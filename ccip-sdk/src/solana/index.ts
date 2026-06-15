@@ -89,6 +89,7 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type MergeArrayElements,
   type WithLogger,
   CCIPVersion,
@@ -440,7 +441,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Async generator of Solana transactions.
    */
   async *getTransactionsForAddress(
-    opts: Omit<LogFilter, 'topics'>,
+    opts: LeanNumbers<Omit<LogFilter, 'topics'>>,
   ): AsyncGenerator<SolanaTransaction> {
     if (opts.watch) {
       opts = {
@@ -482,7 +483,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
-  async *getLogs(opts: LogFilter & { programs?: string[] | true }): AsyncGenerator<SolanaLog> {
+  async *getLogs(
+    opts: LeanNumbers<LogFilter> & { programs?: string[] | true },
+  ): AsyncGenerator<SolanaLog> {
     let programs: true | string[]
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
@@ -561,7 +564,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       programs: [request.log.address],
       address: destChainStatePda.toBase58(),
     }
-    return super.getMessagesInBatch(request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_ as { page?: number })
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

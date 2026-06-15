@@ -51,6 +51,7 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type WithLogger,
   CCIPVersion,
   ExecutionState,
@@ -392,7 +393,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param opts - Log filter options (startBlock/endBlock are interpreted as lt values)
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
-  async *getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog> {
+  async *getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog> {
     if (opts.watch) {
       opts = {
         ...opts,

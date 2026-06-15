@@ -1,6 +1,7 @@
 import { type Connection, PublicKey } from '@solana/web3.js'
 
 import type { LogFilter } from '../chain.ts'
+import type { LeanNumbers } from '../types.ts'
 import type { SolanaTransaction } from './index.ts'
 import {
   CCIPLogsAddressRequiredError,
@@ -12,11 +13,11 @@ import { signalToPromise } from '../utils.ts'
 const DEFAULT_POLL_INTERVAL = 5e3
 
 async function* fetchSigsForward(
-  opts: LogFilter & { pollInterval?: number },
+  opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   ctx: { connection: Connection },
 ) {
   const { connection } = ctx
-  const limit = Math.min(opts.page || 1000, 1000)
+  const limit = Math.min(Number(opts.page) || 1000, 1000)
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
 
   // forward collect all matching sigs in array
@@ -32,8 +33,8 @@ async function* fetchSigsForward(
 
     while (
       batch.length > 0 &&
-      (batch[batch.length - 1]!.slot < (opts.startBlock ?? 0) ||
-        (batch[batch.length - 1]!.blockTime ?? -1) < (opts.startTime ?? 0))
+      (batch[batch.length - 1]!.slot < Number(opts.startBlock ?? 0) ||
+        (batch[batch.length - 1]!.blockTime ?? -1) < Number(opts.startTime ?? 0))
     ) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
@@ -45,11 +46,11 @@ async function* fetchSigsForward(
   allSigs.reverse() // forward
 
   const notAfter =
-    typeof opts.endBlock !== 'number'
+    typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint'
       ? undefined
-      : opts.endBlock < 0
-        ? (await connection.getSlot('confirmed')) + opts.endBlock
-        : opts.endBlock
+      : Number(opts.endBlock) < 0
+        ? (await connection.getSlot('confirmed')) + Number(opts.endBlock)
+        : Number(opts.endBlock)
   while (notAfter != null && allSigs.length > 0 && allSigs[allSigs.length - 1]!.slot > notAfter) {
     allSigs.length-- // truncate head (after reverse) of txs newer than requested end
   }
@@ -68,11 +69,11 @@ async function* fetchSigsForward(
     batch.reverse() // forward
 
     const notAfter =
-      batch.length === 0 || typeof opts.endBlock !== 'number'
+      batch.length === 0 || (typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint')
         ? undefined
-        : opts.endBlock < 0
-          ? (await connection.getSlot('confirmed')) + opts.endBlock
-          : opts.endBlock
+        : Number(opts.endBlock) < 0
+          ? (await connection.getSlot('confirmed')) + Number(opts.endBlock)
+          : Number(opts.endBlock)
 
     for (const sig of batch) {
       if (notAfter != null && sig.slot > notAfter) break
@@ -100,7 +101,7 @@ async function* fetchSigsForward(
  * @returns Async generator of Solana transactions.
  */
 export async function* getTransactionsForAddress(
-  opts: Omit<LogFilter, 'topics'> & { pollInterval?: number },
+  opts: LeanNumbers<Omit<LogFilter, 'topics'>> & { pollInterval?: number },
   ctx: {
     connection: Connection
     getTransaction: (signature: string) => Promise<SolanaTransaction>
@@ -112,8 +113,15 @@ export async function* getTransactionsForAddress(
 
   const hasStart = opts.startBlock != null || opts.startTime != null
   if (!hasStart) throw new CCIPLogsRequiresStartError()
-  if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
-    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  if (
+    opts.watch &&
+    (((typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      Number(opts.endBlock) > 0) ||
+      opts.endBefore)
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(
+      typeof opts.endBlock === 'bigint' ? Number(opts.endBlock) : opts.endBlock,
+    )
 
   const allSignatures = fetchSigsForward(opts, ctx)
 

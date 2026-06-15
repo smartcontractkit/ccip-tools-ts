@@ -8,6 +8,7 @@ import {
   CCIPLogsWatchRequiresFinalityError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
+import type { LeanNumbers } from '../types.ts'
 import { signalToPromise } from '../utils.ts'
 
 type MerkleRoot = {
@@ -117,22 +118,26 @@ async function getLatestCheckpoint(graphqlClient: SuiGraphQLClient): Promise<num
  */
 async function* fetchEventsForward<T>(
   ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
-  opts: LogFilter & { pollInterval?: number },
+  opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   type: string,
   limit = 50,
 ): AsyncGenerator<EventNode<T>> {
   const DEFAULT_POLL_INTERVAL = 5e3
 
-  if (opts.watch && typeof opts.endBlock === 'number' && opts.endBlock > 0)
-    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  if (
+    opts.watch &&
+    (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+    Number(opts.endBlock) > 0
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(Number(opts.endBlock))
 
   // Determine starting checkpoint
   let startCheckpoint: number | undefined
-  if (opts.startBlock != null) startCheckpoint = opts.startBlock
+  if (opts.startBlock != null) startCheckpoint = Number(opts.startBlock)
   if (opts.startTime != null) {
     // Use getTransactionDigestsInTimeRange to find the checkpoint for startTime
     // Use a small time window to find transactions near startTime
-    const startCheckpoint_ = await getCheckpointRightBefore(ctx.client, opts.startTime)
+    const startCheckpoint_ = await getCheckpointRightBefore(ctx.client, Number(opts.startTime))
     if (startCheckpoint_ != null) {
       if (startCheckpoint != null) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
       else startCheckpoint = startCheckpoint_
@@ -142,12 +147,12 @@ async function* fetchEventsForward<T>(
 
   // Determine ending checkpoint
   let endCheckpoint: number | undefined
-  if (typeof opts.endBlock === 'number') {
-    if (opts.endBlock < 0) {
+  if (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') {
+    if (Number(opts.endBlock) < 0) {
       // Negative means relative to latest
-      endCheckpoint = (await getLatestCheckpoint(ctx.graphqlClient)) + opts.endBlock
+      endCheckpoint = (await getLatestCheckpoint(ctx.graphqlClient)) + Number(opts.endBlock)
     } else {
-      endCheckpoint = opts.endBlock
+      endCheckpoint = Number(opts.endBlock)
     }
   }
 
@@ -242,7 +247,7 @@ async function* fetchEventsForward<T>(
           // Filter by startTime if provided (timestamp is in ISO format)
           if (opts.startTime != null) {
             const eventTime = new Date(node.timestamp).getTime() / 1000 // Convert to seconds
-            if (eventTime < opts.startTime) continue
+            if (eventTime < Number(opts.startTime)) continue
           }
 
           // Check endBlock constraint
@@ -290,7 +295,7 @@ async function* fetchEventsForward<T>(
  */
 export async function* streamSuiLogs<T>(
   ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
-  opts: LogFilter,
+  opts: LeanNumbers<LogFilter>,
 ): AsyncGenerator<EventNode<T>> {
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
     throw new CCIPTopicsInvalidError(opts.topics!)

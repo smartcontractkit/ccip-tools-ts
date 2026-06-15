@@ -89,6 +89,7 @@ import {
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
+  type LeanNumbers,
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
@@ -458,7 +459,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
-  async getBlockInfo(block: EVMEndBlockTag): Promise<BlockInfo> {
+  async getBlockInfo(block: number | bigint | EVMEndBlockTag): Promise<BlockInfo> {
     const res = await this.provider.getBlock(block) // cached
     if (!res) throw new CCIPBlockNotFoundError(block)
     return { number: res.number, timestamp: res.timestamp }
@@ -477,17 +478,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       timestamp,
       logs: [] as ChainLog[],
     }
-    const logs: ChainLog[] = tx.logs.map((l) =>
-      Object.assign(l, { blockTimestamp: timestamp, tx: chainTx }),
-    )
+    const logs: ChainLog[] = tx.logs.map((l) => ({ ...l, blockTimestamp: timestamp, tx: chainTx }))
     chainTx.logs = logs
     return chainTx
   }
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(
-    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
-  ): AsyncIterableIterator<Log & { blockTimestamp: number }> {
+    filter: SetFieldType<LeanNumbers<LogFilter>, 'endBlock', EVMEndBlockTag | bigint | undefined>,
+  ) {
     if (filter.watch) {
       filter = {
         ...filter,
@@ -521,7 +520,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [[request.log.topics[0]!], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
-    return super.getMessagesInBatch(request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_ as { page?: number })
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

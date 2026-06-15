@@ -26,6 +26,7 @@ import type {
   ChainLog,
   ChainTransaction,
   Lane,
+  LeanNumbers,
   MessageInput,
 } from './types.ts'
 import {
@@ -420,7 +421,7 @@ export async function getMessagesInBatch<
         Math.ceil(
           (Number(BigInt(request.message.sequenceNumber) - minSeqNr) /
             Number(maxSeqNr - minSeqNr)) *
-            baseFilter.page,
+            Number(baseFilter.page),
         ),
     ),
     // iff our request is maxSeqNr, we know we don't need to go past it
@@ -439,7 +440,7 @@ export async function getMessagesInBatch<
       ...baseFilter,
       startTime: Math.max(
         0,
-        earliest.log.blockTimestamp - BATCH_LOG_LOOKBACK_SECONDS * 2 ** retries,
+        Number(earliest.log.blockTimestamp) - BATCH_LOG_LOOKBACK_SECONDS * 2 ** retries,
       ),
       endBlock: earliest.log.blockNumber,
     })
@@ -514,7 +515,7 @@ export async function getMessagesInBatch<
  */
 export async function* getMessagesInRange(
   source: Chain,
-  opts: LogFilter,
+  opts: LeanNumbers<LogFilter>,
 ): AsyncIterableIterator<CCIPRequest> {
   for await (const log of source.getLogs({
     ...opts,
@@ -565,7 +566,7 @@ export async function waitFinalized<C extends Chain>(
 ): ReturnType<Chain['getBlockInfo']> {
   const log = 'request' in rest ? rest.request.log : rest.log
   // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
-  if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
+  if (!log.blockTimestamp || Date.now() / 1e3 - Number(log.blockTimestamp) > 60) {
     const [tx, finalized, latest] = await Promise.all([
       chain.getTransaction(log.transactionHash),
       chain.getBlockInfo(finality),

@@ -4,16 +4,16 @@ import type { TonClient, Transaction } from '@ton/ton'
 import type { LogFilter } from '../chain.ts'
 import { CCIPLogsRequiresStartError, CCIPLogsWatchRequiresFinalityError } from '../errors/index.ts'
 import { CCIPLogsAddressRequiredError } from '../errors/specialized.ts'
-import type { ChainTransaction } from '../types.ts'
+import type { ChainTransaction, LeanNumbers } from '../types.ts'
 import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5000
 
 async function* fetchTxsForward(
-  opts: LogFilter & { pollInterval?: number },
+  opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   { provider }: { provider: TonClient },
 ) {
-  const limit = Math.min(opts.page || 99, 99)
+  const limit = Math.min(Number(opts.page) || 99, 99)
 
   // forward collect all matching txs in array
   const allTxs = [] as Transaction[]
@@ -31,7 +31,7 @@ async function* fetchTxsForward(
     })
     until ??= batch[0]?.lt
 
-    while (batch.length > 0 && batch[batch.length - 1]!.now < (opts.startTime ?? 0)) {
+    while (batch.length > 0 && batch[batch.length - 1]!.now < Number(opts.startTime ?? 0)) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
     while (notBefore != null && batch.length > 0 && batch[batch.length - 1]!.lt < notBefore) {
@@ -44,7 +44,10 @@ async function* fetchTxsForward(
   allTxs.reverse() // forward
 
   const notAfter =
-    typeof opts.endBlock !== 'number' || opts.endBlock < 0 ? undefined : BigInt(opts.endBlock)
+    (typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint') ||
+    Number(opts.endBlock) < 0
+      ? undefined
+      : BigInt(opts.endBlock)
   while (notAfter != null && allTxs.length > 0 && allTxs[allTxs.length - 1]!.lt > notAfter) {
     allTxs.length-- // truncate head (after reverse) of txs newer than requested end
   }
@@ -86,7 +89,7 @@ async function* fetchTxsForward(
  * @returns Async generator of TON transactions.
  */
 export async function* streamTransactionsForAddress(
-  opts: Omit<LogFilter, 'topics'> & { pollInterval?: number },
+  opts: LeanNumbers<Omit<LogFilter, 'topics'>> & { pollInterval?: number },
   ctx: {
     provider: TonClient
     getTransaction: (tx: Transaction) => Promise<ChainTransaction>
@@ -98,8 +101,15 @@ export async function* streamTransactionsForAddress(
 
   const hasStart = opts.startBlock != null || opts.startTime != null
   if (!hasStart) throw new CCIPLogsRequiresStartError()
-  if (opts.watch && ((typeof opts.endBlock === 'number' && opts.endBlock > 0) || opts.endBefore))
-    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  if (
+    opts.watch &&
+    (((typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      Number(opts.endBlock) > 0) ||
+      opts.endBefore)
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(
+      typeof opts.endBlock === 'bigint' ? Number(opts.endBlock) : opts.endBlock,
+    )
 
   const allTransactions = fetchTxsForward(opts, ctx)
 

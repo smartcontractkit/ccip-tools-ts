@@ -34,6 +34,7 @@ import {
   type CommitReport,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type OffchainTokenData,
   type VerifierResult,
   type WithLogger,
@@ -383,7 +384,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.getLogs}
    * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  getLogs(_opts: LogFilter): AsyncIterableIterator<ChainLog> {
+  getLogs(_opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog> {
     throw new CCIPNotImplementedError('CantonChain.getLogs')
   }
 

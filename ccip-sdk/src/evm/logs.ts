@@ -12,7 +12,7 @@ import type { FinalityRequested } from '../extra-args.ts'
 import { getEndpointLogRange, parseLogRangeError, setEndpointLogRange } from '../fetch.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
-import type { Logger, WithLogger } from '../types.ts'
+import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
@@ -128,18 +128,22 @@ async function* getLogsPaginated(
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
-  filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
+  filter: SetFieldType<LeanNumbers<LogFilter>, 'endBlock', EVMEndBlockTag | bigint | undefined>,
   ctx: {
     provider: JsonRpcApiProvider
     getBlockInfo: (block: EVMEndBlockTag) => Promise<{ number: number; timestamp: number }>
     abort?: AbortSignal
   } & WithLogger,
-): AsyncIterableIterator<Log & { blockTimestamp: number }> {
+): AsyncIterableIterator<ChainLog> {
   const { provider, logger = console } = ctx
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
-  if (filter.watch && typeof filter.endBlock === 'number' && filter.endBlock > 0)
-    throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
+  if (
+    filter.watch &&
+    (typeof filter.endBlock === 'number' || typeof filter.endBlock === 'bigint') &&
+    Number(filter.endBlock) > 0
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(Number(filter.endBlock))
 
   if (
     filter.topics?.length &&
@@ -162,6 +166,7 @@ export async function* getEvmLogs(
 
   // Seed initial page: explicit user value > learned endpoint value > default 10e3
   filter.page ??= getEndpointLogRange(endpointUrl ?? 'unknown') ?? 10e3
+  filter.page = Number(filter.page)
   // Mutable box so getLogsPaginated can propagate learned page shrinks back to watch loop
   const pageBox = { value: filter.page }
 
@@ -170,9 +175,10 @@ export async function* getEvmLogs(
   filter.startBlock ??= await getSomeBlockNumberBefore(
     async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
-    filter.startTime!,
+    Number(filter.startTime!),
     ctx,
   )
+  filter.startBlock = Number(filter.startBlock)
   let latestLogBlockNumber = filter.startBlock - 1
 
   const baseFilter = {
@@ -184,6 +190,7 @@ export async function* getEvmLogs(
     ...filter,
     startBlock: filter.startBlock,
     endBlock,
+    page: pageBox.value,
   })) {
     for await (const log of getLogsPaginated(
       provider,
@@ -195,10 +202,7 @@ export async function* getEvmLogs(
       logger,
     )) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
-      const log_ = Object.assign(log, {
-        blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp,
-      })
-      yield log_
+      yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
     }
   }
 
@@ -282,7 +286,11 @@ export async function* getEvmLogs(
     const contAc = new AbortController()
     let contSignal = contAc.signal
     const contEvent =
-      typeof filter.endBlock === 'number' || filter.endBlock == 'latest' ? 'block' : filter.endBlock // finalized | safe
+      typeof filter.endBlock === 'number' ||
+      typeof filter.endBlock === 'bigint' ||
+      filter.endBlock == 'latest'
+        ? 'block'
+        : filter.endBlock // finalized | safe
     const contListener = (number?: number) => {
       contAc.abort()
       lastEvent = [contEvent, number] as const
