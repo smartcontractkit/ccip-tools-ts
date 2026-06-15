@@ -74,7 +74,7 @@ import {
 import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
+import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -488,6 +488,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new CCIPLogsAddressRequiredError()
     } else if (!opts.programs) {
       programs = [opts.address]
+      if (opts.topics?.length === 1 && opts.topics[0] === 'ExecutionStateChanged') {
+        // optimization: when querying offramp's execs, use router's `allowed_offramp` PDA to better filter executions
+        const { router } = await this._getOffRampReferenceAddresses(opts.address)
+        const { chainSelector: remoteSel } =
+          this.network.networkType === NetworkType.Mainnet
+            ? networkInfo('ethereum-mainnet')
+            : networkInfo('ethereum-testnet-sepolia') // some source we KNOW are connected to this network
+        const [pdaAddr] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('allowed_offramp'),
+            toLeArray(remoteSel, 8),
+            new PublicKey(opts.address).toBuffer(),
+          ],
+          router,
+        )
+        opts.address = pdaAddr.toBase58()
+      }
     } else {
       programs = opts.programs
     }
