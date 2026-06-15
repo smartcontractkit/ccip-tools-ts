@@ -309,6 +309,11 @@ describe('parseLogRangeError', () => {
     assert.ok(result !== null)
   })
 
+  it('handles JSON-RPC error code -32012 as range error', () => {
+    const rpcErr = { code: -32012, message: 'upstream exhausted' }
+    assert.deepEqual(parseLogRangeError(rpcErr), {})
+  })
+
   it('handles nested error.error.message', () => {
     const nested = { error: { message: 'query returned more than 10000 results', code: -32000 } }
     const result = parseLogRangeError(nested)
@@ -339,6 +344,109 @@ describe('parseLogRangeError', () => {
       },
     }
     assert.deepEqual(parseLogRangeError(err), { maxRange: 1024 })
+  })
+
+  it('does NOT treat "invalid block range" (-32602) as a range-too-large error', () => {
+    // Happens e.g. when endBlock is in the future; should surface as-is, not be wrapped.
+    const err = { code: 'UNKNOWN_ERROR', error: { code: -32602, message: 'invalid block range' } }
+    assert.equal(parseLogRangeError(err), null)
+  })
+
+  it('does NOT extract -32602 code as maxRange from serialised JSON body', () => {
+    const err = {
+      code: 'UNKNOWN_ERROR',
+      body: '{"error":{"code":-32602,"message":"invalid block range"}}',
+    }
+    assert.equal(parseLogRangeError(err), null)
+  })
+
+  it('handles erpc/hyperliquid 413 with responseBody containing max block range', () => {
+    // Ethers SERVER_ERROR shape: string code, info.responseBody is a JSON string,
+    // info.responseStatus carries the HTTP status.
+    const err = {
+      code: 'SERVER_ERROR',
+      message: 'server response 413 Request Entity Too Large',
+      info: {
+        requestUrl: 'https://rpcs.cldev.sh/hyperliquid/testnet',
+        responseStatus: '413 Request Entity Too Large',
+        responseBody: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 32,
+          error: {
+            code: -32012,
+            message: 'query exceeds max block range 1000',
+            data: {
+              code: 'ErrUpstreamsExhausted',
+              message: 'all upstream attempts failed',
+              details: { method: 'eth_getLogs' },
+            },
+          },
+        }),
+      },
+    }
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 1000 })
+  })
+
+  it('extracts maxRange from "Exceeded maximum block range: 1000" (hedera/other)', () => {
+    const err = {
+      code: 'SERVER_ERROR',
+      message: 'server response 413 Request Entity Too Large',
+      info: {
+        responseStatus: '413 Request Entity Too Large',
+        responseBody: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          error: {
+            code: -32012,
+            message:
+              'getLogs request exceeded max allowed range: [Request ID: ea947e85-7032-4c9e-a021-35e5a83763e3] Exceeded maximum block range: 1000',
+          },
+        }),
+      },
+    }
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 1000 })
+  })
+
+  it('does NOT use HTTP 413 status code as maxRange when message carries the real limit', () => {
+    // Regression: ethers err.message embeds all inner JSON; if treated as a message
+    // string, BLOCK_RANGE_RE matches and FIRST_NUMBER_RE grabs 413, not 1000.
+    const err = {
+      code: 'SERVER_ERROR',
+      message:
+        'server response 413 Request Entity Too Large (request={}, response={}, error=null, info={"responseBody":"{\\"error\\":{\\"code\\":-32012,\\"message\\":\\"query exceeds max block range 1000\\"}}","responseStatus":"413 Request Entity Too Large"})',
+      info: {
+        requestUrl: 'https://rpcs.cldev.sh/hyperliquid/testnet',
+        responseStatus: '413 Request Entity Too Large',
+        responseBody: JSON.stringify({
+          error: { code: -32012, message: 'query exceeds max block range 1000' },
+        }),
+      },
+    }
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 1000 })
+  })
+
+  it('picks the LAST number as the limit, not the requested span', () => {
+    // "block range too large (10000), maximum allowed is 2000 blocks":
+    // first number (10000) is the rejected span, last (2000) is the real max.
+    const err = {
+      code: 'UNKNOWN_ERROR',
+      error: {
+        code: -32000,
+        message: 'block range too large (10000), maximum allowed is 2000 blocks',
+      },
+    }
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 2000 })
+  })
+
+  it('extracts maxRange from "Cannot request logs over more than 100 blocks"', () => {
+    const err = {
+      code: 'UNKNOWN_ERROR',
+      error: {
+        code: -32603,
+        message: 'Error:\n  Cannot request logs over more than 100 blocks\n',
+      },
+    }
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 100 })
   })
 })
 

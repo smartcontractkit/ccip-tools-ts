@@ -1917,8 +1917,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.USDCTokenPoolProxy_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
-        previousPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as CleanAddressable<
-          Awaited<ReturnType<(typeof proxy)['getPools']>>
+        const pools = await proxy.getPools()
+        previousPool = pools['cctpV2PoolWithCCV'] as CleanAddressable<
+          typeof pools
         >['cctpV2PoolWithCCV']
       }
       const contract = new Contract(
