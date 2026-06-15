@@ -21,14 +21,13 @@ import {
   dataSlice,
   encodeBase58,
   encodeBase64,
-  formatUnits,
   hexlify,
   isHexString,
   randomBytes,
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep } from 'type-fest'
+import type { PickDeep, Simplify } from 'type-fest'
 
 import {
   type BlockInfo,
@@ -50,19 +49,17 @@ import {
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
+  CCIPExtraArgsEncodingUnsupportedError,
   CCIPExtraArgsInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
-  CCIPSolanaExtraArgsEncodingError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
-  CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
-  CCIPTokenPoolInfoNotFoundError,
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
@@ -74,6 +71,8 @@ import {
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
 } from '../extra-args.ts'
+import { fetchProfileForUrl } from '../fetch.ts'
+import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
@@ -165,7 +164,12 @@ const unknownTokens: { [mint: string]: string } = {
 }
 
 /** Solana-specific log structure with transaction reference and log level. */
-export type SolanaLog = ChainLog & { tx: SolanaTransaction; data: string; level: number }
+export type SolanaLog = ChainLog & {
+  tx?: SolanaTransaction
+  data: string
+  level: number
+  type: 'log' | 'data'
+}
 /** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
   ChainTransaction,
@@ -283,6 +287,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
       expires: 60e3,
     })
+    this._getOffRampReferenceAddresses = memoize(this._getOffRampReferenceAddresses.bind(this), {
+      async: true,
+      maxArgs: 1,
+      expires: 60e3,
+    })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
       maxArgs: 2,
@@ -308,8 +317,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Solana Connection instance.
    * @throws {@link CCIPDataFormatUnsupportedError} if URL format is invalid
    */
-  static _getConnection(url: string, ctx?: WithLogger): Connection {
-    const { logger = console } = ctx ?? {}
+  static _getConnection(
+    url: string,
+    ctx?: WithLogger & { fetch?: typeof fetch; abort?: AbortSignal },
+  ): Connection {
     if (!url.startsWith('http') && !url.startsWith('ws')) {
       throw new CCIPDataFormatUnsupportedError(
         `Invalid Solana RPC URL format (should be https://, http://, wss://, or ws://): ${url}`,
@@ -317,10 +328,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const config: ConnectionConfig = { commitment: 'confirmed' }
-    if (url.includes('.solana.com')) {
-      config.fetch = createRateLimitedFetch(undefined, ctx) // public nodes
-      logger.warn('Using rate-limited fetch for public solana nodes, commands may be slow')
-    }
+    config.fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
 
     return new Connection(url, config)
   }
@@ -474,9 +482,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
-  async *getLogs(
-    opts: LogFilter & { programs?: string[] | true },
-  ): AsyncGenerator<ChainLog & { tx: SolanaTransaction }> {
+  async *getLogs(opts: LogFilter & { programs?: string[] | true }): AsyncGenerator<SolanaLog> {
     let programs: true | string[]
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
@@ -592,6 +598,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...routerConfig,
+        destChainSelector,
         ...destChainState.config,
         feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
         router: onRamp,
@@ -605,12 +612,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.getOffRampConfig}
+   * Fetch `reference_addresses` PDA for the OffRamp
    */
-  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+  private async _getOffRampReferenceAddresses(offRamp: string) {
     const offRamp_ = new PublicKey(offRamp)
-    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
-
     // Read referenceAddresses PDA for router and other fields
     const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
     const [referenceAddressesAddr] = PublicKey.findProgramAddressSync(
@@ -618,6 +623,20 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
+    return refAddresses as Simplify<typeof refAddresses>
+  }
+
+  /**
+   * {@inheritDoc Chain.getOffRampConfig}
+   */
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
+    const offRamp_ = new PublicKey(offRamp)
+    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
+
+    const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
+
+    // Read referenceAddresses PDA for router and other fields
+    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
 
     // Read source_chain_state PDA for onRamp and other config fields
     const [statePda] = PublicKey.findProgramAddressSync(
@@ -636,6 +655,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return normalizeDeep(
       {
         ...refAddresses,
+        sourceChainSelector,
         ...sourceConfig,
         ...state,
         onRamps: [onRamp],
@@ -682,20 +702,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /** {@inheritDoc Chain.getOnRampForRouter} */
   getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
     return Promise.resolve(router) // solana's Router is also the OnRamp
-  }
-
-  /**
-   * {@inheritDoc Chain.getTokenForTokenPool}
-   * @throws {@link CCIPTokenPoolInfoNotFoundError} if token pool info not found
-   */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
-    const tokenPoolInfo = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolInfo) throw new CCIPTokenPoolInfoNotFoundError(tokenPool)
-    const { config }: { config: { mint: PublicKey } } = tokenPoolCoder.accounts.decode(
-      'state',
-      tokenPoolInfo.data,
-    )
-    return config.mint.toString()
   }
 
   /**
@@ -956,7 +962,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('computeUnits' in args) throw new CCIPSolanaExtraArgsEncodingError()
+    if ('computeUnits' in args)
+      throw new CCIPExtraArgsEncodingUnsupportedError(ChainFamily.Solana, 'EVMExtraArgsV2 format')
     const gasLimitUint128Le = toLeArray(args.gasLimit ?? 0n, 16)
     return concat([
       EVMExtraArgsV2Tag,
@@ -1072,7 +1079,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (laterReceiptLog) {
         return // ignore intermediary state (InProgress=1) if we can find a later receipt
       } else if (state !== ExecutionState.Success) {
-        returnData = getErrorFromLogs(log.tx.logs)
+        returnData = getErrorFromLogs(log.tx.logs as SolanaLog[])
       } else if (log.tx.error) {
         returnData = util.inspect(log.tx.error)
         state = ExecutionState.Failed
@@ -1138,13 +1145,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
     const [type] = await this.typeAndVersion(address)
+    if (type.includes('OffRamp'))
+      return this.getTokenAdminRegistryFor(
+        (await this._getOffRampReferenceAddresses(address)).router.toBase58(),
+      )
     if (!type.includes('Router')) throw new CCIPContractNotRouterError(address, type)
     // Solana implements TokenAdminRegistry in the Router/OnRamp program
     return address
   }
 
   /** {@inheritDoc Chain.getFee} */
-  getFee({ router, destChainSelector, message }: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    await this.checkSendMessage(opts)
+    const { router, destChainSelector, message } = opts
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     return getFee(this, router, destChainSelector, populatedMessage)
   }
@@ -1274,42 +1287,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
   ): Promise<number> {
-    const convertAmounts = (
-      tokenAmounts?: readonly ((
-        | { token: string }
-        | { destTokenAddress: string; extraData?: string }
-      ) & {
-        amount: bigint
-      })[],
-    ) =>
-      !tokenAmounts
-        ? undefined
-        : Promise.all(
-            tokenAmounts.map(async (ta) => {
-              if (!('destTokenAddress' in ta)) return ta
-              let amount = ta.amount
-              if (isHexString(ta.extraData, 32)) {
-                // extraData is source token decimals in most pools derived from standard TP contracts;
-                // we can identify it by being exactly 32B and a small integer; otherwise, assume same decimals.
-                const sourceDecimals = toBigInt(ta.extraData)
-                if (0 < sourceDecimals && sourceDecimals <= 36) {
-                  const { decimals: destDecimals } = await this.getTokenInfo(ta.destTokenAddress)
-                  amount =
-                    (amount * BigInt(10) ** BigInt(destDecimals)) /
-                    BigInt(10) ** BigInt(sourceDecimals)
-                  if (amount === 0n)
-                    throw new CCIPTokenDecimalsInsufficientError(
-                      ta.destTokenAddress,
-                      destDecimals,
-                      this.network.name,
-                      formatUnits(amount, sourceDecimals),
-                    )
-                }
-              }
-              return { token: ta.destTokenAddress, amount }
-            }),
-          )
-
     let opts_
     if (!('offRamp' in opts)) {
       const { lane, message, metadata } = await this.getMessageById(opts.messageId)
@@ -1326,7 +1303,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           receiver: message.receiver,
           sender: message.sender,
           data: message.data,
-          destTokenAmounts: await convertAmounts(message.tokenAmounts),
+          destTokenAmounts: await Promise.all(
+            message.tokenAmounts.map((tokenAmount) =>
+              getDestTokenAmount({ dest: this, tokenAmount }),
+            ),
+          ),
           tokenReceiver: 'tokenReceiver' in message ? message.tokenReceiver : undefined,
           accounts: 'accounts' in message ? message.accounts : undefined,
           accountIsWritableBitmap:
@@ -1339,7 +1320,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         message: {
           messageId: hexlify(randomBytes(32)),
           ...opts.message,
-          destTokenAmounts: await convertAmounts(opts.message.tokenAmounts),
+          destTokenAmounts: await Promise.all(
+            (opts.message.tokenAmounts ?? []).map((tokenAmount) =>
+              getDestTokenAmount({ dest: this, tokenAmount }),
+            ),
+          ),
         },
       }
     }
@@ -1379,13 +1364,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (Array.isArray(data)) {
         if (data.every((e) => typeof e === 'string')) return getErrorFromLogs(data)
         else if (data.every((e) => typeof e === 'object' && 'data' in e && 'address' in e))
-          return getErrorFromLogs(data as ChainLog[])
+          return getErrorFromLogs(data as SolanaLog[])
       } else if (typeof data === 'object') {
         if ('transactionLogs' in data && 'transactionMessage' in data) {
-          const parsed = getErrorFromLogs(data.transactionLogs as ChainLog[] | string[])
+          const parsed = getErrorFromLogs(data.transactionLogs as SolanaLog[] | string[])
           if (parsed) return { message: data.transactionMessage, ...parsed }
         }
-        if ('logs' in data) return getErrorFromLogs(data.logs as ChainLog[] | string[])
+        if ('program' in data || 'error' in data) return data
+        if ('logs' in data) return getErrorFromLogs(data.logs as SolanaLog[] | string[])
       } else if (typeof data === 'string') {
         const parsedExtraArgs = this.decodeExtraArgs(getDataBytes(data))
         if (parsedExtraArgs) return parsedExtraArgs

@@ -15,15 +15,11 @@ import yaml from 'yaml'
 
 import type { Chain, ChainStatic } from './chain.ts'
 import {
-  CCIPAbortError,
   CCIPBlockBeforeTimestampNotFoundError,
   CCIPChainFamilyUnsupportedError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
-  CCIPHttpError,
-  CCIPTimeoutError,
   CCIPTypeVersionInvalidError,
-  isTransientHttpStatus,
 } from './errors/index.ts'
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
@@ -549,7 +545,7 @@ export async function withRetry<T>(
 export function parseTypeAndVersion(
   typeAndVersion: string,
 ): Awaited<ReturnType<Chain['typeAndVersion']>> {
-  const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.\d+)?)([^\d.].*)?$/)
+  const match = typeAndVersion.match(/^(\w.+\S)\s+v?(\d+\.\d+(?:\.[x\d]+)?)([^\d.].*)?$/)
   if (!match) throw new CCIPTypeVersionInvalidError(typeAndVersion)
   // some string normalization
   const type = match[1]!
@@ -571,242 +567,8 @@ export function parseTypeAndVersion(
   else return [type, version, typeAndVersion, match[3]]
 }
 
-/* eslint-disable jsdoc/require-jsdoc */
-type RateLimitOpts = { maxRequests: number; windowMs: number; maxRetries: number }
-
-class RateLimit {
-  readonly requestQueue: Array<{ timestamp: number }>
-  readonly methodRateLimits: Record<
-    string,
-    { limit: number; remaining: number; queue: Array<{ timestamp: number }> }
-  >
-  constructor() {
-    this.requestQueue = []
-    this.methodRateLimits = {}
-  }
-
-  isRateLimited({ windowMs, maxRequests }: RateLimitOpts): boolean {
-    const now = Date.now()
-    // Remove old requests outside the window
-    while (this.requestQueue.length > 0 && now - this.requestQueue[0]!.timestamp > windowMs) {
-      this.requestQueue.shift()
-    }
-    return this.requestQueue.length >= maxRequests
-  }
-
-  isMethodRateLimited({ windowMs }: RateLimitOpts, method: string): boolean {
-    const methodLimit = this.methodRateLimits[method]
-    if (!methodLimit) return false
-
-    const now = Date.now()
-    // Remove old requests outside the window
-    while (methodLimit.queue.length > 0 && now - methodLimit.queue[0]!.timestamp > windowMs) {
-      methodLimit.queue.shift()
-    }
-    return methodLimit.queue.length >= methodLimit.limit
-  }
-
-  async waitForRateLimit(opts: RateLimitOpts, method?: string): Promise<void> {
-    // Wait for method-specific rate limit if applicable
-    if (method && this.methodRateLimits[method]) {
-      while (this.isMethodRateLimited(opts, method)) {
-        const oldestRequest = this.methodRateLimits[method].queue[0]
-        if (!oldestRequest) break // Queue was cleaned, no longer rate limited
-        const waitTime = opts.windowMs - (Date.now() - oldestRequest.timestamp)
-        if (waitTime > 0) {
-          await sleep(waitTime + 100) // Add small buffer
-        }
-      }
-    }
-
-    // Wait for global rate limit
-    while (this.isRateLimited(opts)) {
-      const oldestRequest = this.requestQueue[0]
-      if (!oldestRequest) break // Queue was cleaned, no longer rate limited
-      const waitTime = opts.windowMs - (Date.now() - oldestRequest.timestamp)
-      if (waitTime > 0) {
-        await sleep(waitTime + 100) // Add small buffer
-      }
-    }
-  }
-
-  recordRequest(method?: string): void {
-    const timestamp = Date.now()
-    this.requestQueue.push({ timestamp })
-    if (method && this.methodRateLimits[method]) {
-      this.methodRateLimits[method].queue.push({ timestamp })
-    }
-  }
-
-  updateMethodRateLimits(response: Response, method?: string): void {
-    if (!method) return
-
-    const limit = Number(response.headers.get('x-ratelimit-method-limit'))
-    const remaining = Number(response.headers.get('x-ratelimit-method-remaining'))
-
-    if (isNaN(limit) || isNaN(remaining)) return
-    if (!this.methodRateLimits[method]) {
-      this.methodRateLimits[method] = { limit, remaining, queue: [] }
-    } else {
-      this.methodRateLimits[method].limit = limit
-      this.methodRateLimits[method].remaining = remaining
-    }
-  }
-}
-/* eslint-enable jsdoc/require-jsdoc */
-
-// global map per hostname
-const perHostnameRateLimits: Record<string, RateLimit> = {}
-
-/**
- * Creates a rate-limited fetch function with retry logic.
- * Configurable via maxRequests, windowMs, and maxRetries options.
- * @returns Rate-limited fetch function.
- */
-export function createRateLimitedFetch(
-  opts: Partial<RateLimitOpts> = {},
-  { logger = console, abort }: { abort?: AbortSignal } & WithLogger = {},
-): typeof fetch {
-  opts.maxRequests ??= 40
-  opts.maxRetries ??= 5
-  opts.windowMs ??= 12e3
-  const opts_ = opts as RateLimitOpts
-
-  const extractMethod = (init?: RequestInit): string | undefined => {
-    if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
-    try {
-      const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
-        | { method?: string }
-        | undefined
-      if (parsed && typeof parsed.method === 'string') return parsed.method
-    } catch {
-      // Not JSON or no method field
-    }
-  }
-
-  const extractHostname = (input: Parameters<typeof fetch>[0]): string => {
-    if (typeof input === 'string') {
-      input = new URL(input)
-    } else if (input instanceof Request) {
-      input = new URL(input.url)
-    }
-    return input.hostname
-  }
-
-  const isRetryableError = (error: unknown): boolean => {
-    if (error instanceof CCIPHttpError) return error.isTransient === true
-    if (error instanceof Error) return !!error.message.match(/\b(429\b|rate.?limit)/i)
-    return false
-  }
-
-  return async (input, init?) => {
-    let lastError: Error | null = null
-    const method = extractMethod(init)
-    const hostname = extractHostname(input)
-    const rl = (perHostnameRateLimits[hostname] ??= new RateLimit())
-
-    const body = init?.body ?? (input instanceof Request ? await input.clone().json() : undefined)
-    for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
-      try {
-        // Wait for rate limit before making request
-        await rl.waitForRateLimit(opts_, method)
-        rl.recordRequest(method)
-
-        if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
-        else if (abort) {
-          if (!init) init = {}
-          init.signal = abort
-        }
-        abort?.throwIfAborted()
-        const response = await globalThis.fetch(
-          input instanceof Request ? input.clone() : input,
-          init,
-        )
-
-        // Update method rate limits from response headers
-        rl.updateMethodRateLimits(response, method)
-
-        // If response is successful, return it
-        if (response.ok) {
-          logger.debug(
-            'fetched',
-            response.status,
-            // response.headers,
-            body,
-            // ((await response.clone().json()) as { result: unknown })?.result,
-          )
-          return response
-        }
-
-        // For transient responses (429, 5xx), throw to trigger retry
-        if (isTransientHttpStatus(response.status)) {
-          throw new CCIPHttpError(response.status, response.statusText)
-        }
-
-        // For other non-2xx responses, don't retry
-        logger.debug('fetch non-retryable error', input, response.status, init?.body)
-        throw new CCIPHttpError(response.status, response.statusText)
-      } catch (error) {
-        logger.debug('fetch errored', attempt, error, input, init?.body)
-        lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
-
-        // Only retry on transient errors (429, 5xx, network errors matching rate-limit pattern)
-        if (!isRetryableError(lastError)) {
-          throw lastError
-        }
-
-        // Don't retry on the last attempt
-        if (attempt >= opts_.maxRetries) break
-      }
-    }
-
-    throw lastError || CCIPError.from('Request failed after all retries', 'HTTP_ERROR')
-  }
-}
-
-/**
- * Performs a fetch request with timeout and abort signal support.
- *
- * @param url - URL to fetch
- * @param operation - Operation name for error context
- * @param opts - Optional configuration:
- *   - `timeoutMs` — request timeout in milliseconds (default: 30000).
- *   - `signal` — an external `AbortSignal` to cancel the request.
- *   - `fetch` — custom fetch function (defaults to `globalThis.fetch`).
- *   - `init` — additional `RequestInit` fields merged into the fetch call.
- * @returns Promise resolving to Response
- * @throws CCIPTimeoutError if request times out
- * @throws CCIPAbortError if request is aborted via signal
- */
-export async function fetchWithTimeout(
-  url: string,
-  operation: string,
-  opts?: {
-    timeoutMs?: number
-    signal?: AbortSignal
-    fetch?: typeof globalThis.fetch
-    init?: RequestInit
-  },
-): Promise<Response> {
-  const timeoutMs = opts?.timeoutMs ?? 30_000
-  const fetchFn = opts?.fetch ?? globalThis.fetch.bind(globalThis)
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  const combinedSignal = opts?.signal
-    ? AbortSignal.any([timeoutSignal, opts.signal])
-    : timeoutSignal
-
-  try {
-    return await fetchFn(url, { ...opts?.init, signal: combinedSignal })
-  } catch (error) {
-    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
-      if (opts?.signal?.aborted) {
-        throw new CCIPAbortError(operation)
-      }
-      throw new CCIPTimeoutError(operation, timeoutMs)
-    }
-    throw error
-  }
-}
+// Re-export for backward compatibility (symbols moved to fetch.ts)
+export { createRateLimitedFetch, fetchWithTimeout } from './fetch.ts'
 
 // barebones `node:util` backfill, if needed
 const util =

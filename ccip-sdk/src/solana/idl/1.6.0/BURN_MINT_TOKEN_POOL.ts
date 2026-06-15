@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type BurnmintTokenPool = {
-  version: '1.6.2'
+  version: '1.6.3'
   name: 'burnmint_token_pool'
   instructions: [
     {
@@ -997,7 +997,7 @@ export type BurnmintTokenPool = {
 }
 
 export const IDL: BurnmintTokenPool = {
-  version: '1.6.2',
+  version: '1.6.3',
   name: 'burnmint_token_pool',
   instructions: [
     {

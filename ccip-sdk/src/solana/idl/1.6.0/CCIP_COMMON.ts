@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type CcipCommon = {
-  version: '1.6.2'
+  version: '1.6.3'
   name: 'ccip_common'
   instructions: []
   accounts: [
@@ -121,7 +121,7 @@ export type CcipCommon = {
 }
 
 export const IDL: CcipCommon = {
-  version: '1.6.2',
+  version: '1.6.3',
   name: 'ccip_common',
   instructions: [],
   accounts: [

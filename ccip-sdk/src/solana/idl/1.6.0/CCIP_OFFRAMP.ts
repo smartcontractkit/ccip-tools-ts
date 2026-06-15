@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type CcipOfframp = {
-  version: '1.6.2'
+  version: '1.6.3'
   name: 'ccip_offramp'
   constants: [
     {
@@ -2748,7 +2748,7 @@ export type CcipOfframp = {
 }
 
 export const IDL: CcipOfframp = {
-  version: '1.6.2',
+  version: '1.6.3',
   name: 'ccip_offramp',
   constants: [
     {

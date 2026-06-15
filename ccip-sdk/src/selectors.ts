@@ -7,6 +7,7 @@ type Selectors = Record<
     readonly name?: string
     family: ChainFamily
     network_type: NetworkType
+    deprecated?: boolean
   }
 >
 
@@ -198,12 +199,14 @@ const SELECTORS: Selectors = {
     selector: 17164792800244661392n,
     name: 'mint-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '195': {
     selector: 2066098519157881736n,
     name: 'ethereum-testnet-sepolia-xlayer-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '196': {
@@ -270,6 +273,7 @@ const SELECTORS: Selectors = {
     selector: 3719320017875267166n,
     name: 'ethereum-mainnet-kroma-1',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '259': {
@@ -384,6 +388,7 @@ const SELECTORS: Selectors = {
     selector: 5059197667603797935n,
     name: 'janction-testnet-sepolia',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '682': {
@@ -486,6 +491,7 @@ const SELECTORS: Selectors = {
     selector: 1948510578179542068n,
     name: 'bitcoin-testnet-bsquared-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1135': {
@@ -545,6 +551,7 @@ const SELECTORS: Selectors = {
     selector: 11059667695644972511n,
     name: 'ethereum-testnet-goerli-polygon-zkevm-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1513': {
@@ -563,6 +570,7 @@ const SELECTORS: Selectors = {
     selector: 10749384167430721561n,
     name: 'mint-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1740': {
@@ -617,6 +625,7 @@ const SELECTORS: Selectors = {
     selector: 13116810400804392105n,
     name: 'ronin-testnet-saigon',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2023': {
@@ -653,6 +662,7 @@ const SELECTORS: Selectors = {
     selector: 12168171414969487009n,
     name: 'memento-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2201': {
@@ -677,6 +687,7 @@ const SELECTORS: Selectors = {
     selector: 5990477251245693094n,
     name: 'ethereum-testnet-sepolia-kroma-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2391': {
@@ -695,6 +706,7 @@ const SELECTORS: Selectors = {
     selector: 8901520481741771655n,
     name: 'ethereum-testnet-holesky-fraxtal-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2741': {
@@ -707,6 +719,7 @@ const SELECTORS: Selectors = {
     selector: 8304510386741731151n,
     name: 'ethereum-testnet-holesky-morph-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2818': {
@@ -731,6 +744,7 @@ const SELECTORS: Selectors = {
     selector: 1467223411771711614n,
     name: 'bitcoin-testnet-botanix',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '3637': {
@@ -805,6 +819,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '5042': {
+    selector: 6370580034781731079n,
+    name: 'arc-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '5330': {
     selector: 470401360549526817n,
     name: 'superseed-mainnet',
@@ -827,6 +847,7 @@ const SELECTORS: Selectors = {
     selector: 2443239559770384419n,
     name: 'megaeth-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '6343': {
@@ -959,12 +980,14 @@ const SELECTORS: Selectors = {
     selector: 16088006396410204581n,
     name: '0g-testnet-newton',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '16601': {
     selector: 2131427466778448014n,
     name: '0g-testnet-galileo',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '16602': {
@@ -983,12 +1006,14 @@ const SELECTORS: Selectors = {
     selector: 7717148896336251131n,
     name: 'ethereum-testnet-holesky',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '25327': {
     selector: 9723842205701363942n,
     name: 'everclear-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '26888': {
@@ -1061,6 +1086,7 @@ const SELECTORS: Selectors = {
     selector: 3963528237232804922n,
     name: 'tempo-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '42431': {
@@ -1097,6 +1123,7 @@ const SELECTORS: Selectors = {
     selector: 3552045678561919002n,
     name: 'celo-testnet-alfajores',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '45439': {
@@ -1139,6 +1166,7 @@ const SELECTORS: Selectors = {
     selector: 6473245816409426016n,
     name: 'memento-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '53302': {
@@ -1151,6 +1179,7 @@ const SELECTORS: Selectors = {
     selector: 3676871237479449268n,
     name: 'sonic-testnet-blaze',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '57073': {
@@ -1199,6 +1228,7 @@ const SELECTORS: Selectors = {
     selector: 5214452172935136222n,
     name: 'treasure-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '68414': {
@@ -1234,18 +1264,21 @@ const SELECTORS: Selectors = {
     selector: 8999465244383784164n,
     name: 'berachain-testnet-bartio',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '80085': {
     selector: 12336603543561911511n,
     name: 'berachain-testnet-artio',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '80087': {
     selector: 2285225387454015855n,
     name: 'zero-g-testnet-galileo',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '80094': {
@@ -1323,12 +1356,14 @@ const SELECTORS: Selectors = {
     selector: 1910019406958449359n,
     name: 'etherlink-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '129399': {
     selector: 9090863410735740267n,
     name: 'polygon-testnet-tatara',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '167000': {
@@ -1341,6 +1376,7 @@ const SELECTORS: Selectors = {
     selector: 7248756420937879088n,
     name: 'ethereum-testnet-holesky-taiko-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '167012': {
@@ -1443,6 +1479,7 @@ const SELECTORS: Selectors = {
     selector: 4012524741200567430n,
     name: 'pharos-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '688689': {
@@ -1515,18 +1552,21 @@ const SELECTORS: Selectors = {
     selector: 10443705513486043421n,
     name: 'ethereum-testnet-sepolia-arbitrum-1-treasure-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '978658': {
     selector: 3676916124122457866n,
     name: 'treasure-testnet-topaz',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '978670': {
     selector: 1010349088906777999n,
     name: 'ethereum-mainnet-arbitrum-1-treasure-1',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2019775': {
@@ -1611,6 +1651,7 @@ const SELECTORS: Selectors = {
     selector: 2027362563942762617n,
     name: 'ethereum-testnet-sepolia-blast-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '728126428': {

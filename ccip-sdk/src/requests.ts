@@ -12,7 +12,6 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageInvalidError,
   CCIPMessageNotFoundInTxError,
-  CCIPTokenNotInRegistryError,
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
@@ -532,70 +531,6 @@ export async function* getMessagesInRange(
 }
 
 /**
- * Map source token to its pool address and destination token address.
- *
- * Resolves token routing by querying the TokenAdminRegistry and TokenPool
- * to find the corresponding destination chain token.
- *
- * @param opts - options to convert source to dest token addresses
- * @returns Extended token amount with `sourcePoolAddress`, `sourceTokenAddress`, and `destTokenAddress`
- *
- * @throws {@link CCIPTokenNotInRegistryError} if token is not registered in TokenAdminRegistry
- *
- * @example
- * ```typescript
- * import { sourceToDestTokenAddresses, EVMChain } from '@chainlink/ccip-sdk'
- *
- * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
- * const tokenAmount = await sourceToDestTokenAddresses({
- *   source,
- *   onRamp: '0xOnRamp...',
- *   destChainSelector: 14767482510784806043n,
- *   sourceTokenAmount: { token: '0xLINK...', amount: 1000000000000000000n },
- * })
- * console.log(`Pool: ${tokenAmount.sourcePoolAddress}`)
- * console.log(`Dest token: ${tokenAmount.destTokenAddress}`)
- * ```
- */
-export async function sourceToDestTokenAddresses<S extends { token: string }>({
-  source,
-  onRamp,
-  destChainSelector,
-  sourceTokenAmount,
-}: {
-  /** Source chain instance */
-  source: Chain
-  /** OnRamp contract address */
-  onRamp: string
-  /** Destination chain selector */
-  destChainSelector: bigint
-  /** Token amount object containing `token` and `amount` */
-  sourceTokenAmount: S
-}): Promise<
-  S & {
-    sourcePoolAddress: string
-    sourceTokenAddress: string
-    destTokenAddress: string
-  }
-> {
-  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
-  const sourceTokenAddress = sourceTokenAmount.token
-  const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
-    tokenAdminRegistry,
-    sourceTokenAddress,
-  )
-  if (!sourcePoolAddress)
-    throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
-  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
-  return {
-    ...sourceTokenAmount,
-    sourcePoolAddress,
-    sourceTokenAddress,
-    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
-  }
-}
-
-/**
  * Confirm a log tx is finalized or wait for it to be finalized.
  *
  * @param chain - Chain instance to check finality on
@@ -620,25 +555,14 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
 export async function waitFinalized<C extends Chain>(
   chain: C,
   {
-    request: { log },
     finality = 'finalized',
     abort,
     reorgSafetyBlocks = 10,
-    pollIntervalMs = 5_000,
-  }: {
-    request: PickDeep<
-      CCIPRequest,
-      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-    >
-    finality?: Parameters<Chain['getBlockInfo']>[0]
-    abort?: AbortSignal
-    /** How many blocks past the original tx blockNumber must be finalized
-     *  without the tx reappearing before we declare it reorged out. Default: 10 */
-    reorgSafetyBlocks?: number
-    /** Delay in ms between block-height poller iterations. Default: 5000 */
-    pollIntervalMs?: number
-  },
+    pollInterval = 5_000,
+    ...rest
+  }: Parameters<Chain['waitFinalized']>[0],
 ): ReturnType<Chain['getBlockInfo']> {
+  const log = 'request' in rest ? rest.request.log : rest.log
   // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
   if (!log.blockTimestamp || Date.now() / 1e3 - log.blockTimestamp > 60) {
     const [tx, finalized, latest] = await Promise.all([
@@ -690,7 +614,7 @@ export async function waitFinalized<C extends Chain>(
       }
       // wait before re-checking; exit early on watch abort
       await signalToPromise(
-        AbortSignal.any([watch, deadline, AbortSignal.timeout(pollIntervalMs)]),
+        AbortSignal.any([watch, deadline, AbortSignal.timeout(pollInterval)]),
       ).catch(() => {})
     }
   })()

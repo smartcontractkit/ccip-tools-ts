@@ -1,7 +1,7 @@
 import { bcs } from '@mysten/sui/bcs'
 import type { Keypair } from '@mysten/sui/cryptography'
 import { SuiGraphQLClient } from '@mysten/sui/graphql'
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { JsonRpcHTTPTransport, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
@@ -26,13 +26,15 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPExecutionReportChainMismatchError,
+  CCIPLogDataInvalidError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
-  CCIPSuiLogInvalidError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
+import { fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
 import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
@@ -51,6 +53,7 @@ import type {
   WithLogger,
 } from '../types.ts'
 import {
+  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   getDataBytes,
@@ -59,7 +62,6 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
 import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
-import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -124,8 +126,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if chain identifier is not supported
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
+    const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+    const transport = new JsonRpcHTTPTransport({ url, fetch: fetchFn })
+
     // Create a temporary client to detect the network (network name unknown yet)
-    const tempClient = new SuiJsonRpcClient({ url, network: url })
+    const tempClient = new SuiJsonRpcClient({ transport, network: url })
 
     // Get chain identifier from the client and map to network info format
     const rawChainId = await tempClient.getChainIdentifier().catch(() => null)
@@ -153,7 +158,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       )
     }
 
-    const client = new SuiJsonRpcClient({ url, network: suiNetwork })
+    const client = new SuiJsonRpcClient({ transport, network: suiNetwork })
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
     const chain = new SuiChain(client, network, ctx)
     return Object.assign(chain, { url })
@@ -290,10 +295,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, _destChainSelector: bigint) {
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
     return {
       router: onRamp,
+      destChainSelector,
       feeQuoter: onRamp, // FIXME
       typeAndVersion,
     }
@@ -360,6 +366,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     return {
       router,
+      sourceChainSelector,
       onRamps: [onRamp],
       isEnabled,
       minSeqNr,
@@ -393,7 +400,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if token pool type is invalid or state not found
    * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
    */
-  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+  override async getTokenForTokenPool(tokenPool: string): Promise<string> {
     const normalizedTokenPool = normalizeSuiAddress(tokenPool)
 
     // Get objects owned by this package (looking for state pointers)
@@ -578,7 +585,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       (typeof data !== 'string' || !data.startsWith('{')) &&
       (typeof data !== 'object' || isBytesLike(data))
     )
-      throw new CCIPSuiLogInvalidError(util.inspect(log))
+      throw new CCIPLogDataInvalidError(util.inspect(log), { chain: this.family })
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)

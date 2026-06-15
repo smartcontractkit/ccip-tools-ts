@@ -5,6 +5,7 @@ const { glob } = require('glob') // FIXME: replace with fs.glob after node22 LTS
 const prettier = require('prettier')
 
 const newLineRe = /(?:\r\n|\r|\n)/g
+const DRY = process.argv.includes('--dry')
 
 /**
  * Process a file, replacing comment blocks starting with `// generate:` and ending
@@ -41,18 +42,21 @@ async function generate(filepath) {
   }
   const options = await prettier.resolveConfig(filepath)
   const newFile = await prettier.format(lines.join('\n'), { ...options, filepath })
-  if (newFile !== file) await fs.writeFile(filepath, newFile)
+  if (!DRY && newFile !== file) await fs.writeFile(filepath, newFile)
   return newFile !== file && (noFail ? true : -1)
 }
 
-process.argv.slice(2).forEach(async (param) => {
-  for (const filepath of await glob(param)) {
-    await generate(filepath).then(
-      (changed) => {
-        if (changed == -1) process.exitCode = 1
-        console.info(changed ? 'generated' : 'up-to-date', filepath)
-      },
-      (err) => console.error(`generate error on "${filepath}":`, err),
-    )
-  }
-})
+process.argv
+  .slice(2)
+  .filter((param) => param !== '--dry')
+  .forEach(async (param) => {
+    for (const filepath of await glob(param)) {
+      await generate(filepath).then(
+        (changed) => {
+          if (changed == -1) process.exitCode = 1
+          console.info(changed ? 'generated' : 'up-to-date', filepath)
+        },
+        (err) => console.error(`generate error on "${filepath}":`, err),
+      )
+    }
+  })

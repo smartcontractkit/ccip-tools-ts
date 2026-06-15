@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+import { describe, it, mock } from 'node:test'
 
 import { NATIVE_MINT } from '@solana/spl-token'
 import { dataLength } from 'ethers'
@@ -13,7 +13,6 @@ import {
   bigIntReviver,
   blockRangeGenerator,
   convertKeysToCamelCase,
-  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
@@ -1051,128 +1050,6 @@ describe('parseTypeAndVersion', () => {
     const result = parseTypeAndVersion('Router  v1.0.0')
     assert.equal(result[0], 'Router')
     assert.equal(result[1], '1.0.0')
-  })
-})
-
-describe('createRateLimitedFetch', () => {
-  let originalFetch: typeof fetch
-  let mockedFetch
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-    mockedFetch = undefined
-  })
-
-  it('should create a rate-limited fetch function', () => {
-    const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 2, windowMs: 1000 })
-    assert.equal(typeof rateLimitedFetch, 'function')
-  })
-
-  it('should allow requests within rate limit', async () => {
-    globalThis.fetch = mockedFetch = mock.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      } as Response),
-    )
-
-    const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 2, windowMs: 1000 })
-
-    const promise1 = rateLimitedFetch('https://example.com')
-    const promise2 = rateLimitedFetch('https://example.com')
-
-    await Promise.all([promise1, promise2])
-
-    assert.equal(mockedFetch.mock.calls.length, 2)
-  })
-
-  it('should retry on 429 rate limit errors', async () => {
-    let callCount = 0
-    globalThis.fetch = mockedFetch = mock.fn(() => {
-      callCount++
-      if (callCount === 1) {
-        return Promise.resolve({
-          ok: false,
-          status: 429,
-          statusText: 'Too Many Requests',
-        } as Response)
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      } as Response)
-    })
-
-    const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 5, windowMs: 1000 })
-
-    const result = await rateLimitedFetch('https://example.com')
-    assert.equal(result.ok, true)
-    assert.equal(mockedFetch.mock.calls.length, 2)
-  })
-
-  it('should throw non-retryable errors immediately', async () => {
-    globalThis.fetch = mockedFetch = mock.fn(() =>
-      Promise.resolve({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      } as Response),
-    )
-
-    const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 5, windowMs: 1000 })
-
-    await assert.rejects(rateLimitedFetch('https://example.com'), /HTTP 404/)
-    assert.equal(mockedFetch.mock.calls.length, 1)
-  })
-
-  it('should respect maxRetries parameter', async () => {
-    globalThis.fetch = mockedFetch = mock.fn(() =>
-      Promise.resolve({
-        ok: false,
-        status: 429,
-        statusText: 'Too Many Requests',
-      } as Response),
-    )
-
-    const rateLimitedFetch = createRateLimitedFetch({
-      maxRequests: 10,
-      windowMs: 1000,
-      maxRetries: 2,
-    })
-
-    await assert.rejects(rateLimitedFetch('https://example.com'), /Too Many Requests/)
-    assert.equal(mockedFetch.mock.calls.length, 3) // Initial + 2 retries
-  })
-
-  it('should use default parameters when none provided', () => {
-    const rateLimitedFetch = createRateLimitedFetch()
-    assert.equal(typeof rateLimitedFetch, 'function')
-  })
-
-  it('should handle network errors with retry logic', async () => {
-    let callCount = 0
-    globalThis.fetch = mockedFetch = mock.fn(() => {
-      callCount++
-      if (callCount === 1) {
-        return Promise.reject(new Error('429 rate limit exceeded'))
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      } as Response)
-    })
-
-    const rateLimitedFetch = createRateLimitedFetch({ maxRequests: 5, windowMs: 1000 })
-
-    const result = await rateLimitedFetch('https://example.com')
-    assert.equal(result.ok, true)
   })
 })
 

@@ -46,6 +46,7 @@ export type {
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
+export { type FetchVerificationsOpts, fetchVerifications } from './commits.ts'
 export {
   type EVMExtraArgsV1,
   type EVMExtraArgsV2,
@@ -61,9 +62,9 @@ export {
   encodeExtraArgs,
   encodeFinality,
 } from './extra-args.ts'
-export { estimateReceiveExecution } from './gas.ts'
+export { estimateReceiveExecution, sourceToDestTokenAddresses } from './gas.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
-export { decodeMessage, getMessagesInRange, sourceToDestTokenAddresses } from './requests.ts'
+export { decodeMessage, getMessagesInRange } from './requests.ts'
 export {
   type CCIPExecution,
   type CCIPMessage,
