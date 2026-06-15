@@ -17,20 +17,25 @@ async function* fetchTxsForward(
 
   // forward collect all matching txs in array
   const allTxs = [] as Transaction[]
-  let batch: typeof allTxs, until: bigint | undefined
+  const notBefore = opts.startBlock == null ? undefined : BigInt(opts.startBlock)
+  let batch: typeof allTxs,
+    until: bigint | undefined = notBefore
   do {
     batch = await provider.getTransactions(Address.parse(opts.address!), {
       limit,
       ...(!!allTxs.length && {
         lt: allTxs[allTxs.length - 1]!.lt.toString(),
         hash: allTxs[allTxs.length - 1]!.hash().toString('base64'),
-        to_lt: opts.startBlock?.toString(),
       }),
+      ...(notBefore != null && { to_lt: notBefore.toString() }),
     })
     until ??= batch[0]?.lt
 
     while (batch.length > 0 && batch[batch.length - 1]!.now < (opts.startTime ?? 0)) {
       batch.length-- // truncate tail of txs which are older than requested start
+    }
+    while (notBefore != null && batch.length > 0 && batch[batch.length - 1]!.lt < notBefore) {
+      batch.length-- // truncate tail of txs which are older than requested startBlock
     }
 
     allTxs.push(...batch) // concat in descending order

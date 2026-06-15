@@ -930,9 +930,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const messageId = toBeHex(slice.loadUintBig(256), 32)
       const state = slice.loadUint(8)
 
-      // Validate state is a valid ExecutionState (2-3)
-      // TON has intermediary txs with state 1 (InProgress), but we filter them here
-      if (state !== ExecutionState.Success && state !== ExecutionState.Failed) return
+      // Validate state is a known ExecutionState (1-3)
+      if (state < ExecutionState.InProgress || state > ExecutionState.Failed) return
 
       return {
         messageId,
