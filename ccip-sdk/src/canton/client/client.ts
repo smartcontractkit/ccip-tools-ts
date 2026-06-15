@@ -1,8 +1,9 @@
-import axios from 'axios'
+import axios, { type AxiosAdapter } from 'axios'
 
 import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
+import { createAxiosFetchAdapter } from '../../fetch.ts'
 
 // Canton JSON Ledger API requires HTTP/2.
 // On Node.js, axios uses its http adapter with native http2.connect().
@@ -79,6 +80,12 @@ export interface CantonClientConfig {
   timeout?: number
   /** Abort signal for cancelling in-flight requests (e.g., from Chain.abort) */
   signal?: AbortSignal
+  /**
+   * Custom fetch implementation. When provided, routes all HTTP traffic through
+   * the fetch adapter instead of the default axios HTTP/2 transport.
+   * Omit to preserve the default HTTP/2 behaviour.
+   */
+  fetch?: typeof fetch
 }
 
 /**
@@ -89,6 +96,11 @@ export function createCantonClient(config: CantonClientConfig) {
   const headers = buildHeaders(config.jwt)
   const timeoutMs = config.timeout ?? 30_000
   const signal = config.signal
+  // Build a fetch adapter only when the caller explicitly supplies a fetch function.
+  // When absent, the default HTTP/2 transport (cantonHttp) is used unchanged.
+  const fetchAdapter: AxiosAdapter | undefined = config.fetch
+    ? createAxiosFetchAdapter(config.fetch, signal)
+    : undefined
 
   // Internal helpers that capture baseUrl/headers/timeoutMs/signal for
   // cleaner call sites inside createCantonClient.
@@ -107,6 +119,7 @@ export function createCantonClient(config: CantonClientConfig) {
       retries,
       undefined,
       signal,
+      fetchAdapter,
     )
 
   const post2 = <T>(
@@ -126,6 +139,7 @@ export function createCantonClient(config: CantonClientConfig) {
       retries,
       undefined,
       signal,
+      fetchAdapter,
     )
 
   return {
@@ -509,6 +523,7 @@ async function request<T>(
   retries = DEFAULT_RETRY_COUNT,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   signal?: AbortSignal,
+  fetchAdapter?: AxiosAdapter,
 ): Promise<T> {
   // Check if signal is already aborted before attempting any requests
   if (signal?.aborted) {
@@ -530,6 +545,9 @@ async function request<T>(
         signal,
         // Prevent axios from throwing on non-2xx so we can handle retries ourselves
         validateStatus: () => true,
+        // Route through the caller-supplied fetch adapter when present; otherwise
+        // cantonHttp's HTTP/2 transport is used (the safeHttp2Request path below).
+        ...(fetchAdapter ? { adapter: fetchAdapter } : {}),
       } as Parameters<typeof cantonHttp.request>[0]
       response = await safeHttp2Request(requestConfig)
     } catch (err) {

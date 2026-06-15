@@ -1,4 +1,5 @@
 import { Console } from 'node:console'
+import util from 'node:util'
 
 import {
   type CCIPExecution,
@@ -192,26 +193,7 @@ function j(...args: (string | number)[]): string {
   )
 }
 
-function formatData(name: string, data: string, parseError = false): Record<string, string> {
-  if (parseError) {
-    let parsed
-    for (const chain of Object.values(supportedChains)) {
-      try {
-        parsed = chain.parse?.(data)
-      } catch {
-        // ignore
-      }
-      if (parsed) break
-    }
-    if (parsed) {
-      const res: Record<string, string> = {}
-      for (const [key, error] of Object.entries(parsed)) {
-        if (isHexString(error)) Object.assign(res, formatData(j(name, key), error))
-        else res[j(name, key)] = error as string
-      }
-      return res
-    }
-  }
+function formatData(name: string, data: string): Record<string, string> {
   if (!isHexString(data)) return { [name]: data }
   const split = []
   if (data.length <= 66) split.push(data)
@@ -484,22 +466,14 @@ function flatten(val: unknown, path: (string | number)[] = []): [(string | numbe
  * @param args - Key-value pairs to print.
  * @param opts - Formatting options.
  */
-export function prettyTable(
-  this: Ctx,
-  args: Record<string, unknown>,
-  opts = { parseErrorKeys: ['returnData'], spcount: 0 },
-) {
+export function prettyTable(this: Ctx, args: Record<string, unknown>, opts = { spcount: 0 }) {
   const out: (readonly [string, unknown])[] = []
   for (const [path, value] of flatten(args)) {
     const last = path[path.length - 1]
     const key = j(...path)
     if (isBytesLike(value)) {
-      let parseError
-      if (opts.parseErrorKeys.includes(path[path.length - 1]!.toString())) parseError = true
       out.push(
-        ...Object.entries(
-          formatData(key, typeof value !== 'string' ? hexlify(value) : value, parseError),
-        ),
+        ...Object.entries(formatData(key, typeof value !== 'string' ? hexlify(value) : value)),
       )
     } else if (typeof value === 'string') {
       out.push(
@@ -534,12 +508,12 @@ export function prettyReceipt(
 
   prettyTable.call(this, {
     state: receipt.receipt.state === ExecutionState.Success ? '✅ success' : '❌ failed',
-    ...(receipt.receipt.state !== ExecutionState.Success ||
-    (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
-      ? { returnData: receipt.receipt.returnData }
-      : {}),
-    ...(receipt.receipt.gasUsed ? { gasUsed: Number(receipt.receipt.gasUsed) } : {}),
-    ...(origin ? { origin: formatDisplayAddress(origin, destFamily) } : {}),
+    ...(!!(
+      receipt.receipt.state !== ExecutionState.Success ||
+      (receipt.receipt.returnData && receipt.receipt.returnData !== '0x')
+    ) && { returnData: receipt.error || receipt.receipt.returnData }),
+    ...(!!receipt.receipt.gasUsed && { gasUsed: Number(receipt.receipt.gasUsed) }),
+    ...(!!origin && { origin: formatDisplayAddress(origin, destFamily) }),
     contract: formatDisplayAddress(receipt.log.address, destFamily),
     transactionHash: formatDisplayTxHash(receipt.log.transactionHash, destFamily),
     logIndex: receipt.log.index,
@@ -564,7 +538,7 @@ export function formatCCIPError(err: unknown, verbose = false): string | null {
   if (Object.keys(err.context).length > 0) {
     lines.push('  context:')
     for (const [key, value] of Object.entries(err.context)) {
-      lines.push(`    ${key}: ${value as string}`)
+      lines.push(`    ${key}: ${util.inspect(value)}`)
     }
   }
 

@@ -78,6 +78,7 @@ function createMockChains(onRamp: string, offRamp: string) {
       onRamp,
     ]),
     balanceOf: mock.fn(async () => 0n),
+    checkExecute: mock.fn(async () => true),
     estimateReceiveExecution: mock.fn(async (opts: any) => {
       const router = await mockDestChain.getRouterForOffRamp(opts.offRamp)
       const { tokenAmounts, ...message } = opts.message
@@ -486,6 +487,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0xdaad',
         tokenAmounts: [],
         offRampAddress: offRamp,
@@ -520,6 +522,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0x',
         tokenAmounts: [],
       },
@@ -561,6 +564,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         messageId,
         sender,
         receiver,
+        sourceChainSelector: 16015286601757825753n,
         data: '0x',
         tokenAmounts: [
           {

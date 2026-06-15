@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { PickDeep } from 'type-fest'
-
 import { type BlockInfo, type LogFilter, Chain } from './chain.ts'
 import { CCIPTransactionNotFinalizedError, CCIPTransactionNotFoundError } from './errors/index.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
 import { waitFinalized } from './requests.ts'
-import type { CCIPRequest, ChainLog, ChainTransaction } from './types.ts'
+import type { ChainLog, ChainTransaction } from './types.ts'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,16 +23,6 @@ function makeLog(overrides: Partial<ChainLog> = {}): ChainLog {
     data: '0x',
     ...overrides,
   }
-}
-
-/** Wrap a log into the shape expected by waitFinalized */
-function makeRequest(
-  log: ChainLog,
-): PickDeep<
-  CCIPRequest,
-  `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-> {
-  return { log }
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +114,6 @@ class WaitFinalizedMockChain extends Chain {
   async getTokenPoolRemotes(): Promise<any> {
     return {}
   }
-  async getTokenForTokenPool() {
-    return '0x'
-  }
   async getTokenInfo() {
     return { symbol: 'T', decimals: 18 }
   }
@@ -205,7 +190,7 @@ describe('waitFinalized', () => {
       from: '0xSender',
     }
 
-    const result = await chain.waitFinalized({ request: makeRequest(log) })
+    const result = await chain.waitFinalized({ log })
     assert.equal(typeof result.number, 'number')
     assert.equal(typeof result.timestamp, 'number')
     chain.destroy()
@@ -219,7 +204,7 @@ describe('waitFinalized', () => {
     // getLogs will yield the matching tx, so it still succeeds
     chain.logsToYield = [log]
 
-    const result = await chain.waitFinalized({ request: makeRequest(log) })
+    const result = await chain.waitFinalized({ log })
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -238,7 +223,7 @@ describe('waitFinalized', () => {
     }
     chain.logsToYield = [log] // getLogs yields the matching log
 
-    const result = await chain.waitFinalized({ request: makeRequest(log) })
+    const result = await chain.waitFinalized({ log })
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -262,10 +247,7 @@ describe('waitFinalized', () => {
       }),
     ]
 
-    await assert.rejects(
-      () => chain.waitFinalized({ request: makeRequest(log) }),
-      CCIPTransactionNotFinalizedError,
-    )
+    await assert.rejects(() => chain.waitFinalized({ log }), CCIPTransactionNotFinalizedError)
     chain.destroy()
   })
 
@@ -296,12 +278,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = []
 
     await assert.rejects(
-      () =>
-        chain.waitFinalized({
-          request: makeRequest(log),
-          reorgSafetyBlocks: 3,
-          pollIntervalMs: 10,
-        }),
+      () => chain.waitFinalized({ log, reorgSafetyBlocks: 3, pollInterval: 10 }),
       CCIPTransactionNotFinalizedError,
     )
     assert.ok(txCallCount >= 2, 'getTransaction should have been called multiple times')
@@ -323,12 +300,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = []
 
     await assert.rejects(
-      () =>
-        chain.waitFinalized({
-          request: makeRequest(log),
-          reorgSafetyBlocks: 3,
-          pollIntervalMs: 10,
-        }),
+      () => chain.waitFinalized({ log, reorgSafetyBlocks: 3, pollInterval: 10 }),
       CCIPTransactionNotFinalizedError,
     )
     chain.destroy()
@@ -365,10 +337,7 @@ describe('waitFinalized', () => {
     // getLogs yields the matching log (simulating it appearing in finalized set)
     chain.logsToYield = [log]
 
-    const result = await chain.waitFinalized({
-      request: makeRequest(log),
-      reorgSafetyBlocks: 3,
-    })
+    const result = await chain.waitFinalized({ log, reorgSafetyBlocks: 3 })
     assert.equal(typeof result.number, 'number')
     assert.ok(txCallCount >= 1, 'getTransaction should have been called for reorg check')
     chain.destroy()
@@ -396,11 +365,7 @@ describe('waitFinalized', () => {
     // Should exit without hanging; the abort causes the watch loop to end,
     // and since no match was found, it throws NotFinalized
     await assert.rejects(
-      () =>
-        chain.waitFinalized({
-          request: makeRequest(log),
-          abort: ac.signal,
-        }),
+      () => chain.waitFinalized({ log, abort: ac.signal }),
       CCIPTransactionNotFinalizedError,
     )
     chain.destroy()
@@ -423,7 +388,7 @@ describe('waitFinalized', () => {
     // getLogs yields matching log so it eventually succeeds
     chain.logsToYield = [log]
 
-    const result = await chain.waitFinalized({ request: makeRequest(log) })
+    const result = await chain.waitFinalized({ log })
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -442,7 +407,7 @@ describe('waitFinalized', () => {
       from: '0xSender',
     }
 
-    const result = await waitFinalized(chain, { request: makeRequest(log) })
+    const result = await waitFinalized(chain, { log })
     assert.equal(result.number, 200)
     assert.equal(result.timestamp, 1_700_000_000)
     chain.destroy()

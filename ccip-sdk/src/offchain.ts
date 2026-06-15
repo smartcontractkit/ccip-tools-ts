@@ -8,9 +8,10 @@ import {
   CCIPUsdcBurnFeesError,
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
+import { fetchWithTimeout } from './fetch.ts'
 import { NetworkType, networkInfo } from './networks.ts'
 import type { CCIPRequest, OffchainTokenData, WithLogger } from './types.ts'
-import { fetchWithTimeout, getDataBytes } from './utils.ts'
+import { getDataBytes } from './utils.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com',

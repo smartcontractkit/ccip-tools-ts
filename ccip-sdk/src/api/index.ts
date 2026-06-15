@@ -7,8 +7,10 @@ import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
+  CCIPMessageNotVerifiedYetError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
+import { fetchWithTimeout } from '../fetch.ts'
 import { HttpStatus } from '../http-status.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { decodeMessage } from '../requests.ts'
@@ -20,11 +22,12 @@ import {
   type Lane,
   type Logger,
   type OffchainTokenData,
+  type VerifierResult,
   type WithLogger,
   CCIPVersion,
   MessageStatus,
 } from '../types.ts'
-import { bigIntReviver, decodeAddress, fetchWithTimeout, parseJson } from '../utils.ts'
+import { bigIntReviver, decodeAddress, parseJson } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
@@ -58,7 +61,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.7.1-2807dab'
+export const SDK_VERSION = '1.8.0-58177faf'
 // generate:end
 
 /** SDK telemetry header name */
@@ -407,6 +410,53 @@ export class CCIPAPIClient {
     const raw = await response.text()
     this.logger.debug('getMessageById raw response:', raw)
     return this._transformMessageResponse(raw)
+  }
+
+  /**
+   * Fetches CCV verification results for a CCIP v2.0 message from the API.
+   *
+   * Validates that all `requiredCCVs` addresses have a matching verification in the
+   * response. Throws {@link CCIPMessageNotVerifiedYetError} if the `verifiers` field
+   * is absent or any required CCV is missing.
+   *
+   * @param messageId - The CCIP message ID
+   * @param options - Optional request options (signal for cancellation)
+   * @returns CCIPVerifications with policy and verifier results
+   * @throws {@link CCIPMessageNotVerifiedYetError} if verifications are not yet available
+   */
+  async getVerifications(
+    messageId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<VerifierResult[]> {
+    const apiRes = await this.getMessageById(messageId, options)
+
+    if (!('verifiers' in apiRes.message)) {
+      throw new CCIPMessageNotVerifiedYetError(messageId)
+    }
+
+    const verifiers = apiRes.message.verifiers as {
+      items?: {
+        destAddress: string
+        sourceAddress: string
+        isRequired: boolean
+        verification?: { data: string; timestamp: string }
+      }[]
+    }
+    if (!verifiers.items?.every((f) => f.verification?.data || !f.isRequired))
+      throw new CCIPMessageNotVerifiedYetError(messageId)
+
+    const verifications: VerifierResult[] = (verifiers.items ?? [])
+      .filter((item) => item.verification?.data)
+      .map((item) => ({
+        destAddress: item.destAddress,
+        sourceAddress: item.sourceAddress,
+        ccvData: item.verification!.data,
+        ...(item.verification?.timestamp && {
+          timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
+        }),
+      }))
+
+    return verifications
   }
 
   /**

@@ -141,8 +141,6 @@ ccip-cli send --<TAB>  # lists all send options
 - `--format=pretty` (default): Human-readable tabular output
 - `--format=log`: Basic console logging, may show some more details (e.g. token addresses)
 - `--format=json`: Machine-readable JSON
-- `--page=10000`: limits `eth_getLogs` (and others) pagination/scanning ranges (e.g. for RPCs which
-  don't support large ranges)
 - `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
 - `--api=<url>`: Use a custom CCIP API URL instead of the default `api.ccip.chain.link`
 

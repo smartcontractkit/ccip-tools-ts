@@ -215,7 +215,16 @@ export function parseData(data: unknown): Record<string, unknown> | undefined {
   }
   const shortMessage = err_.shortMessage || err_.message
   const transaction = err_.transaction
-  if (!shortMessage || !transaction?.data) return
+  if (!shortMessage) return
+  if (!transaction?.data) {
+    // No transaction calldata context (e.g. error from contract.fn.populateTransaction);
+    // still try to surface decoded revert data if available.
+    const errorData = getErrorData(data)
+    if (!errorData) return
+    const reason = Object.fromEntries(recursiveParseError('revert', errorData))
+    if (!Object.keys(reason).length) return
+    return { error: shortMessage, ...reason }
+  }
 
   let method, invocation
   const invocation_ = (data as { invocation: { method: string; args: Result } | null }).invocation

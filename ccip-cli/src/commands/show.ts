@@ -21,7 +21,6 @@
 
 import {
   type Chain,
-  type ChainStatic,
   CCIPAPIClient,
   CCIPExecTxRevertedError,
   CCIPMessageIdNotFoundError,
@@ -103,7 +102,18 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     | { request?: unknown; attestations?: unknown; verifications?: unknown; receipts?: unknown[] }
     | undefined = argv.format === Format.json ? {} : undefined
   const emitJsonEnvelope = () => {
-    if (jsonEnvelope) output.write(JSON.stringify(jsonEnvelope, bigIntReplacer, 2))
+    if (jsonEnvelope) {
+      const seen = new WeakSet<object>()
+      const uncircularReplacer = (key: string, value: unknown) => {
+        const replaced = bigIntReplacer(key, value)
+        if (typeof replaced === 'object' && replaced !== null) {
+          if (seen.has(replaced)) return undefined
+          seen.add(replaced)
+        }
+        return replaced
+      }
+      output.write(JSON.stringify(jsonEnvelope, uncircularReplacer, 2))
+    }
   }
 
   const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
@@ -198,10 +208,6 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       context: { error: request.tx.error },
     })
 
-  if (!source) {
-    emitJsonEnvelope()
-    return
-  }
   if (argv.wait === false) {
     emitJsonEnvelope()
     return // `false` used by call at end of `send` command without `--wait`
@@ -211,17 +217,18 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   const finalized$ = (async () => {
     if (argv.wait) {
       logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
+      if (!source) return
       const finalizedAc = new AbortController()
       cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
       await source.waitFinalized({
-        request,
+        log: request.log,
         abort: finalizedAc.signal,
       })
       logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
-    const offchainTokenData = await source.getOffchainTokenData(request)
-    if (offchainTokenData.length && offchainTokenData.some((d) => !!d)) {
+    const offchainTokenData = await source?.getOffchainTokenData(request)
+    if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {
           output.write('attestations =', offchainTokenData)
@@ -267,21 +274,16 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
   if (request.metadata?.receiptTransactionHash) {
     // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
-    execs$ = await dest
-      .getTransaction(request.metadata.receiptTransactionHash)
-      .then(async ({ logs }) => {
-        const res = []
-        for (const log of logs) {
-          const receipt = (dest.constructor as ChainStatic).decodeReceipt(log)
-          if (receipt?.messageId !== request.message.messageId) continue
-          res.push({ receipt, log, timestamp: request.metadata!.receiptTimestamp! })
-        }
-        cancelWaitFinalized?.()
-        await finalized$
-        return res
-      })
+    execs$ = await dest.getExecutionReceiptsInTx(request.metadata.receiptTransactionHash, {
+      offRamp,
+      messageId: request.message.messageId,
+      sourceChainSelector: request.message.sourceChainSelector,
+      sequenceNumber: request.message.sequenceNumber,
+    })
+    cancelWaitFinalized?.()
+    await finalized$
   } else {
-    offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    offRamp ??= await discoverOffRamp(source!, dest, request.lane.onRamp, source)
 
     let watch
     if (argv.wait) {

@@ -1,10 +1,11 @@
 import { concat, id, keccak256, zeroPadValue } from 'ethers'
 
-import { CCIPExtraArgsInvalidError, CCIPSuiHasherVersionUnsupportedError } from '../errors/index.ts'
+import { CCIPExtraArgsInvalidError, CCIPHasherVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
 import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
+import { ChainFamily } from '../networks.ts'
 import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
 
 /**
@@ -30,7 +31,7 @@ export function getSuiLeafHasher<V extends CCIPVersion = CCIPVersion>({
       return ((message: CCIPMessage<typeof CCIPVersion.V1_6>): string =>
         hashV16SuiMessage(message, metadataHash)) as LeafHasher<V>
     default:
-      throw new CCIPSuiHasherVersionUnsupportedError(version)
+      throw new CCIPHasherVersionUnsupportedError(ChainFamily.Sui, version)
   }
 }
 

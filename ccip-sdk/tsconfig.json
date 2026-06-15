@@ -19,4 +19,5 @@
     "noUncheckedIndexedAccess": true,
     "stableTypeOrdering": true,
   },
+  "exclude": ["dist", "node_modules"],
 }

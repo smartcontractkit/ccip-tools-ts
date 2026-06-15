@@ -120,18 +120,20 @@ class MockChain extends Chain {
     return '0xRouter'
   }
 
-  async getOnRampConfig(_onRamp: string, _destChainSelector: bigint) {
+  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     return {
-      router: this.mockRouterForOnRamp.get(_onRamp) || '0xDefaultRouter',
+      router: this.mockRouterForOnRamp.get(onRamp) || '0xDefaultRouter',
+      destChainSelector,
       feeQuoter: '0xFeeQuoter',
       typeAndVersion: 'EVM2EVMOnRamp 1.5.0',
     }
   }
 
-  async getOffRampConfig(_offRamp: string, _sourceChainSelector: bigint) {
+  async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
     return {
       router: '0xRouter',
-      onRamps: [this.mockOnRampForOffRamp.get(_offRamp) || '0xDefaultOnRamp'],
+      sourceChainSelector,
+      onRamps: [this.mockOnRampForOffRamp.get(offRamp) || '0xDefaultOnRamp'],
       typeAndVersion: 'EVM2EVMOffRamp 1.5.0',
     }
   }
@@ -170,10 +172,6 @@ class MockChain extends Chain {
 
   async getTokenPoolRemotes(_pool: string, _remoteChainSelector: bigint): Promise<any> {
     return { remoteToken: '0xRemoteToken', remotePools: [] }
-  }
-
-  async getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    return '0xToken'
   }
 
   async getTokenInfo(_token: string): Promise<{ symbol: string; decimals: number; name?: string }> {

@@ -12,6 +12,7 @@ import {
   type TokenPoolRemote,
   Chain,
 } from '../chain.ts'
+import { MAINNET_INDEXER_URLS } from '../commits.ts'
 import {
   CCIPChainNotFoundError,
   CCIPError,
@@ -19,7 +20,6 @@ import {
   CCIPNotImplementedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import { CCV_INDEXER_URL } from '../evm/const.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -106,6 +106,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   readonly tokenMetadataClient: TokenMetadataClient
   readonly indexerUrl: string
   readonly ccipParty: string
+  /** Custom fetch function supplied via ctx, used for indexer requests. Falls back to globalThis.fetch. */
+  private readonly fetchFn: typeof fetch
 
   /**
    * Creates a new CantonChain instance.
@@ -139,6 +141,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.tokenMetadataClient = tokenMetadataClient
     this.ccipParty = ccipParty
     this.indexerUrl = indexerUrl
+    this.fetchFn = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   /**
@@ -182,7 +185,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     transferInstructionClient: TransferInstructionClient,
     tokenMetadataClient: TokenMetadataClient,
     ccipParty: string,
-    indexerUrl = CCV_INDEXER_URL,
+    indexerUrl = MAINNET_INDEXER_URLS[0]!,
     ctx?: ChainContext,
   ): Promise<CantonChain> {
     const synchronizers = await client.getConnectedSynchronizers()
@@ -254,10 +257,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    const fetchFn = ctx.fetch
     const client = createCantonClient({
       baseUrl: url,
       jwt: ctx.cantonConfig.jwt,
       signal: ctx.abort,
+      fetch: fetchFn,
     })
     try {
       const alive = await client.isAlive()
@@ -432,21 +437,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   getOnRampForRouter(_router: string, _destChainSelector: bigint): Promise<string> {
     throw new CCIPNotImplementedError('CantonChain.getOnRampForRouter')
-  }
-
-  /**
-   * {@inheritDoc Chain.getCommitStoreForOffRamp}
-   */
-  async getCommitStoreForOffRamp(offRamp: string): Promise<string> {
-    return Promise.resolve(offRamp)
-  }
-
-  /**
-   * {@inheritDoc Chain.getTokenForTokenPool}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
-   */
-  getTokenForTokenPool(_tokenPool: string): Promise<string> {
-    throw new CCIPNotImplementedError('CantonChain.getTokenForTokenPool')
   }
 
   /**
@@ -1217,7 +1207,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const indexerMessageId = normalizeIndexerMessageId(request.message.messageId)
     const url = `${this.indexerUrl}/v1/verifierresults/${indexerMessageId}`
-    const res = await fetch(url)
+    const res = await this.fetchFn(url)
     if (!res.ok) {
       const body = await res.text()
       throw new CCIPError(

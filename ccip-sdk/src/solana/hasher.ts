@@ -12,10 +12,7 @@ import {
 } from 'ethers'
 import type { ReadonlyDeep } from 'type-fest'
 
-import {
-  CCIPExtraArgsInvalidError,
-  CCIPSolanaLaneVersionUnsupportedError,
-} from '../errors/index.ts'
+import { CCIPExtraArgsInvalidError, CCIPLaneVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/index.ts'
 import { networkInfo } from '../networks.ts'
@@ -52,8 +49,7 @@ export function getV16SolanaLeafHasher(
   lane: Lane,
   { logger = console }: WithLogger = {},
 ): LeafHasher<typeof CCIPVersion.V1_6> {
-  if (lane.version !== CCIPVersion.V1_6)
-    throw new CCIPSolanaLaneVersionUnsupportedError(lane.version)
+  if (lane.version !== CCIPVersion.V1_6) throw new CCIPLaneVersionUnsupportedError(lane.version)
 
   return (message: ReadonlyDeep<CCIPMessage<typeof CCIPVersion.V1_6>>): string => {
     let parsedArgs

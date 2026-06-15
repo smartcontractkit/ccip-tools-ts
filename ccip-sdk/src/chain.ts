@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, keccak256 } from 'ethers'
+import { type BytesLike, dataLength, isBytesLike, keccak256 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -10,8 +10,10 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
+  CCIPRateLimitExceededError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -29,7 +31,7 @@ import type {
 import type { EstimateMessageInput } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
-import { type ChainFamily, type NetworkInfo, networkInfo } from './networks.ts'
+import { type ChainFamily, type NetworkInfo, type NetworkType, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import {
   getMessagesInBatch,
@@ -120,6 +122,14 @@ function hasV3ExtraArgs(extraArgs: Partial<ExtraArgs> | undefined): boolean {
  * ```
  */
 export type ChainContext = WithLogger & {
+  /**
+   * Custom fetch implementation. When provided, it is used verbatim for all HTTP
+   * requests on this chain and the built-in rate-limit/retry wrapper is NOT applied.
+   * When omitted, a default per-endpoint rate-limited fetch (with adaptive throttle,
+   * 429/Retry-After handling and retries) is installed automatically.
+   */
+  fetch?: typeof fetch
+
   /**
    * CCIP API client instance for lane information queries.
    *
@@ -499,6 +509,18 @@ export type TokenPoolConfig = {
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
   /**
+   * For Proxy TokenPools, the address of the previous pool implementation (if any).
+   */
+  previousPool?: string
+  /**
+   * For Proxy TokenPools, the typeAndVersion() string of the previous pool implementation (if any).
+   */
+  previousPoolTypeAndVersion?: string
+  /**
+   * For LockReleaseTokenPool v2+, the address of the associated LockBox contract.
+   */
+  lockBox?: string
+  /**
    * Min finalityDepth and finality flags for Faster-Than-Finality (FTF) and FCR (safe),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
    * `finalityDepth=0` indicates FTF is supported but not enabled for this token;
@@ -536,6 +558,8 @@ export type RegistryTokenConfig = {
 export interface OnRampConfig {
   /** Original (unparsed) typeAndVersion() string. */
   typeAndVersion: string
+  /** selector of onramp's dest config */
+  destChainSelector: bigint
   /** Router address connected to this OnRamp on the source chain. */
   router: string
   /** Address of the FeeQuoter contract for this OffRamp. */
@@ -557,6 +581,8 @@ export interface OnRampConfig {
 export interface OffRampConfig {
   /** Original (unparsed) typeAndVersion() string. */
   typeAndVersion: string
+  /** selector of offramp's source config */
+  sourceChainSelector: bigint
   /** Router address connected to this OffRamp for this source chain. */
   router: string
   /**
@@ -748,19 +774,31 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async waitFinalized(opts: {
-    request: PickDeep<
-      CCIPRequest,
-      `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-    >
-    finality?: Parameters<Chain['getBlockInfo']>[0]
-    abort?: AbortSignal
-    /** How many blocks past the original tx blockNumber must be finalized
-     *  without the tx reappearing before we declare it reorged out. Default: 10 */
-    reorgSafetyBlocks?: number
-    /** Delay in ms between block-height poller iterations. Default: 5000 */
-    pollIntervalMs?: number
-  }): ReturnType<Chain['getBlockInfo']> {
+  async waitFinalized(
+    opts: {
+      finality?: Parameters<Chain['getBlockInfo']>[0]
+      abort?: AbortSignal
+      /** How many blocks past the original tx blockNumber must be finalized
+       *  without the tx reappearing before we declare it reorged out. Default: 10 */
+      reorgSafetyBlocks?: number
+      /** Delay in ms between block-height poller iterations. Default: 5000 */
+      pollInterval?: number
+    } & (
+      | {
+          /** @deprecated Prefer passing `log` directly to `opts` */
+          request: PickDeep<
+            CCIPRequest,
+            `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+          >
+        }
+      | {
+          log: Pick<
+            ChainLog,
+            'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+          >
+        }
+    ),
+  ): ReturnType<Chain['getBlockInfo']> {
     return waitFinalized(this, opts)
   }
   /**
@@ -1170,7 +1208,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Token: ${token}`)
    * ```
    */
-  abstract getTokenForTokenPool(tokenPool: string): Promise<string>
+  async getTokenForTokenPool(tokenPool: string): Promise<string> {
+    return (await this.getTokenPoolConfig(tokenPool)).token
+  }
+
   /**
    * Fetch token metadata.
    *
@@ -1184,6 +1225,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenInfo(token: string): Promise<TokenInfo>
+
   /**
    * Query token balance for an address.
    *
@@ -1221,6 +1263,94 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTokenAdminRegistryFor(address: string): Promise<string>
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkSendMessage({
+    router,
+    destChainSelector,
+    message,
+  }: PickDeep<
+    SendMessageOpts,
+    'router' | 'destChainSelector' | 'message.tokenAmounts'
+  >): Promise<true> {
+    let registry
+    for (const { token, amount } of message.tokenAmounts ?? []) {
+      registry ??= await this.getTokenAdminRegistryFor(router)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
+      if (!remote.outboundRateLimiterState) continue
+      if (amount > remote.outboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('OUTBOUND', remote.outboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: this.network.chainSelector,
+          destChainSelector,
+        })
+      }
+    }
+    return true
+  }
+
+  /**
+   * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
+   * For LockRelease TPs, also check it has enough liquidity
+   * @param opts - Execution options
+   * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @returns true if all token transfers are supported and within the rate limit
+   * @internal
+   */
+  async checkExecute({
+    offRamp,
+    message,
+  }: {
+    offRamp: string
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'>
+  }): Promise<true> {
+    let registry
+    for (const ta of message.tokenAmounts ?? []) {
+      const amount = ta.amount
+      const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      registry ??= await this.getTokenAdminRegistryFor(offRamp)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
+      // if a LockReleaseTokenPool, also check it has enough liquidity
+      if (typeAndVersion?.includes('LockRelease')) {
+        const [balance, { symbol }] = await Promise.all([
+          this.getBalance({ holder: lockBox || tokenPool!, token }),
+          this.getTokenInfo(token),
+        ])
+        if (balance < amount) {
+          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
+            context: { tokenPool, token, typeAndVersion, network: this.network.name },
+          })
+        }
+      }
+
+      const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
+      if (!remote.inboundRateLimiterState) continue
+      if (amount > remote.inboundRateLimiterState.tokens) {
+        throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
+          token,
+          amount,
+          tokenPool: tokenPool!,
+          registry,
+          sourceChainSelector: message.sourceChainSelector,
+          destChainSelector: this.network.chainSelector,
+        })
+      }
+    }
+    return true
+  }
+
   /**
    * Fetch the current fee for a given intended message.
    *
@@ -1484,6 +1614,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       CCIPRequest,
       'lane' | `message.${'sequenceNumber' | 'messageId'}` | 'log.blockTimestamp'
     >
+    /** Optional list of CCIP v2 indexer base URLs to query for CCV verifications, or a NetworkType to use default URLs */
+    indexer?: readonly string[] | NetworkType
   } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
     return getOnchainCommitReport(this, offRamp, request, hints)
   }
@@ -1661,14 +1793,86 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           receipt.sourceChainSelector !== sourceChainSelector)
       )
         continue
-
-      yield { receipt, log }
+      let error
+      if (
+        receipt.state !== ExecutionState.Success &&
+        receipt.returnData &&
+        (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
+      ) {
+        if (!isBytesLike(receipt.returnData)) error = receipt.returnData
+        try {
+          const parsed = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+          if (parsed) error = parsed
+        } catch {
+          // ignore
+        }
+      }
+      yield { receipt, log, ...(!!error && { error }) }
       if (receipt.state === ExecutionState.Success) break
     }
   }
 
   /**
-   * Fetch first execution receipt inside a transaction.
+   * Fetch all execution receipts inside a transaction.
+   *
+   * @internal
+   * @param tx - Transaction hash or transaction object
+   * @param filter - Source, messageId or sequenceNumber filters to apply on receipts
+   * @returns CCIP executions array
+   */
+  async getExecutionReceiptsInTx(
+    tx: string | ChainTransaction,
+    filters?: {
+      offRamp?: string | null
+      sourceChainSelector?: bigint
+      messageId?: string
+      sequenceNumber?: bigint
+    },
+  ): Promise<CCIPExecution[]> {
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    const results = []
+    for (const log of tx.logs) {
+      if (filters?.offRamp && log.address !== filters.offRamp) continue
+      let receipt
+      try {
+        receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+      } catch {
+        // continue
+      }
+      if (
+        !receipt ||
+        (filters?.messageId && receipt.messageId !== filters.messageId) ||
+        (filters?.sequenceNumber && receipt.sequenceNumber !== filters.sequenceNumber)
+      )
+        continue
+      if (filters?.sourceChainSelector) {
+        // <=v1.5 => EVM only => falsy sourceChainSelector => per-source OffRamp
+        receipt.sourceChainSelector ??= (
+          await this.getOffRampConfig(log.address, 0n)
+        ).sourceChainSelector
+        if (receipt.sourceChainSelector !== filters.sourceChainSelector) continue
+      }
+
+      let error
+      if (
+        receipt.state !== ExecutionState.Success &&
+        receipt.returnData &&
+        (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
+      ) {
+        try {
+          error = (this.constructor as ChainStatic).parse?.(receipt.returnData)
+        } catch {
+          // ignore
+        }
+      }
+
+      results.push({ receipt, log, ...(!!error && { error }) })
+    }
+    return results
+  }
+
+  /**
+   * Fetch first execution receipt matching filters inside a transaction.
    *
    * @internal
    * @param tx - Transaction hash or transaction object
@@ -1682,15 +1886,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`State: ${exec.receipt.state}`)
    * ```
    */
-  async getExecutionReceiptInTx(tx: string | ChainTransaction): Promise<CCIPExecution> {
-    if (typeof tx === 'string') tx = await this.getTransaction(tx)
-    for (const log of tx.logs) {
-      const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
-      if (!receipt) continue
-
-      return { receipt, log }
-    }
-    throw new CCIPExecTxRevertedError(tx.hash)
+  async getExecutionReceiptInTx(
+    tx: string | ChainTransaction,
+    filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
+  ): Promise<CCIPExecution> {
+    const receipts = await this.getExecutionReceiptsInTx(tx, filters)
+    if (receipts.length) return receipts[0]!
+    throw new CCIPExecTxRevertedError(typeof tx === 'string' ? tx : tx.hash)
   }
 
   /**

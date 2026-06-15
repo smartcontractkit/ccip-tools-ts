@@ -115,9 +115,11 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
   const source = await getChain(sourceNetwork.name)
   let registry
   try {
-    registry = await source.getTokenAdminRegistryFor(argv.address)
+    const [type] = await source.typeAndVersion(argv.address)
+    if (['Router', 'Ramp'].some((t) => type.includes(t)))
+      registry = await source.getTokenAdminRegistryFor(argv.address)
   } catch (_) {
-    // ignore
+    // not a router or ramp, maybe a TP; continue
   }
 
   // In JSON mode, accumulate all output into a single envelope so JSON.parse(stdout) works.

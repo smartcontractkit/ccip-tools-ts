@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `createRateLimitedFetch` wrapper applied by default, auto-detect and adapt to RPC rate limits
+- EVM: `getLogs` auto-detect `page` / `log range` errors and retry with suggested or halvened ranges
+- SDK: `Chain.getExecutionReceiptsInTx` added, to fetch and parse all or `filter`ed receipts in tx; previous `getExecutionReceiptInTx` is now a simple wrapper around it
+- SDK: `CCIPExecution.error?: Record<string, unknown>` property added to `Chain.getExecutionReceipts[InTx]` output for failed executions, to include parsed error data when available (e.g. revert reason, custom error fields, etc.)
+
+## [1.8.0] - 2026-06-05
+
+- SDK: `checkSendMessage` method called at `getFee` time, checks source rate limits before sending
+- SDK: `checkExecute` method checks dest rate limits, called by standalone `estimateReceiveExecution` function
+- SDK: `estimateReceiveExecution` method also checks requested finality is within `ccipReceiver` `allowedFinality`
+- CLI: `send` performs all these `--estimate-gas-limit` checks by default before sending
+- SDK: fetch v2 offchain verifications from Indexers
+- CLI: add `--indexer` global option to add custom indexers (relevant for `show` and `manual-exec` commands)
+
 ## [1.7.0] - 2026-05-25
 
 - SDK: Add `getMessagesInRange()` to the abstract Chain class — range-based CCIP message discovery using `getLogs` + `decodeMessage`, returns `AsyncIterableIterator<CCIPRequest>`

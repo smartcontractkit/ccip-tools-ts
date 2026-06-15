@@ -2,8 +2,10 @@ import type { BytesLike } from 'ethers'
 
 import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 import { CCIPErrorCode } from './codes.ts'
+import type { RateLimiterState } from '../chain.ts'
+import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
-import type { ChainFamily } from '../networks.ts'
+import { type ChainFamily, networkInfo } from '../networks.ts'
 import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
 
 // Chain/Network
@@ -799,6 +801,75 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when TokenPool's rate limit is not enough for the requested amount.
+ * Transient: rate limit may refill after some time, or user can reduce amount and retry immediately.
+ * Not transient: amount exceeds total capacity of the pool, so it will never be processable until pool configs change.
+ *
+ * @example
+ * ```typescript
+ * let fee
+ * do {
+ *   try {
+ *     fee = await chain.getFee({
+ *       router,
+ *       destChainSelector,
+ *       message: { receiver, tokenAmounts: [{ token, amount }] },
+ *     })
+ *   } catch (error) {
+ *     if (!(error instanceof CCIPRateLimitExceededError) || !error.isTransient) {
+ *       throw error
+ *     }
+ *     console.log(`Token ${error.context.token} exceeds rate limit, retrying after ${error.retryAfterMs}ms`)
+ *     await sleep(error.retryAfterMs)
+ *   }
+ * } while (fee === undefined)
+ * ```
+ */
+export class CCIPRateLimitExceededError extends CCIPError {
+  override readonly name = 'CCIPRateLimitExceededError'
+  /** Creates a rate limit exceeded error. */
+  constructor(
+    direction: 'OUTBOUND' | 'INBOUND',
+    rateLimiterState: NonNullable<RateLimiterState>,
+    tokenInfo: {
+      token: string
+      amount: bigint
+      registry?: string
+      tokenPool: string
+      sourceChainSelector: bigint
+      destChainSelector: bigint
+    },
+    options?: CCIPErrorOptions,
+  ) {
+    const isTransient = tokenInfo.amount <= rateLimiterState.capacity
+    let retryAfterMs
+    if (isTransient) {
+      retryAfterMs = Number(
+        ((tokenInfo.amount - rateLimiterState.tokens) * 1000n) / rateLimiterState.rate,
+      )
+    }
+    const localNetwork =
+      direction === 'INBOUND'
+        ? networkInfo(tokenInfo.destChainSelector)
+        : networkInfo(tokenInfo.sourceChainSelector)
+    const remoteNetwork =
+      direction === 'INBOUND'
+        ? networkInfo(tokenInfo.sourceChainSelector)
+        : networkInfo(tokenInfo.destChainSelector)
+    super(
+      CCIPErrorCode.RATE_LIMIT_EXCEEDED,
+      `Requested token transfer amount=${tokenInfo.amount} on tokenPool=${tokenInfo.tokenPool} for token=${tokenInfo.token} at "${localNetwork.name}" ${direction === 'INBOUND' ? 'from' : 'to'} "${remoteNetwork.name}" exceeds rate limiter's ${isTransient ? 'available tokens' : 'capacity'}`,
+      {
+        ...options,
+        isTransient,
+        ...(isTransient && { retryAfterMs }),
+        context: { ...options?.context, direction, ...tokenInfo, ...rateLimiterState },
+      },
+    )
+  }
+}
+
 // Contract Type
 
 /**
@@ -1072,6 +1143,109 @@ export class CCIPLbtcAttestationNotApprovedError extends CCIPError {
         isTransient: true,
         retryAfterMs: 30000,
         context: { ...options?.context, payloadHash, attestation },
+      },
+    )
+  }
+}
+
+// Lane Version
+
+/**
+ * Thrown when lane version is not supported.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const lane = await chain.getLane(onRamp, offRamp)
+ * } catch (error) {
+ *   if (error instanceof CCIPLaneVersionUnsupportedError) {
+ *     console.log(`Unsupported version: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLaneVersionUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPLaneVersionUnsupportedError'
+  /** Creates a lane version unsupported error. */
+  constructor(version: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LANE_VERSION_UNSUPPORTED, `Unsupported lane version: ${version}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, version },
+    })
+  }
+}
+
+// Token Registration
+
+/**
+ * Thrown when token is not registered in a chain's token admin registry.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getRegistryTokenConfig(registry, token)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenNotRegisteredError) {
+ *     console.log(`Token ${error.context.token} not in registry`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenNotRegisteredError extends CCIPError {
+  override readonly name = 'CCIPTokenNotRegisteredError'
+  /** Creates a token not registered error. */
+  constructor(token: string, registry: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_NOT_REGISTERED,
+      `Token=${token} not registered in registry=${registry}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token, registry },
+      },
+    )
+  }
+}
+
+// ExtraArgs Encoding
+
+/**
+ * Thrown when a chain family cannot encode the given extraArgs format.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   chain.encodeExtraArgs(unsupportedArgs)
+ * } catch (error) {
+ *   if (error instanceof CCIPExtraArgsEncodingUnsupportedError) {
+ *     console.log(`${error.context.chainFamily} only supports: ${error.context.supportedFormats}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPExtraArgsEncodingUnsupportedError extends CCIPError {
+  override readonly name = 'CCIPExtraArgsEncodingUnsupportedError'
+  /** Creates an extraArgs encoding unsupported error. */
+  constructor(
+    chainFamily: typeof ChainFamily.Solana | typeof ChainFamily.Aptos,
+    supportedFormats: string,
+    options?: CCIPErrorOptions,
+  ) {
+    const ERROR_CODE_MAP: Record<
+      typeof ChainFamily.Solana | typeof ChainFamily.Aptos,
+      CCIPErrorCode
+    > = {
+      SVM: CCIPErrorCode.EXTRA_ARGS_SOLANA_EVM_ONLY,
+      APTOS: CCIPErrorCode.EXTRA_ARGS_APTOS_RESTRICTION,
+    }
+    super(
+      ERROR_CODE_MAP[chainFamily],
+      `${chainFamily} extraArgs encoding only supports ${supportedFormats}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, chainFamily, supportedFormats },
       },
     )
   }
@@ -1577,6 +1751,38 @@ export class CCIPLogsAddressRequiredError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a getLogs request is rejected because the requested block range is too large.
+ * Transient: the caller should retry with a smaller range.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const logs = await chain.getLogs({ startBlock: 0, endBlock: 100000 })
+ * } catch (error) {
+ *   if (error instanceof CCIPLogRangeTooLargeError) {
+ *     const { maxRange, suggestedRange } = error.context
+ *     console.log(`Reduce range to ${maxRange} blocks`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLogRangeTooLargeError extends CCIPError {
+  override readonly name = 'CCIPLogRangeTooLargeError'
+  /** Creates a log range too large error. */
+  constructor(
+    info: { requestedRange?: number; maxRange?: number; suggestedRange?: [number, number] },
+    options?: CCIPErrorOptions,
+  ) {
+    const maxRangeStr = info.maxRange !== undefined ? ` (max: ${info.maxRange})` : ''
+    super(CCIPErrorCode.LOG_RANGE_TOO_LARGE, `getLogs block range is too large${maxRangeStr}`, {
+      ...options,
+      isTransient: true,
+      context: { ...options?.context, ...info },
+    })
+  }
+}
+
 // Chain Family
 
 /**
@@ -1985,12 +2191,17 @@ export class CCIPContractNotRouterError extends CCIPError {
 export class CCIPLogDataInvalidError extends CCIPError {
   override readonly name = 'CCIPLogDataInvalidError'
   /** Creates a log data invalid error. */
-  constructor(data: unknown, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOG_DATA_INVALID, `Invalid log data: ${String(data)}`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, data },
-    })
+  constructor(data: unknown, options?: CCIPErrorOptions & { chain?: ChainFamily }) {
+    const chain = options?.chain
+    super(
+      CCIPErrorCode.LOG_DATA_INVALID,
+      `Invalid ${chain ? chain + ' ' : ''}log data: ${String(data)}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, data, ...(chain && { chain }) },
+      },
+    )
   }
 }
 
@@ -2013,10 +2224,15 @@ export class CCIPLogDataInvalidError extends CCIPError {
 export class CCIPWalletInvalidError extends CCIPError {
   override readonly name = 'CCIPWalletInvalidError'
   /** Creates a wallet invalid error. */
-  constructor(wallet: unknown, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.WALLET_INVALID, `Wallet must be a Signer, got ${String(wallet)}`, {
+  constructor(wallet: unknown, options?: CCIPErrorOptions & { className?: string }) {
+    const className = options?.className
+    const msg = className
+      ? `${className} requires a valid wallet, got ${String(wallet)}`
+      : `Wallet must be a Signer, got ${String(wallet)}`
+    super(CCIPErrorCode.WALLET_INVALID, msg, {
       ...options,
       isTransient: false,
+      context: { ...options?.context, ...(className && { className }) },
     })
   }
 }
@@ -2341,6 +2557,8 @@ export class CCIPExtraArgsLengthInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='SVM' instead.
+ *
  * Thrown when Solana can only encode EVMExtraArgsV2 but got different args.
  *
  * @example
@@ -2599,6 +2817,8 @@ export class CCIPAptosRegistryTypeInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain='Aptos' instead.
+ *
  * Thrown when Aptos log data is invalid.
  *
  * @example
@@ -2625,6 +2845,8 @@ export class CCIPAptosLogInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPExtraArgsEncodingUnsupportedError} with chainFamily='Aptos' instead.
+ *
  * Thrown when Aptos can only encode specific extra args types.
  *
  * @example
@@ -2654,6 +2876,8 @@ export class CCIPAptosExtraArgsEncodingError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPWalletInvalidError} with className option instead.
+ *
  * Thrown when Aptos wallet is invalid.
  *
  * @example
@@ -2709,6 +2933,8 @@ export class CCIPAptosExtraArgsV2RequiredError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPTokenNotRegisteredError} instead.
+ *
  * Thrown when token is not registered in Aptos registry.
  *
  * @example
@@ -3257,6 +3483,8 @@ export class CCIPCctpDecodeError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Sui' instead.
+ *
  * Thrown when Sui hasher version is unsupported.
  *
  * @example
@@ -3316,6 +3544,8 @@ export class CCIPSuiMessageVersionInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLogDataInvalidError} with chain='Sui' instead.
+ *
  * Thrown when Sui log data is invalid.
  *
  * This error occurs when attempting to decode a Sui event log that doesn't
@@ -3350,6 +3580,8 @@ export class CCIPSuiLogInvalidError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPLaneVersionUnsupportedError} instead.
+ *
  * Thrown when Solana lane version is unsupported.
  *
  * @example
@@ -3406,6 +3638,8 @@ export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
 }
 
 /**
+ * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Aptos' instead.
+ *
  * Thrown when Aptos hasher version is unsupported.
  *
  * @example
@@ -3532,6 +3766,51 @@ export class CCIPViemAdapterError extends CCIPError {
     super(CCIPErrorCode.VIEM_ADAPTER_ERROR, message, {
       ...options,
       isTransient: false,
+    })
+  }
+}
+
+// Finality
+
+/**
+ * Thrown when a receiver contract rejects the requested finality.
+ *
+ * The receiver either does not support `"safe"` (FCR) finality, or requires a higher
+ * minimum confirmation depth than what was requested. Inspect `context.requested` and
+ * `context.allowed` for the exact mismatch.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.estimateReceiveExecution({ offRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPFinalityNotAllowedError) {
+ *     console.log(
+ *       `Receiver ${error.context.receiver} rejected finality`,
+ *       `requested=${error.context.requested}`,
+ *       `allowed=${JSON.stringify(error.context.allowed)}`,
+ *     )
+ *   }
+ * }
+ * ```
+ */
+export class CCIPFinalityNotAllowedError extends CCIPError {
+  override readonly name = 'CCIPFinalityNotAllowedError'
+  /**
+   * Creates a finality not allowed error.
+   * @param requested - The finality value that was requested (`"safe"` or a block depth number).
+   * @param allowed - The finality config the receiver actually accepts.
+   * @param options - Optional error options.
+   */
+  constructor(requested: FinalityRequested, allowed: FinalityAllowed, options?: CCIPErrorOptions) {
+    const detail =
+      requested === 'safe'
+        ? `Receiver does not support "safe" finality`
+        : `Receiver requires minimum finality depth of ${allowed.finalityDepth}, but ${requested} was requested`
+    super(CCIPErrorCode.FINALITY_NOT_ALLOWED, detail, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, requested, allowed },
     })
   }
 }
