@@ -74,7 +74,7 @@ import {
 import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
+import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -441,7 +441,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Async generator of Solana transactions.
    */
   async *getTransactionsForAddress(
-    opts: LeanNumbers<Omit<LogFilter, 'topics'>>,
+    opts: LeanNumbers<Omit<LogFilter, 'topics'>> & {
+      pollInterval?: number
+      excludeAddresses?: string[]
+    },
   ): AsyncGenerator<SolanaTransaction> {
     if (opts.watch) {
       opts = {
@@ -487,26 +490,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: LeanNumbers<LogFilter> & { programs?: string[] | true },
   ): AsyncGenerator<SolanaLog> {
     let programs: true | string[]
+    let excludeAddresses
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
     } else if (!opts.programs) {
       programs = [opts.address]
       if (opts.topics?.length === 1 && opts.topics[0] === 'ExecutionStateChanged') {
-        // optimization: when querying offramp's execs, use router's `allowed_offramp` PDA to better filter executions
-        const { router } = await this._getOffRampReferenceAddresses(opts.address)
-        const { chainSelector: remoteSel } =
-          this.network.networkType === NetworkType.Mainnet
-            ? networkInfo('ethereum-mainnet')
-            : networkInfo('ethereum-testnet-sepolia') // some source we KNOW are connected to this network
+        // optimization: when querying offramp's execs, exclude txs including `fee_billing_signer` (used only in commits)
         const [pdaAddr] = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from('allowed_offramp'),
-            toLeArray(remoteSel, 8),
-            new PublicKey(opts.address).toBuffer(),
-          ],
-          router,
+          [Buffer.from('fee_billing_signer')],
+          new PublicKey(/* OffRamp */ opts.address),
         )
-        opts.address = pdaAddr.toBase58()
+        excludeAddresses = [pdaAddr.toBase58()]
       }
     } else {
       programs = opts.programs
@@ -523,7 +518,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
-    for await (const tx of this.getTransactionsForAddress(opts)) {
+    for await (const tx of this.getTransactionsForAddress({ ...opts, excludeAddresses })) {
       for (const log of tx.logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (

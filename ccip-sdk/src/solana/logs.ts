@@ -21,7 +21,7 @@ async function* fetchSigsForward(
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
 
   // forward collect all matching sigs in array
-  const allSigs = [] as Awaited<ReturnType<typeof connection.getSignaturesForAddress>>
+  const allSigs: Awaited<ReturnType<typeof connection.getSignaturesForAddress>> = []
   let batch: typeof allSigs, until: string | undefined
   do {
     batch = await connection.getSignaturesForAddress(
@@ -101,7 +101,12 @@ async function* fetchSigsForward(
  * @returns Async generator of Solana transactions.
  */
 export async function* getTransactionsForAddress(
-  opts: LeanNumbers<Omit<LogFilter, 'topics'>> & { pollInterval?: number },
+  opts: LeanNumbers<Omit<LogFilter, 'topics'>> & {
+    /** interval to poll for new signatures in watch mode */
+    pollInterval?: number
+    /** signatures including these addresses are skipped from yield on first pass */
+    excludeAddresses?: string[]
+  },
   ctx: {
     connection: Connection
     getTransaction: (signature: string) => Promise<SolanaTransaction>
@@ -124,9 +129,20 @@ export async function* getTransactionsForAddress(
     )
 
   const allSignatures = fetchSigsForward(opts, ctx)
+  const excludeSet = new Set<string>()
+  for (const addr of opts.excludeAddresses ?? []) {
+    const { watch: _, ...optsWithoutWatch } = opts
+    for await (const { signature } of fetchSigsForward(
+      { ...optsWithoutWatch, address: addr },
+      ctx,
+    )) {
+      excludeSet.add(signature)
+    }
+  }
 
   // Process signatures
   for await (const signatureInfo of allSignatures) {
+    if (excludeSet.has(signatureInfo.signature)) continue
     yield await ctx.getTransaction(signatureInfo.signature)
   }
 }
