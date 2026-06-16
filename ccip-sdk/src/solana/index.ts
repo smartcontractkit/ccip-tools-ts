@@ -27,7 +27,7 @@ import {
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep, Simplify } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import {
   type BlockInfo,

@@ -1696,6 +1696,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '7095321190': {
+    selector: 10073034426865795585n,
+    name: 'glamsterdam-devnet-5',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   // end:generate
 
   // generate:
