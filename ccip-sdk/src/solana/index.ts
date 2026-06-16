@@ -623,7 +623,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
-    return refAddresses as Simplify<typeof refAddresses>
+    return refAddresses
   }
 
   /**
