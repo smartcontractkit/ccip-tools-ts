@@ -46,6 +46,7 @@ async function collectEndpoints(
     try {
       const fileContent = await readFile(rpcsFile, 'utf8')
       for (const line of fileContent.toString().split(/(?:\r\n|\r|\n)/g)) {
+        if (line.match(/^\s*(#|\/\/)/)) continue // skip commented lines
         const match = line.match(RPCS_RE)
         if (match) endpoints.add(match[0])
       }
