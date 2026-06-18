@@ -12,7 +12,7 @@ import type { FinalityRequested } from '../extra-args.ts'
 import { getEndpointLogRange, parseLogRangeError, setEndpointLogRange } from '../fetch.ts'
 import { blockRangeGenerator, getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
-import type { Logger, WithLogger } from '../types.ts'
+import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
@@ -60,6 +60,7 @@ async function* getLogsPaginated(
   url: string | undefined,
   logger: Logger,
 ): AsyncGenerator<Log> {
+  if (fromBlock > toBlock) return
   const filter_ = {
     fromBlock,
     toBlock,
@@ -93,7 +94,10 @@ async function* getLogsPaginated(
       )
     }
 
-    logger.warn(`evm getLogs: range too large (span=${currentSpan}), shrinking page to ${newPage}`)
+    logger.warn(
+      `evm getLogs: range too large (span=${currentSpan}), shrinking page to ${newPage}`,
+      { url, err },
+    )
     if (url !== undefined) setEndpointLogRange(url, newPage, 'error')
     pageBox.value = Math.min(pageBox.value, newPage)
 
@@ -124,18 +128,22 @@ async function* getLogsPaginated(
  * @returns Async iterator of logs.
  */
 export async function* getEvmLogs(
-  filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
+  filter: SetFieldType<LeanNumbers<LogFilter>, 'endBlock', EVMEndBlockTag | bigint | undefined>,
   ctx: {
     provider: JsonRpcApiProvider
     getBlockInfo: (block: EVMEndBlockTag) => Promise<{ number: number; timestamp: number }>
     abort?: AbortSignal
   } & WithLogger,
-): AsyncIterableIterator<Log & { blockTimestamp: number }> {
+): AsyncIterableIterator<ChainLog> {
   const { provider, logger = console } = ctx
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
-  if (filter.watch && typeof filter.endBlock === 'number' && filter.endBlock > 0)
-    throw new CCIPLogsWatchRequiresFinalityError(filter.endBlock)
+  if (
+    filter.watch &&
+    (typeof filter.endBlock === 'number' || typeof filter.endBlock === 'bigint') &&
+    Number(filter.endBlock) > 0
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(Number(filter.endBlock))
 
   if (
     filter.topics?.length &&
@@ -158,6 +166,7 @@ export async function* getEvmLogs(
 
   // Seed initial page: explicit user value > learned endpoint value > default 10e3
   filter.page ??= getEndpointLogRange(endpointUrl ?? 'unknown') ?? 10e3
+  filter.page = Number(filter.page)
   // Mutable box so getLogsPaginated can propagate learned page shrinks back to watch loop
   const pageBox = { value: filter.page }
 
@@ -166,9 +175,10 @@ export async function* getEvmLogs(
   filter.startBlock ??= await getSomeBlockNumberBefore(
     async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
-    filter.startTime!,
+    Number(filter.startTime!),
     ctx,
   )
+  filter.startBlock = Number(filter.startBlock)
   let latestLogBlockNumber = filter.startBlock - 1
 
   const baseFilter = {
@@ -180,6 +190,7 @@ export async function* getEvmLogs(
     ...filter,
     startBlock: filter.startBlock,
     endBlock,
+    page: pageBox.value,
   })) {
     for await (const log of getLogsPaginated(
       provider,
@@ -191,10 +202,7 @@ export async function* getEvmLogs(
       logger,
     )) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
-      const log_ = Object.assign(log, {
-        blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp,
-      })
-      yield log_
+      yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
     }
   }
 
@@ -202,30 +210,87 @@ export async function* getEvmLogs(
   let lastEvent
   while (filter.watch && (!(filter.watch instanceof AbortSignal) || !filter.watch.aborted)) {
     const watchFrom = Math.max(latestLogBlockNumber, endBlock - pageBox.value) + 1
+    const toBlockTag = await provider._getBlockTag(filter.endBlock)
     const filter_ = {
       fromBlock: watchFrom,
-      toBlock: await provider._getBlockTag(filter.endBlock),
+      toBlock: toBlockTag,
       ...baseFilter,
     }
     logger.debug('evm watch getLogs:', { ...filter_, lastEvent })
-    const logs = await provider.getLogs(filter_).catch((err) => {
-      // when querying a tag (e.g. `finalized`), it can be "before" `fromBlock`; threat as empty
-      if (isInvalidBlockRangesError(err)) return []
-      throw err
-    })
-    if (logs.length)
-      latestLogBlockNumber = Math.max(latestLogBlockNumber, logs[logs.length - 1]!.blockNumber)
+    let watchLogs: Log[]
+    try {
+      watchLogs = await provider.getLogs(filter_)
+    } catch (err) {
+      if (isInvalidBlockRangesError(err)) {
+        watchLogs = []
+      } else {
+        const rangeInfo = parseLogRangeError(err)
+        if (rangeInfo === null) throw err
+
+        // Resolve symbolic tags (e.g. 'latest') to a block number so we can
+        // offload to getLogsPaginated regardless of how toBlock was expressed.
+        const toBlockNum = /^0x/i.test(toBlockTag)
+          ? parseInt(toBlockTag, 16)
+          : (await provider.getBlock(toBlockTag))!.number
+        const currentSpan = toBlockNum - watchFrom + 1
+        let newPage: number
+        if (rangeInfo.maxRange !== undefined) {
+          newPage = rangeInfo.maxRange
+        } else if (rangeInfo.suggestedRange !== undefined) {
+          newPage = rangeInfo.suggestedRange[1] - rangeInfo.suggestedRange[0] + 1
+        } else {
+          newPage = Math.floor(currentSpan / 2)
+        }
+        // Floor at 100: fast-block chains can produce >100 new blocks per watch
+        // interval; don't let the page shrink to 1 just because the span keeps
+        // exceeding the endpoint limit — getLogsPaginated handles large spans.
+        newPage = Math.max(100, newPage)
+        logger.warn(
+          `evm watch getLogs: range too large (span=${currentSpan}), shrinking page to ${newPage}`,
+          { url: endpointUrl, err },
+        )
+        if (endpointUrl !== undefined) setEndpointLogRange(endpointUrl, newPage, 'error')
+        pageBox.value = Math.min(pageBox.value, newPage)
+
+        for await (const log of getLogsPaginated(
+          provider,
+          baseFilter,
+          watchFrom,
+          toBlockNum,
+          pageBox,
+          endpointUrl,
+          logger,
+        )) {
+          if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
+          yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
+        }
+        // Advance past the entire covered range so next watchFrom doesn't
+        // re-request the same blocks (even if no logs were found in them).
+        latestLogBlockNumber = Math.max(latestLogBlockNumber, toBlockNum)
+        continue
+      }
+    }
+    if (watchLogs.length)
+      latestLogBlockNumber = Math.max(
+        latestLogBlockNumber,
+        watchLogs[watchLogs.length - 1]!.blockNumber,
+      )
     const logs_ = await Promise.all(
-      logs.map(async (l) =>
-        Object.assign(l, { blockTimestamp: (await ctx.getBlockInfo(l.blockNumber)).timestamp }),
-      ),
+      watchLogs.map(async (l) => ({
+        ...l,
+        blockTimestamp: (await ctx.getBlockInfo(l.blockNumber)).timestamp,
+      })),
     )
     yield* logs_
 
     const contAc = new AbortController()
     let contSignal = contAc.signal
     const contEvent =
-      typeof filter.endBlock === 'number' || filter.endBlock == 'latest' ? 'block' : filter.endBlock // finalized | safe
+      typeof filter.endBlock === 'number' ||
+      typeof filter.endBlock === 'bigint' ||
+      filter.endBlock == 'latest'
+        ? 'block'
+        : filter.endBlock // finalized | safe
     const contListener = (number?: number) => {
       contAc.abort()
       lastEvent = [contEvent, number] as const
