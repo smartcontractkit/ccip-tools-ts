@@ -3,7 +3,7 @@ import { Buffer } from 'buffer'
 import { type Transaction, Address, Cell, beginCell, fromNano, toNano } from '@ton/core'
 import { TonClient } from '@ton/ton'
 import { type BytesLike, hexlify, isBytesLike, isHexString, toBeArray, toBeHex } from 'ethers'
-import { type Memoized, memoize } from 'micro-memoize'
+import { memoize } from 'micro-memoize'
 
 import {
   decodeLegacyEVMTONExtraArgs,
@@ -102,11 +102,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
-  constructor(
-    client: TonClient,
-    network: NetworkInfo,
-    ctx?: ChainContext & { fetchFn?: typeof fetch },
-  ) {
+  constructor(client: TonClient, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
     this.provider = client
 
@@ -154,7 +150,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // When neither is provided, fall back to a rate-limited default.
     this.rateLimitedFetch =
       ctx?.fetch ??
-      ctx?.fetchFn ??
       createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
@@ -184,6 +179,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       maxArgs: 2,
       expires: 60e3,
     })
+    this.getMCSeqNoByLt = memoize(this.getMCSeqNoByLt.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.getMCBlockHeader = memoize(this.getMCBlockHeader.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
   }
 
   /**
@@ -192,10 +197,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param ctx - Optional chain context with logger, API client, and fetch function.
    * @returns TONChain instance configured for the detected network (mainnet or testnet).
    */
-  static async fromClient(
-    client: TonClient,
-    ctx?: ChainContext & { fetchFn?: typeof fetch },
-  ): Promise<TONChain> {
+  static async fromClient(client: TonClient, ctx?: ChainContext): Promise<TONChain> {
     // Verify connection by getting the latest block
     const isMainnet =
       (
@@ -241,15 +243,75 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         isMainnetHint !== undefined
           ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
               ...ctx,
-              fetchFn,
+              fetch: fetchFn,
             })
-          : await this.fromClient(client, { ...ctx, fetchFn })
+          : await this.fromClient(client, { ...ctx, fetch: fetchFn })
       logger.debug(`Connected to TON V2 endpoint: ${url}`)
       return chain
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new CCIPHttpError(0, `Failed to connect to TONv2 endpoint ${url}: ${message}`)
     }
+  }
+
+  /**
+   * Fetches the block seqno (number) for a given logical time (lt).
+   * @internal
+   */
+  async getMCSeqNoByLt(lt: number | bigint): Promise<number> {
+    const res = await this.rateLimitedFetch(this.provider.parameters.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'lookupBlock',
+        params: {
+          workchain: -1,
+          shard: '-9223372036854775808',
+          lt: Number(lt),
+        },
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new CCIPHttpError(res.status, `Failed to lookupBlock by lt=${lt}: ${text}`)
+    }
+    const { result } = (await res.json()) as { result: { seqno: number } }
+    return result.seqno
+  }
+
+  /**
+   * Fetches the block seqno (number) for a given logical time (lt).
+   * @internal
+   */
+  async getMCBlockHeader(
+    block: number | bigint,
+  ): Promise<{ gen_utime: number; start_lt: string; end_lt: string; min_ref_mc_seqno: number }> {
+    const res = await this.rateLimitedFetch(this.provider.parameters.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'getBlockHeader',
+        params: {
+          workchain: -1,
+          shard: '-9223372036854775808',
+          seqno: Number(block),
+        },
+      }),
+    })
+    if (!res.ok) {
+      throw new CCIPHttpError(
+        res.status,
+        `Failed to getBlockHeader by seqno=${block}: ${await res.text()}`,
+      )
+    }
+    const { result } = (await res.json()) as {
+      result: Awaited<ReturnType<TONChain['getMCBlockHeader']>>
+    }
+    return result
   }
 
   /**
@@ -265,16 +327,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    */
   async getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
     if (typeof block != 'number') {
-      const now = Math.floor(Date.now() / 1000)
-      return { number: now, timestamp: now }
+      const info = await this.provider.getMasterchainInfo()
+      block = info.latestSeqno
     }
 
-    // For TON, we cannot look up timestamp by lt alone without the account address.
-    // The lt must have been cached during a previous getLogs or getTransaction call.
-    throw new CCIPNotImplementedError(
-      `getBlockInfo: lt ${block} not in cache. ` +
-        `TON requires lt to be cached from getLogs or getTransaction calls first.`,
-    )
+    const result = await this.getMCBlockHeader(block)
+    return { number: block, timestamp: result.gen_utime }
   }
 
   /**
@@ -335,25 +393,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
     }
 
-    // Cache lt → timestamp for later getBlockInfo lookups
-    ;(this.getBlockInfo as Memoized<typeof this.getBlockInfo, { async: true }>).cache.set(
-      [Number(tx.lt)],
-      Promise.resolve({ number: Number(tx.lt), timestamp: tx.now }),
-    )
-
     // Extract logs from outgoing external messages
     // Build composite hash format: workchain:address:lt:hash
     const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
+    const seqno = await this.getMCSeqNoByLt(tx.lt)
     const res = {
       hash: compositeHash,
       logs: [] as ChainLog[],
-      blockNumber: Number(tx.lt), // Note: This is lt (logical time), not block seqno
+      blockNumber: seqno,
       timestamp: tx.now,
       from: address.toRawString(),
       tx,
     }
     const logs: ChainLog[] = []
-    for (const [index, msg] of tx.outMessages) {
+    for (const [, msg] of tx.outMessages) {
       if (msg.info.type !== 'external-out') continue
       const topics = []
       // logs are external messages where dest "address" is the uint32 topic (e.g. crc32("ExecutionStateChanged"))
@@ -376,7 +429,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         blockNumber: res.blockNumber, // Note: This is lt (logical time), not block seqno
         blockTimestamp: tx.now,
         transactionHash: res.hash,
-        index,
+        index: Number(msg.info.createdLt),
         tx: res,
       })
     }
@@ -413,7 +466,18 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => crc32(t)),
       ])
     }
-    for await (const tx of streamTransactionsForAddress(opts, this)) {
+    // streamTransactionsForAddress expects LT for startBlock/endBlock, so convert MC seqno to LT range as needed
+    const opts_ = { ...opts }
+    if (opts.startBlock != null) {
+      opts_.startBlock = BigInt((await this.getMCBlockHeader(opts.startBlock)).start_lt)
+    }
+    if (
+      (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      opts.endBlock > 0
+    ) {
+      opts_.endBlock = BigInt((await this.getMCBlockHeader(opts.endBlock)).end_lt)
+    }
+    for await (const tx of streamTransactionsForAddress(opts_, this)) {
       for (const log of tx.logs) {
         if (topics && !topics.has(log.topics[0]!)) continue
         yield log
