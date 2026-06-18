@@ -223,7 +223,7 @@ describe('TON index unit tests', () => {
       assert.ok(captured, 'sendTransaction should be called')
       assert.equal(captured.to, TON_OFFRAMP_ADDRESS_TEST, 'should send to offRamp address')
       assert.ok(captured.body instanceof Object, 'body should be a Cell')
-      assert.equal(captured.value, toNano('0.3'), 'should send 0.3 TON for gas')
+      assert.equal(captured.value, toNano('0.3'), 'should send 0.3 GRAM for gas')
     })
 
     it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
@@ -973,7 +973,7 @@ describe('TON index unit tests', () => {
     const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
     const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
 
-    it('should return native TON balance when no token specified', async () => {
+    it('should return native GRAM balance when no token specified', async () => {
       const mockClient = {
         getContractState: async () => ({ balance: 1_500_000_000n }),
         getTransactions: async () => [],

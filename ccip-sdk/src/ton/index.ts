@@ -90,8 +90,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     supportedChains[ChainFamily.TON] = TONChain
   }
   static readonly family = ChainFamily.TON
-  static readonly decimals = 9 // TON uses 9 decimals (nanotons)
-  static readonly extraArgGasLimitMin = toNano('0.025') // 0.025 TON
+  static readonly decimals = 9 // GRAM uses 9 decimals (nanograms)
+  static readonly extraArgGasLimitMin = toNano('0.025') // 0.025 GRAM
   readonly rateLimitedFetch: typeof fetch
   readonly provider: TonClient
 
@@ -548,7 +548,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    */
   getNativeTokenForRouter(_router: string): Promise<string> {
     // TON native token is represented as address 0:0...01 (workchain 0, hash = 1)
-    // This is a convention for representing native TON in CCIP
+    // This is a convention for representing native GRAM in CCIP
     return Promise.resolve('0:0000000000000000000000000000000000000000000000000000000000000001')
   }
 
@@ -631,7 +631,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
     const tokenAddress = Address.parse(token)
     if (tokenAddress.toRawString().match(/^[0:]+1$/)) {
-      return { symbol: 'TON', decimals: (this.constructor as typeof TONChain).decimals }
+      return { symbol: 'GRAM', decimals: (this.constructor as typeof TONChain).decimals }
     }
 
     try {
@@ -656,7 +656,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const holderAddress = Address.parse(holder)
 
     if (!token) {
-      // Get native TON balance
+      // Get native GRAM balance
       const state = await this.provider.getContractState(holderAddress)
       return state.balance
     }
@@ -1082,7 +1082,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!gasLimit || gasLimit < this.extraArgGasLimitMin) {
       throw new CCIPArgumentInvalidError(
         'extraArgs.gasLimit',
-        `(val=${gasLimit}) must be at least ${this.extraArgGasLimitMin} (${fromNano(this.extraArgGasLimitMin)} TON) for TON destinations`,
+        `(val=${gasLimit}) must be at least ${this.extraArgGasLimitMin} (${fromNano(this.extraArgGasLimitMin)} GRAM) for TON destinations`,
       )
     }
 

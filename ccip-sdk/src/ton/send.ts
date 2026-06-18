@@ -17,8 +17,8 @@ export const DEFAULT_GAS_BUFFER = toNano('0.5')
 export const DEFAULT_GAS_LIMIT = 200_000n
 
 /**
- * WRAPPED_NATIVE address for TON - sentinel address representing native TON.
- * Used as feeToken for native TON payments in FeeQuoter calls.
+ * WRAPPED_NATIVE address for GRAM - sentinel address representing native GRAM.
+ * Used as feeToken for native GRAM payments in FeeQuoter calls.
  */
 export const WRAPPED_NATIVE = Address.parse(
   '0:0000000000000000000000000000000000000000000000000000000000000001',
@@ -51,7 +51,7 @@ function encodeTokenAmounts(
  *
  * @param destChainSelector - Destination chain selector
  * @param message - CCIP message containing receiver, data, tokenAmounts, and extraArgs
- * @param feeTokenAddress - Fee token jetton address, or null for native TON
+ * @param feeTokenAddress - Fee token jetton address, or null for native GRAM
  * @param queryId - TON query ID for the message (default: 0)
  * @returns Cell containing the encoded Router ccipSend message
  */
@@ -83,7 +83,7 @@ export function buildCcipSendCell(
     .storeBuffer(paddedReceiver) // receiver bytes (32 bytes, left-padded)
     .storeRef(dataCell) // ref 0: data
     .storeRef(tokenAmountsCell) // ref 1: tokenAmounts
-    .storeAddress(feeTokenAddress) // null = addr_none for native TON
+    .storeAddress(feeTokenAddress) // null = addr_none for native GRAM
     .storeRef(extraArgsCell) // ref 2: extraArgs
     .endCell()
 }
@@ -95,7 +95,7 @@ export function buildCcipSendCell(
  * @param router - Router contract address
  * @param destChainSelector - Destination chain selector
  * @param message - CCIP message to quote
- * @returns Fee amount in nanotons
+ * @returns Fee amount in nanograms
  */
 export async function getFee(
   ctx: { provider: TonClient } & WithLogger,
@@ -106,7 +106,7 @@ export async function getFee(
   const { provider, logger = console } = ctx
   const routerAddress = Address.parse(router)
 
-  // FeeQuoter requires WRAPPED_NATIVE for native TON
+  // FeeQuoter requires WRAPPED_NATIVE for native GRAM
   const feeTokenAddress = message.feeToken ? Address.parse(message.feeToken) : WRAPPED_NATIVE
 
   // Get FeeQuoter address via OnRamp
@@ -154,7 +154,7 @@ export async function getFee(
   if (fee < 0n) {
     throw new CCIPError(CCIPErrorCode.MESSAGE_INVALID, `Invalid fee: ${fee}`)
   }
-  logger.debug('CCIP fee:', fee.toString(), 'nanotons')
+  logger.debug('CCIP fee:', fee.toString(), 'nanograms')
   return fee
 }
 
@@ -180,14 +180,14 @@ export function generateUnsignedCcipSend(
   const { logger = console } = ctx
   const gasBuffer = opts?.gasBuffer ?? DEFAULT_GAS_BUFFER
 
-  // Router accepts addr_none for native TON (unlike FeeQuoter which needs WRAPPED_NATIVE)
+  // Router accepts addr_none for native GRAM (unlike FeeQuoter which needs WRAPPED_NATIVE)
   const feeTokenAddress = message.feeToken ? Address.parse(message.feeToken) : null
 
   const ccipSendCell = buildCcipSendCell(destChainSelector, message, feeTokenAddress)
   const totalValue = message.fee + gasBuffer
 
   logger.debug('Generating ccipSend tx to router:', router)
-  logger.debug('Total value:', totalValue.toString(), 'nanotons')
+  logger.debug('Total value:', totalValue.toString(), 'nanograms')
 
   return {
     to: router,
