@@ -79,12 +79,12 @@ function isTvmError(error: unknown): error is Error & { exitCode: number } {
  * TON chain implementation supporting TON networks.
  *
  * TON uses two different ordering concepts:
- * - `seqno` (sequence number): The actual block number in the blockchain
+ * - `seqno` (sequence number): The actual block number in the masterchain
  * - `lt` (logical time): A per-account transaction ordering timestamp
  *
- * This implementation uses `lt` for the `blockNumber` field in logs and transactions
- * because TON's transaction APIs are indexed by `lt`, not `seqno`. The `lt` is
- * monotonically increasing per account and suitable for pagination and ordering.
+ * This implementation uses the masterchain `seqno` for the `blockNumber` field and
+ * the message's `lt` for the `logIndex` field. The `startBlock`/`endBlock` filter
+ * parameters accept masterchain seqnos and are converted to lt ranges internally.
  */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
@@ -146,8 +146,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return txs
     }
 
-    // Use caller-supplied fetch verbatim; fetchFn is a still-supported alias for back-compat.
-    // When neither is provided, fall back to a rate-limited default.
+    // Use caller-supplied fetch verbatim; fall back to a rate-limited default.
     this.rateLimitedFetch =
       ctx?.fetch ??
       createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
@@ -161,7 +160,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
-      forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
+      forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -269,7 +268,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         params: {
           workchain: -1,
           shard: '-9223372036854775808',
-          lt: Number(lt),
+          lt: lt.toString(),
         },
       }),
     })
@@ -282,7 +281,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Fetches the block seqno (number) for a given logical time (lt).
+   * Fetches the masterchain block header by seqno.
    * @internal
    */
   async getMCBlockHeader(
@@ -315,24 +314,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Fetch the timestamp for a given logical time (lt) or finalized block.
+   * Fetch the timestamp for a given masterchain block or the latest finalized block.
    *
-   * Note: For TON, the `block` parameter represents logical time (lt), not block seqno.
-   * This is because TON transaction APIs are indexed by lt. The lt must have been
-   * previously cached via getLogs or getTransaction calls.
-   *
-   * @param block - Logical time (lt) as number, or 'finalized' for latest block timestamp
+   * @param block - Masterchain block seqno, or 'finalized'/'latest' for the latest block
    * @returns Unix timestamp in seconds
-   * @throws {@link CCIPNotImplementedError} if lt is not in cache
    */
-  async getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
-    if (typeof block != 'number') {
+  async getBlockInfo(block: number | bigint | 'finalized' | 'latest'): Promise<BlockInfo> {
+    if (typeof block !== 'number' && typeof block !== 'bigint') {
       const info = await this.provider.getMasterchainInfo()
       block = info.latestSeqno
     }
 
-    const result = await this.getMCBlockHeader(block)
-    return { number: block, timestamp: result.gen_utime }
+    const seqno = Number(block)
+    const result = await this.getMCBlockHeader(seqno)
+    return { number: seqno, timestamp: result.gen_utime }
   }
 
   /**
@@ -347,7 +342,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    *
    * @param tx - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
-   *          Note: `blockNumber` contains logical time (lt), not block seqno
+   *          `blockNumber` is the masterchain seqno; `logIndex` is the message's lt
    * @throws {@link CCIPArgumentInvalidError} if hash format is invalid
    * @throws {@link CCIPTransactionNotFoundError} if transaction not found
    */
@@ -426,7 +421,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         address: msg.info.src.toRawString(),
         topics,
         data,
-        blockNumber: res.blockNumber, // Note: This is lt (logical time), not block seqno
+        blockNumber: res.blockNumber, // masterchain seqno
         blockTimestamp: tx.now,
         transactionHash: res.hash,
         index: Number(msg.info.createdLt),
@@ -440,10 +435,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Async generator that yields logs from TON transactions.
    *
-   * Note: For TON, `startBlock` and `endBlock` in opts represent logical time (lt),
-   * not block sequence numbers. This is because TON transaction APIs are indexed by lt.
+   * `startBlock`/`endBlock` are masterchain seqnos (public interface). Internally,
+   * they are converted to lt ranges before being passed to `streamTransactionsForAddress`,
+   * which uses lt for TON transaction API pagination.
    *
-   * @param opts - Log filter options (startBlock/endBlock are interpreted as lt values)
+   * @param opts - Log filter options (startBlock/endBlock are masterchain seqnos)
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
   async *getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog> {
