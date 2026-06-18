@@ -163,8 +163,9 @@ async function* fetchEventsForward(
     (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
     !catchedUp
   ) {
+    const startBefore: number = start
     const lastReq = performance.now()
-    const data = await fetchBatch(start)
+    const data: ResEvent[] = await fetchBatch(start)
     if (
       first &&
       opts.startTime != null &&
@@ -201,6 +202,13 @@ async function* fetchEventsForward(
       const start_: number = +ev.sequence_number
       start = start_ + 1
       yield ev
+    }
+    if (start === startBefore && data.length > 0) {
+      // All events in this batch were skipped (e.g. all below opts.startBlock). Advance start
+      // past the tail of the batch so catchedUp can become true and the loop exits cleanly.
+      // Without this, the memoized fetchBatch(start) spins as pure microtasks, starving the
+      // event loop and making the process unresponsive.
+      start = +data[data.length - 1]!.sequence_number + 1
     }
     catchedUp ||= start >= end
     if (opts.watch && catchedUp) {
