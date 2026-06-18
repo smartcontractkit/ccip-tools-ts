@@ -2305,7 +2305,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               receiver: opts_.message.receiver,
             },
           })
-      } else if (opts_.message.finality < allowedFinality.finalityDepth) {
+      } else if (
+        allowedFinality.finalityDepth == 0 ||
+        opts_.message.finality < allowedFinality.finalityDepth
+      ) {
         throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
           context: {
             source: networkInfo(opts_.message.sourceChainSelector).name,
