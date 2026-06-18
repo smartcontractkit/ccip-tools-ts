@@ -27,7 +27,7 @@ import {
   toBigInt,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
-import type { PickDeep, Simplify } from 'type-fest'
+import type { PickDeep } from 'type-fest'
 
 import {
   type BlockInfo,
@@ -623,7 +623,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
-    return refAddresses as Simplify<typeof refAddresses>
+    return refAddresses
   }
 
   /**
