@@ -1711,30 +1711,42 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
+    // Fast finality (FINALITY_FAST/SAFE) requires an OnRamp that can carry
+    // GenericExtraArgsV3 extra args, i.e. OnRamp version >= 2.0. A v2.0 token pool
+    // may report a finalityDepth/finalitySafe even on a lane whose OnRamp is still
+    // <2.0 (partial upgrade) — surfacing it there advertises a capability getFee
+    // can't fulfil and reverts with InvalidExtraArgsTag. Decide once, up front.
+    const supportsFastFinality = version >= CCIPVersion.V2_0
+
     const result: Partial<LaneFeatures> = {}
 
     // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
-    if (version >= CCIPVersion.V2_0) {
+    if (supportsFastFinality) {
       result[LaneFeature.FINALITY_FAST] = 1
       result[LaneFeature.FINALITY_SAFE] = true
     }
 
-    // FINALITY_FAST — V2_0+ only
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
         await this.getTokenAdminRegistryFor(onRamp),
         opts.token,
       )
       if (tokenPool) {
-        const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
-        if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
-        else delete result[LaneFeature.FINALITY_FAST]
-        if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
-        else delete result[LaneFeature.FINALITY_SAFE]
+        // Only read/apply pool-level finality on lanes that can use it; on <2.0
+        // lanes FINALITY_FAST stays undefined ("pre-v2.0 / not supported").
+        let fastRateLimitsApply = false
+        if (supportsFastFinality) {
+          const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+          if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
+          else delete result[LaneFeature.FINALITY_FAST]
+          if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
+          else delete result[LaneFeature.FINALITY_SAFE]
+          fastRateLimitsApply = Boolean(finalityDepth || finalitySafe)
+        }
 
         const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
-        if ((finalityDepth || finalitySafe) && 'fastOutboundRateLimiterState' in remote) {
+        if (fastRateLimitsApply && 'fastOutboundRateLimiterState' in remote) {
           result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
         }
       }
