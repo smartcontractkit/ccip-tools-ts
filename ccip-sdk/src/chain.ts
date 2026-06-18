@@ -803,7 +803,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           >
         }
     ),
-  ): ReturnType<Chain['getBlockInfo']> {
+  ): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
     return waitFinalized(this, opts)
   }
   /**

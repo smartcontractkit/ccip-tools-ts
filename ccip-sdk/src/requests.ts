@@ -563,7 +563,7 @@ export async function waitFinalized<C extends Chain>(
     pollInterval = 5_000,
     ...rest
   }: Parameters<Chain['waitFinalized']>[0],
-): ReturnType<Chain['getBlockInfo']> {
+): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
   const log = 'request' in rest ? rest.request.log : rest.log
   // Fast-path: if the log is old enough, check tx timestamp vs finalized timestamp
   if (!log.blockTimestamp || Date.now() / 1e3 - Number(log.blockTimestamp) > 60) {
@@ -638,12 +638,17 @@ export async function waitFinalized<C extends Chain>(
       }
     }
   } catch (err) {
-    // If the deadline signal fired, its reason is already the right error
+    // If the reorg deadline fired, its reason is already the right error
     if (deadline.aborted) throw deadline.reason
+    // External cancellation (e.g. show.ts found an execution first on a FTF message):
+    // not a finality failure — swallow it and let the caller ignore the result
+    if (watch.aborted) return undefined
     throw err
   } finally {
     deadlineAc.abort() // stop the poller if getLogs resolved first
     await blockHeightPoller // clean up
   }
+  // getLogs ended without matching the tx; if we were cancelled, don't report a reorg
+  if (watch.aborted) return undefined
   throw new CCIPTransactionNotFinalizedError(log.transactionHash)
 }
