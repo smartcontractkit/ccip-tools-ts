@@ -569,8 +569,8 @@ describe.skip('e2e command show TON', () => {
       output,
       /transactionHash.*86866ebd8beb4afc5bedb3fbb1bfec0c1f2c86ca843ddf47b22bfb14666245b1/i,
     )
-    assert.match(output, /logIndex.*1/)
-    assert.match(output, /blockNumber.*43860281000027/)
+    assert.match(output, /logIndex.*43860281000027/) // lt is now logIndex
+    // TODO: update blockNumber to actual masterchain seqno once test is re-enabled
 
     // TON shows execution history including failed attempts and final success after manualExec
     // First receipt final state: failed

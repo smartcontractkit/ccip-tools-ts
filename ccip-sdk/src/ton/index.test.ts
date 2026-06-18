@@ -10,6 +10,29 @@ import { TONChain } from './index.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
+import { util } from '../utils.ts'
+
+// Mock fetch for TON tests that handles lookupBlock (getMCSeqNoByLt) calls
+async function mockTonFetch(
+  _url: Parameters<typeof fetch>[0],
+  opts?: Parameters<typeof fetch>[1],
+): Promise<Response> {
+  const body = JSON.parse((opts?.body as string | undefined) ?? '{}') as { method?: string }
+  if (body.method === 'lookupBlock') {
+    return new Response(JSON.stringify({ result: { seqno: 1 } }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  if (body.method === 'getBlockHeader') {
+    return new Response(
+      JSON.stringify({
+        result: { gen_utime: 1, start_lt: '0', end_lt: '9999999999', min_ref_mc_seqno: 1 },
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+  throw new Error(`Unexpected fetch: ${util.inspect(_url)}, method=${body.method}`)
+}
 
 describe('TON index unit tests', () => {
   // Test constants from chainlink-ton test suite
@@ -168,6 +191,7 @@ describe('TON index unit tests', () => {
       }
 
       const mockClient = {
+        parameters: { endpoint: 'http://mock-ton-api' },
         runMethod: async (_address: Address, method: string) => {
           if (method === 'seqno') {
             // Return seqno+1 to simulate transaction confirmed
@@ -211,7 +235,7 @@ describe('TON index unit tests', () => {
 
     it('should send to offRamp with correct value and seqno', async () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet({ seqno: 42 })
-      const tonChain = new TONChain(client, mockNetworkInfo)
+      const tonChain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
 
       await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -228,7 +252,7 @@ describe('TON index unit tests', () => {
 
     it('should build Cell body with MANUALLY_EXECUTE_OPCODE', async () => {
       const { client, wallet, getCapturedTransfer } = createMockClientAndWallet()
-      const tonChain = new TONChain(client, mockNetworkInfo)
+      const tonChain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
 
       await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -252,7 +276,7 @@ describe('TON index unit tests', () => {
         txLt: '42317062000001',
         txHash: 'bb94e574159e19660ab558347f59f80fd005b44c544417df38d0dfb08f2bd395',
       })
-      const tonChain = new TONChain(client, mockNetworkInfo)
+      const tonChain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
 
       const result = await tonChain.execute({
         offRamp: TON_OFFRAMP_ADDRESS_TEST,
@@ -734,6 +758,7 @@ describe('TON index unit tests', () => {
 
       let callCount = 0
       return {
+        parameters: { endpoint: 'http://mock-ton-api' },
         getTransactions: async () => {
           // First call returns all transactions, subsequent calls return empty (end of history)
           if (callCount++ === 0) {
@@ -756,7 +781,7 @@ describe('TON index unit tests', () => {
         createMockTransaction(2, 1001), // Success - should be yielded
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo, { fetch: mockTonFetch })
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
@@ -771,13 +796,13 @@ describe('TON index unit tests', () => {
       assert.equal(receipts[0]!.receipt.state, 2, 'Receipt state should be Success (2)')
     })
 
-    it('should filter out InProgress state (1)', async () => {
+    it('should yield InProgress state (1) alongside other states', async () => {
       const mockClient = createMockClient([
-        createMockTransaction(1, 1000), // InProgress - should be filtered
+        createMockTransaction(1, 1000), // InProgress - should be yielded
         createMockTransaction(3, 1001), // Failure - should be yielded
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo, { fetch: mockTonFetch })
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({
@@ -787,9 +812,10 @@ describe('TON index unit tests', () => {
         receipts.push(receipt)
       }
 
-      // Should only have Failure, not InProgress
-      assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
-      assert.equal(receipts[0]!.receipt.state, 3, 'Receipt state should be Failure (3)')
+      // Both InProgress and Failure are yielded (InProgress fix: cbeae82d)
+      assert.equal(receipts.length, 2, 'Should have exactly 2 receipts')
+      assert.equal(receipts[0]!.receipt.state, 1, 'First receipt state should be InProgress (1)')
+      assert.equal(receipts[1]!.receipt.state, 3, 'Second receipt state should be Failure (3)')
     })
 
     it('should yield both Success and Failure states', async () => {
@@ -801,7 +827,7 @@ describe('TON index unit tests', () => {
         createMockTransaction(2, 1001, pastTimestamp + 1), // Success
       ])
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo, { fetch: mockTonFetch })
 
       // Use startTime before the mock transactions so they are included
       const request = {
@@ -865,6 +891,7 @@ describe('TON index unit tests', () => {
 
       let callCount = 0
       const mockClient = {
+        parameters: { endpoint: 'http://mock-ton-api' },
         getTransactions: async () => {
           // First call returns all transactions, subsequent calls return empty
           if (callCount++ === 0) {
@@ -874,7 +901,7 @@ describe('TON index unit tests', () => {
         },
       } as unknown as TonClient
 
-      const tonChain = new TONChain(mockClient, mockNetworkInfo)
+      const tonChain = new TONChain(mockClient, mockNetworkInfo, { fetch: mockTonFetch })
 
       const receipts = []
       for await (const receipt of tonChain.getExecutionReceipts({

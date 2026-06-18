@@ -55,6 +55,7 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type Logger,
   type MessageInput,
   type OffchainTokenData,
@@ -720,7 +721,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Finalized block ${info.number} at ${new Date(info.timestamp * 1000).toISOString()}`)
    * ```
    */
-  abstract getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo>
+  abstract getBlockInfo(block: number | bigint | 'finalized' | 'latest'): Promise<BlockInfo>
 
   /**
    * Fetch the timestamp of a given block.
@@ -728,7 +729,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns Unix timestamp in seconds
    * @deprecated Use {@link Chain.getBlockInfo} instead.
    */
-  async getBlockTimestamp(block: number | 'finalized' | 'latest'): Promise<number> {
+  async getBlockTimestamp(block: number | bigint | 'finalized' | 'latest'): Promise<number> {
     return (await this.getBlockInfo(block)).timestamp
   }
   /**
@@ -786,19 +787,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     } & (
       | {
           /** @deprecated Prefer passing `log` directly to `opts` */
-          request: PickDeep<
-            CCIPRequest,
-            `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+          request: LeanNumbers<
+            PickDeep<
+              CCIPRequest,
+              `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+            >
           >
         }
       | {
-          log: Pick<
-            ChainLog,
-            'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+          log: LeanNumbers<
+            Pick<
+              ChainLog,
+              'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+            >
           >
         }
     ),
-  ): ReturnType<Chain['getBlockInfo']> {
+  ): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
     return waitFinalized(this, opts)
   }
   /**
@@ -825,7 +830,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPLogsRequiresStartError} if used without startBlock or startTime
    * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
-  abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
+  abstract getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog>
 
   /**
    * Fetch all CCIP requests in a transaction.
@@ -1854,7 +1859,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (
         !receipt ||
         (filters?.messageId && receipt.messageId !== filters.messageId) ||
-        (filters?.sequenceNumber && receipt.sequenceNumber !== filters.sequenceNumber)
+        (filters?.sequenceNumber &&
+          BigInt(receipt.sequenceNumber) !== BigInt(filters.sequenceNumber))
       )
         continue
       if (filters?.sourceChainSelector) {
