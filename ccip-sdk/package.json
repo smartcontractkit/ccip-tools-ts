@@ -57,11 +57,11 @@
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",
-    "@types/node": "25.9.1",
+    "@types/node": "25.9.2",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.4",
     "typescript": "6.0.3",
-    "viem": "^2.52.0"
+    "viem": "^2.52.2"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^6.3.1",

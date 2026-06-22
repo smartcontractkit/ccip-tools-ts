@@ -42,7 +42,7 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@types/node": "25.9.1",
+    "@types/node": "25.9.2",
     "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
     "tsx": "4.22.4",
