@@ -9,28 +9,45 @@ import {
   CCIPLogsWatchRequiresFinalityError,
 } from '../errors/index.ts'
 import type { FinalityRequested } from '../extra-args.ts'
-import { getEndpointLogRange, parseLogRangeError, setEndpointLogRange } from '../fetch.ts'
-import { blockRangeGenerator, getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
+import {
+  type LogRangeErrorInfo,
+  getEndpointLogRange,
+  parseLogRangeError,
+  setEndpointLogRange,
+} from '../fetch.ts'
+import { getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
 
-function isInvalidBlockRangesError(
-  err: unknown,
-): err is { error: { code: number; message: string } } {
-  return !!(
-    (
-      err instanceof Error &&
-      (('error' in err &&
-        typeof err.error === 'object' &&
-        err.error &&
-        'code' in err.error &&
-        err.error.code === -32602) ||
-        err.message.match(/-32602\b/g))
-    ) // err: invalid block range params
-  )
+/**
+ * Floor for adaptive page shrinking: never request fewer than this many blocks
+ * per `eth_getLogs` call. Fast-block chains can mint over 100 blocks between
+ * watch ticks; shrinking under this just multiplies round-trips without helping, and
+ * an endpoint that can't serve 100 blocks is surfaced as an error instead.
+ */
+const MIN_LOG_RANGE = 100
+
+/** Topic/address subset of a {@link LogFilter}, as accepted by `provider.getLogs`. */
+type BaseFilter = { address?: string | string[]; topics?: (string | string[] | null)[] }
+
+/**
+ * True for JSON-RPC "invalid block range" errors (code -32602) — the watch loop
+ * can hit this when the end tag resolves below `watchFrom` (no new blocks yet),
+ * which is a benign no-op, not a failure. Matches across the common provider
+ * error shapes and message texts so the case is recognized however it's reported.
+ */
+function isInvalidBlockRangesError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const e = err as {
+    code?: unknown
+    error?: { code?: unknown }
+    info?: { error?: { code?: unknown } }
+  }
+  if (e.code === -32602 || e.error?.code === -32602 || e.info?.error?.code === -32602) return true
+  return /-32602\b/.test(err.message) || /invalid block range/i.test(err.message)
 }
 
 /**
@@ -48,74 +65,113 @@ function getProviderUrl(provider: JsonRpcApiProvider): string | undefined {
 }
 
 /**
- * Yields logs for a single [fromBlock, toBlock] range, subdividing adaptively on range errors.
- * Mutates `pageBox` so caller can observe learned page size.
+ * Computes the next (smaller) page size from a range-too-large error and the
+ * span that triggered it, floored at {@link MIN_LOG_RANGE}. Prefers the limit
+ * the RPC reported (`maxRange`/`suggestedRange`); otherwise halves the span.
  */
-async function* getLogsPaginated(
+function shrinkPage(info: LogRangeErrorInfo, span: number): number {
+  const page =
+    info.maxRange ??
+    (info.suggestedRange
+      ? info.suggestedRange[1] - info.suggestedRange[0] + 1
+      : Math.floor(span / 2))
+  return Math.max(MIN_LOG_RANGE, page)
+}
+
+/**
+ * Streams raw logs over `[fromBlock, toBlock]`, paginating by `pageBox.value`
+ * and adaptively shrinking the page (down to {@link MIN_LOG_RANGE}) whenever the
+ * RPC rejects a chunk as too wide. The learned page is propagated through
+ * `pageBox` (and the endpoint registry) so subsequent chunks — and the watch
+ * loop — start at the smaller size without re-failing. Throws
+ * {@link CCIPLogRangeTooLargeError} when a single chunk can't be subdivided.
+ *
+ * When `endTag` (a dynamic end tag like 'latest'/'safe', whose numeric value is
+ * `toBlock`) is given, the terminal chunk is fetched against that tag instead of
+ * a number, so a serving RPC resolves the head itself — avoiding -32602 from a
+ * numeric toBlock that is ahead of a lagging node's tip.
+ */
+async function* streamLogs(
   provider: JsonRpcApiProvider,
-  baseFilter: { address?: string | string[]; topics?: (string | string[] | null)[] },
+  baseFilter: BaseFilter,
   fromBlock: number,
   toBlock: number,
   pageBox: { value: number },
   url: string | undefined,
   logger: Logger,
+  endTag?: EVMEndBlockTag | bigint,
 ): AsyncGenerator<Log> {
-  if (fromBlock > toBlock) return
-  const filter_ = {
-    fromBlock,
-    toBlock,
-    ...(baseFilter.address ? { address: baseFilter.address } : {}),
-    ...(baseFilter.topics?.length ? { topics: baseFilter.topics } : {}),
-  }
-  logger.debug('evm getLogs:', filter_)
-  try {
-    const logs = await provider.getLogs(filter_)
-    yield* logs
-  } catch (err) {
-    const rangeInfo = parseLogRangeError(err)
-    if (rangeInfo === null) throw err
+  // `cursor <= toBlock` makes an inverted range (fromBlock > toBlock) yield
+  // nothing without ever issuing a getLogs; the page is clamped to >=1 so a
+  // degenerate page can't invert a chunk either.
+  for (let cursor = fromBlock; cursor <= toBlock; ) {
+    const page = Math.max(1, pageBox.value)
+    let chunkTo = Math.min(cursor + page - 1, toBlock)
 
-    const currentSpan = toBlock - fromBlock + 1
-    let newPage: number
-    if (rangeInfo.maxRange !== undefined) {
-      newPage = rangeInfo.maxRange
-    } else if (rangeInfo.suggestedRange !== undefined) {
-      newPage = rangeInfo.suggestedRange[1] - rangeInfo.suggestedRange[0] + 1
-    } else {
-      newPage = Math.floor(currentSpan / 2)
-    }
-    // Clamp: must be >=1 and strictly less than currentSpan to make progress
-    newPage = Math.max(1, newPage)
-    if (newPage >= currentSpan) {
-      // Cannot subdivide further — surface a typed error
-      throw new CCIPLogRangeTooLargeError(
-        { requestedRange: currentSpan, ...rangeInfo },
-        { cause: err instanceof Error ? err : undefined },
-      )
+    // The terminal chunk (the one reaching the end) is fetched against the end
+    // TAG rather than a numeric block, so a serving RPC resolves the head itself
+    // instead of rejecting a numeric toBlock that may be ahead of its tip. When
+    // this isn't the first/only chunk (the caller already resolved the head once),
+    // re-resolve first to catch chain growth: if the head moved past the chunk
+    // boundary, extend and keep paginating numerically, re-checking when the new
+    // terminal chunk is reached.
+    let useTag = false
+    if (endTag !== undefined && chunkTo >= toBlock) {
+      if (cursor > fromBlock) {
+        // Null (block momentarily unavailable) → don't extend; the tag fetch below
+        // still resolves the head on the serving RPC.
+        const fresh = await provider.getBlock(endTag)
+        if (fresh && fresh.number > toBlock) {
+          toBlock = fresh.number
+          chunkTo = Math.min(cursor + page - 1, toBlock)
+        }
+      }
+      useTag = chunkTo >= toBlock // still terminal after any growth → fetch by tag
     }
 
-    logger.warn(
-      `evm getLogs: range too large (span=${currentSpan}), shrinking page to ${newPage}`,
-      { url, err },
-    )
-    if (url !== undefined) setEndpointLogRange(url, newPage, 'error')
-    pageBox.value = Math.min(pageBox.value, newPage)
+    // toBlock derives from the FINAL chunkTo: the tag when terminal, else the
+    // (possibly extended) numeric boundary.
+    const toFilter: number | EVMEndBlockTag | bigint = useTag ? endTag! : chunkTo
+    const filter_ = { fromBlock: cursor, toBlock: toFilter, ...baseFilter }
+    logger.debug('evm getLogs:', filter_)
+    try {
+      yield* await provider.getLogs(filter_)
+      cursor = chunkTo + 1 // advance only after a chunk succeeds
+    } catch (err) {
+      // Invalid/inverted range for the serving RPC — e.g. a round-robin proxy
+      // landed on a downstream node whose head lags behind this chunk, so
+      // fromBlock/toBlock sit beyond its tip. Benign: skip the chunk as empty and
+      // move on (the watch loop re-scans the tail on a later tick).
+      if (isInvalidBlockRangesError(err)) {
+        logger.debug('evm getLogs: invalid block range, skipping chunk', {
+          fromBlock: cursor,
+          toBlock: chunkTo,
+          url,
+        })
+        cursor = chunkTo + 1
+        continue
+      }
 
-    // Re-chunk the same [fromBlock, toBlock] with the smaller page
-    for (const chunk of blockRangeGenerator({
-      startBlock: fromBlock,
-      endBlock: toBlock,
-      page: newPage,
-    })) {
-      yield* getLogsPaginated(
-        provider,
-        baseFilter,
-        chunk.fromBlock,
-        chunk.toBlock,
-        pageBox,
+      const rangeInfo = parseLogRangeError(err)
+      if (rangeInfo === null) throw err
+
+      const span = chunkTo - cursor + 1
+      const newPage = shrinkPage(rangeInfo, span)
+      if (newPage >= span) {
+        // Already at the floor and still too large — cannot subdivide further.
+        throw new CCIPLogRangeTooLargeError(
+          { requestedRange: span, ...rangeInfo },
+          { cause: err instanceof Error ? err : undefined },
+        )
+      }
+
+      logger.warn(`evm getLogs: range too large (span=${span}), shrinking page to ${newPage}`, {
         url,
-        logger,
-      )
+        err,
+      })
+      if (url !== undefined) setEndpointLogRange(url, newPage, 'error')
+      pageBox.value = Math.min(pageBox.value, newPage)
+      // Retry the same cursor with the smaller page on the next iteration.
     }
   }
 }
@@ -136,6 +192,9 @@ export async function* getEvmLogs(
   } & WithLogger,
 ): AsyncIterableIterator<ChainLog> {
   const { provider, logger = console } = ctx
+  // Work on a shallow copy: getEvmLogs resolves page/endBlock/startBlock/topics
+  // in place, and must not mutate the caller's filter object.
+  filter = { ...filter }
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
   if (
@@ -155,23 +214,28 @@ export async function* getEvmLogs(
         .concat(Object.keys(getAllFragmentsMatchingEvents(filter.topics)) as `0x${string}`[])
         .flat(),
     )
-    if (!topics.size) {
-      throw new CCIPLogTopicsNotFoundError(filter.topics)
-    }
+    if (!topics.size) throw new CCIPLogTopicsNotFoundError(filter.topics)
     filter.topics = [Array.from(topics)]
   }
 
   // Determine endpoint URL for cross-instance log-range learning
   const endpointUrl = getProviderUrl(provider)
 
-  // Seed initial page: explicit user value > learned endpoint value > default 10e3
+  // Seed initial page: explicit user value > learned endpoint value > default 10e3.
+  // MIN_LOG_RANGE only floors error-driven shrinks, never this initial size.
   filter.page ??= getEndpointLogRange(endpointUrl ?? 'unknown') ?? 10e3
   filter.page = Number(filter.page)
-  // Mutable box so getLogsPaginated can propagate learned page shrinks back to watch loop
+  // Mutable box so streamLogs can propagate learned page shrinks back to the watch loop.
   const pageBox = { value: filter.page }
 
   filter.endBlock ||= 'latest'
-  const { number: endBlock } = (await provider.getBlock(filter.endBlock))!
+  const endTag = filter.endBlock
+  // Dynamic ends (a tag like 'latest'/'safe', or a negative depth) move with the
+  // chain head; stream the terminal backfill chunk against the tag so a lagging
+  // RPC resolves the head itself. A fixed positive endBlock is inert (the "tag"
+  // is just the number), so pass undefined and keep plain numeric chunking.
+  const endIsDynamic = typeof endTag === 'string' || Number(endTag) < 0
+  const { number: endBlock } = (await provider.getBlock(endTag))!
   filter.startBlock ??= await getSomeBlockNumberBefore(
     async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
@@ -181,107 +245,76 @@ export async function* getEvmLogs(
   filter.startBlock = Number(filter.startBlock)
   let latestLogBlockNumber = filter.startBlock - 1
 
-  const baseFilter = {
+  const baseFilter: BaseFilter = {
     ...(filter.address ? { address: filter.address } : {}),
     ...(filter.topics?.length ? { topics: filter.topics } : {}),
   }
 
-  for (const blockRange of blockRangeGenerator({
-    ...filter,
-    startBlock: filter.startBlock,
-    endBlock,
-    page: pageBox.value,
-  })) {
-    for await (const log of getLogsPaginated(
-      provider,
-      baseFilter,
-      blockRange.fromBlock,
-      blockRange.toBlock,
-      pageBox,
-      endpointUrl,
-      logger,
-    )) {
+  // Enrich each raw log with its block timestamp and track the highest block
+  // seen, so the watch loop knows where to resume.
+  async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
+    for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
       yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
     }
   }
 
-  // watch mode, otherwise return
+  // Backfill: stream [startBlock, endBlock], paginating + shrinking adaptively.
+  // The terminal chunk is fetched against the end tag when it's dynamic.
+  yield* emit(
+    streamLogs(
+      provider,
+      baseFilter,
+      filter.startBlock,
+      endBlock,
+      pageBox,
+      endpointUrl,
+      logger,
+      endIsDynamic ? endTag : undefined,
+    ),
+  )
+
+  // Watch mode, otherwise return.
   let lastEvent
   while (filter.watch && (!(filter.watch instanceof AbortSignal) || !filter.watch.aborted)) {
-    const watchFrom = Math.max(latestLogBlockNumber, endBlock - pageBox.value) + 1
+    // When no log advanced latestLogBlockNumber, fall back to a window ending at
+    // `endBlock`, sized at 0.9*page so that if `latest` moves forward between this
+    // resolution and the getLogs call the span still stays under the page limit.
+    const watchFrom = Math.max(latestLogBlockNumber, endBlock - Math.floor(pageBox.value * 0.9)) + 1
+    // Prefer streaming up to the endBlock TAG itself ('latest'/'safe'/'finalized')
+    // so the RPC resolves the head atomically — a separate getBlock could land on
+    // a slightly different head. Resolve to a number only if we must paginate.
     const toBlockTag = await provider._getBlockTag(filter.endBlock)
-    const filter_ = {
-      fromBlock: watchFrom,
-      toBlock: toBlockTag,
-      ...baseFilter,
-    }
+    const filter_ = { fromBlock: watchFrom, toBlock: toBlockTag, ...baseFilter }
     logger.debug('evm watch getLogs:', { ...filter_, lastEvent })
-    let watchLogs: Log[]
+
+    // Optimistic single call; the new tail is usually small. Keep getLogs alone in
+    // the try so enrichment errors propagate rather than being mistaken for range
+    // errors.
+    let watchLogs: Log[] = []
     try {
       watchLogs = await provider.getLogs(filter_)
     } catch (err) {
-      if (isInvalidBlockRangesError(err)) {
-        watchLogs = []
-      } else {
+      if (!isInvalidBlockRangesError(err)) {
+        // An inverted range (head < watchFrom, no new blocks yet) is benign and
+        // leaves watchLogs empty; otherwise it must be a range-too-large error.
         const rangeInfo = parseLogRangeError(err)
         if (rangeInfo === null) throw err
 
-        // Resolve symbolic tags (e.g. 'latest') to a block number so we can
-        // offload to getLogsPaginated regardless of how toBlock was expressed.
+        // Range too large: now resolve the tag to a number so streamLogs can
+        // paginate it (streamLogs guards an inverted [watchFrom, toBlock] as empty).
         const toBlockNum = /^0x/i.test(toBlockTag)
           ? parseInt(toBlockTag, 16)
           : (await provider.getBlock(toBlockTag))!.number
-        const currentSpan = toBlockNum - watchFrom + 1
-        let newPage: number
-        if (rangeInfo.maxRange !== undefined) {
-          newPage = rangeInfo.maxRange
-        } else if (rangeInfo.suggestedRange !== undefined) {
-          newPage = rangeInfo.suggestedRange[1] - rangeInfo.suggestedRange[0] + 1
-        } else {
-          newPage = Math.floor(currentSpan / 2)
-        }
-        // Floor at 100: fast-block chains can produce >100 new blocks per watch
-        // interval; don't let the page shrink to 1 just because the span keeps
-        // exceeding the endpoint limit — getLogsPaginated handles large spans.
-        newPage = Math.max(100, newPage)
-        logger.warn(
-          `evm watch getLogs: range too large (span=${currentSpan}), shrinking page to ${newPage}`,
-          { url: endpointUrl, err },
+        yield* emit(
+          streamLogs(provider, baseFilter, watchFrom, toBlockNum, pageBox, endpointUrl, logger),
         )
-        if (endpointUrl !== undefined) setEndpointLogRange(endpointUrl, newPage, 'error')
-        pageBox.value = Math.min(pageBox.value, newPage)
-
-        for await (const log of getLogsPaginated(
-          provider,
-          baseFilter,
-          watchFrom,
-          toBlockNum,
-          pageBox,
-          endpointUrl,
-          logger,
-        )) {
-          if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
-          yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
-        }
-        // Advance past the entire covered range so next watchFrom doesn't
-        // re-request the same blocks (even if no logs were found in them).
+        // Advance past the whole covered range so the next watchFrom doesn't
+        // re-request these blocks even if none of them held logs.
         latestLogBlockNumber = Math.max(latestLogBlockNumber, toBlockNum)
-        continue
       }
     }
-    if (watchLogs.length)
-      latestLogBlockNumber = Math.max(
-        latestLogBlockNumber,
-        watchLogs[watchLogs.length - 1]!.blockNumber,
-      )
-    const logs_ = await Promise.all(
-      watchLogs.map(async (l) => ({
-        ...l,
-        blockTimestamp: (await ctx.getBlockInfo(l.blockNumber)).timestamp,
-      })),
-    )
-    yield* logs_
+    yield* emit(watchLogs)
 
     const contAc = new AbortController()
     let contSignal = contAc.signal
