@@ -70,6 +70,7 @@ import type {
   ExecutionInput,
   ExecutionReceipt,
   Lane,
+  LeanNumbers,
   WithLogger,
 } from '../types.ts'
 import {
@@ -355,7 +356,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }): AsyncIterableIterator<ChainLog> {
+  async *getLogs(
+    opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean },
+  ): AsyncIterableIterator<ChainLog> {
     if (opts.watch) {
       opts = {
         ...opts,

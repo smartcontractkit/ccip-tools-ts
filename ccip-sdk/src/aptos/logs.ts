@@ -15,7 +15,7 @@ import {
   CCIPLogsWatchRequiresFinalityError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import type { ChainLog } from '../types.ts'
+import type { ChainLog, LeanNumbers } from '../types.ts'
 import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
@@ -90,13 +90,17 @@ async function binarySearchFirst(
 
 async function* fetchEventsForward(
   { provider }: { provider: Aptos },
-  opts: LogFilter & { pollInterval?: number },
+  opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   eventHandlerField: string,
   stateAddr: string,
   limit = 100,
 ): AsyncGenerator<ResEvent> {
-  if (opts.watch && typeof opts.endBlock === 'number' && opts.endBlock > 0)
-    throw new CCIPLogsWatchRequiresFinalityError(opts.endBlock)
+  if (
+    opts.watch &&
+    (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+    Number(opts.endBlock) > 0
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(Number(opts.endBlock))
   opts.endBlock ??= 'latest'
 
   const fetchBatch = memoize(
@@ -120,19 +124,19 @@ async function* fetchEventsForward(
   let start
   if (
     opts.startTime != null &&
-    (opts.startBlock == null || opts.startBlock < +initialBatch[0]!.version) &&
-    opts.startTime < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
+    (opts.startBlock == null || Number(opts.startBlock) < +initialBatch[0]!.version) &&
+    Number(opts.startTime) < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
   ) {
     const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
       const batch = await fetchBatch(end - (i + 1) * limit + 1)
       const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
-      return firstTimestamp > opts.startTime!
+      return firstTimestamp > Number(opts.startTime!)
     })
     start = Math.max(end - (i + 1) * limit + 1, 0)
   } else if (
     opts.startTime == null &&
     opts.startBlock != null &&
-    opts.startBlock <= +initialBatch[0]!.version
+    Number(opts.startBlock) <= +initialBatch[0]!.version
   ) {
     start = 0
   } else {
@@ -140,12 +144,11 @@ async function* fetchEventsForward(
   }
 
   let notAfter =
-    typeof opts.endBlock !== 'number'
+    typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint'
       ? undefined
-      : opts.endBlock < 0
+      : Number(opts.endBlock) < 0
         ? memoize(
-            async () =>
-              +(await provider.getLedgerInfo()).ledger_version + (opts.endBlock as number),
+            async () => +(await provider.getLedgerInfo()).ledger_version + Number(opts.endBlock),
             {
               async: true,
               maxArgs: 0,
@@ -160,28 +163,34 @@ async function* fetchEventsForward(
     (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
     !catchedUp
   ) {
+    const startBefore: number = start
     const lastReq = performance.now()
-    const data = await fetchBatch(start)
+    const data: ResEvent[] = await fetchBatch(start)
     if (
       first &&
       opts.startTime != null &&
-      (await getVersionTimestamp(provider, +data[0]!.version)) < opts.startTime
+      (await getVersionTimestamp(provider, +data[0]!.version)) < Number(opts.startTime)
     ) {
       // the first batch may have some head which is not in the range
       const actualStart = await binarySearchFirst(0, data.length - 1, async (i) => {
         const timestamp = await getVersionTimestamp(provider, +data[i]!.version)
-        return timestamp < opts.startTime!
+        return timestamp < Number(opts.startTime!)
       })
       data.splice(0, actualStart - 1)
     }
 
-    if (!first && catchedUp && typeof opts.endBlock === 'number' && opts.endBlock < 0)
-      notAfter = +(await provider.getLedgerInfo()).ledger_version + opts.endBlock
+    if (
+      !first &&
+      catchedUp &&
+      (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      Number(opts.endBlock) < 0
+    )
+      notAfter = +(await provider.getLedgerInfo()).ledger_version + Number(opts.endBlock)
 
     first = false
 
     for (const ev of data) {
-      if (opts.startBlock != null && +ev.version < opts.startBlock) continue
+      if (opts.startBlock != null && +ev.version < Number(opts.startBlock)) continue
       // there may be an unknown interval between yields, so we support memoized negative finality
       if (
         notAfter != null &&
@@ -193,6 +202,13 @@ async function* fetchEventsForward(
       const start_: number = +ev.sequence_number
       start = start_ + 1
       yield ev
+    }
+    if (start === startBefore && data.length > 0) {
+      // All events in this batch were skipped (e.g. all below opts.startBlock). Advance start
+      // past the tail of the batch so catchedUp can become true and the loop exits cleanly.
+      // Without this, the memoized fetchBatch(start) spins as pure microtasks, starving the
+      // event loop and making the process unresponsive.
+      start = +data[data.length - 1]!.sequence_number + 1
     }
     catchedUp ||= start >= end
     if (opts.watch && catchedUp) {
@@ -219,7 +235,7 @@ async function* fetchEventsForward(
  */
 export async function* streamAptosLogs(
   ctx: { provider: Aptos },
-  opts: LogFilter & { versionAsHash?: boolean },
+  opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean },
 ): AsyncGenerator<ChainLog> {
   const limit = 100
   if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()

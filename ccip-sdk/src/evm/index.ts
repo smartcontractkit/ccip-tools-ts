@@ -89,6 +89,7 @@ import {
   type ExecutionReceipt,
   type ExecutionState,
   type Lane,
+  type LeanNumbers,
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
@@ -458,7 +459,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
-  async getBlockInfo(block: EVMEndBlockTag): Promise<BlockInfo> {
+  async getBlockInfo(block: number | bigint | EVMEndBlockTag): Promise<BlockInfo> {
     const res = await this.provider.getBlock(block) // cached
     if (!res) throw new CCIPBlockNotFoundError(block)
     return { number: res.number, timestamp: res.timestamp }
@@ -477,17 +478,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       timestamp,
       logs: [] as ChainLog[],
     }
-    const logs: ChainLog[] = tx.logs.map((l) =>
-      Object.assign(l, { blockTimestamp: timestamp, tx: chainTx }),
-    )
+    const logs: ChainLog[] = tx.logs.map((l) => ({ ...l, blockTimestamp: timestamp, tx: chainTx }))
     chainTx.logs = logs
     return chainTx
   }
 
   /** {@inheritDoc Chain.getLogs} */
   async *getLogs(
-    filter: SetFieldType<LogFilter, 'endBlock', EVMEndBlockTag>,
-  ): AsyncIterableIterator<Log & { blockTimestamp: number }> {
+    filter: SetFieldType<LeanNumbers<LogFilter>, 'endBlock', EVMEndBlockTag | bigint | undefined>,
+  ) {
     if (filter.watch) {
       filter = {
         ...filter,
@@ -521,7 +520,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         topics: [[request.log.topics[0]!], [toBeHex(request.lane.destChainSelector, 32)]],
       }
     }
-    return super.getMessagesInBatch(request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_ as { page?: number })
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -1917,8 +1916,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           interfaces.USDCTokenPoolProxy_v2_0,
           this.provider,
         ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
-        previousPool = (await proxy.getPools())['cctpV2PoolWithCCV'] as CleanAddressable<
-          Awaited<ReturnType<(typeof proxy)['getPools']>>
+        const pools = await proxy.getPools()
+        previousPool = pools['cctpV2PoolWithCCV'] as CleanAddressable<
+          typeof pools
         >['cctpV2PoolWithCCV']
       }
       const contract = new Contract(
@@ -2305,7 +2305,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
               receiver: opts_.message.receiver,
             },
           })
-      } else if (opts_.message.finality < allowedFinality.finalityDepth) {
+      } else if (
+        allowedFinality.finalityDepth == 0 ||
+        opts_.message.finality < allowedFinality.finalityDepth
+      ) {
         throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
           context: {
             source: networkInfo(opts_.message.sourceChainSelector).name,

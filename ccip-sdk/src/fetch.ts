@@ -664,30 +664,67 @@ export interface LogRangeErrorInfo {
 export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
   if (err == null) return null
 
-  // Gather candidate message strings from common error shapes
-  const messages: string[] = []
+  // messageTexts: strings from actual `message` keys — the only ones tested against patterns.
+  // Sentinels: independent signals (code -32005, HTTP 413) collected separately.
+  const messageTexts: string[] = []
+  let isRangeCode: boolean = false
+  let isHttp413: boolean = false
 
-  const extractMessages = (val: unknown): void => {
+  // fromMessageKey: true when the string being extracted came from a `message` field
+  // (directly or via JSON.parse of a body that ultimately led to a message field).
+  const extractMessages = (val: unknown, fromMessageKey = false): void => {
     if (typeof val === 'string') {
-      messages.push(val)
+      // Parse JSON strings so we inspect their structure rather than treat a
+      // serialised body as a raw message (avoids false number matches from codes).
+      try {
+        extractMessages(JSON.parse(val), fromMessageKey)
+        return
+      } catch {
+        // not JSON
+      }
+      if (fromMessageKey) messageTexts.push(val)
     } else if (val && typeof val === 'object') {
       const obj = val as Record<string, unknown>
-      // JSON-RPC code -32005
-      if ('code' in obj && (obj.code === -32005 || obj.code === '-32005')) {
-        // Treat as a range error even if message doesn't match; will return {}
-        messages.push('__code32005__')
+      // JSON-RPC codes that always indicate a log-range error.
+      if ('code' in obj && (Number(obj.code) === -32005 || Number(obj.code) === -32012))
+        isRangeCode = true
+      // HTTP 413: server rejected request as too large (block range too wide).
+      if (
+        'responseStatus' in obj &&
+        typeof obj.responseStatus === 'string' &&
+        obj.responseStatus.startsWith('413')
+      ) {
+        isHttp413 = true
       }
-      for (const key of ['message', 'error', 'data', 'body', 'details'] as const) {
-        if (key in obj) extractMessages(obj[key])
+      // JSON-RPC error object (numeric code + message): only recurse into message.
+      // String codes (e.g. ethers 'SERVER_ERROR') keep traversing all fields.
+      if ('code' in obj && typeof obj.code === 'number' && 'message' in obj) {
+        extractMessages(obj['message'], true)
+        return
+      }
+      for (const key of [
+        'message',
+        'error',
+        'data',
+        'body',
+        'details',
+        'info',
+        'responseBody',
+      ] as const) {
+        if (key in obj) {
+          // Collect message strings only when the containing object has no string code.
+          // Objects with a string code (e.g. ethers SERVER_ERROR) are wrapper errors
+          // whose `message` embeds all inner JSON — traversing it would pick up
+          // numbers like the HTTP status code as a false maxRange.
+          const isMsg = key === 'message' && !('code' in obj && typeof obj.code === 'string')
+          extractMessages(obj[key], isMsg)
+        }
       }
     }
   }
   extractMessages(err)
 
-  const isCode32005 = messages.includes('__code32005__')
-  const textMessages = messages.filter((m) => m !== '__code32005__')
-
-  // Range-error patterns (case-insensitive)
+  // Range-error patterns (case-insensitive). First capture group = limit number when present.
   const RANGE_ERROR_PATTERNS = [
     // Alchemy: "up to a 10000 block range"
     /up to a (\d+) block range/i,
@@ -696,27 +733,40 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     // QuickNode
     /eth_getLogs is limited to a (\d+) range/i,
     /exceeds the range/i,
+    // erpc/hyperliquid: "query exceeds max block range 1000"
+    // hedera/alchemy: "Exceeded maximum block range: 1000"
+    /\bmax(?:imum)?\s+block\s+range\b[^0-9]*(\d+)/i,
+    // Generic max/maximum … range (e.g. "maximum range: 500", "max allowed range exceeded")
+    /\bmax(?:imum)?\b.*\brange\b/i,
     // Generic
     /range too large/i,
     /limit exceeded/i,
+    // some providers: "Cannot request logs over more than 100 blocks"
+    /\bmore than (\d+) blocks?\b/i,
     /too many (?:results|logs|blocks)/i,
     /response size exceeded/i,
   ]
 
-  // Generic block-range detector: any message mentioning a block "range" is
-  // treated as a range error, and any number in that same message is taken as
-  // the max range (e.g. Astar/erpc "block range is too wide (maximum 1024)").
-  const BLOCK_RANGE_RE = /\bblock\b.*\brange\b/i
-  const FIRST_NUMBER_RE = /\b(\d+)\b/
+  // Generic block-range detector: requires a "too/wide/large/max" qualifier so
+  // that "invalid block range" (bad params, e.g. endBlock in future) is not
+  // matched. Any number in the matching message is taken as max range.
+  // Since we only test messageTexts (actual `message` field strings), there is no
+  // risk of picking up JSON-RPC error codes embedded in raw JSON bodies.
+  const BLOCK_RANGE_RE = /\bblock\s+range\b.*\b(?:too|wide|large|max)\b/i
+  // Match the LAST number in the message: providers phrase these as
+  // "block range too large (10000), maximum allowed is 2000 blocks" — the
+  // requested span comes first, the real limit comes last.
+  const LAST_NUMBER_RE = /\b(\d+)\b(?!.*\d)/s
 
   // Alchemy suggested range: [0x..., 0x...]
   const ALCHEMY_SUGGESTED_RANGE = /\[(0x[0-9a-f]+),\s*(0x[0-9a-f]+)\]/i
 
-  let isRangeError = isCode32005
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by extractMessages closure above
+  let isRangeError = isRangeCode || isHttp413
   let maxRange: number | undefined
   let suggestedRange: [number, number] | undefined
 
-  for (const msg of textMessages) {
+  for (const msg of messageTexts) {
     for (const pattern of RANGE_ERROR_PATTERNS) {
       const match = pattern.exec(msg)
       if (match) {
@@ -732,7 +782,7 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     // that same message is the max range (covers "(maximum N)", "limited to N", …).
     if (BLOCK_RANGE_RE.test(msg)) {
       isRangeError = true
-      const numMatch = FIRST_NUMBER_RE.exec(msg)
+      const numMatch = LAST_NUMBER_RE.exec(msg)
       if (numMatch) {
         const n = Number(numMatch[1])
         if (!isNaN(n) && n > 0 && (maxRange === undefined || n < maxRange)) maxRange = n

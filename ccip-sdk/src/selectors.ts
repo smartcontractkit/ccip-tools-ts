@@ -1666,6 +1666,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '2026041002': {
+    selector: 4175996748267305081n,
+    name: 'private-testnet-quartzite',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '2026041003': {
     selector: 604447335222770945n,
     name: 'private-testnet-rhyolite',

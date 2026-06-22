@@ -191,6 +191,7 @@ describe('waitFinalized', () => {
     }
 
     const result = await chain.waitFinalized({ log })
+    assert.ok(result)
     assert.equal(typeof result.number, 'number')
     assert.equal(typeof result.timestamp, 'number')
     chain.destroy()
@@ -205,6 +206,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log]
 
     const result = await chain.waitFinalized({ log })
+    assert.ok(result)
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -224,6 +226,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log] // getLogs yields the matching log
 
     const result = await chain.waitFinalized({ log })
+    assert.ok(result)
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -338,6 +341,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log]
 
     const result = await chain.waitFinalized({ log, reorgSafetyBlocks: 3 })
+    assert.ok(result)
     assert.equal(typeof result.number, 'number')
     assert.ok(txCallCount >= 1, 'getTransaction should have been called for reorg check')
     chain.destroy()
@@ -362,12 +366,11 @@ describe('waitFinalized', () => {
     // Abort after a short delay
     setTimeout(() => ac.abort(), 50)
 
-    // Should exit without hanging; the abort causes the watch loop to end,
-    // and since no match was found, it throws NotFinalized
-    await assert.rejects(
-      () => chain.waitFinalized({ log, abort: ac.signal }),
-      CCIPTransactionNotFinalizedError,
-    )
+    // Should exit without hanging; the abort causes the watch loop to end.
+    // External cancellation is NOT a finality failure, so it returns undefined
+    // (rather than throwing NotFinalized) so the caller can ignore the result.
+    const result = await chain.waitFinalized({ log, abort: ac.signal })
+    assert.equal(result, undefined)
     chain.destroy()
   })
 
@@ -389,6 +392,7 @@ describe('waitFinalized', () => {
     chain.logsToYield = [log]
 
     const result = await chain.waitFinalized({ log })
+    assert.ok(result)
     assert.equal(typeof result.number, 'number')
     chain.destroy()
   })
@@ -408,6 +412,7 @@ describe('waitFinalized', () => {
     }
 
     const result = await waitFinalized(chain, { log })
+    assert.ok(result)
     assert.equal(result.number, 200)
     assert.equal(result.timestamp, 1_700_000_000)
     chain.destroy()

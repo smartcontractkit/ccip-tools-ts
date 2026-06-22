@@ -42,6 +42,7 @@ export async function getSomeBlockNumberBefore(
   timestamp: number,
   { precision = 10, logger = console }: { precision?: number } & WithLogger = {},
 ): Promise<number> {
+  timestamp = Number(timestamp)
   const recentTimestamp = await getBlockTimestamp(recentBlockNumber)
   if (recentTimestamp <= timestamp) return recentBlockNumber
 

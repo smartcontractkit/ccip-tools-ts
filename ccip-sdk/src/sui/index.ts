@@ -50,6 +50,7 @@ import type {
   ExecutionReceipt,
   ExecutionState,
   Lane,
+  LeanNumbers,
   WithLogger,
 } from '../types.ts'
 import {
@@ -229,7 +230,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
    */
-  async *getLogs(opts: LogFilter & { versionAsHash?: boolean }) {
+  async *getLogs(opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean }) {
     if (opts.watch) {
       opts = {
         ...opts,

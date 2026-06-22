@@ -220,11 +220,12 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       if (!source) return
       const finalizedAc = new AbortController()
       cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
-      await source.waitFinalized({
+      const finalized = await source.waitFinalized({
         log: request.log,
         abort: finalizedAc.signal,
       })
-      logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
+      // undefined => cancelled (e.g. execution already found, FTF message); don't claim finalization
+      if (finalized) logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
     }
 
     const offchainTokenData = await source?.getOffchainTokenData(request)

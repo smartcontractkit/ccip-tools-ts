@@ -89,6 +89,7 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type MergeArrayElements,
   type WithLogger,
   CCIPVersion,
@@ -440,7 +441,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Async generator of Solana transactions.
    */
   async *getTransactionsForAddress(
-    opts: Omit<LogFilter, 'topics'>,
+    opts: LeanNumbers<Omit<LogFilter, 'topics'>> & {
+      pollInterval?: number
+      excludeAddresses?: string[]
+    },
   ): AsyncGenerator<SolanaTransaction> {
     if (opts.watch) {
       opts = {
@@ -482,12 +486,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics contain invalid values
    */
-  async *getLogs(opts: LogFilter & { programs?: string[] | true }): AsyncGenerator<SolanaLog> {
+  async *getLogs(
+    opts: LeanNumbers<LogFilter> & { programs?: string[] | true },
+  ): AsyncGenerator<SolanaLog> {
     let programs: true | string[]
+    let excludeAddresses
     if (!opts.address) {
       throw new CCIPLogsAddressRequiredError()
     } else if (!opts.programs) {
       programs = [opts.address]
+      if (opts.topics?.length === 1 && opts.topics[0] === 'ExecutionStateChanged') {
+        // optimization: when querying offramp's execs, exclude txs including `fee_billing_signer` (used only in commits)
+        const [pdaAddr] = PublicKey.findProgramAddressSync(
+          [Buffer.from('fee_billing_signer')],
+          new PublicKey(/* OffRamp */ opts.address),
+        )
+        excludeAddresses = [pdaAddr.toBase58()]
+      }
     } else {
       programs = opts.programs
     }
@@ -503,7 +518,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
-    for await (const tx of this.getTransactionsForAddress(opts)) {
+    for await (const tx of this.getTransactionsForAddress({ ...opts, excludeAddresses })) {
       for (const log of tx.logs) {
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
@@ -544,7 +559,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       programs: [request.log.address],
       address: destChainStatePda.toBase58(),
     }
-    return super.getMessagesInBatch(request, range, opts_)
+    return super.getMessagesInBatch(request, range, opts_ as { page?: number })
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -1420,7 +1435,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
       const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
       const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (request.message.sequenceNumber < minSeqNr || maxSeqNr < request.message.sequenceNumber)
+      if (
+        BigInt(request.message.sequenceNumber) < minSeqNr ||
+        maxSeqNr < BigInt(request.message.sequenceNumber)
+      )
         continue
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({

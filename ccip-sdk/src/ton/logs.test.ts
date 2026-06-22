@@ -215,6 +215,41 @@ describe('TON logs unit tests', () => {
         assert.ok(getTransactionsMock.mock.calls.length >= 1)
       })
 
+      it('should apply startBlock to the first TON transaction page', async () => {
+        const belowStart = createMockTransaction({ lt: 99n, now: 99 })
+        const atStart = createMockTransaction({ lt: 100n, now: 100 })
+        const aboveStart = createMockTransaction({ lt: 101n, now: 101 })
+
+        const getTransactionsMock = mock.fn(async () => [aboveStart, atStart, belowStart])
+        const mockProvider = {
+          getTransactions: getTransactionsMock,
+        } as unknown as TonClient
+
+        const mockGetTransaction = mock.fn(async (tx: Transaction) =>
+          createMockChainTransaction(tx.hash().toString('base64'), Number(tx.lt)),
+        )
+
+        const results: ChainTransaction[] = []
+        for await (const tx of streamTransactionsForAddress(
+          {
+            address: TEST_ADDRESS,
+            startBlock: 100,
+          },
+          { provider: mockProvider, getTransaction: mockGetTransaction },
+        )) {
+          results.push(tx)
+        }
+
+        const firstCall = getTransactionsMock.mock.calls[0] as unknown as {
+          arguments: [Address, { to_lt?: string }]
+        }
+        assert.equal(firstCall.arguments[1].to_lt, '100')
+        assert.deepEqual(
+          results.map((tx) => tx.blockNumber),
+          [100, 101],
+        )
+      })
+
       it('should filter transactions by startTime', async () => {
         // Create enough transactions to trigger pagination (batch size equals limit)
         const oldTxs = Array.from({ length: 50 }, (_, i) =>
