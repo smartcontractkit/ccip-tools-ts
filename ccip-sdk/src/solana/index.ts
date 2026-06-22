@@ -584,6 +584,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return res
   }
 
+  /**
+   * On Solana, Router is OnRamp
+   */
+  override async getRouterForOnRamp(onRamp: string, _destChainSelector: bigint): Promise<string> {
+    return onRamp
+  }
+
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
