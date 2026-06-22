@@ -1286,6 +1286,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   >): Promise<true> {
     let registry
     for (const { token, amount } of message.tokenAmounts ?? []) {
+      // Native value transfers aren't pool-managed (no registry entry / rate limiter),
+      // and `router` may be a sender helper (e.g. EtherSenderReceiver) rather than a
+      // Router/Ramp — skip the token-pool preflight for them.
+      if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(router)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
@@ -1324,6 +1328,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     for (const ta of message.tokenAmounts ?? []) {
       const amount = ta.amount
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      // Native value transfers aren't pool-managed — skip the token-pool preflight.
+      if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
