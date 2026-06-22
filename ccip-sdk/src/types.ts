@@ -57,6 +57,19 @@ export type MergeArrayElements<T, U> = {
         : never
 }
 
+/** Utility type to widen numeric types. */
+export type LeanNumbers<T> = number extends T
+  ? T | bigint
+  : bigint extends T
+    ? T | number
+    : T extends Promise<infer U>
+      ? Promise<LeanNumbers<U>>
+      : T extends { [K: string]: unknown } | [...unknown[]]
+        ? { [K in keyof T]: LeanNumbers<T[K]> }
+        : T extends { readonly [K: string]: unknown } | readonly [...unknown[]]
+          ? { readonly [K in keyof T]: LeanNumbers<T[K]> }
+          : T
+
 /**
  * Enumeration of supported CCIP protocol versions.
  */

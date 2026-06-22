@@ -55,6 +55,7 @@ import {
   type ExecutionInput,
   type ExecutionReceipt,
   type Lane,
+  type LeanNumbers,
   type Logger,
   type MessageInput,
   type OffchainTokenData,
@@ -720,7 +721,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Finalized block ${info.number} at ${new Date(info.timestamp * 1000).toISOString()}`)
    * ```
    */
-  abstract getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo>
+  abstract getBlockInfo(block: number | bigint | 'finalized' | 'latest'): Promise<BlockInfo>
 
   /**
    * Fetch the timestamp of a given block.
@@ -728,7 +729,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @returns Unix timestamp in seconds
    * @deprecated Use {@link Chain.getBlockInfo} instead.
    */
-  async getBlockTimestamp(block: number | 'finalized' | 'latest'): Promise<number> {
+  async getBlockTimestamp(block: number | bigint | 'finalized' | 'latest'): Promise<number> {
     return (await this.getBlockInfo(block)).timestamp
   }
   /**
@@ -786,19 +787,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     } & (
       | {
           /** @deprecated Prefer passing `log` directly to `opts` */
-          request: PickDeep<
-            CCIPRequest,
-            `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+          request: LeanNumbers<
+            PickDeep<
+              CCIPRequest,
+              `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+            >
           >
         }
       | {
-          log: Pick<
-            ChainLog,
-            'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+          log: LeanNumbers<
+            Pick<
+              ChainLog,
+              'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+            >
           >
         }
     ),
-  ): ReturnType<Chain['getBlockInfo']> {
+  ): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
     return waitFinalized(this, opts)
   }
   /**
@@ -825,7 +830,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPLogsRequiresStartError} if used without startBlock or startTime
    * @throws {@link CCIPLogsAddressRequiredError} if address is required but not provided (chain-specific)
    */
-  abstract getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog>
+  abstract getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog>
 
   /**
    * Fetch all CCIP requests in a transaction.
@@ -1706,30 +1711,42 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
 
+    // Fast finality (FINALITY_FAST/SAFE) requires an OnRamp that can carry
+    // GenericExtraArgsV3 extra args, i.e. OnRamp version >= 2.0. A v2.0 token pool
+    // may report a finalityDepth/finalitySafe even on a lane whose OnRamp is still
+    // <2.0 (partial upgrade) — surfacing it there advertises a capability getFee
+    // can't fulfil and reverts with InvalidExtraArgsTag. Decide once, up front.
+    const supportsFastFinality = version >= CCIPVersion.V2_0
+
     const result: Partial<LaneFeatures> = {}
 
     // default FTF value for V2_0+ lanes if no token/pool or pool doesn't specify
-    if (version >= CCIPVersion.V2_0) {
+    if (supportsFastFinality) {
       result[LaneFeature.FINALITY_FAST] = 1
       result[LaneFeature.FINALITY_SAFE] = true
     }
 
-    // FINALITY_FAST — V2_0+ only
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
         await this.getTokenAdminRegistryFor(onRamp),
         opts.token,
       )
       if (tokenPool) {
-        const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
-        if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
-        else delete result[LaneFeature.FINALITY_FAST]
-        if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
-        else delete result[LaneFeature.FINALITY_SAFE]
+        // Only read/apply pool-level finality on lanes that can use it; on <2.0
+        // lanes FINALITY_FAST stays undefined ("pre-v2.0 / not supported").
+        let fastRateLimitsApply = false
+        if (supportsFastFinality) {
+          const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+          if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
+          else delete result[LaneFeature.FINALITY_FAST]
+          if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
+          else delete result[LaneFeature.FINALITY_SAFE]
+          fastRateLimitsApply = Boolean(finalityDepth || finalitySafe)
+        }
 
         const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
-        if ((finalityDepth || finalitySafe) && 'fastOutboundRateLimiterState' in remote) {
+        if (fastRateLimitsApply && 'fastOutboundRateLimiterState' in remote) {
           result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
         }
       }
@@ -1842,7 +1859,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (
         !receipt ||
         (filters?.messageId && receipt.messageId !== filters.messageId) ||
-        (filters?.sequenceNumber && receipt.sequenceNumber !== filters.sequenceNumber)
+        (filters?.sequenceNumber &&
+          BigInt(receipt.sequenceNumber) !== BigInt(filters.sequenceNumber))
       )
         continue
       if (filters?.sourceChainSelector) {
