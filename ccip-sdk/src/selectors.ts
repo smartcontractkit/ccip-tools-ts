@@ -461,6 +461,7 @@ const SELECTORS: Selectors = {
     selector: 4348158687435793198n,
     name: 'ethereum-mainnet-polygon-zkevm-1',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1111': {
@@ -751,6 +752,7 @@ const SELECTORS: Selectors = {
     selector: 4560701533377838164n,
     name: 'bitcoin-mainnet-botanix',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '3776': {
