@@ -1022,11 +1022,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Token,
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
-    const [symbol, decimals, name] = await Promise.all([
-      contract.symbol(),
-      contract.decimals(),
-      contract.name(),
-    ])
+    const symbol = await contract.symbol()
+    const decimals = await contract.decimals()
+    const name = await contract.name()
     return { symbol, decimals: Number(decimals), name }
   }
 
@@ -1274,10 +1272,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         interfaces.CCTPVerifier_v2_0,
         this.provider,
       ) as unknown as TypedContract<typeof CCTPVerifier_2_0_ABI>
-      const [staticConfig, domainResult] = await Promise.all([
-        verifier.getStaticConfig(),
-        verifier.getDomain(destChainSelector),
-      ])
+      const staticConfig = await verifier.getStaticConfig()
+      const domainResult = await verifier.getDomain(destChainSelector)
       return {
         sourceDomain: Number(staticConfig[3]), // localDomainIdentifier
         destDomain: Number(domainResult.domainIdentifier),
@@ -1348,12 +1344,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
     }
 
-    const [result, { decimals }] = await Promise.all([
+    const result =
       blockTag != null
-        ? contract.getTokenPrice.staticCall(token, { blockTag })
-        : contract.getTokenPrice(token),
-      this.getTokenInfo(token),
-    ])
+        ? await contract.getTokenPrice.staticCall(token, { blockTag })
+        : await contract.getTokenPrice(token)
+    const { decimals } = await this.getTokenInfo(token)
 
     const rawPrice = BigInt(result.value)
     return { price: Number(rawPrice) * 10 ** (decimals - 36) }
@@ -1364,10 +1359,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['getTotalFeesEstimate']>[0],
   ): Promise<TotalFeesEstimate> {
     const tokenAmounts = opts.message.tokenAmounts
-    const ccipFee$ = this.getFee(opts)
 
     if (!tokenAmounts?.length) {
-      return { ccipFee: await ccipFee$ }
+      return { ccipFee: await this.getFee(opts) }
     }
 
     const { token, amount } = tokenAmounts[0]!
@@ -1385,7 +1379,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
     const [, version] = await this.typeAndVersion(onRamp)
     if (version < CCIPVersion.V2_0) {
-      return { ccipFee: await ccipFee$ }
+      return { ccipFee: await this.getFee(opts) }
     }
 
     const onRampContract = new Contract(
@@ -1399,19 +1393,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       token,
     )) as string
 
-    const [ccipFee, { tokenTransferFeeConfig }, usdcDomains] = await Promise.all([
-      ccipFee$,
-      this.getTokenPoolConfig(poolAddress, {
-        destChainSelector: opts.destChainSelector,
-        finality,
-        tokenArgs,
-      }),
-      this.detectUsdcDomains(
-        poolAddress,
-        opts.destChainSelector,
-        extraArgs && 'ccvs' in extraArgs ? extraArgs.ccvs : [],
-      ),
-    ])
+    const ccipFee = await this.getFee(opts)
+    const { tokenTransferFeeConfig } = await this.getTokenPoolConfig(poolAddress, {
+      destChainSelector: opts.destChainSelector,
+      finality,
+      tokenArgs,
+    })
+    const usdcDomains = await this.detectUsdcDomains(
+      poolAddress,
+      opts.destChainSelector,
+      extraArgs && 'ccvs' in extraArgs ? extraArgs.ccvs : [],
+    )
 
     // USDC path: use Circle CCTP burn fees
     if (usdcDomains) {
@@ -2138,13 +2130,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     const tokens = await contract.getFeeTokens()
 
-    return Object.fromEntries(
-      await Promise.all(
-        tokens.map(
-          async (token) => [token as string, await this.getTokenInfo(token as string)] as const,
-        ),
-      ),
-    )
+    const entries: Array<readonly [string, Awaited<ReturnType<typeof this.getTokenInfo>>]> = []
+    for (const token of tokens) {
+      const address = token as string
+      entries.push([address, await this.getTokenInfo(address)] as const)
+    }
+
+    return Object.fromEntries(entries)
   }
 
   /** {@inheritDoc Chain.getVerifications} */
