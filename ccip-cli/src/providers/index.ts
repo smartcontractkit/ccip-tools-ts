@@ -28,10 +28,17 @@ import type { Ctx } from '../commands/index.ts'
 import type { GlobalOpts } from '../index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
+type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
 
-async function collectEndpoints(
+/**
+ * Collects RPC endpoints URLs in rpcs array, rpcsFile an `RPC_` env vars, and returns a Set of unique endpoints
+ * @param this - Context object containing abort signal and logger properties
+ * @param argv - Partial GlobalArgs argv object
+ * @returns Promise resolving to a Set of unique RPC endpoint URLs
+ */
+export async function collectEndpoints(
   this: Ctx,
-  { rpcs, rpcsFile }: { rpcs?: string[]; rpcsFile?: string },
+  { rpcs, rpcsFile }: Pick<FetchGlobalArgs, 'rpcs' | 'rpcsFile'>,
 ): Promise<Set<string>> {
   const endpoints = new Set<string>(
     rpcs
@@ -57,7 +64,6 @@ async function collectEndpoints(
   return endpoints
 }
 
-type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
 export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
