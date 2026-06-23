@@ -157,6 +157,10 @@ interface ParsedTokenInfo {
   name?: string
   symbol?: string
   decimals: number
+  extensions?: Array<{
+    extension: string
+    state: { name?: string; symbol?: string; [key: string]: unknown }
+  }>
 }
 
 // hardcoded symbols for tokens without metadata
@@ -741,15 +745,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     if (typeof mintInfo.value.data === 'object' && 'parsed' in mintInfo.value.data) {
       const parsed = mintInfo.value.data.parsed as { info: ParsedTokenInfo }
       const data = parsed.info
-      let symbol = data.symbol || unknownTokens[token] || 'UNKNOWN'
-      let name = data.name
+
+      // Token-2022 tokens may embed metadata in extensions
+      const tokenMetadataExt = data.extensions?.find((e) => e.extension === 'tokenMetadata')
+      const extSymbol = tokenMetadataExt?.state.symbol
+      const extName = tokenMetadataExt?.state.name
+      const rawSymbol = data.symbol || extSymbol
+
+      // Track whether we have an on-chain authoritative symbol/name (parsed fields or T-2022 extension).
+      // unknownTokens / 'UNKNOWN' are fallbacks — Metaplex can still override them.
+      let symbol = rawSymbol || unknownTokens[token] || 'UNKNOWN'
+      let name = data.name || extName
+
+      const hasAuthoritativeSymbol = !!rawSymbol && rawSymbol !== 'UNKNOWN'
+      const hasAuthoritativeName = !!name
 
       // If symbol or name is missing, try to fetch from Metaplex metadata
-      if (!data.symbol || symbol === 'UNKNOWN' || !data.name) {
+      if (!hasAuthoritativeSymbol || !hasAuthoritativeName) {
         try {
           const metadata = await this._fetchTokenMetadata(mint)
           if (metadata) {
-            if (metadata.symbol && (!data.symbol || symbol === 'UNKNOWN')) {
+            if (metadata.symbol && !hasAuthoritativeSymbol) {
               symbol = metadata.symbol
             }
             if (metadata.name && !name) {
