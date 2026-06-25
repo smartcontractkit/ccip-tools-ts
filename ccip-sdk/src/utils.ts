@@ -7,6 +7,7 @@ import {
   type Numeric,
   decodeBase64,
   getBytes,
+  id as keccak256Utf8,
   isBytesLike,
   toBeArray,
   toBigInt,
@@ -351,6 +352,9 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
           ? '0x' + address
           : address,
     )
+  } else if (typeof address === 'string' && isCantonPartyId(address)) {
+    // Canton CCIP receivers use keccak256(partyId) as a 32-byte address (see HashedPartyFromString in chainlink-canton).
+    bytes = getBytes(keccak256Utf8(address))
   } else if (typeof address === 'string' && /^-?\d+:[0-9a-f]{64}$/i.test(address)) {
     // TON raw format: "workchain:hash" → 36-byte CCIP format (4-byte BE workchain + 32-byte hash)
     const [workchain, hash] = address.split(':')
@@ -369,6 +373,11 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     if (!bytes) bytes = decodeBase64(address as string)
   }
   return bytes
+}
+
+/** Daml party ID: `hint::1220<64-hex-fingerprint>` (not a 3-part instrument id). */
+function isCantonPartyId(address: string): boolean {
+  return /^[\w.-]+::1220[0-9a-fA-F]{64}$/.test(address)
 }
 
 /**

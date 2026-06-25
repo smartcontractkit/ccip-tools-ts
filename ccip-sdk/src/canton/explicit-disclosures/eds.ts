@@ -60,6 +60,7 @@ export interface EdsSendResult {
   disclosedContracts: DisclosedContract[]
   ccvs: string[]
   executor?: string
+  feeTokenConfigCid: string
 }
 
 /** Result of `POST /ccip/v1/global/message/execute`. */
@@ -112,6 +113,7 @@ interface EdsGlobalSendResponse {
   disclosedContracts?: EdsApiDisclosedContract[]
   ccvs?: string[]
   executor?: string
+  feeTokenConfigCid?: string
 }
 
 interface EdsGlobalExecuteResponse {
@@ -253,6 +255,7 @@ export class EdsDisclosureProvider {
       disclosedContracts: contractsOrEmpty(resp.disclosedContracts),
       ccvs: resp.ccvs ?? [],
       executor: resp.executor,
+      feeTokenConfigCid: resp.feeTokenConfigCid ?? '',
     }
   }
 

@@ -20,11 +20,15 @@
  */
 
 import {
+  type CCIPRequest,
   type Chain,
+  type ChainGetter,
+  type ChainTransaction,
   CCIPAPIClient,
   CCIPExecTxRevertedError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
+  ChainFamily,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
@@ -46,6 +50,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import { loadCantonConfig, resolveCliIndexer } from '../providers/canton.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = ['show <tx-hash-or-id>', '* <tx-hash-or-id>']
@@ -92,8 +97,13 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 /**
  * Show details of a request.
+ * When `opts.request` is set (e.g. after `send`), skip re-fetching the source tx from RPC.
  */
-export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
+export async function showRequests(
+  ctx: Ctx,
+  argv: Parameters<typeof handler>[0],
+  opts?: { request?: CCIPRequest },
+) {
   const { output, logger } = ctx
 
   // In JSON mode, accumulate all output into a single envelope so JSON.parse(stdout) works.
@@ -116,41 +126,58 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
     }
   }
 
-  const [getChain, tx$] = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
+  let getChain: ChainGetter
+  let tx$: Promise<[Chain, ChainTransaction]> | undefined
+  if (opts?.request) {
+    getChain = fetchChainsFromRpcs(ctx, argv)
+  } else {
+    const chainsResult = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
+    getChain = chainsResult[0]
+    tx$ = chainsResult[1]
+  }
 
   let source: Chain | undefined, offRamp
   // Track if we displayed all messages in non-interactive multi-message path
   let displayedAllMessages = false as boolean
 
-  let request$ = (async () => {
-    const [source_, tx] = await tx$
-    source = source_
-    const messages = await source_.getMessagesInTx(tx)
+  let request$ = opts?.request
+    ? (async () => {
+        try {
+          source = await getChain(opts.request!.lane.sourceChainSelector)
+        } catch (err) {
+          logger.debug('Failed to resolve source chain for prebuilt request:', err)
+        }
+        return opts.request!
+      })()
+    : (async () => {
+        const [source_, tx] = await tx$!
+        source = source_
+        const messages = await source_.getMessagesInTx(tx)
 
-    // Non-interactive multi-message path: display all messages and signal early return
-    if (argv.interactive === false && argv.logIndex == null && messages.length > 1) {
-      switch (argv.format) {
-        case Format.log:
-          for (const req of messages) {
-            output.write(`message ${req.log.index} =`, withDateTimestamp(req))
+        // Non-interactive multi-message path: display all messages and signal early return
+        if (argv.interactive === false && argv.logIndex == null && messages.length > 1) {
+          switch (argv.format) {
+            case Format.log:
+              for (const req of messages) {
+                output.write(`message ${req.log.index} =`, withDateTimestamp(req))
+              }
+              break
+            case Format.pretty:
+              for (const req of messages) {
+                await prettyRequest.call(ctx, req, source)
+              }
+              break
+            case Format.json:
+              output.write(JSON.stringify({ requests: messages }, bigIntReplacer, 2))
+              break
           }
-          break
-        case Format.pretty:
-          for (const req of messages) {
-            await prettyRequest.call(ctx, req, source)
-          }
-          break
-        case Format.json:
-          output.write(JSON.stringify({ requests: messages }, bigIntReplacer, 2))
-          break
-      }
-      logger.info('Use --log-index N for full details on a specific message.')
-      displayedAllMessages = true
-      return messages[0]! // return first to satisfy type; caller checks displayedAllMessages
-    }
+          logger.info('Use --log-index N for full details on a specific message.')
+          displayedAllMessages = true
+          return messages[0]! // return first to satisfy type; caller checks displayedAllMessages
+        }
 
-    return selectRequest(messages, 'to know more', argv)
-  })()
+        return selectRequest(messages, 'to know more', argv)
+      })()
 
   if (argv.api !== false && isHexString(argv.txHashOrId, 32)) {
     const apiClient = CCIPAPIClient.fromUrl(
@@ -258,7 +285,7 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       output.write('Commit (dest):')
   })()
 
-  let dest: Chain | undefined
+  let dest!: Chain
   try {
     dest = await getChain(request.lane.destChainSelector)
   } catch (err) {
@@ -293,10 +320,15 @@ export async function showRequests(ctx: Ctx, argv: Parameters<typeof handler>[0]
       cancelWaitVerifications = ac.abort.bind(ac)
     }
     verifications$ = (async () => {
+      const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+      const laneInvolvesCanton =
+        dest.network.family === ChainFamily.Canton || source?.network.family === ChainFamily.Canton
+      const indexer = resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
       const verifications = await dest.getVerifications({
         offRamp,
         request,
         ...argv,
+        indexer,
         watch,
       })
       cancelWaitFinalized?.()

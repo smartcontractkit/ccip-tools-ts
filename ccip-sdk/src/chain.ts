@@ -218,8 +218,43 @@ export type CantonConfig = {
   /** Base URL for the Transfer Instruction API. */
   transferInstructionUrl: string
 
-  /** Optional base URL for a transaction indexer to fetch CCV verifications; if not provided, default URL will be used. */
+  /**
+   * Optional base URL for a transaction indexer to fetch CCV verifications.
+   * Used when `--indexer` is omitted on ccip-cli (CLI `--indexer` overrides this).
+   */
   indexerUrl?: string
+
+  /**
+   * Optional CCIP Canton chain ID (e.g. `canton:TestNet`). When set, skips
+   * synchronizer-alias detection — required when the ledger reports a generic
+   * alias such as `global`.
+   */
+  chainId?: string
+
+  /**
+   * Optional DAR package names for ACS template filters. Prod testnet bundles
+   * PerPartyRouter in `ccip-runtime` instead of the dev default `ccip-perpartyrouter`.
+   */
+  packages?: Partial<{
+    perPartyRouter: string
+    ccipReceiver: string
+    ccipSender: string
+  }>
+
+  /**
+   * Optional CCIPSender instance id for Canton-source sends (ccip-cli `-r` on Canton lanes).
+   * Used only for CLI/SDK routing; on-ledger Send resolves CCIPSender from `party` via ACS.
+   * CLI `-r` overrides this value.
+   */
+  senderInstanceId?: string
+
+  /**
+   * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
+   * Used for execute (EDS disclosures + receiver matching) and as the default for
+   * Canton send `senderRequiredCCVs` when `extraArgs.ccvRawAddresses` is omitted.
+   * CLI `-x ccvRawAddresses=…` overrides this list for send.
+   */
+  ccvs?: string[]
 }
 
 /**
@@ -647,6 +682,13 @@ export type ExecuteOpts = (
   forceBuffer?: boolean
   /** For Solana, create and extend addresses in a lookup table before executing */
   forceLookupTable?: boolean
+  /**
+   * Canton destination only: select the `CCIPReceiver` for execute.
+   * Accepts a ledger contract ID, a Canton party ID (`hint::1220…`), or the
+   * keccak256(party) hex used as the CCIP message `receiver` field.
+   * When omitted on Canton manual exec, the message receiver hash is used automatically.
+   */
+  receiver?: string
 }
 
 /**

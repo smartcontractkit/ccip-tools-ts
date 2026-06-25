@@ -26,12 +26,13 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
+  ChainFamily,
   bigIntReplacer,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { isHexString } from 'ethers'
+import { hexlify, isHexString } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -44,6 +45,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
+import { loadCantonConfig, resolveCliIndexer } from '../providers/canton.ts'
 import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000
@@ -117,6 +119,11 @@ export const builder = (yargs: Argv) =>
         describe: 'Receiver object IDs for Sui execution (if executing on Sui destination)',
         string: true,
         example: '--receiver-object-ids 0xabc... 0xdef...',
+      },
+      receiver: {
+        type: 'string',
+        describe:
+          'Canton destination: CCIPReceiver contract ID, party ID (hint::1220…), or keccak256(party) from the message receiver field. Defaults to the message receiver when executing on Canton.',
       },
     })
 
@@ -205,8 +212,13 @@ async function manualExec(
   let inputs
   if (source) {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+    const laneInvolvesCanton =
+      dest.network.family === ChainFamily.Canton || source.network.family === ChainFamily.Canton
+    const indexer = resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
     const verifications = await dest.getVerifications({
       ...argv,
+      indexer,
       offRamp,
       request,
     })
@@ -277,10 +289,16 @@ async function manualExec(
     'on network',
     dest.network.name,
   )
+  const messageReceiver =
+    typeof request.message.receiver === 'string'
+      ? request.message.receiver
+      : hexlify(request.message.receiver)
+
   const receipt = await dest.execute({
     ...argv,
     wallet,
     ...(inputs ?? { messageId: request.message.messageId }),
+    receiver: argv.receiver ?? messageReceiver,
   })
 
   switch (argv.format) {

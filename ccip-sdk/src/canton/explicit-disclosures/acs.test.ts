@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { id as keccak256Utf8 } from 'ethers'
+
 import { AcsDisclosureProvider } from './acs.ts'
 import type { CantonClient, JsGetActiveContractsResponse } from '../client/index.ts'
 
@@ -20,11 +22,27 @@ function makeAcsEntry(
   contractId: string,
   createdEventBlob: string,
   signatory: string,
-  opts?: { instanceId?: string; partyOwner?: string },
+  opts?: {
+    instanceId?: string
+    partyOwner?: string
+    owner?: string
+    requiredCCVs?: string[]
+    requiredCCVsLength?: number
+    receiverFinalityConfig?: { tag: string; value: unknown }
+  },
 ): JsGetActiveContractsResponse {
-  const createArgument: Record<string, string> = {}
+  const createArgument: Record<string, unknown> = {}
   if (opts?.instanceId) createArgument['instanceId'] = opts.instanceId
   if (opts?.partyOwner) createArgument['partyOwner'] = opts.partyOwner
+  if (opts?.owner) createArgument['owner'] = opts.owner
+  if (opts?.requiredCCVs) {
+    createArgument['requiredCCVs'] = opts.requiredCCVs.map((unpack) => ({ unpack }))
+  } else if (opts?.requiredCCVsLength != null) {
+    createArgument['requiredCCVs'] = Array.from({ length: opts.requiredCCVsLength }, () => ({}))
+  }
+  if (opts?.receiverFinalityConfig) {
+    createArgument['receiverFinalityConfig'] = opts.receiverFinalityConfig
+  }
   return {
     contractEntry: {
       JsActiveContract: {
@@ -61,12 +79,18 @@ const SENDER_CONTRACT_ID = 'sender-cid-003'
 const SENDER_BLOB = 'sender-blob'
 const SENDER_TEMPLATE_ID = 'pkg-sender:CCIP.CCIPSender:CCIPSender'
 
+const EXECUTE_CCV_RAW =
+  'committeeverifier-tqkny@ccvOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
+const EXECUTE_CCV_HEX = keccak256Utf8(EXECUTE_CCV_RAW)
+const OTHER_CCV_RAW =
+  'other-ccv@ccvOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
 const EXECUTOR_TEMPLATE_ID = 'pkg-executor:CCIP.Executor:Executor'
-
-/** ACS snapshot for the default execute scenario (router + receiver) */
 const DEFAULT_ACS: JsGetActiveContractsResponse[] = [
   makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, { partyOwner: PARTY }),
-  makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY),
+  makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY, {
+    owner: PARTY,
+    receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+  }),
 ]
 
 /** ACS snapshot for the default send scenario (router + sender, plus unrelated executor noise) */
@@ -208,5 +232,100 @@ describe('canton/acs', () => {
       /PerPartyRouter/,
       'should throw mentioning PerPartyRouter',
     )
+  })
+
+  it('resolveReceiverForExecute prefers receivers whose requiredCCVs match configured ccvs', async () => {
+    const matchingCid = 'matching-ccv-receiver-cid'
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'empty-receiver-cid', 'empty-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'wrong-ccv-receiver-cid', 'wrong-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [OTHER_CCV_RAW, OTHER_CCV_RAW],
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, matchingCid, 'matching-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [EXECUTE_CCV_RAW],
+      }),
+    ]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), {
+      party: PARTY,
+      ccvs: [EXECUTE_CCV_HEX],
+    })
+    const resolved = await provider.resolveReceiverForExecute(1)
+
+    assert.equal(resolved?.contractId, matchingCid)
+  })
+
+  it('resolveReceiverForExecute falls back to non-empty requiredCCVs when ccvs is unset', async () => {
+    const configuredCid = 'configured-receiver-cid'
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'empty-receiver-cid', 'empty-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, configuredCid, 'configured-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [OTHER_CCV_RAW],
+      }),
+    ]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
+    const resolved = await provider.resolveReceiverForExecute(1)
+
+    assert.equal(resolved?.contractId, configuredCid)
+  })
+
+  it('resolveReceiverForExecute resolves keccak256(party) message receiver hints', async () => {
+    const hashedParty = keccak256Utf8(PARTY)
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, RECEIVER_CONTRACT_ID, RECEIVER_BLOB, PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [EXECUTE_CCV_RAW],
+      }),
+    ]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), {
+      party: PARTY,
+      ccvs: [EXECUTE_CCV_HEX],
+    })
+    const resolved = await provider.resolveReceiverForExecute(1, hashedParty)
+
+    assert.equal(resolved?.contractId, RECEIVER_CONTRACT_ID)
+  })
+
+  it('resolveReceiverForExecute resolves explicit contract IDs with 0x prefix', async () => {
+    const longReceiverCid =
+      '009d6a63b316ebffe5c495009c7dd9debf3a81cc05796f815b964e4ea09855d328ca1212205be120866d73817cef0ff776f558e0f6c3c14159567c0bc893484ad9b24375f5'
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, longReceiverCid, RECEIVER_BLOB, PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+      }),
+    ]
+
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
+    const resolved = await provider.resolveReceiverForExecute(1, `0x${longReceiverCid}`)
+
+    assert.equal(resolved?.contractId, longReceiverCid)
   })
 })
