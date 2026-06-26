@@ -138,20 +138,14 @@ async function* streamLogs(
       yield* await provider.getLogs(filter_)
       cursor = chunkTo + 1 // advance only after a chunk succeeds
     } catch (err) {
-      // Invalid/inverted range for the serving RPC — e.g. a round-robin proxy
-      // landed on a downstream node whose head lags behind this chunk, so
-      // fromBlock/toBlock sit beyond its tip. Benign: skip the chunk as empty and
-      // move on (the watch loop re-scans the tail on a later tick).
-      if (isInvalidBlockRangesError(err)) {
-        logger.debug('evm getLogs: invalid block range, skipping chunk', {
-          fromBlock: cursor,
-          toBlock: chunkTo,
-          url,
-        })
-        cursor = chunkTo + 1
-        continue
-      }
-
+      // An invalid/inverted range (-32602) — e.g. a round-robin proxy landed on a
+      // downstream node whose head lags behind this chunk — is deliberately NOT
+      // swallowed here. In a bounded (non-watch) backfill there is no later tick to
+      // re-scan the tail, so skipping the chunk as empty would let the caller
+      // checkpoint past blocks that were never actually read (silent log loss).
+      // Let it bubble: the activity fails and Temporal retries from the same
+      // startBlock, hitting a healthier node. parseLogRangeError returns null for
+      // -32602, so the throw below covers it.
       const rangeInfo = parseLogRangeError(err)
       if (rangeInfo === null) throw err
 
