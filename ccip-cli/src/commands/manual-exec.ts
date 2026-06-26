@@ -14,6 +14,9 @@
  *
  * # Execute with custom gas limit
  * ccip-cli manual-exec 0xSourceTxHash... --gas-limit 500000
+ *
+ * # Execute with custom Solana heap frame
+ * ccip-cli manual-exec 0xMessageId... --heap-frame-bytes 262144
  * ```
  *
  * @packageDocumentation
@@ -80,6 +83,11 @@ export const builder = (yargs: Argv) =>
         type: 'number',
         describe:
           'Override gas limit for tokens releaseOrMint calls (0 keeps original, v1.5..v1.6 only)',
+      },
+      'heap-frame-bytes': {
+        type: 'number',
+        describe:
+          'For Solana, request a transaction-wide heap frame size in bytes (must be a multiple of 1024).',
       },
       'estimate-gas-limit': {
         type: 'number',
