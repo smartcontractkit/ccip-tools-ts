@@ -1,0 +1,500 @@
+{
+  "31": {
+    "key": "bitcoin-testnet-rootstock",
+    "chainId": 31,
+    "explorer": "https://explorer.testnet.rsk.co",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer.testnet.rsk.co)."
+  },
+  "51": {
+    "key": "xdc-testnet",
+    "chainId": 51,
+    "explorer": "https://testnet.xdcscan.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "81": {
+    "key": "polkadot-testnet-astar-shibuya",
+    "chainId": 81,
+    "explorer": "https://shibuya.blockscout.com",
+    "provider": "blockscout",
+    "apiUrl": "https://shibuya.blockscout.com/api",
+    "note": "Also on Sourcify."
+  },
+  "97": {
+    "key": "bsc-testnet",
+    "chainId": 97,
+    "explorer": "https://testnet.bscscan.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "133": {
+    "key": "ethereum-testnet-sepolia-hashkey-1",
+    "chainId": 133,
+    "explorer": "https://hashkeychain-testnet-explorer.alt.technology",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://hashkeychain-testnet-explorer.alt.technology)."
+  },
+  "157": {
+    "key": "shibarium-testnet-puppynet",
+    "chainId": 157,
+    "explorer": "https://puppyscan.shib.io",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-puppyscan.shib.io/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint)."
+  },
+  "240": {
+    "key": "cronos-zkevm-testnet-sepolia",
+    "chainId": 240,
+    "explorer": "https://explorer.zkevm.cronos.org/testnet",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer.zkevm.cronos.org/testnet)."
+  },
+  "296": {
+    "key": "hedera-testnet",
+    "chainId": 296,
+    "explorer": "https://hashscan.io/testnet",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api.hashscan.io/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "300": {
+    "key": "ethereum-testnet-sepolia-zksync-1",
+    "chainId": 300,
+    "explorer": "https://sepolia.explorer.zksync.io",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://sepolia.explorer.zksync.io)."
+  },
+  "338": {
+    "key": "cronos-testnet",
+    "chainId": 338,
+    "explorer": "https://explorer.cronos.org/testnet",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer.cronos.org/testnet)."
+  },
+  "679": {
+    "key": "janction-testnet-sepolia",
+    "chainId": 679,
+    "explorer": "https://janction-testnet-explorer.alt.technology",
+    "provider": "unknown",
+    "note": "Custom explorer (https://janction-testnet-explorer.alt.technology); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "919": {
+    "key": "ethereum-testnet-sepolia-mode-1",
+    "chainId": 919,
+    "explorer": "https://sepolia.explorer.mode.network",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://sepolia.explorer.mode.network)."
+  },
+  "998": {
+    "key": "hyperliquid-testnet",
+    "chainId": 998,
+    "explorer": "https://explore-testnet.hyperpc.app",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explore-testnet.hyperpc.app)."
+  },
+  "1001": {
+    "key": "kaia-testnet-kairos",
+    "chainId": 1001,
+    "explorer": "https://kairos.kaiascan.io",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-kairos.kaiascan.io/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "1112": {
+    "key": "wemix-testnet",
+    "chainId": 1112,
+    "explorer": "https://scan.wemix.com/wemixTestnet",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-scan.wemix.com/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "1114": {
+    "key": "core-testnet",
+    "chainId": 1114,
+    "explorer": "https://scan.test2.btcs.network",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-scan.test2.btcs.network/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "1123": {
+    "key": "bitcoin-testnet-bsquared-1",
+    "chainId": 1123,
+    "explorer": "https://testnet-explorer.bsquared.network",
+    "provider": "unknown",
+    "note": "Custom explorer (https://testnet-explorer.bsquared.network); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "1301": {
+    "key": "ethereum-testnet-sepolia-unichain-1",
+    "chainId": 1301,
+    "explorer": "https://sepolia.uniscan.xyz",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "1328": {
+    "key": "sei-testnet-atlantic",
+    "chainId": 1328,
+    "explorer": "https://seitrace.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "1687": {
+    "key": "mint-testnet",
+    "chainId": 1687,
+    "explorer": "https://sepolia-testnet-explorer.mintchain.io",
+    "provider": "unknown",
+    "note": "Custom explorer (https://sepolia-testnet-explorer.mintchain.io); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "1740": {
+    "key": "metal-testnet",
+    "chainId": 1740,
+    "explorer": "https://testnet.explorer.metall2.com",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://testnet.explorer.metall2.com)."
+  },
+  "1946": {
+    "key": "ethereum-testnet-sepolia-soneium-1",
+    "chainId": 1946,
+    "explorer": "https://soneium-minato.blockscout.com",
+    "provider": "blockscout",
+    "apiUrl": "https://soneium-minato.blockscout.com/api",
+    "note": "Also on Sourcify."
+  },
+  "2391": {
+    "key": "tac-testnet",
+    "chainId": 2391,
+    "explorer": "https://spb.explorer.tac.build",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://spb.explorer.tac.build)."
+  },
+  "2910": {
+    "key": "ethereum-testnet-hoodi-morph",
+    "chainId": 2910,
+    "explorer": "https://explorer-hoodi.morphl2.io",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer-hoodi.morphl2.io)."
+  },
+  "4202": {
+    "key": "ethereum-testnet-sepolia-lisk-1",
+    "chainId": 4202,
+    "explorer": "https://sepolia-blockscout.lisk.com",
+    "provider": "blockscout",
+    "apiUrl": "https://sepolia-blockscout.lisk.com/api",
+    "note": "Also on Sourcify."
+  },
+  "4801": {
+    "key": "ethereum-testnet-sepolia-worldchain-1",
+    "chainId": 4801,
+    "explorer": "https://sepolia.worldscan.org",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "5003": {
+    "key": "ethereum-testnet-sepolia-mantle-1",
+    "chainId": 5003,
+    "explorer": "https://sepolia.mantlescan.xyz",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "5611": {
+    "key": "binance-smart-chain-testnet-opbnb-1",
+    "chainId": 5611,
+    "explorer": "https://opbnb-testnet.bscscan.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "6343": {
+    "key": "megaeth-testnet-2",
+    "chainId": 6343,
+    "explorer": "https://megaeth-testnet-v2.blockscout.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "9746": {
+    "key": "plasma-testnet",
+    "chainId": 9746,
+    "explorer": "https://testnet.plasmascan.to",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "10143": {
+    "key": "monad-testnet",
+    "chainId": 10143,
+    "explorer": "https://testnet.monadexplorer.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "10200": {
+    "key": "xdai-testnet-chiado",
+    "chainId": 10200,
+    "explorer": "https://gnosis-chiado.blockscout.com",
+    "provider": "blockscout",
+    "apiUrl": "https://gnosis-chiado.blockscout.com/api",
+    "note": "Also on Sourcify."
+  },
+  "11124": {
+    "key": "abstract-testnet",
+    "chainId": 11124,
+    "explorer": "https://sepolia.abscan.org",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "14601": {
+    "key": "sonic-testnet",
+    "chainId": 14601,
+    "explorer": "https://explorer.testnet.soniclabs.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "16602": {
+    "key": "0g-testnet-galileo-1",
+    "chainId": 16602,
+    "explorer": "https://chainscan-galileo.0g.ai",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://chainscan-galileo.0g.ai)."
+  },
+  "33111": {
+    "key": "apechain-testnet-curtis",
+    "chainId": 33111,
+    "explorer": "https://explorer.curtis.apechain.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "33431": {
+    "key": "edge-testnet",
+    "chainId": 33431,
+    "explorer": "https://edge-testnet.explorer.alchemy.com",
+    "provider": "unknown",
+    "note": "Custom explorer (https://edge-testnet.explorer.alchemy.com); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "37111": {
+    "key": "ethereum-testnet-sepolia-lens-1",
+    "chainId": 37111,
+    "explorer": "https://explorer.testnet.lens.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer.testnet.lens.xyz)."
+  },
+  "42431": {
+    "key": "tempo-testnet-moderato",
+    "chainId": 42431,
+    "explorer": "https://explore.moderato.tempo.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explore.moderato.tempo.xyz)."
+  },
+  "43113": {
+    "key": "avalanche-fuji-testnet",
+    "chainId": 43113,
+    "explorer": "https://testnet.snowtrace.io",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "46630": {
+    "key": "robinhood-testnet",
+    "chainId": 46630,
+    "explorer": "https://explorer.testnet.chain.robinhood.com",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer.testnet.chain.robinhood.com)."
+  },
+  "53302": {
+    "key": "superseed-testnet",
+    "chainId": 53302,
+    "explorer": "https://sepolia-explorer.superseed.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://sepolia-explorer.superseed.xyz)."
+  },
+  "59141": {
+    "key": "ethereum-testnet-sepolia-linea-1",
+    "chainId": 59141,
+    "explorer": "https://sepolia.lineascan.build",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "59902": {
+    "key": "ethereum-testnet-sepolia-andromeda-1",
+    "chainId": 59902,
+    "explorer": "https://sepolia-explorer.metisdevops.link",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://sepolia-explorer.metisdevops.link)."
+  },
+  "80002": {
+    "key": "polygon-testnet-amoy",
+    "chainId": 80002,
+    "explorer": "https://amoy.polygonscan.com",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "84532": {
+    "key": "ethereum-testnet-sepolia-base-1",
+    "chainId": 84532,
+    "explorer": "https://sepolia.basescan.org",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "98867": {
+    "key": "plume-testnet-sepolia",
+    "chainId": 98867,
+    "explorer": "https://testnet-explorer.plumenetwork.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://testnet-explorer.plumenetwork.xyz)."
+  },
+  "99999": {
+    "key": "adi-testnet",
+    "chainId": 99999,
+    "explorer": "https://explorer.ab.testnet.adifoundation.ai",
+    "provider": "unknown",
+    "note": "Custom explorer (https://explorer.ab.testnet.adifoundation.ai); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "192940": {
+    "key": "mind-testnet",
+    "chainId": 192940,
+    "explorer": "https://explorer-testnet.mindnetwork.xyz",
+    "provider": "unknown",
+    "note": "Custom explorer (https://explorer-testnet.mindnetwork.xyz); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "200810": {
+    "key": "bitcoin-testnet-bitlayer-1",
+    "chainId": 200810,
+    "explorer": "https://testnet.btrscan.com",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-testnet.btrscan.com/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "202601": {
+    "key": "ethereum-testnet-sepolia-ronin-1",
+    "chainId": 202601,
+    "explorer": "https://saigon-explorer.roninchain.com",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://saigon-explorer.roninchain.com)."
+  },
+  "421614": {
+    "key": "ethereum-testnet-sepolia-arbitrum-1",
+    "chainId": 421614,
+    "explorer": "https://sepolia.arbiscan.io",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "534351": {
+    "key": "ethereum-testnet-sepolia-scroll-1",
+    "chainId": 534351,
+    "explorer": "https://sepolia.scrollscan.dev",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-sepolia.scrollscan.dev/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "560048": {
+    "key": "ethereum-testnet-hoodi",
+    "chainId": 560048,
+    "explorer": "https://hoodi.etherscan.io",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "686868": {
+    "key": "bitcoin-testnet-merlin",
+    "chainId": 686868,
+    "explorer": "https://testnet-scan.merlinchain.io",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-testnet-scan.merlinchain.io/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint)."
+  },
+  "688689": {
+    "key": "pharos-atlantic-testnet",
+    "chainId": 688689,
+    "explorer": "https://atlantic.pharosscan.xyz",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-atlantic.pharosscan.xyz/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint)."
+  },
+  "743111": {
+    "key": "hemi-testnet-sepolia",
+    "chainId": 743111,
+    "explorer": "https://testnet.explorer.hemi.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://testnet.explorer.hemi.xyz)."
+  },
+  "763373": {
+    "key": "ink-testnet-sepolia",
+    "chainId": 763373,
+    "explorer": "https://explorer-sepolia.inkonchain.com",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://explorer-sepolia.inkonchain.com)."
+  },
+  "808813": {
+    "key": "bitcoin-testnet-sepolia-bob-1",
+    "chainId": 808813,
+    "explorer": "https://bob-sepolia.explorer.gobob.xyz",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://bob-sepolia.explorer.gobob.xyz)."
+  },
+  "2019775": {
+    "key": "jovay-testnet",
+    "chainId": 2019775,
+    "explorer": "https://sepolia-explorer.jovay.io/l2",
+    "provider": "unknown",
+    "note": "Custom explorer (https://sepolia-explorer.jovay.io/l2); not on Etherscan v2, Blockscout, or Sourcify — needs manual config."
+  },
+  "5042002": {
+    "key": "arc-testnet",
+    "chainId": 5042002,
+    "explorer": "https://testnet.arcscan.app",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-testnet.arcscan.app/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "6281971": {
+    "key": "dogeos-testnet-chikyu",
+    "chainId": 6281971,
+    "explorer": "https://blockscout.testnet.dogeos.com",
+    "provider": "blockscout",
+    "apiUrl": "https://blockscout.testnet.dogeos.com/api",
+    "note": "Also on Sourcify."
+  },
+  "11155111": {
+    "key": "ethereum-testnet-sepolia",
+    "chainId": 11155111,
+    "explorer": "https://sepolia.etherscan.io",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "11155420": {
+    "key": "ethereum-testnet-sepolia-optimism-1",
+    "chainId": 11155420,
+    "explorer": "https://sepolia-optimism.etherscan.io",
+    "provider": "etherscan-v2",
+    "note": "Also on Sourcify."
+  },
+  "12227332": {
+    "key": "neox-testnet-t4",
+    "chainId": 12227332,
+    "explorer": "https://xt4scan.ngd.network",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-xt4scan.ngd.network/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint). Also on Sourcify."
+  },
+  "21000001": {
+    "key": "ethereum-testnet-sepolia-corn-1",
+    "chainId": 21000001,
+    "explorer": "https://testnet.cornscan.io",
+    "provider": "etherscan-standalone",
+    "apiUrl": "https://api-testnet.cornscan.io/api",
+    "needsApiKey": true,
+    "note": "Standalone Etherscan-family explorer; needs its own API base + key (not the v2 endpoint)."
+  },
+  "999999999": {
+    "key": "zora-testnet",
+    "chainId": 999999999,
+    "explorer": "https://sepolia.explorer.zora.energy",
+    "provider": "sourcify",
+    "note": "No Etherscan/Blockscout API; verified via Sourcify (https://sepolia.explorer.zora.energy)."
+  }
+}
