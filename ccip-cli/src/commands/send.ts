@@ -41,7 +41,7 @@ import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
-import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -68,8 +68,8 @@ export const builder = (yargs: Argv) =>
     .option('router', {
       alias: 'r',
       type: 'string',
-      demandOption: true,
-      describe: 'Router contract address on source',
+      describe:
+        'Router contract address on EVM source, or CCIPSender instance id on Canton source (defaults to canton-config senderInstanceId)',
     })
     .options({
       receiver: {
@@ -227,9 +227,19 @@ async function sendMessage(
   const { output, logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
+  const router = resolveRouter(argv, sourceNetwork, logger)
+  if (!router) {
+    throw new CCIPArgumentInvalidError(
+      'router',
+      sourceNetwork.family === ChainFamily.Canton
+        ? 'required on Canton source: pass -r or set senderInstanceId in canton-config'
+        : 'required: pass -r with the source router contract address',
+    )
+  }
+
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
-  decodeAddress(argv.router, sourceNetwork.family)
+  decodeAddress(router, sourceNetwork.family)
 
   let data: BytesLike | undefined
   if (argv.data) {
@@ -319,7 +329,7 @@ async function sendMessage(
       const estimated = await estimateReceiveExecution({
         source,
         dest,
-        routerOrRamp: argv.router,
+        routerOrRamp: router,
         message: {
           sender: walletAddress,
           receiver,
@@ -378,7 +388,7 @@ async function sendMessage(
       feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
       feeTokenInfo = await source.getTokenInfo(feeToken)
     } catch (_) {
-      const feeTokens = await source.getFeeTokens(argv.router)
+      const feeTokens = await source.getFeeTokens(router)
       logger.debug('supported feeTokens:', feeTokens)
       for (const [token, info] of Object.entries(feeTokens)) {
         if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue
@@ -389,7 +399,7 @@ async function sendMessage(
       if (!feeTokenInfo) throw new CCIPTokenNotFoundError(argv.feeToken)
     }
   } else {
-    const nativeToken = await source.getNativeTokenForRouter(argv.router)
+    const nativeToken = await source.getNativeTokenForRouter(router)
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
@@ -404,6 +414,7 @@ async function sendMessage(
   // calculate fee
   const fee = await source.getFee({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message,
   })
@@ -460,6 +471,7 @@ async function sendMessage(
 
   const request = await source.sendMessage({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message: { ...message, fee },
     wallet,
@@ -474,11 +486,15 @@ async function sendMessage(
     ', messageId =>',
     request.message.messageId,
   )
-  await showRequests(ctx, {
-    ...argv,
-    txHashOrId: request.tx.hash,
-    'tx-hash-or-id': request.tx.hash,
-    'log-index': undefined,
-    logIndex: undefined,
-  })
+  await showRequests(
+    ctx,
+    {
+      ...argv,
+      txHashOrId: request.tx.hash,
+      'tx-hash-or-id': request.tx.hash,
+      'log-index': undefined,
+      logIndex: undefined,
+    },
+    { request },
+  )
 }
