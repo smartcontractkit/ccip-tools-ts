@@ -467,13 +467,14 @@ describe('getEvmLogs — backfill invariants', () => {
     )
   })
 
-  it('A9 — tolerates -32602 from a lagging RPC: skips unservable chunks, no throw', async () => {
+  it('A9 — -32602 from a lagging RPC throws in backfill (no silent log loss)', async () => {
     const url = 'https://fake-bf-a9.example.com/rpc'
     // Simulate a round-robin proxy whose serving node lags: endBlock resolves to
     // 10000 (an ahead RPC), but getLogs rejects any chunk past head=5000 with
-    // -32602. streamLogs must skip those chunks and stream the servable ones.
+    // -32602. In backfill mode this must throw — silently skipping chunks would
+    // let callers checkpoint past blocks that were never read (silent log loss).
+    // Temporal activities retry from the same startBlock on a healthier node.
     const head = 5000
-    const calls: Array<{ fromBlock: number; toBlock: number }> = []
     const provider = {
       _getConnection: () => ({ url }),
       getBlock: async (tag: string | number) => ({
@@ -481,7 +482,6 @@ describe('getEvmLogs — backfill invariants', () => {
         timestamp: 0,
       }),
       getLogs: async (filter: { fromBlock: number; toBlock: number }) => {
-        calls.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock })
         if (filter.toBlock > head) {
           throw Object.assign(new Error('invalid block range params'), {
             error: { code: -32602 },
@@ -494,23 +494,18 @@ describe('getEvmLogs — backfill invariants', () => {
       once: (_e: unknown, cb: () => void) => setTimeout(cb, 0),
     } as unknown as JsonRpcApiProvider
 
-    const logs = await collect(
-      getEvmLogs(
-        { startBlock: 1, endBlock: 10_000, page: 1000 },
-        { provider, getBlockInfo, logger: silentLogger },
-      ),
-    )
-
-    // Chunks [1..5000] (toBlock <= head) yield logs; [5001..10000] are skipped.
-    assert.equal(logs.length, 5, 'only the 5 servable chunks (up to head) yield logs')
-    assert.ok(
-      logs.every((l) => l.blockNumber <= head),
-      'no logs should come from blocks past the serving RPC head',
-    )
-    // The unservable chunks were attempted (and skipped), not throwing.
-    assert.ok(
-      calls.some((c) => c.toBlock > head),
-      'expected the unservable chunks to have been attempted',
+    await assert.rejects(
+      () =>
+        collect(
+          getEvmLogs(
+            { startBlock: 1, endBlock: 10_000, page: 1000 },
+            { provider, getBlockInfo, logger: silentLogger },
+          ),
+        ),
+      (err: Error) => {
+        assert.equal((err as { error?: { code?: number } }).error?.code, -32602)
+        return true
+      },
     )
   })
 
