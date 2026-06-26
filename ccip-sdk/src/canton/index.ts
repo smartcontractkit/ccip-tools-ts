@@ -139,8 +139,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @param ccipParty - The party ID to use for CCIP operations
    * @param indexerUrl - Base URL of the CCV indexer service.
    * @param network - Network information for this chain.
+   * @param ledgerParty - User ledger party for actAs and transaction lookups (`canton-config.party`)
    * @param ctx - Context containing logger.
-   * @param ledgerParty - Party ID for ledger event visibility (defaults to ccipParty)
    */
   constructor(
     client: CantonClient,
@@ -151,8 +151,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ccipParty: string,
     indexerUrl: string,
     network: NetworkInfo<typeof ChainFamily.Canton>,
+    ledgerParty: string,
     ctx?: ChainContext,
-    ledgerParty?: string,
   ) {
     super(network, ctx)
     this.provider = client
@@ -162,7 +162,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.transferInstructionClient = transferInstructionClient
     this.tokenMetadataClient = tokenMetadataClient
     this.ccipParty = ccipParty
-    this.ledgerParty = ledgerParty ?? ccipParty
+    this.ledgerParty = ledgerParty
     this.indexerUrl = indexerUrl
     this.fetchFn = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
     this.ccvs = normalizeCantonCcvList(ctx?.cantonConfig?.ccvs)
@@ -209,8 +209,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     transferInstructionClient: TransferInstructionClient,
     tokenMetadataClient: TokenMetadataClient,
     ccipParty: string,
-    indexerUrl = MAINNET_INDEXER_URLS[0]!,
-    ledgerParty?: string,
+    indexerUrl: string,
+    ledgerParty: string,
     ctx?: ChainContext,
   ): Promise<CantonChain> {
     const synchronizers = await client.getConnectedSynchronizers()
@@ -234,8 +234,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         ccipParty,
         indexerUrl,
         networkInfo(configChainId) as NetworkInfo<typeof ChainFamily.Canton>,
-        ctx,
         ledgerParty,
+        ctx,
       )
     }
 
@@ -254,8 +254,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           ccipParty,
           indexerUrl,
           networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Canton>,
-          ctx,
           ledgerParty,
+          ctx,
         )
       }
     }
@@ -277,8 +277,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         ccipParty,
         indexerUrl,
         networkInfo(CantonChain.DEFAULT_CANTON_CHAIN_ID) as NetworkInfo<typeof ChainFamily.Canton>,
-        ctx,
         ledgerParty,
+        ctx,
       )
     }
 
@@ -303,6 +303,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
         'CantonChain.fromUrl: ctx.cantonConfig is required',
+      )
+    }
+
+    if (!ctx.cantonConfig.party.trim()) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.fromUrl: ctx.cantonConfig.party is required (ledger actAs party; distinct from ccipParty)',
       )
     }
 
@@ -347,8 +354,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       transferInstructionClient,
       tokenMetadataClient,
       ctx.cantonConfig.ccipParty,
-      ctx.cantonConfig.indexerUrl ?? '',
-      ctx.cantonConfig.party,
+      ctx.cantonConfig.indexerUrl ?? MAINNET_INDEXER_URLS[0]!,
+      ctx.cantonConfig.party.trim(),
       ctx,
     )
   }

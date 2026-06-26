@@ -41,8 +41,7 @@ import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
-import { loadCantonConfig, resolveCliRouter } from '../providers/canton.ts'
-import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -228,12 +227,7 @@ async function sendMessage(
   const { output, logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
-  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
-  const router = resolveCliRouter(
-    argv.router,
-    cantonConfig,
-    sourceNetwork.family === ChainFamily.Canton,
-  )
+  const router = resolveRouter(argv, sourceNetwork, logger)
   if (!router) {
     throw new CCIPArgumentInvalidError(
       'router',

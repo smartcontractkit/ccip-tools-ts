@@ -1,8 +1,7 @@
-import { id as keccak256Utf8 } from 'ethers'
-
 import { normalizeCantonCcvList, receiverRequiresConfiguredCcvs } from '../ccv-addresses.ts'
 import type { DisclosedContract } from './types.ts'
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import { hashedUtf8Hex, isCantonPartyId, normalizeHex } from '../../utils.ts'
 import {
   type CantonClient,
   type EventFormat,
@@ -40,53 +39,55 @@ function extractInstanceId(createArgument: unknown): string | null {
   return extractStringField(createArgument, 'instanceId')
 }
 
-/** Length of a list field on createArgument (empty list → 0). */
-function extractListLength(createArgument: unknown, fieldName: string): number {
-  return extractStringListField(createArgument, fieldName).length
+/** Read a field from ledger `createArgument` (flat object or `{ fields: [{ label, value }] }`). */
+function readCreateArgumentField(createArgument: unknown, fieldName: string): unknown {
+  if (!createArgument || typeof createArgument !== 'object') return undefined
+  const arg = createArgument as Record<string, unknown>
+  if (fieldName in arg) return arg[fieldName]
+  if (Array.isArray(arg['fields'])) {
+    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
+      if (field['label'] === fieldName) return field['value']
+    }
+  }
+  return undefined
 }
 
-/** Extract RawInstanceAddress.unpack strings from a list field on createArgument. */
-function extractStringListField(createArgument: unknown, fieldName: string): string[] {
-  if (!createArgument || typeof createArgument !== 'object') return []
-  const arg = createArgument as Record<string, unknown>
-
-  const listValue = (value: unknown): string[] => {
-    if (Array.isArray(value)) {
-      return value
-        .map((item) => {
-          if (typeof item === 'string') return item
-          if (item && typeof item === 'object') {
-            const record = item as Record<string, unknown>
-            if (typeof record['unpack'] === 'string') return record['unpack']
-            if (record['value'] && typeof record['value'] === 'object') {
-              const nested = record['value'] as Record<string, unknown>
-              if (typeof nested['unpack'] === 'string') return nested['unpack']
-            }
-          }
-          return null
-        })
-        .filter((item): item is string => item != null)
-    }
-    if (value && typeof value === 'object') {
-      const record = value as Record<string, unknown>
-      if (Array.isArray(record['list'])) return listValue(record['list'])
-      if (Array.isArray(record['elements'])) return listValue(record['elements'])
-    }
-    return []
-  }
-
-  if (fieldName in arg) return listValue(arg[fieldName])
-
-  if ('fields' in arg && Array.isArray(arg['fields'])) {
-    for (const field of arg['fields'] as Array<Record<string, unknown>>) {
-      if (field['label'] === fieldName) return listValue(field['value'])
-    }
+/** Ledger list fields may be a bare array or wrapped as `{ list }` / `{ elements }`. */
+function asLedgerList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (Array.isArray(record['list'])) return record['list']
+    if (Array.isArray(record['elements'])) return record['elements']
   }
   return []
 }
 
+/** One `RawInstanceAddress` entry from ledger JSON → its `unpack` hex string, if present. */
+function extractRawInstanceAddressUnpack(item: unknown): string | null {
+  if (typeof item === 'string') return item
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+  if (typeof record['unpack'] === 'string') return record['unpack']
+  const value = record['value']
+  if (
+    value &&
+    typeof value === 'object' &&
+    typeof (value as Record<string, unknown>)['unpack'] === 'string'
+  ) {
+    return (value as Record<string, unknown>)['unpack'] as string
+  }
+  return null
+}
+
+/**
+ * CCIPReceiver `requiredCCVs`: CCV addresses the receiver expects at execute time.
+ * The ledger returns a list of `RawInstanceAddress`; we collect each `unpack` value.
+ */
 function extractRequiredCCVs(createArgument: unknown): string[] {
-  return extractStringListField(createArgument, 'requiredCCVs')
+  return asLedgerList(readCreateArgumentField(createArgument, 'requiredCCVs'))
+    .map(extractRawInstanceAddressUnpack)
+    .filter((address): address is string => address != null)
 }
 
 /**
@@ -230,27 +231,8 @@ interface RichContractMatch {
   partyOwner: string | null
   /** receiverFinalityConfig variant from createArgument (present on CCIPReceiver) */
   receiverFinalityConfig: { tag: string; value: unknown } | null
-  /** requiredCCVs list length from createArgument (present on CCIPReceiver) */
-  requiredCCVsLength: number
   /** RawInstanceAddress.unpack values from requiredCCVs (present on CCIPReceiver) */
   requiredCCVs: string[]
-}
-
-/** Daml party ID: `hint::1220<64-hex-fingerprint>` (not a 3-part instrument id). */
-function isCantonPartyId(value: string): boolean {
-  return /^[\w.-]+::1220[0-9a-fA-F]{64}$/.test(value)
-}
-
-function normalizeHex(value: string): string {
-  return (value.startsWith('0x') ? value.slice(2) : value).toLowerCase()
-}
-
-function normalizeContractId(value: string): string {
-  return normalizeHex(value)
-}
-
-function hashedPartyHex(owner: string): string {
-  return normalizeHex(keccak256Utf8(owner))
 }
 
 function matchesReceiverFinality(
@@ -272,7 +254,7 @@ function rankReceiverCandidates(
 ): RichContractMatch[] {
   const score = (candidate: RichContractMatch): number => {
     if (receiverRequiresConfiguredCcvs(candidate.requiredCCVs, configuredCcvs)) return 2
-    if (candidate.requiredCCVsLength > 0) return 1
+    if (candidate.requiredCCVs.length > 0) return 1
     return 0
   }
   return [...candidates].sort((a, b) => score(b) - score(a))
@@ -350,7 +332,6 @@ async function fetchRichSnapshot(
       partyOwner: extractStringField(created.createArgument, 'partyOwner'),
       receiverFinalityConfig: extractFinalityConfig(created.createArgument),
       requiredCCVs: extractRequiredCCVs(created.createArgument),
-      requiredCCVsLength: extractListLength(created.createArgument, 'requiredCCVs'),
     }
 
     const list = byModuleEntity.get(moduleEntity) ?? []
@@ -374,10 +355,10 @@ function pickByContractId(
   snapshot: Map<string, RichContractMatch[]>,
   cid: string,
 ): DisclosedContract {
-  const want = normalizeContractId(cid)
+  const want = normalizeHex(cid)
   for (const contracts of snapshot.values()) {
     for (const c of contracts) {
-      if (normalizeContractId(c.contractId) === want) {
+      if (normalizeHex(c.contractId) === want) {
         return toDisclosedContract(c)
       }
     }
@@ -580,7 +561,7 @@ export class AcsDisclosureProvider {
         pool = pool.filter((c) => c.owner === trimmed)
       } else {
         const want = normalizeHex(trimmed)
-        pool = pool.filter((c) => c.owner != null && hashedPartyHex(c.owner) === want)
+        pool = pool.filter((c) => c.owner != null && hashedUtf8Hex(c.owner) === want)
       }
     }
 

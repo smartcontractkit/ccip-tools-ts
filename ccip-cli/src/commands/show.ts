@@ -28,7 +28,6 @@ import {
   CCIPExecTxRevertedError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
-  ChainFamily,
   ExecutionState,
   MessageStatus,
   bigIntReplacer,
@@ -50,8 +49,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { loadCantonConfig, resolveCliIndexer } from '../providers/canton.ts'
-import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { fetchChainsFromRpcs, resolveIndexer } from '../providers/index.ts'
 
 export const command = ['show <tx-hash-or-id>', '* <tx-hash-or-id>']
 export const describe = 'Show details of a CCIP request'
@@ -320,10 +318,7 @@ export async function showRequests(
       cancelWaitVerifications = ac.abort.bind(ac)
     }
     verifications$ = (async () => {
-      const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
-      const laneInvolvesCanton =
-        dest.network.family === ChainFamily.Canton || source?.network.family === ChainFamily.Canton
-      const indexer = resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
+      const indexer = resolveIndexer(argv, dest, logger, source)
       const verifications = await dest.getVerifications({
         offRamp,
         request,

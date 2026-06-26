@@ -26,7 +26,6 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
-  ChainFamily,
   bigIntReplacer,
   discoverOffRamp,
   estimateReceiveExecution,
@@ -45,8 +44,7 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { loadCantonConfig, resolveCliIndexer } from '../providers/canton.ts'
-import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveIndexer } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000
 // const MAX_EXECS_IN_BATCH = 1
@@ -212,10 +210,7 @@ async function manualExec(
   let inputs
   if (source) {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
-    const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
-    const laneInvolvesCanton =
-      dest.network.family === ChainFamily.Canton || source.network.family === ChainFamily.Canton
-    const indexer = resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
+    const indexer = resolveIndexer(argv, dest, logger, source)
     const verifications = await dest.getVerifications({
       ...argv,
       indexer,

@@ -1,13 +1,8 @@
-import { id as keccak256Utf8 } from 'ethers'
-
-/** Normalize a hex CCV InstanceAddress for comparison (lowercase, no 0x). */
-export function normalizeCcvHex(value: string): string {
-  return (value.startsWith('0x') ? value.slice(2) : value).toLowerCase()
-}
+import { hashedUtf8Hex, normalizeHex } from '../utils.ts'
 
 /** keccak256 of a RawInstanceAddress.unpack string → InstanceAddress hex. */
 export function hashedRawInstanceAddress(raw: string): string {
-  return normalizeCcvHex(keccak256Utf8(raw))
+  return hashedUtf8Hex(raw)
 }
 
 /** Normalize canton-config `ccvs` to a trimmed, non-empty list. */
@@ -21,9 +16,9 @@ export function ccvAddressesMatch(a: string, b: string): boolean {
   const left = a.trim()
   const right = b.trim()
   if (!left || !right) return false
-  if (normalizeCcvHex(left) === normalizeCcvHex(right)) return true
-  if (left.includes('@') && normalizeCcvHex(right) === hashedRawInstanceAddress(left)) return true
-  if (right.includes('@') && normalizeCcvHex(left) === hashedRawInstanceAddress(right)) return true
+  if (normalizeHex(left) === normalizeHex(right)) return true
+  if (left.includes('@') && normalizeHex(right) === hashedRawInstanceAddress(left)) return true
+  if (right.includes('@') && normalizeHex(left) === hashedRawInstanceAddress(right)) return true
   return false
 }
 

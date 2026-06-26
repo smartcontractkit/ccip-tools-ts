@@ -27,7 +27,6 @@ function makeAcsEntry(
     partyOwner?: string
     owner?: string
     requiredCCVs?: string[]
-    requiredCCVsLength?: number
     receiverFinalityConfig?: { tag: string; value: unknown }
   },
 ): JsGetActiveContractsResponse {
@@ -37,8 +36,6 @@ function makeAcsEntry(
   if (opts?.owner) createArgument['owner'] = opts.owner
   if (opts?.requiredCCVs) {
     createArgument['requiredCCVs'] = opts.requiredCCVs.map((unpack) => ({ unpack }))
-  } else if (opts?.requiredCCVsLength != null) {
-    createArgument['requiredCCVs'] = Array.from({ length: opts.requiredCCVsLength }, () => ({}))
   }
   if (opts?.receiverFinalityConfig) {
     createArgument['receiverFinalityConfig'] = opts.receiverFinalityConfig

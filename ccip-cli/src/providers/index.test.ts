@@ -11,7 +11,12 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { resolveCliIndexer, resolveCliRouter } from './canton.ts'
-import { fetchChainsFromRpcs, filterEndpointsForFamily, isCantonLedgerUrl } from './index.ts'
+import {
+  fetchChainsFromRpcs,
+  filterEndpointsForFamily,
+  isCantonLedgerUrl,
+  resolveRouter,
+} from './index.ts'
 import type { Ctx } from '../commands/index.ts'
 
 // ---------------------------------------------------------------------------
@@ -589,6 +594,20 @@ describe('filterEndpointsForFamily', () => {
   it('gives EVM only non-ledger URLs', () => {
     const filtered = filterEndpointsForFamily(endpoints, ChainFamily.EVM)
     assert.deepEqual([...filtered], ['https://ethereum-sepolia-rpc.publicnode.com'])
+  })
+})
+
+describe('resolveRouter', () => {
+  const cantonSource = networkInfo('canton-testnet')
+  const evmSource = networkInfo('ethereum-testnet-sepolia')
+
+  it('returns explicit CLI -r for any source family', () => {
+    assert.equal(resolveRouter({ router: '0xRouterAddress' }, evmSource), '0xRouterAddress')
+    assert.equal(resolveRouter({ router: 'prod-ccipsender' }, cantonSource), 'prod-ccipsender')
+  })
+
+  it('returns undefined for EVM source without -r', () => {
+    assert.equal(resolveRouter({}, evmSource), undefined)
   })
 })
 

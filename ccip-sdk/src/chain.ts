@@ -196,10 +196,10 @@ export type WithCantonConfig = {
  * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
  */
 export type CantonConfig = {
-  /** Party identifier for the Canton Ledger API. */
+  /** User ledger party for actAs, ACS queries, and transaction visibility (often differs from ccipParty). */
   party: string
 
-  /** CCIP party identifier */
+  /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
   /** JSON Web Token for authentication with the Canton Ledger API. */

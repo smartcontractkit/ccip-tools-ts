@@ -203,6 +203,7 @@ export function loadCantonConfig(
  * CCIP v2 indexer URLs for verification lookups.
  * CLI `--indexer` wins when provided; otherwise uses canton-config `indexerUrl`
  * only when the lane involves Canton (EVM-only lanes keep default indexer behavior).
+ * Prefer {@link resolveIndexer} from `./index.ts` in CLI commands.
  */
 export function resolveCliIndexer(
   cliIndexer: readonly string[] | undefined,
@@ -219,6 +220,7 @@ export function resolveCliIndexer(
  * Router / sender instance id for `ccip-cli send -r`.
  * On Canton source lanes this is the CCIPSender instance id (e.g. `prod-ccipsender`);
  * on EVM it must be the router contract address. CLI `-r` wins when set.
+ * Prefer {@link resolveRouter} from `./index.ts` in CLI commands.
  */
 export function resolveCliRouter(
   cliRouter: string | undefined,

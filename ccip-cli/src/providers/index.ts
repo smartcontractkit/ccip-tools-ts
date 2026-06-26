@@ -7,6 +7,7 @@ import {
   type ChainTransaction,
   type EVMChain,
   type Logger,
+  type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPRpcNotFoundError,
@@ -19,7 +20,12 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
-import { loadCantonConfig, loadCantonWallet } from './canton.ts'
+import {
+  loadCantonConfig,
+  loadCantonWallet,
+  resolveCliIndexer,
+  resolveCliRouter,
+} from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -53,6 +59,44 @@ export function filterEndpointsForFamily(endpoints: Set<string>, family: ChainFa
     return new Set(urls.filter(isCantonLedgerUrl))
   }
   return new Set(urls.filter((url) => !isCantonLedgerUrl(url)))
+}
+
+type CantonCliArgs = Partial<Pick<GlobalOpts, 'cantonConfig'>>
+
+/** CLI argv fields used by {@link resolveRouter}. */
+export type ResolveRouterArgs = CantonCliArgs & { router?: string }
+
+/** CLI argv fields used by {@link resolveIndexer}. */
+export type ResolveIndexerArgs = CantonCliArgs & { indexer?: string[] }
+
+/**
+ * Resolve `ccip-cli send -r` for the source chain.
+ * Canton source: CCIPSender instance id (CLI or canton-config `senderInstanceId`).
+ * EVM source: router contract address (CLI only).
+ */
+export function resolveRouter(
+  argv: ResolveRouterArgs,
+  sourceNetwork: NetworkInfo,
+  logger?: Logger,
+): string | undefined {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+  return resolveCliRouter(argv.router, cantonConfig, sourceNetwork.family === ChainFamily.Canton)
+}
+
+/**
+ * Resolve CCIP v2 indexer URLs for verification lookups on manual-exec / show.
+ * CLI `--indexer` wins; canton-config `indexerUrl` applies only when the lane involves Canton.
+ */
+export function resolveIndexer(
+  argv: ResolveIndexerArgs,
+  dest: Chain,
+  logger?: Logger,
+  source?: Chain,
+): readonly string[] | undefined {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+  const laneInvolvesCanton =
+    dest.network.family === ChainFamily.Canton || source?.network.family === ChainFamily.Canton
+  return resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
 }
 
 /**
