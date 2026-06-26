@@ -72,9 +72,9 @@ export function normalizeDeep<T extends Record<string, unknown>>(
         v && decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.destFamily)
       )
     if (k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i))
-      return decodeAddress(
-        (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-        opts.sourceFamily,
+      return (
+        v &&
+        decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.sourceFamily)
       )
     if (
       v instanceof Uint8Array ||

@@ -404,7 +404,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       commitment: 'confirmed',
       maxSupportedTransactionVersion: 0,
     })
-    if (!tx) throw new CCIPTransactionNotFoundError(hash)
+    if (!tx)
+      throw new CCIPTransactionNotFoundError(hash, { context: { network: this.network.name } })
     if (tx.blockTime) {
       ;(this.getBlockInfo as Memoized<typeof this.getBlockInfo, { async: true }>).cache.set(
         [tx.slot],
