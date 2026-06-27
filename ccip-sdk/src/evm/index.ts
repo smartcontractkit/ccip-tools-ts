@@ -163,7 +163,7 @@ function encodeAddressToEvm(address: BytesLike): string {
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
-function isSigner(wallet: unknown): wallet is Signer {
+export function isSigner(wallet: unknown): wallet is Signer {
   return (
     typeof wallet === 'object' &&
     wallet !== null &&
@@ -177,7 +177,7 @@ function isSigner(wallet: unknown): wallet is Signer {
  * Try sendTransaction() first (works with browser wallets),
  * fallback to signTransaction() + broadcastTransaction() if unsupported.
  */
-async function submitTransaction(
+export async function submitTransaction(
   wallet: Signer,
   tx: TransactionRequest,
   provider: JsonRpcApiProvider,
