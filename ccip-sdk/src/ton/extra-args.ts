@@ -11,7 +11,7 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { bigIntReplacer, bytesToBuffer, decodeAddress, getAddressBytes } from '../utils.ts'
+import { bytesToBuffer, decodeAddress, getAddressBytes, jsonStringify } from '../utils.ts'
 import { asSnakedCell, fromSnakeData } from './utils.ts'
 import { ChainFamily } from '../networks.ts'
 
@@ -64,7 +64,7 @@ function encodeEVMExtraArgsCell(extraArgs: ExtraArgs): Cell {
     Object.keys(extraArgs).filter((k) => k !== '_tag').length !== 2 ||
     !('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
   )
-    throw new CCIPExtraArgsInvalidError(ChainFamily.TON, JSON.stringify(extraArgs, bigIntReplacer))
+    throw new CCIPExtraArgsInvalidError(ChainFamily.TON, jsonStringify(extraArgs))
 
   let gasLimit: bigint | null = null
   if (extraArgs.gasLimit > 0n) {

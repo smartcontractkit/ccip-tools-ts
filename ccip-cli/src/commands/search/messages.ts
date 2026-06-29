@@ -29,7 +29,7 @@ import {
   type MessageSearchResult,
   CCIPAPIClient,
   CCIPApiClientNotAvailableError,
-  bigIntReplacer,
+  jsonStringify,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { select } from '@inquirer/prompts'
@@ -151,7 +151,7 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   // Output results
   switch (argv.format) {
     case Format.json:
-      output.write(JSON.stringify(results, bigIntReplacer, 2))
+      output.write(jsonStringify(results, 2))
       return // no interactive follow-up for JSON
     case Format.log:
       for (const msg of results) output.write(msg)
@@ -196,7 +196,7 @@ async function fetchAndShowDetails(
     const full = await apiClient.getMessageById(messageId)
     switch (format) {
       case Format.json:
-        ctx.output.write(JSON.stringify(full, bigIntReplacer, 2))
+        ctx.output.write(jsonStringify(full, 2))
         break
       case Format.log:
         ctx.output.write('message =', withDateTimestamp(full))

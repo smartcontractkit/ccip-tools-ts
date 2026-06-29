@@ -87,12 +87,12 @@ export {
 } from './types.ts'
 export type { WithRetryConfig } from './utils.ts'
 export {
-  bigIntReplacer,
-  bigIntReviver,
   bytesToBuffer,
   decodeAddress,
   getDataBytes,
   isSupportedTxHash,
+  jsonParse,
+  jsonStringify,
   signalToPromise,
   withRetry,
 } from './utils.ts'

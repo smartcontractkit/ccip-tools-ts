@@ -27,11 +27,11 @@ import {
   CCIPMethodUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
-  bigIntReplacer,
-  bigIntReviver,
   decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
+  jsonParse,
+  jsonStringify,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 'ethers'
@@ -193,19 +193,12 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
   for (const entry of extra) {
     const eqIdx = entry.indexOf('=')
     const key = entry.substring(0, eqIdx)
-    const raw = entry.substring(eqIdx + 1)
-    let value: unknown
+    let value: unknown = entry.substring(eqIdx + 1)
 
     try {
-      // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
-      // The alternation matches JSON strings first (preserved as-is) and number tokens second
-      // (pure integers get quoted; floats/scientific-notation are left alone).
-      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
-        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
-      )
-      value = JSON.parse(quoted, bigIntReviver)
+      value = jsonParse<unknown>(value as string)
     } catch {
-      value = raw
+      // pass
     }
 
     if (key in result) {
@@ -343,13 +336,12 @@ async function sendMessage(
         // --only-estimate: the estimate IS the data output
         if (argv.format === Format.json) {
           output.write(
-            JSON.stringify(
+            jsonStringify(
               {
                 estimated,
                 bufferPercent: argv.estimateGasLimit ?? 0,
                 withBuffer: argv.gasLimit,
               },
-              bigIntReplacer,
               2,
             ),
           )
@@ -427,7 +419,7 @@ async function sendMessage(
     // --only-get-fee: the fee IS the data output
     if (argv.format === Format.json) {
       output.write(
-        JSON.stringify(
+        jsonStringify(
           {
             fee: fee.toString(),
             feeFormatted: formatUnits(fee, feeTokenInfo.decimals),
@@ -435,7 +427,6 @@ async function sendMessage(
             feeTokenSymbol: displaySymbol,
             feeTokenDecimals: feeTokenInfo.decimals,
           },
-          bigIntReplacer,
           2,
         ),
       )

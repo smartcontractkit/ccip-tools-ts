@@ -19,7 +19,7 @@
 import {
   CCIPAPIClient,
   CCIPApiClientNotAvailableError,
-  bigIntReplacer,
+  jsonStringify,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -96,7 +96,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
 
   switch (argv.format) {
     case Format.json:
-      output.write(JSON.stringify(result, bigIntReplacer, 2))
+      output.write(jsonStringify(result, 2))
       break
     case Format.log:
       output.write('Lane Latency:', result)

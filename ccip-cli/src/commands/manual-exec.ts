@@ -26,10 +26,10 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
-  bigIntReplacer,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
+  jsonStringify,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { hexlify, isHexString } from 'ethers'
 import type { Argv } from 'yargs'
@@ -256,13 +256,12 @@ async function manualExec(
       if (argv.onlyEstimate) {
         if (argv.format === Format.json) {
           output.write(
-            JSON.stringify(
+            jsonStringify(
               {
                 estimated,
                 bufferPercent: argv.estimateGasLimit,
                 withBuffer,
               },
-              bigIntReplacer,
               2,
             ),
           )
@@ -311,7 +310,7 @@ async function manualExec(
       )
       break
     case Format.json:
-      output.write(JSON.stringify({ request, receipt }, bigIntReplacer, 2))
+      output.write(jsonStringify({ request, receipt }, 2))
       break
   }
 }

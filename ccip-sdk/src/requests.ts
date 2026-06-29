@@ -33,8 +33,8 @@ import {
   convertKeysToCamelCase,
   decodeAddress,
   getDataBytes,
+  jsonParse,
   leToBigInt,
-  parseJson,
   signalToPromise,
 } from './utils.ts'
 
@@ -218,7 +218,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     (typeof data === 'string' && data.startsWith('{')) ||
     (typeof data === 'object' && !isBytesLike(data))
   ) {
-    if (typeof data === 'string') data = parseJson<Record<string, unknown>>(data)
+    if (typeof data === 'string') data = jsonParse<Record<string, unknown>>(data)
     return decodeJsonMessage(data)
   }
 

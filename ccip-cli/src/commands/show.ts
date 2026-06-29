@@ -30,9 +30,9 @@ import {
   CCIPTransactionNotFoundError,
   ExecutionState,
   MessageStatus,
-  bigIntReplacer,
   discoverOffRamp,
   isSupportedTxHash,
+  jsonStringify,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { isHexString } from 'ethers'
 import type { Argv } from 'yargs'
@@ -111,16 +111,7 @@ export async function showRequests(
     | undefined = argv.format === Format.json ? {} : undefined
   const emitJsonEnvelope = () => {
     if (jsonEnvelope) {
-      const seen = new WeakSet<object>()
-      const uncircularReplacer = (key: string, value: unknown) => {
-        const replaced = bigIntReplacer(key, value)
-        if (typeof replaced === 'object' && replaced !== null) {
-          if (seen.has(replaced)) return undefined
-          seen.add(replaced)
-        }
-        return replaced
-      }
-      output.write(JSON.stringify(jsonEnvelope, uncircularReplacer, 2))
+      output.write(jsonStringify(jsonEnvelope, 2))
     }
   }
 
@@ -166,7 +157,7 @@ export async function showRequests(
               }
               break
             case Format.json:
-              output.write(JSON.stringify({ requests: messages }, bigIntReplacer, 2))
+              output.write(jsonStringify({ requests: messages }, 2))
               break
           }
           logger.info('Use --log-index N for full details on a specific message.')
