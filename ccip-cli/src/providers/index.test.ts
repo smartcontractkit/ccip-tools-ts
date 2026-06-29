@@ -10,7 +10,13 @@ import {
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
-import { fetchChainsFromRpcs } from './index.ts'
+import { resolveCliIndexer, resolveCliRouter } from './canton.ts'
+import {
+  fetchChainsFromRpcs,
+  filterEndpointsForFamily,
+  isCantonLedgerUrl,
+  resolveRouter,
+} from './index.ts'
 import type { Ctx } from '../commands/index.ts'
 
 // ---------------------------------------------------------------------------
@@ -559,5 +565,103 @@ describe('fetchChainsFromRpcs', () => {
       restore()
       ac.abort()
     }
+  })
+})
+
+describe('isCantonLedgerUrl', () => {
+  it('matches Canton JSON Ledger API paths', () => {
+    assert.ok(isCantonLedgerUrl('https://testnet.cv1.bcy-v.metalhosts.com/api/json'))
+    assert.ok(isCantonLedgerUrl('http://localhost:7575'))
+  })
+
+  it('does not match EVM JSON-RPC URLs', () => {
+    assert.ok(!isCantonLedgerUrl('https://ethereum-sepolia-rpc.publicnode.com'))
+    assert.ok(!isCantonLedgerUrl('https://rpcs.cldev.sh/ethereum/sepolia'))
+  })
+})
+
+describe('filterEndpointsForFamily', () => {
+  const endpoints = new Set([
+    'https://testnet.cv1.bcy-v.metalhosts.com/api/json',
+    'https://ethereum-sepolia-rpc.publicnode.com',
+  ])
+
+  it('gives Canton only ledger URLs', () => {
+    const filtered = filterEndpointsForFamily(endpoints, ChainFamily.Canton)
+    assert.deepEqual([...filtered], ['https://testnet.cv1.bcy-v.metalhosts.com/api/json'])
+  })
+
+  it('gives EVM only non-ledger URLs', () => {
+    const filtered = filterEndpointsForFamily(endpoints, ChainFamily.EVM)
+    assert.deepEqual([...filtered], ['https://ethereum-sepolia-rpc.publicnode.com'])
+  })
+})
+
+describe('resolveRouter', () => {
+  const cantonSource = networkInfo('canton-testnet')
+  const evmSource = networkInfo('ethereum-testnet-sepolia')
+
+  it('returns explicit CLI -r for any source family', () => {
+    assert.equal(resolveRouter({ router: '0xRouterAddress' }, evmSource), '0xRouterAddress')
+    assert.equal(resolveRouter({ router: 'prod-ccipsender' }, cantonSource), 'prod-ccipsender')
+  })
+
+  it('returns undefined for EVM source without -r', () => {
+    assert.equal(resolveRouter({}, evmSource), undefined)
+  })
+})
+
+describe('resolveCliIndexer', () => {
+  const configIndexer = 'https://indexer-1.testnet.ccip.chain.link'
+
+  it('prefers explicit CLI --indexer values', () => {
+    assert.deepEqual(
+      resolveCliIndexer(['https://cli-indexer'], { indexerUrl: configIndexer }, true),
+      ['https://cli-indexer'],
+    )
+  })
+
+  it('falls back to canton-config indexerUrl when the lane involves Canton', () => {
+    assert.deepEqual(resolveCliIndexer(undefined, { indexerUrl: configIndexer }, true), [
+      configIndexer,
+    ])
+  })
+
+  it('does not fall back to canton-config indexerUrl for EVM-only lanes', () => {
+    assert.equal(resolveCliIndexer(undefined, { indexerUrl: configIndexer }, false), undefined)
+  })
+
+  it('returns undefined when neither CLI nor config provides an indexer', () => {
+    assert.equal(resolveCliIndexer(undefined, undefined, true), undefined)
+  })
+})
+
+describe('resolveCliRouter', () => {
+  it('prefers explicit CLI -r on Canton source', () => {
+    assert.equal(
+      resolveCliRouter('cli-sender', { senderInstanceId: 'prod-ccipsender' }, true),
+      'cli-sender',
+    )
+  })
+
+  it('prefers explicit CLI -r on EVM source even when canton-config has senderInstanceId', () => {
+    assert.equal(
+      resolveCliRouter('0xRouterAddress', { senderInstanceId: 'prod-ccipsender' }, false),
+      '0xRouterAddress',
+    )
+  })
+
+  it('falls back to canton-config senderInstanceId for Canton source', () => {
+    assert.equal(
+      resolveCliRouter(undefined, { senderInstanceId: 'prod-ccipsender' }, true),
+      'prod-ccipsender',
+    )
+  })
+
+  it('does not fall back to senderInstanceId for EVM source', () => {
+    assert.equal(
+      resolveCliRouter(undefined, { senderInstanceId: 'prod-ccipsender' }, false),
+      undefined,
+    )
   })
 })

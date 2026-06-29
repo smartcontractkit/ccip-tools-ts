@@ -7,6 +7,7 @@ import {
   type Numeric,
   decodeBase64,
   getBytes,
+  id as keccak256Utf8,
   isBytesLike,
   toBeArray,
   toBigInt,
@@ -351,6 +352,9 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
           ? '0x' + address
           : address,
     )
+  } else if (typeof address === 'string' && isCantonPartyId(address)) {
+    // Canton CCIP receivers use keccak256(partyId) as a 32-byte address (see HashedPartyFromString in chainlink-canton).
+    bytes = getBytes(`0x${hashedUtf8Hex(address)}`)
   } else if (typeof address === 'string' && /^-?\d+:[0-9a-f]{64}$/i.test(address)) {
     // TON raw format: "workchain:hash" → 36-byte CCIP format (4-byte BE workchain + 32-byte hash)
     const [workchain, hash] = address.split(':')
@@ -369,6 +373,22 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     if (!bytes) bytes = decodeBase64(address as string)
   }
   return bytes
+}
+
+/** Strip optional `0x` prefix and lowercase for stable hex string comparison. */
+export function normalizeHex(value: string): string {
+  const trimmed = value.trim()
+  return (trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed).toLowerCase()
+}
+
+/** keccak256(utf8 string) as normalized hex (no `0x`). Used for Canton party / InstanceAddress hashes. */
+export function hashedUtf8Hex(value: string): string {
+  return normalizeHex(keccak256Utf8(value))
+}
+
+/** Daml party ID: `hint::1220<64-hex-fingerprint>` (not a 3-part instrument id). */
+export function isCantonPartyId(address: string): boolean {
+  return /^[\w.-]+::1220[0-9a-fA-F]{64}$/.test(address)
 }
 
 /**

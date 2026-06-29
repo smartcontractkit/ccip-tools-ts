@@ -18,16 +18,16 @@ import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
-import type {
-  AnyMessage,
-  CCIPMessage,
-  CCIPRequest,
+import {
+  type AnyMessage,
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainLog,
+  type ChainTransaction,
+  type Lane,
+  type LeanNumbers,
+  type MessageInput,
   CCIPVersion,
-  ChainLog,
-  ChainTransaction,
-  Lane,
-  LeanNumbers,
-  MessageInput,
 } from './types.ts'
 import {
   convertKeysToCamelCase,
@@ -259,6 +259,14 @@ export async function resolveLane(
   log: ChainLog,
 ): Promise<Lane> {
   if ('destChainSelector' in message) {
+    if (source.network.family === ChainFamily.Canton) {
+      return {
+        sourceChainSelector: message.sourceChainSelector,
+        destChainSelector: message.destChainSelector,
+        onRamp: log.address || '',
+        version: CCIPVersion.V2_0,
+      }
+    }
     const [_, version] = await source.typeAndVersion(log.address)
     return {
       sourceChainSelector: message.sourceChainSelector,
