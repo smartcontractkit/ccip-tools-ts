@@ -1301,6 +1301,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Needed to map a source token to its dest counterparts.
    *
    * @param address - Contract address (OnRamp, Router, etc.)
+   * @param destChainSelector - Some dest chain connected to this address/router
    * @returns Promise resolving to TokenAdminRegistry address
    *
    * @example Get token registry
@@ -1309,7 +1310,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Registry: ${registry}`)
    * ```
    */
-  abstract getTokenAdminRegistryFor(address: string): Promise<string>
+  abstract getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string>
 
   /**
    * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
@@ -1332,7 +1333,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // and `router` may be a sender helper (e.g. EtherSenderReceiver) rather than a
       // Router/Ramp — skip the token-pool preflight for them.
       if (!token || token.match(/^(0x)?0*$/i)) continue
-      registry ??= await this.getTokenAdminRegistryFor(router)
+      registry ??= await this.getTokenAdminRegistryFor(router, destChainSelector)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
       if (!remote.outboundRateLimiterState) continue
@@ -1776,7 +1777,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
-        await this.getTokenAdminRegistryFor(onRamp),
+        await this.getTokenAdminRegistryFor(onRamp, opts.destChainSelector),
         opts.token,
       )
       if (tokenPool) {

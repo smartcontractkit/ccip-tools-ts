@@ -111,7 +111,7 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
     destTokenAddress: string
   }
 > {
-  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp)
+  const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp, destChainSelector)
   const sourceTokenAddress = sourceTokenAmount.token
   const { tokenPool: sourcePoolAddress } = await source.getRegistryTokenConfig(
     tokenAdminRegistry,

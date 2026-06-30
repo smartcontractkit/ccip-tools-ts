@@ -1074,36 +1074,41 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param address - Router or OnRamp contract address.
    * @returns OnRamp contract address.
    */
-  async _getSomeOnRampFor(address: string): Promise<string> {
+  async _getSomeOnRampFor(address: string, destChainSelector?: bigint): Promise<string> {
     const [type, , typeAndVersion] = await this.typeAndVersion(address)
     if (type.includes('OnRamp')) return address
     else if (type !== 'Router') throw new CCIPContractNotRouterError(address, typeAndVersion)
     // when given a router, we take any onRamp we can find, as usually they all use same registry
-    const someOtherNetwork =
-      this.network.networkType === NetworkType.Testnet
-        ? this.network.name === 'ethereum-testnet-sepolia'
-          ? 'avalanche-testnet-fuji'
-          : 'ethereum-testnet-sepolia'
-        : this.network.name === 'ethereum-mainnet'
-          ? 'avalanche-mainnet'
-          : 'ethereum-mainnet'
-    return this.getOnRampForRouter(address, networkInfo(someOtherNetwork).chainSelector)
+    if (!destChainSelector) {
+      // usually, we're handed a destChainSelector hint;
+      // but if not, assume this router is connected to one of the ethereum networks (or to Avalanche, if Ethereum)
+      const someOtherNetwork =
+        this.network.networkType === NetworkType.Testnet
+          ? this.network.name === 'ethereum-testnet-sepolia'
+            ? 'avalanche-testnet-fuji'
+            : 'ethereum-testnet-sepolia'
+          : this.network.name === 'ethereum-mainnet'
+            ? 'avalanche-mainnet'
+            : 'ethereum-mainnet'
+      destChainSelector = networkInfo(someOtherNetwork).chainSelector
+    }
+    return this.getOnRampForRouter(address, destChainSelector)
   }
 
   /**
    * {@inheritDoc Chain.getTokenAdminRegistryFor}
    * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
    */
-  async getTokenAdminRegistryFor(address: string): Promise<string> {
+  async getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string> {
     const [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (type.includes('TokenPool')) {
       address = (await this.getTokenPoolConfig(address)).router
-      return this.getTokenAdminRegistryFor(address)
+      return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type === 'Router') {
-      address = await this._getSomeOnRampFor(address)
-      return this.getTokenAdminRegistryFor(address)
+      address = await this._getSomeOnRampFor(address, destChainSelector)
+      return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (!type.includes('Ramp')) {
       const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
