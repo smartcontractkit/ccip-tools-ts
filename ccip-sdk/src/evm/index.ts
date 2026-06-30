@@ -1474,6 +1474,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...populatedMessage,
       fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
     }
+    if (this.network.name.startsWith('hedera-') && (message.feeToken || '').match(/^(0x)?0*$/i))
+      message.fee *= BigInt(10) ** BigInt(10) // hedera's tinybar to weibar for msg.value native fee
 
     const feeToken = message.feeToken || ZeroAddress
     const receiver = encodeAddressToEvm(message.receiver)
