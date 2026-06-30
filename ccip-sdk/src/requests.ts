@@ -18,23 +18,23 @@ import type { EVMChain } from './evm/index.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
-import type {
-  AnyMessage,
-  CCIPMessage,
-  CCIPRequest,
+import {
+  type AnyMessage,
+  type CCIPMessage,
+  type CCIPRequest,
+  type ChainLog,
+  type ChainTransaction,
+  type Lane,
+  type LeanNumbers,
+  type MessageInput,
   CCIPVersion,
-  ChainLog,
-  ChainTransaction,
-  Lane,
-  LeanNumbers,
-  MessageInput,
 } from './types.ts'
 import {
   convertKeysToCamelCase,
   decodeAddress,
   getDataBytes,
+  jsonParse,
   leToBigInt,
-  parseJson,
   signalToPromise,
 } from './utils.ts'
 
@@ -72,9 +72,9 @@ export function normalizeDeep<T extends Record<string, unknown>>(
         v && decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.destFamily)
       )
     if (k?.match(/((source.*address)|sender|issuer|origin|onramp|(feetoken$)|(token.*address$))/i))
-      return decodeAddress(
-        (typeof v === 'bigint' ? v.toString() : v) as BytesLike,
-        opts.sourceFamily,
+      return (
+        v &&
+        decodeAddress((typeof v === 'bigint' ? v.toString() : v) as BytesLike, opts.sourceFamily)
       )
     if (
       v instanceof Uint8Array ||
@@ -218,7 +218,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
     (typeof data === 'string' && data.startsWith('{')) ||
     (typeof data === 'object' && !isBytesLike(data))
   ) {
-    if (typeof data === 'string') data = parseJson<Record<string, unknown>>(data)
+    if (typeof data === 'string') data = jsonParse<Record<string, unknown>>(data)
     return decodeJsonMessage(data)
   }
 
@@ -259,6 +259,14 @@ export async function resolveLane(
   log: ChainLog,
 ): Promise<Lane> {
   if ('destChainSelector' in message) {
+    if (source.network.family === ChainFamily.Canton) {
+      return {
+        sourceChainSelector: message.sourceChainSelector,
+        destChainSelector: message.destChainSelector,
+        onRamp: log.address || '',
+        version: CCIPVersion.V2_0,
+      }
+    }
     const [_, version] = await source.typeAndVersion(log.address)
     return {
       sourceChainSelector: message.sourceChainSelector,

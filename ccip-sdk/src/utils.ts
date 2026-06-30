@@ -7,6 +7,7 @@ import {
   type Numeric,
   decodeBase64,
   getBytes,
+  id as keccak256Utf8,
   isBytesLike,
   toBeArray,
   toBigInt,
@@ -135,48 +136,81 @@ export function* blockRangeGenerator(
   }
 }
 
-/**
- * JSON replacer function that converts BigInt values to strings.
- * @param _key - Property key (unused).
- * @param value - Value to transform.
- * @returns String representation if BigInt, otherwise unchanged value.
- * @example
- * ```typescript
- * import { bigIntReplacer } from '@chainlink/ccip-sdk'
- *
- * const data = { amount: 1000000000000000000n }
- * const json = JSON.stringify(data, bigIntReplacer)
- * console.log(json) // '{"amount":"1000000000000000000"}'
- * ```
- * @see {@link bigIntReviver} - Revive BigInt values when parsing
- */
-export function bigIntReplacer(_key: string, value: unknown): unknown {
-  if (typeof value === 'bigint') {
-    return value.toString()
+function createUncircularReplacer() {
+  const holderStack: object[] = []
+  const ancestorStack: object[] = []
+  const originals = new WeakMap<object, object>()
+
+  const uncircularReplacer = function (this: unknown, _key: string, value: unknown) {
+    // bigints pass through untouched; serialization to bare JSON numbers is
+    // handled by stringifyExtended below.
+    const replaced = value
+    if (typeof replaced !== 'object' || replaced === null) return replaced
+
+    while (holderStack.length > 0 && holderStack.at(-1) !== this) {
+      holderStack.pop()
+      ancestorStack.pop()
+    }
+
+    if (ancestorStack.includes(replaced)) return undefined
+
+    let returned = replaced
+    if (Array.isArray(replaced)) {
+      const filtered = replaced.filter(
+        (item) =>
+          typeof item !== 'object' ||
+          item === null ||
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          (item !== replaced && !ancestorStack.includes(originals.get(item) ?? item)),
+      )
+      if (filtered.length !== replaced.length) {
+        originals.set(filtered, replaced)
+        returned = filtered
+      }
+    }
+
+    holderStack.push(returned)
+    ancestorStack.push(replaced)
+    return returned
   }
-  return value
+  return uncircularReplacer
 }
 
+// Private-use sentinel: JSON.stringify can't emit a bigint, so bigints are first
+// tagged as a string, then the quotes+tag are stripped to leave a bare JSON
+// number.  is in the Unicode private-use area and is left unescaped by
+// JSON.stringify, so it never collides with real (hex/decimal) string data.
+const INT_TAG = 'int:'
+const INT_TAG_RE = new RegExp(`"${INT_TAG}(-?\\d+(?:.0)?)"`, 'g')
+
 /**
- * JSON reviver function that converts numeric strings back to BigInt.
- * @param _key - Property key (unused).
- * @param value - Value to transform.
- * @returns BigInt if numeric string, otherwise unchanged value.
+ * JSON.stringify that drops circular references (via createUncircularReplacer)
+ * and serializes bigints as bare JSON numbers, preserving full precision so a
+ * uint64/uint256 survives the round-trip to Go without becoming a decimal string.
+ * plain `number` integers are also tagged with `.0` suffix, to differentiate them from `bigint`s.
  * @example
  * ```typescript
- * import { bigIntReviver } from '@chainlink/ccip-sdk'
- *
- * const json = '{"amount":"1000000000000000000"}'
- * const data = JSON.parse(json, bigIntReviver)
- * console.log(typeof data.amount) // 'bigint'
+ * jsonStringify({ a: 1n, b: 2, c: { d: 3n } }) // '{"a":1,"b":2.0,"c":{"d":3}}'
+ * yaml.parse('{"a":1,"b":2.0,"c":{"d":3}}', { intAsBigInt: true }) // { a: 1n, b: 2, c: { d: 3n } }
  * ```
- * @see {@link bigIntReplacer} - Stringify BigInt values
  */
-export function bigIntReviver(_key: string, value: unknown): unknown {
-  if (typeof value === 'string' && /^\d+$/.test(value)) {
-    return BigInt(value)
-  }
-  return value
+export function jsonStringify(value: unknown, space?: string | number): string {
+  const uncircular = createUncircularReplacer()
+  const json = JSON.stringify(
+    value,
+    function (this: unknown, key: string, val: unknown) {
+      const replaced = uncircular.call(this, key, val)
+      return typeof replaced === 'bigint'
+        ? INT_TAG + replaced.toString()
+        : typeof replaced === 'number' && Number.isSafeInteger(replaced)
+          ? INT_TAG + replaced.toString() + '.0' // use .0 suffix to distinguish plain numbers
+          : replaced
+    },
+    space,
+  )
+  // JSON.stringify is typed `string` but returns undefined for undefined input.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return json === undefined ? json : json.replace(INT_TAG_RE, '$1')
 }
 
 /**
@@ -185,7 +219,8 @@ export function bigIntReviver(_key: string, value: unknown): unknown {
  * @param text - JSON string to parse
  * @returns Parsed object with large integers as BigInt
  */
-export function parseJson<T = unknown>(text: string): T {
+export function jsonParse<T = unknown>(text: string): T {
+  // `.0`-suffixed integers are parsed as numbers; bare integers are parsed as bigints.
   return yaml.parse(text, { intAsBigInt: true }) as T
 }
 
@@ -351,6 +386,9 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
           ? '0x' + address
           : address,
     )
+  } else if (typeof address === 'string' && isCantonPartyId(address)) {
+    // Canton CCIP receivers use keccak256(partyId) as a 32-byte address (see HashedPartyFromString in chainlink-canton).
+    bytes = getBytes(`0x${hashedUtf8Hex(address)}`)
   } else if (typeof address === 'string' && /^-?\d+:[0-9a-f]{64}$/i.test(address)) {
     // TON raw format: "workchain:hash" → 36-byte CCIP format (4-byte BE workchain + 32-byte hash)
     const [workchain, hash] = address.split(':')
@@ -369,6 +407,22 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     if (!bytes) bytes = decodeBase64(address as string)
   }
   return bytes
+}
+
+/** Strip optional `0x` prefix and lowercase for stable hex string comparison. */
+export function normalizeHex(value: string): string {
+  const trimmed = value.trim()
+  return (trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed).toLowerCase()
+}
+
+/** keccak256(utf8 string) as normalized hex (no `0x`). Used for Canton party / InstanceAddress hashes. */
+export function hashedUtf8Hex(value: string): string {
+  return normalizeHex(keccak256Utf8(value))
+}
+
+/** Daml party ID: `hint::1220<64-hex-fingerprint>` (not a 3-part instrument id). */
+export function isCantonPartyId(address: string): boolean {
+  return /^[\w.-]+::1220[0-9a-fA-F]{64}$/.test(address)
 }
 
 /**

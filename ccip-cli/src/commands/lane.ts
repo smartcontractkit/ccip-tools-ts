@@ -1,4 +1,4 @@
-import { bigIntReplacer, discoverOffRamp, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import { discoverOffRamp, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import { type Ctx, Format } from './types.ts'
@@ -70,7 +70,7 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const jsonEnvelope: Record<string, unknown> | undefined =
     argv.format === Format.json ? {} : undefined
   const emitJsonEnvelope = () => {
-    if (jsonEnvelope) output.write(JSON.stringify(jsonEnvelope, bigIntReplacer, 2))
+    if (jsonEnvelope) output.write(jsonStringify(jsonEnvelope, 2))
   }
 
   const source = await getChain(sourceNetwork.name)

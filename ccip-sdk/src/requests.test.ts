@@ -28,7 +28,7 @@ import {
   type Lane,
   CCIPVersion,
 } from './types.ts'
-import { bigIntReplacer } from './utils.ts'
+import { jsonStringify } from './utils.ts'
 
 let rampAddress: string
 
@@ -192,7 +192,7 @@ describe('getMessagesInTx', () => {
         {
           address: getAddress(hexlify(randomBytes(20))),
           topics: [topic0],
-          data: JSON.stringify(mockedMessage(1), bigIntReplacer),
+          data: jsonStringify(mockedMessage(1)),
           blockNumber: 12000,
           blockTimestamp: 1234567890,
           transactionHash: '0x123',

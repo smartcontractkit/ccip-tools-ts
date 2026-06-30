@@ -6,8 +6,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const CLI_PATH = path.join(__dirname, '..', 'index.ts')
 
 export const RPCS = [
-  process.env['RPC_SEPOLIA'] || 'https://ethereum-sepolia-rpc.publicnode.com',
-  process.env['RPC_AVAX'] || 'https://avalanche-fuji-c-chain-rpc.publicnode.com',
+  process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co',
+  process.env['RPC_AVAX'] || 'https://api.avax-test.network/ext/bc/C/rpc',
   process.env['RPC_APTOS'] || 'testnet',
   process.env['RPC_SOLANA'] || 'https://api.devnet.solana.com',
   process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',

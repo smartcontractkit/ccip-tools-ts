@@ -189,8 +189,50 @@ export function loadCantonConfig(
     }
   }
 
+  if (parsed['chainId'] != null) {
+    if (typeof parsed['chainId'] !== 'string' || !parsed['chainId'].length) {
+      throw new Error('Canton config: "chainId" must be a non-empty string if provided')
+    }
+  }
+
   logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
   return parsed as unknown as CantonConfig
+}
+
+/**
+ * CCIP v2 indexer URLs for verification lookups.
+ * CLI `--indexer` wins when provided; otherwise uses canton-config `indexerUrl`
+ * only when the lane involves Canton (EVM-only lanes keep default indexer behavior).
+ * Prefer {@link resolveIndexer} from `./index.ts` in CLI commands.
+ */
+export function resolveCliIndexer(
+  cliIndexer: readonly string[] | undefined,
+  cantonConfig: Partial<CantonConfig> | undefined,
+  laneInvolvesCanton: boolean,
+): readonly string[] | undefined {
+  if (cliIndexer?.length) return cliIndexer
+  if (!laneInvolvesCanton) return undefined
+  const url = cantonConfig?.indexerUrl?.trim()
+  return url ? [url] : undefined
+}
+
+/**
+ * Router / sender instance id for `ccip-cli send -r`.
+ * On Canton source lanes this is the CCIPSender instance id (e.g. `prod-ccipsender`);
+ * on EVM it must be the router contract address. CLI `-r` wins when set.
+ * Prefer {@link resolveRouter} from `./index.ts` in CLI commands.
+ */
+export function resolveCliRouter(
+  cliRouter: string | undefined,
+  cantonConfig: Partial<CantonConfig> | undefined,
+  sourceIsCanton: boolean,
+): string | undefined {
+  if (cliRouter?.trim()) return cliRouter.trim()
+  if (sourceIsCanton) {
+    const fromConfig = cantonConfig?.senderInstanceId?.trim()
+    if (fromConfig) return fromConfig
+  }
+  return cliRouter
 }
 
 /**

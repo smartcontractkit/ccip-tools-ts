@@ -21,7 +21,7 @@ import { EVMChain } from '../evm/index.ts'
 import { ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
 import { CCIPVersion } from '../types.ts'
-import { bigIntReplacer } from '../utils.ts'
+import { jsonStringify } from '../utils.ts'
 
 const origFetch = globalThis.fetch
 
@@ -773,9 +773,9 @@ describe('CCIPAPIClient', () => {
           destTokenAddress: 'So11111111111111111111111111111111111111113',
         })),
         receiver: 'So11111111111111111111111111111111111111112',
-        destChainSelector: networkInfo('solana-mainnet').chainSelector,
+        destChainSelector: networkInfo('solana-mainnet').chainSelector.toString(),
         extraArgs: {
-          computeUnits: 200000,
+          computeUnits: 200000n,
           accountIsWritableBitmap: '255',
           allowOutOfOrderExecution: false,
           tokenReceiver: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -788,7 +788,7 @@ describe('CCIPAPIClient', () => {
       const customFetch = mock.fn(() =>
         Promise.resolve({
           ok: true,
-          text: () => Promise.resolve(JSON.stringify(response, bigIntReplacer)),
+          text: () => Promise.resolve(jsonStringify(response)),
         }),
       )
       const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })

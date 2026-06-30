@@ -27,7 +27,7 @@ import {
   CCIPVersion,
   MessageStatus,
 } from '../types.ts'
-import { bigIntReviver, decodeAddress, parseJson } from '../utils.ts'
+import { decodeAddress, jsonParse } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
@@ -61,7 +61,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.9.0-a487431'
+export const SDK_VERSION = '1.10.0-c58294d'
 // generate:end
 
 /** SDK telemetry header name */
@@ -292,7 +292,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = parseJson<APIErrorResponse>(await response.text())
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -320,12 +320,12 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = JSON.parse(await response.text(), bigIntReviver) as RawLaneLatencyResponse
+    const raw = jsonParse<RawLaneLatencyResponse>(await response.text())
 
     // Log full raw response for debugging
     this.logger.debug('getLaneLatency raw response:', raw)
 
-    return { totalMs: raw.totalMs }
+    return { totalMs: Number(raw.totalMs) }
   }
 
   /**
@@ -379,7 +379,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = parseJson<APIErrorResponse>(await response.text())
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -553,7 +553,7 @@ export class CCIPAPIClient {
 
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = parseJson<APIErrorResponse>(await response.text())
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON
       }
@@ -565,7 +565,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = parseJson<RawMessagesResponse>(await response.text())
+    const raw = jsonParse<RawMessagesResponse>(await response.text())
 
     this.logger.debug('searchMessages raw response:', raw)
 
@@ -727,7 +727,7 @@ export class CCIPAPIClient {
       // Try to parse structured error response from API
       let apiError: APIErrorResponse | undefined
       try {
-        apiError = parseJson<APIErrorResponse>(await response.text())
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -755,7 +755,7 @@ export class CCIPAPIClient {
       })
     }
 
-    const raw = JSON.parse(await response.text(), bigIntReviver) as RawExecutionInputsResult
+    const raw = jsonParse<RawExecutionInputsResult>(await response.text())
     this.logger.debug('getExecutionInput raw response:', raw)
 
     const offRamp = raw.offramp
@@ -874,7 +874,7 @@ export class CCIPAPIClient {
     const log: ChainLog = {
       transactionHash: sendTransactionHash,
       address: raw.onramp,
-      data: { message: parseJson(text) },
+      data: { message: jsonParse(text) },
       topics: [lane.version < CCIPVersion.V1_6 ? 'CCIPSendRequested' : 'CCIPMessageSent'],
       index: Number(sendLogIndex),
       blockNumber: Number(sendBlockNumber),

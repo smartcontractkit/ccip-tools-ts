@@ -467,7 +467,7 @@ This is unconditional. No format-dependent behavior. The type system enforces it
 | `parse`, `token`, `lane-latency` | Single object (no envelope needed) |
 | `search messages` | JSON array of results |
 
-All `JSON.stringify` calls must use `bigIntReplacer`.
+All JSONs should be stringified with `jsonStringify`, to handle bigints and circular references.
 
 ### Format Switch Pattern
 
@@ -476,13 +476,13 @@ const { output, logger } = ctx
 
 switch (argv.format) {
   case Format.log:
-    output.write('result =', data)                              // stdout
+    output.write('result =', data)         // stdout
     break
   case Format.pretty:
-    prettyTable.call(ctx, data)                                 // stdout (via output.table)
+    prettyTable.call(ctx, data)            // stdout (via output.table)
     break
   case Format.json:
-    output.write(JSON.stringify(data, bigIntReplacer, 2))       // stdout
+    output.write(jsonStringify(data, 2))   // stdout
     break
 }
 

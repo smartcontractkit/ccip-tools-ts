@@ -111,7 +111,8 @@ async function* fetchEventsForward(
         path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
         params: { start, limit },
       })
-      if (!start) fetchBatch.cache.set([+data[0]!.sequence_number], Promise.resolve(data))
+      if (!start && data.length)
+        fetchBatch.cache.set([+data[0]!.sequence_number], Promise.resolve(data))
       return data
     },
     { maxArgs: 1, maxSize: 100, async: true },

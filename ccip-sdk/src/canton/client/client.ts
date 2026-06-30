@@ -225,6 +225,80 @@ export function createCantonClient(config: CantonClientConfig) {
       return data.connectedSynchronizers ?? []
     },
 
+    /** List package IDs supported by this participant (for prepare submission). */
+    async listPackageIds(): Promise<string[]> {
+      const data = await get2<{ packageIds?: string[] }>('/v2/packages')
+      return data.packageIds ?? []
+    },
+
+    /** List vetted packages for a synchronizer (maps package IDs to names). */
+    async listVettedPackages(
+      synchronizerId: string,
+    ): Promise<Array<{ packageId: string; packageName: string; packageVersion: string }>> {
+      const packages: Array<{ packageId: string; packageName: string; packageVersion: string }> = []
+      let pageToken = ''
+      do {
+        const data = await post2<{
+          vettedPackages?: Array<{
+            packages?: Array<{
+              packageId?: string
+              packageName?: string
+              packageVersion?: string
+            }>
+          }>
+          nextPageToken?: string
+        }>(
+          '/v2/package-vetting',
+          {
+            topologyStateFilter: { synchronizerIds: [synchronizerId] },
+            pageToken,
+            pageSize: 500,
+          },
+          undefined,
+          1,
+        )
+        for (const group of data.vettedPackages ?? []) {
+          for (const pkg of group.packages ?? []) {
+            if (pkg.packageId && pkg.packageName) {
+              packages.push({
+                packageId: pkg.packageId,
+                packageName: pkg.packageName,
+                packageVersion: pkg.packageVersion ?? '',
+              })
+            }
+          }
+        }
+        pageToken = data.nextPageToken ?? ''
+      } while (pageToken)
+      return packages
+    },
+
+    /** Resolve one vetted package ID per package name for interactive submission. */
+    async getPreferredPackageIds(
+      actAs: string[],
+      packageNames: string[],
+      synchronizerId: string,
+    ): Promise<string[]> {
+      if (packageNames.length === 0) return []
+      const data = await post2<{
+        packageReferences?: Array<{ packageId?: string }>
+      }>(
+        '/v2/interactive-submission/preferred-packages',
+        {
+          packageVettingRequirements: packageNames.map((packageName) => ({
+            parties: actAs,
+            packageName,
+          })),
+          synchronizerId,
+        },
+        undefined,
+        1,
+      )
+      return (data.packageReferences ?? [])
+        .map((ref) => ref.packageId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    },
+
     /**
      * Check if the ledger API is alive
      */
@@ -252,20 +326,21 @@ export function createCantonClient(config: CantonClientConfig) {
     },
 
     /**
-     * Fetch a transaction by its update ID without requiring a known party.
-     * Uses `filtersForAnyParty` with a wildcard so all visible events are returned.
+     * Fetch a transaction by its update ID.
+     *
+     * When `party` is provided, events are scoped via `filtersByParty` (works on
+     * restricted ledgers). Without a party, falls back to `filtersForAnyParty`
+     * which may be denied with HTTP 403 on production participant nodes.
+     *
      * @param updateId - The update ID (Canton transaction hash)
+     * @param party - Optional party ID to scope visible events
      * @returns The full `JsTransaction` including all events
      */
-    async getTransactionById(updateId: string): Promise<JsTransaction> {
-      const response = await post2<{ transaction: JsTransaction }>(
-        '/v2/updates/transaction-by-id',
-        {
-          updateId,
-          transactionFormat: {
-            eventFormat: {
-              filtersByParty: {},
-              filtersForAnyParty: {
+    async getTransactionById(updateId: string, party?: string): Promise<JsTransaction> {
+      const eventFormat = party
+        ? {
+            filtersByParty: {
+              [party]: {
                 cumulative: [
                   {
                     identifierFilter: {
@@ -276,8 +351,31 @@ export function createCantonClient(config: CantonClientConfig) {
                   },
                 ],
               },
-              verbose: true,
             },
+            verbose: true,
+          }
+        : {
+            filtersByParty: {},
+            filtersForAnyParty: {
+              cumulative: [
+                {
+                  identifierFilter: {
+                    WildcardFilter: {
+                      value: { includeCreatedEventBlob: false },
+                    },
+                  },
+                },
+              ],
+            },
+            verbose: true,
+          }
+
+      const response = await post2<{ transaction: JsTransaction }>(
+        '/v2/updates/transaction-by-id',
+        {
+          updateId,
+          transactionFormat: {
+            eventFormat,
             transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
           },
         },
@@ -572,15 +670,17 @@ async function request<T>(
 
     if (response.status < 200 || response.status >= 300) {
       const errorBody = response.data ?? `HTTP ${response.status}`
-      if (attempt < retries) {
-        console.log(
-          `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
-          errorBody,
-        )
-        await new Promise((r) => setTimeout(r, retryDelayMs))
-        continue
+      const isClientError =
+        response.status >= 400 && response.status < 500 && response.status !== 429
+      if (isClientError || attempt >= retries) {
+        throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
       }
-      throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
+      console.log(
+        `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
+        errorBody,
+      )
+      await new Promise((r) => setTimeout(r, retryDelayMs))
+      continue
     }
 
     const contentLength = response.headers['content-length']

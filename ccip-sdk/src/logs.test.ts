@@ -122,7 +122,10 @@ describe('EVM logs block tags', () => {
       ),
     )
 
+    // The tag is resolved once to a number (for chunking)…
     assert.equal(getBlock.mock.calls[0]!.arguments[0], 'safe')
-    assert.equal(getLogs.mock.calls[0]!.arguments[0].toBlock, 123)
+    // …but the terminal chunk is fetched against the tag itself, not the number,
+    // so a lagging RPC resolves the head rather than rejecting a future toBlock.
+    assert.equal(getLogs.mock.calls[0]!.arguments[0].toBlock, 'safe')
   })
 })

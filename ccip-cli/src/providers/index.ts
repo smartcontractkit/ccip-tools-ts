@@ -7,6 +7,7 @@ import {
   type ChainTransaction,
   type EVMChain,
   type Logger,
+  type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPRpcNotFoundError,
@@ -19,7 +20,12 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import { loadAptosWallet } from './aptos.ts'
-import { loadCantonConfig, loadCantonWallet } from './canton.ts'
+import {
+  loadCantonConfig,
+  loadCantonWallet,
+  resolveCliIndexer,
+  resolveCliRouter,
+} from './canton.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -28,10 +34,80 @@ import type { Ctx } from '../commands/index.ts'
 import type { GlobalOpts } from '../index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
+type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
 
-async function collectEndpoints(
+/**
+ * True for Canton JSON Ledger API base URLs (not EVM/JSON-RPC endpoints).
+ * Used to avoid racing every `--rpc` against every chain family.
+ */
+export function isCantonLedgerUrl(url: string): boolean {
+  try {
+    const { pathname, port } = new URL(url)
+    if (/\/api\/json\/?$/i.test(pathname)) return true
+    if (/\/api\/ledger\/?$/i.test(pathname)) return true
+    if (port === '7575') return true
+  } catch {
+    return false
+  }
+  return false
+}
+
+/** Keep only endpoints that plausibly belong to the requested chain family. */
+export function filterEndpointsForFamily(endpoints: Set<string>, family: ChainFamily): Set<string> {
+  const urls = [...endpoints]
+  if (family === ChainFamily.Canton) {
+    return new Set(urls.filter(isCantonLedgerUrl))
+  }
+  return new Set(urls.filter((url) => !isCantonLedgerUrl(url)))
+}
+
+type CantonCliArgs = Partial<Pick<GlobalOpts, 'cantonConfig'>>
+
+/** CLI argv fields used by {@link resolveRouter}. */
+export type ResolveRouterArgs = CantonCliArgs & { router?: string }
+
+/** CLI argv fields used by {@link resolveIndexer}. */
+export type ResolveIndexerArgs = CantonCliArgs & { indexer?: string[] }
+
+/**
+ * Resolve `ccip-cli send -r` for the source chain.
+ * Canton source: CCIPSender instance id (CLI or canton-config `senderInstanceId`).
+ * EVM source: router contract address (CLI only).
+ */
+export function resolveRouter(
+  argv: ResolveRouterArgs,
+  sourceNetwork: NetworkInfo,
+  logger?: Logger,
+): string | undefined {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+  return resolveCliRouter(argv.router, cantonConfig, sourceNetwork.family === ChainFamily.Canton)
+}
+
+/**
+ * Resolve CCIP v2 indexer URLs for verification lookups on manual-exec / show.
+ * CLI `--indexer` wins; canton-config `indexerUrl` applies only when the lane involves Canton.
+ */
+export function resolveIndexer(
+  argv: ResolveIndexerArgs,
+  dest: Chain,
+  logger?: Logger,
+  source?: Chain,
+): readonly string[] | undefined {
+  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
+  const laneInvolvesCanton =
+    dest.network.family === ChainFamily.Canton || source?.network.family === ChainFamily.Canton
+  return resolveCliIndexer(argv.indexer, cantonConfig, laneInvolvesCanton)
+}
+
+/**
+ * Collects RPC endpoints URLs in rpcs array, rpcsFile an `RPC_` env vars, and returns a Set of unique endpoints
+ * @param this - Context object containing abort signal and logger properties
+ * @param argv - Partial GlobalArgs argv object
+ * @returns Promise resolving to a Set of unique RPC endpoint URLs
+ */
+export async function collectEndpoints(
   this: Ctx,
-  { rpcs, rpcsFile }: { rpcs?: string[]; rpcsFile?: string },
+  { rpcs, rpcsFile }: Pick<FetchGlobalArgs, 'rpcs' | 'rpcsFile'>,
 ): Promise<Set<string>> {
   const endpoints = new Set<string>(
     rpcs
@@ -57,7 +133,6 @@ async function collectEndpoints(
   return endpoints
 }
 
-type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
 export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs): ChainGetter
 export function fetchChainsFromRpcs(
   ctx: Ctx,
@@ -91,11 +166,18 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
       const C = supportedChains[F]
       if (!C) throw new CCIPChainFamilyUnsupportedError(F)
       ctx.abort.throwIfAborted()
-      ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)
+      const familyEndpoints = filterEndpointsForFamily(endpoints, F)
+      ctx.logger.debug(
+        'Racing',
+        familyEndpoints.size,
+        'RPC endpoints for',
+        F,
+        familyEndpoints.size < endpoints.size ? `(filtered from ${endpoints.size})` : '',
+      )
 
       const chains$: Promise<Chain>[] = []
       const txOnlyRacers = new WeakSet<Chain>()
-      for (const url of endpoints) {
+      for (const url of familyEndpoints) {
         const chain$ = C.fromUrl(url, {
           ...ctx,
           abort: ctx.abort,

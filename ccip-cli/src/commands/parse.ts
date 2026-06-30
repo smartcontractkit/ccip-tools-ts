@@ -18,7 +18,7 @@
 
 import {
   CCIPDataParseError,
-  bigIntReplacer,
+  jsonStringify,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
@@ -85,7 +85,7 @@ function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       prettyTable.call(ctx, parsed)
       break
     case Format.json:
-      output.write(JSON.stringify(parsed, bigIntReplacer, 2))
+      output.write(jsonStringify(parsed, 2))
       break
   }
 }
