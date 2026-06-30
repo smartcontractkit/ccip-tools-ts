@@ -6,7 +6,7 @@ import type { RateLimiterState } from '../chain.ts'
 import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
-import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
+import { getAddressBytes, jsonStringify, util } from '../utils.ts'
 
 // Chain/Network
 
@@ -143,10 +143,7 @@ export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
-    const dataStr =
-      typeof data === 'object' && data !== null
-        ? JSON.stringify(data, bigIntReplacer)
-        : String(data)
+    const dataStr = typeof data === 'object' && data !== null ? jsonStringify(data) : String(data)
     super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,

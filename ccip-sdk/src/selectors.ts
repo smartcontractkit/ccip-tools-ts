@@ -1686,6 +1686,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '2026041005': {
+    selector: 13879014182901017172n,
+    name: 'dtcc-mainnet-appchain',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '2494104990': {
     selector: 13231703482326770598n,
     name: 'tron-testnet-shasta-evm',

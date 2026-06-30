@@ -156,6 +156,9 @@ async function formatToken(
     | { sourceTokenAddress?: string; sourcePoolAddress: string }
   ),
 ): Promise<string> {
+  if ('token' in ta && !ta.token) {
+    return ta.amount === 0n ? '0 (paid on-ledger)' : `${ta.amount} (on-ledger)`
+  }
   if (!source) return `${ta.amount} ${'sourcePoolAddress' in ta ? ta.sourcePoolAddress : ta.token}`
   let token
   if ('token' in ta) token = ta.token
