@@ -162,8 +162,8 @@ function encodeAddressToEvm(address: BytesLike): string {
   return hexlify(encodeAddressToAny(address))
 }
 
-/** typeguard for ethers Signer interface (used for `wallet`s)  */
-function isSigner(wallet: unknown): wallet is Signer {
+/** Typeguard for ethers Signer interface (used for `wallet`s). */
+export function isSigner(wallet: unknown): wallet is Signer {
   return (
     typeof wallet === 'object' &&
     wallet !== null &&
@@ -177,7 +177,7 @@ function isSigner(wallet: unknown): wallet is Signer {
  * Try sendTransaction() first (works with browser wallets),
  * fallback to signTransaction() + broadcastTransaction() if unsupported.
  */
-async function submitTransaction(
+export async function submitTransaction(
   wallet: Signer,
   tx: TransactionRequest,
   provider: JsonRpcApiProvider,
@@ -1843,14 +1843,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const config = (await resultToObject(contract.getTokenConfig(token))) as CleanAddressable<
       Partial<Awaited<ReturnType<(typeof contract)['getTokenConfig']>>>
     >
-    if (!config.administrator || config.administrator === ZeroAddress)
+    const hasPending = config.pendingAdministrator && config.pendingAdministrator !== ZeroAddress
+    if ((!config.administrator || config.administrator === ZeroAddress) && !hasPending)
       throw new CCIPTokenNotConfiguredError(token, registry)
-    if (!config.pendingAdministrator || config.pendingAdministrator === ZeroAddress)
-      delete config.pendingAdministrator
+    if (!hasPending) delete config.pendingAdministrator
     if (!config.tokenPool || config.tokenPool === ZeroAddress) delete config.tokenPool
     return {
       ...config,
-      administrator: config.administrator,
+      administrator: config.administrator ?? ZeroAddress,
     }
   }
 
@@ -1879,6 +1879,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     let token,
       router,
+      owner,
+      rateLimitAdmin,
+      feeAdmin,
       allowedFinality,
       tokenTransferFeeConfig,
       previousPool: string | undefined,
@@ -1890,7 +1893,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_ABI>
       token = contract.getToken()
+      owner = contract.owner()
       router = contract.getRouter()
+      rateLimitAdmin = contract.getRateLimitAdmin()
       if (type.endsWith('AndProxy')) {
         const proxy = new Contract(
           tokenPool,
@@ -1919,7 +1924,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         this.provider,
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       token = contract.getToken()
-      router = contract.getDynamicConfig().then(([router]) => router)
+      owner = contract.owner()
+      const dynamicConfig = contract.getDynamicConfig()
+      router = dynamicConfig.then(([router]) => router)
+      rateLimitAdmin = dynamicConfig.then(([, rateLimitAdmin]) => rateLimitAdmin)
+      feeAdmin = dynamicConfig.then(([, , feeAdmin]) => feeAdmin)
       if (type.includes('LockRelease')) {
         const lockBox_ = await resultToObject(contract.getLockBox().catch(() => null))
         if (lockBox_ && !lockBox_.match(/^(0x)?0*$/)) lockBox = lockBox_
@@ -1964,23 +1973,40 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return Promise.all([
       token,
       router,
+      owner,
+      rateLimitAdmin,
+      feeAdmin,
       allowedFinality,
       tokenTransferFeeConfig,
       previousTypeAndVersion,
-    ]).then(([token, router, allowedFinality, tokenTransferFeeConfig, previousTypeAndVersion]) => {
-      return {
-        token: token as CleanAddressable<typeof token>,
-        router: router as CleanAddressable<typeof router>,
-        typeAndVersion,
-        ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
-        ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
-        ...(previousPool != null && {
-          previousPool,
-          previousTypeAndVersion: previousTypeAndVersion![2],
-        }),
-        ...(!!lockBox && { lockBox }),
-      }
-    })
+    ]).then(
+      ([
+        token,
+        router,
+        owner,
+        rateLimitAdmin,
+        feeAdmin,
+        allowedFinality,
+        tokenTransferFeeConfig,
+        previousTypeAndVersion,
+      ]) => {
+        return {
+          token: token as CleanAddressable<typeof token>,
+          router: router as CleanAddressable<typeof router>,
+          owner: owner as CleanAddressable<typeof owner>,
+          typeAndVersion,
+          ...(rateLimitAdmin && { rateLimitAdmin: rateLimitAdmin as string }),
+          ...(feeAdmin && { feeAdmin: feeAdmin as string }),
+          ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+          ...(previousPool != null && {
+            previousPool,
+            previousTypeAndVersion: previousTypeAndVersion![2],
+          }),
+          ...(!!lockBox && { lockBox }),
+        }
+      },
+    )
   }
 
   /**

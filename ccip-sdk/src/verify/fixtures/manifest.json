@@ -1,0 +1,44 @@
+{
+  "CrossChainToken": {
+    "contractName": "contracts/tokens/CrossChainToken.sol:CrossChainToken",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "CrossChainToken.standard-input.json",
+    "abi": "CrossChainToken.abi.json",
+    "initCode": "CrossChainToken.bin"
+  },
+  "ERC20LockBox": {
+    "contractName": "contracts/pools/ERC20LockBox.sol:ERC20LockBox",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "ERC20LockBox.standard-input.json",
+    "abi": "ERC20LockBox.abi.json",
+    "initCode": "ERC20LockBox.bin"
+  },
+  "LockReleaseTokenPool": {
+    "contractName": "contracts/pools/LockReleaseTokenPool.sol:LockReleaseTokenPool",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "LockReleaseTokenPool.standard-input.json",
+    "abi": "LockReleaseTokenPool.abi.json",
+    "initCode": "LockReleaseTokenPool.bin"
+  },
+  "BurnMintTokenPool": {
+    "contractName": "contracts/pools/BurnMintTokenPool.sol:BurnMintTokenPool",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "BurnMintTokenPool.standard-input.json",
+    "abi": "BurnMintTokenPool.abi.json",
+    "initCode": "BurnMintTokenPool.bin"
+  },
+  "CrossChainPoolToken": {
+    "contractName": "contracts/pools/CrossChainPoolToken.sol:CrossChainPoolToken",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "CrossChainPoolToken.standard-input.json",
+    "abi": "CrossChainPoolToken.abi.json",
+    "initCode": "CrossChainPoolToken.bin"
+  },
+  "AdvancedPoolHooks": {
+    "contractName": "contracts/pools/AdvancedPoolHooks.sol:AdvancedPoolHooks",
+    "compilerVersion": "v0.8.26+commit.8a97fa7a",
+    "standardInput": "AdvancedPoolHooks.standard-input.json",
+    "abi": "AdvancedPoolHooks.abi.json",
+    "initCode": "AdvancedPoolHooks.bin"
+  }
+}

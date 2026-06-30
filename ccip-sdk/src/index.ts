@@ -107,6 +107,44 @@ export {
 // errors
 export * from './errors/index.ts'
 
+// token-admin shared types
+export type {
+  AcceptOwnershipParams,
+  AppendRemotePoolAddressesParams,
+  AppendRemotePoolAddressesResult,
+  ApplyChainUpdatesParams,
+  ChainRateLimiterConfig,
+  DeleteChainConfigParams,
+  DeleteChainConfigResult,
+  DeployVerificationTarget,
+  EVMFactoryDeployPoolParams,
+  EVMFactoryDeployTokenAndPoolParams,
+  ExecuteOwnershipTransferParams,
+  FactoryDeployPoolResult,
+  FactoryDeployTokenAndPoolResult,
+  GrantMintBurnAccessParams,
+  MintBurnRole,
+  OwnershipResult,
+  ProvideLiquidityParams,
+  ProvideLiquidityResult,
+  RateLimiterConfig,
+  RemoteChainConfig,
+  RemoveRemotePoolAddressesParams,
+  RemoveRemotePoolAddressesResult,
+  RevokeMintBurnAccessParams,
+  RevokeMintBurnAccessResult,
+  SetAllowedFinalityConfigParams,
+  SetAllowedFinalityConfigResult,
+  SetChainRateLimiterConfigParams,
+  SetFeeAdminParams,
+  SetFeeAdminResult,
+  SetRateLimitAdminParams,
+  SetTokenTransferFeeConfigParams,
+  SetTokenTransferFeeConfigResult,
+  TokenTransferFeeConfigUpdate,
+  TransferOwnershipParams,
+} from './token-admin/types.ts'
+
 // chains
 import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
