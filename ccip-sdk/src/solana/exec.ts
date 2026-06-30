@@ -7,6 +7,7 @@ import {
   type TransactionInstruction,
   AddressLookupTableAccount,
   AddressLookupTableProgram,
+  ComputeBudgetProgram,
   PublicKey,
   SystemProgram,
 } from '@solana/web3.js'
@@ -47,7 +48,12 @@ export async function generateUnsignedExecuteReport(
   payer: PublicKey,
   offramp: PublicKey,
   execReport: ExecutionInput<CCIPMessage_V1_6_Solana>,
-  opts?: { forceLookupTable?: boolean; forceBuffer?: boolean; clearLeftoverAccounts?: boolean },
+  opts?: {
+    forceLookupTable?: boolean
+    forceBuffer?: boolean
+    clearLeftoverAccounts?: boolean
+    heapFrameBytes?: number
+  },
 ): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
 
@@ -125,6 +131,18 @@ export async function generateUnsignedExecuteReport(
     })
     .remainingAccounts(accounts.slice(12))
     .instruction()
+
+  if (opts?.heapFrameBytes != null && opts.heapFrameBytes % 1024 !== 0) {
+    throw new Error(
+      `heapFrameBytes must be a multiple of 1024, got ${opts.heapFrameBytes}`,
+    )
+  }
+
+  if (opts?.heapFrameBytes) {
+    instructions.push(
+      ComputeBudgetProgram.requestHeapFrame({ bytes: opts.heapFrameBytes }),
+    )
+  }
 
   // actual exec tx
   let execIndex = instructions.length

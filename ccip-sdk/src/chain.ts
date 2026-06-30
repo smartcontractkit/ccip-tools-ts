@@ -678,6 +678,8 @@ export type ExecuteOpts = (
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
+  /** For Solana, request a transaction-wide heap frame size in bytes (must be a multiple of 1024). */
+  heapFrameBytes?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
   /** For Solana, create and extend addresses in a lookup table before executing */
