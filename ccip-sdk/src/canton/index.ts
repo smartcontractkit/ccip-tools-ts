@@ -60,7 +60,6 @@ import {
 } from './client/index.ts'
 import {
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
-  DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
 } from './defaults.ts'
@@ -112,7 +111,6 @@ export type {
 export { isCantonWallet, parseCantonInstrumentId, parseInstrumentId } from './types.ts'
 export {
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
-  DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
 } from './defaults.ts'
@@ -1963,14 +1961,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /**
    * Build a message targeted at this Canton destination chain, populating missing fields.
    *
-   * Canton lanes require GenericExtraArgsV3. Default `finality` to `finalized` when unset,
-   * and set the Go CLI `NoExecutionTag` executor when unset so * → Canton sends do not
-   * auto-execute on Canton (manual `canton execute` flow).
+   * Canton lanes require GenericExtraArgsV3. Default `finality` to `finalized` when unset.
+   * Empty `executor` is left for the source OnRamp lane `defaultExecutor` (no-execution on EVM → Canton).
    */
   static override buildMessageForDest(message: Parameters<ChainStatic['buildMessageForDest']>[0]) {
     const extraArgs = message.extraArgs
     const hasFinality = extraArgs != null && 'finality' in extraArgs && extraArgs.finality != null
-    const built = super.buildMessageForDest(
+    return super.buildMessageForDest(
       hasFinality
         ? message
         : {
@@ -1978,22 +1975,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
             extraArgs: { ...extraArgs, finality: 'finalized' },
           },
     )
-    const builtExtraArgs = built.extraArgs
-    if (!('ccvs' in builtExtraArgs)) return built
-
-    const executor =
-      'executor' in builtExtraArgs && typeof builtExtraArgs.executor === 'string'
-        ? builtExtraArgs.executor.trim()
-        : ''
-    if (executor) return built
-
-    return {
-      ...built,
-      extraArgs: {
-        ...builtExtraArgs,
-        executor: DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
-      },
-    }
   }
 }
 

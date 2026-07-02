@@ -4,14 +4,13 @@ import { describe, it } from 'node:test'
 import { EVMChain } from '../evm/index.ts'
 import { ChainFamily } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
-import { DEFAULT_CANTON_NO_EXECUTION_EXECUTOR } from './defaults.ts'
 import { CantonChain } from './index.ts'
 
 // Ensure Canton is registered in supportedChains for buildMessageForDest(..., ChainFamily.Canton).
 void CantonChain
 
 describe('CantonChain.buildMessageForDest', () => {
-  it('sets NoExecutionTag executor for V3 when executor is unset', () => {
+  it('leaves executor empty for V3 when unset (OnRamp lane default applies on send)', () => {
     const result = buildMessageForDest(
       {
         receiver: '0x' + 'ab'.repeat(32),
@@ -20,10 +19,7 @@ describe('CantonChain.buildMessageForDest', () => {
       ChainFamily.Canton,
     )
     assert.equal('ccvs' in result.extraArgs, true)
-    assert.equal(
-      'executor' in result.extraArgs && result.extraArgs.executor,
-      DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
-    )
+    assert.equal('executor' in result.extraArgs && result.extraArgs.executor, '')
   })
 
   it('preserves an explicit executor on V3 Canton-dest messages', () => {
@@ -50,10 +46,7 @@ describe('CantonChain.buildMessageForDest', () => {
     assert.equal('finality' in result.extraArgs && result.extraArgs.finality, 'finalized')
     assert.ok('gasLimit' in result.extraArgs)
     assert.equal(result.extraArgs.gasLimit, 100_000n)
-    assert.equal(
-      'executor' in result.extraArgs && result.extraArgs.executor,
-      DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
-    )
+    assert.equal('executor' in result.extraArgs && result.extraArgs.executor, '')
   })
 
   it('defaults finality to finalized when extraArgs omitted', () => {
@@ -66,10 +59,7 @@ describe('CantonChain.buildMessageForDest', () => {
     )
     assert.equal('ccvs' in result.extraArgs, true)
     assert.equal('finality' in result.extraArgs && result.extraArgs.finality, 'finalized')
-    assert.equal(
-      'executor' in result.extraArgs && result.extraArgs.executor,
-      DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
-    )
+    assert.equal('executor' in result.extraArgs && result.extraArgs.executor, '')
   })
 
   it('preserves explicit finality overrides', () => {

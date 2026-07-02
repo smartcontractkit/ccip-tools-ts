@@ -133,7 +133,6 @@ export { parseCantonInstrumentId, parseInstrumentId } from './canton/types.ts'
 export {
   type CantonOperationalDefaults,
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
-  DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   resolveCantonSendGasLimit,

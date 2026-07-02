@@ -5,10 +5,6 @@ import type { CantonConfig } from '../chain.ts'
  * Prefer `canton-config.json` for environment defaults and CLI / `extraArgs` for per-send overrides.
  */
 
-/** V3 executor sentinel for EVM → Canton (no auto-execute). Go CLI `profiles.NoExecutionTag`. */
-export const DEFAULT_CANTON_NO_EXECUTION_EXECUTOR =
-  '0xEBa517d200000000000000000000000000000000' as const
-
 /** Default gas for Canton → destination sends when `extraArgs.gasLimit` is omitted. */
 export const DEFAULT_CANTON_SEND_GAS_LIMIT = 50_000n
 
