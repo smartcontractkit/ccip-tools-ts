@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { id as keccak256Utf8 } from 'ethers'
+import { hexlify, id as keccak256Utf8, toUtf8Bytes } from 'ethers'
 
 import {
   ccvAddressesMatch,
@@ -84,19 +84,19 @@ describe('canton/ccv-addresses', () => {
   })
 
   it('decodeCantonVerifierDestAddress decodes hex-encoded indexer dest addresses', () => {
-    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    const hexEncoded = hexlify(toUtf8Bytes(EXECUTE_CCV_RAW)).slice(2)
     assert.equal(decodeCantonVerifierDestAddress(`0x${hexEncoded}`), EXECUTE_CCV_RAW)
     assert.equal(decodeCantonVerifierDestAddress(EXECUTE_CCV_RAW), EXECUTE_CCV_RAW)
   })
 
   it('resolveExecuteCcvAddress hashes raw unpack to InstanceAddress hex', () => {
     assert.equal(resolveExecuteCcvAddress(EXECUTE_CCV_RAW), EXECUTE_CCV_HEX)
-    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    const hexEncoded = hexlify(toUtf8Bytes(EXECUTE_CCV_RAW)).slice(2)
     assert.equal(resolveExecuteCcvAddress(`0x${hexEncoded}`), EXECUTE_CCV_HEX)
   })
 
   it('resolveExecuteCcvAddress does not apply canton-config ccvs override', () => {
-    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    const hexEncoded = hexlify(toUtf8Bytes(EXECUTE_CCV_RAW)).slice(2)
     assert.notEqual(
       resolveExecuteCcvAddress(`0x${hexEncoded}`),
       resolveEdsCcvAddress(`0x${hexEncoded}`, [
@@ -111,7 +111,7 @@ describe('canton/ccv-addresses', () => {
   })
 
   it('damlRequiredCcvsList decodes hex-encoded attestation addresses', () => {
-    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    const hexEncoded = hexlify(toUtf8Bytes(EXECUTE_CCV_RAW)).slice(2)
     assert.deepEqual(damlRequiredCcvsList([`0x${hexEncoded}`]), [{ unpack: EXECUTE_CCV_RAW }])
   })
 })

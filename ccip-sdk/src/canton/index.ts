@@ -20,7 +20,7 @@ import {
   CCIPNotImplementedError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
-import type { ExtraArgs } from '../extra-args.ts'
+import type { ExtraArgs, FinalityRequested } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { readMessageV1ChainSelectors, readMessageV1OffRampAddress } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -114,10 +114,6 @@ export type {
 export { isCantonWallet, parseCantonInstrumentId, parseInstrumentId } from './types.ts'
 export {
   type CantonOperationalDefaults,
-  CANTON_DEFAULT_SENDER_INSTANCE_ID,
-  CANTON_DEFAULT_SEND_GAS_LIMIT,
-  CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
-  CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
   DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
@@ -1515,9 +1511,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const res = await this.fetchFn(url)
     if (!res.ok) {
       const body = await res.text()
+      const isVerificationNotIndexed =
+        res.status === 404 &&
+        (body.includes('MessageID not found') || body.includes('"status":404'))
+      const waitHint = isVerificationNotIndexed
+        ? cantonIndexerVerificationWaitHint(request.message)
+        : undefined
+      if (waitHint) this.logger.warn(waitHint)
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `Canton indexer responded with ${res.status} for message ${indexerMessageId} (${url})${body ? `: ${body}` : ''}`,
+        `Canton indexer responded with ${res.status} for message ${indexerMessageId} (${url})${body ? `: ${body}` : ''}${waitHint ? `\n${waitHint}` : ''}`,
       )
     }
 
@@ -1992,10 +1995,17 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Build a message targeted at this Canton destination chain, populating missing fields.
+   * Canton lanes require GenericExtraArgsV3; default `finality` to `finalized` like other chains.
    * EVM → Canton NoExecutionTag defaults are applied in `evm/index.ts` (`populateMessageForDest`).
    */
   static override buildMessageForDest(message: Parameters<ChainStatic['buildMessageForDest']>[0]) {
-    return super.buildMessageForDest(message)
+    const extraArgs = message.extraArgs
+    const hasFinality = extraArgs != null && 'finality' in extraArgs && extraArgs.finality != null
+    if (hasFinality) return super.buildMessageForDest(message)
+    return super.buildMessageForDest({
+      ...message,
+      extraArgs: { ...extraArgs, finality: 'finalized' },
+    })
   }
 }
 
@@ -2005,6 +2015,42 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
 const CANTON_ACS_PROPAGATION_TIMEOUT_MS = 60_000
 const CANTON_ACS_PROPAGATION_POLL_MS = 500
+
+/** User-facing hint when CCV results are not on the indexer yet (common during source finality wait). */
+function cantonIndexerVerificationWaitHint(message: object): string {
+  const finality = readMessageRequestedFinality(message)
+  if (finality === 'finalized' || finality == null) {
+    return (
+      'Canton indexer has no CCV verification for this message yet. ' +
+      'This send uses finalized finality (the default when unset) — ' +
+      'relayers publish verifications only after the source chain finalizes. ' +
+      'Wait until the finalized column clears in manual-exec output, then retry. '
+    )
+  }
+  if (finality === 'safe') {
+    return (
+      'Canton indexer has no CCV verification for this message yet. ' +
+      'This send requested safe finality — wait for the source chain to reach safe, then retry manual-exec.'
+    )
+  }
+  return (
+    `Canton indexer has no CCV verification for this message yet. ` +
+    `This send requested ${finality} source block confirmation(s) — wait for that finality, then retry manual-exec.`
+  )
+}
+
+function readMessageRequestedFinality(message: object): FinalityRequested | undefined {
+  if (!('finality' in message)) return undefined
+  const { finality } = message as { finality?: FinalityRequested }
+  if (
+    finality === 'finalized' ||
+    finality === 'safe' ||
+    (typeof finality === 'number' && Number.isFinite(finality))
+  ) {
+    return finality
+  }
+  return undefined
+}
 
 type CantonTransferFactoryData = {
   factoryId: string

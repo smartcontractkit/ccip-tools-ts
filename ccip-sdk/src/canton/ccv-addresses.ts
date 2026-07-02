@@ -1,4 +1,6 @@
-import { hashedUtf8Hex, normalizeHex } from '../utils.ts'
+import { toUtf8String } from 'ethers'
+
+import { getDataBytes, hashedUtf8Hex, normalizeHex } from '../utils.ts'
 
 /**
  * Decode Canton indexer `verifier_dest_address` to a RawInstanceAddress.unpack string.
@@ -11,7 +13,7 @@ export function decodeCantonVerifierDestAddress(destAddress: string): string {
   const hex = trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed
   if (/^[0-9a-fA-F]+$/.test(hex) && hex.length >= 2 && hex.length % 2 === 0) {
     try {
-      const decoded = Buffer.from(hex, 'hex').toString('utf8')
+      const decoded = toUtf8String(getDataBytes(`0x${hex}`))
       if (decoded.includes('@') && decoded.includes('::')) return decoded
     } catch {
       // fall through

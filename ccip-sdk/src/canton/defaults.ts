@@ -19,15 +19,6 @@ export const DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT = '1.0'
 /** CCIPSender `instanceId` when creating a missing sender contract. */
 export const DEFAULT_CANTON_SENDER_INSTANCE_ID = 'ccipsender'
 
-/** @deprecated Use {@link DEFAULT_CANTON_NO_EXECUTION_EXECUTOR} */
-export const CANTON_NO_EXECUTION_EXECUTOR = DEFAULT_CANTON_NO_EXECUTION_EXECUTOR
-/** @deprecated Use {@link DEFAULT_CANTON_SEND_GAS_LIMIT} */
-export const CANTON_DEFAULT_SEND_GAS_LIMIT = DEFAULT_CANTON_SEND_GAS_LIMIT
-/** @deprecated Use {@link DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT} */
-export const CANTON_FEE_TRANSFER_FACTORY_AMOUNT = DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT
-/** @deprecated Use {@link DEFAULT_CANTON_SENDER_INSTANCE_ID} */
-export const CANTON_DEFAULT_SENDER_INSTANCE_ID = DEFAULT_CANTON_SENDER_INSTANCE_ID
-
 /** Canton operational defaults overridable via {@link CantonConfig}. */
 export type CantonOperationalDefaults = Pick<
   CantonConfig,
