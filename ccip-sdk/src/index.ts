@@ -123,11 +123,29 @@ export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type {
+  CantonInstrumentId,
   CantonWallet,
   PartySignatures,
   TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
+export { parseCantonInstrumentId, parseInstrumentId } from './canton/types.ts'
+export {
+  type CantonOperationalDefaults,
+  CANTON_DEFAULT_SENDER_INSTANCE_ID,
+  CANTON_DEFAULT_SEND_GAS_LIMIT,
+  CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
+  CANTON_NO_EXECUTION_EXECUTOR,
+  DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
+  DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
+  DEFAULT_CANTON_SENDER_INSTANCE_ID,
+  DEFAULT_CANTON_SEND_GAS_LIMIT,
+  applyCantonDestExecutorDefault,
+  resolveCantonSendGasLimit,
+  resolveFeeTransferFactoryAmount,
+  resolveNoExecutionExecutor,
+  resolveSenderInstanceId,
+} from './canton/defaults.ts'
 export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'

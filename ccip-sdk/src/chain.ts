@@ -249,6 +249,24 @@ export type CantonConfig = {
   senderInstanceId?: string
 
   /**
+   * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.
+   * ccip-cli `--gas-limit` and `extraArgs.gasLimit` override this.
+   */
+  defaultSendGasLimit?: number | bigint
+
+  /**
+   * Transfer-factory preview amount for Canton fee-token payments.
+   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   */
+  feeTransferFactoryAmount?: string
+
+  /**
+   * V3 `extraArgs.executor` sentinel for EVM → Canton when unset on the message.
+   * Matches Go CLI network profile `NoExecutionTag`. `extraArgs.executor` overrides this.
+   */
+  noExecutionExecutor?: string
+
+  /**
    * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
    * Used for execute (EDS disclosures + receiver matching) and as the default for
    * Canton send `senderRequiredCCVs` when `extraArgs.ccvRawAddresses` is omitted.
@@ -704,6 +722,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
   /** Abort signal from ChainContext; fires when the chain should tear down. */
   readonly abort: AbortSignal
+  /** Optional Canton connection defaults (from `ChainContext.cantonConfig`). */
+  readonly cantonConfig?: CantonConfig
 
   /**
    * Base constructor for Chain class.
@@ -712,7 +732,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient, apiRetryConfig, abort } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig, abort, cantonConfig } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -722,6 +742,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
     this.network = network as NetworkInfo<F>
     this.logger = logger
+    this.cantonConfig = cantonConfig
 
     const ac = new AbortController()
     this.abort = ac.signal

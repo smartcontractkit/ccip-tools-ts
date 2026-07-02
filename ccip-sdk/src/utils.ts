@@ -14,6 +14,7 @@ import {
 } from 'ethers'
 import yaml from 'yaml'
 
+import { isCantonUpdateId } from './canton/update-id.ts'
 import type { Chain, ChainStatic } from './chain.ts'
 import {
   CCIPBlockBeforeTimestampNotFoundError,
@@ -259,6 +260,7 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
  * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not supported
  */
 export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
+  if (typeof txHash === 'string' && isCantonUpdateId(txHash)) return true
   let chains: ChainStatic[]
   if (!family) chains = Object.values(supportedChains)
   else if (family in supportedChains) chains = [supportedChains[family]!]

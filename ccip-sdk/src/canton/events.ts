@@ -321,6 +321,34 @@ export function extractEventsFromTransaction(obj: unknown): unknown[] {
   return results
 }
 
+/**
+ * Find the contract ID of a newly created template in a ledger transaction.
+ * Mirrors Go `extractCreatedReceiverCID` / `cantonops.extractCreatedReceiverCID`.
+ */
+export function extractCreatedContractId(
+  transaction: unknown,
+  entityName: string,
+): string | undefined {
+  for (const event of extractEventsFromTransaction(transaction)) {
+    if (!event || typeof event !== 'object') continue
+    const rec = event as Record<string, unknown>
+    const contractId = rec.contractId ?? rec.contract_id
+    if (typeof contractId !== 'string') continue
+
+    const templateId = rec.templateId ?? rec.template_id
+    const tid =
+      typeof templateId === 'string'
+        ? templateId
+        : getTemplateEntityName(
+            templateId && typeof templateId === 'object'
+              ? { ...rec, templateId, template_id: templateId }
+              : rec,
+          )
+    if (tid.includes(entityName)) return contractId
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Low-level field helpers
 // ---------------------------------------------------------------------------
@@ -410,6 +438,12 @@ export function getTemplateEntityName(event: Record<string, unknown>): string {
   // gRPC format: { template_id: { entity_name: "..." } }
   if (event.template_id && typeof event.template_id === 'object') {
     const tid = event.template_id as Record<string, unknown>
+    if (typeof tid.entity_name === 'string') return tid.entity_name
+  }
+  // JSON API object format: { templateId: { entityName: "..." } }
+  if (event.templateId && typeof event.templateId === 'object') {
+    const tid = event.templateId as Record<string, unknown>
+    if (typeof tid.entityName === 'string') return tid.entityName
     if (typeof tid.entity_name === 'string') return tid.entity_name
   }
   // Legacy flat format: "packageId:Module:Entity" or "Module:Entity"

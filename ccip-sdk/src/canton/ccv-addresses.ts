@@ -1,5 +1,49 @@
 import { hashedUtf8Hex, normalizeHex } from '../utils.ts'
 
+/**
+ * Decode Canton indexer `verifier_dest_address` to a RawInstanceAddress.unpack string.
+ * The indexer returns UTF-8 bytes as a hex string; Go uses `string(vr.VerifierDestAddress)`.
+ */
+export function decodeCantonVerifierDestAddress(destAddress: string): string {
+  const trimmed = destAddress.trim()
+  if (trimmed.includes('@')) return trimmed
+
+  const hex = trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed
+  if (/^[0-9a-fA-F]+$/.test(hex) && hex.length >= 2 && hex.length % 2 === 0) {
+    try {
+      const decoded = Buffer.from(hex, 'hex').toString('utf8')
+      if (decoded.includes('@') && decoded.includes('::')) return decoded
+    } catch {
+      // fall through
+    }
+  }
+  return trimmed
+}
+
+/** InstanceAddress hex for CCV execute EDS lookups (mirrors Go `InstanceAddress()`). */
+export function resolveExecuteCcvAddress(verifierDestAddress: string): string {
+  const raw = decodeCantonVerifierDestAddress(verifierDestAddress)
+  if (raw.includes('@')) return `0x${hashedUtf8Hex(raw)}`
+  const normalized = normalizeHex(raw)
+  return normalized.startsWith('0x') ? normalized : `0x${normalized}`
+}
+
+/** Whether a receiver's requiredCCVs already include the attestation CCV. */
+export function receiverRequiredCcvConfigured(
+  receiverRequiredCCVs: readonly string[],
+  attestationCcvRaw: string,
+): boolean {
+  const want = decodeCantonVerifierDestAddress(attestationCcvRaw)
+  return receiverRequiredCCVs.some((required) => ccvAddressesMatch(required, want))
+}
+
+/** Daml list items for CCIPReceiver `requiredCCVs` / `UpdateRequiredCCVs`. */
+export function damlRequiredCcvsList(rawUnpackAddresses: readonly string[]): { unpack: string }[] {
+  return rawUnpackAddresses.map((raw) => ({
+    unpack: decodeCantonVerifierDestAddress(raw),
+  }))
+}
+
 /** keccak256 of a RawInstanceAddress.unpack string → InstanceAddress hex. */
 export function hashedRawInstanceAddress(raw: string): string {
   return hashedUtf8Hex(raw)

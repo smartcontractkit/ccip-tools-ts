@@ -75,7 +75,8 @@ export interface UnsignedCantonTx {
 /**
  * Identifies a token on Canton (maps to `splice_api_token_holding_v1.InstrumentId`).
  *
- * Encoded as `"admin::tokenId"` in the SDK's `message.feeToken` string.
+ * Encoded as `"party::fingerprint::tokenId"` (e.g. `ccipOwner::1220…::link-token`).
+ * The ledger stores `admin` as `party::fingerprint` and `id` as the token name.
  */
 export interface CantonInstrumentId {
   admin: string
@@ -135,25 +136,45 @@ export interface CantonExtraArgsV1 {
    * These are also passed verbatim as `ccvRawAddress.unpack` in the Send choice argument.
    */
   ccvRawAddresses?: string[]
-  /** Gas limit for ccipReceive on the destination chain */
+  /** Gas limit for ccipReceive on the destination chain (`--gas-limit` / canton-config `defaultSendGasLimit`). */
   gasLimit?: bigint
+  /**
+   * On-ledger executor mode for Canton → destination sends.
+   * - `default`: resolve executor from global EDS.
+   * - `none`: `Executor_NoExecutor` — no auto-execute on destination.
+   */
+  executorMode?: 'default' | 'none'
 }
 
 /**
- * Parse a fee-token string of the form `"admin::tokenId"` into a
- * {@link CantonInstrumentId}.
+ * Parse a Canton instrument string `party::fingerprint::tokenId` into
+ * {@link CantonInstrumentId} for ledger Holding filters and CCIP fee/token fields.
  *
- * @throws {@link CCIPArgumentInvalidError} if the string does not contain the `::` separator.
+ * @example
+ * ```ts
+ * parseCantonInstrumentId(
+ *   'ccipOwner::1220e382…::link-token',
+ * )
+ * // => { admin: 'ccipOwner::1220e382…', id: 'link-token' }
+ * ```
+ *
+ * @throws {@link CCIPArgumentInvalidError} if the string is not three `::`-separated parts.
  */
-export function parseInstrumentId(feeToken: string): CantonInstrumentId {
-  const sep = feeToken.split('::')
-  if (sep.length !== 3) {
+export function parseCantonInstrumentId(instrument: string): CantonInstrumentId {
+  const parts = instrument.split('::')
+  if (parts.length !== 3) {
     throw new CCIPArgumentInvalidError(
-      'feeToken',
-      `invalid Canton instrument ID "${feeToken}": expected "admin::tokenId" format`,
+      'instrument',
+      `invalid Canton instrument ID "${instrument}": expected party::fingerprint::tokenId`,
     )
   }
-  const admin = [sep[0], sep[1]].join('::')
-  const id = sep[2]!
-  return { admin, id }
+  return { admin: [parts[0], parts[1]].join('::'), id: parts[2]! }
+}
+
+/**
+ * Parse a Canton instrument id string.
+ * @deprecated Prefer {@link parseCantonInstrumentId} for new code.
+ */
+export function parseInstrumentId(feeToken: string): CantonInstrumentId {
+  return parseCantonInstrumentId(feeToken)
 }

@@ -5,10 +5,14 @@ import { id as keccak256Utf8 } from 'ethers'
 
 import {
   ccvAddressesMatch,
+  damlRequiredCcvsList,
+  decodeCantonVerifierDestAddress,
   missingTokenPoolRequiredCcvs,
   normalizeCantonCcvList,
+  receiverRequiredCcvConfigured,
   receiverRequiresConfiguredCcvs,
   resolveEdsCcvAddress,
+  resolveExecuteCcvAddress,
   resolveSenderRequiredCcvs,
 } from './ccv-addresses.ts'
 
@@ -77,5 +81,37 @@ describe('canton/ccv-addresses', () => {
 
   it('resolveSenderRequiredCcvs honors explicit empty CLI ccvRawAddresses', () => {
     assert.deepEqual(resolveSenderRequiredCcvs([], [EXECUTE_CCV_HEX]), [])
+  })
+
+  it('decodeCantonVerifierDestAddress decodes hex-encoded indexer dest addresses', () => {
+    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    assert.equal(decodeCantonVerifierDestAddress(`0x${hexEncoded}`), EXECUTE_CCV_RAW)
+    assert.equal(decodeCantonVerifierDestAddress(EXECUTE_CCV_RAW), EXECUTE_CCV_RAW)
+  })
+
+  it('resolveExecuteCcvAddress hashes raw unpack to InstanceAddress hex', () => {
+    assert.equal(resolveExecuteCcvAddress(EXECUTE_CCV_RAW), EXECUTE_CCV_HEX)
+    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    assert.equal(resolveExecuteCcvAddress(`0x${hexEncoded}`), EXECUTE_CCV_HEX)
+  })
+
+  it('resolveExecuteCcvAddress does not apply canton-config ccvs override', () => {
+    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    assert.notEqual(
+      resolveExecuteCcvAddress(`0x${hexEncoded}`),
+      resolveEdsCcvAddress(`0x${hexEncoded}`, [
+        '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      ]),
+    )
+  })
+
+  it('receiverRequiredCcvConfigured matches raw unpack on receiver', () => {
+    assert.equal(receiverRequiredCcvConfigured([EXECUTE_CCV_RAW], EXECUTE_CCV_RAW), true)
+    assert.equal(receiverRequiredCcvConfigured([], EXECUTE_CCV_RAW), false)
+  })
+
+  it('damlRequiredCcvsList decodes hex-encoded attestation addresses', () => {
+    const hexEncoded = Buffer.from(EXECUTE_CCV_RAW, 'utf8').toString('hex')
+    assert.deepEqual(damlRequiredCcvsList([`0x${hexEncoded}`]), [{ unpack: EXECUTE_CCV_RAW }])
   })
 })
