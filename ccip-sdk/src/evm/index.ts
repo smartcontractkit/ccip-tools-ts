@@ -29,10 +29,8 @@ import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 import type { PickDeep, SetFieldType, SetRequired } from 'type-fest'
 
-import { applyCantonDestExecutorDefault } from '../canton/defaults.ts'
 import {
   type BlockInfo,
-  type CantonConfig,
   type ChainContext,
   type GetBalanceOpts,
   type LogFilter,
@@ -81,7 +79,6 @@ import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
-  type AnyMessage,
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
@@ -93,7 +90,6 @@ import {
   type ExecutionState,
   type Lane,
   type LeanNumbers,
-  type MessageInput,
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
@@ -1197,7 +1193,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     await this.checkSendMessage(opts)
     const { router, destChainSelector, message } = opts
-    const populatedMessage = populateMessageForDest(message, destChainSelector, this.cantonConfig)
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     const contract = new Contract(
       router,
       interfaces.Router,
@@ -1475,10 +1471,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedEVMTx> {
     const { sender, router, destChainSelector } = opts
-    const populatedMessage = populateMessageForDest(
+    const populatedMessage = buildMessageForDest(
       opts.message,
-      destChainSelector,
-      this.cantonConfig,
+      networkInfo(destChainSelector).family,
     )
     const message = {
       ...populatedMessage,
@@ -2439,19 +2434,4 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     return estimateExecGas({ provider: this.provider, router: destRouter, ...opts_ })
   }
-}
-
-/**
- * Populate message defaults for the destination family.
- * Canton-specific V3 executor defaults are applied only on the EVM → Canton send path.
- */
-function populateMessageForDest(
-  message: MessageInput,
-  destChainSelector: bigint,
-  cantonConfig?: CantonConfig,
-): AnyMessage {
-  const destFamily = networkInfo(destChainSelector).family
-  const built = buildMessageForDest(message, destFamily)
-  if (destFamily !== ChainFamily.Canton) return built
-  return applyCantonDestExecutorDefault(built, cantonConfig)
 }

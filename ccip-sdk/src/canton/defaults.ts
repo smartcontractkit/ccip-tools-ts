@@ -1,5 +1,4 @@
 import type { CantonConfig } from '../chain.ts'
-import type { AnyMessage } from '../types.ts'
 
 /**
  * SDK fallbacks when neither {@link CantonConfig} nor per-message `extraArgs` specify a value.
@@ -22,7 +21,7 @@ export const DEFAULT_CANTON_SENDER_INSTANCE_ID = 'ccipsender'
 /** Canton operational defaults overridable via {@link CantonConfig}. */
 export type CantonOperationalDefaults = Pick<
   CantonConfig,
-  'defaultSendGasLimit' | 'feeTransferFactoryAmount' | 'noExecutionExecutor' | 'senderInstanceId'
+  'defaultSendGasLimit' | 'feeTransferFactoryAmount' | 'senderInstanceId'
 >
 
 /** Resolve send gas limit: explicit extraArgs → config → SDK default (0 for token-only, no payload). */
@@ -48,43 +47,9 @@ export function resolveFeeTransferFactoryAmount(
 }
 
 /**
- * Resolve V3 no-execution executor sentinel from config or SDK default.
- */
-export function resolveNoExecutionExecutor(config?: Partial<CantonOperationalDefaults>): string {
-  const fromConfig = config?.noExecutionExecutor?.trim()
-  return fromConfig || DEFAULT_CANTON_NO_EXECUTION_EXECUTOR
-}
-
-/**
  * Resolve CCIPSender instance id from config or SDK default.
  */
 export function resolveSenderInstanceId(config?: Partial<CantonOperationalDefaults>): string {
   const fromConfig = config?.senderInstanceId?.trim()
   return fromConfig || DEFAULT_CANTON_SENDER_INSTANCE_ID
-}
-
-/**
- * Apply EVM → Canton V3 executor default when `extraArgs.executor` is unset.
- * Used from the EVM send path only (`populateMessageForDest` in `evm/index.ts`).
- */
-export function applyCantonDestExecutorDefault(
-  message: AnyMessage,
-  config?: Partial<CantonOperationalDefaults>,
-): AnyMessage {
-  const { extraArgs } = message
-  if (!('ccvs' in extraArgs)) return message
-
-  const executor =
-    'executor' in extraArgs && typeof extraArgs.executor === 'string'
-      ? extraArgs.executor.trim()
-      : ''
-  if (executor) return message
-
-  return {
-    ...message,
-    extraArgs: {
-      ...extraArgs,
-      executor: resolveNoExecutionExecutor(config),
-    },
-  }
 }

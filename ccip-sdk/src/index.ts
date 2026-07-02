@@ -136,10 +136,8 @@ export {
   DEFAULT_CANTON_NO_EXECUTION_EXECUTOR,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
-  applyCantonDestExecutorDefault,
   resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
-  resolveNoExecutionExecutor,
   resolveSenderInstanceId,
 } from './canton/defaults.ts'
 export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }

@@ -5,7 +5,6 @@ import {
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
-  resolveNoExecutionExecutor,
   resolveSenderInstanceId,
 } from './defaults.ts'
 
@@ -31,11 +30,6 @@ describe('canton defaults resolvers', () => {
 
   it('resolveFeeTransferFactoryAmount reads canton-config', () => {
     assert.equal(resolveFeeTransferFactoryAmount({ feeTransferFactoryAmount: '2.5' }), '2.5')
-  })
-
-  it('resolveNoExecutionExecutor reads canton-config', () => {
-    const custom = '0x' + 'aa'.repeat(20)
-    assert.equal(resolveNoExecutionExecutor({ noExecutionExecutor: custom }), custom)
   })
 
   it('resolveSenderInstanceId reads canton-config', () => {
