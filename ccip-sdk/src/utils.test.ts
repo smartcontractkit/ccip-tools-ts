@@ -1081,7 +1081,7 @@ describe('withRetry', () => {
       () =>
         withRetry(operation, {
           ...DEFAULT_API_RETRY_CONFIG,
-          maxRetries: 2,
+          maxAttempts: 2,
           initialDelayMs: 10,
           respectRetryAfterHint: false,
         }),
@@ -1103,7 +1103,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 2,
+        maxAttempts: 2,
         initialDelayMs: 50,
         backoffMultiplier: 2,
         maxDelayMs: 1000,
@@ -1128,7 +1128,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 3,
+        maxAttempts: 3,
         initialDelayMs: 100,
         backoffMultiplier: 10, // Aggressive multiplier
         maxDelayMs: 150, // But capped
@@ -1150,7 +1150,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 1,
+        maxAttempts: 1,
         initialDelayMs: 10, // Lower than hint
         backoffMultiplier: 1,
         maxDelayMs: 1000,

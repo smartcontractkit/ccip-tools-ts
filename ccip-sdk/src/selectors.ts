@@ -1710,10 +1710,17 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '7052886157': {
+    selector: 410896468069059699n,
+    name: 'glamsterdam-devnet-6',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '7095321190': {
     selector: 10073034426865795585n,
     name: 'glamsterdam-devnet-5',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   // end:generate
