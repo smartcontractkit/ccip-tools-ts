@@ -247,6 +247,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 1024,
+      forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
     this.getBlockInfo = getBlockInfo
 
@@ -460,7 +461,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getBlockInfo} */
   async getBlockInfo(block: number | bigint | EVMEndBlockTag): Promise<BlockInfo> {
-    const res = await this.provider.getBlock(block) // cached
+    const res = await this.provider.getBlock(block)
     if (!res) throw new CCIPBlockNotFoundError(block)
     return { number: res.number, timestamp: res.timestamp }
   }

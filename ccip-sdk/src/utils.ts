@@ -492,15 +492,15 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
  */
 export type WithRetryConfig = {
   /** Maximum number of retry attempts */
-  maxRetries: number
+  maxAttempts?: number
   /** Initial delay in milliseconds before the first retry */
-  initialDelayMs: number
+  initialDelayMs?: number
   /** Multiplier applied to delay after each retry */
-  backoffMultiplier: number
+  backoffMultiplier?: number
   /** Maximum delay in milliseconds between retries */
-  maxDelayMs: number
+  maxDelayMs?: number
   /** Whether to respect the error's retryAfterMs hint */
-  respectRetryAfterHint: boolean
+  respectRetryAfterHint?: boolean
   /** Optional logger for retry attempts */
   logger?: { debug: (...args: unknown[]) => void; warn: (...args: unknown[]) => void }
 }
@@ -533,18 +533,18 @@ export async function withRetry<T>(
   config: WithRetryConfig,
 ): Promise<T> {
   const {
-    maxRetries,
-    initialDelayMs,
-    backoffMultiplier,
-    maxDelayMs,
-    respectRetryAfterHint,
-    logger,
+    maxAttempts = 5,
+    initialDelayMs = 1e3,
+    backoffMultiplier = 2,
+    maxDelayMs = 30e3,
+    respectRetryAfterHint = true,
+    logger = console,
   } = config
 
   let lastError: CCIPError | undefined
   let delay = initialDelayMs
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     try {
       return await operation()
     } catch (err) {
@@ -556,8 +556,8 @@ export async function withRetry<T>(
       }
 
       // Don't sleep after the last attempt
-      if (attempt >= maxRetries) {
-        logger?.warn(`All ${maxRetries} retries exhausted:`, lastError.message)
+      if (attempt >= maxAttempts) {
+        logger.warn(`All ${maxAttempts} retries exhausted:`, lastError.message)
         break
       }
 
@@ -575,8 +575,8 @@ export async function withRetry<T>(
       // Cap at maxDelayMs
       nextDelay = Math.min(nextDelay, maxDelayMs)
 
-      logger?.debug(
-        `Retry attempt ${attempt + 1}/${maxRetries} after ${nextDelay}ms:`,
+      logger.debug(
+        `Retry attempt ${attempt + 1}/${maxAttempts} after ${nextDelay}ms:`,
         lastError.message,
       )
 
