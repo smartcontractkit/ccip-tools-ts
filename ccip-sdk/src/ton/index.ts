@@ -1297,7 +1297,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const startTime = Math.floor(Date.now() / 1000)
     // Open wallet and send transaction using the unsigned data
     const seqno = await wallet.sendTransaction({
-      value: toNano('0.3'),
+      value: opts.txGasLimit ? BigInt(opts.txGasLimit) : toNano('0.3'),
       ...unsigned,
     })
 

@@ -81,6 +81,11 @@ export const builder = (yargs: Argv) =>
         describe:
           'Override gas limit for tokens releaseOrMint calls (0 keeps original, v1.5..v1.6 only)',
       },
+      'tx-gas-limit': {
+        alias: 'G',
+        type: 'number',
+        describe: 'Force execute transaction gasLimit/computeUnits (instead of estimating)',
+      },
       'estimate-gas-limit': {
         type: 'number',
         describe:

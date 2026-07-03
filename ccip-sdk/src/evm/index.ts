@@ -1788,6 +1788,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
+    if (opts.txGasLimit) {
+      unsignedTxs.transactions = unsignedTxs.transactions.map((tx) => ({
+        ...tx,
+        gasLimit: opts.txGasLimit,
+      }))
+    }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
