@@ -1168,12 +1168,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
-  async generateUnsignedSendMessage({
-    router,
-    destChainSelector,
-    message,
-    sender,
-  }: Parameters<Chain['generateUnsignedSendMessage']>[0]): Promise<UnsignedTONTx> {
+  async generateUnsignedSendMessage(
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0] & { txGasLimit?: number },
+  ): Promise<UnsignedTONTx> {
+    const { router, destChainSelector, message, sender } = opts
     // Convert MessageInput to AnyMessage with defaults
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
 
@@ -1186,10 +1184,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         message: populatedMessage,
       }))
 
-    const unsigned = generateUnsignedCcipSend(this, sender, router, destChainSelector, {
-      ...populatedMessage,
-      fee,
-    })
+    const unsigned = generateUnsignedCcipSend(
+      this,
+      sender,
+      router,
+      destChainSelector,
+      { ...populatedMessage, fee },
+      opts,
+    )
 
     return {
       family: ChainFamily.TON,
@@ -1198,35 +1200,28 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage({
-    router,
-    destChainSelector,
-    message,
-    wallet,
-  }: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
-    if (!isTONWallet(wallet)) {
-      throw new CCIPWalletInvalidError(wallet)
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+    if (!isTONWallet(opts.wallet)) {
+      throw new CCIPWalletInvalidError(opts.wallet)
     }
 
-    const sender = await wallet.getAddress()
+    const sender = await opts.wallet.getAddress()
 
     // Generate unsigned transaction with fee calculation if needed
     const { family: _, ...unsigned } = await this.generateUnsignedSendMessage({
-      router,
-      destChainSelector,
-      message,
+      ...opts,
       sender,
     })
 
     // Send transaction
     const startTime = Math.floor(Date.now() / 1000)
-    const seqno = await wallet.sendTransaction(unsigned)
+    const seqno = await opts.wallet.sendTransaction(unsigned)
 
     this.logger.info('CCIP send transaction submitted, seqno:', seqno)
 
     // Wait for CCIPMessageSent event and extract the request
     // Query the OnRamp for the CCIPMessageSent event
-    const onRamp = await this.getOnRampForRouter(router, destChainSelector)
+    const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
 
     // Poll for the message in recent logs
     for await (const log of this.getLogs({
@@ -1244,7 +1239,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return {
         lane: {
           sourceChainSelector: this.network.chainSelector,
-          destChainSelector,
+          destChainSelector: opts.destChainSelector,
           onRamp,
           version: CCIPVersion.V1_6,
         },

@@ -1240,7 +1240,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       sender: opts.wallet.publicKey.toBase58(),
     })
 
-    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned)
+    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned, opts.txGasLimit)
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 

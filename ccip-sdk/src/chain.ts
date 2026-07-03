@@ -1474,6 +1474,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: SendMessageOpts & {
       /** Signer instance (chain-dependent) */
       wallet: unknown
+      /** Force send transaction gas limit (instead of estimating) */
+      txGasLimit?: number
     },
   ): Promise<CCIPRequest>
   /**
