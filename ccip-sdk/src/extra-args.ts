@@ -20,16 +20,13 @@ export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '
  * CCIP no-execution tag (`keccak256("NO_EXECUTION_TAG")[:4]`).
  * @see {@link NO_EXECUTION_ADDRESS}
  */
-export const NO_EXECUTION_TAG = '0xeba517d2' as const
-
-const noExecutionAddressBytes = new Uint8Array(20)
-noExecutionAddressBytes.set([0xeb, 0xa5, 0x17, 0xd2], 0)
+export const NO_EXECUTION_TAG = dataSlice(id('NO_EXECUTION_TAG'), 0, 4) as '0xeba517d2'
 
 /**
  * EVM executor sentinel for GenericExtraArgsV3: skip automated destination execution.
  * Maps to `Client.NO_EXECUTION_ADDRESS` in chainlink-ccip EVM contracts.
  */
-export const NO_EXECUTION_ADDRESS = getAddress(hexlify(noExecutionAddressBytes))
+export const NO_EXECUTION_ADDRESS = getAddress(zeroPadBytes(NO_EXECUTION_TAG, 20))
 
 /**
  * EVM extra arguments version 1 with gas limit only.
