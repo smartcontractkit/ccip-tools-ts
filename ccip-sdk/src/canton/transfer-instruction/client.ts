@@ -77,6 +77,11 @@ export interface TransferInstructionClientConfig {
   jwt?: string
   /** Request timeout in milliseconds (default: 30 000) */
   timeout?: number
+  /**
+   * When true (default), prefix paths with `/v0/scan-proxy` (validator API).
+   * CCIP LINK on EDS uses `false` — same OpenAPI paths without scan-proxy.
+   */
+  useScanProxy?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +98,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
   const headers = buildHeaders(config.jwt)
   const timeoutMs = config.timeout ?? 30_000
 
-  const appendScanProxyPath = (path: string) => `/v0/scan-proxy${path}`
+  const apiPath = (path: string) => (config.useScanProxy === false ? path : `/v0/scan-proxy${path}`)
   return {
     /**
      * Get the factory and choice context for executing a direct transfer.
@@ -105,7 +110,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
     ): Promise<TransferFactoryWithChoiceContext> {
       return post<TransferFactoryWithChoiceContext>(
         baseUrl,
-        appendScanProxyPath('/registry/transfer-instruction/v1/transfer-factory'),
+        apiPath('/registry/transfer-instruction/v1/transfer-factory'),
         headers,
         timeoutMs,
         request,
@@ -123,7 +128,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
     ): Promise<ChoiceContext> {
       return post<ChoiceContext>(
         baseUrl,
-        appendScanProxyPath(
+        apiPath(
           `/registry/transfer-instruction/v1/${encodeURIComponent(transferInstructionId)}/choice-contexts/accept`,
         ),
         headers,
@@ -143,7 +148,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
     ): Promise<ChoiceContext> {
       return post<ChoiceContext>(
         baseUrl,
-        appendScanProxyPath(
+        apiPath(
           `/registry/transfer-instruction/v1/${encodeURIComponent(transferInstructionId)}/choice-contexts/reject`,
         ),
         headers,
@@ -163,7 +168,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
     ): Promise<ChoiceContext> {
       return post<ChoiceContext>(
         baseUrl,
-        appendScanProxyPath(
+        apiPath(
           `/registry/transfer-instruction/v1/${encodeURIComponent(transferInstructionId)}/choice-contexts/withdraw`,
         ),
         headers,
