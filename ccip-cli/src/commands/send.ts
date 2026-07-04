@@ -202,7 +202,7 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
     let value: unknown = raw
 
     // Bare 0x literals are hex (addresses, calldata); yaml/json parse would coerce them to bigint.
-    if (!/^0x[0-9a-fA-F]+$/i.test(raw)) {
+    if (!/^0x[0-9a-fA-F]*$/i.test(raw)) {
       try {
         value = jsonParse<unknown>(raw)
       } catch {
