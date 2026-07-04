@@ -38,6 +38,17 @@ export function normalizeCantonMessageId(messageId: string): string {
   return messageId
 }
 
+/** Normalize Canton `BytesHex` payloads to canonical `0x`-prefixed hex for EVM tooling. */
+export function normalizeCantonEncodedMessage(encodedMessage: string): string {
+  const trimmed = encodedMessage.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+    return trimmed.startsWith('0X') ? `0x${trimmed.slice(2)}` : trimmed
+  }
+  if (/^[0-9a-fA-F]+$/.test(trimmed)) return `0x${trimmed}`
+  return trimmed
+}
+
 // ---------------------------------------------------------------------------
 // Top-level parsers
 // ---------------------------------------------------------------------------
@@ -83,8 +94,9 @@ export function parseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
         ),
-        encodedMessage:
+        encodedMessage: normalizeCantonEncodedMessage(
           typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
         nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
         onRampAddress:
@@ -99,7 +111,9 @@ export function parseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof flat.messageId === 'string' ? flat.messageId : updateId,
         ),
-        encodedMessage: typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(flat.sequenceNumber),
         nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
         onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
@@ -139,8 +153,9 @@ export function tryParseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
         ),
-        encodedMessage:
+        encodedMessage: normalizeCantonEncodedMessage(
           typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
         nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
         onRampAddress:
@@ -154,7 +169,9 @@ export function tryParseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof flat.messageId === 'string' ? flat.messageId : updateId,
         ),
-        encodedMessage: typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(flat.sequenceNumber),
         nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
         onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,

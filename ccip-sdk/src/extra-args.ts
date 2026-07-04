@@ -1,4 +1,4 @@
-import { type BytesLike, id, toNumber } from 'ethers'
+import { type BytesLike, getAddress, hexlify, id, toNumber } from 'ethers'
 
 import type { CantonExtraArgsV1 } from './canton/types.ts'
 import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
@@ -15,6 +15,21 @@ export const GenericExtraArgsV3Tag = id('CCIP GenericExtraArgsV3').substring(0, 
 export const SVMExtraArgsV1Tag = id('CCIP SVMExtraArgsV1').substring(0, 10) as '0x1f3b3aba'
 /** Tag identifier for SuiExtraArgsV1 encoding. */
 export const SuiExtraArgsV1Tag = id('CCIP SuiExtraArgsV1').substring(0, 10) as '0x21ea4ca9'
+
+/**
+ * CCIP no-execution tag (`keccak256("NO_EXECUTION_TAG")[:4]`).
+ * @see {@link NO_EXECUTION_ADDRESS}
+ */
+export const NO_EXECUTION_TAG = '0xeba517d2' as const
+
+const noExecutionAddressBytes = new Uint8Array(20)
+noExecutionAddressBytes.set([0xeb, 0xa5, 0x17, 0xd2], 0)
+
+/**
+ * EVM executor sentinel for GenericExtraArgsV3: skip automated destination execution.
+ * Maps to `Client.NO_EXECUTION_ADDRESS` in chainlink-ccip EVM contracts.
+ */
+export const NO_EXECUTION_ADDRESS = getAddress(hexlify(noExecutionAddressBytes))
 
 /**
  * EVM extra arguments version 1 with gas limit only.
@@ -107,7 +122,7 @@ export type GenericExtraArgsV3 = {
   ccvs: string[]
   /** Per-CCV arguments (BytesLike). */
   ccvArgs: BytesLike[]
-  /** Executor address (EVM address or empty string for none). */
+  /** Executor address (`''` = lane default; {@link NO_EXECUTION_ADDRESS} = manual execution). */
   executor: string
   /** Executor-specific arguments (BytesLike). */
   executorArgs: BytesLike

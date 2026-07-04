@@ -193,12 +193,16 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
   for (const entry of extra) {
     const eqIdx = entry.indexOf('=')
     const key = entry.substring(0, eqIdx)
-    let value: unknown = entry.substring(eqIdx + 1)
+    const raw = entry.substring(eqIdx + 1)
+    let value: unknown = raw
 
-    try {
-      value = jsonParse<unknown>(value as string)
-    } catch {
-      // pass
+    // Bare 0x literals are hex (addresses, calldata); yaml/json parse would coerce them to bigint.
+    if (!/^0x[0-9a-fA-F]+$/i.test(raw)) {
+      try {
+        value = jsonParse<unknown>(raw)
+      } catch {
+        // pass
+      }
     }
 
     if (key in result) {

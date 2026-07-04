@@ -294,10 +294,27 @@ export function readMessageV1ChainSelectors(encodedMessage: BytesLike): {
   }
 }
 
-/** Read the destination OffRamp address embedded in a MessageV1 payload (raw bytes, no family decode). */
+/** Read the source OnRamp address embedded in a MessageV1 payload. */
+export function readMessageV1OnRampAddress(encodedMessage: BytesLike): string {
+  const encoded = getDataBytes(encodedMessage)
+  if (encoded.length < 71) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
+  const { sourceChainSelector } = readMessageV1ChainSelectors(encodedMessage)
+  const sourceFamily = networkInfo(sourceChainSelector).family
+  let offset = 69
+  if (offset >= encoded.length) throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_LENGTH')
+  const onRampAddressLength = encoded[offset++]!
+  if (offset + onRampAddressLength > encoded.length) {
+    throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_CONTENT')
+  }
+  return decodeAddress(dataSlice(encoded, offset, offset + onRampAddressLength), sourceFamily)
+}
+
+/** Read the destination OffRamp address embedded in a MessageV1 payload. */
 export function readMessageV1OffRampAddress(encodedMessage: BytesLike): string {
   const encoded = getDataBytes(encodedMessage)
   if (encoded.length < 71) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
+  const { destChainSelector } = readMessageV1ChainSelectors(encodedMessage)
+  const destFamily = networkInfo(destChainSelector).family
   let offset = 69
   const onRampAddressLength = encoded[offset++]!
   offset += onRampAddressLength
@@ -306,5 +323,5 @@ export function readMessageV1OffRampAddress(encodedMessage: BytesLike): string {
   if (offset + offRampAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('MESSAGE_OFFRAMP_ADDRESS_CONTENT')
   }
-  return hexlify(dataSlice(encoded, offset, offset + offRampAddressLength))
+  return decodeAddress(dataSlice(encoded, offset, offset + offRampAddressLength), destFamily)
 }

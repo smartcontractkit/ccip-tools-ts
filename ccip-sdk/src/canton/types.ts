@@ -170,11 +170,3 @@ export function parseCantonInstrumentId(instrument: string): CantonInstrumentId 
   }
   return { admin: [parts[0], parts[1]].join('::'), id: parts[2]! }
 }
-
-/**
- * Parse a Canton instrument id string.
- * @deprecated Prefer {@link parseCantonInstrumentId} for new code.
- */
-export function parseInstrumentId(feeToken: string): CantonInstrumentId {
-  return parseCantonInstrumentId(feeToken)
-}

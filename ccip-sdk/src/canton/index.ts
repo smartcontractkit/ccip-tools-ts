@@ -22,6 +22,12 @@ import {
 } from '../errors/index.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import {
+  decodeMessageV1,
+  readMessageV1ChainSelectors,
+  readMessageV1OffRampAddress,
+  readMessageV1OnRampAddress,
+} from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -77,6 +83,8 @@ import {
 import {
   extractCantonSentEventFieldsFromLogData,
   extractCreatedContractId,
+  flattenCantonRecord,
+  normalizeCantonEncodedMessage,
   normalizeCantonMessageId,
   parseCantonExecutionReceipt,
   parseCantonSendResult,
@@ -98,8 +106,9 @@ import {
   type TransactionSigner,
   type UnsignedCantonTx,
   isCantonWallet,
-  parseInstrumentId,
+  parseCantonInstrumentId,
 } from './types.ts'
+import { isCantonUpdateId } from './update-id.ts'
 
 export type {
   CantonClient,
@@ -119,7 +128,7 @@ export type {
   TransactionSigner,
   UnsignedCantonTx,
 } from './types.ts'
-export { isCantonWallet, parseCantonInstrumentId, parseInstrumentId } from './types.ts'
+export { isCantonWallet, parseCantonInstrumentId } from './types.ts'
 export {
   CANTON_DECIMALS,
   formatCantonDecimalAmountUnits,
@@ -573,7 +582,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * the local `id` portion.
    */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
-    const { id } = parseInstrumentId(token)
+    const { id } = parseCantonInstrumentId(token)
     try {
       const instrument = await this.tokenMetadataClient.getInstrument(id)
       return { symbol: instrument.symbol, decimals: instrument.decimals }
@@ -646,7 +655,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     // --- parse fields ---
-    const feeInstrument = parseInstrumentId(message.feeToken)
+    const feeInstrument = parseCantonInstrumentId(message.feeToken)
     const receiverHex = stripHexPrefix(
       typeof message.receiver === 'string' ? message.receiver : hexlify(message.receiver),
     )
@@ -707,7 +716,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         )
       }
 
-      const tokenInstrument = parseInstrumentId(tokenAmount.token)
+      const tokenInstrument = parseCantonInstrumentId(tokenAmount.token)
       const tokenAmountDecimal = formatCantonDecimalAmountUnits(tokenAmount.amount)
       messageTokenTransfer = {
         token: { admin: tokenInstrument.admin, id: tokenInstrument.id },
@@ -971,7 +980,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const ccipMessage = {
       messageId: sendResult.messageId,
-      encodedMessage: sendResult.encodedMessage,
+      encodedMessage: normalizeCantonEncodedMessage(sendResult.encodedMessage),
       sourceChainSelector: this.network.chainSelector,
       destChainSelector: opts.destChainSelector,
       sequenceNumber: sendResult.sequenceNumber,
@@ -981,7 +990,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         typeof opts.message.receiver === 'string'
           ? opts.message.receiver
           : String(opts.message.receiver),
-      data: sendResult.encodedMessage,
+      data: normalizeCantonEncodedMessage(sendResult.encodedMessage),
       tokenAmounts: (opts.message.tokenAmounts ?? []) as readonly {
         token: string
         amount: bigint
@@ -1895,7 +1904,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       return { ...message, feeToken }
     }
 
-    const holdings = await fetchTokenHoldings(this.provider, party, parseInstrumentId(feeToken))
+    const holdings = await fetchTokenHoldings(
+      this.provider,
+      party,
+      parseCantonInstrumentId(feeToken),
+    )
     if (!holdings.length) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
@@ -1903,11 +1916,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const feeInstrument = parseInstrumentId(feeToken)
+    const feeInstrument = parseCantonInstrumentId(feeToken)
     const excludeFromFee: string[] = []
     const tokenAmount = message.tokenAmounts?.[0]
     if (tokenAmount && tokenAmount.amount > 0n) {
-      const tokenInstrument = parseInstrumentId(tokenAmount.token)
+      const tokenInstrument = parseCantonInstrumentId(tokenAmount.token)
       if (sameInstrumentId(feeInstrument, tokenInstrument)) {
         const tokenHoldingCid = excludeHoldingCidForTokenTransfer(
           holdings,
@@ -1969,18 +1982,68 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       sentEvent?.dest_chain_selector
     const srcRaw = sentEvent?.sourceChainSelector ?? sentEvent?.source_chain_selector
 
-    if (destRaw == null || srcRaw == null) return undefined
+    let destChainSelector = destRaw != null ? toBigIntSafe(destRaw) : undefined
+    let sourceChainSelector = srcRaw != null ? toBigIntSafe(srcRaw) : undefined
+
+    // CCIPMessageSentEvent on Canton omits sourceChainSelector; read both from the wire payload.
+    if (sourceChainSelector == null || destChainSelector == null) {
+      try {
+        const selectors = readMessageV1ChainSelectors(sendResult.encodedMessage)
+        sourceChainSelector ??= selectors.sourceChainSelector
+        destChainSelector ??= selectors.destChainSelector
+      } catch {
+        if (sourceChainSelector == null || destChainSelector == null) return undefined
+      }
+    }
+
+    let sender = typeof sentEvent?.sender === 'string' ? sentEvent.sender : ''
+    let receiver = typeof sentEvent?.receiver === 'string' ? sentEvent.receiver : ''
+
+    if (!sender && log.data && typeof log.data === 'object') {
+      const rec = log.data as Record<string, unknown>
+      const createArgs = (rec.create_arguments ?? rec.createArgument) as
+        | Record<string, unknown>
+        | undefined
+      if (createArgs) {
+        const flat = flattenCantonRecord(createArgs)
+        if (typeof flat.sender === 'string') sender = flat.sender
+      }
+    }
+
+    let onRampAddress = sendResult.onRampAddress ?? ''
+    let offRampAddress = ''
+
+    try {
+      const decoded = decodeMessageV1(sendResult.encodedMessage)
+      onRampAddress = decoded.onRampAddress || onRampAddress
+      offRampAddress = decoded.offRampAddress
+      if (!sender) sender = decoded.sender
+      if (!receiver) receiver = decoded.receiver
+    } catch {
+      try {
+        offRampAddress = readMessageV1OffRampAddress(sendResult.encodedMessage)
+      } catch {
+        // optional when wire layout is incomplete
+      }
+      try {
+        if (!onRampAddress) onRampAddress = readMessageV1OnRampAddress(sendResult.encodedMessage)
+      } catch {
+        // optional when wire layout is incomplete
+      }
+    }
 
     return {
       messageId: sendResult.messageId,
-      encodedMessage: sendResult.encodedMessage,
-      sourceChainSelector: toBigIntSafe(srcRaw),
-      destChainSelector: toBigIntSafe(destRaw),
+      encodedMessage: normalizeCantonEncodedMessage(sendResult.encodedMessage),
+      sourceChainSelector,
+      destChainSelector,
       sequenceNumber: sendResult.sequenceNumber,
       nonce: sendResult.nonce ?? 0n,
-      sender: typeof sentEvent?.sender === 'string' ? sentEvent.sender : '',
-      receiver: typeof sentEvent?.receiver === 'string' ? sentEvent.receiver : '',
-      data: sendResult.encodedMessage,
+      sender,
+      receiver,
+      onRampAddress,
+      offRampAddress,
+      data: normalizeCantonEncodedMessage(sendResult.encodedMessage),
       tokenAmounts: [],
       feeToken: '',
       feeTokenAmount: 0n,
@@ -2037,10 +2100,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Validates a transaction (update) ID format for Canton.
-   * Canton update IDs are base64-encoded strings.
+   * Supports hex ledger update IDs (`1220` + digest) and base64url-encoded update IDs.
    */
   static isTxHash(v: unknown): v is string {
     if (typeof v !== 'string' || v.length === 0) return false
+    if (isCantonUpdateId(v)) return true
     // Canton update IDs are base64url-encoded strings, typically ~44 chars
     return /^[A-Za-z0-9+/=_-]+$/.test(v)
   }

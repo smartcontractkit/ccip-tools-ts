@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { parseCantonInstrumentId, parseInstrumentId } from './types.ts'
+import { parseCantonInstrumentId } from './types.ts'
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 
 const LINK_INSTRUMENT =
@@ -13,10 +13,6 @@ describe('canton/types parseCantonInstrumentId', () => {
       admin: 'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
       id: 'link-token',
     })
-  })
-
-  it('parseInstrumentId is an alias', () => {
-    assert.deepEqual(parseInstrumentId(LINK_INSTRUMENT), parseCantonInstrumentId(LINK_INSTRUMENT))
   })
 
   it('rejects two-part instrument strings', () => {

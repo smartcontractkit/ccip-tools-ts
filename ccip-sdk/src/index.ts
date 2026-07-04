@@ -56,6 +56,8 @@ export {
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
+  NO_EXECUTION_ADDRESS,
+  NO_EXECUTION_TAG,
   decodeExtraArgs,
   decodeFinalityAllowed,
   decodeFinalityRequested,
@@ -129,7 +131,7 @@ export type {
   TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
-export { parseCantonInstrumentId, parseInstrumentId } from './canton/types.ts'
+export { parseCantonInstrumentId } from './canton/types.ts'
 export {
   type CantonOperationalDefaults,
   CANTON_FEE_TOKEN_CLI_SYMBOLS,

@@ -178,7 +178,11 @@ async function manualExec(
   let request
   try {
     request = await request$
-    if ('offRampAddress' in request.message) {
+    if (
+      'offRampAddress' in request.message &&
+      typeof request.message.offRampAddress === 'string' &&
+      request.message.offRampAddress
+    ) {
       offRamp = request.message.offRampAddress
     }
   } catch (err) {
