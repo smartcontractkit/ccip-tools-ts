@@ -97,6 +97,11 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Allow out-of-order execution (v1.5+ lanes)',
       },
+      'tx-gas-limit': {
+        alias: 'G',
+        type: 'number',
+        describe: 'Force send transaction gasLimit/computeUnits (instead of estimating)',
+      },
       'fee-token': {
         type: 'string',
         describe: 'Fee token address or symbol (default: native)',

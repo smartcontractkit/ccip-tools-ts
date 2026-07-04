@@ -13,6 +13,7 @@ import {
   Contract,
   FetchRequest,
   JsonRpcProvider,
+  MaxUint256,
   WebSocketProvider,
   ZeroAddress,
   ZeroHash,
@@ -1510,7 +1511,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ) as unknown as TypedContract<typeof Token_ABI>
           const allowance = await contract.allowance(sender, router)
           if (allowance >= amount) return
-          const amnt = opts.approveMax ? BigInt(2) ** BigInt(256) - BigInt(1) : amount
+          const amnt = opts.approveMax ? MaxUint256 : amount
           return contract.approve.populateTransaction(router, amnt, { from: sender })
         }),
       )
@@ -1556,6 +1557,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const sender = await wallet.getAddress()
     const txs = await this.generateUnsignedSendMessage({ ...opts, sender })
+    if (opts.txGasLimit) {
+      txs.transactions = txs.transactions.map((tx) => ({
+        ...tx,
+        gasLimit: opts.txGasLimit,
+      }))
+    }
     const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
     let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]!
 
@@ -1781,6 +1788,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
+    if (opts.txGasLimit) {
+      unsignedTxs.transactions = unsignedTxs.transactions.map((tx) => ({
+        ...tx,
+        gasLimit: opts.txGasLimit,
+      }))
+    }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())

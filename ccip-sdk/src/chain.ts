@@ -690,6 +690,8 @@ export type ExecuteOpts = (
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
+  /** Force execute transaction gasLimit/computeUnits (instead of estimating) */
+  txGasLimit?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
   /** For Solana, create and extend addresses in a lookup table before executing */
@@ -1486,6 +1488,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: SendMessageOpts & {
       /** Signer instance (chain-dependent) */
       wallet: unknown
+      /** Force send transaction gas limit (instead of estimating) */
+      txGasLimit?: number
     },
   ): Promise<CCIPRequest>
   /**

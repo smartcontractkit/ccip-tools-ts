@@ -4,12 +4,17 @@ import {
   Contract,
   FunctionFragment,
   concat,
+  dataSlice,
   getAddress,
+  getBigInt,
   getNumber,
   hexlify,
+  id,
+  keccak256,
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
+  toBigInt,
   zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
@@ -32,6 +37,14 @@ const ccipReceive = FunctionFragment.from({
 })
 type Any2EVMMessage = Parameters<TypedContract<typeof RouterABI>['routeMessage']>[0]
 
+// keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ERC20")) - 1)) & ~bytes32(uint256(0xff))
+function erc7201(namespace: string): bigint {
+  const inner = getBigInt(id(namespace))
+  const encoded = defaultAbiCoder.encode(['uint256'], [inner - 1n])
+  const hash = keccak256(encoded)
+  return toBigInt(dataSlice(hash, 0, 31) + '00') // & ~bytes32(uint256(0xff))
+}
+
 /**
  * Finds suitable token balance slot by simulating a fake transfer between 2 non-existent accounts,
  * with state overrides for the holders' balance, which reverts if override slot is wrong
@@ -42,7 +55,7 @@ const findBalancesSlot = memoize(
     provider: JsonRpcApiProvider,
     holder: string = getAddress(hexlify(randomBytes(20))),
     recipient: string = getAddress(hexlify(randomBytes(20))),
-  ): Promise<number> {
+  ): Promise<bigint> {
     const contract = new Contract(token, interfaces.Token, provider) as unknown as TypedContract<
       typeof TokenABI
     >
@@ -51,7 +64,15 @@ const findBalancesSlot = memoize(
 
     let firstErr
     // try range(0..15), but start with most probable 0 (common ERC20) and 9 (USDC)
-    for (const slot of [0, 9, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]) {
+    for (const slot of [
+      0,
+      9,
+      erc7201('openzeppelin.storage.ERC20'), // OpenZepellin's ERC20Upgradeable/ERC1967 proxy
+      ...Array.from({ length: 15 })
+        .map((_, i) => i + 1)
+        .filter((i) => i !== 9),
+    ]) {
+      const storage = solidityPackedKeccak256(['uint256', 'uint256'], [holder, slot])
       try {
         await provider.send('eth_estimateGas', [
           { from: holder, to: token, data: calldata },
@@ -59,15 +80,12 @@ const findBalancesSlot = memoize(
           {
             [token]: {
               stateDiff: {
-                [solidityPackedKeccak256(['uint256', 'uint256'], [holder, slot])]: toBeHex(
-                  fakeAmount,
-                  32,
-                ),
+                [storage]: toBeHex(fakeAmount, 32),
               },
             },
           },
         ])
-        return slot // if didn't reject
+        return BigInt(slot) // if didn't reject
       } catch (err) {
         firstErr ??= err
       }
