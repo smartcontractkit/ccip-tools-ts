@@ -1,4 +1,4 @@
-import { type BytesLike, getAddress, hexlify, id, toNumber } from 'ethers'
+import { type BytesLike, dataSlice, getAddress, id, toNumber, zeroPadBytes } from 'ethers'
 
 import type { CantonExtraArgsV1 } from './canton/types.ts'
 import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
