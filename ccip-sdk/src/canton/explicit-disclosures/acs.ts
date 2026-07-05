@@ -351,6 +351,19 @@ async function fetchRichSnapshot(
  *
  * @throws `CCIPError(CANTON_API_ERROR)` if no matching contract is found.
  */
+function pickMatchByContractId(
+  snapshot: Map<string, RichContractMatch[]>,
+  cid: string,
+): RichContractMatch | undefined {
+  const want = normalizeHex(cid)
+  for (const contracts of snapshot.values()) {
+    for (const c of contracts) {
+      if (normalizeHex(c.contractId) === want) return c
+    }
+  }
+  return undefined
+}
+
 function pickByContractId(
   snapshot: Map<string, RichContractMatch[]>,
   cid: string,
@@ -525,20 +538,13 @@ export class AcsDisclosureProvider {
   }
 
   /**
-   * Find the best `CCIPReceiver` for execute, optionally resolving a caller hint.
-   *
-   * Hint formats:
-   * - Ledger contract ID (long hex, optional `0x` prefix)
-   * - Canton party ID (`hint::1220…`)
-   * - keccak256(party) hex from the CCIP message `receiver` field (32 bytes)
-   *
-   * When no hint is given, returns the best receiver whose finality config matches
-   * the message, preferring contracts whose `requiredCCVs` include a configured CCV.
+   * Find the best `CCIPReceiver` match for execute, optionally resolving a caller hint.
+   * Returns the full ACS match (including `requiredCCVs`) for create/update decisions.
    */
-  async resolveReceiverForExecute(
+  async findReceiverMatchForExecute(
     finality: number,
     hint?: string,
-  ): Promise<DisclosedContract | null> {
+  ): Promise<RichContractMatch | null> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party, this.packages)
     const moduleEntity = CCIP_MODULE_ENTITIES.ccipReceiver
     const candidates = snapshot.get(moduleEntity) ?? []
@@ -555,7 +561,8 @@ export class AcsDisclosureProvider {
       const trimmed = hint.trim()
       const kind = classifyReceiverHint(trimmed)
       if (kind === 'contractId') {
-        return pickByContractId(snapshot, trimmed)
+        const match = pickMatchByContractId(snapshot, trimmed)
+        return match ?? null
       }
       if (kind === 'partyId') {
         pool = pool.filter((c) => c.owner === trimmed)
@@ -569,7 +576,25 @@ export class AcsDisclosureProvider {
       pool.filter((c) => matchesReceiverFinality(c.receiverFinalityConfig, finality)),
       this.config.ccvs ?? [],
     )
-    const best = matching[0]
+    return matching[0] ?? null
+  }
+
+  /**
+   * Find the best `CCIPReceiver` for execute, optionally resolving a caller hint.
+   *
+   * Hint formats:
+   * - Ledger contract ID (long hex, optional `0x` prefix)
+   * - Canton party ID (`hint::1220…`)
+   * - keccak256(party) hex from the CCIP message `receiver` field (32 bytes)
+   *
+   * When no hint is given, returns the best receiver whose finality config matches
+   * the message, preferring contracts whose `requiredCCVs` include a configured CCV.
+   */
+  async resolveReceiverForExecute(
+    finality: number,
+    hint?: string,
+  ): Promise<DisclosedContract | null> {
+    const best = await this.findReceiverMatchForExecute(finality, hint)
     return best ? toDisclosedContract(best) : null
   }
 
@@ -587,16 +612,46 @@ export class AcsDisclosureProvider {
    * Returns the sender's `PerPartyRouter` and `CCIPSender` contracts from the
    * Active Contract Set. Executor disclosures are supplied by the external EDS
    * API when the global EDS selects one for the message.
+   *
+   * @throws {@link CCIPError} if either contract is missing (use {@link findSendDisclosures} to probe).
    */
   async fetchSendDisclosures(): Promise<AcsSendDisclosures> {
+    const found = await this.findSendDisclosures()
+    if (!found.perPartyRouter) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton ACS: no active PerPartyRouter found with partyOwner "${this.config.party}".`,
+      )
+    }
+    if (!found.ccipSender) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton ACS: no active CCIPSender found with signatory "${this.config.party}".`,
+      )
+    }
+    return { perPartyRouter: found.perPartyRouter, ccipSender: found.ccipSender }
+  }
+
+  /**
+   * Like {@link fetchSendDisclosures} but returns `null` for missing contracts
+   * instead of throwing (used by GetOrCreate helpers).
+   */
+  async findSendDisclosures(): Promise<{
+    perPartyRouter: DisclosedContract | null
+    ccipSender: DisclosedContract | null
+  }> {
     const snapshot = await fetchRichSnapshot(this.client, this.config.party, this.packages)
-
-    const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
-    const existingSender = pickBySignatory(snapshot, 'ccipSender', this.config.party)
-
+    const routerEntity = CCIP_MODULE_ENTITIES.perPartyRouter
+    const senderEntity = CCIP_MODULE_ENTITIES.ccipSender
+    const routerMatch = (snapshot.get(routerEntity) ?? []).find(
+      (c) => c.partyOwner === this.config.party,
+    )
+    const senderMatch = (snapshot.get(senderEntity) ?? []).find(
+      (c) => c.signatory === this.config.party,
+    )
     return {
-      perPartyRouter: existingRouter,
-      ccipSender: existingSender,
+      perPartyRouter: routerMatch ? toDisclosedContract(routerMatch) : null,
+      ccipSender: senderMatch ? toDisclosedContract(senderMatch) : null,
     }
   }
 }

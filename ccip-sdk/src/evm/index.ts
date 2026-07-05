@@ -2310,7 +2310,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const { encodedMessage } = request.message as CCIPMessage_V2_0
+      const encodedMessage = hexlify(
+        getDataBytes((request.message as CCIPMessage_V2_0).encodedMessage),
+      )
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,

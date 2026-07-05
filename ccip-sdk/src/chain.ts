@@ -249,6 +249,18 @@ export type CantonConfig = {
   senderInstanceId?: string
 
   /**
+   * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.
+   * ccip-cli `--gas-limit` and `extraArgs.gasLimit` override this.
+   */
+  defaultSendGasLimit?: number | bigint
+
+  /**
+   * Transfer-factory preview amount for Canton fee-token payments.
+   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   */
+  feeTransferFactoryAmount?: string
+
+  /**
    * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
    * Used for execute (EDS disclosures + receiver matching) and as the default for
    * Canton send `senderRequiredCCVs` when `extraArgs.ccvRawAddresses` is omitted.

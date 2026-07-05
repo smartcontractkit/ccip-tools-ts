@@ -27,6 +27,7 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
+    "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
   "scripts": {
