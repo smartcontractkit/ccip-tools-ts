@@ -97,7 +97,7 @@ export function Features(): React.JSX.Element {
           <FeatureCard
             icon={<SdkIcon />}
             title="SDK Reference"
-            description="Full TypeScript SDK documentation with type definitions, examples, and multi-chain support for EVM, Solana, Aptos, and Sui."
+            description="Full TypeScript SDK documentation with type definitions, examples, and multi-chain support for EVM, Solana, Aptos, Sui, TON, and Canton."
             link="/sdk/"
             linkText="Explore SDK"
             version={sdkVersion ? `v${sdkVersion}` : undefined}

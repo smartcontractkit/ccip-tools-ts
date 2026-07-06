@@ -73,9 +73,9 @@ import {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
   DEFAULT_CANTON_SENDER_INSTANCE_ID,
-  DEFAULT_CANTON_SEND_GAS_LIMIT,
   excludeHoldingCidForTokenTransfer,
   formatCantonLinkFeeToken,
+  resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
   selectFeeTokenHoldingCids,
   sumCantonHoldingAmounts,
@@ -186,6 +186,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /** Transfer-factory preview amount for fee payments (`canton-config.feeTransferFactoryAmount`). */
   private readonly feeTransferFactoryAmount: string
 
+  /** Default gas limit for Canton → destination sends (`canton-config.defaultSendGasLimit`). */
+  private readonly defaultSendGasLimit?: number | bigint
+
   /**
    * Creates a new CantonChain instance.
    * @param client - Canton Ledger API client.
@@ -233,6 +236,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender',
     }
     this.feeTransferFactoryAmount = resolveFeeTransferFactoryAmount(ctx?.cantonConfig)
+    this.defaultSendGasLimit = ctx?.cantonConfig?.defaultSendGasLimit
   }
 
   /**
@@ -664,11 +668,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       : ''
     const hasPayload = Boolean(message.data && dataLength(message.data))
     const tokenAmounts = message.tokenAmounts ?? []
-    let gasLimit = cantonArgs.gasLimit
-    if (gasLimit == null) {
-      const tokenOnly = tokenAmounts.length === 1 && !hasPayload
-      gasLimit = tokenOnly ? 0n : DEFAULT_CANTON_SEND_GAS_LIMIT
-    }
+    const tokenOnly = tokenAmounts.length === 1 && !hasPayload
+    const gasLimit = resolveCantonSendGasLimit(cantonArgs.gasLimit, tokenOnly, {
+      defaultSendGasLimit: this.defaultSendGasLimit,
+    })
     const feeTokenHoldingCids = cantonArgs.feeTokenHoldingCids
     const executorMode = cantonArgs.executorMode ?? 'default'
     const senderRequiredCCVs = resolveSenderRequiredCcvs(cantonArgs.ccvRawAddresses, this.ccvs)
