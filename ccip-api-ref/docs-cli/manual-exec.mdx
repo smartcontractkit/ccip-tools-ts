@@ -7,9 +7,11 @@ sidebar_position: 4
 custom_edit_url: null
 ---
 
+import { SEND_COMMAND_CHAIN_FAMILIES } from '@site/src/types'
+
 # manual-exec
 
-<ChainSupport />
+<ChainSupport chains={SEND_COMMAND_CHAIN_FAMILIES} />
 
 Manually execute pending or failed CCIP messages on the destination chain.
 
@@ -23,13 +25,13 @@ Aliases: `manualExec`
 
 ## Description
 
-The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It accepts either a source transaction hash or a CCIP message ID (32-byte hex). When given a transaction hash, it retrieves the original request from the source chain, calculates the merkle proof, and fetches any required offchain data. When given a message ID (with `--api` enabled, the default), it fetches execution inputs directly from the CCIP API, removing the need for source chain RPC access. In both cases, it submits the execution transaction to the destination chain.
+The `manual-exec` command allows you to manually trigger the execution of a CCIP message that is stuck or has failed. It accepts a source transaction hash, a CCIP message ID (32-byte hex), or a Canton ledger update ID. When given a transaction hash or Canton update ID, it retrieves the original request from the source chain, calculates the merkle proof, and fetches any required offchain data. When given a message ID (with `--api` enabled, the default), it fetches execution inputs directly from the CCIP API, removing the need for source chain RPC access. In all cases, it submits the execution transaction to the destination chain.
 
 ## Arguments
 
-| Argument          | Type   | Required | Description                                                                       |
-| ----------------- | ------ | -------- | --------------------------------------------------------------------------------- |
-| `<tx-hash-or-id>` | string | Yes      | Transaction hash of the original CCIP request, or a CCIP message ID (32-byte hex) |
+| Argument          | Type   | Required | Description                                                                                                                    |
+| ----------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `<tx-hash-or-id>` | string | Yes      | Transaction hash of the original CCIP request, a CCIP message ID (32-byte hex), or a Canton ledger update ID (`1220` + digest) |
 
 ## Options
 
@@ -66,6 +68,14 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 | Option                  | Type     | Default | Description                                               |
 | ----------------------- | -------- | ------- | --------------------------------------------------------- |
 | `--receiver-object-ids` | string[] | -       | Receiver object IDs for Sui execution (e.g., `0xabc...`). |
+
+### Canton-Specific Options
+
+| Option            | Type     | Default | Description                                                                                                                        |
+| ----------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--canton-config` | string   | -       | Path to Canton config JSON file (required when executing on Canton). See [Configuration](/cli/configuration#canton-configuration). |
+| `--indexer`       | string[] | -       | CCIP v2 indexer URLs for CCV verifications (falls back to `indexerUrl` in canton-config).                                          |
+| `--receiver`      | string   | -       | CCIPReceiver contract ID, party ID (`hint::1220…`), or keccak256(party) hash. Defaults to message receiver.                        |
 
 See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
 
@@ -148,6 +158,20 @@ ccip-cli manual-exec 0xabc123... \
   --receiver-object-ids 0xabc... 0xdef...
 ```
 
+### Canton execution by update ID
+
+For Canton destinations, pass the ledger update ID from the source send transaction:
+
+```bash
+ccip-cli manual-exec 1220a1b2c3d4... \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --receiver sender::1220... \
+  --wallet <64-char-ed25519-seed>
+```
+
+Canton manual execution requires `--canton-config` with `indexerUrl` (or `--indexer`) for CCV verifications. The `--receiver` flag accepts a CCIPReceiver contract ID, a party ID, or the keccak256 hash from the message receiver field.
+
 ## Execution Flow
 
 **When given a transaction hash:**
@@ -177,6 +201,16 @@ Solana transactions have size limits. For large messages:
 | 3    | `--clear-leftover-accounts` | Cleans up from aborted attempts           |
 
 After successful execution, buffers auto-clear. Lookup tables require a grace period before deletion.
+
+## Canton Considerations
+
+Canton execution uses the ledger's interactive submission flow (prepare → sign → execute) when an external signer is provided via `--wallet`. Without `--wallet`, transactions are submitted directly using the JWT from config.
+
+| Input     | Format                                                                  |
+| --------- | ----------------------------------------------------------------------- |
+| Update ID | `1220` + 64 hex chars (SHA-256 multihash)                               |
+| Receiver  | Party ID (`hint::1220…`), CCIPReceiver contract ID, or keccak256(party) |
+| Config    | `--canton-config` with `indexerUrl` for CCV verifications               |
 
 ## See Also
 

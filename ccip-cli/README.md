@@ -113,6 +113,7 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `EVM`: numeric chain id; e.g. `1` for `ethereum-mainnet`.
 - `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
 - `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
+- `Canton`: prefixed chain id: e.g. `canton:TestNet`, `canton:DevNet`, `canton:MainNet`
 
 ## Shell Completion
 
@@ -290,7 +291,7 @@ Canton requires a config file with connection parameters via `--canton-config <p
 ```
 
 **Required fields:** `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`  
-**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`
+**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `senderInstanceId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
 
 #### Example
 

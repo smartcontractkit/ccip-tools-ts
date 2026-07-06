@@ -49,6 +49,7 @@ const fee = await source.getFee({ router, destChainSelector, message: {
 | Aptos        | Mainnet, Testnet                                             | Supported      |
 | Sui          | Mainnet, Testnet                                             | Partial (manual exec) |
 | TON          | Mainnet, Testnet                                             | Partial (no token pool/registry queries) |
+| Canton       | LocalNet, DevNet, TestNet, MainNet                           | Partial (send + manual exec; requires config file) |
 
 ## Documentation
 
