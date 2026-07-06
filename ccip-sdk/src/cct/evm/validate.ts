@@ -6,15 +6,15 @@
 
 import { isAddress } from 'ethers'
 
-import { CCIPCctParamsInvalidError } from '../../errors/index.ts'
+import { CCTParamsInvalidError } from '../errors.ts'
 
 /**
  * Asserts `value` is a valid EVM address.
- * @throws {@link CCIPCctParamsInvalidError} if it is not
+ * @throws {@link CCTParamsInvalidError} if it is not
  */
 export function validateAddress(operation: string, param: string, value: unknown): void {
   if (typeof value !== 'string' || !isAddress(value)) {
-    throw new CCIPCctParamsInvalidError(
+    throw new CCTParamsInvalidError(
       operation,
       param,
       `must be a valid address, got ${String(value)}`,
