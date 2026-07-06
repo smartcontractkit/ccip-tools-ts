@@ -237,6 +237,7 @@ const SELECTORS: Selectors = {
     selector: 11690709103138290329n,
     name: 'mind-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '232': {
@@ -1299,6 +1300,7 @@ const SELECTORS: Selectors = {
     selector: 4411394078118774322n,
     name: 'ethereum-mainnet-blast-1',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '84531': {
@@ -1397,6 +1399,7 @@ const SELECTORS: Selectors = {
     selector: 7189150270347329685n,
     name: 'mind-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '200810': {
@@ -1629,12 +1632,14 @@ const SELECTORS: Selectors = {
     selector: 9043146809313071210n,
     name: 'corn-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '21000001': {
     selector: 1467427327723633929n,
     name: 'ethereum-testnet-sepolia-corn-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '31415926': {
