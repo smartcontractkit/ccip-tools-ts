@@ -12,6 +12,7 @@ import {
 import type { CCIPMessage_V2_0 } from './evm/messages.ts'
 import { discoverOffRamp } from './execution.ts'
 import { networkInfo } from './networks.ts'
+import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage, MessageInput } from './types.ts'
 import { getDataBytes } from './utils.ts'
@@ -268,10 +269,9 @@ export async function estimateReceiveExecution({
   const payload = {
     offRamp,
     message: {
-      ...message,
+      ...buildMessageForDest({ ...message, tokenAmounts: destTokenAmounts }, dest.network.family),
       messageId: message.messageId ?? hexlify(randomBytes(32)),
       sourceChainSelector: source.network.chainSelector,
-      tokenAmounts: destTokenAmounts,
     },
   }
   await dest.checkExecute(payload)
