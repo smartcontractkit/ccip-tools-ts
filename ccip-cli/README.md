@@ -278,13 +278,13 @@ Canton requires a config file with connection parameters via `--canton-config <p
 
 ```json
 {
-  "party": "sender::party",
-  "ccipParty": "ccip::party",
+  "party": "sender::1220...",
+  "ccipParty": "ccip::1220...",
   "jwt": "eyJ...",
   "edsUrl": "https://eds.example.com",
   "transferInstructionUrl": "https://transfer-instruction.example.com",
   "externalEdsUrlsByOwner": {
-    "owner::party": "https://external-eds.example.com"
+    "owner::1220...": "https://external-eds.example.com"
   },
   "indexerUrl": "https://indexer.example.com"
 }

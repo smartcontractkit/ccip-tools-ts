@@ -421,7 +421,7 @@ Canton source sends use `CantonExtraArgsV1` (not on-wire encoded bytes):
 
 | Field | Description |
 |-------|-------------|
-| `feeTokenHoldingCids` | Contract IDs for fee token holdings (Amulet or LINK). Auto-discovered if omitted. |
+| `feeTokenHoldingCids` | Contract IDs for fee token holdings (Amulet or LINK). Optional on `sendMessage` (auto-discovered from the party's holdings via `fillCantonSendDefaults`); required when calling `generateUnsignedSendMessage` directly. |
 | `ccvRawAddresses` | CCV instance addresses in `instanceId@party` format |
 | `gasLimit` | Gas limit for destination `ccipReceive` callback |
 | `executorMode` | `'default'` or `'none'` (skip executor for no-execution lanes) |

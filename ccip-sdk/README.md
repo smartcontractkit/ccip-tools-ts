@@ -35,8 +35,8 @@ const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v
 // Canton (requires CantonConfig — see Multi-Chain guide)
 const cantonChain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
   cantonConfig: {
-    party: 'sender::party',
-    ccipParty: 'ccip::party',
+    party: 'sender::1220...',
+    ccipParty: 'ccip::1220...',
     jwt: 'eyJ...',
     edsUrl: 'https://eds.example.com',
     transferInstructionUrl: 'https://transfer-instruction.example.com',

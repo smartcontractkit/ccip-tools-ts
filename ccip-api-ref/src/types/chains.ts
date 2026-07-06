@@ -32,7 +32,7 @@ export const CHAIN_CONFIGS: Readonly<Record<ChainType, ChainConfig>> = {
   solana: { label: 'Solana', icon: '/assets/chains/solana.svg' },
   aptos: { label: 'Aptos', icon: '/assets/chains/aptos.svg' },
   sui: { label: 'Sui', icon: '/assets/chains/sui.svg' },
-  ton: { label: 'TON', icon: '/assets/chains/ethereum.svg' },
+  ton: { label: 'TON', icon: '/assets/chains/ton.svg' },
   canton: { label: 'Canton', icon: '/assets/chains/canton.svg' },
 } as const
 
