@@ -4,14 +4,11 @@ import { describe, it } from 'node:test'
 import { makeError } from 'ethers'
 
 import { submit } from './submit.ts'
-import {
-  CCIPCctTxFailedError,
-  CCIPCctTxNotConfirmedError,
-  CCIPWalletInvalidError,
-} from '../../errors/index.ts'
+import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
+import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
 
 const TAR = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
@@ -56,21 +53,21 @@ function fakeSigner(opts: {
 }
 
 describe('submit (shared CCT submit pipeline)', () => {
-  it('returns the txHash on a successful receipt', async () => {
+  it('returns the hash on a successful receipt', async () => {
     const result = await submit(
       stubChain(),
       fakeSigner({ receipt: { status: 1 } }),
       UNSIGNED,
       'setPool',
     )
-    assert.deepEqual(result, { txHash: HASH })
+    assert.deepEqual(result, { hash: HASH })
   })
 
-  it('throws CCIPCctTxFailedError (reverted) on status 0, tagged with the operation', async () => {
+  it('throws CCTTxFailedError (reverted) on status 0, tagged with the operation', async () => {
     await assert.rejects(
       () => submit(stubChain(), fakeSigner({ receipt: { status: 0 } }), UNSIGNED, 'setPool'),
       (err: unknown) =>
-        err instanceof CCIPCctTxFailedError &&
+        err instanceof CCTTxFailedError &&
         err.context.operation === 'setPool' &&
         err.context.txHash === HASH &&
         !err.isTransient &&
@@ -78,15 +75,15 @@ describe('submit (shared CCT submit pipeline)', () => {
     )
   })
 
-  it('throws CCIPCctTxNotConfirmedError (transient, keeps hash) when no receipt arrives', async () => {
+  it('throws CCTTxNotConfirmedError (transient, keeps hash) when no receipt arrives', async () => {
     await assert.rejects(
       () => submit(stubChain(), fakeSigner({ receipt: null }), UNSIGNED, 'setPool'),
       (err: unknown) =>
-        err instanceof CCIPCctTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
+        err instanceof CCTTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
     )
   })
 
-  it('throws CCIPCctTxNotConfirmedError (transient, keeps hash) on confirmation timeout', async () => {
+  it('throws CCTTxNotConfirmedError (transient, keeps hash) on confirmation timeout', async () => {
     await assert.rejects(
       () =>
         submit(
@@ -96,11 +93,11 @@ describe('submit (shared CCT submit pipeline)', () => {
           'setPool',
         ),
       (err: unknown) =>
-        err instanceof CCIPCctTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
+        err instanceof CCTTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
     )
   })
 
-  it('throws a transient CCIPCctTxFailedError when submission fails with a network error', async () => {
+  it('throws a transient CCTTxFailedError when submission fails with a network error', async () => {
     await assert.rejects(
       () =>
         submit(
@@ -109,7 +106,7 @@ describe('submit (shared CCT submit pipeline)', () => {
           UNSIGNED,
           'setPool',
         ),
-      (err: unknown) => err instanceof CCIPCctTxFailedError && err.isTransient,
+      (err: unknown) => err instanceof CCTTxFailedError && err.isTransient,
     )
   })
 
