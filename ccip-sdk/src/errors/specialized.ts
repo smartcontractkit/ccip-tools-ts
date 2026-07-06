@@ -2237,66 +2237,6 @@ export class CCIPWalletInvalidError extends CCIPError {
   }
 }
 
-// CCT — Cross-Chain Token admin
-//
-// Generic across all CCT operations (setPool, applyChainUpdates, …). The
-// specific operation is carried in `error.context.operation` so callers branch
-// on `(code, operation)` rather than a per-op class — this keeps the error
-// surface flat as the operation set grows. Reserve a dedicated subclass only
-// for an op with genuinely distinct recovery semantics.
-
-/** Thrown before any RPC when a CCT operation's parameters fail validation. */
-export class CCIPCctParamsInvalidError extends CCIPError {
-  override readonly name = 'CCIPCctParamsInvalidError'
-  /** Creates a CCT params invalid error for `operation` (e.g. `'setPool'`). */
-  constructor(operation: string, param: string, reason: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.CCT_PARAMS_INVALID,
-      `Invalid ${operation} parameter "${param}": ${reason}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, operation, param, reason },
-      },
-    )
-  }
-}
-
-/** Thrown when a CCT operation's transaction reverts or fails after submission. */
-export class CCIPCctTxFailedError extends CCIPError {
-  override readonly name = 'CCIPCctTxFailedError'
-  /** Creates a CCT tx failed error for `operation` (e.g. `'setPool'`). */
-  constructor(operation: string, reason: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.CCT_TX_FAILED, `${operation} failed: ${reason}`, {
-      ...options,
-      isTransient: options?.isTransient ?? false,
-      context: { ...options?.context, operation, reason },
-    })
-  }
-}
-
-/**
- * Thrown when a CCT operation's transaction was submitted but not confirmed
- * within the timeout. Transient — the tx may still mine; `context.txHash` lets
- * the caller check before resubmitting.
- */
-export class CCIPCctTxNotConfirmedError extends CCIPError {
-  override readonly name = 'CCIPCctTxNotConfirmedError'
-  /** Creates a CCT tx not-confirmed error for `operation` (e.g. `'setPool'`). */
-  constructor(operation: string, txHash: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.CCT_TX_NOT_CONFIRMED,
-      `${operation} transaction not confirmed within timeout: ${txHash}`,
-      {
-        ...options,
-        isTransient: true,
-        retryAfterMs: 5000,
-        context: { ...options?.context, operation, txHash },
-      },
-    )
-  }
-}
-
 // Source Chain
 
 /**

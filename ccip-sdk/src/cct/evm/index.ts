@@ -1,5 +1,5 @@
 /**
- * EVM Cross-Chain Token (CCT) admin operations on the TokenAdminRegistry.
+ * EVM Cross-Chain Token (CCT) admin operations.
  * {@link EVMTokenManager} wraps an {@link EVMChain}: build with
  * `generateUnsigned<Op>` (sender in opts), then `<op>` with `wallet` in opts.
  *
@@ -12,12 +12,14 @@ import type { ChainContext } from '../../chain.ts'
 import { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
+import type { TransactionHash } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
-import * as SetPool from './operations/set-pool.ts'
+import { type SetPoolParams, SetPool } from './token-admin/operations/set-pool.ts'
 
-/** CCT admin operations for EVM chains, delegating each op to `./operations`. */
+/** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
+  readonly #setPool = new SetPool()
 
   /** Wraps the chain this manager builds and submits through. */
   constructor(chain: EVMChain) {
@@ -50,21 +52,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `setPool` tx (for multisig / offline signing).
-   * @throws {@link CCIPCctParamsInvalidError} if any param is invalid
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
-  generateUnsignedSetPool(
-    opts: SetPool.SetPoolParams & { sender?: string },
-  ): Promise<UnsignedEVMTx> {
-    return SetPool.generate(this.chain, opts)
+  generateUnsignedSetPool(opts: SetPoolParams): Promise<UnsignedEVMTx> {
+    return this.#setPool.generate(this.chain, opts)
   }
 
   /**
    * Registers a pool, signing + submitting with `opts.wallet` (the token admin).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCIPCctParamsInvalidError} if any param is invalid
-   * @throws {@link CCIPCctTxFailedError} if the tx reverts or fails
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  setPool(opts: SetPool.SetPoolParams & { wallet: unknown }): Promise<SetPool.SetPoolResult> {
-    return SetPool.execute(this.chain, opts)
+  setPool(opts: SetPoolParams & { wallet: unknown }): Promise<TransactionHash> {
+    return this.#setPool.execute(this.chain, opts)
   }
+
 }

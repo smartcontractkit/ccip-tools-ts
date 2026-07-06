@@ -202,18 +202,19 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   INTERACTIVE_REQUIRED:
     'Provide the required input via CLI flags or environment variables, or remove --no-interactive to allow prompts.',
 
-  CCT_PARAMS_INVALID:
-    'Check the operation parameters (addresses, selectors, amounts). See error.context for the offending field.',
-  CCT_TX_FAILED:
-    'The CCT admin transaction failed. Ensure the caller holds the required role (token admin / pool owner) for this operation.',
-  CCT_TX_NOT_CONFIRMED:
-    'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting — it may still be mined.',
-
   NOT_IMPLEMENTED: 'This feature is not yet implemented.',
   UNKNOWN: 'An unknown error occurred. Check the error details.',
 
   CANTON_API_ERROR:
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
+
+  // Cross-Chain Token
+  CCT_PARAMS_INVALID:
+    'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TX_FAILED:
+    'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
+  CCT_TX_NOT_CONFIRMED:
+    'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */

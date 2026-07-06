@@ -4,9 +4,10 @@ import { describe, it } from 'node:test'
 import { Interface, id } from 'ethers'
 
 import { EVMTokenManager } from './index.ts'
-import { CCIPCctParamsInvalidError, CCIPWalletInvalidError } from '../../errors/index.ts'
+import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
+import { CCTParamsInvalidError } from '../errors.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -105,7 +106,7 @@ describe('EVMTokenManager (cct/evm)', () => {
             routerAddress: ROUTER,
           }),
         (err: unknown) =>
-          err instanceof CCIPCctParamsInvalidError &&
+          err instanceof CCTParamsInvalidError &&
           err.context.operation === 'setPool' &&
           err.context.param === 'tokenAddress',
       )
@@ -128,4 +129,5 @@ describe('EVMTokenManager (cct/evm)', () => {
       )
     })
   })
+
 })
