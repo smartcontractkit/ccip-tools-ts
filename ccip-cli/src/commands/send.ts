@@ -30,6 +30,7 @@ import {
   decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
+  getRequiredCCVs,
   jsonParse,
   jsonStringify,
   networkInfo,
@@ -143,6 +144,12 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Print gas estimate and exit',
         implies: 'estimate-gas-limit',
+      },
+      'only-ccvs': {
+        type: 'boolean',
+        describe:
+          'Print the destination-required CCV set (requiredCCVs/optionalCCVs/threshold) and exit. ' +
+          'A disallowed finality surfaces as an error.',
       },
       'approve-max': {
         type: 'boolean',
@@ -314,6 +321,32 @@ async function sendMessage(
     ...(!!argv.tokenReceiver && { tokenReceiver: argv.tokenReceiver }),
     ...(!!accounts && { accounts, accountIsWritableBitmap }), // accounts also used as Sui receiverObjectIds
     ...parseExtraArgs(argv.extra),
+  }
+
+  if (argv.onlyCcvs) {
+    // --only-ccvs: read the destination-required CCV set (and finality verdict) and exit; no send.
+    const dest = await getChain(destNetwork.chainSelector)
+    if (!walletAddress) {
+      try {
+        ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
+      } catch {
+        // sender is optional here; omitting it yields the lane-default (not sender-scoped) CCV view
+      }
+    }
+    const ccvs = await getRequiredCCVs({
+      source,
+      dest,
+      routerOrRamp: router,
+      message: { sender: walletAddress, receiver, data, tokenAmounts, ...extraArgs },
+    })
+    if (argv.format === Format.json) {
+      output.write(jsonStringify(ccvs, 2))
+    } else {
+      output.write('requiredCCVs      :', ccvs.requiredCCVs)
+      output.write('optionalCCVs      :', ccvs.optionalCCVs)
+      output.write('optionalThreshold :', ccvs.optionalThreshold)
+    }
+    return
   }
 
   if (argv.estimateGasLimit == null || argv.estimateGasLimit > -100)

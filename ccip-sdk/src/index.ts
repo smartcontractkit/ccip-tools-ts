@@ -64,7 +64,8 @@ export {
   encodeExtraArgs,
   encodeFinality,
 } from './extra-args.ts'
-export { estimateReceiveExecution, sourceToDestTokenAddresses } from './gas.ts'
+export { estimateReceiveExecution, getRequiredCCVs, sourceToDestTokenAddresses } from './gas.ts'
+export type { GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
 export { decodeMessage, getMessagesInRange } from './requests.ts'
 export {
@@ -118,6 +119,12 @@ export { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from './netwo
 import SELECTORS from './selectors.ts'
 export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'
+export {
+  type MessageV1,
+  type MessageV1TokenTransfer,
+  encodeMessageV1,
+  encodeTokenTransferV1,
+} from './evm/messageCodec.ts'
 import { SolanaChain } from './solana/index.ts'
 export type { UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'

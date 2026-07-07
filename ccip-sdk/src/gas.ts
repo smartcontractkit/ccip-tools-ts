@@ -1,4 +1,4 @@
-import { formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
+import { type BytesLike, formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
 import type { Simplify } from 'type-fest'
 
 import type { Chain } from './chain.ts'
@@ -11,6 +11,7 @@ import {
 } from './errors/index.ts'
 import type { CCIPMessage_V2_0 } from './evm/messages.ts'
 import { discoverOffRamp } from './execution.ts'
+import type { FinalityRequested } from './extra-args.ts'
 import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
@@ -63,6 +64,34 @@ export type EstimateReceiveExecutionOpts = {
   routerOrRamp: string
   /** message to be simulated */
   message: Omit<EstimateMessageInput, 'sourceChainSelector'>
+}
+
+/**
+ * Candidate message for {@link Chain.getRequiredCCVs} — the fields the destination OffRamp
+ * `getCCVsForMessage` resolver reads. `destTokenAmounts` are the already-resolved destination token
+ * amounts (as produced by {@link getDestTokenAmount}).
+ */
+export type GetRequiredCCVsMessage = {
+  sourceChainSelector: bigint
+  receiver: string
+  finality?: FinalityRequested
+  sender?: string
+  data?: BytesLike
+  ccipReceiveGasLimit?: number | bigint
+  gasLimit?: number | bigint
+  destTokenAmounts?: readonly {
+    token?: string
+    destTokenAddress?: string
+    amount: bigint
+    extraData?: string
+  }[]
+}
+
+/** Resolved CCV requirements returned by {@link Chain.getRequiredCCVs}. */
+export type GetRequiredCCVsResult = {
+  requiredCCVs: readonly string[]
+  optionalCCVs: readonly string[]
+  optionalThreshold: number
 }
 
 /**
@@ -280,4 +309,69 @@ export async function estimateReceiveExecution({
     throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
 
   return dest.estimateReceiveExecution(payload)
+}
+
+/**
+ * Resolve the CCVs the destination will require for a candidate message, and whether its finality is
+ * accepted, via the OffRamp's `getCCVsForMessage` view (a read; no send). Resolves the onRamp/offRamp from
+ * `routerOrRamp` like {@link estimateReceiveExecution}, maps token amounts to their destination
+ * counterparts, then queries the resolver. A disallowed finality throws `CCIPFinalityNotAllowedError`.
+ *
+ * The set is sender-scoped: pass the real `sender`. It is informative only — comparing it against the
+ * source-engaged set is left to the caller, since source and destination CCVs are distinct per-chain
+ * contracts with no on-chain address link.
+ *
+ * @param opts - {@link EstimateReceiveExecutionOpts} (source, dest, routerOrRamp, message)
+ * @returns `{ requiredCCVs, optionalCCVs, optionalThreshold }`.
+ */
+export async function getRequiredCCVs({
+  source,
+  dest,
+  routerOrRamp,
+  message,
+}: EstimateReceiveExecutionOpts): Promise<GetRequiredCCVsResult> {
+  let onRamp: string, offRamp: string
+  if (message.onRampAddress) onRamp = message.onRampAddress
+  if (message.offRampAddress) offRamp = message.offRampAddress
+  if (!onRamp! || !offRamp!)
+    try {
+      const [type] = await source.typeAndVersion(routerOrRamp)
+      if (!type.includes('OnRamp'))
+        onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
+      else onRamp = routerOrRamp
+      offRamp ||= await discoverOffRamp(source, dest, onRamp, source)
+    } catch (sourceErr) {
+      try {
+        const [type, , tnv] = await dest.typeAndVersion(routerOrRamp)
+        if (!type.includes('OffRamp'))
+          throw new CCIPContractTypeInvalidError(routerOrRamp, tnv, ['OffRamp'])
+        offRamp = routerOrRamp
+        const onRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
+        if (!onRamps.length) throw new CCIPOnRampRequiredError()
+        onRamp = onRamps[onRamps.length - 1]!
+      } catch {
+        throw sourceErr // re-throw original error
+      }
+    }
+
+  const destTokenAmounts = await Promise.all(
+    (message.tokenAmounts ?? []).map(async (tokenAmount) =>
+      getDestTokenAmount({ source, dest, onRamp, tokenAmount }),
+    ),
+  )
+
+  if (!dest.getRequiredCCVs)
+    throw new CCIPMethodUnsupportedError(dest.constructor.name, 'getRequiredCCVs')
+
+  return dest.getRequiredCCVs({
+    offRamp,
+    message: {
+      sourceChainSelector: source.network.chainSelector,
+      receiver: message.receiver,
+      finality: message.finality,
+      sender: message.sender,
+      data: message.data,
+      destTokenAmounts,
+    },
+  })
 }
