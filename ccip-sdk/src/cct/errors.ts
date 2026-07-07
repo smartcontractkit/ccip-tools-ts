@@ -65,3 +65,62 @@ export class CCTTxNotConfirmedError extends CCIPError {
     )
   }
 }
+
+// Token-pool version dispatch
+
+/**
+ * Thrown when the contract at an address is not a supported token-pool type
+ * (BurnMint or LockRelease).
+ */
+export class CCTContractTypeInvalidError extends CCIPError {
+  override readonly name = 'CCTContractTypeInvalidError'
+  /** Creates a contract-type-invalid error. */
+  constructor(address: string, expected: string, actual: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CONTRACT_TYPE_INVALID,
+      `Expected a ${expected} contract at ${address}, got "${actual}"`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, address, expected, actual },
+      },
+    )
+  }
+}
+
+/** Thrown when a token pool reports a version string the SDK does not recognize. Permanent. */
+export class CCTTokenPoolVersionUnsupportedError extends CCIPError {
+  override readonly name = 'CCTTokenPoolVersionUnsupportedError'
+  /** Creates a token-pool-version-unsupported error. */
+  constructor(version: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CCT_TOKEN_POOL_VERSION_UNSUPPORTED,
+      `Unsupported token pool version: ${version}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, version },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when no implementation is registered for an operation at or below the pool's
+ * version (floor-match miss). Permanent for that pool version.
+ */
+export class CCTOperationUnsupportedError extends CCIPError {
+  override readonly name = 'CCTOperationUnsupportedError'
+  /** Creates an operation-unsupported error. */
+  constructor(operation: string, version: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CCT_OPERATION_UNSUPPORTED,
+      `${operation} is not supported at token-pool version ${version}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, operation, version },
+      },
+    )
+  }
+}
