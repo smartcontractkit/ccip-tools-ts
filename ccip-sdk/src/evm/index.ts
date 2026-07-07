@@ -13,6 +13,7 @@ import {
   Contract,
   FetchRequest,
   JsonRpcProvider,
+  MaxUint256,
   WebSocketProvider,
   ZeroAddress,
   ZeroHash,
@@ -191,6 +192,37 @@ export async function submitTransaction(
 }
 
 /**
+ * Whether an estimate message is a token-only transfer (tokens, empty data, no receive-gas).
+ *
+ * Mirrors the OffRamp's `_isTokenOnlyTransfer` (`dataLength == 0 && ccipReceiveGasLimit == 0`,
+ * `OffRamp.sol`): for a token-only transfer the OffRamp does NOT consult the receiver's finality
+ * policy — finality is delegated to the token pool — so the SDK must skip its receiver-finality
+ * check too. Otherwise `estimateReceiveExecution` false-positives `CCIPFinalityNotAllowedError` on
+ * a token-only transfer at a fast finality to a finalized-only receiver, blocking a send the OffRamp
+ * would have executed.
+ *
+ * The receive-gas value appears under two field names depending on the call path: `gasLimit`
+ * (user/CLI input) and `ccipReceiveGasLimit` (decoded MessageV1 on the `getMessageById` branch).
+ * BOTH are checked so an empty-data message that still calls the receiver (receive-gas nonzero) is
+ * NOT misclassified token-only (which would wrongly skip the finality check, a false negative).
+ */
+export function isTokenOnlyEstimate(message: {
+  data?: BytesLike | null
+  ccipReceiveGasLimit?: number | null
+  gasLimit?: number | bigint | null
+  [key: string]: unknown
+}): boolean {
+  const dataLength = message.data != null ? getDataBytes(message.data).length : 0
+  const receiveGasLimit =
+    message.ccipReceiveGasLimit != null
+      ? BigInt(message.ccipReceiveGasLimit)
+      : message.gasLimit != null
+        ? BigInt(message.gasLimit)
+        : 0n
+  return dataLength === 0 && receiveGasLimit === 0n
+}
+
+/**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
  * Provides methods for sending CCIP cross-chain messages, querying message
@@ -247,6 +279,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 1024,
+      forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
     this.getBlockInfo = getBlockInfo
 
@@ -460,7 +493,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /** {@inheritDoc Chain.getBlockInfo} */
   async getBlockInfo(block: number | bigint | EVMEndBlockTag): Promise<BlockInfo> {
-    const res = await this.provider.getBlock(block) // cached
+    const res = await this.provider.getBlock(block)
     if (!res) throw new CCIPBlockNotFoundError(block)
     return { number: res.number, timestamp: res.timestamp }
   }
@@ -1074,36 +1107,41 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @param address - Router or OnRamp contract address.
    * @returns OnRamp contract address.
    */
-  async _getSomeOnRampFor(address: string): Promise<string> {
+  async _getSomeOnRampFor(address: string, destChainSelector?: bigint): Promise<string> {
     const [type, , typeAndVersion] = await this.typeAndVersion(address)
     if (type.includes('OnRamp')) return address
     else if (type !== 'Router') throw new CCIPContractNotRouterError(address, typeAndVersion)
     // when given a router, we take any onRamp we can find, as usually they all use same registry
-    const someOtherNetwork =
-      this.network.networkType === NetworkType.Testnet
-        ? this.network.name === 'ethereum-testnet-sepolia'
-          ? 'avalanche-testnet-fuji'
-          : 'ethereum-testnet-sepolia'
-        : this.network.name === 'ethereum-mainnet'
-          ? 'avalanche-mainnet'
-          : 'ethereum-mainnet'
-    return this.getOnRampForRouter(address, networkInfo(someOtherNetwork).chainSelector)
+    if (!destChainSelector) {
+      // usually, we're handed a destChainSelector hint;
+      // but if not, assume this router is connected to one of the ethereum networks (or to Avalanche, if Ethereum)
+      const someOtherNetwork =
+        this.network.networkType === NetworkType.Testnet
+          ? this.network.name === 'ethereum-testnet-sepolia'
+            ? 'avalanche-testnet-fuji'
+            : 'ethereum-testnet-sepolia'
+          : this.network.name === 'ethereum-mainnet'
+            ? 'avalanche-mainnet'
+            : 'ethereum-mainnet'
+      destChainSelector = networkInfo(someOtherNetwork).chainSelector
+    }
+    return this.getOnRampForRouter(address, destChainSelector)
   }
 
   /**
    * {@inheritDoc Chain.getTokenAdminRegistryFor}
    * @throws {@link CCIPContractNotRouterError} if address is not a Router, OnRamp, or OffRamp
    */
-  async getTokenAdminRegistryFor(address: string): Promise<string> {
+  async getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string> {
     const [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (type.includes('TokenPool')) {
       address = (await this.getTokenPoolConfig(address)).router
-      return this.getTokenAdminRegistryFor(address)
+      return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type === 'Router') {
-      address = await this._getSomeOnRampFor(address)
-      return this.getTokenAdminRegistryFor(address)
+      address = await this._getSomeOnRampFor(address, destChainSelector)
+      return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (!type.includes('Ramp')) {
       const [, , typeAndVersion] = await this.typeAndVersion(address)
       throw new CCIPContractNotRouterError(address, typeAndVersion)
@@ -1504,7 +1542,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ) as unknown as TypedContract<typeof Token_ABI>
           const allowance = await contract.allowance(sender, router)
           if (allowance >= amount) return
-          const amnt = opts.approveMax ? BigInt(2) ** BigInt(256) - BigInt(1) : amount
+          const amnt = opts.approveMax ? MaxUint256 : amount
           return contract.approve.populateTransaction(router, amnt, { from: sender })
         }),
       )
@@ -1550,6 +1588,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const sender = await wallet.getAddress()
     const txs = await this.generateUnsignedSendMessage({ ...opts, sender })
+    if (opts.txGasLimit) {
+      txs.transactions = txs.transactions.map((tx) => ({
+        ...tx,
+        gasLimit: opts.txGasLimit,
+      }))
+    }
     const approveTxs = txs.transactions.slice(0, txs.transactions.length - 1)
     let sendTx: TransactionRequest = txs.transactions[txs.transactions.length - 1]!
 
@@ -1775,6 +1819,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ...opts,
       payer: await wallet.getAddress(),
     })
+    if (opts.txGasLimit) {
+      unsignedTxs.transactions = unsignedTxs.transactions.map((tx) => ({
+        ...tx,
+        gasLimit: opts.txGasLimit,
+      }))
+    }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
     unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
@@ -2260,7 +2310,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const { encodedMessage } = request.message as CCIPMessage_V2_0
+      const encodedMessage = hexlify(
+        getDataBytes((request.message as CCIPMessage_V2_0).encodedMessage),
+      )
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
@@ -2372,11 +2424,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
 
-    // v2: check allowed finality
+    // v2: check allowed finality — but SKIP for token-only transfers (empty data + no receive-gas),
+    // mirroring the OffRamp which delegates finality to the pool and does not consult the receiver
+    // for token-only transfers (see isTokenOnlyEstimate / OffRamp._isTokenOnlyTransfer).
     if (
       'finality' in opts_.message &&
       opts_.message.finality &&
-      opts_.message.finality !== 'finalized'
+      opts_.message.finality !== 'finalized' &&
+      !isTokenOnlyEstimate(opts_.message)
     ) {
       let allowedFinality: FinalityAllowed = {
         finalityDepth: 1,

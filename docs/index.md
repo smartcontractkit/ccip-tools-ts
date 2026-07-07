@@ -108,6 +108,7 @@ console.log('Fee:', fee.toString())
 | Aptos | Mainnet, Testnet | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk) | Supported |
 | Sui | Mainnet, Testnet | [@mysten/sui](https://github.com/MystenLabs/sui) | Partial (manual exec) |
 | TON | Mainnet, Testnet | [@ton/ton](https://github.com/ton-org/ton) | Partial (no token pool/registry queries) |
+| Canton | LocalNet, DevNet, TestNet, MainNet | Canton Ledger JSON API | Partial (send + manual exec; requires config file) |
 
 ## Requirements
 

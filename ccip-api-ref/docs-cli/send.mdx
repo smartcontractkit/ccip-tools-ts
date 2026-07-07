@@ -7,9 +7,11 @@ sidebar_position: 3
 custom_edit_url: null
 ---
 
+import { SEND_COMMAND_CHAIN_FAMILIES } from '@site/src/types'
+
 # send
 
-<ChainSupport />
+<ChainSupport chains={SEND_COMMAND_CHAIN_FAMILIES} />
 
 Send a CCIP message from a source chain to a destination chain.
 
@@ -27,11 +29,11 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 
 ### Required
 
-| Option     | Alias | Type   | Description                                       |
-| ---------- | ----- | ------ | ------------------------------------------------- |
-| `--source` | `-s`  | string | Source network (chain ID, selector, or name)      |
-| `--dest`   | `-d`  | string | Destination network (chain ID, selector, or name) |
-| `--router` | `-r`  | string | CCIP Router contract address on source chain      |
+| Option     | Alias | Type   | Description                                                                                                                              |
+| ---------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--source` | `-s`  | string | Source network (chain ID, selector, or name)                                                                                             |
+| `--dest`   | `-d`  | string | Destination network (chain ID, selector, or name)                                                                                        |
+| `--router` | `-r`  | string | CCIP Router contract address on EVM source, or CCIPSender instance id on Canton source (defaults to `senderInstanceId` in canton-config) |
 
 ### Message
 
@@ -77,10 +79,12 @@ For array fields (`ccvs`, `ccvArgs`, `tokenArgs`), repeating a key creates an ar
 
 ### Chain-Specific
 
-| Option             | Alias                  | Type     | Description                                                                                                          |
-| ------------------ | ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
-| `--token-receiver` | -                      | string   | Solana token receiver address if different from program receiver. **Required** when sending tokens + data to Solana. |
-| `--account`        | `--receiver-object-id` | string[] | Solana accounts (append `=rw` for writable) or Sui receiver object IDs.                                              |
+| Option             | Alias                  | Type     | Description                                                                                                                             |
+| ------------------ | ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `--token-receiver` | -                      | string   | Solana token receiver address if different from program receiver. **Required** when sending tokens + data to Solana.                    |
+| `--account`        | `--receiver-object-id` | string[] | Solana accounts (append `=rw` for writable) or Sui receiver object IDs.                                                                 |
+| `--canton-config`  | -                      | string   | Path to Canton config JSON file (required when source or dest is Canton). See [Configuration](/cli/configuration#canton-configuration). |
+| `--indexer`        | -                      | string[] | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton).                                                            |
 
 ### Wallet
 
@@ -135,14 +139,16 @@ When `--data` is present and `--gas-limit` is omitted, the SDK applies a default
 
 ## Lane-Specific Parameters
 
-| Option                 | EVM→EVM                     | EVM→Solana                       | Solana→EVM    | EVM→Sui             |
-| ---------------------- | --------------------------- | -------------------------------- | ------------- | ------------------- |
-| `--gas-limit` / `-L`   | Gas limit for `ccipReceive` | Compute units                    | Gas limit     | Gas limit           |
-| `--estimate-gas-limit` | Auto-estimate + % margin    | Auto-estimate                    | Auto-estimate | -                   |
-| `--token-receiver`     | v2+ lanes only (`--extra`)  | Required if tokens + data        | -             | Optional            |
-| `--account`            | -                           | Receiver accounts (append `=rw`) | -             | Receiver object IDs |
-| `--ooo`                | Default: true               | Default: true                    | Default: true | Default: true       |
-| `--extra` / `-x`       | v2+ lanes only              | -                                | -             | -                   |
+| Option                 | EVM→EVM                     | EVM→Solana                       | Solana→EVM     | EVM→Sui             | Canton→EVM                                               |
+| ---------------------- | --------------------------- | -------------------------------- | -------------- | ------------------- | -------------------------------------------------------- |
+| `--gas-limit` / `-L`   | Gas limit for `ccipReceive` | Compute units                    | Gas limit      | Gas limit           | Gas limit for dest                                       |
+| `--estimate-gas-limit` | Auto-estimate + % margin    | Auto-estimate                    | Auto-estimate  | -                   | -                                                        |
+| `--token-receiver`     | v2+ lanes only (`--extra`)  | Required if tokens + data        | -              | Optional            | -                                                        |
+| `--account`            | -                           | Receiver accounts (append `=rw`) | -              | Receiver object IDs | -                                                        |
+| `--ooo`                | Default: true               | Default: true                    | Default: true  | Default: true       | Default: true                                            |
+| `--extra` / `-x`       | v2+ lanes only              | -                                | -              | -                   | `feeTokenHoldingCids`, `ccvRawAddresses`, `executorMode` |
+| `--canton-config`      | -                           | -                                | -              | -                   | Required                                                 |
+| `-r` / `--router`      | Router address              | Router address                   | Router address | Router address      | CCIPSender instance id                                   |
 
 ## Examples
 
@@ -234,6 +240,28 @@ ccip-cli send \
   --account 0xObjectId2 \
   -t 0xToken=1.0 \
   --wallet ledger
+```
+
+### Canton to EVM
+
+```bash
+ccip-cli send \
+  -s canton-testnet \
+  -d ethereum-testnet-sepolia \
+  -r ccipsender \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --rpc https://ethereum-sepolia-rpc.example.com \
+  --to 0xReceiverContract \
+  -t link-token=1.0 \
+  -w <64-char-ed25519-seed>
+```
+
+On Canton source, `-r` is the **CCIPSender instance id** (not an EVM router address). Use `--only-get-fee` to preview — Canton returns `0` since fees are computed on-ledger. Pass Canton send extras via `--extra`:
+
+```bash
+-x feeTokenHoldingCids='["#holding-cid-1"]' \
+-x executorMode=none
 ```
 
 ### Extra args (CCIP v2+ lanes)

@@ -104,7 +104,7 @@ function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
   // executorLength (1 byte)
   if (args.executor && args.executor !== '0x') {
     parts.push(new Uint8Array([20]))
-    parts.push(decodeAddress(args.executor, ChainFamily.EVM))
+    parts.push(getAddressBytes(args.executor))
   } else {
     parts.push(new Uint8Array([0]))
   }
