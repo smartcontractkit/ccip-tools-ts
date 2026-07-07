@@ -32,7 +32,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   serializeUnsignedTx(
     unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
     payer: string,
-    encoding: SerializedSolanaTxEncoding = 'base64',
+    encoding?: SerializedSolanaTxEncoding,
   ): Promise<string> {
     return serializeUnsignedSolanaTx(this.chain.connection, unsigned, payer, encoding)
   }

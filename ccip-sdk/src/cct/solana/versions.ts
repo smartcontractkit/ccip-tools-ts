@@ -7,7 +7,7 @@ export const SolanaCCTVersion = {
 export type SolanaCCTVersionValue = (typeof SolanaCCTVersion)[keyof typeof SolanaCCTVersion]
 
 /** Default Solana CCT program version. */
-export const SOLANA_CCT_VERSION = SolanaCCTVersion.V1_6_2
+export const DEFAULT_SOLANA_CCT_VERSION = SolanaCCTVersion.V1_6_2
 
 /** Optional version hint accepted by Solana CCT operations. */
 export type SolanaCCTVersionHint = {
@@ -16,7 +16,7 @@ export type SolanaCCTVersionHint = {
 
 /** Resolves a Solana CCT version hint to the default when omitted. */
 export function resolveSolanaCCTVersion(
-  version: unknown = SOLANA_CCT_VERSION,
+  version: unknown = DEFAULT_SOLANA_CCT_VERSION,
 ): SolanaCCTVersionValue {
   return version as SolanaCCTVersionValue
 }
