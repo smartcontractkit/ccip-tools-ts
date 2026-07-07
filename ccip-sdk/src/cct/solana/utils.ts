@@ -1,9 +1,4 @@
-import {
-  type Connection,
-  PublicKey,
-  TransactionMessage,
-  VersionedTransaction,
-} from '@solana/web3.js'
+import { PublicKey, TransactionMessage } from '@solana/web3.js'
 import bs58 from 'bs58'
 
 import { CCIPCctParamsInvalidError } from '../../errors/index.ts'
@@ -17,27 +12,38 @@ export function derivePda(seed: string, programId: PublicKey, extra: Buffer[] = 
   return PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], programId)[0]
 }
 
-/** Serializes an unsigned Solana tx into one unsigned v0 transaction. */
+/** Serializes an unsigned Solana tx into one legacy message for external signing. */
 export function serializeUnsignedSolanaTx(
-  connection: Connection,
+  connection: { getLatestBlockhash: () => Promise<{ blockhash: string }> },
   unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
   payer: PublicKey | string,
   encoding?: SerializedSolanaTxEncoding,
 ): Promise<string>
 export async function serializeUnsignedSolanaTx(
-  connection: Connection,
+  connection: { getLatestBlockhash: () => Promise<{ blockhash: string }> },
   unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
   payer: PublicKey | string,
-  encoding = 'base64',
+  encoding = 'base58',
 ): Promise<string> {
+  if (unsigned.lookupTables?.length) {
+    throw new CCIPCctParamsInvalidError(
+      'serializeUnsignedTx',
+      'lookupTables',
+      'legacy-message serialization does not support address lookup tables',
+    )
+  }
+
   const payerKey = typeof payer === 'string' ? new PublicKey(payer) : payer
   const { blockhash } = await connection.getLatestBlockhash()
-  const message = new TransactionMessage({
-    payerKey,
-    recentBlockhash: blockhash,
-    instructions: unsigned.instructions,
-  }).compileToV0Message(unsigned.lookupTables)
-  const serialized = Buffer.from(new VersionedTransaction(message).serialize())
+  const serialized = Buffer.from(
+    new TransactionMessage({
+      payerKey,
+      recentBlockhash: blockhash,
+      instructions: unsigned.instructions,
+    })
+      .compileToLegacyMessage()
+      .serialize(),
+  )
 
   if (encoding === 'base58') return bs58.encode(serialized)
   if (encoding === 'base64') return serialized.toString('base64')

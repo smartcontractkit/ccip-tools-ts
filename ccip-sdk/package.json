@@ -31,6 +31,10 @@
       "types": "./dist/cct/evm/index.d.ts",
       "default": "./dist/cct/evm/index.js"
     },
+    "./cct/solana": {
+      "types": "./dist/cct/solana/index.d.ts",
+      "default": "./dist/cct/solana/index.js"
+    },
     "./src/*": "./src/*"
   },
   "scripts": {

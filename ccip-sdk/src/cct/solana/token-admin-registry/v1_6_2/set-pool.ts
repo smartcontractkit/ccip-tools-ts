@@ -1,19 +1,20 @@
 import { Buffer } from 'buffer'
 
-import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
-import { IDL as CCIP_ROUTER_IDL } from '../../../../solana/idl/1.6.0/CCIP_ROUTER.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import { simulationProvider } from '../../../../solana/utils.ts'
 import type { CctTxResult } from '../../../token-manager.ts'
+import {
+  createRouterProgram,
+  deriveRouterConfigPda,
+  deriveTokenAdminRegistryPda,
+} from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import { derivePda } from '../../utils.ts'
 import { validatePublicKey } from '../../validate.ts'
-import { type SolanaCCTVersionHint, SOLANA_CCT_VERSION } from '../../versions.ts'
+import { type SolanaCCTVersionHint, DEFAULT_SOLANA_CCT_VERSION } from '../../versions.ts'
 
 export const OPERATION = 'setPool'
 
@@ -51,9 +52,9 @@ export async function generate(
   const authority = new PublicKey(opts.authority ?? opts.payer)
   const lookupTable = new PublicKey(opts.poolLookupTableAddress)
 
-  const routerProgram = new Program(CCIP_ROUTER_IDL, router, simulationProvider(chain, payer))
-  const config = derivePda('config', router)
-  const tokenAdminRegistry = derivePda('token_admin_registry', router, [tokenMint.toBuffer()])
+  const routerProgram = createRouterProgram(chain, router, payer)
+  const config = deriveRouterConfigPda(router)
+  const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
 
   const instruction = await routerProgram.methods
     .setPool(Buffer.from([3, 4, 7]))
@@ -67,7 +68,7 @@ export async function generate(
     .instruction()
 
   chain.logger.debug(
-    `${OPERATION}: version = ${SOLANA_CCT_VERSION}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}, lookupTable = ${lookupTable.toBase58()}`,
+    `${OPERATION}: version = ${DEFAULT_SOLANA_CCT_VERSION}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}, lookupTable = ${lookupTable.toBase58()}`,
   )
   return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
 }
