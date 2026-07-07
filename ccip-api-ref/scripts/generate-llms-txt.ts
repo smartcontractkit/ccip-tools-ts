@@ -645,7 +645,7 @@ ${enums.map((e) => `- \`${e.name}\``).join('\n')}
 
 ## Chain Methods (Full Signatures)
 
-Methods available on chain instances (EVMChain, SolanaChain, AptosChain, SuiChain, TONChain):
+Methods available on chain instances (EVMChain, SolanaChain, AptosChain, SuiChain, TONChain, CantonChain):
 
 ${chainMethods
   .map((m) => {

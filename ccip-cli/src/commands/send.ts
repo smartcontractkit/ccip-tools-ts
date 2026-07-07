@@ -27,11 +27,11 @@ import {
   CCIPMethodUnsupportedError,
   CCIPTokenNotFoundError,
   ChainFamily,
-  bigIntReplacer,
-  bigIntReviver,
   decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
+  jsonParse,
+  jsonStringify,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 'ethers'
@@ -41,7 +41,7 @@ import type { GlobalOpts } from '../index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
-import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -68,8 +68,8 @@ export const builder = (yargs: Argv) =>
     .option('router', {
       alias: 'r',
       type: 'string',
-      demandOption: true,
-      describe: 'Router contract address on source',
+      describe:
+        'Router contract address on EVM source, or CCIPSender instance id on Canton source (defaults to canton-config senderInstanceId)',
     })
     .options({
       receiver: {
@@ -96,6 +96,11 @@ export const builder = (yargs: Argv) =>
         alias: 'ooo',
         type: 'boolean',
         describe: 'Allow out-of-order execution (v1.5+ lanes)',
+      },
+      'tx-gas-limit': {
+        alias: 'G',
+        type: 'number',
+        describe: 'Force send transaction gasLimit/computeUnits (instead of estimating)',
       },
       'fee-token': {
         type: 'string',
@@ -194,18 +199,15 @@ function parseExtraArgs(extra: readonly string[] | undefined): Record<string, un
     const eqIdx = entry.indexOf('=')
     const key = entry.substring(0, eqIdx)
     const raw = entry.substring(eqIdx + 1)
-    let value: unknown
+    let value: unknown = raw
 
-    try {
-      // Quote bare integer literals (outside JSON strings) so bigIntReviver can convert them to BigInt.
-      // The alternation matches JSON strings first (preserved as-is) and number tokens second
-      // (pure integers get quoted; floats/scientific-notation are left alone).
-      const quoted = raw.replace(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (m) =>
-        m.startsWith('"') || !/^-?\d+$/.test(m) ? m : `"${m}"`,
-      )
-      value = JSON.parse(quoted, bigIntReviver)
-    } catch {
-      value = raw
+    // Bare 0x literals are hex (addresses, calldata); yaml/json parse would coerce them to bigint.
+    if (!/^0x[0-9a-fA-F]*$/i.test(raw)) {
+      try {
+        value = jsonParse<unknown>(raw)
+      } catch {
+        // pass
+      }
     }
 
     if (key in result) {
@@ -227,9 +229,19 @@ async function sendMessage(
   const { output, logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
+  const router = resolveRouter(argv, sourceNetwork, logger)
+  if (!router) {
+    throw new CCIPArgumentInvalidError(
+      'router',
+      sourceNetwork.family === ChainFamily.Canton
+        ? 'required on Canton source: pass -r or set senderInstanceId in canton-config'
+        : 'required: pass -r with the source router contract address',
+    )
+  }
+
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
-  decodeAddress(argv.router, sourceNetwork.family)
+  decodeAddress(router, sourceNetwork.family)
 
   let data: BytesLike | undefined
   if (argv.data) {
@@ -319,7 +331,7 @@ async function sendMessage(
       const estimated = await estimateReceiveExecution({
         source,
         dest,
-        routerOrRamp: argv.router,
+        routerOrRamp: router,
         message: {
           sender: walletAddress,
           receiver,
@@ -333,13 +345,12 @@ async function sendMessage(
         // --only-estimate: the estimate IS the data output
         if (argv.format === Format.json) {
           output.write(
-            JSON.stringify(
+            jsonStringify(
               {
                 estimated,
                 bufferPercent: argv.estimateGasLimit ?? 0,
                 withBuffer: argv.gasLimit,
               },
-              bigIntReplacer,
               2,
             ),
           )
@@ -378,7 +389,7 @@ async function sendMessage(
       feeToken = (source.constructor as ChainStatic).getAddress(argv.feeToken)
       feeTokenInfo = await source.getTokenInfo(feeToken)
     } catch (_) {
-      const feeTokens = await source.getFeeTokens(argv.router)
+      const feeTokens = await source.getFeeTokens(router)
       logger.debug('supported feeTokens:', feeTokens)
       for (const [token, info] of Object.entries(feeTokens)) {
         if (info.symbol === 'UNKNOWN' || info.symbol !== argv.feeToken) continue
@@ -389,7 +400,7 @@ async function sendMessage(
       if (!feeTokenInfo) throw new CCIPTokenNotFoundError(argv.feeToken)
     }
   } else {
-    const nativeToken = await source.getNativeTokenForRouter(argv.router)
+    const nativeToken = await source.getNativeTokenForRouter(router)
     feeTokenInfo = await source.getTokenInfo(nativeToken)
   }
 
@@ -404,6 +415,7 @@ async function sendMessage(
   // calculate fee
   const fee = await source.getFee({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message,
   })
@@ -416,7 +428,7 @@ async function sendMessage(
     // --only-get-fee: the fee IS the data output
     if (argv.format === Format.json) {
       output.write(
-        JSON.stringify(
+        jsonStringify(
           {
             fee: fee.toString(),
             feeFormatted: formatUnits(fee, feeTokenInfo.decimals),
@@ -424,7 +436,6 @@ async function sendMessage(
             feeTokenSymbol: displaySymbol,
             feeTokenDecimals: feeTokenInfo.decimals,
           },
-          bigIntReplacer,
           2,
         ),
       )
@@ -460,6 +471,7 @@ async function sendMessage(
 
   const request = await source.sendMessage({
     ...argv,
+    router,
     destChainSelector: destNetwork.chainSelector,
     message: { ...message, fee },
     wallet,
@@ -474,11 +486,15 @@ async function sendMessage(
     ', messageId =>',
     request.message.messageId,
   )
-  await showRequests(ctx, {
-    ...argv,
-    txHashOrId: request.tx.hash,
-    'tx-hash-or-id': request.tx.hash,
-    'log-index': undefined,
-    logIndex: undefined,
-  })
+  await showRequests(
+    ctx,
+    {
+      ...argv,
+      txHashOrId: request.tx.hash,
+      'tx-hash-or-id': request.tx.hash,
+      'log-index': undefined,
+      logIndex: undefined,
+    },
+    { request },
+  )
 }

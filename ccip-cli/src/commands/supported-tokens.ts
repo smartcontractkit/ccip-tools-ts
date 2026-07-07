@@ -26,7 +26,7 @@ import {
   type RateLimiterState,
   type TokenInfo,
   CCIPTokenNotConfiguredError,
-  bigIntReplacer,
+  jsonStringify,
   networkInfo,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { search } from '@inquirer/prompts'
@@ -154,8 +154,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
         output.write('feeTokens:', feeTokens)
     }
     if (argv.onlyFeeTokens) {
-      if (jsonFeeTokens !== undefined)
-        output.write(JSON.stringify({ feeTokens: jsonFeeTokens }, bigIntReplacer, 2))
+      if (jsonFeeTokens !== undefined) output.write(jsonStringify({ feeTokens: jsonFeeTokens }, 2))
       return
     }
   }
@@ -192,14 +191,13 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
     if (argv.format === Format.json) {
       output.write(
-        JSON.stringify(
+        jsonStringify(
           {
             ...(jsonFeeTokens !== undefined && { feeTokens: jsonFeeTokens }),
             ...info,
             tokenPool,
             ...poolConfig,
           },
-          bigIntReplacer,
           2,
         ),
       )
@@ -293,9 +291,8 @@ async function listTokens(
   if (argv.format === Format.json) {
     // Emit a single JSON object with all tokens (and fee tokens if available)
     output.write(
-      JSON.stringify(
+      jsonStringify(
         { ...(jsonFeeTokens !== undefined && { feeTokens: jsonFeeTokens }), tokens: infos },
-        bigIntReplacer,
         2,
       ),
     )

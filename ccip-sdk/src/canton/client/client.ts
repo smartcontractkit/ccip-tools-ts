@@ -1,9 +1,10 @@
 import axios, { type AxiosAdapter } from 'axios'
 
-import type { components } from './generated/ledger-api.ts'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
 import { createAxiosFetchAdapter } from '../../fetch.ts'
+import { normalizeCantonUpdateId } from '../update-id.ts'
+import type { components } from './generated/ledger-api.ts'
 
 // Canton JSON Ledger API requires HTTP/2.
 // On Node.js, axios uses its http adapter with native http2.connect().
@@ -21,6 +22,26 @@ export type JsSubmitAndWaitForTransactionResponse =
   components['schemas']['JsSubmitAndWaitForTransactionResponse']
 /** A single transaction from the ledger */
 export type JsTransaction = components['schemas']['JsTransaction']
+
+/**
+ * Extract a {@link JsTransaction} from a `/v2/updates/update-by-id` response body.
+ */
+export function extractJsTransactionFromUpdate(response: unknown): JsTransaction {
+  if (!response || typeof response !== 'object') {
+    throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'Canton update response is empty')
+  }
+  const root = response as Record<string, unknown>
+  const update = (root.update ?? root) as Record<string, unknown>
+  const transactionWrapper = update.Transaction as Record<string, unknown> | undefined
+  const transaction = transactionWrapper?.value
+  if (!transaction || typeof transaction !== 'object') {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      'Canton update response did not include a transaction',
+    )
+  }
+  return transaction as JsTransaction
+}
 /** Request to get active contracts */
 export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
 /** Response containing active contracts */
@@ -225,6 +246,80 @@ export function createCantonClient(config: CantonClientConfig) {
       return data.connectedSynchronizers ?? []
     },
 
+    /** List package IDs supported by this participant (for prepare submission). */
+    async listPackageIds(): Promise<string[]> {
+      const data = await get2<{ packageIds?: string[] }>('/v2/packages')
+      return data.packageIds ?? []
+    },
+
+    /** List vetted packages for a synchronizer (maps package IDs to names). */
+    async listVettedPackages(
+      synchronizerId: string,
+    ): Promise<Array<{ packageId: string; packageName: string; packageVersion: string }>> {
+      const packages: Array<{ packageId: string; packageName: string; packageVersion: string }> = []
+      let pageToken = ''
+      do {
+        const data = await post2<{
+          vettedPackages?: Array<{
+            packages?: Array<{
+              packageId?: string
+              packageName?: string
+              packageVersion?: string
+            }>
+          }>
+          nextPageToken?: string
+        }>(
+          '/v2/package-vetting',
+          {
+            topologyStateFilter: { synchronizerIds: [synchronizerId] },
+            pageToken,
+            pageSize: 500,
+          },
+          undefined,
+          1,
+        )
+        for (const group of data.vettedPackages ?? []) {
+          for (const pkg of group.packages ?? []) {
+            if (pkg.packageId && pkg.packageName) {
+              packages.push({
+                packageId: pkg.packageId,
+                packageName: pkg.packageName,
+                packageVersion: pkg.packageVersion ?? '',
+              })
+            }
+          }
+        }
+        pageToken = data.nextPageToken ?? ''
+      } while (pageToken)
+      return packages
+    },
+
+    /** Resolve one vetted package ID per package name for interactive submission. */
+    async getPreferredPackageIds(
+      actAs: string[],
+      packageNames: string[],
+      synchronizerId: string,
+    ): Promise<string[]> {
+      if (packageNames.length === 0) return []
+      const data = await post2<{
+        packageReferences?: Array<{ packageId?: string }>
+      }>(
+        '/v2/interactive-submission/preferred-packages',
+        {
+          packageVettingRequirements: packageNames.map((packageName) => ({
+            parties: actAs,
+            packageName,
+          })),
+          synchronizerId,
+        },
+        undefined,
+        1,
+      )
+      return (data.packageReferences ?? [])
+        .map((ref) => ref.packageId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    },
+
     /**
      * Check if the ledger API is alive
      */
@@ -252,16 +347,27 @@ export function createCantonClient(config: CantonClientConfig) {
     },
 
     /**
-     * Fetch a transaction by its update ID without requiring a known party.
-     * Uses `filtersForAnyParty` with a wildcard so all visible events are returned.
+     * Fetch a transaction by its update ID.
+     *
+     * Uses `/v2/updates/update-by-id` (same as the Go CLI `GetUpdateById`) when a
+     * party is provided. Falls back to the deprecated `transaction-by-id` endpoint
+     * only when no party is available.
+     *
      * @param updateId - The update ID (Canton transaction hash)
+     * @param party - Optional party ID to scope visible events
      * @returns The full `JsTransaction` including all events
      */
-    async getTransactionById(updateId: string): Promise<JsTransaction> {
+    async getTransactionById(updateId: string, party?: string): Promise<JsTransaction> {
+      const normalizedId = normalizeCantonUpdateId(updateId)
+      if (party) {
+        const response = await this.getUpdateById(normalizedId, party)
+        return extractJsTransactionFromUpdate(response)
+      }
+
       const response = await post2<{ transaction: JsTransaction }>(
         '/v2/updates/transaction-by-id',
         {
-          updateId,
+          updateId: normalizedId,
           transactionFormat: {
             eventFormat: {
               filtersByParty: {},
@@ -293,7 +399,7 @@ export function createCantonClient(config: CantonClientConfig) {
      */
     async getUpdateById(updateId: string, party: string): Promise<unknown> {
       return post2<unknown>('/v2/updates/update-by-id', {
-        updateId,
+        updateId: normalizeCantonUpdateId(updateId),
         updateFormat: {
           includeTransactions: {
             eventFormat: {
@@ -572,15 +678,17 @@ async function request<T>(
 
     if (response.status < 200 || response.status >= 300) {
       const errorBody = response.data ?? `HTTP ${response.status}`
-      if (attempt < retries) {
-        console.log(
-          `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
-          errorBody,
-        )
-        await new Promise((r) => setTimeout(r, retryDelayMs))
-        continue
+      const isClientError =
+        response.status >= 400 && response.status < 500 && response.status !== 429
+      if (isClientError || attempt >= retries) {
+        throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
       }
-      throw new CantonApiError(`${method} ${path} failed`, errorBody, response.status)
+      console.log(
+        `[canton/client] ${method} ${path} failed with status ${response.status} (attempt ${attempt}/${retries}), retrying in ${retryDelayMs}ms:`,
+        errorBody,
+      )
+      await new Promise((r) => setTimeout(r, retryDelayMs))
+      continue
     }
 
     const contentLength = response.headers['content-length']

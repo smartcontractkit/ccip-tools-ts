@@ -196,10 +196,10 @@ export type WithCantonConfig = {
  * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
  */
 export type CantonConfig = {
-  /** Party identifier for the Canton Ledger API. */
+  /** User ledger party for actAs, ACS queries, and transaction visibility (often differs from ccipParty). */
   party: string
 
-  /** CCIP party identifier */
+  /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
   /** JSON Web Token for authentication with the Canton Ledger API. */
@@ -218,8 +218,55 @@ export type CantonConfig = {
   /** Base URL for the Transfer Instruction API. */
   transferInstructionUrl: string
 
-  /** Optional base URL for a transaction indexer to fetch CCV verifications; if not provided, default URL will be used. */
+  /**
+   * Optional base URL for a transaction indexer to fetch CCV verifications.
+   * Used when `--indexer` is omitted on ccip-cli (CLI `--indexer` overrides this).
+   */
   indexerUrl?: string
+
+  /**
+   * Optional CCIP Canton chain ID (e.g. `canton:TestNet`). When set, skips
+   * synchronizer-alias detection — required when the ledger reports a generic
+   * alias such as `global`.
+   */
+  chainId?: string
+
+  /**
+   * Optional DAR package names for ACS template filters. Prod testnet bundles
+   * PerPartyRouter in `ccip-runtime` instead of the dev default `ccip-perpartyrouter`.
+   */
+  packages?: Partial<{
+    perPartyRouter: string
+    ccipReceiver: string
+    ccipSender: string
+  }>
+
+  /**
+   * Optional CCIPSender instance id for Canton-source sends (ccip-cli `-r` on Canton lanes).
+   * Used only for CLI/SDK routing; on-ledger Send resolves CCIPSender from `party` via ACS.
+   * CLI `-r` overrides this value.
+   */
+  senderInstanceId?: string
+
+  /**
+   * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.
+   * ccip-cli `--gas-limit` and `extraArgs.gasLimit` override this.
+   */
+  defaultSendGasLimit?: number | bigint
+
+  /**
+   * Transfer-factory preview amount for Canton fee-token payments.
+   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   */
+  feeTransferFactoryAmount?: string
+
+  /**
+   * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
+   * Used for execute (EDS disclosures + receiver matching) and as the default for
+   * Canton send `senderRequiredCCVs` when `extraArgs.ccvRawAddresses` is omitted.
+   * CLI `-x ccvRawAddresses=…` overrides this list for send.
+   */
+  ccvs?: string[]
 }
 
 /**
@@ -643,10 +690,19 @@ export type ExecuteOpts = (
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
+  /** Force execute transaction gasLimit/computeUnits (instead of estimating) */
+  txGasLimit?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
   /** For Solana, create and extend addresses in a lookup table before executing */
   forceLookupTable?: boolean
+  /**
+   * Canton destination only: select the `CCIPReceiver` for execute.
+   * Accepts a ledger contract ID, a Canton party ID (`hint::1220…`), or the
+   * keccak256(party) hex used as the CCIP message `receiver` field.
+   * When omitted on Canton manual exec, the message receiver hash is used automatically.
+   */
+  receiver?: string
 }
 
 /**
@@ -1259,6 +1315,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Needed to map a source token to its dest counterparts.
    *
    * @param address - Contract address (OnRamp, Router, etc.)
+   * @param destChainSelector - Some dest chain connected to this address/router
    * @returns Promise resolving to TokenAdminRegistry address
    *
    * @example Get token registry
@@ -1267,7 +1324,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Registry: ${registry}`)
    * ```
    */
-  abstract getTokenAdminRegistryFor(address: string): Promise<string>
+  abstract getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string>
 
   /**
    * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
@@ -1286,7 +1343,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   >): Promise<true> {
     let registry
     for (const { token, amount } of message.tokenAmounts ?? []) {
-      registry ??= await this.getTokenAdminRegistryFor(router)
+      // Native value transfers aren't pool-managed (no registry entry / rate limiter),
+      // and `router` may be a sender helper (e.g. EtherSenderReceiver) rather than a
+      // Router/Ramp — skip the token-pool preflight for them.
+      if (!token || token.match(/^(0x)?0*$/i)) continue
+      registry ??= await this.getTokenAdminRegistryFor(router, destChainSelector)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
       if (!remote.outboundRateLimiterState) continue
@@ -1324,6 +1385,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     for (const ta of message.tokenAmounts ?? []) {
       const amount = ta.amount
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      // Native value transfers aren't pool-managed — skip the token-pool preflight.
+      if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
@@ -1425,6 +1488,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: SendMessageOpts & {
       /** Signer instance (chain-dependent) */
       wallet: unknown
+      /** Force send transaction gas limit (instead of estimating) */
+      txGasLimit?: number
     },
   ): Promise<CCIPRequest>
   /**
@@ -1728,7 +1793,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
-        await this.getTokenAdminRegistryFor(onRamp),
+        await this.getTokenAdminRegistryFor(onRamp, opts.destChainSelector),
         opts.token,
       )
       if (tokenPool) {

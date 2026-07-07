@@ -1,7 +1,7 @@
 ---
 id: multi-chain
 title: 'Multi-Chain'
-description: 'Work with EVM, Solana, Aptos, Sui, and TON chains using the unified SDK interface.'
+description: 'Work with EVM, Solana, Aptos, Sui, TON, and Canton chains using the unified SDK interface.'
 sidebar_label: Multi-Chain
 sidebar_position: 10
 ---
@@ -24,9 +24,12 @@ For EVM-only usage, see [Sending Messages](/sdk/guides/sending-messages) and [Tr
 | `AptosChain` | Aptos | `AptosAsyncAccount` | Yes | Yes | Yes |
 | `SuiChain` | Sui | `Keypair` | No | Yes | No |
 | `TONChain` | TON | `TONWallet` | Yes | Yes | No |
+| `CantonChain` | Canton | `CantonWallet` | Yes | Yes | No |
 
 :::note
-**Sui is execution-only** — it can execute incoming messages but cannot send cross-chain messages. Token pool queries are not implemented on Sui or TON.
+**Sui is execution-only** — it can execute incoming messages but cannot send cross-chain messages. Token pool queries are not implemented on Sui, TON, or Canton.
+
+**Canton is partial** — it supports send and manual execution but requires a `CantonConfig` object (party IDs, JWT, EDS URLs). Fee estimation, balance queries, message tracking via `getMessagesInTx`, and registry/pool queries are not yet implemented.
 :::
 
 ## Connecting
@@ -73,6 +76,29 @@ console.log('Connected to:', chain.network.name)
 ```
 
 </TabItem>
+<TabItem value="canton" label="Canton">
+
+```typescript
+import { CantonChain } from '@chainlink/ccip-sdk'
+
+const chain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
+  cantonConfig: {
+    party: 'sender::1220...',
+    ccipParty: 'ccip::1220...',
+    jwt: 'eyJ...',
+    edsUrl: 'https://eds.example.com',
+    transferInstructionUrl: 'https://transfer-instruction.example.com',
+    indexerUrl: 'https://indexer.example.com',
+    senderInstanceId: 'ccipsender',
+    chainId: 'canton:TestNet',
+  },
+})
+console.log('Connected to:', chain.network.name)
+```
+
+Canton requires `cantonConfig` in the second argument to `fromUrl`. See [Canton Configuration](/cli/configuration#canton-configuration) for the full config schema.
+
+</TabItem>
 </Tabs>
 
 All chains accept the same `ChainContext` options:
@@ -94,11 +120,16 @@ import {
   EVMChain,
   SolanaChain,
   AptosChain,
+  CantonChain,
   networkInfo,
   ChainFamily,
 } from '@chainlink/ccip-sdk'
 
-function createChain(rpcUrl: string, family: ChainFamily): Promise<Chain> {
+function createChain(
+  rpcUrl: string,
+  family: ChainFamily,
+  cantonConfig?: Parameters<typeof CantonChain.fromUrl>[1],
+): Promise<Chain> {
   switch (family) {
     case ChainFamily.EVM:
       return EVMChain.fromUrl(rpcUrl)
@@ -106,6 +137,8 @@ function createChain(rpcUrl: string, family: ChainFamily): Promise<Chain> {
       return SolanaChain.fromUrl(rpcUrl)
     case ChainFamily.Aptos:
       return AptosChain.fromUrl(rpcUrl)
+    case ChainFamily.Canton:
+      return CantonChain.fromUrl(rpcUrl, cantonConfig)
     default:
       throw new Error(`Unsupported family: ${family}`)
   }
@@ -254,9 +287,65 @@ const message = {
 ```
 
 </TabItem>
-</Tabs>
+<TabItem value="canton-to-evm" label="Canton → EVM">
 
-## Extra Args by Destination
+```typescript
+import { CantonChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
+  cantonConfig: { /* party, ccipParty, jwt, edsUrl, transferInstructionUrl, ... */ },
+})
+
+const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
+
+const message = {
+  receiver: '0xEVMReceiverAddress...',
+  data: '0x1234...',
+  tokenAmounts: [{ token: 'admin::1220...::link-token', amount: 1_000_000_000n }],
+  extraArgs: {
+    gasLimit: 200_000n,
+    feeTokenHoldingCids: ['#contract-id-1'], // Amulet or LINK fee token holdings
+    executorMode: 'default',
+  },
+}
+
+// router = CCIPSender instance id on Canton (not an EVM address)
+const request = await source.sendMessage({
+  router: 'ccipsender',
+  destChainSelector: destSelector,
+  message: { ...message, fee: 0n }, // Canton fees are computed on-ledger
+  wallet,
+})
+```
+
+On Canton source, `router` is the **CCIPSender instance id** (e.g. `ccipsender`), not a contract address. `getFee()` returns `0n` — fees are computed on-ledger during send.
+
+</TabItem>
+<TabItem value="evm-to-canton" label="EVM → Canton">
+
+```typescript
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
+const destSelector = networkInfo('canton-testnet').chainSelector
+
+const message = {
+  receiver: '0x...', // keccak256(partyId) as 32-byte hex
+  data: '0x1234...',
+  tokenAmounts: [],
+  extraArgs: {
+    gasLimit: 200_000n,
+    finality: 'finalized', // GenericExtraArgsV3 for Canton destinations
+  },
+}
+
+const fee = await source.getFee({ router, destChainSelector: destSelector, message })
+```
+
+Canton receivers use **keccak256(partyId)** as the 32-byte CCIP address. Manual execution on Canton requires a `CantonConfig` with `indexerUrl` for CCV verifications.
+
+</TabItem>
+</Tabs>
 
 The `extraArgs` fields depend on the **destination** chain family:
 
@@ -267,6 +356,8 @@ The `extraArgs` fields depend on the **destination** chain family:
 | Aptos | `EVMExtraArgsV2` | `gasLimit`, `allowOutOfOrderExecution` |
 | Sui | `SuiExtraArgsV1` | `gasLimit`, `allowOutOfOrderExecution`, `tokenReceiver`, `receiverObjectIds` |
 | TON | `EVMExtraArgsV2` | `gasLimit`, `allowOutOfOrderExecution` |
+| Canton (source) | `CantonExtraArgsV1` | `feeTokenHoldingCids`, `ccvRawAddresses`, `gasLimit`, `executorMode` |
+| Canton (destination) | `GenericExtraArgsV3` | `finality` (defaults to `'finalized'`) |
 
 For token-only transfers (no `data`), you can omit `extraArgs` entirely — the SDK fills in defaults.
 
@@ -310,6 +401,47 @@ const messageV0 = new TransactionMessage({
 
 const transaction = new VersionedTransaction(messageV0)
 const signature = await sendTransaction(transaction, connection)
+```
+
+## Canton Notes
+
+### Configuration
+
+Canton requires a `CantonConfig` object passed via `ChainContext.cantonConfig` when calling `CantonChain.fromUrl`. Required fields: `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`. See [Canton Configuration](/cli/configuration#canton-configuration) for the full schema.
+
+### Identity and Addresses
+
+- **Party IDs** (`hint::1220...`) identify Canton participants on the ledger
+- **CCIP wire addresses** for Canton receivers are `keccak256(partyId)` as 32-byte hex
+- **Transaction IDs** are Canton ledger update IDs (`1220` + 32-byte SHA-256 digest), not EVM tx hashes
+
+### Send Extras
+
+Canton source sends use `CantonExtraArgsV1` (not on-wire encoded bytes):
+
+| Field | Description |
+|-------|-------------|
+| `feeTokenHoldingCids` | Contract IDs for fee token holdings (Amulet or LINK). Optional on `sendMessage` (auto-discovered from the party's holdings via `fillCantonSendDefaults`); required when calling `generateUnsignedSendMessage` directly. |
+| `ccvRawAddresses` | CCV instance addresses in `instanceId@party` format |
+| `gasLimit` | Gas limit for destination `ccipReceive` callback |
+| `executorMode` | `'default'` or `'none'` (skip executor for no-execution lanes) |
+
+### Fee Model
+
+`getFee()` returns `0n` on Canton — fees are computed on-ledger during the send transaction. Fee tokens are instrument IDs (native Amulet or CCIP LINK).
+
+### Unsigned Transactions
+
+Canton unsigned sends return `JsCommands` (Daml exercise commands with disclosed contracts):
+
+```typescript
+const unsignedTx = await source.generateUnsignedSendMessage({
+  sender: cantonConfig.party,
+  router: 'ccipsender',
+  destChainSelector,
+  message,
+})
+// unsignedTx.commands — submit via interactive submission (prepare → sign → execute)
 ```
 
 ## Related

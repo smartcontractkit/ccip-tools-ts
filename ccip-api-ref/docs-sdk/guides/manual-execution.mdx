@@ -288,6 +288,41 @@ const hash = await walletClient.sendTransaction(tx)
 
 Unlike `generateUnsignedSendMessage` (which may return multiple transactions for token approvals), `generateUnsignedExecute` always returns a single transaction.
 
+## Canton Execution
+
+Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`:
+
+```typescript
+import { CantonChain } from '@chainlink/ccip-sdk'
+
+const dest = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
+  cantonConfig: {
+    party: 'receiver::1220...',
+    ccipParty: 'ccip::1220...',
+    jwt: 'eyJ...',
+    edsUrl: 'https://eds.example.com',
+    transferInstructionUrl: 'https://transfer-instruction.example.com',
+    indexerUrl: 'https://indexer.example.com',
+  },
+})
+
+// Execute by message ID (CCIP API provides verifications)
+const execution = await dest.execute({
+  messageId: '0x1234...abcd',
+  wallet: cantonWallet,
+})
+
+// Or execute with pre-fetched input (CCIP v2.0 only)
+const execution = await dest.execute({
+  encodedMessage: '0x...',
+  verifications: [...],
+  wallet: cantonWallet,
+  receiver: 'receiver::1220...', // optional; defaults to message receiver
+})
+```
+
+Canton accepts **ledger update IDs** (`1220` + SHA-256 digest) as transaction identifiers. Use `CantonChain.isTxHash()` to validate update ID format.
+
 ## Using the CLI
 
 ```bash
@@ -314,9 +349,16 @@ ccip-cli manual-exec 0xSourceTxHash \
   --rpc https://rpc.fuji.avax.network \
   --wallet $PRIVATE_KEY \
   --log-index 1
+
+# Canton destination (by ledger update ID)
+ccip-cli manual-exec 1220a1b2c3d4... \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --receiver sender::1220... \
+  --wallet <64-char-ed25519-seed>
 ```
 
-The CLI auto-detects whether the argument is a message ID or transaction hash.
+The CLI auto-detects whether the argument is a message ID, transaction hash, or Canton update ID.
 
 ## Method Reference
 

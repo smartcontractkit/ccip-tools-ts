@@ -237,6 +237,7 @@ const SELECTORS: Selectors = {
     selector: 11690709103138290329n,
     name: 'mind-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '232': {
@@ -1299,6 +1300,7 @@ const SELECTORS: Selectors = {
     selector: 4411394078118774322n,
     name: 'ethereum-mainnet-blast-1',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '84531': {
@@ -1397,6 +1399,7 @@ const SELECTORS: Selectors = {
     selector: 7189150270347329685n,
     name: 'mind-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '200810': {
@@ -1629,12 +1632,14 @@ const SELECTORS: Selectors = {
     selector: 9043146809313071210n,
     name: 'corn-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '21000001': {
     selector: 1467427327723633929n,
     name: 'ethereum-testnet-sepolia-corn-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '31415926': {
@@ -1686,6 +1691,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '2026041005': {
+    selector: 13879014182901017172n,
+    name: 'dtcc-mainnet-appchain',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '2494104990': {
     selector: 13231703482326770598n,
     name: 'tron-testnet-shasta-evm',
@@ -1704,10 +1715,17 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '7052886157': {
+    selector: 410896468069059699n,
+    name: 'glamsterdam-devnet-6',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '7095321190': {
     selector: 10073034426865795585n,
     name: 'glamsterdam-devnet-5',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   // end:generate

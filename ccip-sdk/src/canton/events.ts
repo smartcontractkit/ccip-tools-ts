@@ -28,6 +28,27 @@ export interface CantonSendResultFields {
   onRampAddress?: string
 }
 
+/**
+ * Normalize a Canton `BytesHex` message ID to CCIP canonical form (`0x` + 64 hex).
+ * Daml stores message IDs without the prefix; EVM-facing CCIP tooling expects it.
+ */
+export function normalizeCantonMessageId(messageId: string): string {
+  if (/^0x[0-9a-fA-F]{64}$/.test(messageId)) return messageId
+  if (/^[0-9a-fA-F]{64}$/.test(messageId)) return `0x${messageId}`
+  return messageId
+}
+
+/** Normalize Canton `BytesHex` payloads to canonical `0x`-prefixed hex for EVM tooling. */
+export function normalizeCantonEncodedMessage(encodedMessage: string): string {
+  const trimmed = encodedMessage.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+    return trimmed.startsWith('0X') ? `0x${trimmed.slice(2)}` : trimmed
+  }
+  if (/^[0-9a-fA-F]+$/.test(trimmed)) return `0x${trimmed}`
+  return trimmed
+}
+
 // ---------------------------------------------------------------------------
 // Top-level parsers
 // ---------------------------------------------------------------------------
@@ -70,9 +91,12 @@ export function parseCantonSendResult(
 
     if (sentEvent) {
       return {
-        messageId: typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
-        encodedMessage:
+        messageId: normalizeCantonMessageId(
+          typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
+        ),
+        encodedMessage: normalizeCantonEncodedMessage(
           typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
         nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
         onRampAddress:
@@ -84,8 +108,12 @@ export function parseCantonSendResult(
     if (createArgs) {
       const flat = flattenCantonRecord(createArgs)
       return {
-        messageId: typeof flat.messageId === 'string' ? flat.messageId : updateId,
-        encodedMessage: typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        messageId: normalizeCantonMessageId(
+          typeof flat.messageId === 'string' ? flat.messageId : updateId,
+        ),
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(flat.sequenceNumber),
         nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
         onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
@@ -97,6 +125,89 @@ export function parseCantonSendResult(
     CCIPErrorCode.CANTON_API_ERROR,
     `Canton send: no CCIPMessageSent event found in transaction ${updateId}`,
   )
+}
+
+/**
+ * Like {@link parseCantonSendResult} but returns `undefined` instead of throwing
+ * when no `CCIPMessageSent` event is found. Also accepts a single created event
+ * (as returned per-log by {@link CantonChain.getTransaction}).
+ */
+export function tryParseCantonSendResult(
+  transaction: unknown,
+  updateId: string,
+): CantonSendResultFields | undefined {
+  try {
+    return parseCantonSendResult(transaction, updateId)
+  } catch {
+    if (!transaction || typeof transaction !== 'object') return undefined
+    const rec = transaction as Record<string, unknown>
+    if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
+
+    const createArgs = (rec.create_arguments ?? rec.createArgument) as
+      | Record<string, unknown>
+      | undefined
+    const sentEvent = extractCCIPMessageSentEvent(createArgs)
+
+    if (sentEvent) {
+      return {
+        messageId: normalizeCantonMessageId(
+          typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
+        ),
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
+        sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
+        nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
+        onRampAddress:
+          typeof sentEvent.onRampAddress === 'string' ? sentEvent.onRampAddress : undefined,
+      }
+    }
+
+    if (createArgs) {
+      const flat = flattenCantonRecord(createArgs)
+      return {
+        messageId: normalizeCantonMessageId(
+          typeof flat.messageId === 'string' ? flat.messageId : updateId,
+        ),
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
+        sequenceNumber: toBigIntSafe(flat.sequenceNumber),
+        nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
+        onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
+      }
+    }
+
+    return undefined
+  }
+}
+
+/**
+ * Extract the flat `CCIPMessageSentEvent` fields from a log's Canton event data.
+ */
+export function extractCantonSentEventFields(data: unknown): Record<string, unknown> | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const rec = data as Record<string, unknown>
+  if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
+  const createArgs = (rec.create_arguments ?? rec.createArgument) as
+    | Record<string, unknown>
+    | undefined
+  return extractCCIPMessageSentEvent(createArgs)
+}
+
+/** Find `CCIPMessageSentEvent` fields in a log payload or full transaction tree. */
+export function extractCantonSentEventFieldsFromLogData(
+  data: unknown,
+): Record<string, unknown> | undefined {
+  const direct = extractCantonSentEventFields(data)
+  if (direct) return direct
+  for (const event of extractEventsFromTransaction(data)) {
+    if (event && typeof event === 'object') {
+      const fields = extractCantonSentEventFields(event)
+      if (fields) return fields
+    }
+  }
+  return undefined
 }
 
 /**
@@ -128,7 +239,7 @@ export function parseCantonExecutionReceipt(
     const srcChain = payload['sourceChainSelector']
     const retData = payload['returnData']
     return {
-      messageId: typeof msgId === 'string' ? msgId : updateId,
+      messageId: normalizeCantonMessageId(typeof msgId === 'string' ? msgId : updateId),
       sequenceNumber: toBigIntSafe(seqNum),
       state: mapExecutionState(payload['state']),
       sourceChainSelector: srcChain != null ? toBigIntSafe(srcChain) : undefined,
@@ -139,7 +250,7 @@ export function parseCantonExecutionReceipt(
   // Fallback — the command completed successfully but we couldn't locate the
   // specific ExecutionStateChanged event (e.g. different event format).
   return {
-    messageId: updateId,
+    messageId: normalizeCantonMessageId(updateId),
     sequenceNumber: 0n,
     state: ExecutionState.Success,
   }
@@ -225,6 +336,34 @@ export function extractEventsFromTransaction(obj: unknown): unknown[] {
   }
 
   return results
+}
+
+/**
+ * Find the contract ID of a newly created template in a ledger transaction.
+ * Mirrors Go `extractCreatedReceiverCID` / `cantonops.extractCreatedReceiverCID`.
+ */
+export function extractCreatedContractId(
+  transaction: unknown,
+  entityName: string,
+): string | undefined {
+  for (const event of extractEventsFromTransaction(transaction)) {
+    if (!event || typeof event !== 'object') continue
+    const rec = event as Record<string, unknown>
+    const contractId = rec.contractId ?? rec.contract_id
+    if (typeof contractId !== 'string') continue
+
+    const templateId = rec.templateId ?? rec.template_id
+    const tid =
+      typeof templateId === 'string'
+        ? templateId
+        : getTemplateEntityName(
+            templateId && typeof templateId === 'object'
+              ? { ...rec, templateId, template_id: templateId }
+              : rec,
+          )
+    if (tid.includes(entityName)) return contractId
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +455,12 @@ export function getTemplateEntityName(event: Record<string, unknown>): string {
   // gRPC format: { template_id: { entity_name: "..." } }
   if (event.template_id && typeof event.template_id === 'object') {
     const tid = event.template_id as Record<string, unknown>
+    if (typeof tid.entity_name === 'string') return tid.entity_name
+  }
+  // JSON API object format: { templateId: { entityName: "..." } }
+  if (event.templateId && typeof event.templateId === 'object') {
+    const tid = event.templateId as Record<string, unknown>
+    if (typeof tid.entityName === 'string') return tid.entityName
     if (typeof tid.entity_name === 'string') return tid.entity_name
   }
   // Legacy flat format: "packageId:Module:Entity" or "Module:Entity"

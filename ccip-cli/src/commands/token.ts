@@ -3,7 +3,7 @@
  * Queries native or token balance for an address.
  */
 
-import { type ChainStatic, bigIntReplacer, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import { type ChainStatic, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
@@ -93,7 +93,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
   switch (argv.format) {
     case Format.json:
       output.write(
-        JSON.stringify(
+        jsonStringify(
           {
             network: networkName,
             holder: argv.holder,
@@ -102,7 +102,6 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
             formatted,
             ...tokenInfo,
           },
-          bigIntReplacer,
           2,
         ),
       )

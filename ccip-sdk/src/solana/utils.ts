@@ -21,13 +21,12 @@ import {
 import { dataLength, dataSlice, hexlify } from 'ethers'
 
 import {
-  CCIPSolanaComputeUnitsExceededError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
 } from '../errors/index.ts'
 import type { WithLogger } from '../types.ts'
-import { bigIntReplacer, getDataBytes, sleep } from '../utils.ts'
+import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
 import type { RateLimiterState } from '../chain.ts'
@@ -356,7 +355,7 @@ export async function simulateTransaction(
     throw new SendTransactionError({
       action: 'simulate',
       signature: '',
-      transactionMessage: JSON.stringify(result.value.err, bigIntReplacer),
+      transactionMessage: jsonStringify(result.value.err),
       logs: result.value.logs!,
     })
   }
@@ -399,7 +398,6 @@ export function simulationProvider(
  *   - lookupTables - lookupTables to be used for main instruction
  * @param computeUnits - max computeUnits limit to be used for main instruction
  * @returns - signature of successful transaction including main instruction
- * @throws {@link CCIPSolanaComputeUnitsExceededError} if simulation exceeds compute units limit
  */
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
@@ -430,12 +428,12 @@ export async function simulateAndSendTxs(
             })
           ).unitsConsumed || 0
 
-        if (simulated <= 200000) {
+        if (computeUnits != null) {
+          computeUnitLimit = computeUnits
+        } else if (simulated <= 200000) {
           computeUnitLimit = undefined
-        } else if (!includesMain || computeUnits == null || simulated <= computeUnits) {
-          computeUnitLimit = Math.ceil(simulated * 1.1)
         } else {
-          throw new CCIPSolanaComputeUnitsExceededError(simulated, computeUnits)
+          computeUnitLimit = Math.ceil(simulated * 1.1)
         }
         break
       } catch (err) {

@@ -9,8 +9,6 @@ import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { ChainFamily } from './index.ts'
 import { networkInfo } from './networks.ts'
 import {
-  bigIntReplacer,
-  bigIntReviver,
   blockRangeGenerator,
   convertKeysToCamelCase,
   decodeAddress,
@@ -19,6 +17,8 @@ import {
   getDataBytes,
   getSomeBlockNumberBefore,
   isBase64,
+  jsonParse,
+  jsonStringify,
   leToBigInt,
   parseTypeAndVersion,
   sleep,
@@ -498,52 +498,6 @@ describe('blockRangeGenerator', () => {
   it('should handle when endBlock equals startBlock', () => {
     const ranges = [...blockRangeGenerator({ startBlock: 100, endBlock: 100 })]
     assert.deepEqual(ranges, [{ fromBlock: 100, toBlock: 100, progress: '0%' }])
-  })
-})
-
-describe('bigIntReplacer', () => {
-  it('should replace bigint with string', () => {
-    const obj = { value: 123n }
-    const json = JSON.stringify(obj, bigIntReplacer)
-    assert.equal(json, '{"value":"123"}')
-  })
-
-  it('should handle nested objects with bigints', () => {
-    const obj = { outer: { inner: 456n }, array: [1n, 2n, 3n] }
-    const json = JSON.stringify(obj, bigIntReplacer)
-    assert.equal(json, '{"outer":{"inner":"456"},"array":["1","2","3"]}')
-  })
-
-  it('should preserve non-bigint values', () => {
-    const obj = { str: 'test', num: 42, bool: true, nil: null }
-    const json = JSON.stringify(obj, bigIntReplacer)
-    assert.equal(json, '{"str":"test","num":42,"bool":true,"nil":null}')
-  })
-})
-
-describe('bigIntReviver', () => {
-  it('should revive string to bigint', () => {
-    const json = '{"value":"123"}'
-    const obj = JSON.parse(json, bigIntReviver) as { value: bigint }
-    assert.equal(obj.value, 123n)
-  })
-
-  it('should handle nested objects', () => {
-    const json = '{"outer":{"inner":"456"},"array":["1","2","3"]}'
-    const obj = JSON.parse(json, bigIntReviver) as {
-      outer: { inner: bigint }
-      array: bigint[]
-    }
-    assert.equal(obj.outer.inner, 456n)
-    assert.deepEqual(obj.array, [1n, 2n, 3n])
-  })
-
-  it('should preserve non-numeric strings', () => {
-    const json = '{"str":"test","numStr":"123","bool":"true"}'
-    const obj = JSON.parse(json, bigIntReviver) as Record<string, unknown>
-    assert.equal(obj.str, 'test')
-    assert.equal(obj.numStr, 123n)
-    assert.equal(obj.bool, 'true')
   })
 })
 
@@ -1127,7 +1081,7 @@ describe('withRetry', () => {
       () =>
         withRetry(operation, {
           ...DEFAULT_API_RETRY_CONFIG,
-          maxRetries: 2,
+          maxAttempts: 2,
           initialDelayMs: 10,
           respectRetryAfterHint: false,
         }),
@@ -1149,7 +1103,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 2,
+        maxAttempts: 2,
         initialDelayMs: 50,
         backoffMultiplier: 2,
         maxDelayMs: 1000,
@@ -1174,7 +1128,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 3,
+        maxAttempts: 3,
         initialDelayMs: 100,
         backoffMultiplier: 10, // Aggressive multiplier
         maxDelayMs: 150, // But capped
@@ -1196,7 +1150,7 @@ describe('withRetry', () => {
 
     await assert.rejects(() =>
       withRetry(operation, {
-        maxRetries: 1,
+        maxAttempts: 1,
         initialDelayMs: 10, // Lower than hint
         backoffMultiplier: 1,
         maxDelayMs: 1000,
@@ -1248,5 +1202,146 @@ describe('withRetry', () => {
 
     // Should not retry non-transient errors
     assert.equal(operation.mock.calls.length, 1)
+  })
+})
+
+describe('jsonStringify', () => {
+  it('should serialize plain objects', () => {
+    // integers get .0 suffix to distinguish from bigints in the output
+    assert.equal(jsonStringify({ a: 1, b: 'hello' }), '{"a":1.0,"b":"hello"}')
+  })
+
+  it('should serialize bigints as bare JSON numbers (no string quotes around value)', () => {
+    const result = jsonStringify({ val: 123456789012345678901234567890n })
+    assert.equal(result, '{"val":123456789012345678901234567890}')
+    // value must not be quoted — check no quote immediately before/after digits
+    assert.doesNotMatch(result, /"123456789012345678901234567890"/)
+  })
+
+  it('should serialize small bigints as bare numbers (no quotes)', () => {
+    assert.equal(jsonStringify({ n: 42n }), '{"n":42}')
+  })
+
+  it('should serialize integer numbers with .0 suffix to distinguish from bigints', () => {
+    assert.equal(jsonStringify({ n: 7 }), '{"n":7.0}')
+  })
+
+  it('should serialize float numbers normally', () => {
+    assert.equal(jsonStringify({ f: 1.5 }), '{"f":1.5}')
+  })
+
+  it('should drop circular object references', () => {
+    const obj: Record<string, unknown> = { a: 1 }
+    obj['self'] = obj
+    const result = jsonStringify(obj)
+    const parsed = JSON.parse(result) as Record<string, unknown>
+    assert.equal(parsed['a'], 1)
+    assert.equal(parsed['self'], undefined)
+  })
+
+  it('should drop circular items from arrays', () => {
+    const arr: unknown[] = [1, 2]
+    arr.push(arr)
+    const result = jsonStringify(arr)
+    const parsed = JSON.parse(result) as unknown[]
+    assert.equal(parsed.length, 2)
+    assert.equal(parsed[0], 1)
+    assert.equal(parsed[1], 2)
+  })
+
+  it('should serialize arrays with bigints', () => {
+    assert.equal(jsonStringify([1n, 2n, 3n]), '[1,2,3]')
+  })
+
+  it('should serialize null and booleans', () => {
+    assert.equal(jsonStringify(null), 'null')
+    assert.equal(jsonStringify(true), 'true')
+    assert.equal(jsonStringify(false), 'false')
+  })
+
+  it('should return undefined for undefined input', () => {
+    assert.equal(jsonStringify(undefined), undefined)
+  })
+
+  it('should handle nested objects with bigints', () => {
+    const result = jsonStringify({ outer: { inner: 9999999999999999999n } })
+    assert.equal(result, '{"outer":{"inner":9999999999999999999}}')
+  })
+
+  it('should round-trip with jsonParse for bigint values', () => {
+    const original = {
+      amount: 115792089237316195423570985008687907853269984665640564039457584007913129639935n,
+    }
+    const json = jsonStringify(original)
+    const parsed = jsonParse<typeof original>(json)
+    assert.equal(parsed.amount, original.amount)
+  })
+})
+
+describe('jsonParse', () => {
+  it('should parse basic JSON', () => {
+    const result = jsonParse<{ a: number }>('{"a":1}')
+    assert.equal(result.a, 1n)
+  })
+
+  it('should parse large integers as BigInt', () => {
+    const result = jsonParse<{ n: bigint }>(
+      '{"n":115792089237316195423570985008687907853269984665640564039457584007913129639935}',
+    )
+    assert.equal(typeof result.n, 'bigint')
+    assert.equal(
+      result.n,
+      115792089237316195423570985008687907853269984665640564039457584007913129639935n,
+    )
+  })
+
+  it('should parse small integers as BigInt', () => {
+    const result = jsonParse<{ n: bigint }>('{"n":42}')
+    assert.equal(typeof result.n, 'bigint')
+    assert.equal(result.n, 42n)
+  })
+
+  it('should parse strings, booleans, null', () => {
+    const result = jsonParse<{ s: string; b: boolean; n: null }>('{"s":"hello","b":true,"n":null}')
+    assert.equal(result.s, 'hello')
+    assert.equal(result.b, true)
+    assert.equal(result.n, null)
+  })
+
+  it('should parse arrays', () => {
+    const result = jsonParse<bigint[]>('[1,2,3]')
+    assert.deepEqual(result, [1n, 2n, 3n])
+  })
+
+  it('should parse nested objects', () => {
+    const result = jsonParse<{ a: { b: bigint } }>('{"a":{"b":99}}')
+    assert.equal(result.a.b, 99n)
+  })
+
+  it('should parse .0 integers as number not BigInt', () => {
+    // jsonStringify encodes plain integers with .0 suffix; jsonParse must recover them as number
+    const result = jsonParse<{ n: number }>('{"n":7.0}')
+    assert.equal(typeof result.n, 'number')
+    assert.equal(result.n, 7)
+  })
+
+  it('should distinguish .0 integer (number) from bare integer (BigInt)', () => {
+    const withDot = jsonParse<{ n: unknown }>('{"n":7.0}')
+    const bare = jsonParse<{ n: unknown }>('{"n":7}')
+    assert.equal(typeof withDot.n, 'number')
+    assert.equal(typeof bare.n, 'bigint')
+  })
+
+  it('should throw on malformed input', () => {
+    // yaml parser throws on unclosed brackets
+    assert.throws(() => jsonParse('{unclosed'))
+  })
+
+  it('should round-trip with jsonStringify', () => {
+    const val = { x: 12345678901234567890n, y: 'text', z: true }
+    const parsed = jsonParse<typeof val>(jsonStringify(val))
+    assert.equal(parsed.x, val.x)
+    assert.equal(parsed.y, val.y)
+    assert.equal(parsed.z, val.z)
   })
 })

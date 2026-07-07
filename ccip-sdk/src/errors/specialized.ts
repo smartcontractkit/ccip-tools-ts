@@ -6,7 +6,7 @@ import type { RateLimiterState } from '../chain.ts'
 import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
-import { bigIntReplacer, getAddressBytes, util } from '../utils.ts'
+import { getAddressBytes, jsonStringify, util } from '../utils.ts'
 
 // Chain/Network
 
@@ -143,10 +143,7 @@ export class CCIPMessageInvalidError extends CCIPError {
   override readonly name = 'CCIPMessageInvalidError'
   /** Creates a message invalid error. */
   constructor(data: unknown, options?: CCIPErrorOptions) {
-    const dataStr =
-      typeof data === 'object' && data !== null
-        ? JSON.stringify(data, bigIntReplacer)
-        : String(data)
+    const dataStr = typeof data === 'object' && data !== null ? jsonStringify(data) : String(data)
     super(CCIPErrorCode.MESSAGE_INVALID, `Invalid CCIP message format: ${dataStr}`, {
       ...options,
       isTransient: false,
@@ -3544,36 +3541,6 @@ export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
       isTransient: false,
       context: { ...options?.context, version },
     })
-  }
-}
-
-/**
- * Thrown when compute units exceed limit.
- *
- * @example
- * ```typescript
- * try {
- *   await solanaChain.execute({ offRamp, input, wallet })
- * } catch (error) {
- *   if (error instanceof CCIPSolanaComputeUnitsExceededError) {
- *     console.log(`CU: ${error.context.simulated} > limit ${error.context.limit}`)
- *   }
- * }
- * ```
- */
-export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
-  override readonly name = 'CCIPSolanaComputeUnitsExceededError'
-  /** Creates a compute units exceeded error. */
-  constructor(simulated: number, limit: number, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.SOLANA_COMPUTE_UNITS_EXCEEDED,
-      `Main simulation exceeds specified computeUnits limit. simulated=${simulated}, limit=${limit}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, simulated, limit },
-      },
-    )
   }
 }
 
