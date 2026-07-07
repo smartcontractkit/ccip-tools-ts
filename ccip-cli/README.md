@@ -113,6 +113,7 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `EVM`: numeric chain id; e.g. `1` for `ethereum-mainnet`.
 - `Solana`: genesis hash; e.g. `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for `solana-mainnet`
 - `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
+- `Canton`: prefixed chain id: e.g. `canton:TestNet`, `canton:DevNet`, `canton:MainNet`
 
 ## Shell Completion
 
@@ -277,20 +278,20 @@ Canton requires a config file with connection parameters via `--canton-config <p
 
 ```json
 {
-  "party": "sender::party",
-  "ccipParty": "ccip::party",
+  "party": "sender::1220...",
+  "ccipParty": "ccip::1220...",
   "jwt": "eyJ...",
   "edsUrl": "https://eds.example.com",
   "transferInstructionUrl": "https://transfer-instruction.example.com",
   "externalEdsUrlsByOwner": {
-    "owner::party": "https://external-eds.example.com"
+    "owner::1220...": "https://external-eds.example.com"
   },
   "indexerUrl": "https://indexer.example.com"
 }
 ```
 
 **Required fields:** `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`  
-**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`
+**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `senderInstanceId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
 
 #### Example
 

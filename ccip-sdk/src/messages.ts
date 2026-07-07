@@ -277,3 +277,51 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
     data,
   }
 }
+
+/**
+ * Read source/dest chain selectors from a MessageV1 payload without full decoding.
+ * Useful when Canton ledger events omit `sourceChainSelector` in the Created event view.
+ */
+export function readMessageV1ChainSelectors(encodedMessage: BytesLike): {
+  sourceChainSelector: bigint
+  destChainSelector: bigint
+} {
+  const encoded = getDataBytes(encodedMessage)
+  if (encoded.length < 17) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
+  return {
+    sourceChainSelector: toBigInt(dataSlice(encoded, 1, 9)),
+    destChainSelector: toBigInt(dataSlice(encoded, 9, 17)),
+  }
+}
+
+/** Read the source OnRamp address embedded in a MessageV1 payload. */
+export function readMessageV1OnRampAddress(encodedMessage: BytesLike): string {
+  const encoded = getDataBytes(encodedMessage)
+  if (encoded.length < 71) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
+  const { sourceChainSelector } = readMessageV1ChainSelectors(encodedMessage)
+  const sourceFamily = networkInfo(sourceChainSelector).family
+  let offset = 69
+  if (offset >= encoded.length) throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_LENGTH')
+  const onRampAddressLength = encoded[offset++]!
+  if (offset + onRampAddressLength > encoded.length) {
+    throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_CONTENT')
+  }
+  return decodeAddress(dataSlice(encoded, offset, offset + onRampAddressLength), sourceFamily)
+}
+
+/** Read the destination OffRamp address embedded in a MessageV1 payload. */
+export function readMessageV1OffRampAddress(encodedMessage: BytesLike): string {
+  const encoded = getDataBytes(encodedMessage)
+  if (encoded.length < 71) throw new CCIPMessageDecodeError('MESSAGE_MIN_SIZE')
+  const { destChainSelector } = readMessageV1ChainSelectors(encodedMessage)
+  const destFamily = networkInfo(destChainSelector).family
+  let offset = 69
+  const onRampAddressLength = encoded[offset++]!
+  offset += onRampAddressLength
+  if (offset >= encoded.length) throw new CCIPMessageDecodeError('MESSAGE_OFFRAMP_ADDRESS_LENGTH')
+  const offRampAddressLength = encoded[offset++]!
+  if (offset + offRampAddressLength > encoded.length) {
+    throw new CCIPMessageDecodeError('MESSAGE_OFFRAMP_ADDRESS_CONTENT')
+  }
+  return decodeAddress(dataSlice(encoded, offset, offset + offRampAddressLength), destFamily)
+}

@@ -95,7 +95,7 @@ export async function generateUnsignedCcipSend(
   router: string,
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
-  _opts?: { approveMax?: boolean },
+  opts?: { approveMax?: boolean; txGasLimit?: number },
 ): Promise<Uint8Array> {
   // Build and submit the transaction
   // Call ccip_send entry function with signature:
@@ -118,6 +118,7 @@ export async function generateUnsignedCcipSend(
         `${router.includes('::') ? router : router + '::router'}::ccip_send` as `${string}::${string}::${string}`,
       functionArguments: messageArgs(destChainSelector, message),
     },
+    ...(!!opts?.txGasLimit && { options: { maxGasAmount: opts.txGasLimit } }),
   })
 
   return transaction.bcsToBytes()

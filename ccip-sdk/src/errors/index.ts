@@ -115,7 +115,6 @@ export {
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
-  CCIPSolanaComputeUnitsExceededError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,

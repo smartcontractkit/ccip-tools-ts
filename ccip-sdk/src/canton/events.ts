@@ -38,6 +38,17 @@ export function normalizeCantonMessageId(messageId: string): string {
   return messageId
 }
 
+/** Normalize Canton `BytesHex` payloads to canonical `0x`-prefixed hex for EVM tooling. */
+export function normalizeCantonEncodedMessage(encodedMessage: string): string {
+  const trimmed = encodedMessage.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+    return trimmed.startsWith('0X') ? `0x${trimmed.slice(2)}` : trimmed
+  }
+  if (/^[0-9a-fA-F]+$/.test(trimmed)) return `0x${trimmed}`
+  return trimmed
+}
+
 // ---------------------------------------------------------------------------
 // Top-level parsers
 // ---------------------------------------------------------------------------
@@ -83,8 +94,9 @@ export function parseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
         ),
-        encodedMessage:
+        encodedMessage: normalizeCantonEncodedMessage(
           typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
         nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
         onRampAddress:
@@ -99,7 +111,9 @@ export function parseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof flat.messageId === 'string' ? flat.messageId : updateId,
         ),
-        encodedMessage: typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(flat.sequenceNumber),
         nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
         onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
@@ -139,8 +153,9 @@ export function tryParseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
         ),
-        encodedMessage:
+        encodedMessage: normalizeCantonEncodedMessage(
           typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
         nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
         onRampAddress:
@@ -154,7 +169,9 @@ export function tryParseCantonSendResult(
         messageId: normalizeCantonMessageId(
           typeof flat.messageId === 'string' ? flat.messageId : updateId,
         ),
-        encodedMessage: typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        encodedMessage: normalizeCantonEncodedMessage(
+          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
+        ),
         sequenceNumber: toBigIntSafe(flat.sequenceNumber),
         nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
         onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
@@ -321,6 +338,34 @@ export function extractEventsFromTransaction(obj: unknown): unknown[] {
   return results
 }
 
+/**
+ * Find the contract ID of a newly created template in a ledger transaction.
+ * Mirrors Go `extractCreatedReceiverCID` / `cantonops.extractCreatedReceiverCID`.
+ */
+export function extractCreatedContractId(
+  transaction: unknown,
+  entityName: string,
+): string | undefined {
+  for (const event of extractEventsFromTransaction(transaction)) {
+    if (!event || typeof event !== 'object') continue
+    const rec = event as Record<string, unknown>
+    const contractId = rec.contractId ?? rec.contract_id
+    if (typeof contractId !== 'string') continue
+
+    const templateId = rec.templateId ?? rec.template_id
+    const tid =
+      typeof templateId === 'string'
+        ? templateId
+        : getTemplateEntityName(
+            templateId && typeof templateId === 'object'
+              ? { ...rec, templateId, template_id: templateId }
+              : rec,
+          )
+    if (tid.includes(entityName)) return contractId
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Low-level field helpers
 // ---------------------------------------------------------------------------
@@ -410,6 +455,12 @@ export function getTemplateEntityName(event: Record<string, unknown>): string {
   // gRPC format: { template_id: { entity_name: "..." } }
   if (event.template_id && typeof event.template_id === 'object') {
     const tid = event.template_id as Record<string, unknown>
+    if (typeof tid.entity_name === 'string') return tid.entity_name
+  }
+  // JSON API object format: { templateId: { entityName: "..." } }
+  if (event.templateId && typeof event.templateId === 'object') {
+    const tid = event.templateId as Record<string, unknown>
+    if (typeof tid.entityName === 'string') return tid.entityName
     if (typeof tid.entity_name === 'string') return tid.entity_name
   }
   // Legacy flat format: "packageId:Module:Entity" or "Module:Entity"

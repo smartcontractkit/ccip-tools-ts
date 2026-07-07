@@ -3545,36 +3545,6 @@ export class CCIPSolanaLaneVersionUnsupportedError extends CCIPError {
 }
 
 /**
- * Thrown when compute units exceed limit.
- *
- * @example
- * ```typescript
- * try {
- *   await solanaChain.execute({ offRamp, input, wallet })
- * } catch (error) {
- *   if (error instanceof CCIPSolanaComputeUnitsExceededError) {
- *     console.log(`CU: ${error.context.simulated} > limit ${error.context.limit}`)
- *   }
- * }
- * ```
- */
-export class CCIPSolanaComputeUnitsExceededError extends CCIPError {
-  override readonly name = 'CCIPSolanaComputeUnitsExceededError'
-  /** Creates a compute units exceeded error. */
-  constructor(simulated: number, limit: number, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.SOLANA_COMPUTE_UNITS_EXCEEDED,
-      `Main simulation exceeds specified computeUnits limit. simulated=${simulated}, limit=${limit}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, simulated, limit },
-      },
-    )
-  }
-}
-
-/**
  * @deprecated Deprecated in v1.7 (2026-05-25). Use {@link CCIPHasherVersionUnsupportedError} with chain='Aptos' instead.
  *
  * Thrown when Aptos hasher version is unsupported.

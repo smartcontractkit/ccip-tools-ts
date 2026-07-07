@@ -142,6 +142,7 @@ Pass directly or specify a file path:
 | Aptos  | Hex private key, or path to text file containing it                                                               |
 | Sui    | Hex or base64 private key                                                                                         |
 | TON    | 64-byte hex private key (`0x`-prefixed), mnemonic phrase (space-separated), path to key file, or `ledger[:index]` |
+| Canton | 64-character hex Ed25519 seed (optional; party ID comes from `--canton-config`)                                   |
 
 ### Foundry Cast Keystore
 
@@ -199,16 +200,18 @@ ccip-cli send ... --wallet ledger:1  # Uses m/44'/60'/1'/0/0 for EVM
 
 These options are available on all commands:
 
-| Option        | Alias   | Type     | Default                       | Description                                                                                                                          |
-| ------------- | ------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `--rpcs`      | `--rpc` | string[] | -                             | RPC endpoint URLs                                                                                                                    |
-| `--rpcs-file` | -       | string   | `./.env`                      | File containing RPC endpoints                                                                                                        |
-| `--format`    | `-f`    | string   | `pretty`                      | Output format: `pretty`, `log`, or `json`                                                                                            |
-| `--verbose`   | `-v`    | boolean  | -                             | Enable debug logging                                                                                                                 |
-| `--page`      | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
-| `--api`       | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
-| `--help`      | `-h`    | boolean  | -                             | Show help                                                                                                                            |
-| `--version`   | `-V`    | boolean  | -                             | Show version                                                                                                                         |
+| Option            | Alias   | Type     | Default                       | Description                                                                                                                          |
+| ----------------- | ------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--rpcs`          | `--rpc` | string[] | -                             | RPC endpoint URLs                                                                                                                    |
+| `--rpcs-file`     | -       | string   | `./.env`                      | File containing RPC endpoints                                                                                                        |
+| `--format`        | `-f`    | string   | `pretty`                      | Output format: `pretty`, `log`, or `json`                                                                                            |
+| `--verbose`       | `-v`    | boolean  | -                             | Enable debug logging                                                                                                                 |
+| `--page`          | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
+| `--api`           | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
+| `--canton-config` | -       | string   | -                             | Path to Canton config JSON file (required for Canton operations)                                                                     |
+| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton)                                                          |
+| `--help`          | `-h`    | boolean  | -                             | Show help                                                                                                                            |
+| `--version`       | `-V`    | boolean  | -                             | Show version                                                                                                                         |
 
 **Output formats:**
 
@@ -222,14 +225,77 @@ These options are available on all commands:
 
 Networks can be specified by name, chain ID, or CCIP chain selector. The CLI uses [chain-selectors](https://github.com/smartcontractkit/chain-selectors) for resolution.
 
-| Chain Family | Identifier Format   | Example                                        |
-| ------------ | ------------------- | ---------------------------------------------- |
-| All          | CCIP chain selector | `16015286601757825753` (Sepolia)               |
-| All          | Network name        | `ethereum-mainnet`, `ethereum-testnet-sepolia` |
-| EVM          | Numeric chain ID    | `1` (Ethereum), `11155111` (Sepolia)           |
-| Solana       | Genesis hash        | `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` |
-| Aptos        | Prefixed chain ID   | `aptos:1` (mainnet), `aptos:2` (testnet)       |
-| Sui          | Prefixed chain ID   | `sui:1`                                        |
+| Chain Family | Identifier Format   | Example                                             |
+| ------------ | ------------------- | --------------------------------------------------- |
+| All          | CCIP chain selector | `16015286601757825753` (Sepolia)                    |
+| All          | Network name        | `ethereum-mainnet`, `ethereum-testnet-sepolia`      |
+| EVM          | Numeric chain ID    | `1` (Ethereum), `11155111` (Sepolia)                |
+| Solana       | Genesis hash        | `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d`      |
+| Aptos        | Prefixed chain ID   | `aptos:1` (mainnet), `aptos:2` (testnet)            |
+| Sui          | Prefixed chain ID   | `sui:1`                                             |
+| Canton       | Prefixed chain ID   | `canton:TestNet`, `canton:DevNet`, `canton:MainNet` |
+
+## Canton Configuration {#canton-configuration}
+
+Canton operations require a JSON config file passed via `--canton-config <path>`. The Canton Ledger API URL is provided through the normal `--rpc` / `--rpcs` mechanism (detected by `/api/json`, `/api/ledger`, or port `7575`).
+
+**Config file format:**
+
+```json
+{
+  "party": "sender::1220...",
+  "ccipParty": "ccip::1220...",
+  "jwt": "eyJ...",
+  "edsUrl": "https://eds.example.com",
+  "transferInstructionUrl": "https://transfer-instruction.example.com",
+  "externalEdsUrlsByOwner": {
+    "owner::1220...": "https://external-eds.example.com"
+  },
+  "indexerUrl": "https://indexer.example.com",
+  "chainId": "canton:TestNet",
+  "senderInstanceId": "ccipsender",
+  "defaultSendGasLimit": 50000,
+  "feeTransferFactoryAmount": "1.0",
+  "ccvs": ["instanceId@party::1220..."],
+  "packages": {
+    "perPartyRouter": "ccip-runtime",
+    "ccipSender": "ccip-sender",
+    "ccipReceiver": "ccip-receiver"
+  }
+}
+```
+
+| Field                      | Required | Description                                                                      |
+| -------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `party`                    | Yes      | User ledger party for actAs and transaction visibility                           |
+| `ccipParty`                | Yes      | CCIP operator party (CCIPSender signatory / fee recipient)                       |
+| `jwt`                      | Yes      | JSON Web Token for Canton Ledger API authentication                              |
+| `edsUrl`                   | Yes      | Base URL for the Explicit Disclosure Service (EDS)                               |
+| `transferInstructionUrl`   | Yes      | Base URL for the Transfer Instruction API                                        |
+| `externalEdsUrlsByOwner`   | No       | Map of owner party → external EDS URL                                            |
+| `indexerUrl`               | No       | CCIP v2 indexer URL for CCV verifications (required for Canton manual execution) |
+| `chainId`                  | No       | CCIP Canton chain ID (e.g. `canton:TestNet`); skips auto-detection               |
+| `senderInstanceId`         | No       | CCIPSender instance id used as router on Canton source (CLI `-r` overrides)      |
+| `defaultSendGasLimit`      | No       | Default gas limit for Canton → destination sends                                 |
+| `feeTransferFactoryAmount` | No       | Transfer-factory preview amount for fee payments (default: `"1.0"`)              |
+| `ccvs`                     | No       | CCV instance addresses for execute disclosures and send defaults                 |
+| `packages`                 | No       | DAR package names for ACS template filters                                       |
+
+### Canton Wallet
+
+On Canton, the party ID comes from config. For external signing, pass a 64-character hex Ed25519 seed via `--wallet`:
+
+```bash
+ccip-cli send canton-testnet ethereum-testnet-sepolia \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --rpc https://ethereum-sepolia-rpc.example.com \
+  -r ccipsender \
+  -w <64-char-ed25519-seed> \
+  -t link-token=1.0
+```
+
+Without `--wallet`, the CLI submits transactions directly using the JWT from config.
 
 ## Shell Completion
 

@@ -39,6 +39,7 @@ const customErrors = [
   'error WrongAsset(address expected, address received)',
   'error FailedInnerCall()',
   'error SenderNotAllowed(uint64 sourceChainSelector, bytes sender)',
+  'error ERC20InsufficientBalance(address from, uint256 fromBalance, uint256 value)',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])

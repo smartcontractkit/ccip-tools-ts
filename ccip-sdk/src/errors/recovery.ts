@@ -161,8 +161,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
-  SOLANA_COMPUTE_UNITS_EXCEEDED:
-    'Simulation exceeds compute units limit. Increase the limit or simplify the transaction.',
 
   APTOS_TX_INVALID:
     'Provide a valid Aptos transaction hash (0x-prefixed 64 hex chars) or version number.',

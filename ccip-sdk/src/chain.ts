@@ -249,6 +249,18 @@ export type CantonConfig = {
   senderInstanceId?: string
 
   /**
+   * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.
+   * ccip-cli `--gas-limit` and `extraArgs.gasLimit` override this.
+   */
+  defaultSendGasLimit?: number | bigint
+
+  /**
+   * Transfer-factory preview amount for Canton fee-token payments.
+   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   */
+  feeTransferFactoryAmount?: string
+
+  /**
    * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
    * Used for execute (EDS disclosures + receiver matching) and as the default for
    * Canton send `senderRequiredCCVs` when `extraArgs.ccvRawAddresses` is omitted.
@@ -678,6 +690,8 @@ export type ExecuteOpts = (
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
   tokensGasLimit?: number
+  /** Force execute transaction gasLimit/computeUnits (instead of estimating) */
+  txGasLimit?: number
   /** For Solana, send report in chunks to OffRamp, to later execute */
   forceBuffer?: boolean
   /** For Solana, create and extend addresses in a lookup table before executing */
@@ -1301,6 +1315,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * Needed to map a source token to its dest counterparts.
    *
    * @param address - Contract address (OnRamp, Router, etc.)
+   * @param destChainSelector - Some dest chain connected to this address/router
    * @returns Promise resolving to TokenAdminRegistry address
    *
    * @example Get token registry
@@ -1309,7 +1324,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Registry: ${registry}`)
    * ```
    */
-  abstract getTokenAdminRegistryFor(address: string): Promise<string>
+  abstract getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string>
 
   /**
    * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
@@ -1332,7 +1347,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // and `router` may be a sender helper (e.g. EtherSenderReceiver) rather than a
       // Router/Ramp — skip the token-pool preflight for them.
       if (!token || token.match(/^(0x)?0*$/i)) continue
-      registry ??= await this.getTokenAdminRegistryFor(router)
+      registry ??= await this.getTokenAdminRegistryFor(router, destChainSelector)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
       if (!remote.outboundRateLimiterState) continue
@@ -1473,6 +1488,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: SendMessageOpts & {
       /** Signer instance (chain-dependent) */
       wallet: unknown
+      /** Force send transaction gas limit (instead of estimating) */
+      txGasLimit?: number
     },
   ): Promise<CCIPRequest>
   /**
@@ -1776,7 +1793,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
     if (opts.token) {
       const { tokenPool } = await this.getRegistryTokenConfig(
-        await this.getTokenAdminRegistryFor(onRamp),
+        await this.getTokenAdminRegistryFor(onRamp, opts.destChainSelector),
         opts.token,
       )
       if (tokenPool) {

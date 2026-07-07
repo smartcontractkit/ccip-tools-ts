@@ -1240,7 +1240,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       sender: opts.wallet.publicKey.toBase58(),
     })
 
-    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned)
+    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned, opts.txGasLimit)
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
@@ -1292,7 +1292,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })
-        hash = await simulateAndSendTxs(this, wallet, unsigned, opts.gasLimit)
+        hash = await simulateAndSendTxs(this, wallet, unsigned, opts.txGasLimit ?? opts.gasLimit)
       } catch (err) {
         if (!(err instanceof Error)) throw err
         if (err.message.includes('AlreadyContainsChunk')) {

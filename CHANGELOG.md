@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `sendMessage` and `execute` methods now accept `opts.txGasLimit`, skips estimation
+- CLI: `send` and `manual-exec --tx-gas-limit` option to force gas limit for txs
+
 ## [1.10.0] - 2026-06-30
 
 - SDK: deprecate `bigIntReviver`/`bigIntReplacer` in favor of `jsonParse`/`jsonStringify` helpers
 - SDK: fix Hedera's tinybar to weibar fee conversion when `generateUnsignedSendMessage`
+- SDK: fix `EVM.getTokenAdminRegistryFor` routers on networks NOT connected to some Ethereum chain
 
 ## [1.9.0] - 2026-06-18
 

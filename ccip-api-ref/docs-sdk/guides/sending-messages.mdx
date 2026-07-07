@@ -414,13 +414,14 @@ When `extraArgs` is omitted or partial, the SDK fills in defaults:
 
 ## Non-EVM Destinations
 
-For Solana and Sui destinations, `extraArgs` requires chain-specific fields. The SDK auto-populates defaults for token-only transfers, but programmable transfers need explicit configuration.
+For Solana, Sui, and Canton destinations, `extraArgs` requires chain-specific fields. The SDK auto-populates defaults for token-only transfers, but programmable transfers need explicit configuration.
 
 | Destination | Required extraArgs fields | Reference |
 |-------------|--------------------------|-----------|
 | **Solana** | `computeUnits`, `accountIsWritableBitmap`, `tokenReceiver`, `accounts` | [Build messages to Solana](https://docs.chain.link/ccip/tutorials/svm/destination/build-messages) |
 | **Aptos** | `gasLimit`, `allowOutOfOrderExecution` | [Build messages to Aptos](https://docs.chain.link/ccip/tutorials/aptos/destination/build-messages) |
 | **Sui** | `gasLimit`, `allowOutOfOrderExecution`, `tokenReceiver`, `receiverObjectIds` | — |
+| **Canton** | `finality` (destination); `feeTokenHoldingCids`, `ccvRawAddresses` (source) | [Canton getting started](https://docs.chain.link/ccip/getting-started/canton) |
 
 See [Multi-Chain](/sdk/guides/multi-chain) for cross-chain send examples.
 

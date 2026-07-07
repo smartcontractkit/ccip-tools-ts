@@ -7,6 +7,7 @@ import { dataSlice, getNumber } from 'ethers'
 import {
   type GenericExtraArgsV3,
   EVMExtraArgsV2Tag,
+  NO_EXECUTION_ADDRESS,
   decodeExtraArgs,
   encodeExtraArgs,
 } from './extra-args.ts'
@@ -495,6 +496,26 @@ describe('GenericExtraArgsV3', () => {
       assert.equal(decoded._tag, 'GenericExtraArgsV3')
       assert.equal(decoded.executor.toLowerCase(), '0xabcdefabcdef123456789012345678901234abcd')
       assert.equal(decoded.executorArgs, '0xaabb')
+    })
+
+    it('should round-trip V3 args with NO_EXECUTION_ADDRESS executor', () => {
+      const original: GenericExtraArgsV3 = {
+        gasLimit: 50_000n,
+        finality: 32,
+        ccvs: [],
+        ccvArgs: [],
+        executor: NO_EXECUTION_ADDRESS,
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
+      }
+      const encoded = encodeExtraArgs(original, ChainFamily.EVM)
+      const decoded = decodeExtraArgs(encoded, ChainFamily.EVM) as GenericExtraArgsV3 & {
+        _tag: string
+      }
+
+      assert.equal(decoded._tag, 'GenericExtraArgsV3')
+      assert.equal(decoded.executor, NO_EXECUTION_ADDRESS)
     })
 
     it('should decode V3 args with tokenReceiver and tokenArgs', () => {

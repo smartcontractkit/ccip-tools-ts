@@ -6,7 +6,7 @@ import styles from './Architecture.module.css'
 const architectureDiagram = `
 flowchart TD
     subgraph NPM["<b>CCIP TypeScript Packages</b>"]
-        SDK["<b>@chainlink/ccip-sdk</b><br/><i>Multi-chain SDK<br/>(EVM, Solana, Aptos, Sui, TON)</i>"]
+        SDK["<b>@chainlink/ccip-sdk</b><br/><i>Multi-chain SDK<br/>(EVM, Solana, Aptos, Sui, TON, Canton)</i>"]
         CLI["<b>@chainlink/ccip-cli</b><br/><i>Command-line tool</i>"]
         MCP["<b>MCP Server</b><br/><i>Tools, Resources, Prompts</i>"]
     end
