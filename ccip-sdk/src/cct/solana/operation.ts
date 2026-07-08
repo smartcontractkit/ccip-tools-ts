@@ -13,16 +13,15 @@ import { CCTTxFailedError } from '../errors.ts'
 import { type TransactionHash, Operation } from '../operation.ts'
 
 /** Solana CCT write base. Subclasses supply validation and encoding. */
-export abstract class SolanaOperation<P extends { payer: string }> extends Operation<
-  SolanaChain,
-  P,
-  UnsignedSolanaTx
-> {
+export abstract class SolanaOperation<
+  P extends { payer: string },
+  Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
+> extends Operation<SolanaChain, P, Tx> {
   /** Encode instructions after params have been validated. */
-  protected abstract encode(chain: SolanaChain, params: P): Promise<UnsignedSolanaTx>
+  protected abstract encode(chain: SolanaChain, params: P): Promise<Tx>
 
   /** Run {@link validate} and {@link encode}; no signing. */
-  async generate(chain: SolanaChain, params: P): Promise<UnsignedSolanaTx> {
+  async generate(chain: SolanaChain, params: P): Promise<Tx> {
     this.validate(params)
     return this.encode(chain, params)
   }

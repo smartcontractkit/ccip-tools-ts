@@ -22,3 +22,14 @@ export function deriveTokenAdminRegistryPda(router: PublicKey, mint: PublicKey):
     router,
   )[0]
 }
+
+/** Derives the Router external token pools signer PDA for a pool program. */
+export function deriveExternalTokenPoolsSignerPda(
+  router: PublicKey,
+  poolProgram: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('external_token_pools_signer'), poolProgram.toBuffer()],
+    router,
+  )[0]
+}
