@@ -5,29 +5,31 @@ import { PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { SolanaOperation } from '../../operation.ts'
+import { type SolanaGenerateParams, SolanaOperation } from '../../operation.ts'
 import {
   createRouterProgram,
   deriveRouterConfigPda,
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validatePublicKey, validateWritableIndexes } from '../../validate.ts'
+
+/** Standard BurnMint/LockRelease pool ALT writable positions. */
+export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
 
 /** Parameters for Solana TokenAdminRegistry `setPool`. */
 export type SetPoolParams = {
   tokenAddress: string
   address: string
   poolLookupTableAddress: string
-}
-
-/** Parameters for unsigned Solana TokenAdminRegistry `setPool` generation. */
-export type GenerateSetPoolParams = SetPoolParams & {
-  payer: string
+  writableIndexes?: number[]
   authority?: string
 }
 
+/** Parameters for unsigned Solana TokenAdminRegistry `setPool` generation. */
+export type GenerateSetPoolParams = SolanaGenerateParams<SetPoolParams>
+
 /** Solana TokenAdminRegistry `setPool` operation. */
-export class SetPool extends SolanaOperation<GenerateSetPoolParams> {
+export class SetPool extends SolanaOperation<SetPoolParams> {
   readonly name = 'setPool'
 
   /** Validates all public keys before any RPC. */
@@ -37,6 +39,7 @@ export class SetPool extends SolanaOperation<GenerateSetPoolParams> {
     validatePublicKey(this.name, 'poolLookupTableAddress', params.poolLookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateWritableIndexes(this.name, 'writableIndexes', params.writableIndexes)
   }
 
   /** Builds the unsigned Solana `setPool` instruction set. */
@@ -55,8 +58,9 @@ export class SetPool extends SolanaOperation<GenerateSetPoolParams> {
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
 
+    const writableIndexes = opts.writableIndexes ?? [...DEFAULT_WRITABLE_INDEXES]
     const instruction = await routerProgram.methods
-      .setPool(Buffer.from([3, 4, 7]))
+      .setPool(Buffer.from(writableIndexes))
       .accounts({
         config,
         tokenAdminRegistry,
@@ -72,5 +76,3 @@ export class SetPool extends SolanaOperation<GenerateSetPoolParams> {
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
 }
-
-export const setPool = new SetPool()

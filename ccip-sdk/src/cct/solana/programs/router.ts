@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 

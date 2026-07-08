@@ -1,7 +1,8 @@
-import { type GenerateSetPoolParams, SetPool } from './operations/set-pool.ts'
+import { type GenerateSetPoolParams, type SetPoolParams, SetPool } from './operations/set-pool.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../solana/types.ts'
 import type { TransactionHash } from '../../operation.ts'
+import type { SolanaExecuteParams } from '../operation.ts'
 
 /** TokenAdminRegistry CCT operations for a Solana Router program. */
 export class SolanaTokenAdminRegistryClient {
@@ -19,7 +20,7 @@ export class SolanaTokenAdminRegistryClient {
   }
 
   /** Registers a token pool. */
-  setPool(opts: GenerateSetPoolParams & { wallet: unknown }): Promise<TransactionHash> {
+  setPool(opts: SolanaExecuteParams<SetPoolParams>): Promise<TransactionHash> {
     return this.#setPool.execute(this.chain, opts)
   }
 }

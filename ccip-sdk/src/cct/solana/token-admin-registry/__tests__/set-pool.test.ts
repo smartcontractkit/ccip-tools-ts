@@ -39,6 +39,55 @@ describe('Solana TokenAdminRegistry setPool', () => {
     assert.equal(instruction.data.toString('hex'), '771e0eb473e1a7ee03000000030407')
   })
 
+  it('uses caller-provided writable indexes', async () => {
+    const cct = SolanaTokenManager.fromChain(stubChain())
+    const unsigned = await cct.tokenAdminRegistry.generateUnsignedSetPool({
+      tokenAddress: KEY,
+      address: KEY,
+      poolLookupTableAddress: KEY,
+      payer: KEY,
+      writableIndexes: [3, 4, 7, 9],
+    })
+
+    assert.equal(unsigned.instructions[0]!.data.toString('hex'), '771e0eb473e1a7ee0400000003040709')
+  })
+
+  it('rejects invalid writable indexes before RPC', async () => {
+    const cct = SolanaTokenManager.fromChain(stubChain())
+    await assert.rejects(
+      () =>
+        cct.tokenAdminRegistry.generateUnsignedSetPool({
+          tokenAddress: KEY,
+          address: KEY,
+          poolLookupTableAddress: KEY,
+          payer: KEY,
+          writableIndexes: [3, 256],
+        }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'setPool' &&
+        err.context.param === 'writableIndexes[1]',
+    )
+  })
+
+  it('rejects empty writable indexes before RPC', async () => {
+    const cct = SolanaTokenManager.fromChain(stubChain())
+    await assert.rejects(
+      () =>
+        cct.tokenAdminRegistry.generateUnsignedSetPool({
+          tokenAddress: KEY,
+          address: KEY,
+          poolLookupTableAddress: KEY,
+          payer: KEY,
+          writableIndexes: [],
+        }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'setPool' &&
+        err.context.param === 'writableIndexes',
+    )
+  })
+
   it('resolves the router from address', async () => {
     let requestedAddress: string | undefined
     const cct = SolanaTokenManager.fromChain({
@@ -85,7 +134,6 @@ describe('Solana TokenAdminRegistry setPool', () => {
           tokenAddress: KEY,
           address: KEY,
           poolLookupTableAddress: KEY,
-          payer: KEY,
           wallet: {},
         }),
       (err: unknown) => err instanceof CCIPWalletInvalidError,
