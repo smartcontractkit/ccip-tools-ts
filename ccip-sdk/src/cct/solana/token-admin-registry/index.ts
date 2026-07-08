@@ -1,13 +1,15 @@
 import {
+  type CreateLookupTableParams,
   type CreateLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
   CreateLookupTable,
 } from './operations/create-lookup-table.ts'
-import { type GenerateSetPoolParams, SetPool } from './operations/set-pool.ts'
+import { type GenerateSetPoolParams, type SetPoolParams, SetPool } from './operations/set-pool.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../solana/types.ts'
 import type { TransactionHash } from '../../operation.ts'
+import type { SolanaExecuteParams } from '../operation.ts'
 
 /** Solana TokenAdminRegistry CCT operations. */
 export class SolanaTokenAdminRegistryClient {
@@ -29,7 +31,7 @@ export class SolanaTokenAdminRegistryClient {
 
   /** Creates and extends a Solana pool lookup table. */
   createLookupTable(
-    opts: GenerateCreateLookupTableParams & { wallet: unknown },
+    opts: SolanaExecuteParams<CreateLookupTableParams>,
   ): Promise<CreateLookupTableResult> {
     return this.#createLookupTable.execute(this.chain, opts)
   }
@@ -40,7 +42,7 @@ export class SolanaTokenAdminRegistryClient {
   }
 
   /** Registers a token pool. */
-  setPool(opts: GenerateSetPoolParams & { wallet: unknown }): Promise<TransactionHash> {
+  setPool(opts: SolanaExecuteParams<SetPoolParams>): Promise<TransactionHash> {
     return this.#setPool.execute(this.chain, opts)
   }
 }

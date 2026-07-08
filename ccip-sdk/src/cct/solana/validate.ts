@@ -22,3 +22,25 @@ export function validatePublicKey(operation: string, param: string, value: unkno
     )
   }
 }
+
+/** Asserts ALT writable indexes are a non-empty list of byte values when provided. */
+export function validateWritableIndexes(
+  operation: string,
+  param: string,
+  writableIndexes: unknown,
+): void {
+  if (writableIndexes === undefined) return
+  if (!Array.isArray(writableIndexes) || writableIndexes.length === 0) {
+    throw new CCTParamsInvalidError(operation, param, 'must be a non-empty array')
+  }
+
+  for (const [i, index] of writableIndexes.entries()) {
+    if (!Number.isInteger(index) || index < 0 || index > 255) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must be an integer between 0 and 255',
+      )
+    }
+  }
+}

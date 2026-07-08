@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { PublicKey, TransactionMessage } from '@solana/web3.js'
 import bs58 from 'bs58'
 
