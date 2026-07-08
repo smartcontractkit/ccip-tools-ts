@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
@@ -53,6 +54,19 @@ describe('Solana TokenAdminRegistry createLookupTable', () => {
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'createLookupTable' &&
         err.context.param === 'tokenAddress',
+    )
+  })
+
+  it('rejects a non-wallet before generating createLookupTable', async () => {
+    const cct = SolanaTokenManager.fromChain(stubChain())
+    await assert.rejects(
+      () =>
+        cct.tokenAdminRegistry.createLookupTable({
+          tokenAddress: KEY,
+          poolProgramAddress: KEY,
+          wallet: {},
+        }),
+      (err: unknown) => err instanceof CCIPWalletInvalidError,
     )
   })
 })

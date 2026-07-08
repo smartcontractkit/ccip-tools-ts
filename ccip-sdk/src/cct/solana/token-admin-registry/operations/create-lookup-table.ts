@@ -1,14 +1,13 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import { resolveATA, simulateAndSendTxs } from '../../../../solana/utils.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { resolveATA } from '../../../../solana/utils.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
-import { SolanaOperation } from '../../operation.ts'
+import { type SolanaGenerateParams, SolanaOperation } from '../../operation.ts'
 import { deriveFeeBillingTokenConfigPda } from '../../programs/fee-quoter.ts'
 import {
   deriveExternalTokenPoolsSignerPda,
@@ -25,13 +24,11 @@ export type CreateLookupTableParams = {
   tokenAddress: string
   poolProgramAddress: string
   additionalAddresses?: string[]
+  authority?: string
 }
 
 /** Parameters for unsigned Solana lookup table generation. */
-export type GenerateCreateLookupTableParams = CreateLookupTableParams & {
-  payer: string
-  authority?: string
-}
+export type GenerateCreateLookupTableParams = SolanaGenerateParams<CreateLookupTableParams>
 
 /** Unsigned create lookup table result, including the derived ALT address. */
 export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
@@ -39,13 +36,11 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
 }
 
 /** Submitted create lookup table result. */
-export type CreateLookupTableResult = TransactionHash & {
-  lookupTableAddress: string
-}
+export type CreateLookupTableResult = TransactionHash
 
 /** Builds and submits Solana ALT create+extend instructions for token pool setup. */
 export class CreateLookupTable extends SolanaOperation<
-  GenerateCreateLookupTableParams,
+  CreateLookupTableParams,
   GenerateCreateLookupTableResult
 > {
   readonly name = 'createLookupTable'
@@ -132,31 +127,6 @@ export class CreateLookupTable extends SolanaOperation<
       instructions: [createIx, ...extendIxs],
       mainIndex: 0,
       lookupTableAddress: lookupTableAddress.toBase58(),
-    }
-  }
-
-  /** Creates and extends a pool lookup table with `opts.wallet`. */
-  override async execute(
-    chain: SolanaChain,
-    opts: GenerateCreateLookupTableParams & { wallet: unknown },
-  ): Promise<CreateLookupTableResult> {
-    const { wallet } = opts
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    opts.payer = wallet.publicKey.toBase58()
-    const unsigned = await this.generate(chain, opts)
-
-    try {
-      return {
-        hash: await simulateAndSendTxs(chain, wallet, unsigned),
-        lookupTableAddress: unsigned.lookupTableAddress,
-      }
-    } catch (error) {
-      throw new CCTTxFailedError(
-        this.name,
-        error instanceof Error ? error.message : String(error),
-        { cause: error instanceof Error ? error : undefined },
-      )
     }
   }
 }
