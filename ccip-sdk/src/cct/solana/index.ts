@@ -38,5 +38,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 }
 
-export type { GenerateSetPoolParams, SetPoolParams } from './token-admin-registry/index.ts'
+export type {
+  CreateLookupTableParams,
+  CreateLookupTableResult,
+  GenerateCreateLookupTableParams,
+  GenerateCreateLookupTableResult,
+  GenerateSetPoolParams,
+  SetPoolParams,
+} from './token-admin-registry/index.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
