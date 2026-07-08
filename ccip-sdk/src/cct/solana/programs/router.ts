@@ -1,10 +1,9 @@
 import { Program } from '@coral-xyz/anchor'
-import type { PublicKey } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
 
 import { IDL as CCIP_ROUTER_IDL } from '../../../solana/idl/1.6.0/CCIP_ROUTER.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
-import { derivePda } from '../utils.ts'
 
 /** Creates an Anchor Program client for the CCIP Router program. */
 export function createRouterProgram(chain: SolanaChain, router: PublicKey, payer: PublicKey) {
@@ -13,10 +12,13 @@ export function createRouterProgram(chain: SolanaChain, router: PublicKey, payer
 
 /** Derives the Router config PDA. */
 export function deriveRouterConfigPda(router: PublicKey): PublicKey {
-  return derivePda('config', router)
+  return PublicKey.findProgramAddressSync([Buffer.from('config')], router)[0]
 }
 
 /** Derives the Router token admin registry PDA for a mint. */
 export function deriveTokenAdminRegistryPda(router: PublicKey, mint: PublicKey): PublicKey {
-  return derivePda('token_admin_registry', router, [mint.toBuffer()])
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('token_admin_registry'), mint.toBuffer()],
+    router,
+  )[0]
 }

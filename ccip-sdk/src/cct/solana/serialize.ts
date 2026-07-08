@@ -7,18 +7,7 @@ import { CCTParamsInvalidError } from '../errors.ts'
 /** Supported serialized transaction encodings. */
 export type SerializedSolanaTxEncoding = 'base58' | 'base64' | 'hex'
 
-/** Derives a PDA from a UTF-8 seed and optional raw seed buffers. */
-export function derivePda(seed: string, programId: PublicKey, extra: Buffer[] = []): PublicKey {
-  return PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], programId)[0]
-}
-
 /** Serializes an unsigned Solana tx into one legacy message for external signing. */
-export function serializeUnsignedSolanaTx(
-  connection: { getLatestBlockhash: () => Promise<{ blockhash: string }> },
-  unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
-  payer: PublicKey | string,
-  encoding?: SerializedSolanaTxEncoding,
-): Promise<string>
 export async function serializeUnsignedSolanaTx(
   connection: { getLatestBlockhash: () => Promise<{ blockhash: string }> },
   unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
