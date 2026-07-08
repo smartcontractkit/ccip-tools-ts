@@ -91,13 +91,6 @@ export { CCIPContractNotRouterError, CCIPContractTypeInvalidError } from './spec
 // Specialized errors - Wallet & Signer
 export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.ts'
 
-// Specialized errors - CCT
-export {
-  CCIPCctParamsInvalidError,
-  CCIPCctTxFailedError,
-  CCIPCctTxNotConfirmedError,
-} from './specialized.ts'
-
 // Specialized errors - Execution
 export {
   CCIPExecTxNotConfirmedError,
@@ -122,7 +115,6 @@ export {
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
-  CCIPSolanaComputeUnitsExceededError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,

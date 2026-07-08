@@ -21,7 +21,6 @@ import {
 import { dataLength, dataSlice, hexlify } from 'ethers'
 
 import {
-  CCIPSolanaComputeUnitsExceededError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
@@ -399,7 +398,6 @@ export function simulationProvider(
  *   - lookupTables - lookupTables to be used for main instruction
  * @param computeUnits - max computeUnits limit to be used for main instruction
  * @returns - signature of successful transaction including main instruction
- * @throws {@link CCIPSolanaComputeUnitsExceededError} if simulation exceeds compute units limit
  */
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
@@ -430,12 +428,12 @@ export async function simulateAndSendTxs(
             })
           ).unitsConsumed || 0
 
-        if (simulated <= 200000) {
+        if (computeUnits != null) {
+          computeUnitLimit = computeUnits
+        } else if (simulated <= 200000) {
           computeUnitLimit = undefined
-        } else if (!includesMain || computeUnits == null || simulated <= computeUnits) {
-          computeUnitLimit = Math.ceil(simulated * 1.1)
         } else {
-          throw new CCIPSolanaComputeUnitsExceededError(simulated, computeUnits)
+          computeUnitLimit = Math.ceil(simulated * 1.1)
         }
         break
       } catch (err) {

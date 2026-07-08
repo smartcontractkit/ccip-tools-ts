@@ -404,7 +404,7 @@ export type AnyMessage = {
    * - EVM: 20-byte hex (e.g., `0x6d1af98d635d3121286ddda1a0c2d7078b1523ed`)
    * - Solana: Base58 public key (e.g., `7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV`)
    */
-  receiver: BytesLike
+  receiver: string
   /** Extra arguments for gas limits and other settings. */
   extraArgs: ExtraArgs
   /** Arbitrary data payload. */

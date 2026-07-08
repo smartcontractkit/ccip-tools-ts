@@ -21,7 +21,7 @@ npm install @chainlink/ccip-sdk
 The SDK provides a unified `Chain` class interface for each blockchain family. Create instances using `fromUrl`:
 
 ```ts
-import { EVMChain, SolanaChain, AptosChain } from '@chainlink/ccip-sdk'
+import { EVMChain, SolanaChain, AptosChain, CantonChain } from '@chainlink/ccip-sdk'
 
 // EVM chains (Ethereum, Arbitrum, Optimism, etc.)
 const evmChain = await EVMChain.fromUrl('https://ethereum-sepolia-rpc.publicnode.com')
@@ -31,6 +31,17 @@ const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 
 // Aptos
 const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v1')
+
+// Canton (requires CantonConfig — see Multi-Chain guide)
+const cantonChain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
+  cantonConfig: {
+    party: 'sender::1220...',
+    ccipParty: 'ccip::1220...',
+    jwt: 'eyJ...',
+    edsUrl: 'https://eds.example.com',
+    transferInstructionUrl: 'https://transfer-instruction.example.com',
+  },
+})
 ```
 
 ## Common Tasks
@@ -119,6 +130,7 @@ Transaction-sending methods require a chain-specific wallet:
 | EVM    | `ethers.Signer` | `new Wallet(privateKey, provider)`         |
 | Solana | `anchor.Wallet` | `new Wallet(Keypair.fromSecretKey(...))` |
 | Aptos  | `aptos.Account` | `Account.fromPrivateKey(...)`              |
+| Canton | `CantonWallet`  | Party ID from config + optional Ed25519 external signer |
 
 ### Unsigned Transactions
 
@@ -135,6 +147,7 @@ const unsignedTx = await source.generateUnsignedSendMessage({
 
 // Sign and send with your own logic (EVM example - uses .transactions)
 // Solana uses .instructions, Aptos uses .transactions (BCS-encoded), TON uses .body
+// Canton uses .commands (Daml JsCommands)
 // Sui does not support unsigned transaction generation
 for (const tx of unsignedTx.transactions) {
   const signed = await customSigner.sign(tx)
@@ -157,6 +170,7 @@ const signer = await source.provider.getSigner(0)
 | Aptos        | `AptosChain`  | [aptos-ts-sdk](https://github.com/aptos-labs/aptos-ts-sdk)               | Supported      |
 | Sui          | `SuiChain`    | [@mysten/sui](https://github.com/MystenLabs/sui)                         | Partial (manual exec) |
 | TON          | `TONChain`    | [@ton/ton](https://github.com/ton-org/ton)                               | Partial (no token pool/registry queries) |
+| Canton       | `CantonChain` | Canton Ledger JSON API                                                   | Partial (send + manual exec; requires `CantonConfig`) |
 
 ## Related
 

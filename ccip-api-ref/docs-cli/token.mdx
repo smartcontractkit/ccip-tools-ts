@@ -21,7 +21,7 @@ ccip-cli token -n <network> -H <holder> [options]
 
 ## Description
 
-The `token` command queries the balance of native tokens (ETH, SOL, APT, etc.) or ERC20/SPL tokens for a specified wallet address. It supports EVM, Solana, Aptos, and TON chains.
+The `token` command queries the balance of native tokens (ETH, SOL, APT, etc.) or ERC20/SPL tokens for a specified wallet address. It supports EVM, Solana, Aptos, and TON chains. Canton balance queries are not yet implemented.
 
 ## Options
 
@@ -124,12 +124,13 @@ echo "Balance: $BALANCE wei"
 
 The `token` command supports all CCIP-enabled chain families:
 
-| Chain Family | Native Token           | Example Network                       |
-| ------------ | ---------------------- | ------------------------------------- |
-| EVM          | ETH, MATIC, AVAX, etc. | `ethereum-mainnet`, `polygon-mainnet` |
-| Solana       | SOL                    | `solana-mainnet`, `solana-devnet`     |
-| Aptos        | APT                    | `aptos-mainnet`, `aptos-testnet`      |
-| TON          | GRAM                   | `ton-mainnet`, `ton-testnet`          |
+| Chain Family | Native Token           | Example Network                                 |
+| ------------ | ---------------------- | ----------------------------------------------- |
+| EVM          | ETH, MATIC, AVAX, etc. | `ethereum-mainnet`, `polygon-mainnet`           |
+| Solana       | SOL                    | `solana-mainnet`, `solana-devnet`               |
+| Aptos        | APT                    | `aptos-mainnet`, `aptos-testnet`                |
+| TON          | GRAM                   | `ton-mainnet`, `ton-testnet`                    |
+| Canton       | —                      | Not supported (balance queries not implemented) |
 
 ## See Also
 

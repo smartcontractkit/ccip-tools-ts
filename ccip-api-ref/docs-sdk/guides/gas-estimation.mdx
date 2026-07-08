@@ -18,7 +18,7 @@ The SDK provides two ways to estimate the gas needed to execute a CCIP message o
 Both simulate the `ccipReceive` call on the destination chain and return the estimated gas units. The returned value has the base transaction cost (21,000 gas) subtracted — it represents the execution cost only, suitable for use as `gasLimit` in `extraArgs` or `execute`.
 
 :::note
-Only EVM destinations support gas estimation. Solana, Aptos, Sui, and TON do not implement `estimateReceiveExecution`.
+Only EVM destinations support gas estimation. Solana, Aptos, Sui, TON, and Canton do not implement `estimateReceiveExecution`.
 :::
 
 ## Estimate Before Sending

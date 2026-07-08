@@ -139,6 +139,19 @@ ccip-cli send \
 | `ccip-cli lane-latency <source> <dest>`                | Query real-time lane latency               | [lane-latency](/cli/lane-latency)             |
 | `ccip-cli search messages [--sender ...]`              | Search CCIP messages via API               | [search](/cli/search)                         |
 
+## Supported Chains
+
+| Chain Family | Status    | Notes                                          |
+| ------------ | --------- | ---------------------------------------------- |
+| EVM          | Supported | Full functionality                             |
+| Solana       | Supported | Full functionality                             |
+| Aptos        | Supported | Full functionality                             |
+| Sui          | Partial   | Manual execution only                          |
+| TON          | Partial   | No token pool/registry queries                 |
+| Canton       | Partial   | Send + manual exec; requires `--canton-config` |
+
+See [Canton Configuration](/cli/configuration#canton-configuration) for setup details.
+
 ## Next Steps
 
 - [Configuration](/cli/configuration) — RPC endpoints, wallets, global options

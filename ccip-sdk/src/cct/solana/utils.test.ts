@@ -5,7 +5,7 @@ import { Message, PublicKey, SystemProgram, TransactionInstruction } from '@sola
 import bs58 from 'bs58'
 
 import { derivePda, serializeUnsignedSolanaTx } from './utils.ts'
-import { CCIPCctParamsInvalidError } from '../../errors/index.ts'
+import { CCTParamsInvalidError } from '../errors.ts'
 
 const KEY = PublicKey.default
 const connection = {
@@ -45,7 +45,7 @@ describe('cct/solana utils', () => {
       () =>
         serializeUnsignedSolanaTx(connection, { ...unsigned, lookupTables: [{} as never] }, KEY),
       (err: unknown) =>
-        err instanceof CCIPCctParamsInvalidError &&
+        err instanceof CCTParamsInvalidError &&
         err.context.operation === 'serializeUnsignedTx' &&
         err.context.param === 'lookupTables',
     )
@@ -55,7 +55,7 @@ describe('cct/solana utils', () => {
     await assert.rejects(
       () => serializeUnsignedSolanaTx(connection, unsigned, KEY, 'base32' as never),
       (err: unknown) =>
-        err instanceof CCIPCctParamsInvalidError &&
+        err instanceof CCTParamsInvalidError &&
         err.context.operation === 'serializeUnsignedTx' &&
         err.context.param === 'encoding',
     )

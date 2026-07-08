@@ -3,7 +3,7 @@
  *
  * Features:
  * - Search chains by name, chain ID, or selector
- * - Filter by family (EVM, SVM, APTOS, SUI, TON) and environment (mainnet/testnet)
+ * - Filter by family (EVM, SVM, APTOS, SUI, TON, CANTON) and environment (mainnet/testnet)
  * - Copy chain selector to clipboard
  * - Responsive design: table on desktop, cards on mobile
  * - URL state persistence for shareable links
@@ -25,6 +25,7 @@ const FAMILY_OPTIONS = [
   { value: ChainFamilyEnum.Aptos, label: 'Aptos' },
   { value: ChainFamilyEnum.Sui, label: 'Sui' },
   { value: ChainFamilyEnum.TON, label: 'TON' },
+  { value: ChainFamilyEnum.Canton, label: 'Canton' },
 ] as const
 
 // Environment options for filter dropdown

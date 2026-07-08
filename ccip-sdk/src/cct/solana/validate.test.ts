@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { PublicKey } from '@solana/web3.js'
 
 import { validatePublicKey } from './validate.ts'
-import { CCIPCctParamsInvalidError } from '../../errors/index.ts'
+import { CCTParamsInvalidError } from '../errors.ts'
 
 describe('cct/solana validate', () => {
   it('accepts valid public keys', () => {
@@ -15,7 +15,7 @@ describe('cct/solana validate', () => {
     assert.throws(
       () => validatePublicKey('op', 'payer', 123),
       (err: unknown) =>
-        err instanceof CCIPCctParamsInvalidError &&
+        err instanceof CCTParamsInvalidError &&
         err.context.operation === 'op' &&
         err.context.param === 'payer',
     )
@@ -25,7 +25,7 @@ describe('cct/solana validate', () => {
     assert.throws(
       () => validatePublicKey('op', 'payer', 'nope'),
       (err: unknown) =>
-        err instanceof CCIPCctParamsInvalidError &&
+        err instanceof CCTParamsInvalidError &&
         err.context.operation === 'op' &&
         err.context.param === 'payer',
     )

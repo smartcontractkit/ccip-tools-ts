@@ -67,6 +67,14 @@ const CHAIN_GROUPS: ChainGroup[] = [
       { value: 'solana-testnet-devnet', label: 'Solana Devnet' },
     ],
   },
+  {
+    label: 'Canton',
+    chains: [
+      { value: 'canton-mainnet', label: 'Canton MainNet' },
+      { value: 'canton-testnet', label: 'Canton TestNet' },
+      { value: 'canton-devnet', label: 'Canton DevNet' },
+    ],
+  },
 ]
 
 /**

@@ -183,7 +183,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
           abort: ctx.abort,
           apiClient:
             argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
-          ...(cantonConfig && { cantonConfig }),
+          ...(cantonConfig && F === ChainFamily.Canton && { cantonConfig }),
         })
         chains$.push(chain$)
 
