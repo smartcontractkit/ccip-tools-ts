@@ -19,7 +19,7 @@ export async function generateUnsignedExecuteReport(
   payer: string,
   offRamp: string,
   execReport: ExecutionInput<CCIPMessage_V1_6_EVM>,
-  opts?: { gasLimit?: number },
+  opts?: { gasLimit?: number; txGasLimit?: number },
 ) {
   // Prepare proofs as byte arrays
   const serialized = serializeExecutionReport(execReport)
@@ -51,7 +51,7 @@ export async function generateUnsignedExecuteReport(
         `${offRamp.includes('::') ? offRamp : offRamp + '::offramp'}::manually_execute` as `${string}::${string}::${string}`,
       functionArguments: [serialized],
     },
-    options: { maxGasAmount: opts?.gasLimit },
+    options: { maxGasAmount: opts?.txGasLimit ?? opts?.gasLimit },
   })
 
   return transaction.bcsToBytes()

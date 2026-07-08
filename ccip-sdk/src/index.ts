@@ -56,6 +56,8 @@ export {
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
+  NO_EXECUTION_ADDRESS,
+  NO_EXECUTION_TAG,
   decodeExtraArgs,
   decodeFinalityAllowed,
   decodeFinalityRequested,
@@ -123,11 +125,25 @@ export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type {
+  CantonInstrumentId,
   CantonWallet,
   PartySignatures,
   TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
+export { parseCantonInstrumentId } from './canton/types.ts'
+export {
+  type CantonOperationalDefaults,
+  CANTON_FEE_TOKEN_CLI_SYMBOLS,
+  DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
+  DEFAULT_CANTON_LINK_INSTRUMENT_ID,
+  DEFAULT_CANTON_SENDER_INSTANCE_ID,
+  DEFAULT_CANTON_SEND_GAS_LIMIT,
+  formatCantonLinkFeeToken,
+  resolveCantonSendGasLimit,
+  resolveFeeTransferFactoryAmount,
+  resolveSenderInstanceId,
+} from './canton/defaults.ts'
 export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'

@@ -15,7 +15,7 @@ All SDK errors extend [`CCIPError`](/sdk/classes/CCIPError) with a machine-reada
 | Error | Code | When Thrown | Recovery |
 |-------|------|-------------|----------|
 | `CCIPChainNotFoundError` | `CHAIN_NOT_FOUND` | Chain selector/ID not in supported networks | Verify chain is supported by CCIP |
-| `CCIPChainFamilyUnsupportedError` | `CHAIN_FAMILY_UNSUPPORTED` | Chain family not implemented | Use supported chain family (EVM, Solana, Aptos, Sui, TON) |
+| `CCIPChainFamilyUnsupportedError` | `CHAIN_FAMILY_UNSUPPORTED` | Chain family not implemented | Use supported chain family (EVM, Solana, Aptos, Sui, TON, Canton) |
 | `CCIPChainFamilyMismatchError` | `CHAIN_FAMILY_MISMATCH` | Operation across incompatible chain families | Ensure source/dest chains are compatible |
 | `CCIPRpcNotFoundError` | `RPC_NOT_FOUND` | No RPC endpoint configured | Provide RPC URL |
 

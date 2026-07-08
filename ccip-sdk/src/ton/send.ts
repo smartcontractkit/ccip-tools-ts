@@ -175,16 +175,20 @@ export function generateUnsignedCcipSend(
   router: string,
   destChainSelector: bigint,
   message: AnyMessage & { fee: bigint },
-  opts?: { gasBuffer?: bigint },
+  opts?: { gasBuffer?: bigint } | { txGasLimit?: number },
 ): Omit<UnsignedTONTx, 'family'> {
   const { logger = console } = ctx
-  const gasBuffer = opts?.gasBuffer ?? DEFAULT_GAS_BUFFER
 
   // Router accepts addr_none for native GRAM (unlike FeeQuoter which needs WRAPPED_NATIVE)
   const feeTokenAddress = message.feeToken ? Address.parse(message.feeToken) : null
 
   const ccipSendCell = buildCcipSendCell(destChainSelector, message, feeTokenAddress)
-  const totalValue = message.fee + gasBuffer
+  let totalValue = message.fee + DEFAULT_GAS_BUFFER
+  if (opts && 'txGasLimit' in opts && opts.txGasLimit) {
+    totalValue = BigInt(opts.txGasLimit)
+  } else if (opts && 'gasBuffer' in opts && opts.gasBuffer) {
+    totalValue = message.fee + opts.gasBuffer
+  }
 
   logger.debug('Generating ccipSend tx to router:', router)
   logger.debug('Total value:', totalValue.toString(), 'nanograms')

@@ -260,10 +260,15 @@ export async function resolveLane(
 ): Promise<Lane> {
   if ('destChainSelector' in message) {
     if (source.network.family === ChainFamily.Canton) {
+      const onRamp =
+        ('onRampAddress' in message &&
+          typeof message.onRampAddress === 'string' &&
+          message.onRampAddress) ||
+        ''
       return {
         sourceChainSelector: message.sourceChainSelector,
         destChainSelector: message.destChainSelector,
-        onRamp: log.address || '',
+        onRamp,
         version: CCIPVersion.V2_0,
       }
     }

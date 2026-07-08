@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { PublicKey } from '@solana/web3.js'
+import { Keypair, PublicKey } from '@solana/web3.js'
 
-import { CCIPCctParamsInvalidError, CCIPVersionUnsupportedError } from '../../../../errors/index.ts'
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCIPVersion } from '../../../../types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 
 const KEY = PublicKey.default.toBase58()
+const ADDRESS = Keypair.generate().publicKey.toBase58()
+const ROUTER = Keypair.generate().publicKey.toBase58()
 
 function stubChain(): SolanaChain {
   return {
@@ -17,6 +19,7 @@ function stubChain(): SolanaChain {
       getAccountInfo: () => assert.fail('should not RPC before validation'),
       getLatestBlockhash: async () => ({ blockhash: KEY, lastValidBlockHeight: 0 }),
     },
+    getTokenAdminRegistryFor: async () => KEY,
   } as unknown as SolanaChain
 }
 
@@ -25,7 +28,7 @@ describe('Solana TokenAdminRegistry setPool', () => {
     const cct = SolanaTokenManager.fromChain(stubChain())
     const unsigned = await cct.tokenAdminRegistry.generateUnsignedSetPool({
       tokenAddress: KEY,
-      routerAddress: KEY,
+      address: KEY,
       poolLookupTableAddress: KEY,
       payer: KEY,
     })
@@ -36,35 +39,56 @@ describe('Solana TokenAdminRegistry setPool', () => {
     assert.equal(instruction.data.toString('hex'), '771e0eb473e1a7ee03000000030407')
   })
 
+  it('resolves the router from address', async () => {
+    let requestedAddress: string | undefined
+    const cct = SolanaTokenManager.fromChain({
+      ...stubChain(),
+      getTokenAdminRegistryFor: async (address: string) => {
+        requestedAddress = address
+        return ROUTER
+      },
+    } as SolanaChain)
+
+    const unsigned = await cct.tokenAdminRegistry.generateUnsignedSetPool({
+      tokenAddress: KEY,
+      address: ADDRESS,
+      poolLookupTableAddress: KEY,
+      payer: KEY,
+    })
+
+    assert.equal(requestedAddress, ADDRESS)
+    assert.equal(unsigned.instructions[0]!.programId.toBase58(), ROUTER)
+  })
+
   it('validates public keys before RPC', async () => {
     const cct = SolanaTokenManager.fromChain(stubChain())
     await assert.rejects(
       () =>
         cct.tokenAdminRegistry.generateUnsignedSetPool({
           tokenAddress: 'nope',
-          routerAddress: KEY,
+          address: KEY,
           poolLookupTableAddress: KEY,
           payer: KEY,
         }),
       (err: unknown) =>
-        err instanceof CCIPCctParamsInvalidError &&
+        err instanceof CCTParamsInvalidError &&
         err.context.operation === 'setPool' &&
         err.context.param === 'tokenAddress',
     )
   })
 
-  it('only supports exact TokenAdminRegistry versions', async () => {
+  it('rejects a non-wallet before generating setPool', async () => {
     const cct = SolanaTokenManager.fromChain(stubChain())
     await assert.rejects(
       () =>
-        cct.tokenAdminRegistry.generateUnsignedSetPool({
+        cct.tokenAdminRegistry.setPool({
           tokenAddress: KEY,
-          routerAddress: KEY,
+          address: KEY,
           poolLookupTableAddress: KEY,
           payer: KEY,
-          version: CCIPVersion.V2_0 as never,
+          wallet: {},
         }),
-      (err: unknown) => err instanceof CCIPVersionUnsupportedError,
+      (err: unknown) => err instanceof CCIPWalletInvalidError,
     )
   })
 })

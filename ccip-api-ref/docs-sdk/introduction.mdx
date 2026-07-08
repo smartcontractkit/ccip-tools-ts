@@ -12,6 +12,7 @@ slug: /
 import Tabs from '@theme/Tabs'
 import TabItem from '@theme/TabItem'
 import { ExamplesLink, PackageVersion, ChainSupport, RpcProviders } from '@site/src/components'
+import { ALL_CHAIN_FAMILIES } from '@site/src/types'
 
 # CCIP SDK
 
@@ -80,7 +81,7 @@ You need RPC endpoints for the chains you want to interact with. Node.js v20+ is
 
 ## Chain Support
 
-<ChainSupport />
+<ChainSupport chains={ALL_CHAIN_FAMILIES} />
 
 ## Quick Reference
 
@@ -106,6 +107,7 @@ You need RPC endpoints for the chains you want to interact with. Node.js v20+ is
 | [AptosChain](/sdk/classes/AptosChain) | Aptos | `import { AptosChain } from '@chainlink/ccip-sdk'` |
 | [SuiChain](/sdk/classes/SuiChain) | Sui | `import { SuiChain } from '@chainlink/ccip-sdk'` |
 | [TONChain](/sdk/classes/TONChain) | TON | `import { TONChain } from '@chainlink/ccip-sdk'` |
+| [CantonChain](/sdk/classes/CantonChain) | Canton | `import { CantonChain } from '@chainlink/ccip-sdk'` |
 
 ### Message Lifecycle
 

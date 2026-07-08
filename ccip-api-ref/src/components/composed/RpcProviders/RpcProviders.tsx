@@ -99,7 +99,9 @@ const CHAIN_LABELS: Record<ChainType, string> = {
   evm: 'EVM',
   solana: 'Solana',
   aptos: 'Aptos',
-  sui: 'Sui', // Not used but kept for type safety
+  sui: 'Sui',
+  ton: 'TON',
+  canton: 'Canton',
 }
 
 /** Chain-specific tips */
@@ -135,7 +137,23 @@ const CHAIN_TIPS: Record<ChainType, React.ReactNode> = {
       work well for development. For production, consider QuickNode or Nodereal.
     </>
   ),
-  sui: <>Sui support coming soon.</>, // Placeholder
+  sui: <>Sui support coming soon.</>,
+  ton: (
+    <>
+      Use{' '}
+      <a href="https://toncenter.com" target="_blank" rel="noopener noreferrer">
+        TON Center
+      </a>{' '}
+      or your own TON node for JSON-RPC access.
+    </>
+  ),
+  canton: (
+    <>
+      Canton uses the Ledger JSON API (not a traditional RPC). Your network operator provides the
+      ledger URL (typically ending in <code>/api/json</code>). Authentication requires a JWT — see{' '}
+      <a href="/cli/configuration#canton-configuration">Canton Configuration</a>.
+    </>
+  ),
 }
 
 /**

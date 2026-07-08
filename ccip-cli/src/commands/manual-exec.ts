@@ -63,9 +63,9 @@ export const builder = (yargs: Argv) =>
     .positional('tx-hash-or-id', {
       type: 'string',
       demandOption: true,
-      describe: 'transaction hash or message ID (32-byte hex) of the CCIP request',
+      describe: 'transaction hash, CCIP message ID (32-byte hex), or Canton update ID',
     })
-    .check(({ 'tx-hash-or-id': txHashOrId }) => isSupportedTxHash(txHashOrId))
+    .check((argv) => isSupportedTxHash(argv.txHashOrId ?? argv['tx-hash-or-id']))
     .options({
       'log-index': {
         type: 'number',
@@ -80,6 +80,11 @@ export const builder = (yargs: Argv) =>
         type: 'number',
         describe:
           'Override gas limit for tokens releaseOrMint calls (0 keeps original, v1.5..v1.6 only)',
+      },
+      'tx-gas-limit': {
+        alias: 'G',
+        type: 'number',
+        describe: 'Force execute transaction gasLimit/computeUnits (instead of estimating)',
       },
       'estimate-gas-limit': {
         type: 'number',
@@ -178,7 +183,11 @@ async function manualExec(
   let request
   try {
     request = await request$
-    if ('offRampAddress' in request.message) {
+    if (
+      'offRampAddress' in request.message &&
+      typeof request.message.offRampAddress === 'string' &&
+      request.message.offRampAddress
+    ) {
       offRamp = request.message.offRampAddress
     }
   } catch (err) {

@@ -15,6 +15,7 @@ function stubChain(): SolanaChain {
       getAccountInfo: () => assert.fail('should not RPC before validation'),
       getLatestBlockhash: async () => ({ blockhash: KEY, lastValidBlockHeight: 0 }),
     },
+    getTokenAdminRegistryFor: async () => KEY,
   } as unknown as SolanaChain
 }
 
@@ -30,7 +31,7 @@ describe('SolanaTokenAdminRegistryClient', () => {
     const client = new SolanaTokenAdminRegistryClient(stubChain())
     const unsigned = await client.generateUnsignedSetPool({
       tokenAddress: KEY,
-      routerAddress: KEY,
+      address: KEY,
       poolLookupTableAddress: KEY,
       payer: KEY,
     })
