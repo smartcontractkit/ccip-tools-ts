@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { Message, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js'
 import bs58 from 'bs58'
 
-import { derivePda, serializeUnsignedSolanaTx } from './utils.ts'
+import { serializeUnsignedSolanaTx } from './serialize.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
 const KEY = PublicKey.default
@@ -21,15 +21,7 @@ const unsigned = {
   ],
 }
 
-describe('cct/solana utils', () => {
-  it('derives PDAs from string and raw seeds', () => {
-    assert.equal(derivePda('config', KEY).toBase58(), derivePda('config', KEY).toBase58())
-    assert.notEqual(
-      derivePda('config', KEY).toBase58(),
-      derivePda('config', KEY, [KEY.toBuffer()]).toBase58(),
-    )
-  })
-
+describe('cct/solana serialize', () => {
   it('serializes unsigned Solana txs as legacy messages in supported encodings', async () => {
     const base58 = await serializeUnsignedSolanaTx(connection, unsigned, KEY)
     const base64 = await serializeUnsignedSolanaTx(connection, unsigned, KEY, 'base64')
@@ -53,7 +45,7 @@ describe('cct/solana utils', () => {
 
   it('rejects unsupported transaction encodings', async () => {
     await assert.rejects(
-      () => serializeUnsignedSolanaTx(connection, unsigned, KEY, 'base32' as never),
+      () => serializeUnsignedSolanaTx(connection, unsigned, KEY, 'base32'),
       (err: unknown) =>
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'serializeUnsignedTx' &&

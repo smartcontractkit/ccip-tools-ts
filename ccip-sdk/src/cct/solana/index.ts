@@ -5,11 +5,11 @@
  */
 
 import type { ChainFamily } from '../../networks.ts'
-import { TokenManager } from '../token-manager.ts'
-import { SolanaTokenAdminRegistryClient } from './token-admin-registry/index.ts'
-import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './utils.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
+import { TokenManager } from '../token-manager.ts'
+import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
+import { SolanaTokenAdminRegistryClient } from './token-admin-registry/index.ts'
 
 /** CCT admin facade for Solana; grouped clients own contract/program operations. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
@@ -39,4 +39,4 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 }
 
 export type { GenerateSetPoolParams, SetPoolParams } from './token-admin-registry/index.ts'
-export type { SerializedSolanaTxEncoding } from './utils.ts'
+export type { SerializedSolanaTxEncoding } from './serialize.ts'
