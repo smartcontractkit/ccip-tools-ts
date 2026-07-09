@@ -22,6 +22,10 @@ export type SetPoolParams = {
   address: string
   poolLookupTableAddress: string
   writableIndexes?: number[]
+  /**
+   * Token admin authority. Defaults to `payer` for single-signer transactions.
+   * Multisig/Squads flows should pass the admin/vault authority explicitly.
+   */
   authority?: string
 }
 

@@ -4,8 +4,11 @@
  * @packageDocumentation
  */
 
+import type { Connection } from '@solana/web3.js'
+
+import type { ChainContext } from '../../chain.ts'
 import type { ChainFamily } from '../../networks.ts'
-import type { SolanaChain } from '../../solana/index.ts'
+import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
@@ -28,13 +31,28 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     return new SolanaTokenManager(chain)
   }
 
+  /** Creates from a Solana web3.js connection. */
+  static async fromProvider(provider: Connection, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    return new SolanaTokenManager(await SolanaChain.fromConnection(provider, ctx))
+  }
+
+  /** Creates from an RPC URL. */
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    return new SolanaTokenManager(await SolanaChain.fromUrl(url, ctx))
+  }
+
+  /** Provider of the underlying chain. */
+  get provider(): Connection {
+    return this.chain.connection
+  }
+
   /** Serializes an unsigned Solana CCT tx for external signing. */
   serializeUnsignedTx(
     unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
     payer: string,
     encoding?: SerializedSolanaTxEncoding,
   ): Promise<string> {
-    return serializeUnsignedSolanaTx(this.chain.connection, unsigned, payer, encoding)
+    return serializeUnsignedSolanaTx(this.provider, unsigned, payer, encoding)
   }
 }
 
