@@ -47,7 +47,7 @@ export class SetPool extends SolanaOperation<SetPoolParams> {
   }
 
   /** Builds the unsigned Solana `setPool` instruction set. */
-  protected async encode(
+  protected async buildUnsigned(
     chain: SolanaChain,
     opts: GenerateSetPoolParams,
   ): Promise<UnsignedSolanaTx> {

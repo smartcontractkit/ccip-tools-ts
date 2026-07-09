@@ -18,7 +18,7 @@ class TestOperation extends SolanaOperation<{ value: string }> {
     this.validated = params.payer
   }
 
-  protected encode(
+  protected buildUnsigned(
     _chain: SolanaChain,
     params: { payer: string; value: string },
   ): Promise<UnsignedSolanaTx> {
