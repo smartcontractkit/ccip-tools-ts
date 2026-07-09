@@ -1,3 +1,4 @@
+import { hexlify } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
@@ -27,7 +28,7 @@ import {
   CCIPVersion,
   MessageStatus,
 } from '../types.ts'
-import { decodeAddress, jsonParse } from '../utils.ts'
+import { decodeAddress, getDataBytes, jsonParse } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
@@ -61,7 +62,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.10.1-456acfd'
+export const SDK_VERSION = '1.10.2-73e631c'
 // generate:end
 
 /** SDK telemetry header name */
@@ -460,6 +461,42 @@ export class CCIPAPIClient {
   }
 
   /**
+   * CCV proofs for v2 `/execution-inputs` when the endpoint omits or marks them incomplete.
+   * Falls back to {@link getVerifications} (from `GET /v2/messages/{id}`) which is populated
+   * for Canton lanes before execution-inputs catches up.
+   */
+  private async resolveV2ExecutionVerifications(
+    messageId: string,
+    raw: Extract<RawExecutionInputsResult, { encodedMessage: string }>,
+    options?: { signal?: AbortSignal },
+  ): Promise<Pick<VerifierResult, 'ccvData' | 'destAddress'>[]> {
+    const ccvData = raw.ccvData ?? []
+    const verifierAddresses = raw.verifierAddresses
+    const hasCompleteExecutionInputs =
+      ccvData.length > 0 &&
+      ccvData.length === verifierAddresses.length &&
+      raw.verificationComplete !== false
+
+    if (hasCompleteExecutionInputs) {
+      return ccvData.map((data, i) => ({
+        ccvData: data,
+        destAddress: verifierAddresses[i]!,
+      }))
+    }
+
+    this.logger.debug(
+      'getExecutionInput: execution-inputs CCV data incomplete; falling back to getMessageById verifiers',
+      {
+        messageId,
+        verificationComplete: raw.verificationComplete,
+        ccvCount: ccvData.length,
+        verifierAddressCount: verifierAddresses.length,
+      },
+    )
+    return this.getVerifications(messageId, options)
+  }
+
+  /**
    * Searches CCIP messages using filters with cursor-based pagination.
    *
    * @param filters - Optional search filters. Ignored when `options.cursor` is provided
@@ -761,23 +798,22 @@ export class CCIPAPIClient {
     const offRamp = raw.offramp
     let lane: Lane
     if ('encodedMessage' in raw) {
-      // CCIP 2.0 messages use MessageV1Codec, which is chain-independent serialization
+      // CCIP 2.0 messages use MessageV1Codec, which is chain-independent serialization.
+      // Canton API responses omit the `0x` prefix (Daml BytesHex); normalize for ethers.
+      const encodedMessage = hexlify(getDataBytes(raw.encodedMessage))
       const {
         sourceChainSelector,
         destChainSelector,
         onRampAddress: onRamp,
-      } = decodeMessageV1(raw.encodedMessage)
+      } = decodeMessageV1(encodedMessage)
       return {
         sourceChainSelector,
         destChainSelector,
         onRamp,
         offRamp,
         version: CCIPVersion.V2_0,
-        encodedMessage: raw.encodedMessage,
-        verifications: (raw.ccvData ?? []).map((ccvData, i) => ({
-          ccvData,
-          destAddress: raw.verifierAddresses[i]!,
-        })),
+        encodedMessage,
+        verifications: await this.resolveV2ExecutionVerifications(messageId, raw, options),
       }
     }
 
