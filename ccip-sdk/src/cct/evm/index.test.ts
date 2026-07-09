@@ -46,7 +46,7 @@ describe('EVMTokenManager (cct/evm)', () => {
       const unsigned = await cct.generateUnsignedSetPool({
         tokenAddress: TOKEN,
         poolAddress: POOL,
-        routerAddress: ROUTER,
+        address: ROUTER,
         sender: TOKEN,
       })
 
@@ -73,7 +73,7 @@ describe('EVMTokenManager (cct/evm)', () => {
       await cct.generateUnsignedSetPool({
         tokenAddress: TOKEN,
         poolAddress: POOL,
-        routerAddress: ROUTER,
+        address: ROUTER,
       })
       assert.equal(seen, ROUTER)
     })
@@ -83,7 +83,7 @@ describe('EVMTokenManager (cct/evm)', () => {
       const unsigned = await cct.generateUnsignedSetPool({
         tokenAddress: TOKEN,
         poolAddress: POOL,
-        routerAddress: ROUTER,
+        address: ROUTER,
       })
       assert.equal(unsigned.transactions[0]!.from, undefined)
     })
@@ -103,7 +103,7 @@ describe('EVMTokenManager (cct/evm)', () => {
           cct.generateUnsignedSetPool({
             tokenAddress: 'not-an-address',
             poolAddress: POOL,
-            routerAddress: ROUTER,
+            address: ROUTER,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
@@ -122,7 +122,7 @@ describe('EVMTokenManager (cct/evm)', () => {
           cct.setPool({
             tokenAddress: TOKEN,
             poolAddress: POOL,
-            routerAddress: ROUTER,
+            address: ROUTER,
             wallet: {},
           }),
         (err: unknown) => err instanceof CCIPWalletInvalidError,
