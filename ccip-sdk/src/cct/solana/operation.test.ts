@@ -18,7 +18,7 @@ class TestOperation extends SolanaOperation<{ value: string }> {
     this.validated = params.payer
   }
 
-  protected encode(
+  protected buildUnsigned(
     _chain: SolanaChain,
     params: { payer: string; value: string },
   ): Promise<UnsignedSolanaTx> {
@@ -57,7 +57,7 @@ describe('SolanaOperation', () => {
     assert.equal(op.captured, wallet.publicKey.toBase58())
   })
 
-  it('rejects invalid wallets before validation or encoding', async () => {
+  it('rejects invalid wallets before validation or building unsigned txs', async () => {
     const op = new TestOperation()
 
     await assert.rejects(
