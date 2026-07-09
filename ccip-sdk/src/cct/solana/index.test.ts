@@ -1,21 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { PublicKey } from '@solana/web3.js'
+import { Connection } from '@solana/web3.js'
 
 import { SolanaTokenManager } from './index.ts'
-import type { SolanaChain } from '../../solana/index.ts'
-
-const KEY = PublicKey.default.toBase58()
+import { SolanaChain } from '../../solana/index.ts'
 
 function stubChain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {
-      getAccountInfo: () => assert.fail('should not RPC before validation'),
-      getLatestBlockhash: async () => ({ blockhash: KEY, lastValidBlockHeight: 0 }),
-    },
-    getTokenAdminRegistryFor: async () => KEY,
+    connection: {},
   } as unknown as SolanaChain
 }
 
@@ -24,26 +18,32 @@ describe('SolanaTokenManager (cct/solana)', () => {
     const chain = stubChain()
     const cct = SolanaTokenManager.fromChain(chain)
     assert.equal(cct.chain, chain)
+    assert.equal(cct.provider, chain.connection)
     assert.equal(cct.tokenAdminRegistry.chain, chain)
   })
 
-  it('serializes unsigned Solana txs on demand', async () => {
-    const cct = SolanaTokenManager.fromChain(stubChain())
-    const unsigned = await cct.tokenAdminRegistry.generateUnsignedSetPool({
-      tokenAddress: KEY,
-      address: KEY,
-      poolLookupTableAddress: KEY,
-      payer: KEY,
+  it('creates from a connection provider', async (t) => {
+    const chain = stubChain()
+    const connection = new Connection('http://localhost:8899')
+    t.mock.method(SolanaChain, 'fromConnection', async (provider: Connection) => {
+      assert.equal(provider, connection)
+      return chain
     })
 
-    const base58 = await cct.serializeUnsignedTx(unsigned, KEY)
-    const hex = await cct.serializeUnsignedTx(unsigned, KEY, 'hex')
+    const cct = await SolanaTokenManager.fromProvider(connection)
 
-    assert.match(base58, /^[1-9A-HJ-NP-Za-km-z]+$/)
-    assert.match(hex, /^[0-9a-f]+$/)
-    await assert.rejects(
-      () => cct.serializeUnsignedTx(unsigned, KEY, 'base32' as never),
-      /unsupported Solana transaction encoding: base32/,
-    )
+    assert.equal(cct.chain, chain)
+  })
+
+  it('creates from an RPC URL', async (t) => {
+    const chain = stubChain()
+    t.mock.method(SolanaChain, 'fromUrl', async (url: string) => {
+      assert.equal(url, 'http://localhost:8899')
+      return chain
+    })
+
+    const cct = await SolanaTokenManager.fromUrl('http://localhost:8899')
+
+    assert.equal(cct.chain, chain)
   })
 })
