@@ -57,7 +57,7 @@ export class CreateLookupTable extends SolanaOperation<
   }
 
   /** Builds unsigned ALT create+extend instructions. */
-  protected async encode(
+  protected async buildUnsigned(
     chain: SolanaChain,
     opts: GenerateCreateLookupTableParams,
   ): Promise<GenerateCreateLookupTableResult> {

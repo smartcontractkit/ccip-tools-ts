@@ -1,5 +1,5 @@
 /**
- * Solana {@link Operation} lifecycle: validate → encode → submit.
+ * Solana {@link Operation} lifecycle: validate → build unsigned tx → submit.
  * Default execution uses wallet.publicKey as payer; use generateUnsigned* for a custom payer.
  *
  * @packageDocumentation
@@ -28,18 +28,18 @@ function withPayer<P extends object>(
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
-/** Solana CCT write base. Subclasses supply validation and encoding. */
+/** Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx> {
-  /** Encode instructions after params have been validated. */
-  protected abstract encode(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
+  /** Build instructions after params have been validated. */
+  protected abstract buildUnsigned(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
 
-  /** Run {@link validate} and {@link encode}; no signing. */
+  /** Run {@link validate} and {@link buildUnsigned}; no signing. */
   async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
     this.validate(params)
-    return this.encode(chain, params)
+    return this.buildUnsigned(chain, params)
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
