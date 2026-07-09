@@ -56,6 +56,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `setPool` tx (for multisig / offline signing).
+   * A zero/empty `poolAddress` delists the token from the registry.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
   generateUnsignedSetPool(opts: SetPoolParams): Promise<UnsignedEVMTx> {
@@ -64,6 +65,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Registers a pool, signing + submitting with `opts.wallet` (the token admin).
+   * A zero/empty `poolAddress` delists the token from the registry.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
@@ -94,3 +96,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     return this.#transferOwnership.execute(this.chain, opts)
   }
 }
+
+export * from '../errors.ts'
+export type { SetPoolParams } from './token-admin/operations/set-pool.ts'
+export type { TransactionHash } from '../operation.ts'

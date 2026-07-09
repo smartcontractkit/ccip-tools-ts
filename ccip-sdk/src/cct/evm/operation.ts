@@ -8,23 +8,25 @@
 
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
-import type { TransactionHash } from '../operation.ts'
-import { Operation } from '../operation.ts'
+import { type TransactionHash, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 
-/** EVM CCT write base. Subclasses supply {@link validate} and {@link encode}. */
+/** EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
 export abstract class EVMOperation<P extends { sender?: string }> extends Operation<
   EVMChain,
   P,
   UnsignedEVMTx
 > {
-  /** Encode calldata into an unsigned tx; versioned ops resolve their encoder here. */
-  protected abstract encode(chain: EVMChain, params: P): Promise<UnsignedEVMTx> | UnsignedEVMTx
+  /** Build calldata into an unsigned tx; versioned ops resolve their encoder here. */
+  protected abstract buildUnsigned(
+    chain: EVMChain,
+    params: P,
+  ): Promise<UnsignedEVMTx> | UnsignedEVMTx
 
-  /** Run {@link validate} and {@link encode}, applying optional `sender`; no signing. */
+  /** Run {@link validate} and {@link buildUnsigned}, applying optional `sender`; no signing. */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {
     this.validate(params)
-    const unsigned = await this.encode(chain, params)
+    const unsigned = await this.buildUnsigned(chain, params)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
     return unsigned
   }
