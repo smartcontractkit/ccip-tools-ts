@@ -1,4 +1,7 @@
-import { SolanaChain } from '../../solana/index.ts'
+import { PublicKey } from '@solana/web3.js'
+
+import { CCIPAddressInvalidError } from '../../errors/index.ts'
+import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
 /** Asserts `value` is a valid Solana public key string. */
@@ -12,13 +15,15 @@ export function validatePublicKey(operation: string, param: string, value: unkno
   }
 
   try {
-    SolanaChain.getAddress(value)
-  } catch (error) {
+    new PublicKey(value)
+  } catch {
     throw new CCTParamsInvalidError(
       operation,
       param,
       `must be a valid Solana public key, got ${String(value)}`,
-      { cause: error instanceof Error ? error : undefined },
+      {
+        cause: new CCIPAddressInvalidError(value, ChainFamily.Solana),
+      },
     )
   }
 }

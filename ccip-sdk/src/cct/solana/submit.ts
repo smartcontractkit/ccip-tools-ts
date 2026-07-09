@@ -7,6 +7,12 @@
  * @packageDocumentation
  */
 
+import {
+  TransactionExpiredBlockheightExceededError,
+  TransactionExpiredNonceInvalidError,
+  TransactionExpiredTimeoutError,
+} from '@solana/web3.js'
+
 import { CCIPWalletInvalidError, shouldRetry } from '../../errors/index.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
@@ -37,7 +43,7 @@ export function createCCTSubmitError(
   error: unknown,
 ): CCTTxFailedError | CCTTxNotConfirmedError {
   const signature = getSignature(error)
-  if (signature) {
+  if (signature && isNotConfirmedError(error)) {
     return new CCTTxNotConfirmedError(operation, signature, {
       cause: error instanceof Error ? error : undefined,
     })
@@ -51,6 +57,15 @@ export function createCCTSubmitError(
 
 function isTransientSubmitError(error: unknown): boolean {
   return /blockhash|expired/i.test(getReason(error)) || shouldRetry(error)
+}
+
+function isNotConfirmedError(error: unknown): boolean {
+  return (
+    error instanceof TransactionExpiredBlockheightExceededError ||
+    error instanceof TransactionExpiredNonceInvalidError ||
+    error instanceof TransactionExpiredTimeoutError ||
+    /not confirmed|unknown if it succeeded|block height exceeded/i.test(getReason(error))
+  )
 }
 
 function getReason(error: unknown): string {

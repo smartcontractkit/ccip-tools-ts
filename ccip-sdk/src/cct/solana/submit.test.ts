@@ -9,8 +9,8 @@ import { createCCTSubmitError } from './submit.ts'
 const OP = 'setPool'
 
 describe('cct/solana submit error mapping', () => {
-  it('maps post-broadcast errors with a signature to not-confirmed', () => {
-    const cause = Object.assign(new Error('blockhash not found'), { signature: 'abc' })
+  it('maps post-broadcast confirmation errors with a signature to not-confirmed', () => {
+    const cause = Object.assign(new Error('transaction was not confirmed'), { signature: 'abc' })
     const err = createCCTSubmitError(OP, cause)
 
     assert.ok(err instanceof CCTTxNotConfirmedError)
@@ -35,6 +35,15 @@ describe('cct/solana submit error mapping', () => {
 
     assert.ok(err instanceof CCTTxNotConfirmedError)
     assert.equal(err.context.txHash, 'ghi')
+  })
+
+  it('maps signed on-chain failures to permanent tx failed', () => {
+    const cause = Object.assign(new Error('custom program error: 0x1'), { signature: 'jkl' })
+    const err = createCCTSubmitError(OP, cause)
+
+    assert.ok(err instanceof CCTTxFailedError)
+    assert.equal(err.isTransient, false)
+    assert.equal(err.context.txHash, undefined)
   })
 
   it('maps SendTransactionError with an empty signature to transient tx failed', () => {

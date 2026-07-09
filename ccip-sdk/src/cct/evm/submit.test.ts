@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { makeError } from 'ethers'
 
 import { submit } from './submit.ts'
-import { CCIPWalletInvalidError } from '../../errors/index.ts'
+import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
@@ -22,6 +22,8 @@ function stubChain(): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    nextNonce: async () => 0,
+    rollbackNonce: () => {},
   } as unknown as EVMChain
 }
 
@@ -37,7 +39,7 @@ function fakeSigner(opts: {
   const fail = opts.submitError
   return {
     signTransaction: () => (fail ? Promise.reject(fail) : Promise.resolve('0x')),
-    getAddress() {},
+    getAddress: () => Promise.resolve('0x' + '55'.repeat(20)),
     populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
     sendTransaction: (_tx: unknown) =>
       fail
@@ -63,15 +65,35 @@ describe('submit (shared CCT submit pipeline)', () => {
     assert.deepEqual(result, { hash: HASH })
   })
 
-  it('throws CCTTxFailedError (reverted) on status 0, tagged with the operation', async () => {
+  it('throws CCIPExecTxRevertedError (non-transient) when wait() throws CALL_EXCEPTION', async () => {
     await assert.rejects(
-      () => submit(stubChain(), fakeSigner({ receipt: { status: 0 } }), UNSIGNED, 'setPool'),
+      () =>
+        submit(
+          stubChain(),
+          fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
+          UNSIGNED,
+          'setPool',
+        ),
       (err: unknown) =>
-        err instanceof CCTTxFailedError &&
+        err instanceof CCIPExecTxRevertedError &&
         err.context.operation === 'setPool' &&
         err.context.txHash === HASH &&
         !err.isTransient &&
         err.message.includes('reverted'),
+    )
+  })
+
+  it('throws CCTTxNotConfirmedError (transient) when wait() throws TRANSACTION_REPLACED', async () => {
+    await assert.rejects(
+      () =>
+        submit(
+          stubChain(),
+          fakeSigner({ waitError: makeError('transaction replaced', 'TRANSACTION_REPLACED') }),
+          UNSIGNED,
+          'setPool',
+        ),
+      (err: unknown) =>
+        err instanceof CCTTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
     )
   })
 
