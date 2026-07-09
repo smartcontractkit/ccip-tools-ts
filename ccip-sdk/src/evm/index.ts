@@ -407,6 +407,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Undo the last {@link nextNonce} increment for a wallet address.
+   * {@link nextNonce} hands out a nonce optimistically; if the send then fails
+   * before broadcast, call this so the counter is reused rather than leaving a
+   * permanent gap that stalls every later transaction. No-op if uncached.
+   * @param address - Wallet address whose cached nonce to roll back
+   */
+  rollbackNonce(address: string): void {
+    if (this.nonces[address] != null) this.nonces[address]--
+  }
+
+  /**
    * Creates a JSON-RPC provider from a URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
    * @returns A ready JSON-RPC provider.
