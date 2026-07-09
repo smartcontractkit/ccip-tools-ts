@@ -17,13 +17,14 @@ export type SolanaGenerateParams<P extends object> = P & { payer: string }
 /** Signed Solana operation params derive payer from `wallet.publicKey`. */
 export type SolanaExecuteParams<P extends object> = P & {
   wallet: unknown
+  computeUnits?: number
 }
 
 function withPayer<P extends object>(
   params: SolanaExecuteParams<P>,
   payer: string,
 ): SolanaGenerateParams<P> {
-  const { wallet: _wallet, ...rest } = params
+  const { wallet: _wallet, computeUnits: _computeUnits, ...rest } = params
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
@@ -43,10 +44,10 @@ export abstract class SolanaOperation<
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
   async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionHash> {
-    const { wallet } = params
+    const { wallet, computeUnits } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const unsigned = await this.generate(chain, withPayer(params, wallet.publicKey.toBase58()))
-    return submit(chain, wallet, unsigned, this.name)
+    return submit(chain, wallet, unsigned, this.name, computeUnits)
   }
 }
