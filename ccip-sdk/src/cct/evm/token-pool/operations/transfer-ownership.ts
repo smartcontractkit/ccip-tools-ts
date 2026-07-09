@@ -48,7 +48,7 @@ export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {
   }
 
   /** Reads the pool's type-and-version, then floor-matches the encoder and its ABI. */
-  protected async encode(
+  protected async buildUnsigned(
     chain: EVMChain,
     { poolAddress, newOwner }: TransferOwnershipParams,
   ): Promise<UnsignedEVMTx> {

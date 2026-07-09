@@ -8,8 +8,8 @@ import {
   isTokenPoolType,
   isTokenPoolVersion,
   parseTokenPoolVersion,
-  tokenPoolAbi,
   resolveEncoder,
+  tokenPoolAbi,
 } from './version.ts'
 import {
   CCTContractTypeInvalidError,
@@ -158,8 +158,7 @@ describe('resolveEncoder', () => {
 
   it('throws when nothing is registered at or below the version', () => {
     assert.throws(
-      () =>
-        resolveEncoder({ [TokenPoolVersion.V2_0_0]: () => 'b' }, TokenPoolVersion.V1_5_0, 'op'),
+      () => resolveEncoder({ [TokenPoolVersion.V2_0_0]: () => 'b' }, TokenPoolVersion.V1_5_0, 'op'),
       CCTOperationUnsupportedError,
     )
   })
