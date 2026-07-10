@@ -33,9 +33,7 @@ function stubChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(
-    stubChain(),
-  ).tokenAdminRegistry.generateUnsignedCreateLookupTable({
+  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedCreateLookupTable({
     tokenAddress: TOKEN,
     poolProgramAddress: POOL_PROGRAM,
     payer: PAYER,

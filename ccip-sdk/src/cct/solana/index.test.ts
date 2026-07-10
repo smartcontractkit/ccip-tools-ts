@@ -14,12 +14,15 @@ function stubChain(): SolanaChain {
 }
 
 describe('SolanaTokenManager (cct/solana)', () => {
-  it('fromChain exposes grouped TokenAdminRegistry operations', () => {
+  it('fromChain exposes flat TokenAdminRegistry operations', () => {
     const chain = stubChain()
     const cct = SolanaTokenManager.fromChain(chain)
     assert.equal(cct.chain, chain)
     assert.equal(cct.provider, chain.connection)
-    assert.equal(cct.tokenAdminRegistry.chain, chain)
+    assert.equal(typeof cct.generateUnsignedCreateLookupTable, 'function')
+    assert.equal(typeof cct.createLookupTable, 'function')
+    assert.equal(typeof cct.generateUnsignedSetPool, 'function')
+    assert.equal(typeof cct.setPool, 'function')
   })
 
   it('creates from a connection provider', async (t) => {

@@ -7,7 +7,11 @@ import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
-import { type SolanaGenerateParams, SolanaOperation } from '../../operation.ts'
+import {
+  type SolanaExecuteParams,
+  type SolanaGenerateParams,
+  SolanaOperation,
+} from '../../operation.ts'
 import { deriveFeeBillingTokenConfigPda } from '../../programs/fee-quoter.ts'
 import {
   deriveExternalTokenPoolsSignerPda,
@@ -19,8 +23,8 @@ import { validatePublicKey } from '../../validate.ts'
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
 
-/** Parameters for creating a pool lookup table for Solana `setPool`. */
-export type CreateLookupTableParams = {
+/** Parameters shared by Solana TokenAdminRegistry `createLookupTable` generation and execution. */
+type CreateLookupTableParams = {
   tokenAddress: string
   poolProgramAddress: string
   additionalAddresses?: string[]
@@ -35,14 +39,14 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
   lookupTableAddress: string
 }
 
-/** Submitted create lookup table result. */
-export type CreateLookupTableResult = TransactionHash
+/** Parameters for executing Solana TokenAdminRegistry `createLookupTable`. */
+export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTableParams>
+
+/** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
+export type ExecuteCreateLookupTableResult = TransactionHash
 
 /** Builds and submits Solana ALT create+extend instructions for token pool setup. */
-export class CreateLookupTable extends SolanaOperation<
-  CreateLookupTableParams,
-  GenerateCreateLookupTableResult
-> {
+export class CreateLookupTable extends SolanaOperation<CreateLookupTableParams> {
   readonly name = 'createLookupTable'
 
   /** Validates all public keys before any RPC. */
