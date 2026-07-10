@@ -23,13 +23,25 @@ import { validatePublicKey } from '../../validate.ts'
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
 
+type CreateLookupTableMode = 'createAndExtend' | 'createEmpty'
+
 /** Parameters shared by Solana TokenAdminRegistry `createLookupTable` generation and execution. */
-type CreateLookupTableParams = {
-  tokenAddress: string
-  poolProgramAddress: string
-  additionalAddresses?: string[]
-  authority?: string
-}
+type CreateLookupTableParams =
+  | {
+      /** Defaults to `createAndExtend`; use `createEmpty` to skip extending the ALT. */
+      mode?: Extract<CreateLookupTableMode, 'createAndExtend'>
+      tokenAddress: string
+      poolProgramAddress: string
+      additionalAddresses?: string[]
+      /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
+      authority?: string
+    }
+  | {
+      /** Creates an empty ALT without extend instructions. */
+      mode: Extract<CreateLookupTableMode, 'createEmpty'>
+      /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
+      authority?: string
+    }
 
 /** Parameters for unsigned Solana lookup table generation. */
 export type GenerateCreateLookupTableParams = SolanaGenerateParams<CreateLookupTableParams>
@@ -45,7 +57,7 @@ export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTab
 /** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
 export type ExecuteCreateLookupTableResult = TransactionHash & { lookupTableAddress: string }
 
-/** Builds and submits Solana ALT create+extend instructions for token pool setup. */
+/** Builds and submits Solana ALT create instructions, optionally with extend instructions. */
 export class CreateLookupTable extends SolanaOperation<
   CreateLookupTableParams,
   GenerateCreateLookupTableResult,
@@ -55,31 +67,46 @@ export class CreateLookupTable extends SolanaOperation<
 
   /** Validates all public keys before any RPC. */
   protected validate(params: GenerateCreateLookupTableParams): void {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    if (params.mode === 'createEmpty') return
+
+    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
   }
 
-  /** Builds unsigned ALT create+extend instructions. */
+  /** Builds unsigned ALT create instructions, optionally with extend instructions. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: GenerateCreateLookupTableParams,
   ): Promise<GenerateCreateLookupTableResult> {
-    const poolProgram = new PublicKey(opts.poolProgramAddress)
-    const tokenMint = new PublicKey(opts.tokenAddress)
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
-    const additionalAddresses = (opts.additionalAddresses ?? []).map((a) => new PublicKey(a))
 
     const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
       authority,
       payer,
       recentSlot: await chain.connection.getSlot('finalized'),
     })
+
+    if (opts.mode === 'createEmpty') {
+      chain.logger.debug(
+        `${this.name}: mode = createEmpty, lookupTable = ${lookupTableAddress.toBase58()}`,
+      )
+      return {
+        family: ChainFamily.Solana,
+        instructions: [createIx],
+        mainIndex: 0,
+        lookupTableAddress: lookupTableAddress.toBase58(),
+      }
+    }
+
+    const poolProgram = new PublicKey(opts.poolProgramAddress)
+    const tokenMint = new PublicKey(opts.tokenAddress)
+    const additionalAddresses = (opts.additionalAddresses ?? []).map((a) => new PublicKey(a))
 
     const { tokenProgram } = await resolveATA(chain.connection, tokenMint, authority)
     const poolConfig = deriveTokenPoolConfigPda(poolProgram, tokenMint)
