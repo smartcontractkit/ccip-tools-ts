@@ -58,16 +58,19 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned Solana pool lookup table create+extend instructions.
+   * Builds unsigned Solana pool lookup table instructions.
+   *
+   * Defaults to create+extend. Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an
+   * EOA payer and vault authority, then populate it later through the authority. If `authority`
+   * is omitted, it defaults to `payer`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedCreateLookupTable({
-   *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
-   *   payer: squadsVault,
-   *   authority: tokenAdmin,
+   *   mode: 'createEmpty',
+   *   payer: eoa,
+   *   authority: squadsVault,
    * })
    * ```
    */
@@ -78,14 +81,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Creates and extends a Solana pool lookup table.
+   * Creates a Solana pool lookup table. Defaults to create+extend; pass `mode: 'createEmpty'` to
+   * create an empty ALT owned by `authority` and paid by `wallet`. If `authority` is omitted, it
+   * defaults to the wallet public key.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const { hash } = await cct.createLookupTable({
-   *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
+   * const { hash, lookupTableAddress } = await cct.createLookupTable({
+   *   mode: 'createEmpty',
+   *   authority: squadsVault,
    *   wallet,
    * })
    * ```

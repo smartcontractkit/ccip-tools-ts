@@ -59,6 +59,37 @@ describe('Solana TokenAdminRegistry createLookupTable', () => {
     )
   })
 
+  it('builds create-only ALT instruction in createEmpty mode', async () => {
+    const unsigned = await SolanaTokenManager.fromChain(
+      stubChain(),
+    ).generateUnsignedCreateLookupTable({
+      payer: PAYER,
+      authority: AUTHORITY,
+      mode: 'createEmpty',
+    })
+
+    assert.equal(unsigned.family, ChainFamily.Solana)
+    assert.equal(unsigned.mainIndex, 0)
+    assert.equal(unsigned.instructions.length, 1)
+    assert.match(unsigned.lookupTableAddress, /^[1-9A-HJ-NP-Za-km-z]+$/)
+    assert.equal(
+      unsigned.instructions[0]!.programId.toBase58(),
+      AddressLookupTableProgram.programId.toBase58(),
+    )
+    assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === AUTHORITY))
+  })
+
+  it('defaults createEmpty authority to payer', async () => {
+    const unsigned = await SolanaTokenManager.fromChain(
+      stubChain(),
+    ).generateUnsignedCreateLookupTable({
+      payer: PAYER,
+      mode: 'createEmpty',
+    })
+
+    assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === PAYER))
+  })
+
   it('chunks additional addresses into multiple extend instructions', async () => {
     const additionalAddresses = Array.from({ length: 21 }, () =>
       Keypair.generate().publicKey.toBase58(),
