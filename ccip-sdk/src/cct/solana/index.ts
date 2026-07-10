@@ -13,14 +13,19 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
+  type ExecuteAppendToLookupTableParams,
+  type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
+  type GenerateAppendToLookupTableParams,
+  type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  AppendToLookupTable,
   CreateLookupTable,
   SetPool,
 } from './token-admin-registry/operations/index.ts'
@@ -28,6 +33,7 @@ import {
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
+  readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #setPool = new SetPool()
 
@@ -97,6 +103,54 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   createLookupTable(opts: ExecuteCreateLookupTableParams): Promise<ExecuteCreateLookupTableResult> {
     return this.#createLookupTable.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned Solana lookup table extend instructions.
+   *
+   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
+   * pass `additionalAddresses` to append manual addresses. `authority` defaults to `payer`.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAppendToLookupTable({
+   *   lookupTableAddress,
+   *   payer: squadsVault,
+   *   authority: squadsVault,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  generateUnsignedAppendToLookupTable(
+    opts: GenerateAppendToLookupTableParams,
+  ): Promise<GenerateAppendToLookupTableResult> {
+    return this.#appendToLookupTable.generate(this.chain, opts)
+  }
+
+  /**
+   * Extends a Solana lookup table.
+   *
+   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.appendToLookupTable({
+   *   lookupTableAddress,
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  appendToLookupTable(
+    opts: ExecuteAppendToLookupTableParams,
+  ): Promise<ExecuteAppendToLookupTableResult> {
+    return this.#appendToLookupTable.execute(this.chain, opts)
   }
 
   /**
