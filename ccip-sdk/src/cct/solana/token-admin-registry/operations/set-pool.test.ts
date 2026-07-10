@@ -30,7 +30,7 @@ function stubChain(router = ROUTER, onAddress?: (address: string) => void): Sola
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).tokenAdminRegistry.generateUnsignedSetPool({
+  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedSetPool({
     tokenAddress: TOKEN,
     address: ADDRESS,
     poolLookupTableAddress: POOL_LOOKUP_TABLE,
@@ -67,7 +67,7 @@ describe('Solana TokenAdminRegistry setPool', () => {
       stubChain(ROUTER, (address) => (requestedAddress = address)),
     )
 
-    const unsigned = await cct.tokenAdminRegistry.generateUnsignedSetPool({
+    const unsigned = await cct.generateUnsignedSetPool({
       tokenAddress: TOKEN,
       address: ADDRESS,
       poolLookupTableAddress: POOL_LOOKUP_TABLE,

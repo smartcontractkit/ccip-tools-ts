@@ -5,7 +5,12 @@ import { PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { type SolanaGenerateParams, SolanaOperation } from '../../operation.ts'
+import type { TransactionHash } from '../../../operation.ts'
+import {
+  type SolanaExecuteParams,
+  type SolanaGenerateParams,
+  SolanaOperation,
+} from '../../operation.ts'
 import {
   createRouterProgram,
   deriveRouterConfigPda,
@@ -16,8 +21,8 @@ import { validatePublicKey, validateWritableIndexes } from '../../validate.ts'
 /** Standard BurnMint/LockRelease pool ALT writable positions. */
 export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
 
-/** Parameters for Solana TokenAdminRegistry `setPool`. */
-export type SetPoolParams = {
+/** Parameters shared by Solana TokenAdminRegistry `setPool` generation and execution. */
+type SetPoolParams = {
   tokenAddress: string
   address: string
   poolLookupTableAddress: string
@@ -31,6 +36,15 @@ export type SetPoolParams = {
 
 /** Parameters for unsigned Solana TokenAdminRegistry `setPool` generation. */
 export type GenerateSetPoolParams = SolanaGenerateParams<SetPoolParams>
+
+/** Unsigned Solana TokenAdminRegistry `setPool` result. */
+export type GenerateSetPoolResult = UnsignedSolanaTx
+
+/** Parameters for executing Solana TokenAdminRegistry `setPool`. */
+export type ExecuteSetPoolParams = SolanaExecuteParams<SetPoolParams>
+
+/** Result of executing Solana TokenAdminRegistry `setPool`. */
+export type ExecuteSetPoolResult = TransactionHash
 
 /** Solana TokenAdminRegistry `setPool` operation. */
 export class SetPool extends SolanaOperation<SetPoolParams> {
