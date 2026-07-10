@@ -43,10 +43,17 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
 export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
-export type ExecuteCreateLookupTableResult = TransactionHash
+export type CreateLookupTableResult = TransactionHash & { lookupTableAddress: string }
+
+/** Result alias for executing Solana TokenAdminRegistry `createLookupTable`. */
+export type ExecuteCreateLookupTableResult = CreateLookupTableResult
 
 /** Builds and submits Solana ALT create+extend instructions for token pool setup. */
-export class CreateLookupTable extends SolanaOperation<CreateLookupTableParams> {
+export class CreateLookupTable extends SolanaOperation<
+  CreateLookupTableParams,
+  GenerateCreateLookupTableResult,
+  CreateLookupTableResult
+> {
   readonly name = 'createLookupTable'
 
   /** Validates all public keys before any RPC. */
@@ -74,7 +81,7 @@ export class CreateLookupTable extends SolanaOperation<CreateLookupTableParams> 
     const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
       authority,
       payer,
-      recentSlot: await chain.connection.getSlot(),
+      recentSlot: await chain.connection.getSlot('finalized'),
     })
 
     const { tokenProgram } = await resolveATA(chain.connection, tokenMint, authority)
@@ -132,5 +139,13 @@ export class CreateLookupTable extends SolanaOperation<CreateLookupTableParams> 
       mainIndex: 0,
       lookupTableAddress: lookupTableAddress.toBase58(),
     }
+  }
+
+  /** Adds the generated lookup table address to the execute result. */
+  protected override resultFromGenerated(
+    hash: TransactionHash,
+    tx: GenerateCreateLookupTableResult,
+  ): CreateLookupTableResult {
+    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
 }
