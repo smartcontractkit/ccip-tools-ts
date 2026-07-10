@@ -43,16 +43,13 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
 export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
-export type CreateLookupTableResult = TransactionHash & { lookupTableAddress: string }
-
-/** Result alias for executing Solana TokenAdminRegistry `createLookupTable`. */
-export type ExecuteCreateLookupTableResult = CreateLookupTableResult
+export type ExecuteCreateLookupTableResult = TransactionHash & { lookupTableAddress: string }
 
 /** Builds and submits Solana ALT create+extend instructions for token pool setup. */
 export class CreateLookupTable extends SolanaOperation<
   CreateLookupTableParams,
   GenerateCreateLookupTableResult,
-  CreateLookupTableResult
+  ExecuteCreateLookupTableResult
 > {
   readonly name = 'createLookupTable'
 
@@ -145,7 +142,7 @@ export class CreateLookupTable extends SolanaOperation<
   protected override resultFromGenerated(
     hash: TransactionHash,
     tx: GenerateCreateLookupTableResult,
-  ): CreateLookupTableResult {
+  ): ExecuteCreateLookupTableResult {
     return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
 }
