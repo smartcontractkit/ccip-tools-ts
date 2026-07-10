@@ -1,9 +1,10 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
@@ -18,6 +19,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { deriveTokenPoolConfigPda, deriveTokenPoolSignerPda } from '../../programs/token-pool.ts'
+import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
@@ -171,5 +173,31 @@ export class CreateLookupTable extends SolanaOperation<
     tx: GenerateCreateLookupTableResult,
   ): ExecuteCreateLookupTableResult {
     return { ...hash, lookupTableAddress: tx.lookupTableAddress }
+  }
+
+  /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
+  override async execute(
+    chain: SolanaChain,
+    params: ExecuteCreateLookupTableParams,
+  ): Promise<ExecuteCreateLookupTableResult> {
+    const { wallet, computeUnits, ...rest } = params
+    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+
+    const payer = wallet.publicKey.toBase58()
+    if (
+      params.mode !== 'createEmpty' &&
+      params.authority &&
+      !new PublicKey(params.authority).equals(wallet.publicKey)
+    ) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'authority',
+        "createAndExtend requires authority to be the executing wallet. Use mode: 'createEmpty' for vault-owned ALTs.",
+      )
+    }
+
+    const tx = await this.generate(chain, { ...rest, payer })
+    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
+    return this.resultFromGenerated(hash, tx)
   }
 }

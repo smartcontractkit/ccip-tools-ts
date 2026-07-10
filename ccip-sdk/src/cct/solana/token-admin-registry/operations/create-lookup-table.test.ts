@@ -15,6 +15,10 @@ const ROUTER = Keypair.generate().publicKey.toBase58()
 const FEE_QUOTER = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
 
 function stubChain(): SolanaChain {
   return {
@@ -97,6 +101,22 @@ describe('Solana TokenAdminRegistry createLookupTable', () => {
     const unsigned = await generate({ additionalAddresses })
 
     assert.equal(unsigned.instructions.length, 3)
+  })
+
+  it('rejects signed create+extend when authority is not the wallet', async () => {
+    await assert.rejects(
+      () =>
+        SolanaTokenManager.fromChain(stubChain()).createLookupTable({
+          tokenAddress: TOKEN,
+          poolProgramAddress: POOL_PROGRAM,
+          wallet: WALLET,
+          authority: AUTHORITY,
+        }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'createLookupTable' &&
+        err.context.param === 'authority',
+    )
   })
 
   it('uses caller-provided authority', async () => {
