@@ -15,17 +15,15 @@ import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './se
 import {
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
-  type GenerateCreateLookupTableParams,
-  type GenerateCreateLookupTableResult,
-  CreateLookupTable,
-} from './token-admin-registry/operations/create-lookup-table.ts'
-import {
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
+  type GenerateCreateLookupTableParams,
+  type GenerateCreateLookupTableResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  CreateLookupTable,
   SetPool,
-} from './token-admin-registry/operations/set-pool.ts'
+} from './token-admin-registry/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
@@ -76,10 +74,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   generateUnsignedCreateLookupTable(
     opts: GenerateCreateLookupTableParams,
   ): Promise<GenerateCreateLookupTableResult> {
-    return this.#createLookupTable.generate(
-      this.chain,
-      opts,
-    ) as Promise<GenerateCreateLookupTableResult>
+    return this.#createLookupTable.generate(this.chain, opts)
   }
 
   /**
@@ -161,5 +156,4 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 export * from '../errors.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
-export type * from './token-admin-registry/operations/create-lookup-table.ts'
-export type * from './token-admin-registry/operations/set-pool.ts'
+export type * from './token-admin-registry/operations/index.ts'
