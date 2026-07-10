@@ -1,11 +1,9 @@
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
 import {
@@ -13,12 +11,7 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
-import { deriveFeeBillingTokenConfigPda } from '../../programs/fee-quoter.ts'
-import {
-  deriveExternalTokenPoolsSignerPda,
-  deriveTokenAdminRegistryPda,
-} from '../../programs/router.ts'
-import { deriveTokenPoolConfigPda, deriveTokenPoolSignerPda } from '../../programs/token-pool.ts'
+import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
@@ -110,31 +103,13 @@ export class CreateLookupTable extends SolanaOperation<
     const tokenMint = new PublicKey(opts.tokenAddress)
     const additionalAddresses = (opts.additionalAddresses ?? []).map((a) => new PublicKey(a))
 
-    const { tokenProgram } = await resolveATA(chain.connection, tokenMint, authority)
-    const poolConfig = deriveTokenPoolConfigPda(poolProgram, tokenMint)
-    const { router: routerAddress } = await chain.getTokenPoolConfig(poolConfig.toBase58())
-    const router = new PublicKey(routerAddress)
-    const { feeQuoter } = await chain._getRouterConfig(routerAddress)
-
-    const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
-    const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)
-    const poolTokenAta = getAssociatedTokenAddressSync(tokenMint, poolSigner, true, tokenProgram)
-    const feeTokenConfig = deriveFeeBillingTokenConfigPda(feeQuoter, tokenMint)
-    const routerPoolSigner = deriveExternalTokenPoolsSignerPda(router, poolProgram)
-
-    const addresses = [
+    const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
       lookupTableAddress,
-      tokenAdminRegistry,
-      poolProgram,
-      poolConfig,
-      poolTokenAta,
-      poolSigner,
-      tokenProgram,
       tokenMint,
-      feeTokenConfig,
-      routerPoolSigner,
-      ...additionalAddresses,
-    ]
+      poolProgram,
+      authority,
+    })
+    const addresses = [...ccipAddresses, ...additionalAddresses]
 
     if (addresses.length > MAX_ALT_ADDRESSES) {
       throw new CCTParamsInvalidError(
@@ -157,7 +132,7 @@ export class CreateLookupTable extends SolanaOperation<
     }
 
     chain.logger.debug(
-      `${this.name}: router = ${router.toBase58()}, token = ${tokenMint.toBase58()}, lookupTable = ${lookupTableAddress.toBase58()}`,
+      `${this.name}: token = ${tokenMint.toBase58()}, lookupTable = ${lookupTableAddress.toBase58()}`,
     )
     return {
       family: ChainFamily.Solana,
