@@ -12,18 +12,23 @@ import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
-import { SolanaTokenAdminRegistryClient } from './token-admin-registry/index.ts'
+import {
+  type ExecuteSetPoolParams,
+  type ExecuteSetPoolResult,
+  type GenerateSetPoolParams,
+  type GenerateSetPoolResult,
+  SetPool,
+} from './token-admin-registry/operations/set-pool.ts'
 
-/** CCT admin facade for Solana; grouped clients own contract/program operations. */
+/** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
-  readonly tokenAdminRegistry: SolanaTokenAdminRegistryClient
+  readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
     super()
     this.chain = chain
-    this.tokenAdminRegistry = new SolanaTokenAdminRegistryClient(chain)
   }
 
   /** Wraps an existing {@link SolanaChain}. */
@@ -46,7 +51,56 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     return this.chain.connection
   }
 
-  /** Serializes an unsigned Solana CCT tx for external signing. */
+  /**
+   * Builds unsigned Solana `setPool` instructions.
+   *
+   * The `payer` pays transaction fees. `authority` defaults to `payer`; Squads/multisig flows
+   * should pass the token admin/vault authority explicitly.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetPool({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   poolLookupTableAddress: lookupTable,
+   *   payer: squadsVault,
+   *   authority: tokenAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedSetPool(opts: GenerateSetPoolParams): Promise<GenerateSetPoolResult> {
+    return this.#setPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Registers a token pool. The wallet must be the token admin authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setPool({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   poolLookupTableAddress: lookupTable,
+   *   wallet,
+   * })
+   * ```
+   */
+  setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
+    return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Serializes an unsigned Solana CCT tx for external signing.
+   *
+   * @example
+   * ```ts
+   * const unsigned = await cct.generateUnsignedSetPool({ ...params, payer })
+   * const base58 = await cct.serializeUnsignedTx(unsigned, payer)
+   * const base64 = await cct.serializeUnsignedTx(unsigned, payer, 'base64')
+   * ```
+   */
   serializeUnsignedTx(
     unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
     payer: string,
@@ -56,5 +110,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 }
 
-export type { GenerateSetPoolParams, SetPoolParams } from './token-admin-registry/index.ts'
+export * from '../errors.ts'
+export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
+export type * from './token-admin-registry/operations/set-pool.ts'
