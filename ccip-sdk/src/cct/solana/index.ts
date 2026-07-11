@@ -13,6 +13,13 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
+  type ExecuteDeployTokenParams,
+  type ExecuteDeployTokenResult,
+  type GenerateDeployTokenParams,
+  type GenerateDeployTokenResult,
+  DeployToken,
+} from './token/operations/index.ts'
+import {
   type ExecuteAppendToLookupTableParams,
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
@@ -35,6 +42,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #deployToken = new DeployToken()
   readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -61,6 +69,48 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /** Provider of the underlying chain. */
   get provider(): Connection {
     return this.chain.connection
+  }
+
+  /**
+   * Builds unsigned Solana mint creation instructions. Does not mint supply.
+   *
+   * The `payer` is also the mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeployToken({
+   *   payer,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: true,
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   * })
+   * ```
+   */
+  generateUnsignedDeployToken(opts: GenerateDeployTokenParams): Promise<GenerateDeployTokenResult> {
+    return this.#deployToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a Solana mint. Does not mint supply.
+   *
+   * The wallet public key is also the mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deployToken({
+   *   wallet,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: false,
+   * })
+   * ```
+   */
+  deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    return this.#deployToken.execute(this.chain, opts)
   }
 
   /**
@@ -215,4 +265,5 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 export * from '../errors.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
+export type * from './token/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
