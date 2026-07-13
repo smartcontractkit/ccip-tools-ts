@@ -36,6 +36,13 @@ import {
   CreateLookupTable,
   SetPool,
 } from './token-admin-registry/operations/index.ts'
+import {
+  type ExecuteDeployTokenPoolParams,
+  type ExecuteDeployTokenPoolResult,
+  type GenerateDeployTokenPoolParams,
+  type GenerateDeployTokenPoolResult,
+  DeployTokenPool,
+} from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
@@ -43,6 +50,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #deployToken = new DeployToken()
+  readonly #deployTokenPool = new DeployTokenPool()
   readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -156,6 +164,44 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds unsigned Solana token pool initialize instructions.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeployTokenPool({
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   payer,
+   *   authority,
+   *   allowlist: [allowedSender],
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPool(
+    opts: GenerateDeployTokenPoolParams,
+  ): Promise<GenerateDeployTokenPoolResult> {
+    return this.#deployTokenPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Initializes a Solana token pool.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deployTokenPool({
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   wallet,
+   * })
+   * ```
+   */
+  deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
+    return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
    * Builds unsigned Solana lookup table extend instructions.
    *
    * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
@@ -266,4 +312,5 @@ export * from '../errors.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
+export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
