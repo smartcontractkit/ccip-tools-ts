@@ -494,7 +494,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /** {@inheritDoc Chain.getBlockInfo} */
   async getBlockInfo(block: number | bigint | EVMEndBlockTag): Promise<BlockInfo> {
     const res = await this.provider.getBlock(block)
-    if (!res) throw new CCIPBlockNotFoundError(block)
+    if (!res) throw new CCIPBlockNotFoundError(block, { context: { network: this.network.name } })
     return { number: res.number, timestamp: res.timestamp }
   }
 
