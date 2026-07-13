@@ -13,6 +13,7 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { buildCreateLookupTableInstruction } from '../../programs/alt.ts'
 import { deriveFeeBillingTokenConfigPda } from '../../programs/fee-quoter.ts'
 import {
   deriveExternalTokenPoolsSignerPda,
@@ -88,7 +89,7 @@ export class CreateLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
 
-    const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
+    const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
       authority,
       payer,
       recentSlot: await chain.connection.getSlot('finalized'),
