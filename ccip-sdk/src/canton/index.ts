@@ -1024,7 +1024,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * 3. **Choice argument** – assembled from the encoded CCIP message,
    *    verification data, and the opaque `contextData` returned by the EDS.
    *
-   * @param opts - Must use the `offRamp` + `input` variant of {@link ExecuteOpts}.
+   * @param opts - {@link ExecuteOpts} with `offRamp` + `input`, or `{ messageId }` when
+   *   `apiClient` is configured (fetches execution inputs from the CCIP API).
    *   `input` must contain `encodedMessage` and `verifications` (CCIP v2.0).
    *   `payer` is the Daml party ID used for `actAs`.
    * @returns An {@link UnsignedCantonTx} wrapping the ready-to-submit
@@ -1033,21 +1034,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   override async generateUnsignedExecute(
     opts: Parameters<Chain['generateUnsignedExecute']>[0],
   ): Promise<UnsignedCantonTx> {
-    // --- validate opts shape ---
-    if (!('offRamp' in opts) || !('input' in opts)) {
-      throw new CCIPNotImplementedError(
-        'CantonChain.generateUnsignedExecute: messageId-based execution is not supported; ' +
-          'provide offRamp + input instead',
-      )
-    }
+    const { payer, ...executeOpts } = opts
+    const cantonOpts = opts as typeof opts & { _cantonReceiverCid?: string }
+    const resolved = await this.resolveExecuteOpts(executeOpts)
 
-    const { input, payer } = opts
     if (!payer) {
       throw new CCIPError(
         CCIPErrorCode.WALLET_INVALID,
         'CantonChain.generateUnsignedExecute: payer (party ID) is required',
       )
     }
+
+    const { input } = resolved
 
     // v2.0 input shape: { encodedMessage, verifications }
     if (!('encodedMessage' in input) || !('verifications' in input)) {
@@ -1070,7 +1068,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       'CantonChain.generateUnsignedExecute: fetching ACS disclosures for CCIPReceiver and PerPartyRouter...',
     )
     // Check opts for a pre-resolved receiver CID (threaded from execute() after find/create).
-    const cantonOpts = opts as typeof opts & { _cantonReceiverCid?: string }
     const acsDisclosures = await this.acsDisclosureProvider.fetchExecutionDisclosures(
       cantonOpts._cantonReceiverCid,
     )
@@ -1178,17 +1175,22 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @throws {@link CCIPError} if the Ledger API submission or result parsing fails
    */
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
-    const { wallet } = opts
+    const { wallet, ...executeOpts } = opts
     if (!isCantonWallet(wallet)) {
       throw new CCIPWalletInvalidError(wallet)
     }
 
-    // Decode the message finality and find/create a compatible CCIPReceiver.
-    const inputOpts = opts as {
-      input?: { encodedMessage?: string; verifications?: Array<{ destAddress: string }> }
+    const resolved = await this.resolveExecuteOpts(executeOpts)
+    if (!('encodedMessage' in resolved.input) || !('verifications' in resolved.input)) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.execute: only CCIP v2.0 ExecutionInput ' +
+          '(encodedMessage + verifications) is supported',
+      )
     }
-    const encodedMessageHex = inputOpts.input?.encodedMessage ?? ''
-    const verifications = inputOpts.input?.verifications ?? []
+
+    const { encodedMessage, verifications } = resolved.input
+    const encodedMessageHex = stripHexPrefix(String(encodedMessage))
     const attestationCcvRaw =
       verifications[0] != null
         ? decodeCantonVerifierDestAddress(verifications[0].destAddress)
@@ -1213,7 +1215,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Build the unsigned command, passing the resolved receiver CID via Canton-specific opts.
     const unsigned = await this.generateUnsignedExecute({
-      ...opts,
+      offRamp: resolved.offRamp,
+      input: resolved.input,
+      receiver: opts.receiver,
       payer: wallet.party,
       _cantonReceiverCid: receiverCid,
     } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])

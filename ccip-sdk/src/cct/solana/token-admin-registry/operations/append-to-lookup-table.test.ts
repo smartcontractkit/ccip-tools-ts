@@ -8,6 +8,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
+import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const POOL_PROGRAM = Keypair.generate().publicKey.toBase58()
@@ -80,6 +81,28 @@ describe('Solana TokenAdminRegistry appendToLookupTable', () => {
     const unsigned = await generate({ tokenAddress: TOKEN, poolProgramAddress: POOL_PROGRAM })
 
     assert.equal(unsigned.instructions.length, 1)
+  })
+
+  it('rejects auto-derived CCIP addresses when the canonical block already exists', async () => {
+    const chain = stubChain()
+    const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
+      lookupTableAddress: new PublicKey(LOOKUP_TABLE),
+      tokenMint: new PublicKey(TOKEN),
+      poolProgram: new PublicKey(POOL_PROGRAM),
+      authority: new PublicKey(AUTHORITY),
+    })
+
+    await assert.rejects(
+      () =>
+        generate(
+          { tokenAddress: TOKEN, poolProgramAddress: POOL_PROGRAM },
+          stubChain(ccipAddresses),
+        ),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'appendToLookupTable' &&
+        err.context.param === 'lookupTableAddress',
+    )
   })
 
   it('rejects signed append when authority is not the wallet', async () => {
