@@ -980,6 +980,115 @@ describe('CCIPAPIClient', () => {
     })
   })
 
+  describe('getExecutionInput', () => {
+    it('should normalize v2 encodedMessage without 0x prefix (Canton API)', async () => {
+      const bareEncoded =
+        '0180a125ef7e2d41dade41ba4fc9d91ad900000000000000ec000531b00000c350000000009a25b2b8f01e3d98ba406630f8a1cda063753407b874762588f561351b46838e2003519eac48d545c4d0ecdc3e3022e443d9e878867827eecb37d5e5a60ae0c98914c6a246a9acdaae651708706494720f79c3e5d0a12028b2421067c474960f680ee23de0c86ce91d3ec7b24f8f5819289160f4d124a7148C244f0B2164E6A3BED74ab429B0ebd661Bb14CA00000000000568656c6c6f'
+      const messageId = '0x387873167bf01283a4803b13698c1ce9d3990c2f72c192477f78cbf6902eec31'
+      const customFetch = mock.fn(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                offramp: '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1',
+                encodedMessage: bareEncoded,
+                ccvData: ['0xe9a05a20'],
+                verifierAddresses: ['0x8f3ee3c77D2B27c32306a89D367654F959Db223D'],
+              }),
+            ),
+        }),
+      )
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getExecutionInput(messageId)
+
+      assert.ok('encodedMessage' in result)
+      assert.match(result.encodedMessage, /^0x[0-9a-fA-F]+$/)
+      assert.equal(result.encodedMessage.slice(2).toLowerCase(), bareEncoded.toLowerCase())
+      assert.equal(result.version, CCIPVersion.V2_0)
+      assert.equal(result.offRamp, '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1')
+    })
+
+    it('falls back to getMessageById verifiers when execution-inputs CCV data is empty', async () => {
+      const messageId = '0x62c8432ef490e06659677a0163bca342fffc62a2b6fbc3a871a312c4ecab53ff'
+      const encodedMessage =
+        '0x01de41ba4fc9d91ad980a125ef7e2d41da00000000000001c300041c50000186a000000001627a052d6d9e5076321c70be47e1c04871e7d06759079187b41ebc78c7f2414a20000000000000000000000000181ac7dc295f1c8c87342d07cfaba90bc477db5d20d03375cb15a7179bfbfa7cfb843250a6b26e4ddc7a4c30e7bc1777cf3afbf580200000000000000000000000008c244f0b2164e6a3bed74ab429b0ebd661bb14ca2028b2421067c474960f680ee23de0c86ce91d3ec7b24f8f5819289160f4d124a700000000000568656c6c6f'
+      const cantonCcv = '0xec1e288bcf8bbf034ac2d31b67f9b15a3f1f828d086c5b9d8fc2866129cd02fe'
+      const ccvProof = '0x' + 'ab'.repeat(100)
+
+      const customFetch = mock.fn((url: string) => {
+        if (url.includes('execution-inputs')) {
+          return Promise.resolve({
+            ok: true,
+            text: () =>
+              Promise.resolve(
+                JSON.stringify({
+                  offramp: '0xd03375cb15a7179bfbfa7cfb843250a6b26e4ddc7a4c30e7bc1777cf3afbf580',
+                  encodedMessage,
+                  verifierAddresses: [],
+                  ccvData: [],
+                  verificationComplete: false,
+                }),
+              ),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(
+              JSON.stringify({
+                messageId,
+                sender: '0x1111111111111111111111111111111111111111',
+                receiver: '0x2222222222222222222222222222222222222222',
+                status: 'VERIFIED',
+                sourceNetworkInfo: {
+                  name: 'ethereum-testnet-sepolia',
+                  chainSelector: '16015286601757825753',
+                  chainId: '11155111',
+                  chainFamily: 'EVM',
+                },
+                destNetworkInfo: {
+                  name: 'canton-testnet',
+                  chainSelector: '9268731218649498074',
+                  chainId: 'canton:TestNet',
+                  chainFamily: 'Canton',
+                },
+                sendTransactionHash: '0x' + 'bb'.repeat(32),
+                sendTimestamp: '2026-07-09T13:22:48.000Z',
+                tokenAmounts: [],
+                extraArgs: { gasLimit: '100000', finality: 1 },
+                verifiers: {
+                  items: [
+                    {
+                      sourceAddress: '0x8f3ee3c77D2B27c32306a89D367654F959Db223D',
+                      destAddress: cantonCcv,
+                      isRequired: true,
+                      verification: { data: ccvProof, timestamp: '2026-07-09T13:23:03.330Z' },
+                    },
+                  ],
+                  optionalThreshold: '0',
+                },
+                version: '2.0.0',
+                onramp: '0x181Ac7dC295f1C8C87342d07CFaBA90bC477DB5d',
+                origin: '0x1111111111111111111111111111111111111111',
+                sequenceNumber: '451',
+                data: '0x68656c6c6f',
+              }),
+            ),
+        })
+      })
+
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getExecutionInput(messageId)
+
+      assert.ok('verifications' in result)
+      assert.equal(result.verifications.length, 1)
+      assert.equal(result.verifications[0]!.destAddress, cantonCcv)
+      assert.equal(result.verifications[0]!.ccvData, ccvProof)
+      assert.equal(customFetch.mock.callCount(), 2)
+    })
+  })
+
   describe('searchMessages', () => {
     const mockSearchResponse = {
       data: [
