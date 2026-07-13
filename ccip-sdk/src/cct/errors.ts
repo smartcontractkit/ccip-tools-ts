@@ -101,11 +101,21 @@ export class CCTTxNotConfirmedError extends CCIPError {
   }
 }
 
-// Token-pool version dispatch
+// Contract version dispatch
 
 /**
- * Thrown when the contract at an address is not a supported token-pool type
- * (BurnMint or LockRelease).
+ * Thrown when the contract at an address is not of the expected type.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTContractTypeInvalidError) {
+ *     console.log(`Expected ${error.context.expected} at ${error.context.address}, got "${error.context.actual}"`)
+ *   }
+ * }
+ * ```
  */
 export class CCTContractTypeInvalidError extends CCIPError {
   override readonly name = 'CCTContractTypeInvalidError'
@@ -154,8 +164,19 @@ export class CCTContractVersionUnsupportedError extends CCIPError {
 }
 
 /**
- * Thrown when no implementation is registered for an operation at or below the pool's
- * version (floor-match miss). Permanent for that pool version.
+ * Thrown when no implementation is registered for an operation at or below the contract's
+ * version (floor-match miss). Permanent for that contract version.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTOperationUnsupportedError) {
+ *     console.log(`${error.context.operation} unsupported at version ${error.context.version}`)
+ *   }
+ * }
+ * ```
  */
 export class CCTOperationUnsupportedError extends CCIPError {
   override readonly name = 'CCTOperationUnsupportedError'
@@ -163,7 +184,7 @@ export class CCTOperationUnsupportedError extends CCIPError {
   constructor(operation: string, version: string, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.CCT_OPERATION_UNSUPPORTED,
-      `${operation} is not supported at token-pool version ${version}`,
+      `${operation} is not supported at contract version ${version}`,
       {
         ...options,
         isTransient: false,
