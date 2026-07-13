@@ -26,6 +26,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setPool = new SetPool()
   readonly #transferOwnership = new TransferOwnership()
 
+  /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
     super()
     this.chain = chain

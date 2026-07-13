@@ -75,7 +75,7 @@ export function parseTokenPoolVersion({
 }
 
 /** Vendored pool ABIs keyed by {@link TokenPoolVersion}.
- * TODO: split per type once BurnMint ABIs are imported from @chainlink/contracts-ccip  */
+ * TODO: split per type once BurnMint ABIs are imported from `@chainlink/contracts-ccip`  */
 export const TOKEN_POOL_ABIS: Record<TokenPoolVersion, InterfaceAbi> = {
   [TokenPoolVersion.V1_5_0]: LockReleaseTokenPool_1_5,
   [TokenPoolVersion.V1_5_1]: LockReleaseTokenPool_1_5_1,

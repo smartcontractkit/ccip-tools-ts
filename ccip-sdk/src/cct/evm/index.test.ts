@@ -7,7 +7,7 @@ import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError, CCTContractVersionUnsupportedError } from '../errors.ts'
+import { CCTContractVersionUnsupportedError, CCTParamsInvalidError } from '../errors.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
