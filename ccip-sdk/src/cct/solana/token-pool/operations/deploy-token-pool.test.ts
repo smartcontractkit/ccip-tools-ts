@@ -12,6 +12,10 @@ const TOKEN = Keypair.generate().publicKey.toBase58()
 const POOL_PROGRAM = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
 
 function stubChain(): SolanaChain {
   return {
@@ -53,6 +57,22 @@ describe('Solana token pool deployTokenPool', () => {
     const unsigned = await generate({ authority: undefined })
 
     assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === PAYER))
+  })
+
+  it('rejects signed deploy when authority is not the wallet', async () => {
+    await assert.rejects(
+      () =>
+        SolanaTokenManager.fromChain(stubChain()).deployTokenPool({
+          tokenAddress: TOKEN,
+          poolProgramAddress: POOL_PROGRAM,
+          wallet: WALLET,
+          authority: AUTHORITY,
+        }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'deployTokenPool' &&
+        err.context.param === 'authority',
+    )
   })
 
   it('rejects invalid allowlist addresses', async () => {

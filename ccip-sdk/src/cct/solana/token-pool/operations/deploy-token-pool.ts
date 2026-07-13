@@ -1,8 +1,10 @@
 import { PublicKey, SystemProgram } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -15,6 +17,7 @@ import {
   deriveTokenPoolGlobalConfigPda,
   deriveTokenPoolProgramDataPda,
 } from '../../programs/token-pool.ts'
+import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool deploy generation and execution. */
@@ -99,5 +102,26 @@ export class DeployTokenPool extends SolanaOperation<DeployTokenPoolParams> {
       `${this.name}: token = ${tokenMint.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
+  }
+
+  /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
+  override async execute(
+    chain: SolanaChain,
+    params: ExecuteDeployTokenPoolParams,
+  ): Promise<ExecuteDeployTokenPoolResult> {
+    const { wallet, computeUnits, ...rest } = params
+    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+
+    const payer = wallet.publicKey.toBase58()
+    if (params.authority && !new PublicKey(params.authority).equals(wallet.publicKey)) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'authority',
+        'deployTokenPool requires authority to be the executing wallet.',
+      )
+    }
+
+    const tx = await this.generate(chain, { ...rest, payer })
+    return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }
