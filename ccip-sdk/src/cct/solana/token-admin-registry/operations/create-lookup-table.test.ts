@@ -61,6 +61,10 @@ describe('Solana TokenAdminRegistry createLookupTable', () => {
       unsigned.instructions[1]!.programId.toBase58(),
       AddressLookupTableProgram.programId.toBase58(),
     )
+    assert.equal(
+      unsigned.instructions[0]!.keys.find((key) => key.pubkey.toBase58() === PAYER)?.isSigner,
+      false,
+    )
   })
 
   it('builds create-only ALT instruction in createEmpty mode', async () => {
@@ -80,7 +84,10 @@ describe('Solana TokenAdminRegistry createLookupTable', () => {
       unsigned.instructions[0]!.programId.toBase58(),
       AddressLookupTableProgram.programId.toBase58(),
     )
-    assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === AUTHORITY))
+    assert.equal(
+      unsigned.instructions[0]!.keys.find((key) => key.pubkey.toBase58() === AUTHORITY)?.isSigner,
+      false,
+    )
   })
 
   it('defaults createEmpty authority to payer', async () => {

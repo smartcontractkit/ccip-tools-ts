@@ -1,4 +1,4 @@
-import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -11,7 +11,10 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
-import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
+import {
+  buildCreateLookupTableInstruction,
+  deriveCcipLookupTableAddresses,
+} from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
@@ -81,7 +84,7 @@ export class CreateLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
 
-    const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
+    const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
       authority,
       payer,
       recentSlot: await chain.connection.getSlot('finalized'),
@@ -119,7 +122,7 @@ export class CreateLookupTable extends SolanaOperation<
       )
     }
 
-    const extendIxs = []
+    const extendIxs: TransactionInstruction[] = []
     for (let i = 0; i < addresses.length; i += EXTEND_CHUNK_SIZE) {
       extendIxs.push(
         AddressLookupTableProgram.extendLookupTable({

@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { PublicKey } from '@solana/web3.js'
 
 /** Derives a token pool state/config PDA for a mint. */
