@@ -28,7 +28,9 @@ import {
 import { validatePublicKey } from '../../validate.ts'
 
 type BaseDeployTokenParams = {
+  /** Mint decimals. Must be an integer between 0 and 255. */
   decimals: number
+  /** Token program that owns the mint: classic SPL Token or Token-2022. */
   tokenProgram: 'spl-token' | 'token-2022'
 }
 
@@ -40,7 +42,15 @@ type BaseDeployTokenParams = {
 type DeployTokenParams = BaseDeployTokenParams &
   (
     | { withMetaplex: false }
-    | { withMetaplex: true; name: string; symbol: string; uri?: string | undefined }
+    | {
+        withMetaplex: true
+        /** Token display name for Metaplex metadata. Max 32 characters. */
+        name: string
+        /** Token symbol for Metaplex metadata. Max 10 characters. */
+        symbol: string
+        /** Metadata URI for Metaplex metadata JSON. Optional; defaults to an empty string when omitted. */
+        uri?: string | undefined
+      }
   )
 
 /** Parameters for unsigned Solana token deploy generation. */
