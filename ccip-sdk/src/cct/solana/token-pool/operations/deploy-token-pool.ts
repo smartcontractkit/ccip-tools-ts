@@ -20,10 +20,16 @@ import {
 import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
-/** Parameters shared by Solana token pool deploy generation and execution. */
+/** Parameters for initializing a Solana token pool, optionally with an allowlist. */
 type DeployTokenPoolParams = {
+  /** Token mint address this pool manages. */
   tokenAddress: string
+  /** Token pool program address, e.g. BurnMint or LockRelease token pool program. */
   poolProgramAddress: string
+  /**
+   * Optional addresses to enable in the pool allowlist during initialization.
+   * If omitted, the pool is initialized without configuring the allowlist.
+   */
   allowlist?: string[]
   /** Pool authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
