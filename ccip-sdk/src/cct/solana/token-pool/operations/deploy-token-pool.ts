@@ -123,7 +123,7 @@ export class DeployTokenPool extends SolanaOperation<DeployTokenPoolParams> {
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        'deployTokenPool requires authority to be the executing wallet.',
+        'deployTokenPool requires authority to be the executing wallet. Use generateUnsignedDeployTokenPool for vault-owned pools and have the vault sign/execute it.',
       )
     }
 
