@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { PublicKey } from '@solana/web3.js'
 
 /** Derives the FeeQuoter billing token config PDA for a mint. */

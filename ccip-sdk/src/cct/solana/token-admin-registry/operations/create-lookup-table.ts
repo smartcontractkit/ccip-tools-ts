@@ -1,5 +1,5 @@
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -145,7 +145,7 @@ export class CreateLookupTable extends SolanaOperation<
       )
     }
 
-    const extendIxs = []
+    const extendIxs: TransactionInstruction[] = []
     for (let i = 0; i < addresses.length; i += EXTEND_CHUNK_SIZE) {
       extendIxs.push(
         AddressLookupTableProgram.extendLookupTable({
