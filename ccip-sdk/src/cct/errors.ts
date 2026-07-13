@@ -9,7 +9,20 @@ import { type CCIPErrorOptions, CCIPError, CCIPErrorCode } from '../errors/index
 
 // Parameter validation
 
-/** Thrown before any RPC when operation params fail validation. Permanent. */
+/**
+ * Thrown before any RPC when operation params fail validation. Permanent.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ tokenAddress: 'not-an-address', poolAddress, address, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTParamsInvalidError) {
+ *     console.log(`Invalid ${error.context.operation} param "${error.context.param}"`)
+ *   }
+ * }
+ * ```
+ */
 export class CCTParamsInvalidError extends CCIPError {
   override readonly name = 'CCTParamsInvalidError'
   /** Creates a params-invalid error. */
@@ -32,6 +45,17 @@ export class CCTParamsInvalidError extends CCIPError {
  * Thrown when a CCT write fails before broadcast or the transaction reverts after mining.
  * Pre-broadcast failures (signing/RPC) may set `isTransient: true` for network errors;
  * on-chain reverts are permanent. Reverts include `context.txHash`.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ ...opts, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTTxFailedError) {
+ *     console.log(`${error.context.operation} failed: ${error.context.reason}`)
+ *   }
+ * }
+ * ```
  */
 export class CCTTxFailedError extends CCIPError {
   override readonly name = 'CCTTxFailedError'
@@ -48,6 +72,17 @@ export class CCTTxFailedError extends CCIPError {
 /**
  * Thrown when a transaction was broadcast but not confirmed within the timeout.
  * Transient — it may still mine; check `context.txHash` before resubmitting.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ ...opts, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTTxNotConfirmedError) {
+ *     console.log(`Not confirmed (tx ${error.context.txHash}); retry in ${error.retryAfterMs}ms`)
+ *   }
+ * }
+ * ```
  */
 export class CCTTxNotConfirmedError extends CCIPError {
   override readonly name = 'CCTTxNotConfirmedError'
@@ -88,18 +123,31 @@ export class CCTContractTypeInvalidError extends CCIPError {
   }
 }
 
-/** Thrown when a token pool reports a version string the SDK does not recognize. Permanent. */
-export class CCTTokenPoolVersionUnsupportedError extends CCIPError {
-  override readonly name = 'CCTTokenPoolVersionUnsupportedError'
-  /** Creates a token-pool-version-unsupported error. */
-  constructor(version: string, options?: CCIPErrorOptions) {
+/**
+ * Thrown when a contract reports a version string the SDK does not recognize. Permanent.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTContractVersionUnsupportedError) {
+ *     console.log(`Unsupported ${error.context.contractType} version: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTContractVersionUnsupportedError extends CCIPError {
+  override readonly name = 'CCTContractVersionUnsupportedError'
+  /** Creates a contract-version-unsupported error. */
+  constructor(contractType: string, version: string, options?: CCIPErrorOptions) {
     super(
-      CCIPErrorCode.CCT_TOKEN_POOL_VERSION_UNSUPPORTED,
-      `Unsupported token pool version: ${version}`,
+      CCIPErrorCode.CCT_CONTRACT_VERSION_UNSUPPORTED,
+      `Unsupported ${contractType} version: ${version}`,
       {
         ...options,
         isTransient: false,
-        context: { ...options?.context, version },
+        context: { ...options?.context, contractType, version },
       },
     )
   }

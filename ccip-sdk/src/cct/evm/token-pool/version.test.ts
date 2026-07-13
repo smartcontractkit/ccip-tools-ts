@@ -13,8 +13,8 @@ import {
 } from './version.ts'
 import {
   CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
-  CCTTokenPoolVersionUnsupportedError,
 } from '../../errors.ts'
 
 const ADDR = '0x' + '11'.repeat(20)
@@ -96,7 +96,7 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
-  it('throws CCTTokenPoolVersionUnsupportedError for an unknown version', () => {
+  it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
         parseTokenPoolVersion({
@@ -104,7 +104,7 @@ describe('parseTokenPoolVersion', () => {
           contractType: 'BurnMintTokenPool',
           version: '1.7.0',
         }),
-      CCTTokenPoolVersionUnsupportedError,
+      CCTContractVersionUnsupportedError,
     )
   })
 })

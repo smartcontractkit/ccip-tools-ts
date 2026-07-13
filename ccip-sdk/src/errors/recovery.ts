@@ -213,8 +213,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
   CCT_TX_NOT_CONFIRMED:
     'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
-  CCT_TOKEN_POOL_VERSION_UNSUPPORTED:
-    'This token-pool version is not supported by the CCT SDK. Check the pool address and its typeAndVersion.',
+  CCT_CONTRACT_VERSION_UNSUPPORTED:
+    'This contract version is not supported by the CCT SDK. Check the contract address and its typeAndVersion.',
   CCT_OPERATION_UNSUPPORTED:
     'This operation is not available at the token pool version in error.context. Verify the pool version supports it.',
 }

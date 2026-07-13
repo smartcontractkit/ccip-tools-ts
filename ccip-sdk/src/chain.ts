@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, isBytesLike, keccak256 } from 'ethers'
+import { type BytesLike, dataLength, hexlify, isBytesLike, keccak256 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -63,7 +63,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { util, withRetry } from './utils.ts'
+import { getDataBytes, util, withRetry } from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -1542,7 +1542,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           ? opts.messageId
           : 'message' in opts.input
             ? opts.input.message.messageId
-            : keccak256(opts.input.encodedMessage)
+            : keccak256(getDataBytes(opts.input.encodedMessage))
       const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
       if (
         'offchainTokenData' in input &&
@@ -1574,10 +1574,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           tokenAmounts: opts_.input.message.tokenAmounts,
         }
       } else {
-        const decoded = decodeMessageV1(opts_.input.encodedMessage)
+        const encodedMessage = hexlify(getDataBytes(opts_.input.encodedMessage))
+        const decoded = decodeMessageV1(encodedMessage)
         message = {
           ...decoded,
-          messageId: keccak256(opts_.input.encodedMessage),
+          messageId: keccak256(encodedMessage),
           tokenAmounts: decoded.tokenTransfer,
         }
       }

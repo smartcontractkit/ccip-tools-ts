@@ -7,7 +7,7 @@ import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError, CCTTokenPoolVersionUnsupportedError } from '../errors.ts'
+import { CCTParamsInvalidError, CCTContractVersionUnsupportedError } from '../errors.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -149,7 +149,7 @@ describe('EVMTokenManager (cct/evm)', () => {
       const cct = EVMTokenManager.fromChain(stubChain({}, '1.6.0'))
       await assert.rejects(
         () => cct.generateUnsignedTransferOwnership({ poolAddress: POOL, newOwner: TOKEN }),
-        CCTTokenPoolVersionUnsupportedError,
+        CCTContractVersionUnsupportedError,
       )
     })
   })

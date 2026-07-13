@@ -14,8 +14,8 @@ import TokenPool_2_0 from '../../../evm/abi/TokenPool_2_0.ts'
 import type { EVMChain } from '../../../evm/index.ts'
 import {
   CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
-  CCTTokenPoolVersionUnsupportedError,
 } from '../../errors.ts'
 
 /** Supported pool contract types; unsupported values fail in {@link parseTokenPoolVersion}. */
@@ -52,7 +52,7 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
  * Narrows raw `typeAndVersion` strings to a known {@link TokenPoolType} and
  * {@link TokenPoolVersion}.
  * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
- * @throws {@link CCTTokenPoolVersionUnsupportedError} if `version` is not a known pool version
+ * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version
  */
 export function parseTokenPoolVersion({
   address,
@@ -70,7 +70,7 @@ export function parseTokenPoolVersion({
       contractType,
     )
   if (!isTokenPoolVersion(version))
-    throw new CCTTokenPoolVersionUnsupportedError(version, { context: { address } })
+    throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
   return { type: contractType, version }
 }
 
