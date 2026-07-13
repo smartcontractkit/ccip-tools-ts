@@ -452,8 +452,7 @@ function extractMethod(init?: RequestInit): string | undefined {
   if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
   try {
     const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
-      | { method?: string }
-      | undefined
+      { method?: string } | undefined
     if (parsed && typeof parsed.method === 'string') return parsed.method
   } catch {
     // Not JSON or no method field
