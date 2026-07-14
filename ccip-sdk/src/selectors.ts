@@ -1420,6 +1420,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '364301': {
+    selector: 17611928792452358269n,
+    name: 't-rex-testnet',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '421613': {
     selector: 6101244977088475029n,
     name: 'ethereum-testnet-goerli-arbitrum-1',
