@@ -52,12 +52,17 @@ import {
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
-  readonly #appendToLookupTable = new AppendToLookupTable()
-  readonly #createLookupTable = new CreateLookupTable()
+  // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
   readonly #deployToken = new DeployToken()
-  readonly #deployTokenPool = new DeployTokenPool()
+
+  // Token admin registry operations
+  readonly #appendToLookupTable = new AppendToLookupTable()
+  readonly #createLookupTable = new CreateLookupTable()
   readonly #setPool = new SetPool()
+
+  // Token pool operations
+  readonly #deployTokenPool = new DeployTokenPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
