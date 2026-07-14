@@ -9,7 +9,20 @@ import { type CCIPErrorOptions, CCIPError, CCIPErrorCode } from '../errors/index
 
 // Parameter validation
 
-/** Thrown before any RPC when operation params fail validation. Permanent. */
+/**
+ * Thrown before any RPC when operation params fail validation. Permanent.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ tokenAddress: 'not-an-address', poolAddress, address, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTParamsInvalidError) {
+ *     console.log(`Invalid ${error.context.operation} param "${error.context.param}"`)
+ *   }
+ * }
+ * ```
+ */
 export class CCTParamsInvalidError extends CCIPError {
   override readonly name = 'CCTParamsInvalidError'
   /** Creates a params-invalid error. */
@@ -32,6 +45,17 @@ export class CCTParamsInvalidError extends CCIPError {
  * Thrown when a CCT write fails before broadcast or the transaction reverts after mining.
  * Pre-broadcast failures (signing/RPC) may set `isTransient: true` for network errors;
  * on-chain reverts are permanent. Reverts include `context.txHash`.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ ...opts, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTTxFailedError) {
+ *     console.log(`${error.context.operation} failed: ${error.context.reason}`)
+ *   }
+ * }
+ * ```
  */
 export class CCTTxFailedError extends CCIPError {
   override readonly name = 'CCTTxFailedError'
@@ -48,6 +72,17 @@ export class CCTTxFailedError extends CCIPError {
 /**
  * Thrown when a transaction was broadcast but not confirmed within the timeout.
  * Transient — it may still mine; check `context.txHash` before resubmitting.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.setPool({ ...opts, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTTxNotConfirmedError) {
+ *     console.log(`Not confirmed (tx ${error.context.txHash}); retry in ${error.retryAfterMs}ms`)
+ *   }
+ * }
+ * ```
  */
 export class CCTTxNotConfirmedError extends CCIPError {
   override readonly name = 'CCTTxNotConfirmedError'

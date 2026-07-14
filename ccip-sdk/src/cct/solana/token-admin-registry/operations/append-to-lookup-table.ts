@@ -1,4 +1,4 @@
-import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -43,8 +43,7 @@ export type ExecuteAppendToLookupTableResult = TransactionHash
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
   AppendToLookupTableParams,
-  GenerateAppendToLookupTableResult,
-  ExecuteAppendToLookupTableResult
+  GenerateAppendToLookupTableResult
 > {
   readonly name = 'appendToLookupTable'
 
@@ -114,6 +113,18 @@ export class AppendToLookupTable extends SolanaOperation<
         poolProgram,
         authority,
       })
+      const existingAddresses = new Set(
+        lookupTable.value.state.addresses.map((address) => address.toBase58()),
+      )
+
+      if (ccipAddresses.every((address) => existingAddresses.has(address.toBase58()))) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'lookupTableAddress',
+          'lookup table already contains the canonical CCIP address block; only append additionalAddresses or use an empty ALT',
+        )
+      }
+
       addresses.unshift(...ccipAddresses)
     }
 
@@ -126,7 +137,7 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
 
-    const instructions = []
+    const instructions: TransactionInstruction[] = []
     for (let i = 0; i < addresses.length; i += EXTEND_CHUNK_SIZE) {
       instructions.push(
         AddressLookupTableProgram.extendLookupTable({
@@ -161,7 +172,7 @@ export class AppendToLookupTable extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        'appendToLookupTable requires authority to be the executing wallet.',
+        'appendToLookupTable requires authority to be the executing wallet. Use generateUnsignedAppendToLookupTable for vault-owned ALTs and have the vault sign/execute it.',
       )
     }
 

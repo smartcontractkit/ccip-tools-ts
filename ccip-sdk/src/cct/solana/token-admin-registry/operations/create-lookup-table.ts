@@ -1,4 +1,4 @@
-import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -11,7 +11,10 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
-import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
+import {
+  buildCreateLookupTableInstruction,
+  deriveCcipLookupTableAddresses,
+} from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
@@ -55,8 +58,7 @@ export type ExecuteCreateLookupTableResult = TransactionHash & { lookupTableAddr
 /** Builds and submits Solana ALT create instructions, optionally with extend instructions. */
 export class CreateLookupTable extends SolanaOperation<
   CreateLookupTableParams,
-  GenerateCreateLookupTableResult,
-  ExecuteCreateLookupTableResult
+  GenerateCreateLookupTableResult
 > {
   readonly name = 'createLookupTable'
 
@@ -81,7 +83,7 @@ export class CreateLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
 
-    const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
+    const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
       authority,
       payer,
       recentSlot: await chain.connection.getSlot('finalized'),
@@ -119,7 +121,7 @@ export class CreateLookupTable extends SolanaOperation<
       )
     }
 
-    const extendIxs = []
+    const extendIxs: TransactionInstruction[] = []
     for (let i = 0; i < addresses.length; i += EXTEND_CHUNK_SIZE) {
       extendIxs.push(
         AddressLookupTableProgram.extendLookupTable({
@@ -140,14 +142,6 @@ export class CreateLookupTable extends SolanaOperation<
       mainIndex: 0,
       lookupTableAddress: lookupTableAddress.toBase58(),
     }
-  }
-
-  /** Adds the generated lookup table address to the execute result. */
-  protected override resultFromGenerated(
-    hash: TransactionHash,
-    tx: GenerateCreateLookupTableResult,
-  ): ExecuteCreateLookupTableResult {
-    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
@@ -173,6 +167,6 @@ export class CreateLookupTable extends SolanaOperation<
 
     const tx = await this.generate(chain, { ...rest, payer })
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
-    return this.resultFromGenerated(hash, tx)
+    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
 }

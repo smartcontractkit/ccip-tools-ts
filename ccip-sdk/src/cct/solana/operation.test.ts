@@ -27,27 +27,6 @@ class TestOperation extends SolanaOperation<{ value: string }> {
   }
 }
 
-type TestTx = UnsignedSolanaTx & { lookupTableAddress: string }
-type TestResult = { hash: string; lookupTableAddress: string }
-
-class TestResultOperation extends SolanaOperation<{ value: string }, TestTx, TestResult> {
-  readonly name = 'testResultOperation'
-
-  protected validate(): void {}
-
-  protected buildUnsigned(): Promise<TestTx> {
-    return Promise.resolve({
-      family: ChainFamily.Solana,
-      instructions: [],
-      lookupTableAddress: 'lookup-table',
-    })
-  }
-
-  protected override resultFromGenerated(hash: { hash: string }, tx: TestTx): TestResult {
-    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
-  }
-}
-
 const chain = { logger: console, connection: {} } as unknown as SolanaChain
 
 describe('SolanaOperation', () => {
@@ -76,18 +55,6 @@ describe('SolanaOperation', () => {
     await op.execute(chain, { value: 'x', wallet })
 
     assert.equal(op.captured, wallet.publicKey.toBase58())
-  })
-
-  it('lets operations add generated data to execute results', async () => {
-    const op = new TestResultOperation()
-    const wallet = {
-      publicKey: Keypair.generate().publicKey,
-      signTransaction: async <T>(tx: T) => tx,
-    }
-
-    const result = await op.execute(chain, { value: 'x', wallet })
-
-    assert.equal(result.lookupTableAddress, 'lookup-table')
   })
 
   it('rejects invalid wallets before validation or building unsigned txs', async () => {
