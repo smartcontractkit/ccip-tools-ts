@@ -1,0 +1,5 @@
+{
+  // Local-only dev build. Includes the src/cct directory.
+  "extends": "./tsconfig.build.json",
+  "exclude": ["node_modules", "**/*.test.*", "**/__tests__", "**/__mocks__"]
+}

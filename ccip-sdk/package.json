@@ -27,10 +27,6 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
-    "./cct/evm": {
-      "types": "./dist/cct/evm/index.d.ts",
-      "default": "./dist/cct/evm/index.js"
-    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
@@ -41,6 +37,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
+    "build:dev": "npm run clean && tsc -p ./tsconfig.build.dev.json",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"
   },
@@ -50,7 +47,9 @@
     "tsconfig.json",
     "!**/*.test.*",
     "!**/__tests__",
-    "!**/__mocks__"
+    "!**/__mocks__",
+    "!dist/cct/**",
+    "!src/cct/**"
   ],
   "peerDependencies": {
     "viem": "^2.0.0"
