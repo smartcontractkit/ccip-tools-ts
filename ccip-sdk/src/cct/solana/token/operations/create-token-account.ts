@@ -6,9 +6,10 @@ import {
 } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
 import {
@@ -16,6 +17,7 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
 /** Parameters for deriving and creating a Solana associated token account. */
@@ -41,8 +43,7 @@ export type ExecuteCreateTokenAccountResult = TransactionHash & { tokenAccountAd
 /** Creates an Associated Token Account for any wallet or PDA owner. */
 export class CreateTokenAccount extends SolanaOperation<
   CreateTokenAccountParams,
-  GenerateCreateTokenAccountResult,
-  ExecuteCreateTokenAccountResult
+  GenerateCreateTokenAccountResult
 > {
   readonly name = 'createTokenAccount'
 
@@ -96,11 +97,16 @@ export class CreateTokenAccount extends SolanaOperation<
     }
   }
 
-  /** Adds the derived token account address to the execution result. */
-  protected override resultFromGenerated(
-    hash: TransactionHash,
-    tx: GenerateCreateTokenAccountResult,
-  ): ExecuteCreateTokenAccountResult {
+  /** Generate, sign, simulate, send, confirm, and return the derived token account address. */
+  override async execute(
+    chain: SolanaChain,
+    params: ExecuteCreateTokenAccountParams,
+  ): Promise<ExecuteCreateTokenAccountResult> {
+    const { wallet, computeUnits, ...rest } = params
+    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+
+    const tx = await this.generate(chain, { ...rest, payer: wallet.publicKey.toBase58() })
+    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
     return { ...hash, tokenAccountAddress: tx.tokenAccountAddress }
   }
 }
