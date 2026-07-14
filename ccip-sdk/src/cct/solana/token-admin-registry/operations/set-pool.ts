@@ -24,8 +24,19 @@ export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
 /** Parameters shared by Solana TokenAdminRegistry `setPool` generation and execution. */
 type SetPoolParams = {
   tokenAddress: string
+  /**
+   * CCIP contract to resolve the TokenAdminRegistry/Router from — the registry itself,
+   * a Router, OnRamp, OffRamp, or TokenPool address all work.
+   */
   address: string
+  /** The pool's Address Lookup Table address, produced by the `createLookupTable` op. */
   poolLookupTableAddress: string
+  /**
+   * Positions in the pool's own Address Lookup Table the Router marks writable during a
+   * transfer. Defaults to {@link DEFAULT_WRITABLE_INDEXES} for standard BurnMint/LockRelease
+   * pools; custom pools with extra accounts MUST extend this or the pool CPI gets wrong
+   * write-permissions and fails at execution. Each entry is a byte (0–255).
+   */
   writableIndexes?: number[]
   /**
    * Token admin authority. Defaults to `payer` for single-signer transactions.
