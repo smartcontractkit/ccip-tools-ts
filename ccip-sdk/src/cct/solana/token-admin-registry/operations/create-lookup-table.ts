@@ -63,8 +63,7 @@ export type ExecuteCreateLookupTableResult = TransactionHash & { lookupTableAddr
 /** Builds and submits Solana ALT create instructions, optionally with extend instructions. */
 export class CreateLookupTable extends SolanaOperation<
   CreateLookupTableParams,
-  GenerateCreateLookupTableResult,
-  ExecuteCreateLookupTableResult
+  GenerateCreateLookupTableResult
 > {
   readonly name = 'createLookupTable'
 
@@ -168,14 +167,6 @@ export class CreateLookupTable extends SolanaOperation<
     }
   }
 
-  /** Adds the generated lookup table address to the execute result. */
-  protected override resultFromGenerated(
-    hash: TransactionHash,
-    tx: GenerateCreateLookupTableResult,
-  ): ExecuteCreateLookupTableResult {
-    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
-  }
-
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
   override async execute(
     chain: SolanaChain,
@@ -199,6 +190,6 @@ export class CreateLookupTable extends SolanaOperation<
 
     const tx = await this.generate(chain, { ...rest, payer })
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
-    return this.resultFromGenerated(hash, tx)
+    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
 }
