@@ -13,10 +13,15 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
+  type ExecuteCreateTokenAccountParams,
+  type ExecuteCreateTokenAccountResult,
   type ExecuteDeployTokenParams,
   type ExecuteDeployTokenResult,
+  type GenerateCreateTokenAccountParams,
+  type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
+  CreateTokenAccount,
   DeployToken,
 } from './token/operations/index.ts'
 import {
@@ -49,6 +54,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #createTokenAccount = new CreateTokenAccount()
   readonly #deployToken = new DeployToken()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #setPool = new SetPool()
@@ -119,6 +125,43 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
     return this.#deployToken.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned idempotent associated token account create instruction.
+   *
+   * The owner may be a wallet or PDA. For pool reserve accounts, pass the pool signer PDA as
+   * `ownerAddress`.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCreateTokenAccount({
+   *   payer,
+   *   tokenAddress: mint,
+   *   ownerAddress: owner,
+   * })
+   * ```
+   */
+  generateUnsignedCreateTokenAccount(
+    opts: GenerateCreateTokenAccountParams,
+  ): Promise<GenerateCreateTokenAccountResult> {
+    return this.#createTokenAccount.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates an associated token account for a wallet or PDA owner.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.createTokenAccount({ wallet, tokenAddress: mint, ownerAddress: owner })
+   * ```
+   */
+  createTokenAccount(
+    opts: ExecuteCreateTokenAccountParams,
+  ): Promise<ExecuteCreateTokenAccountResult> {
+    return this.#createTokenAccount.execute(this.chain, opts)
   }
 
   /**
