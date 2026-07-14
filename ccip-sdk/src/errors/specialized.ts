@@ -3721,3 +3721,81 @@ export class CCIPFinalityNotAllowedError extends CCIPError {
     })
   }
 }
+
+/**
+ * Thrown when the destination pool's `releaseOrMint` simulation reverts. A revert means the
+ * message would not execute on the destination, so the send is blocked — regardless of whether the
+ * SDK recognizes the specific error. Rather than classify the revert into bespoke error subclasses,
+ * this single error carries the raw encoded revert in `context.revert` so the caller can decode it
+ * with the SDK's standard parse (`EVMChain.parse(context.revert)`) and branch on the exact cause;
+ * the message also includes a best-effort decoded name for convenience.
+ *
+ * `isTransient` reflects whether the specific revert typically clears on its own — a liquidity
+ * shortfall, an inbound rate/bridge limit, or an RMN curse (`true`, retry may later succeed) versus
+ * a mint-authority or lane-config problem (`false`, needs a fix). It is passed in by the caller via
+ * `options.isTransient`; when omitted it defaults to `false`.
+ *
+ * @example
+ * ```typescript
+ * import { CCIPDestExecutionRevertError, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * try {
+ *   await estimateReceiveExecution({ source, dest, routerOrRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPDestExecutionRevertError) {
+ *     const parsed = EVMChain.parse(error.context.revert) // decode the raw revert
+ *     console.log(`Dest execution would revert: ${parsed?.error}`, 'retryable:', error.isTransient)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPDestExecutionRevertError extends CCIPError {
+  override readonly name = 'CCIPDestExecutionRevertError'
+  /**
+   * Creates a destination-execution revert error.
+   * @param detail - Best-effort decoded revert for the message (name + data, or raw selector).
+   * @param options - Optional error options. Put the raw encoded revert in `context.revert` for
+   *   the caller to parse, and pass `isTransient` when the revert is one that recovers on its own.
+   */
+  constructor(detail: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.DEST_EXECUTION_REVERT,
+      `Destination pool releaseOrMint would revert: ${detail}`,
+      { ...options, isTransient: options?.isTransient ?? false },
+    )
+  }
+}
+
+/**
+ * Thrown when the destination pool's `releaseOrMint` simulation could not be performed at all —
+ * the `eth_call` failed with a transport/RPC error rather than a contract revert. Executability is
+ * therefore undetermined (neither proven nor disproven), so this is **transient**
+ * (`isTransient === true`): the caller should retry, optionally against a different destination
+ * RPC. It is distinct from {@link CCIPDestExecutionRevertError}, which means the call did revert
+ * and the message would not execute.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await estimateReceiveExecution({ source, dest, routerOrRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPDestSimulationUnavailableError && error.isTransient) {
+ *     // retry, optionally with a different dest RPC
+ *   }
+ * }
+ * ```
+ */
+export class CCIPDestSimulationUnavailableError extends CCIPError {
+  override readonly name = 'CCIPDestSimulationUnavailableError'
+  /**
+   * Creates a destination-simulation-unavailable error.
+   * @param options - Optional error options; pass the underlying RPC error as `cause`.
+   */
+  constructor(options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.DEST_SIMULATION_UNAVAILABLE,
+      'Destination releaseOrMint simulation could not be performed (RPC/transport error)',
+      { ...options, isTransient: true },
+    )
+  }
+}

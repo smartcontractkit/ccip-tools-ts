@@ -1,0 +1,630 @@
+export default [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/heads/main/chains/evm/gobindings/generated/v2_0_0/advanced_pool_hooks/advanced_pool_hooks.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((obj) => require('util').inspect(obj, {depth:99, maxArrayLength: Infinity}).split('\n').slice(1, -1))
+  {
+    type: 'constructor',
+    inputs: [
+      {
+        name: 'allowlist',
+        type: 'address[]',
+        internalType: 'address[]',
+      },
+      {
+        name: 'thresholdAmountForAdditionalCCVs',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'policyEngine',
+        type: 'address',
+        internalType: 'address',
+      },
+      {
+        name: 'authorizedCallers',
+        type: 'address[]',
+        internalType: 'address[]',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'acceptOwnership',
+    inputs: [],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'applyAllowListUpdates',
+    inputs: [
+      { name: 'removes', type: 'address[]', internalType: 'address[]' },
+      { name: 'adds', type: 'address[]', internalType: 'address[]' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'applyAuthorizedCallerUpdates',
+    inputs: [
+      {
+        name: 'authorizedCallerArgs',
+        type: 'tuple',
+        internalType: 'struct AuthorizedCallers.AuthorizedCallerArgs',
+        components: [
+          {
+            name: 'addedCallers',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'removedCallers',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'applyCCVConfigUpdates',
+    inputs: [
+      {
+        name: 'ccvConfigArgs',
+        type: 'tuple[]',
+        internalType: 'struct AdvancedPoolHooks.CCVConfigArg[]',
+        components: [
+          {
+            name: 'remoteChainSelector',
+            type: 'uint64',
+            internalType: 'uint64',
+          },
+          {
+            name: 'outboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdOutboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'inboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdInboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'checkAllowList',
+    inputs: [{ name: 'sender', type: 'address', internalType: 'address' }],
+    outputs: [],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getAllAuthorizedCallers',
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]', internalType: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getAllCCVConfigs',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple[]',
+        internalType: 'struct AdvancedPoolHooks.CCVConfigArg[]',
+        components: [
+          {
+            name: 'remoteChainSelector',
+            type: 'uint64',
+            internalType: 'uint64',
+          },
+          {
+            name: 'outboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdOutboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'inboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdInboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getAllowList',
+    inputs: [],
+    outputs: [{ name: '', type: 'address[]', internalType: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getAllowListEnabled',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool', internalType: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getCCVConfig',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        internalType: 'struct AdvancedPoolHooks.CCVConfig',
+        components: [
+          {
+            name: 'outboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdOutboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'inboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+          {
+            name: 'thresholdInboundCCVs',
+            type: 'address[]',
+            internalType: 'address[]',
+          },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getPolicyEngine',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getRequiredCCVs',
+    inputs: [
+      { name: '', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+      { name: '', type: 'bytes4', internalType: 'bytes4' },
+      { name: '', type: 'bytes', internalType: 'bytes' },
+      {
+        name: 'direction',
+        type: 'uint8',
+        internalType: 'enum IPoolV2.MessageDirection',
+      },
+    ],
+    outputs: [
+      {
+        name: 'requiredCCVs',
+        type: 'address[]',
+        internalType: 'address[]',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getThresholdAmount',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256', internalType: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    inputs: [],
+    outputs: [{ name: '', type: 'address', internalType: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'postflightCheck',
+    inputs: [
+      {
+        name: 'releaseOrMintIn',
+        type: 'tuple',
+        internalType: 'struct Pool.ReleaseOrMintInV1',
+        components: [
+          {
+            name: 'originalSender',
+            type: 'bytes',
+            internalType: 'bytes',
+          },
+          {
+            name: 'remoteChainSelector',
+            type: 'uint64',
+            internalType: 'uint64',
+          },
+          {
+            name: 'receiver',
+            type: 'address',
+            internalType: 'address',
+          },
+          {
+            name: 'sourceDenominatedAmount',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'localToken',
+            type: 'address',
+            internalType: 'address',
+          },
+          {
+            name: 'sourcePoolAddress',
+            type: 'bytes',
+            internalType: 'bytes',
+          },
+          {
+            name: 'sourcePoolData',
+            type: 'bytes',
+            internalType: 'bytes',
+          },
+          {
+            name: 'offchainTokenData',
+            type: 'bytes',
+            internalType: 'bytes',
+          },
+        ],
+      },
+      { name: '', type: 'uint256', internalType: 'uint256' },
+      { name: '', type: 'bytes4', internalType: 'bytes4' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'preflightCheck',
+    inputs: [
+      {
+        name: 'lockOrBurnIn',
+        type: 'tuple',
+        internalType: 'struct Pool.LockOrBurnInV1',
+        components: [
+          { name: 'receiver', type: 'bytes', internalType: 'bytes' },
+          {
+            name: 'remoteChainSelector',
+            type: 'uint64',
+            internalType: 'uint64',
+          },
+          {
+            name: 'originalSender',
+            type: 'address',
+            internalType: 'address',
+          },
+          { name: 'amount', type: 'uint256', internalType: 'uint256' },
+          {
+            name: 'localToken',
+            type: 'address',
+            internalType: 'address',
+          },
+        ],
+      },
+      { name: '', type: 'bytes4', internalType: 'bytes4' },
+      { name: 'tokenArgs', type: 'bytes', internalType: 'bytes' },
+      { name: '', type: 'uint256', internalType: 'uint256' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'setPolicyEngine',
+    inputs: [
+      {
+        name: 'newPolicyEngine',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'setPolicyEngineAllowFailedDetach',
+    inputs: [
+      {
+        name: 'newPolicyEngine',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'setThresholdAmount',
+    inputs: [
+      {
+        name: 'thresholdAmount',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'transferOwnership',
+    inputs: [{ name: 'to', type: 'address', internalType: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'typeAndVersion',
+    inputs: [],
+    outputs: [{ name: '', type: 'string', internalType: 'string' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'event',
+    name: 'AllowListAdd',
+    inputs: [
+      {
+        name: 'sender',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'AllowListRemove',
+    inputs: [
+      {
+        name: 'sender',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'AuthorizedCallerAdded',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'AuthorizedCallerRemoved',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: false,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'CCVConfigUpdated',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        indexed: true,
+        internalType: 'uint64',
+      },
+      {
+        name: 'outboundCCVs',
+        type: 'address[]',
+        indexed: false,
+        internalType: 'address[]',
+      },
+      {
+        name: 'thresholdOutboundCCVs',
+        type: 'address[]',
+        indexed: false,
+        internalType: 'address[]',
+      },
+      {
+        name: 'inboundCCVs',
+        type: 'address[]',
+        indexed: false,
+        internalType: 'address[]',
+      },
+      {
+        name: 'thresholdInboundCCVs',
+        type: 'address[]',
+        indexed: false,
+        internalType: 'address[]',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipTransferRequested',
+    inputs: [
+      {
+        name: 'from',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'OwnershipTransferred',
+    inputs: [
+      {
+        name: 'from',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'PolicyEngineAttached',
+    inputs: [
+      {
+        name: 'policyEngine',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'PolicyEngineDetachFailed',
+    inputs: [
+      {
+        name: 'policyEngine',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'reason',
+        type: 'bytes',
+        indexed: false,
+        internalType: 'bytes',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'ThresholdAmountSet',
+    inputs: [
+      {
+        name: 'thresholdAmount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  { type: 'error', name: 'AllowListNotEnabled', inputs: [] },
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'DuplicateCCVNotAllowed',
+    inputs: [{ name: 'ccvAddress', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  {
+    type: 'error',
+    name: 'MustSpecifyUnderThresholdCCVsForThresholdCCVs',
+    inputs: [],
+  },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyEngineDetachReverted',
+    inputs: [
+      {
+        name: 'oldPolicyEngine',
+        type: 'address',
+        internalType: 'address',
+      },
+      { name: 'err', type: 'bytes', internalType: 'bytes' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SenderNotAllowed',
+    inputs: [{ name: 'sender', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
+] as const

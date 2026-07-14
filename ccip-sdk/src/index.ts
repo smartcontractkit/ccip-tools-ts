@@ -65,6 +65,18 @@ export {
   encodeFinality,
 } from './extra-args.ts'
 export { estimateReceiveExecution, sourceToDestTokenAddresses } from './gas.ts'
+export {
+  type LockOrBurnSimInput,
+  type PoolInterfaceVersion,
+  type ReleaseOrMintSimInput,
+  type SimulateLockOrBurnOpts,
+  type SimulateReleaseOrMintOpts,
+  CCIP_POOL_V1_INTERFACE_ID,
+  IPOOL_V2_INTERFACE_ID,
+  isTransientReleaseOrMintRevert,
+  simulateLockOrBurn,
+  simulateReleaseOrMint,
+} from './evm/simulate.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
 export { decodeMessage, getMessagesInRange } from './requests.ts'
 export {

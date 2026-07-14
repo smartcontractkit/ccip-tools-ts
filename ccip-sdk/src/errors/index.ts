@@ -177,6 +177,9 @@ export { CCIPViemAdapterError } from './specialized.ts'
 // Specialized errors - Finality
 export { CCIPFinalityNotAllowedError } from './specialized.ts'
 
+// Specialized errors - Destination pool preflight
+export { CCIPDestExecutionRevertError, CCIPDestSimulationUnavailableError } from './specialized.ts'
+
 // Specialized errors - Address Validation
 export { CCIPAddressInvalidError } from './specialized.ts'
 

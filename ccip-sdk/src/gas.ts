@@ -261,15 +261,49 @@ export async function estimateReceiveExecution({
       }
     }
 
-  const destTokenAmounts = await Promise.all(
-    (message.tokenAmounts ?? []).map(async (tokenAmount) =>
-      getDestTokenAmount({ source, dest, onRamp, tokenAmount }),
-    ),
+  const resolvedTokenAmounts = await Promise.all(
+    (message.tokenAmounts ?? []).map(async (tokenAmount) => {
+      const destTokenAmount = await getDestTokenAmount({ source, dest, onRamp, tokenAmount })
+      // with the source chain at hand, obtain the pool-reported destPoolData from the source
+      // pool's lockOrBurn, so the destination releaseOrMint simulation consumes the same
+      // sourcePoolData a real transfer would carry (paired with the source-denominated amount)
+      let forCheck: NonNullable<EstimateMessageInput['tokenAmounts']>[number] = destTokenAmount
+      if (source.simulateLockOrBurn && 'token' in tokenAmount && !tokenAmount.extraData) {
+        try {
+          const { sourcePoolAddress, destPoolData } = await source.simulateLockOrBurn({
+            onRamp,
+            destChainSelector: dest.network.chainSelector,
+            token: tokenAmount.token,
+            amount: tokenAmount.amount,
+            originalSender: message.sender,
+            receiver: message.receiver,
+            finality: message.finality,
+          })
+          forCheck = {
+            amount: tokenAmount.amount,
+            sourceTokenAddress: tokenAmount.token,
+            sourcePoolAddress,
+            destTokenAddress: destTokenAmount.token,
+            extraData: destPoolData,
+          }
+        } catch (err) {
+          source.logger.debug(
+            `lockOrBurn simulation unavailable for token=${tokenAmount.token}; using decimals default:`,
+            err,
+          )
+        }
+      }
+      return { dest: destTokenAmount, forCheck }
+    }),
   )
+  const destTokenAmounts = resolvedTokenAmounts.map(({ dest }) => dest)
   const payload = {
     offRamp,
     message: {
       ...buildMessageForDest({ ...message, tokenAmounts: destTokenAmounts }, dest.network.family),
+      // the source-pool-reported shape (source-denominated amount + pool destPoolData) takes
+      // precedence for the destination checks; getDestTokenAmount re-derives dest amounts
+      tokenAmounts: resolvedTokenAmounts.map(({ forCheck }) => forCheck),
       messageId: message.messageId ?? hexlify(randomBytes(32)),
       sourceChainSelector: source.network.chainSelector,
     },

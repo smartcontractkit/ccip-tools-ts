@@ -1,0 +1,125 @@
+---
+id: pre-send-validation
+title: 'Validating a Transfer Before Sending'
+description: 'estimateReceiveExecution checks that a message can execute on the destination — not only its gas — so you can catch a would-be-stuck transfer before ccipSend.'
+sidebar_label: Pre-Send Validation
+sidebar_position: 7
+---
+
+# Validating a Transfer Before Sending
+
+`estimateReceiveExecution` is often described as a gas helper, but it does more than return a gas number. Before it estimates gas it runs a **destination-side preflight**: it checks that the message could actually execute on the destination chain. Calling it before `ccipSend` lets you catch conditions that would otherwise strand the transfer on the destination — where the tokens are not lost, but require a later manual execution once the cause is fixed.
+
+## Why this matters
+
+A CCIP send succeeds on the source chain even when the destination cannot complete it. The message then sits on the destination until the blocking condition clears. Common causes:
+
+- The receiver rejects the message's requested finality.
+- The destination token pool cannot release or mint: not enough liquidity in a LockRelease pool or its lockbox, an inbound rate limit or xERC20 bridge limit, an RMN curse, the pool missing mint authority on the token, or a lane that is not wired for the source pool/chain.
+
+`estimateReceiveExecution` simulates the destination execution and **throws a typed error** for these cases, so your application can block the send and surface the reason instead of committing funds to a stuck transfer.
+
+## What it validates
+
+When you pass both `source` and `dest` chain instances, `estimateReceiveExecution`:
+
+1. Resolves the destination OffRamp for the lane.
+2. Checks the receiver accepts the requested finality (for data-carrying messages).
+3. For each token transfer, first simulates the **source** pool's `lockOrBurn` to obtain the exact `destPoolData` a real transfer would carry (see [below](#how-source-pool-data-is-obtained)), then simulates the **destination** pool's `releaseOrMint` directly (an `eth_call` with `from` set to the registered OffRamp), running the real release path — liquidity, inbound rate limit, RMN curse, mint authority, source-pool wiring, and pool compatibility.
+4. Returns the `ccipReceive` gas limit (unchanged from a gas-only estimate).
+
+**Whenever a message carries token transfers this destination simulation is not optional** — a transfer whose destination pool cannot release or mint would strand on the destination, so the check always runs. If the `releaseOrMint` simulation reverts, the message would not execute on the destination, so the send is **always blocked** — that verdict does not depend on whether the SDK recognizes the specific revert. Recognizing the revert only selects a more specific error; an unrecognized revert still blocks (as `CCIPDestExecutionRevertError`, carrying the decoded name or raw selector). The one case that is neither a pass nor a block is a transport/RPC failure that prevents the simulation from running at all — reported as the transient `CCIPDestSimulationUnavailableError` so you can retry. The returned gas number is unchanged.
+
+```typescript
+import { estimateReceiveExecution, EVMChain } from '@chainlink/ccip-sdk'
+import {
+  CCIPDestExecutionRevertError,
+  CCIPDestSimulationUnavailableError,
+} from '@chainlink/ccip-sdk'
+
+const source = await EVMChain.fromUrl(sourceRpcUrl)
+const dest = await EVMChain.fromUrl(destRpcUrl)
+
+try {
+  const gasLimit = await estimateReceiveExecution({
+    source,
+    dest,
+    routerOrRamp: sourceRouter,
+    message: { sender, receiver, data: '0x', tokenAmounts: [{ token, amount }] },
+  })
+  // safe to send; use gasLimit in extraArgs
+} catch (error) {
+  if (error instanceof CCIPDestExecutionRevertError) {
+    // the destination releaseOrMint reverts, so the transfer would not execute — blocked.
+    // decode the exact cause from the raw encoded revert:
+    const parsed = EVMChain.parse(error.context.revert)
+    console.log('dest would revert:', parsed?.error, '— retryable:', error.isTransient)
+  } else if (error instanceof CCIPDestSimulationUnavailableError) {
+    // could not run the check (RPC/transport error) — transient, retry
+  }
+}
+```
+
+## Typed errors
+
+A single error models a destination-pool revert. Rather than classify the revert into bespoke subclasses, it carries the **raw encoded revert** in `context.revert` so you decode it yourself with the SDK's standard parse (`EVMChain.parse`) and branch on the exact cause. Each error extends `CCIPError`, so it carries a `code`, a `context`, an `isTransient` flag, and a `recovery` hint. The CLI surfaces these automatically.
+
+| Error                                | Raised when                                                                                                                                                                                                                                                                                                                        | Transient |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `CCIPFinalityNotAllowedError`        | the receiver does not accept the requested finality                                                                                                                                                                                                                                                                                | no        |
+| `CCIPContractTypeInvalidError`       | the registered pool is not a CCIP-compatible pool                                                                                                                                                                                                                                                                                  | no        |
+| `CCIPDestExecutionRevertError`       | the `releaseOrMint` simulation reverts — the transfer would not execute. `context.revert` carries the raw encoded revert; `isTransient` is `true` when the revert is one that recovers on its own (liquidity shortfall, inbound rate/bridge limit, RMN curse) and `false` otherwise (mint authority, lane config, or unrecognized) | varies    |
+| `CCIPDestSimulationUnavailableError` | a destination check could not be performed at all (RPC/transport error reading the pool wiring or running the simulation), so executability is undetermined — retry                                                                                                                                                                | yes       |
+
+A revert always blocks: whether or not the SDK recognizes the specific error, a reverting `releaseOrMint` means the message would not execute on the destination. The check never returns a pass on a revert. To act on the specific cause, parse `context.revert`:
+
+```typescript
+const parsed = EVMChain.parse(error.context.revert) // { error: 'InsufficientLiquidity(...)', ...args } | undefined
+if (parsed?.error?.startsWith('InsufficientLiquidity')) {
+  // top up the destination pool, then retry (error.isTransient is true)
+}
+```
+
+## How source pool data is obtained
+
+Simulating the destination `releaseOrMint` faithfully requires the same `sourcePoolData` a real transfer would carry — the `destPoolData` the **source** pool returns from its `lockOrBurn`. Because you have the source chain instance, `estimateReceiveExecution` obtains it for you: for each token it first simulates the source pool's `lockOrBurn`, takes the returned `destPoolData` and source pool address, and feeds them into the destination `releaseOrMint` simulation.
+
+This matters for pools that encode real state in `destPoolData` — USDC/CCTP, siloed, and Lombard pools among them. For a plain base `TokenPool` the source data is just the source token's decimals (an identity conversion).
+
+The source `lockOrBurn` simulation runs only for **EVM sources** (which implement `simulateLockOrBurn`). For **non-EVM sources (e.g. Solana), which do not implement it, or any token whose message already carries `extraData`**, it is skipped and the check falls back to the source token's decimals as `sourcePoolData` — the identity conversion above — and still runs. In other words, supplying the message's own `tokenAmounts[].extraData` (the real source pool data) short-circuits the source simulation.
+
+If you drive the two simulations yourself, obtain the source data first with the `simulateLockOrBurn` primitive and pass it into `simulateReleaseOrMint` as `sourcePoolData`:
+
+```typescript
+import { simulateLockOrBurn, simulateReleaseOrMint } from '@chainlink/ccip-sdk'
+
+const { sourcePoolAddress, destPoolData } = await simulateLockOrBurn({
+  provider: source.provider,
+  pool: sourcePool,
+  onRamp,
+  input: { remoteChainSelector: dest.network.chainSelector, amount /* ... */ },
+})
+
+await simulateReleaseOrMint({
+  provider: dest.provider,
+  pool: destPool,
+  offRamp,
+  input: { sourcePoolAddress, sourcePoolData: destPoolData /* ... */ },
+})
+```
+
+## Lower-level primitives
+
+For advanced flows the same building blocks are exported directly:
+
+- `simulateReleaseOrMint({ provider, pool, offRamp, input })` — simulate a destination pool's `releaseOrMint` and get the pool-computed destination amount, or the raw revert.
+- `simulateLockOrBurn({ provider, pool, onRamp, input })` — simulate the source pool's `lockOrBurn` to obtain the `destPoolData` a real transfer would carry (used internally to feed the destination simulation for exotic source pools).
+- `isTransientReleaseOrMintRevert(data)` — whether a raw revert is one that recovers on its own (liquidity, rate/bridge limit, RMN curse) and is therefore worth retrying. Decode the revert itself with `EVMChain.parse(data)`.
+
+## Availability
+
+The **destination-side `releaseOrMint` preflight described on this page is EVM-only** — the pool-direct simulation and its typed errors run only when the destination is an EVM chain.
+
+`estimateReceiveExecution` itself (the gas / compute-unit estimate) is also implemented on **Solana**, but there it only estimates the compute units of the OffRamp's `execute` — it does not run the token-pool `releaseOrMint` validation or raise the typed errors above. Aptos, Sui, TON, and Canton do not implement `estimateReceiveExecution` at all.
+
+See also: [Gas Estimation](./gas-estimation.mdx) for the gas-number semantics, and [Error Reference](./error-reference.mdx) for the full error catalog.

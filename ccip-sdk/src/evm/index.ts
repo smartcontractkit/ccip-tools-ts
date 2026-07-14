@@ -24,7 +24,9 @@ import {
   isError,
   isHexString,
   randomBytes,
+  solidityPackedKeccak256,
   toBeHex,
+  zeroPadValue,
 } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
@@ -50,6 +52,8 @@ import {
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
+  CCIPDestExecutionRevertError,
+  CCIPDestSimulationUnavailableError,
   CCIPError,
   CCIPExecTxNotConfirmedError,
   CCIPExecTxRevertedError,
@@ -58,6 +62,7 @@ import {
   CCIPLogDataInvalidError,
   CCIPSourceChainUnsupportedError,
   CCIPTokenNotConfiguredError,
+  CCIPTokenNotInRegistryError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
   CCIPVersionRequiresLaneError,
@@ -72,7 +77,7 @@ import {
   encodeFinality,
 } from '../extra-args.ts'
 import { fetchProfileForUrl } from '../fetch.ts'
-import { getDestTokenAmount } from '../gas.ts'
+import { type EstimateMessageInput, getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
@@ -131,20 +136,27 @@ import {
   type TokenPoolAndProxyABI,
   VersionedContractABI,
   commitsFragments,
+  defaultAbiCoder,
   interfaces,
   receiptsFragments,
   requestsFragments,
 } from './const.ts'
-import { parseData } from './errors.ts'
+import { getErrorData, parseData } from './errors.ts'
 import {
   decodeExtraArgs as decodeExtraArgs_,
   encodeExtraArgs as encodeExtraArgs_,
 } from './extra-args.ts'
-import { estimateExecGas } from './gas.ts'
+import { estimateExecGas, findBalancesSlot } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
+import {
+  describeRevert,
+  isTransientReleaseOrMintRevert,
+  simulateLockOrBurn as simulateLockOrBurn_,
+  simulateReleaseOrMint,
+} from './simulate.ts'
 import { type UnsignedEVMTx, resultToObject } from './types.ts'
 export type { UnsignedEVMTx }
 
@@ -2382,6 +2394,241 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
     yield* super.getExecutionReceipts(opts_)
+  }
+
+  /**
+   * Pre-flight check that the token transfers in a message can execute on this (destination)
+   * chain: a simulation of each destination pool's `releaseOrMint` (`eth_call` with `from` set to
+   * the registered OffRamp). The pool runs its full `_validateReleaseOrMint` before releasing, so
+   * this single simulation covers token support, the inbound rate limit, RMN curses, source-pool
+   * wiring, mint/burn authority and liquidity — no separate base check is needed (see
+   * {@link simulateReleaseOrMint}). Whenever the message carries token transfers this simulation
+   * always runs — it is not optional. If the simulation reverts the message would strand on the
+   * destination, so the send is always blocked: a recognized revert becomes a specific typed error
+   * and an unrecognized one becomes {@link CCIPDestExecutionRevertError}. Only a transport/RPC
+   * failure that prevents the simulation from running (no revert data) is treated differently — a
+   * transient {@link CCIPDestSimulationUnavailableError} the caller can retry.
+   *
+   * @throws {@link CCIPDestExecutionRevertError} when the `releaseOrMint` simulation reverts (the
+   *   raw encoded revert is in `context.revert`; `isTransient` is set when the revert is one that
+   *   recovers on its own — liquidity, rate/bridge limit, or RMN curse)
+   * @throws {@link CCIPContractTypeInvalidError} when the registered pool is not CCIP-compatible
+   * @throws {@link CCIPDestSimulationUnavailableError} (transient) when a check could not be
+   *   performed at all due to an RPC/transport error
+   */
+  override async checkExecute(opts: {
+    offRamp: string
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'> &
+      Partial<Pick<EstimateMessageInput, 'receiver' | 'sender'>>
+  }): Promise<true> {
+    const { offRamp, message } = opts
+    // without a receiver the ReleaseOrMintInV1 input is not constructible; nothing more to check
+    if (!message.receiver) return true
+
+    let registry
+    for (const ta of message.tokenAmounts ?? []) {
+      const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
+      if (!token || token.match(/^(0x)?0*$/i)) continue
+      // Resolve the pool from the TokenAdminRegistry — both to simulate against and as the
+      // token-support check: a token with no registered pool can never be released on this
+      // destination, so the transfer would strand. Hard block rather than skip.
+      registry ??= await this.getTokenAdminRegistryFor(offRamp)
+      const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
+      if (!tokenPool) throw new CCIPTokenNotInRegistryError(token, registry)
+
+      // sourcePoolData: real messages carry the source pool's `destPoolData` in `extraData`
+      // (paired with a source-denominated amount); otherwise declare the amount as being in the
+      // dest token's own decimals — the identity conversion, correct for every base-TokenPool
+      // pool (their `_parseRemoteDecimals` treats it as the source decimals declaration).
+      let sourcePoolData =
+        'extraData' in ta && ta.extraData && getDataBytes(ta.extraData).length
+          ? ta.extraData
+          : undefined
+      if (sourcePoolData === undefined) {
+        const { decimals } = await this.getTokenInfo(token)
+        sourcePoolData = defaultAbiCoder.encode(['uint256'], [decimals])
+      }
+
+      // source pool: the message's own when present (proves the real wiring), else a remote pool
+      // configured on the dest pool for this lane (v1.5.0 single-getRemotePool handled inside).
+      // If the dest "pool" is not a real pool (no getRemotePools) the read throws — don't crash:
+      // fall through to the simulation, whose ERC165 probe hard-blocks an incompatible pool.
+      // Resolve the source pool address for the simulation. Prefer a caller-supplied one (the
+      // wrapper fills it from source.simulateLockOrBurn for EVM sources); otherwise derive it from
+      // the dest pool's configured remote pools.
+      let knownSourcePool: string
+      if ('sourcePoolAddress' in ta && ta.sourcePoolAddress) {
+        knownSourcePool = ta.sourcePoolAddress
+      } else {
+        let remotePools: readonly string[] | undefined
+        try {
+          remotePools = (await this.getTokenPoolRemote(tokenPool, message.sourceChainSelector))
+            .remotePools
+        } catch (err) {
+          const revertData = getErrorData(err)
+          // No revert data => an RPC/transport failure; executability is undetermined => transient
+          // so the caller retries.
+          if (!revertData)
+            throw new CCIPDestSimulationUnavailableError({
+              cause: err instanceof Error ? err : undefined,
+              context: { tokenPool, token, offRamp, network: this.network.name },
+            })
+          // On-chain revert reading the remote-pool config: the pool the registry points at cannot
+          // resolve its source pools, so it can never release this transfer. Block now with the
+          // actual revert — no point simulating releaseOrMint against a pool already known to be
+          // unusable, nor fabricating a placeholder source pool just to make that sim fail.
+          throw new CCIPDestExecutionRevertError(describeRevert(revertData), {
+            cause: err instanceof Error ? err : undefined,
+            isTransient: false,
+            context: {
+              revert: revertData,
+              tokenPool,
+              token,
+              offRamp,
+              amount: ta.amount.toString(),
+              sourceChainSelector: message.sourceChainSelector.toString(),
+              network: this.network.name,
+            },
+          })
+        }
+        const sourcePool = remotePools.at(-1)
+        // Fail fast on a genuinely unwired lane: the read succeeded but no source pool is configured
+        // on this dest pool for the source chain, so `releaseOrMint` would revert
+        // `InvalidSourcePoolAddress`. Block now (same verdict, one fewer eth_call), carrying a
+        // synthetic `InvalidSourcePoolAddress` revert so the raised error keeps the uniform shape
+        // (raw revert in `context.revert`, parseable by the caller).
+        if (!sourcePool) {
+          const revert = interfaces.TokenPool_v2_0.encodeErrorResult('InvalidSourcePoolAddress', [
+            ZeroHash,
+          ])
+          throw new CCIPDestExecutionRevertError(describeRevert(revert), {
+            isTransient: false,
+            context: {
+              revert,
+              tokenPool,
+              token,
+              offRamp,
+              amount: ta.amount.toString(),
+              sourceChainSelector: message.sourceChainSelector.toString(),
+              network: this.network.name,
+            },
+          })
+        }
+        knownSourcePool = sourcePool
+      }
+      const bytes = getAddressBytes(knownSourcePool)
+      const sourcePoolAddress = bytes.length < 32 ? zeroPadValue(bytes, 32) : hexlify(bytes)
+
+      try {
+        await simulateReleaseOrMint({
+          provider: this.provider,
+          pool: tokenPool,
+          offRamp,
+          finality: message.finality,
+          input: {
+            originalSender: message.sender,
+            remoteChainSelector: message.sourceChainSelector,
+            receiver: message.receiver,
+            sourceDenominatedAmount: ta.amount,
+            localToken: token,
+            sourcePoolAddress,
+            sourcePoolData,
+          },
+        })
+      } catch (err) {
+        // A pool that supports neither IPoolV2 nor CCIP_POOL_V1 is not a CCIP-compatible pool:
+        // the dest OffRamp would revert `NotACompatiblePool` on execution, so the message is a
+        // guaranteed stuck. Hard block.
+        if (err instanceof CCIPContractTypeInvalidError) throw err
+
+        const revertData = getErrorData(err)
+        // No revert data => the eth_call could not be performed at all (RPC/transport failure),
+        // not a destination-execution verdict. Executability is undetermined, so surface a
+        // transient error telling the caller to retry — never fabricate a pass or a hard block.
+        if (!revertData)
+          throw new CCIPDestSimulationUnavailableError({
+            cause: err instanceof Error ? err : undefined,
+            context: { tokenPool, token, offRamp, network: this.network.name },
+          })
+
+        // The releaseOrMint eth_call reverted, so the message would NOT execute on the
+        // destination — a revert is a revert, so the send is always blocked regardless of whether
+        // the SDK recognizes the error. One typed error carries the raw encoded revert (for the
+        // caller to parse with EVMChain.parse) plus a best-effort decoded name in the message;
+        // isTransient flags reverts that recover on their own (liquidity/rate-limit/curse).
+        throw new CCIPDestExecutionRevertError(describeRevert(revertData), {
+          cause: err instanceof Error ? err : undefined,
+          isTransient: isTransientReleaseOrMintRevert(revertData),
+          context: {
+            revert: revertData,
+            tokenPool,
+            token,
+            offRamp,
+            amount: ta.amount.toString(),
+            sourceChainSelector: message.sourceChainSelector.toString(),
+            network: this.network.name,
+          },
+        })
+      }
+    }
+    return true
+  }
+
+  /** {@inheritDoc Chain.simulateLockOrBurn} */
+  override async simulateLockOrBurn(opts: {
+    onRamp: string
+    destChainSelector: bigint
+    token: string
+    amount: bigint
+    originalSender?: string
+    receiver?: string
+    finality?: FinalityRequested
+  }): Promise<{ sourcePoolAddress: string; destTokenAddress: string; destPoolData: string }> {
+    const registry = await this.getTokenAdminRegistryFor(opts.onRamp, opts.destChainSelector)
+    const { tokenPool } = await this.getRegistryTokenConfig(registry, opts.token)
+    if (!tokenPool) throw new CCIPTokenNotInRegistryError(opts.token, registry)
+    const receiverBytes = getAddressBytes(opts.receiver ?? opts.originalSender ?? opts.onRamp)
+    const simOpts = {
+      provider: this.provider,
+      pool: tokenPool,
+      onRamp: opts.onRamp,
+      finality: opts.finality,
+      input: {
+        receiver:
+          receiverBytes.length < 32 ? zeroPadValue(receiverBytes, 32) : hexlify(receiverBytes),
+        remoteChainSelector: opts.destChainSelector,
+        originalSender: opts.originalSender ?? opts.onRamp,
+        amount: opts.amount,
+        localToken: opts.token,
+      },
+    }
+    // In production the Router transfers the tokens to the pool before calling lockOrBurn, so the
+    // pool holds the amount when it locks/burns. Simulate that by overriding the pool's token
+    // balance up front — running without it reproduces an empty-pool state that never occurs
+    // on-chain (and burn pools burn from their own balance). `findBalancesSlot` resolves standard
+    // ERC20 (slot 0), USDC (slot 9) and OpenZeppelin ERC-7201 / proxy layouts; best-effort — if a
+    // token's balance slot is outside all of those, proceed without the override.
+    const balancesSlot = await findBalancesSlot(opts.token, this.provider).catch(() => undefined)
+    const result = await simulateLockOrBurn_({
+      ...simOpts,
+      ...(balancesSlot !== undefined && {
+        stateOverrides: {
+          [opts.token]: {
+            stateDiff: {
+              [solidityPackedKeccak256(['uint256', 'uint256'], [tokenPool, balancesSlot])]: toBeHex(
+                opts.amount,
+                32,
+              ),
+            },
+          },
+        },
+      }),
+    })
+    return {
+      sourcePoolAddress: tokenPool,
+      destTokenAddress: result.destTokenAddress,
+      destPoolData: result.destPoolData,
+    }
   }
 
   /** {@inheritDoc Chain.estimateReceiveExecution} */

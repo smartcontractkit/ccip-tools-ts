@@ -1,16 +1,25 @@
 import { parseAbi } from 'abitype'
 import { type EventFragment, AbiCoder, Interface } from 'ethers'
 
+import AdvancedPoolHooks_2_0_ABI from './abi/AdvancedPoolHooks_2_0.ts'
 import Token_ABI from './abi/BurnMintERC677Token.ts'
+import BurnWithFromMintRebasingTokenPool_1_5_0_ABI from './abi/BurnWithFromMintRebasingTokenPool_1_5_0.ts'
 import CCIPReceiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
+import CCTPThroughCCVTokenPool_2_0_ABI from './abi/CCTPThroughCCVTokenPool_2_0.ts'
 import CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
+import CrossChainPoolToken_2_0_ABI from './abi/CrossChainPoolToken_2_0.ts'
+import CrossChainToken_2_0_ABI from './abi/CrossChainToken_2_0.ts'
+import ERC20LockBox_2_0_ABI from './abi/ERC20LockBox_2_0.ts'
+import FactoryBurnMintERC20_1_5_1_ABI from './abi/FactoryBurnMintERC20_1_5_1.ts'
+import FastTransferTokenPool_1_6_0_ABI from './abi/FastTransferTokenPool_1_6_0.ts'
 import FeeQuoter_1_6_ABI from './abi/FeeQuoter_1_6.ts'
 import FeeQuoter_2_0_ABI from './abi/FeeQuoter_2_0.ts'
 import TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import TokenPool_1_5_1_ABI from './abi/LockReleaseTokenPool_1_5_1.ts'
 import TokenPool_1_6_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
+import LombardTokenPool_2_0_ABI from './abi/LombardTokenPool_2_0.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
@@ -21,9 +30,13 @@ import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import Router_ABI from './abi/Router.ts'
+import SiloedLockReleaseTokenPool_1_6_0_ABI from './abi/SiloedLockReleaseTokenPool_1_6_0.ts'
+import SiloedLockReleaseTokenPool_2_0_ABI from './abi/SiloedLockReleaseTokenPool_2_0.ts'
+import SiloedUSDCTokenPool_2_0_ABI from './abi/SiloedUSDCTokenPool_2_0.ts'
 import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
+import USDCTokenPool_1_5_1_ABI from './abi/USDCTokenPool_1_5_1.ts'
 import VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
@@ -71,6 +84,23 @@ export const interfaces = {
   USDCTokenPoolProxy_v2_0: new Interface(USDCTokenPoolProxy_2_0_ABI),
   CCTPVerifier_v2_0: new Interface(CCTPVerifier_2_0_ABI),
   VersionedVerifierResolver_v2_0: new Interface(VersionedVerifierResolver_2_0_ABI),
+  // pool/token contracts added for error parsing; kept last (before Custom) so they only add
+  // coverage for otherwise-unresolved selectors and never shadow an earlier match
+  SiloedLockReleaseTokenPool_v2_0: new Interface(SiloedLockReleaseTokenPool_2_0_ABI),
+  SiloedUSDCTokenPool_v2_0: new Interface(SiloedUSDCTokenPool_2_0_ABI),
+  ERC20LockBox_v2_0: new Interface(ERC20LockBox_2_0_ABI),
+  CrossChainToken_v2_0: new Interface(CrossChainToken_2_0_ABI),
+  CrossChainPoolToken_v2_0: new Interface(CrossChainPoolToken_2_0_ABI),
+  FactoryBurnMintERC20_v1_5_1: new Interface(FactoryBurnMintERC20_1_5_1_ABI),
+  FastTransferTokenPool_v1_6_0: new Interface(FastTransferTokenPool_1_6_0_ABI),
+  LombardTokenPool_v2_0: new Interface(LombardTokenPool_2_0_ABI),
+  USDCTokenPool_v1_5_1: new Interface(USDCTokenPool_1_5_1_ABI),
+  SiloedLockReleaseTokenPool_v1_6_0: new Interface(SiloedLockReleaseTokenPool_1_6_0_ABI),
+  AdvancedPoolHooks_v2_0: new Interface(AdvancedPoolHooks_2_0_ABI),
+  CCTPThroughCCVTokenPool_v2_0: new Interface(CCTPThroughCCVTokenPool_2_0_ABI),
+  BurnWithFromMintRebasingTokenPool_v1_5_0: new Interface(
+    BurnWithFromMintRebasingTokenPool_1_5_0_ABI,
+  ),
   Custom: new Interface(customErrors),
 } as const
 

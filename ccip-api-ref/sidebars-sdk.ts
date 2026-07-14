@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
         'guides/tracking-messages',
         'guides/searching-messages',
         'guides/sending-messages',
+        'guides/pre-send-validation',
         'guides/manual-execution',
         'guides/querying-data',
         'guides/token-pools',
