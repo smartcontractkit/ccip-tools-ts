@@ -43,8 +43,7 @@ export type ExecuteAppendToLookupTableResult = TransactionHash
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
   AppendToLookupTableParams,
-  GenerateAppendToLookupTableResult,
-  ExecuteAppendToLookupTableResult
+  GenerateAppendToLookupTableResult
 > {
   readonly name = 'appendToLookupTable'
 

@@ -15,9 +15,10 @@ import {
 } from '@solana/spl-token'
 import { PublicKey, SystemProgram } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
 import {
@@ -25,6 +26,7 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { submit } from '../../submit.ts'
 import { validatePublicKey } from '../../validate.ts'
 
 type BaseDeployTokenParams = {
@@ -63,14 +65,38 @@ export type GenerateDeployTokenResult = UnsignedSolanaTx & { tokenAddress: strin
 export type ExecuteDeployTokenParams = SolanaExecuteParams<DeployTokenParams>
 
 /** Result of executing Solana token deploy. */
-export type ExecuteDeployTokenResult = TransactionHash
+export type ExecuteDeployTokenResult = TransactionHash & { tokenAddress: string }
+
+function createMetadataInstructions(
+  chain: SolanaChain,
+  mint: PublicKey,
+  payer: PublicKey,
+  tokenProgram: PublicKey,
+  decimals: number,
+  params: { name: string; symbol: string; uri: string },
+) {
+  const payerSigner = createNoopSigner(umiPublicKey(payer.toBase58()))
+  const umi = createUmi(chain.connection).use(mplTokenMetadata()).use(signerIdentity(payerSigner))
+
+  return createV1(umi, {
+    mint: umiPublicKey(mint.toBase58()),
+    authority: payerSigner,
+    payer: payerSigner,
+    updateAuthority: payerSigner,
+    splTokenProgram: umiPublicKey(tokenProgram.toBase58()),
+    name: params.name,
+    symbol: params.symbol,
+    uri: params.uri,
+    sellerFeeBasisPoints: percentAmount(0),
+    decimals,
+    tokenStandard: TokenStandard.Fungible,
+  })
+    .getInstructions()
+    .map(toWeb3JsInstruction)
+}
 
 /** Creates a Solana SPL mint, optionally with Metaplex metadata. Does not mint supply. */
-export class DeployToken extends SolanaOperation<
-  DeployTokenParams,
-  GenerateDeployTokenResult,
-  ExecuteDeployTokenResult
-> {
+export class DeployToken extends SolanaOperation<DeployTokenParams, GenerateDeployTokenResult> {
   readonly name = 'deployToken'
 
   /** Validates mint and metadata params before any RPC. */
@@ -151,32 +177,17 @@ export class DeployToken extends SolanaOperation<
       tokenAddress: mint.toBase58(),
     }
   }
-}
 
-function createMetadataInstructions(
-  chain: SolanaChain,
-  mint: PublicKey,
-  payer: PublicKey,
-  tokenProgram: PublicKey,
-  decimals: number,
-  params: { name: string; symbol: string; uri: string },
-) {
-  const payerSigner = createNoopSigner(umiPublicKey(payer.toBase58()))
-  const umi = createUmi(chain.connection).use(mplTokenMetadata()).use(signerIdentity(payerSigner))
+  /** Generate, sign, simulate, send, confirm, and return the created mint address. */
+  override async execute(
+    chain: SolanaChain,
+    params: ExecuteDeployTokenParams,
+  ): Promise<ExecuteDeployTokenResult> {
+    const { wallet, computeUnits, ...rest } = params
+    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-  return createV1(umi, {
-    mint: umiPublicKey(mint.toBase58()),
-    authority: payerSigner,
-    payer: payerSigner,
-    updateAuthority: payerSigner,
-    splTokenProgram: umiPublicKey(tokenProgram.toBase58()),
-    name: params.name,
-    symbol: params.symbol,
-    uri: params.uri,
-    sellerFeeBasisPoints: percentAmount(0),
-    decimals,
-    tokenStandard: TokenStandard.Fungible,
-  })
-    .getInstructions()
-    .map(toWeb3JsInstruction)
+    const tx = await this.generate(chain, { ...rest, payer: wallet.publicKey.toBase58() })
+    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
+    return { ...hash, tokenAddress: tx.tokenAddress }
+  }
 }

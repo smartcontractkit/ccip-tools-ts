@@ -32,15 +32,9 @@ function withPayer<P extends object>(
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
-  Result = TransactionHash,
-> extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, Result> {
+> extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionHash> {
   /** Build instructions after params have been validated. */
   protected abstract buildUnsigned(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
-
-  /** Adds generated operation metadata to the submit result. */
-  protected resultFromGenerated(hash: TransactionHash, _tx: Tx): Result {
-    return hash as Result
-  }
 
   /** Run {@link validate} and {@link buildUnsigned}; no signing. */
   async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
@@ -49,12 +43,11 @@ export abstract class SolanaOperation<
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
-  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<Result> {
+  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionHash> {
     const { wallet, computeUnits } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const tx = await this.generate(chain, withPayer(params, wallet.publicKey.toBase58()))
-    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
-    return this.resultFromGenerated(hash, tx)
+    return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }
