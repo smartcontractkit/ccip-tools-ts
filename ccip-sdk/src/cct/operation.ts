@@ -7,14 +7,17 @@
 
 import type { ChainTransaction } from '../types.ts'
 
-/** Confirmed on-chain hash returned by a successful CCT write. */
-export type TransactionHash = Pick<ChainTransaction, 'hash'>
+/** Result of a successful CCT write: the confirmed on-chain tx hash. */
+export type TransactionResult = Pick<ChainTransaction, 'hash'>
+
+/** Result of a successful contract-deployment write: the tx hash plus the deployed address. */
+export type DeployResult = TransactionResult & { address: string }
 
 /**
  * Abstract CCT write operation: build unsigned tx(s) with {@link generate}, or
  * sign and submit with {@link execute}.
  */
-export abstract class Operation<Chain, Params, Tx, Result = TransactionHash> {
+export abstract class Operation<Chain, Params, Tx, Result> {
   /** camelCase id; matches the token-manager facade method and error context. */
   abstract readonly name: string
   /** Reject invalid params before any chain RPC. */

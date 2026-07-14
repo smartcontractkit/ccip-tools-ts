@@ -1,21 +1,27 @@
 /**
  * EVM {@link Operation} lifecycle: validate → encode → submit.
- * Concrete ops implement {@link EVMOperation.encode}; this base wires
- * {@link generate} and {@link execute}.
+ * Concrete ops implement {@link EVMOperation.buildUnsigned}; the base wires
+ * {@link generate} and {@link execute}. Ops needing more than a tx hash (e.g. a
+ * deployment's address) override {@link execute}, reusing {@link submit}.
  *
  * @packageDocumentation
  */
 
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
-import { type TransactionHash, Operation } from '../operation.ts'
+import { type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 
-/** EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
+/**
+ * EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned};
+ * {@link execute} signs and submits, returning the confirmed tx hash. Ops that
+ * resolve to more (e.g. a deployed address) override {@link execute}.
+ */
 export abstract class EVMOperation<P extends { sender?: string }> extends Operation<
   EVMChain,
   P,
-  UnsignedEVMTx
+  UnsignedEVMTx,
+  TransactionResult
 > {
   /** Build calldata into an unsigned tx; versioned ops resolve their encoder here. */
   protected abstract buildUnsigned(
@@ -31,8 +37,14 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
     return unsigned
   }
 
-  /** {@link generate}, then sign and submit via {@link submit}; returns once confirmed. */
-  async execute(chain: EVMChain, params: P & { wallet: unknown }): Promise<TransactionHash> {
-    return submit(chain, params.wallet, await this.generate(chain, params), this.name)
+  /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
+  async execute(chain: EVMChain, params: P & { wallet: unknown }): Promise<TransactionResult> {
+    const { response } = await submit(
+      chain,
+      params.wallet,
+      await this.generate(chain, params),
+      this.name,
+    )
+    return { hash: response.hash }
   }
 }

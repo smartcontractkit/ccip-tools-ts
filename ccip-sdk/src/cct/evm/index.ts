@@ -12,8 +12,9 @@ import type { ChainContext } from '../../chain.ts'
 import { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
-import type { TransactionHash } from '../operation.ts'
+import type { DeployResult, TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
+import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
   type TransferOwnershipParams,
@@ -25,6 +26,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
   readonly #setPool = new SetPool()
   readonly #transferOwnership = new TransferOwnership()
+  readonly #deployToken = new DeployToken()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -91,7 +93,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setPool(opts: SetPoolParams & { wallet: unknown }): Promise<TransactionHash> {
+  setPool(opts: SetPoolParams & { wallet: unknown }): Promise<TransactionResult> {
     return this.#setPool.execute(this.chain, opts)
   }
 
@@ -113,11 +115,55 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  transferOwnership(opts: TransferOwnershipParams & { wallet: unknown }): Promise<TransactionHash> {
+  transferOwnership(
+    opts: TransferOwnershipParams & { wallet: unknown },
+  ): Promise<TransactionResult> {
     return this.#transferOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `BurnMintERC677Token` deployment tx (for multisig / offline signing).
+   * The deployed address is only known once mined, so it is NOT returned here — use
+   * {@link deployToken} to deploy and receive `{ hash, address }`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployToken({
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   *   decimals: 18,
+   *   maxSupply: 0n, // 0 = unlimited
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployToken(opts: DeployTokenParams): Promise<UnsignedEVMTx> {
+    return this.#deployToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a `BurnMintERC677Token`, signing + submitting with `opts.wallet`; resolves to
+   * the tx hash and the newly deployed token address.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @example
+   * ```typescript
+   * const { hash, address } = await cct.deployToken({
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   *   decimals: 18,
+   *   maxSupply: 0n,
+   *   wallet,
+   * })
+   * ```
+   */
+  deployToken(opts: DeployTokenParams & { wallet: unknown }): Promise<DeployResult> {
+    return this.#deployToken.execute(this.chain, opts)
   }
 }
 
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
-export type { TransactionHash } from '../operation.ts'
+export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { DeployResult, TransactionResult } from '../operation.ts'

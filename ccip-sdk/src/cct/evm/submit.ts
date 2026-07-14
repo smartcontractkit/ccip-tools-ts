@@ -1,18 +1,23 @@
 /**
  * Shared sign-and-submit pipeline for EVM CCT operations. Maps broadcast and
  * confirmation failures to {@link CCTTxFailedError} / {@link CCTTxNotConfirmedError},
- * and on-chain reverts to {@link CCIPExecTxRevertedError}.
+ * and on-chain reverts to {@link CCIPExecTxRevertedError}. Operations map the
+ * confirmed `{ response, receipt }` to their own result shape.
  *
  * @packageDocumentation
  */
 
-import { type TransactionRequest, type TransactionResponse, isError } from 'ethers'
+import {
+  type TransactionReceipt,
+  type TransactionRequest,
+  type TransactionResponse,
+  isError,
+} from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import { type EVMChain, isSigner, submitTransaction } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
-import type { TransactionHash } from '../operation.ts'
 
 /** Max ms to wait for one confirmation before throwing {@link CCTTxNotConfirmedError}. */
 const CONFIRM_TIMEOUT_MS = 60_000
@@ -26,7 +31,8 @@ function isTransientError(error: unknown): boolean {
 
 /**
  * Signs and submits the first transaction in `unsigned`, then waits for one confirmation.
- * `operation` labels logs and error context.
+ * Returns the broadcast `response` and mined `receipt`; callers map these to their
+ * own result shape (see {@link EVMOperation.execute}).
  * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
  * @throws {@link CCTTxFailedError} if submission fails before broadcast
  * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -37,7 +43,7 @@ export async function submit(
   wallet: unknown,
   unsigned: UnsignedEVMTx,
   operation: string,
-): Promise<TransactionHash> {
+): Promise<{ response: TransactionResponse; receipt: TransactionReceipt }> {
   if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
   const sender = await wallet.getAddress()
   chain.logger.debug(`${operation}: submitting...`)
@@ -64,7 +70,7 @@ export async function submit(
 
   chain.logger.debug(`${operation}: waiting for confirmation, tx =`, response.hash)
 
-  let receipt
+  let receipt: TransactionReceipt | null
   try {
     receipt = await response.wait(1, CONFIRM_TIMEOUT_MS)
   } catch (error) {
@@ -82,5 +88,5 @@ export async function submit(
   if (!receipt) throw new CCTTxNotConfirmedError(operation, response.hash)
 
   chain.logger.info(`${operation}: confirmed, tx =`, response.hash)
-  return { hash: response.hash }
+  return { response, receipt }
 }
