@@ -16,7 +16,7 @@ import {
   deriveCcipLookupTableAddresses,
 } from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
-import { parsePublicKey, validatePublicKey } from '../../validate.ts'
+import { validatePublicKey } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
@@ -153,7 +153,11 @@ export class CreateLookupTable extends SolanaOperation<
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const payer = wallet.publicKey.toBase58()
-    const authority = params.authority && parsePublicKey(this.name, 'authority', params.authority)
+    const generateParams: GenerateCreateLookupTableParams = { ...rest, payer }
+
+    this.validate(generateParams)
+
+    const authority = params.authority ? new PublicKey(params.authority) : undefined
     if (params.mode !== 'createEmpty' && authority && !authority.equals(wallet.publicKey)) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -162,7 +166,7 @@ export class CreateLookupTable extends SolanaOperation<
       )
     }
 
-    const tx = await this.generate(chain, { ...rest, payer })
+    const tx = await this.buildUnsigned(chain, generateParams)
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
     return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
