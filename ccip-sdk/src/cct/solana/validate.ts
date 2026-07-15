@@ -4,8 +4,8 @@ import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
-/** Asserts `value` is a valid Solana public key string. */
-export function validatePublicKey(operation: string, param: string, value: unknown): void {
+/** Parses `value` as a Solana public key or throws a CCT validation error. */
+export function parsePublicKey(operation: string, param: string, value: unknown): PublicKey {
   if (typeof value !== 'string') {
     throw new CCTParamsInvalidError(
       operation,
@@ -15,7 +15,7 @@ export function validatePublicKey(operation: string, param: string, value: unkno
   }
 
   try {
-    new PublicKey(value)
+    return new PublicKey(value)
   } catch {
     throw new CCTParamsInvalidError(
       operation,
@@ -26,6 +26,11 @@ export function validatePublicKey(operation: string, param: string, value: unkno
       },
     )
   }
+}
+
+/** Asserts `value` is a valid Solana public key string. */
+export function validatePublicKey(operation: string, param: string, value: unknown): void {
+  parsePublicKey(operation, param, value)
 }
 
 /** Asserts ALT writable indexes are a non-empty list of byte values when provided. */
