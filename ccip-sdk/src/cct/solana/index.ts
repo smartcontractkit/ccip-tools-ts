@@ -12,12 +12,11 @@ import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
-import {
-  type ExecuteDeployTokenParams,
-  type ExecuteDeployTokenResult,
-  type GenerateDeployTokenParams,
-  type GenerateDeployTokenResult,
-  DeployToken,
+import type {
+  ExecuteDeployTokenParams,
+  ExecuteDeployTokenResult,
+  GenerateDeployTokenParams,
+  GenerateDeployTokenResult,
 } from './token/operations/index.ts'
 import {
   type ExecuteAppendToLookupTableParams,
@@ -42,7 +41,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
-  readonly #deployToken = new DeployToken()
   readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -72,9 +70,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned Solana mint creation instructions. Does not mint supply.
+   * Builds unsigned Solana mint creation instructions, optionally with initial supply.
    *
-   * The `payer` is also the mint, freeze, and metadata update authority.
+   * The `payer` defaults as mint, freeze, and metadata update authority.
    *
    * @example
    * ```ts
@@ -89,14 +87,17 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  generateUnsignedDeployToken(opts: GenerateDeployTokenParams): Promise<GenerateDeployTokenResult> {
-    return this.#deployToken.generate(this.chain, opts)
+  async generateUnsignedDeployToken(
+    opts: GenerateDeployTokenParams,
+  ): Promise<GenerateDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().generate(this.chain, opts)
   }
 
   /**
-   * Creates a Solana mint. Does not mint supply.
+   * Creates a Solana mint, optionally with initial supply.
    *
-   * The wallet public key is also the mint, freeze, and metadata update authority.
+   * The wallet public key defaults as mint, freeze, and metadata update authority.
    *
    * @example
    * ```ts
@@ -109,8 +110,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
-    return this.#deployToken.execute(this.chain, opts)
+  async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().execute(this.chain, opts)
   }
 
   /**
