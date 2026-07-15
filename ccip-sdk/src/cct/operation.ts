@@ -10,8 +10,12 @@ import type { ChainTransaction } from '../types.ts'
 /** Result of a successful CCT write: the confirmed on-chain tx hash. */
 export type TransactionResult = Pick<ChainTransaction, 'hash'>
 
-/** Result of a successful contract-deployment write: the tx hash plus the deployed address. */
-export type DeployResult = TransactionResult & { address: string }
+/**
+ * Result of a successful deployment write: the tx hash plus the deployed contract address (token, pool, etc.)
+ * Note: No block-explorer verification handle yet; it's recoverable from the init-code,
+ * so it can be added later without a breaking change.
+ */
+export type DeployResult = TransactionResult & { contractAddress: string }
 
 /**
  * Abstract CCT write operation: build unsigned tx(s) with {@link generate}, or

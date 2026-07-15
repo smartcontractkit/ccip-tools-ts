@@ -63,7 +63,10 @@ export class DeployToken extends EVMOperation<DeployTokenParams> {
     if (!receipt.contractAddress)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
         context: { txHash: response.hash },
+        // override the default CCT_TX_FAILED hint to point tx has mined but receipt carried no address
+        recovery:
+          'Deployment mined but the receipt carried no contract address; re-fetch it by tx hash or retry against a different RPC.',
       })
-    return { hash: response.hash, address: receipt.contractAddress }
+    return { hash: response.hash, contractAddress: receipt.contractAddress }
   }
 }
