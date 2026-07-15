@@ -168,7 +168,11 @@ export class AppendToLookupTable extends SolanaOperation<
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const payer = wallet.publicKey.toBase58()
-    if (params.authority && !new PublicKey(params.authority).equals(wallet.publicKey)) {
+    const generateParams: GenerateAppendToLookupTableParams = { ...rest, payer }
+    this.validate(generateParams)
+
+    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    if (authority && !authority.equals(wallet.publicKey)) {
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
@@ -176,7 +180,7 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
 
-    const tx = await this.generate(chain, { ...rest, payer })
+    const tx = await this.buildUnsigned(chain, generateParams)
     return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }
