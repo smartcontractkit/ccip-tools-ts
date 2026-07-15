@@ -13,6 +13,20 @@ const TOKEN_POOL_IDL = {
   types: BASE_TOKEN_POOL_IDL.types,
 }
 
+/** Canonical Solana token pool program addresses. */
+export const TOKEN_POOL_PROGRAMS = {
+  'burn-mint': '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB',
+  'lock-release': '8eqh8wppT9c5rw4ERqNCffvU6cNFJWff9WmkcYtmGiqC',
+} as const
+
+/** Canonical Solana token pool program type. */
+export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
+
+/** Resolves a canonical token pool program type to its address. */
+export function resolveTokenPoolProgram(poolType: TokenPoolType): PublicKey {
+  return new PublicKey(TOKEN_POOL_PROGRAMS[poolType])
+}
+
 /** Creates an Anchor Program client for a token pool program. */
 export function createTokenPoolProgram(
   chain: SolanaChain,

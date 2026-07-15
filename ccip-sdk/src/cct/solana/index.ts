@@ -168,12 +168,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana token pool initialize instructions.
    *
+   * @remarks
+   * This only builds the pool `initialize` instruction. `authority` must be allowed to initialize
+   * the pool. This does not create the pool signer PDA's associated token account.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedDeployTokenPool({
    *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
+   *   poolType: 'burn-mint',
    *   payer,
    *   authority,
    *   allowlist: [allowedSender],
@@ -189,12 +193,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Initializes a Solana token pool.
    *
+   * @remarks
+   * This only sends the pool `initialize` instruction. The signer must be allowed to initialize the
+   * pool. This does not create the pool signer PDA's associated token account.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.deployTokenPool({
    *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
+   *   poolType: 'burn-mint',
    *   wallet,
    * })
    * ```
