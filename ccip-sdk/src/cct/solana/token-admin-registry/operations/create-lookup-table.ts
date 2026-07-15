@@ -153,19 +153,20 @@ export class CreateLookupTable extends SolanaOperation<
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const payer = wallet.publicKey.toBase58()
-    if (
-      params.mode !== 'createEmpty' &&
-      params.authority &&
-      !new PublicKey(params.authority).equals(wallet.publicKey)
-    ) {
+    const generateParams: GenerateCreateLookupTableParams = { ...rest, payer }
+
+    this.validate(generateParams)
+
+    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    if (params.mode !== 'createEmpty' && authority && !authority.equals(wallet.publicKey)) {
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        "createAndExtend requires authority to be the executing wallet. Use mode: 'createEmpty' for vault-owned ALTs.",
+        "createAndExtend requires authority to be the executing wallet. Use 'createEmpty' mode for vault-owned ALTs.",
       )
     }
 
-    const tx = await this.generate(chain, { ...rest, payer })
+    const tx = await this.buildUnsigned(chain, generateParams)
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
     return { ...hash, lookupTableAddress: tx.lookupTableAddress }
   }
