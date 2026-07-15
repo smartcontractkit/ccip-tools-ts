@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Keypair } from '@solana/web3.js'
+import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
+import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
-const POOL_PROGRAM = Keypair.generate().publicKey.toBase58()
+const BURN_MINT_POOL_PROGRAM = '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB'
+const LOCK_RELEASE_POOL_PROGRAM = '8eqh8wppT9c5rw4ERqNCffvU6cNFJWff9WmkcYtmGiqC'
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const WALLET = {
@@ -27,7 +29,7 @@ function stubChain(): SolanaChain {
 function generate(opts = {}) {
   return SolanaTokenManager.fromChain(stubChain()).generateUnsignedDeployTokenPool({
     tokenAddress: TOKEN,
-    poolProgramAddress: POOL_PROGRAM,
+    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     ...opts,
@@ -41,7 +43,14 @@ describe('Solana token pool deployTokenPool', () => {
     assert.equal(unsigned.family, ChainFamily.Solana)
     assert.equal(unsigned.mainIndex, 0)
     assert.equal(unsigned.instructions.length, 1)
-    assert.equal(unsigned.instructions[0]!.programId.toBase58(), POOL_PROGRAM)
+    assert.equal(unsigned.instructions[0]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+    assert.equal(
+      unsigned.poolAddress,
+      deriveTokenPoolConfigPda(
+        new PublicKey(BURN_MINT_POOL_PROGRAM),
+        new PublicKey(TOKEN),
+      ).toBase58(),
+    )
   })
 
   it('adds configure allowlist instruction when provided', async () => {
@@ -50,7 +59,13 @@ describe('Solana token pool deployTokenPool', () => {
     })
 
     assert.equal(unsigned.instructions.length, 2)
-    assert.equal(unsigned.instructions[1]!.programId.toBase58(), POOL_PROGRAM)
+    assert.equal(unsigned.instructions[1]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+  })
+
+  it('uses canonical lock-release pool program', async () => {
+    const unsigned = await generate({ poolType: 'lock-release' })
+
+    assert.equal(unsigned.instructions[0]!.programId.toBase58(), LOCK_RELEASE_POOL_PROGRAM)
   })
 
   it('defaults authority to payer', async () => {
@@ -64,7 +79,7 @@ describe('Solana token pool deployTokenPool', () => {
       () =>
         SolanaTokenManager.fromChain(stubChain()).deployTokenPool({
           tokenAddress: TOKEN,
-          poolProgramAddress: POOL_PROGRAM,
+          poolType: 'burn-mint',
           wallet: WALLET,
           authority: AUTHORITY,
         }),
@@ -72,6 +87,16 @@ describe('Solana token pool deployTokenPool', () => {
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'deployTokenPool' &&
         err.context.param === 'authority',
+    )
+  })
+
+  it('rejects invalid pool types', async () => {
+    await assert.rejects(
+      () => generate({ poolType: 'custom' }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'deployTokenPool' &&
+        err.context.param === 'poolType',
     )
   })
 

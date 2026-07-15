@@ -22,7 +22,6 @@ import {
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
   CreateTokenAccount,
-  DeployToken,
 } from './token/operations/index.ts'
 import {
   type ExecuteAppendToLookupTableParams,
@@ -54,7 +53,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
-  readonly #deployToken = new DeployToken()
 
   // Token admin registry operations
   readonly #appendToLookupTable = new AppendToLookupTable()
@@ -91,9 +89,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned Solana mint creation instructions. Does not mint supply.
+   * Builds unsigned Solana mint creation instructions, optionally with initial supply.
    *
-   * The `payer` is also the mint, freeze, and metadata update authority.
+   * The `payer` defaults as mint, freeze, and metadata update authority.
    *
    * @example
    * ```ts
@@ -108,14 +106,17 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  generateUnsignedDeployToken(opts: GenerateDeployTokenParams): Promise<GenerateDeployTokenResult> {
-    return this.#deployToken.generate(this.chain, opts)
+  async generateUnsignedDeployToken(
+    opts: GenerateDeployTokenParams,
+  ): Promise<GenerateDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().generate(this.chain, opts)
   }
 
   /**
-   * Creates a Solana mint. Does not mint supply.
+   * Creates a Solana mint, optionally with initial supply.
    *
-   * The wallet public key is also the mint, freeze, and metadata update authority.
+   * The wallet public key defaults as mint, freeze, and metadata update authority.
    *
    * @example
    * ```ts
@@ -128,8 +129,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
-    return this.#deployToken.execute(this.chain, opts)
+  async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().execute(this.chain, opts)
   }
 
   /**
@@ -214,12 +216,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana token pool initialize instructions.
    *
+   * @remarks
+   * This only builds the pool `initialize` instruction. `authority` must be allowed to initialize
+   * the pool. This does not create the pool signer PDA's associated token account.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedDeployTokenPool({
    *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
+   *   poolType: 'burn-mint',
    *   payer,
    *   authority,
    *   allowlist: [allowedSender],
@@ -235,12 +241,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Initializes a Solana token pool.
    *
+   * @remarks
+   * This only sends the pool `initialize` instruction. The signer must be allowed to initialize the
+   * pool. This does not create the pool signer PDA's associated token account.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.deployTokenPool({
    *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
+   *   poolType: 'burn-mint',
    *   wallet,
    * })
    * ```
