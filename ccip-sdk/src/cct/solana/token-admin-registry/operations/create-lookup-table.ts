@@ -181,7 +181,7 @@ export class CreateLookupTable extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        "createAndExtend requires authority to be the executing wallet. Use mode: 'createEmpty' for vault-owned ALTs.",
+        "createAndExtend requires authority to be the executing wallet. Use 'createEmpty' mode for vault-owned ALTs.",
       )
     }
 
