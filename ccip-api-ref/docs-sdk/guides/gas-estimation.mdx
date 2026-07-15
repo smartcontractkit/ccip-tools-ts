@@ -10,15 +10,19 @@ sidebar_position: 6
 
 The SDK provides two ways to estimate the gas needed to execute a CCIP message on the destination chain:
 
-| Approach | Use when |
-|----------|----------|
-| Standalone `estimateReceiveExecution` function | Before sending — you have source and dest chain instances and want to set `gasLimit` in `extraArgs` |
-| `chain.estimateReceiveExecution({ messageId })` | After sending — you have a message ID and want to estimate gas before manual execution |
+| Approach                                        | Use when                                                                                            |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Standalone `estimateReceiveExecution` function  | Before sending — you have source and dest chain instances and want to set `gasLimit` in `extraArgs` |
+| `chain.estimateReceiveExecution({ messageId })` | After sending — you have a message ID and want to estimate gas before manual execution              |
 
-Both simulate the `ccipReceive` call on the destination chain and return the estimated gas units. The returned value has the base transaction cost (21,000 gas) subtracted — it represents the execution cost only, suitable for use as `gasLimit` in `extraArgs` or `execute`.
+On EVM, both simulate the `ccipReceive` call on the destination chain and return the estimated gas units, with the base transaction cost (21,000 gas) subtracted — it represents the execution cost only, suitable for use as `gasLimit` in `extraArgs` or `execute`. On Solana the same methods estimate the compute units of the OffRamp's `execute` instead (see the note below).
 
 :::note
-Only EVM destinations support gas estimation. Solana, Aptos, Sui, TON, and Canton do not implement `estimateReceiveExecution`.
+`estimateReceiveExecution` is implemented on **EVM** (returns `ccipReceive` gas units) and **Solana** (returns compute units — Solana meters execution in CU, not gas). Aptos, Sui, TON, and Canton do not implement it.
+:::
+
+:::tip
+When called before sending with both `source` and `dest`, `estimateReceiveExecution` also validates that the message can execute on the destination and throws a typed error if it cannot. For a message that carries token transfers this destination check is mandatory, not opt-in — see [Validating a Transfer Before Sending](./pre-send-validation.mdx). The returned gas number is unchanged.
 :::
 
 ## Estimate Before Sending
@@ -70,13 +74,13 @@ const gasLimit = await estimateReceiveExecution({
 
 ### Optional Fields
 
-| Field | Default when omitted |
-|-------|---------------------|
-| `message.messageId` | Random 32-byte hash |
-| `message.sender` | Empty bytes (zero-padded) |
-| `message.data` | Empty bytes |
-| `message.tokenAmounts` | Empty array |
-| `message.onRampAddress` | Discovered from `routerOrRamp` |
+| Field                    | Default when omitted           |
+| ------------------------ | ------------------------------ |
+| `message.messageId`      | Random 32-byte hash            |
+| `message.sender`         | Empty bytes (zero-padded)      |
+| `message.data`           | Empty bytes                    |
+| `message.tokenAmounts`   | Empty array                    |
+| `message.onRampAddress`  | Discovered from `routerOrRamp` |
 | `message.offRampAddress` | Discovered from `routerOrRamp` |
 
 If both `onRampAddress` and `offRampAddress` are provided, the `routerOrRamp` discovery is skipped entirely.
@@ -98,6 +102,7 @@ console.log('Estimated gas:', gasLimit)
 ```
 
 This path:
+
 1. Calls `getMessageById` to fetch the message details (sender, receiver, data, tokenAmounts) from the API
 2. Resolves the offRamp in order: `message.offRampAddress`, `metadata.offRamp`, then `getExecutionInput` as a last resort
 3. Simulates `ccipReceive` on the destination chain using the fetched message data
@@ -111,7 +116,7 @@ Requires `apiClient` to be available (the default). Throws `CCIPApiClientNotAvai
 When calling `execute` or `generateUnsignedExecute` without a `gasLimit` override, the SDK attempts to auto-estimate via `estimateReceiveExecution` internally. The auto-estimation:
 
 - Runs only when `gasLimit` is not provided in the call options
-- Runs only when `estimateReceiveExecution` is available on the dest chain (EVM only)
+- Runs only when `estimateReceiveExecution` is available on the dest chain (EVM and Solana)
 - Runs only when the message's token amounts already have `destTokenAddress` resolved (or the message has no token amounts)
 - Compares the estimate against the message's original gas limit (`gasLimit` for v2.0+ messages, `ccipReceiveGasLimit` for v1.x messages). Overrides only when the estimate exceeds the original value. If neither field is present in the message, no override is applied.
 - If estimation fails, proceeds without override (the error is logged at debug level)
@@ -167,22 +172,22 @@ await source.waitFinalized({
 
 ## Error Handling
 
-| Error | When |
-|-------|------|
-| `CCIPMethodUnsupportedError` | Dest chain does not implement `estimateReceiveExecution` (non-EVM) |
-| `CCIPContractTypeInvalidError` | `routerOrRamp` resolves on the dest chain but is not an OffRamp |
-| `CCIPOnRampRequiredError` | No OnRamp found for the given OffRamp and source chain |
-| `CCIPTokenDecimalsInsufficientError` | Dest token decimals too low to represent the converted amount |
-| `CCIPApiClientNotAvailableError` | `{ messageId }` path used but `apiClient` is null |
-| `CCIPTransactionNotFinalizedError` | `waitFinalized` cannot confirm finality |
+| Error                                | When                                                               |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| `CCIPMethodUnsupportedError`         | Dest chain does not implement `estimateReceiveExecution` (non-EVM) |
+| `CCIPContractTypeInvalidError`       | `routerOrRamp` resolves on the dest chain but is not an OffRamp    |
+| `CCIPOnRampRequiredError`            | No OnRamp found for the given OffRamp and source chain             |
+| `CCIPTokenDecimalsInsufficientError` | Dest token decimals too low to represent the converted amount      |
+| `CCIPApiClientNotAvailableError`     | `{ messageId }` path used but `apiClient` is null                  |
+| `CCIPTransactionNotFinalizedError`   | `waitFinalized` cannot confirm finality                            |
 
 ## Method Reference
 
-| Method | Input | Returns |
-|--------|-------|---------|
-| `estimateReceiveExecution(opts)` | `{ source, dest, routerOrRamp, message }` | `Promise<number>` — estimated gas |
+| Method                                 | Input                                     | Returns                           |
+| -------------------------------------- | ----------------------------------------- | --------------------------------- |
+| `estimateReceiveExecution(opts)`       | `{ source, dest, routerOrRamp, message }` | `Promise<number>` — estimated gas |
 | `chain.estimateReceiveExecution(opts)` | `{ offRamp, message }` or `{ messageId }` | `Promise<number>` — estimated gas |
-| `chain.waitFinalized(opts)` | `{ request, finality?, cancel$? }` | `Promise<true>` |
+| `chain.waitFinalized(opts)`            | `{ request, finality?, cancel$? }`        | `Promise<true>`                   |
 
 ## Related
 

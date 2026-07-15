@@ -10,7 +10,6 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
-  CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
@@ -1367,7 +1366,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
 
   /**
    * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
-   * For LockRelease TPs, also check it has enough liquidity
    * @param opts - Execution options
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
@@ -1379,7 +1377,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     message,
   }: {
     offRamp: string
-    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'>
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'> &
+      Partial<Pick<EstimateMessageInput, 'receiver' | 'sender'>>
   }): Promise<true> {
     let registry
     for (const ta of message.tokenAmounts ?? []) {
@@ -1389,19 +1388,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
-      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
-      // if a LockReleaseTokenPool, also check it has enough liquidity
-      if (typeAndVersion?.includes('LockRelease')) {
-        const [balance, { symbol }] = await Promise.all([
-          this.getBalance({ holder: lockBox || tokenPool!, token }),
-          this.getTokenInfo(token),
-        ])
-        if (balance < amount) {
-          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
-            context: { tokenPool, token, typeAndVersion, network: this.network.name },
-          })
-        }
-      }
 
       const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
       if (!remote.inboundRateLimiterState) continue
@@ -2274,6 +2260,36 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   getTokenPrice(_opts: { router: string; token: string; timestamp?: number }): Promise<TokenPrice> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPrice'))
   }
+
+  /**
+   * Simulate the source pool's `lockOrBurn` for a prospective token transfer and return the
+   * pool-reported `destTokenAddress` and `destPoolData` (the value the destination pool's
+   * `releaseOrMint` consumes as `sourcePoolData`), plus the resolved source pool address.
+   *
+   * Optional; currently implemented for EVM chains. Used by `estimateReceiveExecution` to feed
+   * the destination-liquidity simulation the same source pool data a real transfer would carry.
+   *
+   * @param opts - lane (`onRamp`, `destChainSelector`), `token` and `amount` (source decimals),
+   *   and optionally `originalSender`, `receiver`, and the requested `finality`
+   * @returns resolved `sourcePoolAddress`, and `destTokenAddress` + `destPoolData` as returned
+   *   by the pool
+   */
+  simulateLockOrBurn?(opts: {
+    /** OnRamp registered on the source Router for the destination chain */
+    onRamp: string
+    /** Destination chain selector */
+    destChainSelector: bigint
+    /** Source token address */
+    token: string
+    /** Amount in the source token's decimals */
+    amount: bigint
+    /** Sender of the prospective message */
+    originalSender?: string
+    /** Receiver on the destination chain */
+    receiver?: string
+    /** Requested finality (v2 pools take it as the 2nd `lockOrBurn` argument) */
+    finality?: FinalityRequested
+  }): Promise<{ sourcePoolAddress: string; destTokenAddress: string; destPoolData: string }>
 
   /**
    * Estimate `ccipReceive` execution cost (gas, computeUnits) for this destination chain.
