@@ -41,10 +41,15 @@ import {
   SetPool,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type ExecuteCreateTokenMultisigParams,
+  type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type GenerateCreateTokenMultisigParams,
+  type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  CreateTokenMultisig,
   DeployTokenPool,
 } from './token-pool/operations/index.ts'
 
@@ -60,6 +65,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #setPool = new SetPool()
 
   // Token pool operations
+  readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -169,6 +175,50 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned SPL Token multisig creation instructions.
+   * The default signers are pool signer PDA and mint authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCreateTokenMultisig({
+   *   payer,
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   threshold: 2,
+   *   additionalSigners: [admin],
+   * })
+   * ```
+   */
+  generateUnsignedCreateTokenMultisig(
+    opts: GenerateCreateTokenMultisigParams,
+  ): Promise<GenerateCreateTokenMultisigResult> {
+    return this.#createTokenMultisig.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates an SPL Token multisig account.
+   * The default signers are pool signer PDA and mint authority.
+   * Wallet pays fees and must match the mint authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { hash, multisigAddress } = await cct.createTokenMultisig({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   threshold: 2,
+   * })
+   * ```
+   */
+  createTokenMultisig(
+    opts: ExecuteCreateTokenMultisigParams,
+  ): Promise<ExecuteCreateTokenMultisigResult> {
+    return this.#createTokenMultisig.execute(this.chain, opts)
   }
 
   /**
