@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
 import { after, beforeEach, describe, it, mock } from 'node:test'
 
-import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
+import { getAddress, hexlify, makeError, randomBytes, toBeHex } from 'ethers'
 
 import { interfaces } from './const.ts'
 import { EVMChain, isTokenOnlyEstimate } from './index.ts'
-import { CCIPFinalityNotAllowedError } from '../errors/index.ts'
+import { CCIPFinalityNotAllowedError, CCIPVersionUnsupportedError } from '../errors/index.ts'
+import { decodeFinalityAllowed } from '../extra-args.ts'
 import { ChainFamily, NetworkType } from '../networks.ts'
 import { CCIPVersion } from '../types.ts'
 
-const recv = interfaces.Receiver_v2_0
-const SUPPORTS_SEL = recv.getFunction('supportsInterface')!.selector
-const CCV_SEL = recv.getFunction('getCCVsAndFinalityConfig')!.selector
+// Under the authoritative preflight, estimateReceiveExecution resolves finality + CCVs via the OffRamp's
+// getCCVsForMessage(bytes) view (through EVMChain.getRequiredCCVs), not by reading the receiver directly.
+const offRampIface = interfaces.OffRamp_v2_0
+const GET_CCVS_SEL = offRampIface.getFunction('getCCVsForMessage')!.selector
 
 const SOURCE_SELECTOR = 16015286601757825753n // ethereum-sepolia
 const DEST_SELECTOR = 10344971235874465080n // base-sepolia
@@ -53,13 +55,32 @@ function makeChain(finalityConfig: string) {
   const provider = {
     // eth_estimateGas (finder probe + final ccipReceive sim) always returns a gas value
     send: mock.fn(async () => toBeHex(44_000)),
-    // selector-aware eth_call: supportsInterface=true, getCCVsAndFinalityConfig=([],[],0,cfg)
+    // selector-aware eth_call that mirrors the OffRamp getCCVsForMessage resolver: revert
+    // InvalidRequestedFinality when the receiver is finalized-only (depth 0), else return a required CCV
+    // set. All finality-gated cases here request depth 1, so depth-1 configs accept and depth-0 rejects.
     call: mock.fn(async (tx: { data?: string }) => {
       const data = tx.data ?? '0x'
       const sel = data.slice(0, 10)
-      if (sel === SUPPORTS_SEL) return recv.encodeFunctionResult('supportsInterface', [true])
-      if (sel === CCV_SEL)
-        return recv.encodeFunctionResult('getCCVsAndFinalityConfig', [[], [], 0, finalityConfig])
+      if (sel === GET_CCVS_SEL) {
+        if (decodeFinalityAllowed(finalityConfig).finalityDepth === 0) {
+          throw makeError('execution reverted', 'CALL_EXCEPTION', {
+            action: 'call',
+            data: offRampIface.encodeErrorResult('InvalidRequestedFinality', [
+              '0x00000001',
+              finalityConfig,
+            ]),
+            reason: null,
+            transaction: { to: null, data, from: undefined },
+            invocation: null,
+            revert: null,
+          })
+        }
+        return offRampIface.encodeFunctionResult('getCCVsForMessage', [
+          [getAddress(hexlify(randomBytes(20)))],
+          [],
+          0,
+        ])
+      }
       return toBeHex(0n, 32) // balanceOf / totalSupply => 0
     }),
   }
@@ -206,6 +227,81 @@ describe('EVMChain.estimateReceiveExecution — token-only finality skip', () =>
     await assert.rejects(
       () => chain.estimateReceiveExecution({ messageId: hexlify(randomBytes(32)) }),
       CCIPFinalityNotAllowedError,
+    )
+  })
+})
+
+// ============================================================================
+// 3) Best-effort: a non-finality resolver failure (v1 lane / transient RPC) is
+//    swallowed so the gas estimate still returns; the finality gate still throws.
+// ============================================================================
+describe('EVMChain.estimateReceiveExecution — finality preflight is best-effort', () => {
+  after(() => mock.restoreAll())
+
+  function makeChainFailingCCVs() {
+    const provider = {
+      send: mock.fn(async () => toBeHex(44_000)),
+      call: mock.fn(async (tx: { data?: string }) => {
+        const sel = (tx.data ?? '0x').slice(0, 10)
+        if (sel === GET_CCVS_SEL)
+          // non-finality revert (unknown selector) — stands in for a v1 lane / transient failure
+          throw makeError('execution reverted', 'CALL_EXCEPTION', {
+            action: 'call',
+            data: '0xdeadbeef',
+            reason: null,
+            transaction: { to: null, data: tx.data ?? '0x', from: undefined },
+            invocation: null,
+            revert: null,
+          })
+        return toBeHex(0n, 32)
+      }),
+    }
+    const chain = Object.create(EVMChain.prototype) as EVMChain
+    Object.assign(chain, {
+      provider,
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      network: {
+        name: 'base-sepolia',
+        chainId: 84532,
+        chainSelector: DEST_SELECTOR,
+        family: ChainFamily.EVM,
+        networkType: NetworkType.Testnet,
+      },
+      getRouterForOffRamp: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
+    })
+    return chain
+  }
+
+  it('swallows a non-finality resolver failure and STILL returns a gas estimate', async () => {
+    const chain = makeChainFailingCCVs()
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    // data-only at fast finality: the finality gate would run, but the resolver fails for a
+    // non-finality reason → must NOT throw; the estimate proceeds.
+    const result = await chain.estimateReceiveExecution({
+      offRamp,
+      message: baseMessage(DATA_ONLY, 1),
+    })
+    assert.equal(typeof result, 'number')
+  })
+
+  it('getRequiredCCVs throws CCIPVersionUnsupportedError on a non-v2 OffRamp', async () => {
+    const chain = makeChainFailingCCVs()
+    chain.typeAndVersion = mock.fn(async () => [
+      'EVM2EVMOffRamp',
+      CCIPVersion.V1_5,
+      'EVM2EVMOffRamp 1.5.0',
+    ]) as unknown as EVMChain['typeAndVersion']
+    await assert.rejects(
+      () =>
+        chain.getRequiredCCVs({
+          offRamp: getAddress(hexlify(randomBytes(20))),
+          message: {
+            sourceChainSelector: SOURCE_SELECTOR,
+            receiver: getAddress(hexlify(randomBytes(20))),
+            finality: 2,
+          },
+        }),
+      CCIPVersionUnsupportedError,
     )
   })
 })

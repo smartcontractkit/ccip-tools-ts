@@ -28,7 +28,7 @@ import type {
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
-import type { EstimateMessageInput } from './gas.ts'
+import type { EstimateMessageInput, GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
 import { type ChainFamily, type NetworkInfo, type NetworkType, networkInfo } from './networks.ts'
@@ -2295,6 +2295,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         }
       | { messageId: string },
   ): Promise<number>
+
+  /**
+   * Resolve the CCV set the destination OffRamp will require for a candidate message, and whether its
+   * finality is accepted (a rejection throws `CCIPFinalityNotAllowedError`). A read via the
+   * `getCCVsForMessage` resolver; EVM destinations only. The set is informative and sender-scoped.
+   *
+   * @param opts - Destination OffRamp (v2.0) address and the candidate message
+   *   ({@link GetRequiredCCVsMessage}).
+   * @returns `{ requiredCCVs, optionalCCVs, optionalThreshold }`.
+   */
+  getRequiredCCVs?(opts: {
+    offRamp: string
+    message: GetRequiredCCVsMessage
+  }): Promise<GetRequiredCCVsResult>
 }
 
 /**
