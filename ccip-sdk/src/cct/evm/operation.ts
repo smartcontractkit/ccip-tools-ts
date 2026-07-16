@@ -9,8 +9,18 @@
 
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
-import { type TransactionResult, Operation } from '../operation.ts'
+import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
+
+/** EVM {@link ExecuteParams} — EVM ops need nothing beyond the signing `wallet`. */
+export type EVMExecuteParams<P extends object> = ExecuteParams<P>
+
+/**
+ * Result of a successful EVM deployment write: the tx hash plus the deployed
+ * contract address (token, pool, etc.). No block-explorer verification handle
+ * yet; it's recoverable from the init-code, so adding one later is non-breaking.
+ */
+export type DeployResult = TransactionResult & { contractAddress: string }
 
 /**
  * EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned};
@@ -38,7 +48,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
-  async execute(chain: EVMChain, params: P & { wallet: unknown }): Promise<TransactionResult> {
+  async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<TransactionResult> {
     const { response } = await submit(
       chain,
       params.wallet,
