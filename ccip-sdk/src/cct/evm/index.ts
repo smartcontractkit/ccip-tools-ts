@@ -100,6 +100,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a recognised pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the pool's current owner.
+   * const unsigned = await cct.generateUnsignedTransferOwnership({
+   *   poolAddress: '0xPool...',
+   *   newOwner: '0xNewOwner...',
+   *   sender: '0xPoolOwner...',
+   * })
+   * ```
    */
   generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {
     return this.#transferOwnership.generate(this.chain, opts)
@@ -112,6 +121,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a recognised pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` signs as the pool's current owner; the new owner must later call acceptOwnership
+   * const { hash } = await cct.transferOwnership({
+   *   poolAddress: '0xPool...',
+   *   newOwner: '0xNewOwner...',
+   *   wallet,
+   * })
+   * ```
    */
   transferOwnership(opts: TransferOwnershipParams & { wallet: unknown }): Promise<TransactionHash> {
     return this.#transferOwnership.execute(this.chain, opts)
