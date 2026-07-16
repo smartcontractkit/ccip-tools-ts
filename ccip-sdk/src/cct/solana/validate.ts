@@ -1,9 +1,10 @@
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
-import { TOKEN_POOL_PROGRAMS, type TokenPoolType } from './programs/token-pool.ts'
+import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 /**
  * Asserts `value` is a valid Solana public key string.
@@ -42,6 +43,29 @@ export function validatePublicKeys(operation: string, param: string, values: unk
 }
 
 /**
+ * Asserts `value` is a non-empty string.
+ * @throws CCTParamsInvalidError if `value` is not a non-empty string.
+ */
+export function validateNonEmptyString(operation: string, param: string, value: unknown): void {
+  if (typeof value === 'string' && value.trim().length > 0) return
+  throw new CCTParamsInvalidError(operation, param, 'must be a non-empty string')
+}
+
+/**
+ * Asserts `tokenProgram` is a supported SPL Token program.
+ * @throws CCTParamsInvalidError if `tokenProgram` is not SPL Token or Token-2022.
+ */
+export function validateTokenProgram(
+  operation: string,
+  param: string,
+  tokenProgram: PublicKey,
+  message = 'mint is not owned by SPL Token or Token-2022',
+): void {
+  if (tokenProgram.equals(TOKEN_PROGRAM_ID) || tokenProgram.equals(TOKEN_2022_PROGRAM_ID)) return
+  throw new CCTParamsInvalidError(operation, param, message)
+}
+
+/**
  * Asserts `value` is a supported token pool type.
  * @throws CCTParamsInvalidError if `value` is not `burn-mint` or `lock-release`.
  */
@@ -56,8 +80,29 @@ export function validatePoolType(
 }
 
 /**
+ * Asserts `value` is an integer, optionally inside inclusive bounds.
+ * @throws CCTParamsInvalidError if `value` is not an integer or is outside bounds.
+ */
+export function validateInteger(
+  operation: string,
+  param: string,
+  value: unknown,
+  min?: number,
+  max?: number,
+): void {
+  const validInteger = Number.isInteger(value)
+  const validMin = min === undefined || (validInteger && Number(value) >= min)
+  const validMax = max === undefined || (validInteger && Number(value) <= max)
+
+  if (!validInteger || !validMin || !validMax) {
+    const range = min !== undefined && max !== undefined ? ` between ${min} and ${max}` : ''
+    throw new CCTParamsInvalidError(operation, param, `must be an integer${range}`)
+  }
+}
+
+/**
  * Asserts ALT writable indexes are a non-empty list of byte values when provided.
- * @throws CCTParamsInvalidError if `writableIndexes` is invalid.
+ * @throws CCTParamsInvalidError if indexes are empty or outside byte range.
  */
 export function validateWritableIndexes(
   operation: string,
@@ -70,12 +115,6 @@ export function validateWritableIndexes(
   }
 
   for (const [i, index] of writableIndexes.entries()) {
-    if (!Number.isInteger(index) || index < 0 || index > 255) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${param}[${i}]`,
-        'must be an integer between 0 and 255',
-      )
-    }
+    validateInteger(operation, `${param}[${i}]`, index, 0, 255)
   }
 }

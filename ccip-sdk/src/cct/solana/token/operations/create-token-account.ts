@@ -1,6 +1,4 @@
 import {
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
@@ -18,7 +16,7 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validatePublicKey, validateTokenProgram } from '../../validate.ts'
 
 /** Parameters for deriving and creating a Solana associated token account. */
 type CreateTokenAccountParams = {
@@ -68,12 +66,7 @@ export class CreateTokenAccount extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'tokenAddress', 'token mint not found')
     }
 
-    if (
-      !mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
-      !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)
-    ) {
-      throw new CCTParamsInvalidError(this.name, 'tokenAddress', 'token mint has invalid owner')
-    }
+    validateTokenProgram(this.name, 'tokenAddress', mintAccount.owner)
 
     const tokenAccount = getAssociatedTokenAddressSync(mint, owner, true, mintAccount.owner)
 

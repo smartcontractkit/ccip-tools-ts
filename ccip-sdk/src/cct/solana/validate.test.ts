@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import {
+  validateInteger,
+  validateNonEmptyString,
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
+  validateTokenProgram,
   validateWritableIndexes,
 } from './validate.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
@@ -36,42 +40,51 @@ describe('cct/solana validate', () => {
     )
   })
 
-  it('accepts valid public key arrays', () => {
-    assert.doesNotThrow(() => validatePublicKeys('op', 'allowlist', [PublicKey.default.toBase58()]))
-  })
-
-  it('rejects non-array public key arrays', () => {
+  it('validates public key arrays', () => {
+    assert.doesNotThrow(() => validatePublicKeys('op', 'signers', []))
+    assert.doesNotThrow(() => validatePublicKeys('op', 'signers', [PublicKey.default.toBase58()]))
     assert.throws(
-      () => validatePublicKeys('op', 'allowlist', 'nope'),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'op' &&
-        err.context.param === 'allowlist',
+      () => validatePublicKeys('op', 'signers', ['nope']),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'signers[0]',
+    )
+    assert.throws(
+      () => validatePublicKeys('op', 'signers', 'nope'),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'signers',
     )
   })
 
-  it('rejects invalid public key array items', () => {
+  it('validates non-empty strings', () => {
+    assert.doesNotThrow(() => validateNonEmptyString('op', 'seed', 'abc'))
     assert.throws(
-      () => validatePublicKeys('op', 'allowlist', [PublicKey.default.toBase58(), 'nope']),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'op' &&
-        err.context.param === 'allowlist[1]',
+      () => validateNonEmptyString('op', 'seed', '   '),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'seed',
     )
   })
 
-  it('accepts valid token pool types', () => {
+  it('validates token programs', () => {
+    assert.doesNotThrow(() => validateTokenProgram('op', 'tokenAddress', TOKEN_PROGRAM_ID))
+    assert.throws(
+      () => validateTokenProgram('op', 'tokenAddress', PublicKey.default),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+    )
+  })
+
+  it('validates pool types', () => {
     assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'burn-mint'))
     assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'lock-release'))
+    assert.throws(
+      () => validatePoolType('op', 'poolType', 'nope'),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'poolType',
+    )
   })
 
-  it('rejects invalid token pool types', () => {
+  it('validates integers', () => {
+    assert.doesNotThrow(() => validateInteger('op', 'threshold', 1))
+    assert.doesNotThrow(() => validateInteger('op', 'decimals', 255, 0, 255))
     assert.throws(
-      () => validatePoolType('op', 'poolType', 'mint-burn'),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'op' &&
-        err.context.param === 'poolType',
+      () => validateInteger('op', 'decimals', 256, 0, 255),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'decimals',
     )
   })
 

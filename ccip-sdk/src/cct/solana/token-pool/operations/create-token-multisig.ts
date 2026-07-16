@@ -1,10 +1,4 @@
-import {
-  MULTISIG_SIZE,
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-  createInitializeMultisigInstruction,
-  unpackMint,
-} from '@solana/spl-token'
+import { MULTISIG_SIZE, createInitializeMultisigInstruction, unpackMint } from '@solana/spl-token'
 import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { concat, hexlify, randomBytes, sha256, toUtf8Bytes } from 'ethers'
 
@@ -21,12 +15,18 @@ import {
 } from '../../operation.ts'
 import {
   type TokenPoolType,
-  TOKEN_POOL_PROGRAMS,
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import {
+  validateInteger,
+  validateNonEmptyString,
+  validatePoolType,
+  validatePublicKey,
+  validatePublicKeys,
+  validateTokenProgram,
+} from '../../validate.ts'
 
 export const SOLANA_MULTISIG_MAX_SIGNERS = 11
 
@@ -90,12 +90,7 @@ function validateMintAccount(
   mintAccount: Parameters<typeof unpackMint>[1],
 ): asserts mintAccount is NonNullable<Parameters<typeof unpackMint>[1]> {
   if (!mintAccount) throw new CCTParamsInvalidError(operation, 'tokenAddress', 'mint not found')
-  if (
-    !mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
-    !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)
-  ) {
-    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'mint is not owned by SPL Token')
-  }
+  validateTokenProgram(operation, 'tokenAddress', mintAccount.owner)
 }
 
 function getMintAuthority(
@@ -125,19 +120,13 @@ export class CreateTokenMultisig extends SolanaOperation<
   /** Validates public keys, threshold, and optional seed before mint/account RPCs. */
   protected validate(params: GenerateCreateTokenMultisigParams): void {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    if (!Object.hasOwn(TOKEN_POOL_PROGRAMS, params.poolType)) {
-      throw new CCTParamsInvalidError(this.name, 'poolType', 'must be burn-mint or lock-release')
-    }
+    validatePoolType(this.name, 'poolType', params.poolType)
     validatePublicKey(this.name, 'payer', params.payer)
-    for (const [i, signer] of (params.additionalSigners ?? []).entries()) {
-      validatePublicKey(this.name, `additionalSigners[${i}]`, signer)
+    if (params.additionalSigners !== undefined) {
+      validatePublicKeys(this.name, 'additionalSigners', params.additionalSigners)
     }
-    if (!Number.isInteger(params.threshold)) {
-      throw new CCTParamsInvalidError(this.name, 'threshold', 'must be an integer')
-    }
-    if (params.seed !== undefined && typeof params.seed !== 'string') {
-      throw new CCTParamsInvalidError(this.name, 'seed', 'must be a string')
-    }
+    validateInteger(this.name, 'threshold', params.threshold)
+    if (params.seed !== undefined) validateNonEmptyString(this.name, 'seed', params.seed)
   }
 
   /** Builds create-with-seed and initialize-multisig instructions. */
@@ -150,6 +139,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     const poolProgram = resolveTokenPoolProgram(opts.poolType)
     const mintAccount = await chain.connection.getAccountInfo(tokenMint)
     validateMintAccount(this.name, mintAccount)
+
     const tokenProgram = mintAccount.owner
     const authority = getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
 
