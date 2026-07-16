@@ -12,8 +12,9 @@ import type { ChainContext } from '../../chain.ts'
 import { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
-import type { DeployResult, TransactionResult } from '../operation.ts'
+import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
+import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
@@ -93,7 +94,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setPool(opts: SetPoolParams & { wallet: unknown }): Promise<TransactionResult> {
+  setPool(opts: EVMExecuteParams<SetPoolParams>): Promise<TransactionResult> {
     return this.#setPool.execute(this.chain, opts)
   }
 
@@ -115,9 +116,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  transferOwnership(
-    opts: TransferOwnershipParams & { wallet: unknown },
-  ): Promise<TransactionResult> {
+  transferOwnership(opts: EVMExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
     return this.#transferOwnership.execute(this.chain, opts)
   }
 
@@ -159,7 +158,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployToken(opts: DeployTokenParams & { wallet: unknown }): Promise<DeployResult> {
+  deployToken(opts: EVMExecuteParams<DeployTokenParams>): Promise<DeployResult> {
     return this.#deployToken.execute(this.chain, opts)
   }
 }
@@ -167,4 +166,5 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
-export type { DeployResult, TransactionResult } from '../operation.ts'
+export type { TransactionResult } from '../operation.ts'
+export type { DeployResult, EVMExecuteParams } from './operation.ts'

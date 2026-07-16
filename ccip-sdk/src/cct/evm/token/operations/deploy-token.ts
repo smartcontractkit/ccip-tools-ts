@@ -10,8 +10,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTTxFailedError } from '../../../errors.ts'
-import type { DeployResult } from '../../../operation.ts'
-import { EVMOperation } from '../../operation.ts'
+import { type DeployResult, type EVMExecuteParams, EVMOperation } from '../../operation.ts'
 import { submit } from '../../submit.ts'
 import { validateNonEmptyString, validateUint256, validateUint8 } from '../../validate.ts'
 import { BURN_MINT_ERC677_BYTECODE } from '../bytecode.ts'
@@ -52,7 +51,7 @@ export class DeployToken extends EVMOperation<DeployTokenParams> {
    */
   override async execute(
     chain: EVMChain,
-    params: DeployTokenParams & { wallet: unknown },
+    params: EVMExecuteParams<DeployTokenParams>,
   ): Promise<DeployResult> {
     const { response, receipt } = await submit(
       chain,
