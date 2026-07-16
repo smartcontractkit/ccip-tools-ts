@@ -2009,8 +2009,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     if (!sender && log.data && typeof log.data === 'object') {
       const rec = log.data as Record<string, unknown>
       const createArgs = (rec.create_arguments ?? rec.createArgument) as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       if (createArgs) {
         const flat = flattenCantonRecord(createArgs)
         if (typeof flat.sender === 'string') sender = flat.sender
