@@ -16,6 +16,7 @@ import type { DeployResult, TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
+import { type DeployPoolParams, DeployPool } from './token-pool/operations/deploy-pool.ts'
 import {
   type TransferOwnershipParams,
   TransferOwnership,
@@ -27,6 +28,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setPool = new SetPool()
   readonly #transferOwnership = new TransferOwnership()
   readonly #deployToken = new DeployToken()
+  readonly #deployPool = new DeployPool()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -122,8 +124,51 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` +
+   * `version` (default `2.0.0`) select the pool contract. The deployed address is only known
+   * once mined, so it is NOT returned here — use {@link deployPool} to receive `{ hash, address }`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployPool({
+   *   type: 'BurnMintTokenPool', // or 'LockReleaseTokenPool'
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployPool(opts: DeployPoolParams): Promise<UnsignedEVMTx> {
+    return this.#deployPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
+   * and the newly deployed pool address. `type` + `version` (default `2.0.0`) select the pool.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @example
+   * ```typescript
+   * const { hash, address } = await cct.deployPool({
+   *   type: 'LockReleaseTokenPool',
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployPool(opts: DeployPoolParams & { wallet: unknown }): Promise<DeployResult> {
+    return this.#deployPool.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned token deployment tx (for multisig / offline signing). The `version`
-   * selects the contract — `2.0.0` (default) deploys `CrossChainToken`, `1.5.1`/`1.6.2` deploy
+   * selects the contract — `2.0.0` (default) deploys `CrossChainToken`, `1.5.1` deploys
    * `FactoryBurnMintERC20`. The deployed address is only known once mined, so it is NOT
    * returned here — use {@link deployToken} to deploy and receive `{ hash, address }`.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -171,4 +216,5 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { DeployPoolParams } from './token-pool/operations/deploy-pool.ts'
 export type { DeployResult, TransactionResult } from '../operation.ts'

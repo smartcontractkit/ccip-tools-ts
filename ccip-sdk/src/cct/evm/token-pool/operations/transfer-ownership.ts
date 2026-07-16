@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 
-import { type InterfaceAbi, Interface } from 'ethers'
+import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
@@ -21,11 +21,11 @@ export interface TransferOwnershipParams {
   sender?: string
 }
 
-/** Encodes `transferOwnership` calldata against the resolved pool ABI. */
-type Encoder = (abi: InterfaceAbi, params: TransferOwnershipParams) => UnsignedEVMTx
+/** Encodes `transferOwnership` calldata against the resolved pool {@link Interface}. */
+type Encoder = (iface: Interface, params: TransferOwnershipParams) => UnsignedEVMTx
 
-const encodeTransferOwnership: Encoder = (abi, { newOwner, poolAddress }) => {
-  const data = new Interface(abi).encodeFunctionData('transferOwnership', [newOwner])
+const encodeTransferOwnership: Encoder = (iface, { newOwner, poolAddress }) => {
+  const data = iface.encodeFunctionData('transferOwnership', [newOwner])
   return { family: ChainFamily.EVM, transactions: [{ to: poolAddress, data }] }
 }
 
@@ -52,7 +52,7 @@ export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {
     chain: EVMChain,
     { poolAddress, newOwner }: TransferOwnershipParams,
   ): Promise<UnsignedEVMTx> {
-    const { version, abi } = await resolveTokenPool(chain, poolAddress)
-    return resolveEncoder(this.encoders, version, this.name)(abi, { poolAddress, newOwner })
+    const { version, iface } = await resolveTokenPool(chain, poolAddress)
+    return resolveEncoder(this.encoders, version, this.name)(iface, { poolAddress, newOwner })
   }
 }
