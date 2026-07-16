@@ -122,9 +122,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `BurnMintERC677Token` deployment tx (for multisig / offline signing).
-   * The deployed address is only known once mined, so it is NOT returned here — use
-   * {@link deployToken} to deploy and receive `{ hash, address }`.
+   * Builds an unsigned token deployment tx (for multisig / offline signing). The `version`
+   * selects the contract — `2.0.0` (default) deploys `CrossChainToken`, `1.5.1`/`1.6.2` deploy
+   * `FactoryBurnMintERC20`. The deployed address is only known once mined, so it is NOT
+   * returned here — use {@link deployToken} to deploy and receive `{ hash, address }`.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -133,6 +134,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   symbol: 'MTK',
    *   decimals: 18,
    *   maxSupply: 0n, // 0 = unlimited
+   *   owner: '0xOwner...', // CrossChainToken v2.0.0; ccipAdmin/burnMintRoleAdmin default to owner
    *   sender: '0xDeployer...',
    * })
    * ```
@@ -142,18 +144,21 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Deploys a `BurnMintERC677Token`, signing + submitting with `opts.wallet`; resolves to
-   * the tx hash and the newly deployed token address.
+   * Deploys a token, signing + submitting with `opts.wallet`; resolves to the tx hash and
+   * the newly deployed token address. The `version` selects the contract — `2.0.0` (default)
+   * deploys `CrossChainToken`, `1.5.1`/`1.6.2` deploy `FactoryBurnMintERC20`.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
    * @example
    * ```typescript
    * const { hash, address } = await cct.deployToken({
+   *   version: '1.5.1', // omit for CrossChainToken v2.0.0
    *   name: 'My Token',
    *   symbol: 'MTK',
    *   decimals: 18,
    *   maxSupply: 0n,
+   *   owner: '0xOwner...',
    *   wallet,
    * })
    * ```
