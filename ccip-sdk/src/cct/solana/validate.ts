@@ -3,8 +3,12 @@ import { PublicKey } from '@solana/web3.js'
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
+import { TOKEN_POOL_PROGRAMS, type TokenPoolType } from './programs/token-pool.ts'
 
-/** Asserts `value` is a valid Solana public key string. */
+/**
+ * Asserts `value` is a valid Solana public key string.
+ * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
+ */
 export function validatePublicKey(operation: string, param: string, value: unknown): void {
   if (typeof value !== 'string') {
     throw new CCTParamsInvalidError(
@@ -28,7 +32,33 @@ export function validatePublicKey(operation: string, param: string, value: unkno
   }
 }
 
-/** Asserts ALT writable indexes are a non-empty list of byte values when provided. */
+/**
+ * Asserts `values` is an array of valid Solana public key strings.
+ * @throws CCTParamsInvalidError if `values` is not an array or any item is invalid.
+ */
+export function validatePublicKeys(operation: string, param: string, values: unknown): void {
+  if (!Array.isArray(values)) throw new CCTParamsInvalidError(operation, param, 'must be an array')
+  for (const [i, value] of values.entries()) validatePublicKey(operation, `${param}[${i}]`, value)
+}
+
+/**
+ * Asserts `value` is a supported token pool type.
+ * @throws CCTParamsInvalidError if `value` is not `burn-mint` or `lock-release`.
+ */
+export function validatePoolType(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is TokenPoolType {
+  if (typeof value !== 'string' || !Object.hasOwn(TOKEN_POOL_PROGRAMS, value)) {
+    throw new CCTParamsInvalidError(operation, param, 'must be burn-mint or lock-release')
+  }
+}
+
+/**
+ * Asserts ALT writable indexes are a non-empty list of byte values when provided.
+ * @throws CCTParamsInvalidError if `writableIndexes` is invalid.
+ */
 export function validateWritableIndexes(
   operation: string,
   param: string,
