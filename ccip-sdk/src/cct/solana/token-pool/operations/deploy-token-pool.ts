@@ -13,7 +13,6 @@ import {
 } from '../../operation.ts'
 import {
   type TokenPoolType,
-  TOKEN_POOL_PROGRAMS,
   createTokenPoolProgram,
   deriveTokenPoolConfigPda,
   deriveTokenPoolGlobalConfigPda,
@@ -21,7 +20,7 @@ import {
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validatePoolType, validatePublicKey, validatePublicKeys } from '../../validate.ts'
 
 /** Parameters for initializing a Solana token pool, optionally with an allowlist. */
 type DeployTokenPoolParams = {
@@ -65,14 +64,10 @@ export class DeployTokenPool extends SolanaOperation<
   /** Validates all public keys before any RPC. */
   protected validate(params: GenerateDeployTokenPoolParams): void {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    if (!Object.hasOwn(TOKEN_POOL_PROGRAMS, params.poolType)) {
-      throw new CCTParamsInvalidError(this.name, 'poolType', 'must be burn-mint or lock-release')
-    }
+    validatePoolType(this.name, 'poolType', params.poolType)
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
-    for (const [i, address] of (params.allowlist ?? []).entries()) {
-      validatePublicKey(this.name, `allowlist[${i}]`, address)
-    }
+    if (params.allowlist !== undefined) validatePublicKeys(this.name, 'allowlist', params.allowlist)
   }
 
   /** Builds the unsigned Solana token pool initialize instruction set. */
