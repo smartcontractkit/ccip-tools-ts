@@ -21,6 +21,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(cct.provider, chain.connection)
     assert.equal(typeof cct.generateUnsignedCreateLookupTable, 'function')
     assert.equal(typeof cct.createLookupTable, 'function')
+    assert.equal(typeof cct.generateUnsignedAppendToLookupTable, 'function')
+    assert.equal(typeof cct.appendToLookupTable, 'function')
     assert.equal(typeof cct.generateUnsignedSetPool, 'function')
     assert.equal(typeof cct.setPool, 'function')
   })
