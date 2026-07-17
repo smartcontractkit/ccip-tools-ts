@@ -100,12 +100,7 @@ export interface ChainOption extends BaseOption<'chain'> {
 
 /** Union of all option types */
 export type OptionDefinition =
-  | StringOption
-  | NumberOption
-  | BooleanOption
-  | SelectOption
-  | ArrayOption
-  | ChainOption
+  StringOption | NumberOption | BooleanOption | SelectOption | ArrayOption | ChainOption
 
 // ============================================================================
 // Argument Types

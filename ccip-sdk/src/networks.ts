@@ -30,8 +30,7 @@ export type NetworkType = (typeof NetworkType)[keyof typeof NetworkType]
 
 /** Helper type that maps chain family to its chain ID format. */
 type ChainFamilyWithId<F extends ChainFamily> = F extends
-  | typeof ChainFamily.EVM
-  | typeof ChainFamily.TON
+  typeof ChainFamily.EVM | typeof ChainFamily.TON
   ? { readonly family: F; readonly chainId: number }
   : F extends typeof ChainFamily.Solana | typeof ChainFamily.Canton
     ? { readonly family: F; readonly chainId: string }

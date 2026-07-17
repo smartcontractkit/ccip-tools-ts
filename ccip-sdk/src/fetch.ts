@@ -94,6 +94,10 @@ class AdaptiveSemaphore {
 const DEFAULT_WINDOW_MS = 1_000
 const MIN_WINDOW_MS = 250
 const MAX_WINDOW_MS = 60_000
+/** Ceiling on how far ahead the pacer may reserve a slot. Past this the request
+ * fails fast instead of sleeping, so a runaway paced backlog can't hold callers
+ * (and their concurrency permits / upstream task slots) for minutes on end. */
+const MAX_PACING_WAIT_MS = 30_000
 
 function clampWindow(ms: number): number {
   return Math.min(MAX_WINDOW_MS, Math.max(MIN_WINDOW_MS, Math.round(ms)))
@@ -125,13 +129,23 @@ class AdaptiveLimiter {
     this.windowMs = clampWindow(seed?.windowMs ?? DEFAULT_WINDOW_MS)
   }
 
-  /** Wait (only when active) for this scope's evenly-paced slot. */
-  async acquire(): Promise<void> {
+  /** Wait (only when active) for this scope's evenly-paced slot. Fails fast when
+   * the paced backlog would push this request more than MAX_PACING_WAIT_MS out,
+   * instead of reserving an ever-farther slot — an unbounded `nextSendAt` under
+   * sustained overload is what lets a collapsed endpoint wedge its callers. A
+   * lone request after idle never trips this (its wait is 0). */
+  async acquire(signal?: AbortSignal): Promise<void> {
     if (!this.active) return
     const now = Date.now()
     const at = Math.max(now, this.nextSendAt)
+    if (at - now > MAX_PACING_WAIT_MS) {
+      throw new CCIPError(
+        'ABORT',
+        `pacing backlog ${at - now}ms exceeds cap ${MAX_PACING_WAIT_MS}ms`,
+      )
+    }
     this.nextSendAt = at + this.windowMs / this.limit // reserve next slot synchronously
-    if (at > now) await sleep(at - now)
+    if (at > now) await sleep(at - now, signal) // abortable: caller checks the signal next
   }
 
   /** On a 429: activate + pace ONLY when an explicit reset window is known.
@@ -438,8 +452,7 @@ function extractMethod(init?: RequestInit): string | undefined {
   if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
   try {
     const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
-      | { method?: string }
-      | undefined
+      { method?: string } | undefined
     if (parsed && typeof parsed.method === 'string') return parsed.method
   } catch {
     // Not JSON or no method field
@@ -480,6 +493,10 @@ export function createRateLimitedFetch(
     const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight)
 
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
+      // Bail out promptly when the caller aborts (e.g. a per-request timeout):
+      // don't burn further attempts/backoff/pacing under a dead signal. The waits
+      // below (pacing + backoff) are also abort-aware so an in-progress one wakes.
+      abort?.throwIfAborted()
       // Resolve the limiter for this request's scope (re-resolved each attempt:
       // methodScoped may flip after the first response).
       const scope = ep.methodScoped && method ? method : '*'
@@ -487,6 +504,14 @@ export function createRateLimitedFetch(
       let response: Response
       let retryDelay = 0
       try {
+        // Pace BEFORE taking a concurrency permit: a request merely waiting for
+        // its evenly-paced slot must not hold a permit, otherwise pacing latency
+        // serializes through the concurrency gate and — under a deep backlog —
+        // wedges the endpoint for everyone. Pace only if this scope is currently
+        // rate-limited; full speed otherwise. May throw (fail fast) if the paced
+        // backlog is too deep; caught below, no permit acquired yet.
+        await lim.acquire(abort)
+
         // Concurrency gate: at most `maxInFlight` requests per endpoint are in
         // flight at once. The slot is held ONLY across the fetch + header read,
         // then released so the next queued request starts immediately (it sees
@@ -494,9 +519,6 @@ export function createRateLimitedFetch(
         // the slot so a backing-off request doesn't occupy a slot.
         await ep.sem.acquire()
         try {
-          // Pace only if this scope is currently rate-limited; full speed otherwise.
-          await lim.acquire()
-
           if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
           else if (abort) {
             if (!init) init = {}
@@ -541,7 +563,7 @@ export function createRateLimitedFetch(
         // Treat a rate-limit-flavored network error as a limit signal: narrow the
         // concurrency cap and back off before retrying (no header → no pacing).
         ep.sem.decrease()
-        if (!lim.active) await sleep(backoffMs(attempt))
+        if (!lim.active) await sleep(backoffMs(attempt), abort)
         continue
       }
 
@@ -553,7 +575,7 @@ export function createRateLimitedFetch(
       if (isTransientHttpStatus(response.status)) {
         if (attempt < opts_.maxRetries) {
           logger.debug('fetch transient error, retrying', response.status, attempt, retryDelay)
-          if (retryDelay > 0) await sleep(retryDelay)
+          if (retryDelay > 0) await sleep(retryDelay, abort)
           continue
         }
         logger.debug('fetch transient error, retries exhausted', response.status)

@@ -44,24 +44,20 @@ export const SUPPORTED_CHAIN_FAMILIES: readonly ChainType[] = [
   ChainType.EVM,
   ChainType.Solana,
   ChainType.Aptos,
-] as const
-
-/**
- * Chain families with partial support (send and/or manual exec only)
- */
-export const PARTIAL_CHAIN_FAMILIES: readonly ChainType[] = [
-  ChainType.Sui,
   ChainType.TON,
   ChainType.Canton,
 ] as const
 
 /**
- * All documented chain families (full + partial)
+ * Chain families with partial support (send and/or manual exec only)
  */
-export const ALL_CHAIN_FAMILIES: readonly ChainType[] = [
-  ...SUPPORTED_CHAIN_FAMILIES,
-  ...PARTIAL_CHAIN_FAMILIES,
-] as const
+export const PARTIAL_CHAIN_FAMILIES: readonly ChainType[] = [ChainType.Sui] as const
+
+/**
+ * All documented chain families
+ * Excludes Sui for now.
+ */
+export const ALL_CHAIN_FAMILIES: readonly ChainType[] = [...SUPPORTED_CHAIN_FAMILIES] as const
 
 /**
  * Chain families supported by the send and manual-exec CLI commands

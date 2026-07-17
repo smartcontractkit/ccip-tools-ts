@@ -331,10 +331,10 @@ describe('e2e command show EVM', () => {
 describe('e2e command show Solana', () => {
   // Test transaction hash
   const TX_HASH =
-    '5kNwdda31bfY2rA8pt2xGpdptTWzDqSxkHae2FqE1RQKbA2Wi3ikC8SZDZdjxwmjpHLNQHWYAKkr6gp2mz2HJ9iS'
-  const MESSAGE_ID = '0x941411a3d6b5e4d7350a2113207976614e6327c3e56a479e266ec57fef61961b'
-  const SENDER = 'DWBXvezhcEadofmf9obkgsMeZnGoDiSBE5Vpc1CPs8fu'
-  const RECEIVER = '0xAB4f961939BFE6A93567cC57C59eEd7084CE2131'
+    'XkdB6ed7LisqoJR6PVAcaLerckoVfyffCxDAyJG6FesLqz1E1ur1FqVCg7CVRAPz81eggyb6XXm3oKPMvfrc9s9'
+  const MESSAGE_ID = '0x6f2f352064ac9aa184ef36179a19cb47349ad754d36f64fe425db372bcb371c7'
+  const SENDER = 'GY3V5RAtSxoJf2dZGqAbzaSxDyXWb8RPMWQdv1mC5PXN'
+  const RECEIVER = '0x8C244f0B2164E6A3BED74ab429B0ebd661Bb14CA'
   const ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
   const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 
@@ -359,12 +359,12 @@ describe('e2e command show Solana', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
-      assert.match(output, /sequenceNumber.*1975n?/)
+      assert.match(output, /sequenceNumber.*3144?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
       assert.match(output, /gasLimit.*0n?/)
       assert.match(output, /finalized.*true/)
       assert.match(output, /fee.*\bSOL/)
-      assert.match(output, /tokens.*0\.017 USDC/)
+      assert.match(output, /tokens.*0\.001 USDC/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
       assert.match(output, /data.*hello from ccip-tools-ts\b/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
@@ -377,14 +377,14 @@ describe('e2e command show Solana', () => {
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0xc14e80512b09a884f491fd2c258d75861e9b0ed8c375b7c306470aad38397613/i,
+        /merkleRoot.*0x291c126410cefe17ef5596ff79b8629e2875d5307e4d1bde2dc75ebcc49046d3/i,
       )
-      assert.match(output, /min.*1975/)
-      assert.match(output, /max.*1975/)
+      assert.match(output, /min.*3144/)
+      assert.match(output, /max.*3144/)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*0xb51f2c20a273438fb3e08765b8cc95eb1c3f6f84d5b0257a212c47039300dcd4/i,
+        /transactionHash.*0x1274619287fbab9acf047e32c451608b8bc7fcb2d1b51c15440640fd88fd1ede/i,
       )
 
       // Receipts information
@@ -392,7 +392,7 @@ describe('e2e command show Solana', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*0x35f262d6c6de2466ab99b7c6e710bb92c546568c4f660aa9d8b65820cec2840b/i,
+        /transactionHash.*0x3af7fa68693261beb5b63b38b28674aabaad1004deccca7d8e1fdbd7ec9ed093/i,
       )
     },
   )

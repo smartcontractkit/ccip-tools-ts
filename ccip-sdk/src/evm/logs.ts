@@ -104,7 +104,7 @@ async function* streamLogs(
   // `cursor <= toBlock` makes an inverted range (fromBlock > toBlock) yield
   // nothing without ever issuing a getLogs; the page is clamped to >=1 so a
   // degenerate page can't invert a chunk either.
-  for (let cursor = fromBlock; cursor <= toBlock; ) {
+  for (let cursor = fromBlock; cursor <= toBlock;) {
     const page = Math.max(1, pageBox.value)
     let chunkTo = Math.min(cursor + page - 1, toBlock)
 

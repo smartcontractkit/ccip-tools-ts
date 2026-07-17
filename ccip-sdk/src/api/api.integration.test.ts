@@ -36,7 +36,7 @@ describe(
 
     describe('getLaneLatency', () => {
       it('should return totalMs for valid testnet lane', { timeout: 30000 }, async () => {
-        const result = await api.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR)
+        const result = await api.getLaneLatency(FUJI_SELECTOR, SEPOLIA_SELECTOR)
 
         assert.equal(typeof result.totalMs, 'number')
         assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
@@ -47,7 +47,7 @@ describe(
         { timeout: 30000 },
         async () => {
           const staging = CCIPAPIClient.fromUrl(STAGING_API_URL)
-          const result = await staging.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR, 10)
+          const result = await staging.getLaneLatency(FUJI_SELECTOR, SEPOLIA_SELECTOR, 10)
 
           assert.equal(typeof result.totalMs, 'number')
           assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
