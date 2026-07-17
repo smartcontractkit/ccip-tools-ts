@@ -152,8 +152,7 @@ export function formatDisplayTxHash(hash: string, family: ChainFamily): string {
 async function formatToken(
   source: Chain | undefined,
   ta: { amount: bigint } & (
-    | { token: string }
-    | { sourceTokenAddress?: string; sourcePoolAddress: string }
+    { token: string } | { sourceTokenAddress?: string; sourcePoolAddress: string }
   ),
 ): Promise<string> {
   if ('token' in ta && !ta.token) {
