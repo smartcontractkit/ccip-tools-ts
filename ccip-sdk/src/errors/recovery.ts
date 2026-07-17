@@ -205,6 +205,14 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   CANTON_API_ERROR:
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
+
+  // Cross-Chain Token
+  CCT_PARAMS_INVALID:
+    'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TX_FAILED:
+    'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
+  CCT_TX_NOT_CONFIRMED:
+    'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */

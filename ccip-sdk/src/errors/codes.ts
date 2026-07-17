@@ -178,6 +178,11 @@ export const CCIPErrorCode = {
 
   // Canton
   CANTON_API_ERROR: 'CANTON_API_ERROR',
+
+  // CCT (Cross-Chain Token)
+  CCT_PARAMS_INVALID: 'CCT_PARAMS_INVALID',
+  CCT_TX_FAILED: 'CCT_TX_FAILED',
+  CCT_TX_NOT_CONFIRMED: 'CCT_TX_NOT_CONFIRMED',
 } as const
 
 /** Union type of all error codes. */
