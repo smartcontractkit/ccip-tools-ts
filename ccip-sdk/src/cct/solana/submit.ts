@@ -26,11 +26,12 @@ export async function submit(
   wallet: unknown,
   unsigned: UnsignedSolanaTx,
   operation: string,
+  computeUnits?: number,
 ): Promise<TransactionHash> {
   if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
   try {
-    return { hash: await simulateAndSendTxs(chain, wallet, unsigned) }
+    return { hash: await simulateAndSendTxs(chain, wallet, unsigned, computeUnits) }
   } catch (error) {
     throw createCCTSubmitError(operation, error)
   }

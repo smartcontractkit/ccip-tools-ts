@@ -17,40 +17,37 @@ export type SolanaGenerateParams<P extends object> = P & { payer: string }
 /** Signed Solana operation params derive payer from `wallet.publicKey`. */
 export type SolanaExecuteParams<P extends object> = P & {
   wallet: unknown
+  computeUnits?: number
 }
 
 function withPayer<P extends object>(
   params: SolanaExecuteParams<P>,
   payer: string,
 ): SolanaGenerateParams<P> {
-  const { wallet: _wallet, ...rest } = params
+  const { wallet: _wallet, computeUnits: _computeUnits, ...rest } = params
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
 /** Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
-export abstract class SolanaOperation<P extends object> extends Operation<
-  SolanaChain,
-  SolanaGenerateParams<P>,
-  UnsignedSolanaTx
-> {
+export abstract class SolanaOperation<
+  P extends object,
+  Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
+> extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionHash> {
   /** Build instructions after params have been validated. */
-  protected abstract buildUnsigned(
-    chain: SolanaChain,
-    params: SolanaGenerateParams<P>,
-  ): Promise<UnsignedSolanaTx>
+  protected abstract buildUnsigned(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
 
   /** Run {@link validate} and {@link buildUnsigned}; no signing. */
-  async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<UnsignedSolanaTx> {
+  async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
     this.validate(params)
     return this.buildUnsigned(chain, params)
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
   async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionHash> {
-    const { wallet } = params
+    const { wallet, computeUnits } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-    const unsigned = await this.generate(chain, withPayer(params, wallet.publicKey.toBase58()))
-    return submit(chain, wallet, unsigned, this.name)
+    const tx = await this.generate(chain, withPayer(params, wallet.publicKey.toBase58()))
+    return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }
