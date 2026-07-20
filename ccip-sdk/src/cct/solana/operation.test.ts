@@ -57,7 +57,7 @@ describe('SolanaOperation', () => {
     assert.equal(op.captured, wallet.publicKey.toBase58())
   })
 
-  it('rejects invalid wallets before validation or encoding', async () => {
+  it('rejects invalid wallets before validation or building unsigned txs', async () => {
     const op = new TestOperation()
 
     await assert.rejects(
