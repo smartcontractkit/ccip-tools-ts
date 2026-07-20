@@ -103,7 +103,7 @@ function getMintAuthority(
   if (!mintAuthority) {
     throw new CCTParamsInvalidError(operation, 'tokenAddress', 'mint has no mint authority')
   }
-  return mintAuthority
+  return new PublicKey(mintAuthority.toBase58())
 }
 
 /**
