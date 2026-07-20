@@ -185,7 +185,7 @@ describe('DeployToken (cct/evm)', () => {
       ...INPUTS,
       wallet: fakeSigner({ contractAddress: DEPLOYED }),
     })
-    assert.deepEqual(result, { hash: HASH, address: DEPLOYED })
+    assert.deepEqual(result, { hash: HASH, contractAddress: DEPLOYED })
   })
 
   it('throws CCTTxFailedError when the receipt carries no contract address', async () => {

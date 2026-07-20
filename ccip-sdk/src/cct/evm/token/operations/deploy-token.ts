@@ -10,8 +10,12 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import type { ExecuteParams, TransactionResult } from '../../../operation.ts'
-import { EVMOperation, deploymentTx } from '../../operation.ts'
+import {
+  type DeployResult,
+  type EVMExecuteParams,
+  EVMOperation,
+  deploymentTx,
+} from '../../operation.ts'
 import { submit } from '../../submit.ts'
 import {
   validateAddress,
@@ -20,9 +24,6 @@ import {
   validateUint8,
 } from '../../validate.ts'
 import { TokenVersion, tokenArtifact } from '../version.ts'
-
-/** Result of a successful contract-deployment write: the tx hash plus the deployed address. */
-export type DeployResult = TransactionResult & { address: string }
 
 /** Parameters for {@link DeployToken} — deploys `CrossChainToken` (v2.0.0). */
 export interface DeployTokenParams {
@@ -101,7 +102,7 @@ export class DeployToken extends EVMOperation<DeployTokenParams> {
    */
   override async execute(
     chain: EVMChain,
-    params: ExecuteParams<DeployTokenParams>,
+    params: EVMExecuteParams<DeployTokenParams>,
   ): Promise<DeployResult> {
     const { response, receipt } = await submit(
       chain,
@@ -113,6 +114,6 @@ export class DeployToken extends EVMOperation<DeployTokenParams> {
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
         context: { txHash: response.hash },
       })
-    return { hash: response.hash, address: receipt.contractAddress }
+    return { hash: response.hash, contractAddress: receipt.contractAddress }
   }
 }

@@ -19,6 +19,16 @@ export function deploymentTx(bytecode: `0x${string}`, ctorArgs: string): Unsigne
   return { family: ChainFamily.EVM, transactions: [{ data: bytecode + ctorArgs.slice(2) }] }
 }
 
+/** EVM {@link ExecuteParams} — EVM ops need nothing beyond the signing `wallet`. */
+export type EVMExecuteParams<P extends object> = ExecuteParams<P>
+
+/**
+ * Result of a successful EVM deployment write: the tx hash plus the deployed
+ * contract address (token, pool, etc.). No block-explorer verification handle
+ * yet; it's recoverable from the init-code, so adding one later is non-breaking.
+ */
+export type DeployResult = TransactionResult & { contractAddress: string }
+
 /**
  * EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned};
  * {@link execute} signs and submits, returning the confirmed tx hash. Ops that
@@ -46,7 +56,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
-  async execute(chain: EVMChain, params: ExecuteParams<P>): Promise<TransactionResult> {
+  async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<TransactionResult> {
     const { response } = await submit(
       chain,
       params.wallet,
