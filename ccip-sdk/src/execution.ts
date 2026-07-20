@@ -203,7 +203,9 @@ export const discoverOffRamp = memoize(
         }
       }
     }
-    throw new CCIPOffRampNotFoundError(onRamp, dest.network.name)
+    throw new CCIPOffRampNotFoundError(onRamp, dest.network.name, {
+      context: { sourceRouter, sourceOffRamps },
+    })
   },
   {
     transformKey: ([source, dest, onRamp]) =>
