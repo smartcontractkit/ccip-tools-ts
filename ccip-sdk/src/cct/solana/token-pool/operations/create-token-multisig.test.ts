@@ -66,8 +66,11 @@ function generate(opts = {}) {
 }
 
 describe('Solana token createTokenMultisig', () => {
-  it('builds unsigned instructions with default signers', async () => {
-    const unsigned = await generate()
+  it('builds a pool-autonomous threshold-two multisig', async () => {
+    const unsigned = await generate({
+      threshold: 2,
+      additionalSigners: [Keypair.generate().publicKey.toBase58()],
+    })
     const [createIx, initIx] = unsigned.instructions
     assert.ok(createIx)
     assert.ok(initIx)
@@ -81,9 +84,20 @@ describe('Solana token createTokenMultisig', () => {
     assert.equal(initIx.data[1], 2) // threshold
 
     const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
-    assert.ok(initIx.keys.some((key) => key.pubkey.equals(poolSigner)))
+    assert.equal(initIx.keys.filter((key) => key.pubkey.equals(poolSigner)).length, 2)
     assert.ok(initIx.keys.some((key) => key.pubkey.equals(new PublicKey(AUTHORITY))))
     assert.ok(!initIx.keys.some((key) => key.pubkey.equals(new PublicKey(PAYER))))
+  })
+
+  it('builds the canonical threshold-one pool multisig', async () => {
+    const unsigned = await generate({ threshold: 1 })
+    const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
+
+    assert.equal(unsigned.instructions[1]!.data[1], 1)
+    assert.equal(
+      unsigned.instructions[1]!.keys.filter((key) => key.pubkey.equals(poolSigner)).length,
+      1,
+    )
   })
 
   it('adds additional signers', async () => {
@@ -103,9 +117,9 @@ describe('Solana token createTokenMultisig', () => {
     )
   })
 
-  it('rejects threshold above signer count', async () => {
+  it('requires an independent governance quorum', async () => {
     await assert.rejects(
-      () => generate({ threshold: 3 }),
+      () => generate(),
       (err: unknown) =>
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'createTokenMultisig' &&

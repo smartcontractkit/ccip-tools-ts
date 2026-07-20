@@ -179,7 +179,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds unsigned SPL Token multisig creation instructions.
-   * The default signers are pool signer PDA and mint authority.
+   * The pool signer PDA occupies `threshold` slots; non-pool signers must meet the threshold independently.
+   *
+   * @remarks When `payer` differs from the mint authority, both must sign: the mint authority is
+   * the `createAccountWithSeed` base account.
    *
    * @example
    * ```ts
@@ -201,7 +204,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Creates an SPL Token multisig account.
-   * The default signers are pool signer PDA and mint authority.
+   * The pool signer PDA occupies `threshold` slots; non-pool signers must meet the threshold independently.
    * Wallet pays fees and must match the mint authority.
    *
    * @example
@@ -212,6 +215,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   threshold: 2,
+   *   additionalSigners: [admin],
    * })
    * ```
    */

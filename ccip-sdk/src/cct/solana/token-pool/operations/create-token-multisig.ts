@@ -30,11 +30,13 @@ import {
 
 export const SOLANA_MULTISIG_MAX_SIGNERS = 11
 
+type MintAccount = NonNullable<Parameters<typeof unpackMint>[1]>
+
 /**
  * Parameters for creating an SPL Token multisig account for a Solana SPL mint.
  *
- * Default multisig signers are the token pool signer PDA for `poolType` and the mint authority
- * read from `tokenAddress`. `additionalSigners` are appended after those defaults.
+ * The pool signer PDA occupies `threshold` slots so it can mint autonomously. The mint authority
+ * read from `tokenAddress` and `additionalSigners` supply the independent signer slots.
  */
 type CreateTokenMultisigParams = {
   tokenAddress: string
@@ -68,19 +70,40 @@ function dedupePublicKeys(signers: PublicKey[]) {
   })
 }
 
-function validateMultisigSigners(operation: string, signers: PublicKey[], threshold: number) {
-  if (signers.length < 1 || signers.length > SOLANA_MULTISIG_MAX_SIGNERS) {
+function validatePoolMultisigConfig(
+  operation: string,
+  signers: PublicKey[],
+  poolSigner: PublicKey,
+  threshold: number,
+) {
+  const poolSignerCount = signers.filter((signer) => signer.equals(poolSigner)).length
+  const nonPoolSignerCount = signers.length - poolSignerCount
+
+  if (signers.length < 2 || signers.length > SOLANA_MULTISIG_MAX_SIGNERS) {
     throw new CCTParamsInvalidError(
       operation,
       'additionalSigners',
-      `multisig must have between 1 and ${SOLANA_MULTISIG_MAX_SIGNERS} total signers`,
+      `multisig must have between 2 and ${SOLANA_MULTISIG_MAX_SIGNERS} total signers`,
     )
   }
-  if (threshold < 1 || threshold > signers.length) {
+  if (threshold < 1) {
+    throw new CCTParamsInvalidError(operation, 'threshold', 'must be at least 1')
+  }
+  if (threshold > signers.length) {
+    throw new CCTParamsInvalidError(operation, 'threshold', 'cannot exceed total signer count')
+  }
+  if (poolSignerCount < threshold) {
     throw new CCTParamsInvalidError(
       operation,
       'threshold',
-      'must be between 1 and total signer count',
+      'pool signer must occupy at least threshold signer slots',
+    )
+  }
+  if (nonPoolSignerCount < threshold) {
+    throw new CCTParamsInvalidError(
+      operation,
+      'threshold',
+      'requires at least threshold non-pool signers',
     )
   }
 }
@@ -88,7 +111,7 @@ function validateMultisigSigners(operation: string, signers: PublicKey[], thresh
 function validateMintAccount(
   operation: string,
   mintAccount: Parameters<typeof unpackMint>[1],
-): asserts mintAccount is NonNullable<Parameters<typeof unpackMint>[1]> {
+): asserts mintAccount is MintAccount {
   if (!mintAccount) throw new CCTParamsInvalidError(operation, 'tokenAddress', 'mint not found')
   validateTokenProgram(operation, 'tokenAddress', mintAccount.owner)
 }
@@ -96,7 +119,7 @@ function validateMintAccount(
 function getMintAuthority(
   operation: string,
   tokenMint: PublicKey,
-  mintAccount: Parameters<typeof unpackMint>[1],
+  mintAccount: MintAccount,
   tokenProgram: PublicKey,
 ): PublicKey {
   const { mintAuthority } = unpackMint(tokenMint, mintAccount, tokenProgram)
@@ -107,7 +130,7 @@ function getMintAuthority(
 }
 
 /**
- * Creates an SPL Token multisig with pool signer + mint authority + optional extra signers.
+ * Creates an SPL Token multisig with threshold pool signer slots and independent signers.
  *
  * The multisig account is derived with `createAccountWithSeed`, so no new signer keypair is needed.
  */
@@ -125,7 +148,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     if (params.additionalSigners !== undefined) {
       validatePublicKeys(this.name, 'additionalSigners', params.additionalSigners)
     }
-    validateInteger(this.name, 'threshold', params.threshold)
+    validateInteger(this.name, 'threshold', params.threshold, 1, SOLANA_MULTISIG_MAX_SIGNERS)
     if (params.seed !== undefined) validateNonEmptyString(this.name, 'seed', params.seed)
   }
 
@@ -133,22 +156,26 @@ export class CreateTokenMultisig extends SolanaOperation<
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: GenerateCreateTokenMultisigParams,
+    mintContext?: { account: MintAccount; authority: PublicKey },
   ): Promise<GenerateCreateTokenMultisigResult> {
     const payer = new PublicKey(opts.payer)
     const tokenMint = new PublicKey(opts.tokenAddress)
     const poolProgram = resolveTokenPoolProgram(opts.poolType)
-    const mintAccount = await chain.connection.getAccountInfo(tokenMint)
+    const mintAccount = mintContext?.account ?? (await chain.connection.getAccountInfo(tokenMint))
     validateMintAccount(this.name, mintAccount)
 
     const tokenProgram = mintAccount.owner
-    const authority = getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
+    const authority =
+      mintContext?.authority ?? getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
 
-    const signers = dedupePublicKeys([
-      deriveTokenPoolSignerPda(poolProgram, tokenMint),
+    const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)
+    const nonPoolSigners = dedupePublicKeys([
       authority,
       ...(opts.additionalSigners ?? []).map((signer) => new PublicKey(signer)),
-    ])
-    validateMultisigSigners(this.name, signers, opts.threshold)
+    ]).filter((signer) => !signer.equals(poolSigner))
+
+    const signers = [...Array.from({ length: opts.threshold }, () => poolSigner), ...nonPoolSigners]
+    validatePoolMultisigConfig(this.name, signers, poolSigner, opts.threshold)
 
     const seedMaterial = opts.seed ?? hexlify(randomBytes(16)).slice(2)
     const seedInput = concat([toUtf8Bytes(seedMaterial), tokenMint.toBuffer()])
@@ -209,7 +236,10 @@ export class CreateTokenMultisig extends SolanaOperation<
       )
     }
 
-    const tx = await this.buildUnsigned(chain, generateParams)
+    const tx = await this.buildUnsigned(chain, generateParams, {
+      account: mintAccount,
+      authority: mintAuthority,
+    })
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
     return { ...hash, multisigAddress: tx.multisigAddress }
   }
