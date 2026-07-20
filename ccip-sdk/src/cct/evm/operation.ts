@@ -10,7 +10,7 @@
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
-import { type TransactionResult, Operation } from '../operation.ts'
+import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 import { validateAddress } from './validate.ts'
 
@@ -46,7 +46,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
-  async execute(chain: EVMChain, params: P & { wallet: unknown }): Promise<TransactionResult> {
+  async execute(chain: EVMChain, params: ExecuteParams<P>): Promise<TransactionResult> {
     const { response } = await submit(
       chain,
       params.wallet,

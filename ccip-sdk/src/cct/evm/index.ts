@@ -12,7 +12,7 @@ import type { ChainContext } from '../../chain.ts'
 import { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
-import type { DeployResult, TransactionResult } from '../operation.ts'
+import type { DeployResult, ExecuteParams, TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
@@ -93,7 +93,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setPool(opts: SetPoolParams & { wallet: unknown }): Promise<TransactionResult> {
+  setPool(opts: ExecuteParams<SetPoolParams>): Promise<TransactionResult> {
     return this.#setPool.execute(this.chain, opts)
   }
 
@@ -115,17 +115,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  transferOwnership(
-    opts: TransferOwnershipParams & { wallet: unknown },
-  ): Promise<TransactionResult> {
+  transferOwnership(opts: ExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
     return this.#transferOwnership.execute(this.chain, opts)
   }
 
   /**
-   * Builds an unsigned token deployment tx (for multisig / offline signing). The `version`
-   * selects the contract — `2.0.0` (default) deploys `CrossChainToken`, `1.5.1`/`1.6.2` deploy
-   * `FactoryBurnMintERC20`. The deployed address is only known once mined, so it is NOT
-   * returned here — use {@link deployToken} to deploy and receive `{ hash, address }`.
+   * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
+   * signing). The deployed address is only known once mined, so it is NOT returned here —
+   * use {@link deployToken} to deploy and receive `{ hash, address }`.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -144,16 +141,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Deploys a token, signing + submitting with `opts.wallet`; resolves to the tx hash and
-   * the newly deployed token address. The `version` selects the contract — `2.0.0` (default)
-   * deploys `CrossChainToken`, `1.5.1`/`1.6.2` deploy `FactoryBurnMintERC20`.
+   * Deploys a `CrossChainToken` (v2.0.0), signing + submitting with `opts.wallet`; resolves
+   * to the tx hash and the newly deployed token address.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
    * @example
    * ```typescript
    * const { hash, address } = await cct.deployToken({
-   *   version: '1.5.1', // omit for CrossChainToken v2.0.0
    *   name: 'My Token',
    *   symbol: 'MTK',
    *   decimals: 18,
@@ -163,7 +158,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployToken(opts: DeployTokenParams & { wallet: unknown }): Promise<DeployResult> {
+  deployToken(opts: ExecuteParams<DeployTokenParams>): Promise<DeployResult> {
     return this.#deployToken.execute(this.chain, opts)
   }
 }
