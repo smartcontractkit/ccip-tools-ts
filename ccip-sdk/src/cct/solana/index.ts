@@ -12,6 +12,12 @@ import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
+import type {
+  ExecuteDeployTokenParams,
+  ExecuteDeployTokenResult,
+  GenerateDeployTokenParams,
+  GenerateDeployTokenResult,
+} from './token/operations/index.ts'
 import {
   type ExecuteAppendToLookupTableParams,
   type ExecuteAppendToLookupTableResult,
@@ -61,6 +67,52 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /** Provider of the underlying chain. */
   get provider(): Connection {
     return this.chain.connection
+  }
+
+  /**
+   * Builds unsigned Solana mint creation instructions, optionally with initial supply.
+   *
+   * The `payer` defaults as mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeployToken({
+   *   payer,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: true,
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   * })
+   * ```
+   */
+  async generateUnsignedDeployToken(
+    opts: GenerateDeployTokenParams,
+  ): Promise<GenerateDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a Solana mint, optionally with initial supply.
+   *
+   * The wallet public key defaults as mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deployToken({
+   *   wallet,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: false,
+   * })
+   * ```
+   */
+  async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().execute(this.chain, opts)
   }
 
   /**
@@ -215,4 +267,5 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 export * from '../errors.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
+export type * from './token/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
