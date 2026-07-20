@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { makeError } from 'ethers'
+import { ZeroAddress, makeError } from 'ethers'
 
 import { DeployToken } from './deploy-token.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
@@ -28,7 +28,7 @@ const INPUTS = {
   symbol: 'CCIPT',
   decimals: 18,
   maxSupply: 0n,
-  preMint: 0n,
+  preMint: 1000n,
   preMintRecipient: PREMINT_RECIPIENT,
   ccipAdmin: CCIP_ADMIN,
   burnMintRoleAdmin: ROLE_ADMIN,
@@ -41,7 +41,7 @@ const CTOR_ARGS =
   '00000000000000000000000000000000000000000000000000000000000000e0' +
   '0000000000000000000000000000000000000000000000000000000000000120' +
   '0000000000000000000000000000000000000000000000000000000000000000' +
-  '0000000000000000000000000000000000000000000000000000000000000000' +
+  '00000000000000000000000000000000000000000000000000000000000003e8' +
   '0000000000000000000000004444444444444444444444444444444444444444' +
   '0000000000000000000000000000000000000000000000000000000000000012' +
   '0000000000000000000000002222222222222222222222222222222222222222' +
@@ -100,13 +100,18 @@ describe('DeployToken (cct/evm)', () => {
     assert.equal(unsigned.transactions[0]!.from, undefined)
   })
 
-  it('defaults preMint to 0n when omitted', async () => {
-    const { preMint: _preMint, ...withoutPreMint } = INPUTS
-    const unsigned = await new DeployToken().generate(stubChain(), withoutPreMint)
-    assert.equal(unsigned.transactions[0]!.data, DEPLOY_DATA)
+  it('defaults preMint to 0 and a zero preMintRecipient when both omitted', async () => {
+    const { preMint: _preMint, preMintRecipient: _recipient, ...zeroPreMint } = INPUTS
+    const unsigned = await new DeployToken().generate(stubChain(), zeroPreMint)
+    // preMint 0 must pair with the zero address, else CrossChainToken's ctor reverts.
+    const expected = DEPLOY_DATA.replace(
+      '00000000000000000000000000000000000000000000000000000000000003e8',
+      '0'.repeat(64),
+    ).replace('0000000000000000000000004444444444444444444444444444444444444444', '0'.repeat(64))
+    assert.equal(unsigned.transactions[0]!.data, expected)
   })
 
-  it('defaults preMintRecipient/ccipAdmin/burnMintRoleAdmin to owner when omitted', async () => {
+  it('defaults ccipAdmin/burnMintRoleAdmin to owner when omitted', async () => {
     const omitted = await new DeployToken().generate(stubChain(), {
       name: 'CCIP Test Token',
       symbol: 'CCIPT',
@@ -119,13 +124,41 @@ describe('DeployToken (cct/evm)', () => {
       symbol: 'CCIPT',
       decimals: 18,
       maxSupply: 0n,
-      preMint: 0n,
-      preMintRecipient: OWNER,
       ccipAdmin: OWNER,
       burnMintRoleAdmin: OWNER,
       owner: OWNER,
     })
     assert.equal(omitted.transactions[0]!.data, explicit.transactions[0]!.data)
+  })
+
+  it('rejects a missing preMintRecipient when preMint > 0', async () => {
+    const { preMintRecipient: _recipient, ...withoutRecipient } = INPUTS
+    await assert.rejects(
+      () => new DeployToken().generate(stubChain(), withoutRecipient),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'preMintRecipient',
+    )
+  })
+
+  it('rejects a preMintRecipient when preMint is 0', async () => {
+    await assert.rejects(
+      () =>
+        new DeployToken().generate(stubChain(), {
+          ...INPUTS,
+          preMint: 0n,
+          preMintRecipient: PREMINT_RECIPIENT,
+        }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'preMintRecipient',
+    )
+  })
+
+  it('rejects a zero-address preMintRecipient when preMint > 0', async () => {
+    await assert.rejects(
+      () => new DeployToken().generate(stubChain(), { ...INPUTS, preMintRecipient: ZeroAddress }),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'preMintRecipient',
+    )
   })
 
   it('rejects an empty name, tagged with the operation and param', async () => {

@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 
-import type { Interface } from 'ethers'
+import { type Interface, ZeroAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
@@ -36,7 +36,7 @@ export interface DeployTokenParams {
   preMint?: bigint
   /** Receives ownership; a valid address. */
   owner: string
-  /** Recipient of `preMint`; defaults to `owner`. */
+  /** Recipient of `preMint`; required when `preMint > 0`, must be unset otherwise. */
   preMintRecipient?: string
   /** CCIP admin (`getCCIPAdmin`); defaults to `owner`. */
   ccipAdmin?: string
@@ -45,7 +45,7 @@ export interface DeployTokenParams {
   sender?: string
 }
 
-/** Encodes the `CrossChainToken` (v2.0.0) constructor args; admin/recipient default to `owner`. */
+/** Encodes the `CrossChainToken` (v2.0.0) constructor args; admins default to `owner`. */
 function encodeCrossChainToken(iface: Interface, p: DeployTokenParams): string {
   return iface.encodeDeploy([
     [
@@ -53,7 +53,8 @@ function encodeCrossChainToken(iface: Interface, p: DeployTokenParams): string {
       p.symbol,
       p.maxSupply,
       p.preMint ?? 0n,
-      p.preMintRecipient ?? p.owner,
+      // preMintRecipient is set iff preMint > 0 (enforced in validate); zero address otherwise.
+      p.preMintRecipient ?? ZeroAddress,
       p.decimals,
       p.ccipAdmin ?? p.owner,
     ],
@@ -62,7 +63,7 @@ function encodeCrossChainToken(iface: Interface, p: DeployTokenParams): string {
   ])
 }
 
-/** Deploys a `CrossChainToken`; `execute` resolves to `{ hash, address }`. */
+/** Deploys a `CrossChainToken`; `execute` resolves to `{ hash, contractAddress }`. */
 export class DeployToken extends EVMOperation<DeployTokenParams> {
   readonly name = 'deployToken'
 
@@ -81,8 +82,28 @@ export class DeployToken extends EVMOperation<DeployTokenParams> {
         'preMint',
         `must be <= maxSupply (${params.maxSupply}), got ${preMint}`,
       )
-    if (params.preMintRecipient !== undefined)
+    // Mirror CrossChainToken's ctor: preMintRecipient is set (and non-zero) iff preMint > 0.
+    if (preMint > 0n) {
+      if (params.preMintRecipient === undefined)
+        throw new CCTParamsInvalidError(
+          this.name,
+          'preMintRecipient',
+          'must be set when preMint > 0',
+        )
       validateAddress(this.name, 'preMintRecipient', params.preMintRecipient)
+      if (params.preMintRecipient === ZeroAddress)
+        throw new CCTParamsInvalidError(
+          this.name,
+          'preMintRecipient',
+          'must be non-zero when preMint > 0',
+        )
+    } else if (params.preMintRecipient !== undefined) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'preMintRecipient',
+        'must be unset when preMint is 0',
+      )
+    }
     if (params.ccipAdmin !== undefined) validateAddress(this.name, 'ccipAdmin', params.ccipAdmin)
     if (params.burnMintRoleAdmin !== undefined)
       validateAddress(this.name, 'burnMintRoleAdmin', params.burnMintRoleAdmin)

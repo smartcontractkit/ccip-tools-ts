@@ -124,6 +124,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress }`.
+   * @remarks Same post-deploy roles caveat as {@link deployToken} — the pool needs
+   * `grantMintAndBurnRoles` before it can bridge.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -144,6 +146,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Deploys a `CrossChainToken` (v2.0.0), signing + submitting with `opts.wallet`; resolves
    * to the tx hash and the newly deployed token address.
+   * @remarks Mint/burn are role-gated (`MINTER_ROLE`/`BURNER_ROLE`); the token grants neither
+   * to any pool at deploy. `preMint` mints initial supply to `preMintRecipient`, but before a
+   * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -167,5 +172,5 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
-export type { DeployResult } from './operation.ts'
+export type { DeployResult, EVMExecuteParams } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
