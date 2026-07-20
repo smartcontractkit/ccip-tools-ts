@@ -9,8 +9,15 @@
 
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
+import { ChainFamily } from '../../networks.ts'
 import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
+import { validateAddress } from './validate.ts'
+
+/** Assembles a contract-deployment tx (no `to`): creation bytecode + ABI-encoded ctor args. */
+export function deploymentTx(bytecode: `0x${string}`, ctorArgs: string): UnsignedEVMTx {
+  return { family: ChainFamily.EVM, transactions: [{ data: bytecode + ctorArgs.slice(2) }] }
+}
 
 /** EVM {@link ExecuteParams} — EVM ops need nothing beyond the signing `wallet`. */
 export type EVMExecuteParams<P extends object> = ExecuteParams<P>
@@ -42,6 +49,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
   /** Run {@link validate} and {@link buildUnsigned}, applying optional `sender`; no signing. */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {
     this.validate(params)
+    if (params.sender !== undefined) validateAddress(this.name, 'sender', params.sender)
     const unsigned = await this.buildUnsigned(chain, params)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
     return unsigned

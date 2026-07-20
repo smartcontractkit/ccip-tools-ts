@@ -121,9 +121,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `BurnMintERC677Token` deployment tx (for multisig / offline signing).
-   * The deployed address is only known once mined, so it is NOT returned here — use
-   * {@link deployToken} to deploy and receive `{ hash, contractAddress }`.
+   * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
+   * signing). The deployed address is only known once mined, so it is NOT returned here —
+   * use {@link deployToken} to deploy and receive `{ hash, contractAddress }`.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -132,6 +132,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   symbol: 'MTK',
    *   decimals: 18,
    *   maxSupply: 0n, // 0 = unlimited
+   *   owner: '0xOwner...', // CrossChainToken v2.0.0; ccipAdmin/burnMintRoleAdmin default to owner
    *   sender: '0xDeployer...',
    * })
    * ```
@@ -141,9 +142,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Deploys a `BurnMintERC677Token`, signing + submitting with `opts.wallet`; resolves to
-   * the tx hash and the newly deployed token address. Deploys with zero supply and no roles
-   * granted — call `grantMintAndBurnRoles` before `mint`, or it reverts on access control.
+   * Deploys a `CrossChainToken` (v2.0.0), signing + submitting with `opts.wallet`; resolves
+   * to the tx hash and the newly deployed token address.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -154,6 +154,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   symbol: 'MTK',
    *   decimals: 18,
    *   maxSupply: 0n,
+   *   owner: '0xOwner...',
    *   wallet,
    * })
    * ```
@@ -166,5 +167,5 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { DeployResult } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
-export type { DeployResult, EVMExecuteParams } from './operation.ts'
