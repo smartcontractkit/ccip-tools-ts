@@ -367,6 +367,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 }
 
 export * from '../errors.ts'
+export { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
