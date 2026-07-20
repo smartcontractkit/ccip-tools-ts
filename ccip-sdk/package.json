@@ -78,6 +78,10 @@
   "dependencies": {
     "@aptos-labs/ts-sdk": "^6.3.1",
     "@coral-xyz/anchor": "^0.29.0",
+    "@metaplex-foundation/mpl-token-metadata": "3.4.0",
+    "@metaplex-foundation/umi": "1.5.1",
+    "@metaplex-foundation/umi-bundle-defaults": "1.5.1",
+    "@metaplex-foundation/umi-web3js-adapters": "1.5.1",
     "@mysten/bcs": "^2.1.0",
     "@mysten/sui": "^2.20.1",
     "@noble/hashes": "^2.2.0",
