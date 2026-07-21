@@ -66,6 +66,21 @@ export function validateTokenProgram(
 }
 
 /**
+ * Asserts an authority matches the executing wallet.
+ * @throws CCTParamsInvalidError if authority does not match wallet.
+ */
+export function validateAuthorityMatchesWallet(
+  operation: string,
+  authority: PublicKey,
+  wallet: PublicKey,
+  errorMessage = 'must match the executing wallet',
+): void {
+  if (!authority.equals(wallet)) {
+    throw new CCTParamsInvalidError(operation, 'authority', errorMessage)
+  }
+}
+
+/**
  * Asserts `value` is a supported token pool type.
  * @throws CCTParamsInvalidError if `value` is not `burn-mint` or `lock-release`.
  */

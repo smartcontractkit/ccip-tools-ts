@@ -20,6 +20,7 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  validateAuthorityMatchesWallet,
   validateInteger,
   validateNonEmptyString,
   validatePoolType,
@@ -228,13 +229,12 @@ export class CreateTokenMultisig extends SolanaOperation<
 
     const tokenProgram = mintAccount.owner
     const mintAuthority = getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
-    if (!mintAuthority.equals(wallet.publicKey)) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        'createTokenMultisig requires the executing wallet to be the mint authority. Use generateUnsignedCreateTokenMultisig for vault-owned mints and have the vault sign/execute it.',
-      )
-    }
+    validateAuthorityMatchesWallet(
+      this.name,
+      mintAuthority,
+      wallet.publicKey,
+      'createTokenMultisig requires the executing wallet to be the mint authority. Use generateUnsignedCreateTokenMultisig for vault-owned mints and have the vault sign/execute it.',
+    )
 
     const tx = await this.buildUnsigned(chain, generateParams, {
       account: mintAccount,

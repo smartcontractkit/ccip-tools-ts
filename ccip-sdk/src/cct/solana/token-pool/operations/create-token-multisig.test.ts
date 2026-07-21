@@ -155,7 +155,7 @@ describe('Solana token createTokenMultisig', () => {
       (err: unknown) =>
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'createTokenMultisig' &&
-        err.context.param === 'tokenAddress',
+        err.context.param === 'authority',
     )
   })
 })
