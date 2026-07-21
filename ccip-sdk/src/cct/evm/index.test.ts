@@ -7,7 +7,7 @@ import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError } from '../errors.ts'
+import { CCTContractVersionUnsupportedError, CCTParamsInvalidError } from '../errors.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -15,19 +15,38 @@ const ROUTER = '0x' + '33'.repeat(20)
 const TAR = '0x' + '44'.repeat(20)
 
 /** Minimal EVMChain stub — only the members EVMTokenManager touches. */
-function stubChain(overrides: Partial<EVMChain> = {}): EVMChain {
+function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
+    typeAndVersion: (_address: string) => Promise.resolve(['BurnMintTokenPool', poolVersion]),
+    nextNonce: async () => 0,
+    rollbackNonce: () => {},
     ...overrides,
   } as unknown as EVMChain
+}
+
+const HASH = '0x' + 'ab'.repeat(32)
+
+/** Fake ethers Signer whose broadcast resolves to a confirmed receipt. */
+function fakeSigner() {
+  return {
+    signTransaction: () => Promise.resolve('0x'),
+    getAddress: () => Promise.resolve(TOKEN),
+    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    sendTransaction: () =>
+      Promise.resolve({ hash: HASH, wait: () => Promise.resolve({ status: 1 }) }),
+  }
 }
 
 const SET_POOL_SELECTOR = id('setPool(address,address)').slice(0, 10)
 const EXPECTED_DATA = new Interface([
   'function setPool(address localToken, address pool)',
 ]).encodeFunctionData('setPool', [TOKEN, POOL])
+const EXPECTED_TRANSFER = new Interface([
+  'function transferOwnership(address to)',
+]).encodeFunctionData('transferOwnership', [TOKEN])
 
 describe('EVMTokenManager (cct/evm)', () => {
   describe('construction', () => {
@@ -115,6 +134,17 @@ describe('EVMTokenManager (cct/evm)', () => {
   })
 
   describe('setPool', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const result = await cct.setPool({
+        tokenAddress: TOKEN,
+        poolAddress: POOL,
+        address: ROUTER,
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
     it('rejects a non-signer wallet', async () => {
       const cct = EVMTokenManager.fromChain(stubChain())
       await assert.rejects(
@@ -126,6 +156,26 @@ describe('EVMTokenManager (cct/evm)', () => {
             wallet: {},
           }),
         (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+  })
+
+  describe('transferOwnership', () => {
+    it('builds transferOwnership to the pool (floor-match across versions)', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain({}, '1.6.1'))
+      const unsigned = await cct.generateUnsignedTransferOwnership({
+        poolAddress: POOL,
+        newOwner: TOKEN,
+      })
+      assert.equal(unsigned.transactions[0]!.to, POOL)
+      assert.equal(unsigned.transactions[0]!.data, EXPECTED_TRANSFER)
+    })
+
+    it('throws for an unsupported pool version', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain({}, '1.6.0'))
+      await assert.rejects(
+        () => cct.generateUnsignedTransferOwnership({ poolAddress: POOL, newOwner: TOKEN }),
+        CCTContractVersionUnsupportedError,
       )
     })
   })

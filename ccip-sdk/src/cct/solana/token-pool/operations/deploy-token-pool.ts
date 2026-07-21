@@ -4,7 +4,7 @@ import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -26,7 +26,15 @@ import {
   validatePublicKeys,
 } from '../../validate.ts'
 
-/** Parameters for initializing a Solana token pool, optionally with an allowlist. */
+/**
+ * Parameters for initializing a Solana token pool, optionally with an allowlist.
+ *
+ * @remarks Targets only the canonical CCIP pool programs selected by `poolType` (`burn-mint`,
+ * `lock-release`). Deploying a custom pool program is intentionally unsupported because this
+ * operation initializes pools through the SDK's bundled program IDL; custom programs may use a
+ * different initialize instruction or pool-state PDA layout. This is a deploy-operation scope,
+ * not a protocol limitation: the registry and lookup-table operations remain program-agnostic.
+ */
 type DeployTokenPoolParams = {
   /** Token mint address this pool manages. */
   tokenAddress: string
@@ -54,7 +62,7 @@ export type GenerateDeployTokenPoolResult = UnsignedSolanaTx & {
 export type ExecuteDeployTokenPoolParams = SolanaExecuteParams<DeployTokenPoolParams>
 
 /** Result of executing Solana token pool deploy plus the derived pool state PDA. */
-export type ExecuteDeployTokenPoolResult = TransactionHash & {
+export type ExecuteDeployTokenPoolResult = TransactionResult & {
   poolAddress: string
 }
 
