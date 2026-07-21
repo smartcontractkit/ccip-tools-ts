@@ -3,7 +3,7 @@ import { PublicKey } from '@solana/web3.js'
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
-import { TOKEN_POOL_PROGRAMS, type TokenPoolType } from './programs/token-pool.ts'
+import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 /**
  * Asserts `value` is a valid Solana public key string.
@@ -39,6 +39,21 @@ export function validatePublicKey(operation: string, param: string, value: unkno
 export function validatePublicKeys(operation: string, param: string, values: unknown): void {
   if (!Array.isArray(values)) throw new CCTParamsInvalidError(operation, param, 'must be an array')
   for (const [i, value] of values.entries()) validatePublicKey(operation, `${param}[${i}]`, value)
+}
+
+/**
+ * Asserts an authority matches the executing wallet.
+ * @throws CCTParamsInvalidError if authority does not match wallet.
+ */
+export function validateAuthorityMatchesWallet(
+  operation: string,
+  authority: PublicKey,
+  wallet: PublicKey,
+  errorMessage = 'must match the executing wallet',
+): void {
+  if (!authority.equals(wallet)) {
+    throw new CCTParamsInvalidError(operation, 'authority', errorMessage)
+  }
 }
 
 /**
