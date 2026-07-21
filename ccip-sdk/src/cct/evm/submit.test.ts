@@ -32,7 +32,7 @@ function stubChain(): EVMChain {
  * `submitError` makes both send and sign paths reject (pre-broadcast failure).
  */
 function fakeSigner(opts: {
-  receipt?: { status: number } | null
+  receipt?: { status: number; contractAddress?: string | null } | null
   waitError?: Error
   submitError?: Error
 }) {
@@ -54,15 +54,16 @@ function fakeSigner(opts: {
   }
 }
 
-describe('submit (shared CCT submit pipeline)', () => {
-  it('returns the hash on a successful receipt', async () => {
-    const result = await submit(
+describe('submit (sign-and-confirm pipeline)', () => {
+  it('returns the broadcast response and mined receipt', async () => {
+    const { response, receipt } = await submit(
       stubChain(),
-      fakeSigner({ receipt: { status: 1 } }),
+      fakeSigner({ receipt: { status: 1, contractAddress: null } }),
       UNSIGNED,
       'setPool',
     )
-    assert.deepEqual(result, { hash: HASH })
+    assert.equal(response.hash, HASH)
+    assert.equal(receipt.status, 1)
   })
 
   it('throws CCIPExecTxRevertedError (non-transient) when wait() throws CALL_EXCEPTION', async () => {

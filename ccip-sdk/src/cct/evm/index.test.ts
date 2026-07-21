@@ -21,8 +21,23 @@ function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EV
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
     typeAndVersion: (_address: string) => Promise.resolve(['BurnMintTokenPool', poolVersion]),
+    nextNonce: async () => 0,
+    rollbackNonce: () => {},
     ...overrides,
   } as unknown as EVMChain
+}
+
+const HASH = '0x' + 'ab'.repeat(32)
+
+/** Fake ethers Signer whose broadcast resolves to a confirmed receipt. */
+function fakeSigner() {
+  return {
+    signTransaction: () => Promise.resolve('0x'),
+    getAddress: () => Promise.resolve(TOKEN),
+    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    sendTransaction: () =>
+      Promise.resolve({ hash: HASH, wait: () => Promise.resolve({ status: 1 }) }),
+  }
 }
 
 const SET_POOL_SELECTOR = id('setPool(address,address)').slice(0, 10)
@@ -119,6 +134,17 @@ describe('EVMTokenManager (cct/evm)', () => {
   })
 
   describe('setPool', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const result = await cct.setPool({
+        tokenAddress: TOKEN,
+        poolAddress: POOL,
+        address: ROUTER,
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
     it('rejects a non-signer wallet', async () => {
       const cct = EVMTokenManager.fromChain(stubChain())
       await assert.rejects(

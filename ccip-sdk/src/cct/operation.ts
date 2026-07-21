@@ -7,14 +7,20 @@
 
 import type { ChainTransaction } from '../types.ts'
 
-/** Confirmed on-chain hash returned by a successful CCT write. */
-export type TransactionHash = Pick<ChainTransaction, 'hash'>
+/** Result of a successful CCT write: the confirmed on-chain tx hash. */
+export type TransactionResult = Pick<ChainTransaction, 'hash'>
+
+/**
+ * Execute params for a CCT write: an op's own params plus the signing `wallet`.
+ * Families extend with submit-time extras (e.g. Solana's `computeUnits`).
+ */
+export type ExecuteParams<P extends object> = P & { wallet: unknown }
 
 /**
  * Abstract CCT write operation: build unsigned tx(s) with {@link generate}, or
  * sign and submit with {@link execute}.
  */
-export abstract class Operation<Chain, Params, Tx, Result = TransactionHash> {
+export abstract class Operation<Chain, Params extends object, Tx, Result> {
   /** camelCase id; matches the token-manager facade method and error context. */
   abstract readonly name: string
   /** Reject invalid params before any chain RPC. */
@@ -22,5 +28,5 @@ export abstract class Operation<Chain, Params, Tx, Result = TransactionHash> {
   /** Build unsigned transaction(s); no wallet required. */
   abstract generate(chain: Chain, params: Params): Promise<Tx>
   /** Sign and submit via `params.wallet`; returns once confirmed. */
-  abstract execute(chain: Chain, params: Params & { wallet: unknown }): Promise<Result>
+  abstract execute(chain: Chain, params: ExecuteParams<Params>): Promise<Result>
 }
