@@ -12,17 +12,35 @@ import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
+import type {
+  ExecuteDeployTokenParams,
+  ExecuteDeployTokenResult,
+  GenerateDeployTokenParams,
+  GenerateDeployTokenResult,
+} from './token/operations/index.ts'
 import {
+  type ExecuteAppendToLookupTableParams,
+  type ExecuteAppendToLookupTableResult,
+  type ExecuteCreateLookupTableParams,
+  type ExecuteCreateLookupTableResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
+  type GenerateAppendToLookupTableParams,
+  type GenerateAppendToLookupTableResult,
+  type GenerateCreateLookupTableParams,
+  type GenerateCreateLookupTableResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  AppendToLookupTable,
+  CreateLookupTable,
   SetPool,
-} from './token-admin-registry/operations/set-pool.ts'
+} from './token-admin-registry/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
+  readonly #appendToLookupTable = new AppendToLookupTable()
+  readonly #createLookupTable = new CreateLookupTable()
   readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -49,6 +67,142 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /** Provider of the underlying chain. */
   get provider(): Connection {
     return this.chain.connection
+  }
+
+  /**
+   * Builds unsigned Solana mint creation instructions, optionally with initial supply.
+   *
+   * The `payer` defaults as mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeployToken({
+   *   payer,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: true,
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   * })
+   * ```
+   */
+  async generateUnsignedDeployToken(
+    opts: GenerateDeployTokenParams,
+  ): Promise<GenerateDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a Solana mint, optionally with initial supply.
+   *
+   * The wallet public key defaults as mint, freeze, and metadata update authority.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deployToken({
+   *   wallet,
+   *   decimals: 9,
+   *   tokenProgram: 'spl-token',
+   *   withMetaplex: false,
+   * })
+   * ```
+   */
+  async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned Solana pool lookup table instructions.
+   *
+   * Defaults to create+extend. Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an
+   * EOA payer and vault authority, then populate it later through the authority. If `authority`
+   * is omitted, it defaults to `payer`.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCreateLookupTable({
+   *   mode: 'createEmpty',
+   *   payer: eoa,
+   *   authority: squadsVault,
+   * })
+   * ```
+   */
+  generateUnsignedCreateLookupTable(
+    opts: GenerateCreateLookupTableParams,
+  ): Promise<GenerateCreateLookupTableResult> {
+    return this.#createLookupTable.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a Solana pool lookup table. Defaults to create+extend; pass `mode: 'createEmpty'` to
+   * create an empty ALT owned by `authority` and paid by `wallet`. If `authority` is omitted, it
+   * defaults to the wallet public key.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { hash, lookupTableAddress } = await cct.createLookupTable({
+   *   mode: 'createEmpty',
+   *   authority: squadsVault,
+   *   wallet,
+   * })
+   * ```
+   */
+  createLookupTable(opts: ExecuteCreateLookupTableParams): Promise<ExecuteCreateLookupTableResult> {
+    return this.#createLookupTable.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned Solana lookup table extend instructions.
+   *
+   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
+   * pass `additionalAddresses` to append manual addresses. `authority` defaults to `payer`.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAppendToLookupTable({
+   *   lookupTableAddress,
+   *   payer: squadsVault,
+   *   authority: squadsVault,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  generateUnsignedAppendToLookupTable(
+    opts: GenerateAppendToLookupTableParams,
+  ): Promise<GenerateAppendToLookupTableResult> {
+    return this.#appendToLookupTable.generate(this.chain, opts)
+  }
+
+  /**
+   * Extends a Solana lookup table.
+   *
+   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.appendToLookupTable({
+   *   lookupTableAddress,
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  appendToLookupTable(
+    opts: ExecuteAppendToLookupTableParams,
+  ): Promise<ExecuteAppendToLookupTableResult> {
+    return this.#appendToLookupTable.execute(this.chain, opts)
   }
 
   /**
@@ -113,4 +267,5 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 export * from '../errors.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
-export type * from './token-admin-registry/operations/set-pool.ts'
+export type * from './token/operations/index.ts'
+export type * from './token-admin-registry/operations/index.ts'
