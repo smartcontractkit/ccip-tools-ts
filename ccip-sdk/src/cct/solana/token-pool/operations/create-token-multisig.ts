@@ -7,7 +7,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -59,7 +59,7 @@ export type GenerateCreateTokenMultisigResult = UnsignedSolanaTx & { multisigAdd
 export type ExecuteCreateTokenMultisigParams = SolanaExecuteParams<CreateTokenMultisigParams>
 
 /** Result of executing Solana token multisig creation. */
-export type ExecuteCreateTokenMultisigResult = TransactionHash & { multisigAddress: string }
+export type ExecuteCreateTokenMultisigResult = TransactionResult & { multisigAddress: string }
 
 function dedupePublicKeys(signers: PublicKey[]) {
   const seen = new Set<string>()
