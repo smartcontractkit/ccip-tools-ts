@@ -42,9 +42,10 @@ export class CCTParamsInvalidError extends CCIPError {
 // Transaction submission
 
 /**
- * Thrown when a CCT write fails before broadcast or the transaction reverts after mining.
- * Pre-broadcast failures (signing/RPC) may set `isTransient: true` for network errors;
- * on-chain reverts are permanent. Reverts include `context.txHash`.
+ * Thrown when a CCT write fails before broadcast, the transaction reverts after mining,
+ * or it mines without the expected effect (e.g. a deployment that produced no contract
+ * address). Pre-broadcast failures (signing/RPC) may set `isTransient: true` for network
+ * errors; reverts and post-mining anomalies are permanent and include `context.txHash`.
  *
  * @example
  * ```typescript
