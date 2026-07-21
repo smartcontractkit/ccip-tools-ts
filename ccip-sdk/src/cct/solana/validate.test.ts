@@ -3,7 +3,12 @@ import { describe, it } from 'node:test'
 
 import { PublicKey } from '@solana/web3.js'
 
-import { validatePublicKey, validateWritableIndexes } from './validate.ts'
+import {
+  validatePoolType,
+  validatePublicKey,
+  validatePublicKeys,
+  validateWritableIndexes,
+} from './validate.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
 describe('cct/solana validate', () => {
@@ -28,6 +33,45 @@ describe('cct/solana validate', () => {
         err instanceof CCTParamsInvalidError &&
         err.context.operation === 'op' &&
         err.context.param === 'payer',
+    )
+  })
+
+  it('accepts valid public key arrays', () => {
+    assert.doesNotThrow(() => validatePublicKeys('op', 'allowlist', [PublicKey.default.toBase58()]))
+  })
+
+  it('rejects non-array public key arrays', () => {
+    assert.throws(
+      () => validatePublicKeys('op', 'allowlist', 'nope'),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'op' &&
+        err.context.param === 'allowlist',
+    )
+  })
+
+  it('rejects invalid public key array items', () => {
+    assert.throws(
+      () => validatePublicKeys('op', 'allowlist', [PublicKey.default.toBase58(), 'nope']),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'op' &&
+        err.context.param === 'allowlist[1]',
+    )
+  })
+
+  it('accepts valid token pool types', () => {
+    assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'burn-mint'))
+    assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'lock-release'))
+  })
+
+  it('rejects invalid token pool types', () => {
+    assert.throws(
+      () => validatePoolType('op', 'poolType', 'mint-burn'),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.operation === 'op' &&
+        err.context.param === 'poolType',
     )
   })
 
