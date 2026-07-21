@@ -31,6 +31,7 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.appendToLookupTable, 'function')
     assert.equal(typeof cct.generateUnsignedSetPool, 'function')
     assert.equal(typeof cct.setPool, 'function')
+    assert.equal(typeof cct.getTokenPoolState, 'function')
   })
 
   it('creates from a connection provider', async (t) => {

@@ -45,7 +45,10 @@ import {
   type ExecuteDeployTokenPoolResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GetTokenPoolStateParams,
+  type GetTokenPoolStateResult,
   DeployTokenPool,
+  GetTokenPoolState,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -58,6 +61,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #setPool = new SetPool()
+  readonly #getTokenPoolState = new GetTokenPoolState()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -349,6 +353,21 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
     return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a canonical Burn/Mint or Lock/Release token pool's state account.
+   *
+   * @example
+   * ```ts
+   * const state = await cct.getTokenPoolState({
+   *   poolType: 'burn-mint',
+   *   tokenAddress: mint,
+   * })
+   * ```
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
+    return this.#getTokenPoolState.query(this.chain, opts)
   }
 
   /**

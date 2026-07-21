@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { Program } from '@coral-xyz/anchor'
+import { type IdlTypes, BorshCoder, Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { IDL as BASE_TOKEN_POOL_IDL } from '../../../solana/idl/1.6.0/BASE_TOKEN_POOL.ts'
@@ -13,6 +13,8 @@ const TOKEN_POOL_IDL = {
   types: BASE_TOKEN_POOL_IDL.types,
 }
 
+const tokenPoolCoder = new BorshCoder(TOKEN_POOL_IDL)
+
 /** Canonical Solana token pool program addresses. */
 export const TOKEN_POOL_PROGRAMS = {
   'burn-mint': '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB',
@@ -21,6 +23,9 @@ export const TOKEN_POOL_PROGRAMS = {
 
 /** Canonical Solana token pool program type. */
 export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
+
+/** Shared state configuration stored by canonical Solana token pools. */
+export type TokenPoolConfig = IdlTypes<typeof TOKEN_POOL_IDL>['BaseConfig']
 
 /** Resolves a canonical token pool program type to its address. */
 export function resolveTokenPoolProgram(poolType: TokenPoolType): PublicKey {
@@ -34,6 +39,11 @@ export function createTokenPoolProgram(
   payer: PublicKey,
 ) {
   return new Program(TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
+}
+
+/** Decodes a canonical token pool state account. */
+export function decodeTokenPoolState(data: Buffer): { version: number; config: TokenPoolConfig } {
+  return tokenPoolCoder.accounts.decode('state', data)
 }
 
 /** Derives the token pool global config PDA. */
