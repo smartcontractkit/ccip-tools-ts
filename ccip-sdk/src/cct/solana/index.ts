@@ -217,8 +217,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds unsigned Solana token pool initialize instructions.
    *
    * @remarks
-   * This only builds the pool `initialize` instruction. `authority` must be allowed to initialize
-   * the pool. This does not create the pool signer PDA's associated token account.
+   * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
+   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
+   * token account.
    *
    * @example
    * ```ts
@@ -242,8 +244,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Initializes a Solana token pool.
    *
    * @remarks
-   * This only sends the pool `initialize` instruction. The signer must be allowed to initialize the
-   * pool. This does not create the pool signer PDA's associated token account.
+   * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
+   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
+   * token account.
    *
    * @example
    * ```ts
