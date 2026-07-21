@@ -1,5 +1,6 @@
 /**
- * Shared parameter validators for EVM CCT ops.
+ * Shared parameter validators for EVM CCT operations. Throws
+ * {@link CCTParamsInvalidError} before any RPC so invalid inputs fail fast.
  *
  * @packageDocumentation
  */
