@@ -35,12 +35,20 @@ import {
   CreateLookupTable,
   SetPool,
 } from './token-admin-registry/operations/index.ts'
+import {
+  type ExecuteDeployTokenPoolParams,
+  type ExecuteDeployTokenPoolResult,
+  type GenerateDeployTokenPoolParams,
+  type GenerateDeployTokenPoolResult,
+  DeployTokenPool,
+} from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #deployTokenPool = new DeployTokenPool()
   readonly #setPool = new SetPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -158,6 +166,52 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds unsigned Solana token pool initialize instructions.
+   *
+   * @remarks
+   * This only builds the pool `initialize` instruction. `authority` must be allowed to initialize
+   * the pool. This does not create the pool signer PDA's associated token account.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeployTokenPool({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   payer,
+   *   authority,
+   *   allowlist: [allowedSender],
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPool(
+    opts: GenerateDeployTokenPoolParams,
+  ): Promise<GenerateDeployTokenPoolResult> {
+    return this.#deployTokenPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Initializes a Solana token pool.
+   *
+   * @remarks
+   * This only sends the pool `initialize` instruction. The signer must be allowed to initialize the
+   * pool. This does not create the pool signer PDA's associated token account.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deployTokenPool({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
+    return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
    * Builds unsigned Solana lookup table extend instructions.
    *
    * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
@@ -265,7 +319,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 }
 
 export * from '../errors.ts'
+export { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 export type { TransactionHash } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
+export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
