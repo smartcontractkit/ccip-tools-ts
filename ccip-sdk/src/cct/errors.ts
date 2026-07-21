@@ -100,3 +100,96 @@ export class CCTTxNotConfirmedError extends CCIPError {
     )
   }
 }
+
+// Contract version dispatch
+
+/**
+ * Thrown when the contract at an address is not of the expected type.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTContractTypeInvalidError) {
+ *     console.log(`Expected ${error.context.expected} at ${error.context.address}, got "${error.context.actual}"`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTContractTypeInvalidError extends CCIPError {
+  override readonly name = 'CCTContractTypeInvalidError'
+  /** Creates a contract-type-invalid error. */
+  constructor(address: string, expected: string, actual: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CONTRACT_TYPE_INVALID,
+      `Expected a ${expected} contract at ${address}, got "${actual}"`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, address, expected, actual },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when a contract reports a version string the SDK does not recognize. Permanent.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTContractVersionUnsupportedError) {
+ *     console.log(`Unsupported ${error.context.contractType} version: ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTContractVersionUnsupportedError extends CCIPError {
+  override readonly name = 'CCTContractVersionUnsupportedError'
+  /** Creates a contract-version-unsupported error. */
+  constructor(contractType: string, version: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CCT_CONTRACT_VERSION_UNSUPPORTED,
+      `Unsupported ${contractType} version: ${version}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, contractType, version },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when no implementation is registered for an operation at or below the contract's
+ * version (floor-match miss). Permanent for that contract version.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCTOperationUnsupportedError) {
+ *     console.log(`${error.context.operation} unsupported at version ${error.context.version}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTOperationUnsupportedError extends CCIPError {
+  override readonly name = 'CCTOperationUnsupportedError'
+  /** Creates an operation-unsupported error. */
+  constructor(operation: string, version: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CCT_OPERATION_UNSUPPORTED,
+      `${operation} is not supported at contract version ${version}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, operation, version },
+      },
+    )
+  }
+}
