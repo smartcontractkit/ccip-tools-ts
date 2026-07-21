@@ -4,7 +4,6 @@ import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionHash } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -20,7 +19,12 @@ import {
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
-import { validatePoolType, validatePublicKey, validatePublicKeys } from '../../validate.ts'
+import {
+  validateAuthorityMatchesWallet,
+  validatePoolType,
+  validatePublicKey,
+  validatePublicKeys,
+} from '../../validate.ts'
 
 /** Parameters for initializing a Solana token pool, optionally with an allowlist. */
 type DeployTokenPoolParams = {
@@ -131,10 +135,11 @@ export class DeployTokenPool extends SolanaOperation<
     this.validate(generateParams)
 
     const authority = params.authority ? new PublicKey(params.authority) : undefined
-    if (authority && !authority.equals(wallet.publicKey)) {
-      throw new CCTParamsInvalidError(
+    if (authority) {
+      validateAuthorityMatchesWallet(
         this.name,
-        'authority',
+        authority,
+        wallet.publicKey,
         'deployTokenPool requires authority to be the executing wallet. Use generateUnsignedDeployTokenPool for vault-owned pools and have the vault sign/execute it.',
       )
     }
