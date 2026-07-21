@@ -11,7 +11,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -38,7 +38,7 @@ export type GenerateCreateTokenAccountResult = UnsignedSolanaTx & { tokenAccount
 export type ExecuteCreateTokenAccountParams = SolanaExecuteParams<CreateTokenAccountParams>
 
 /** Result of executing Solana associated token account creation. */
-export type ExecuteCreateTokenAccountResult = TransactionHash & { tokenAccountAddress: string }
+export type ExecuteCreateTokenAccountResult = TransactionResult & { tokenAccountAddress: string }
 
 /** Creates an Associated Token Account for any wallet or PDA owner. */
 export class CreateTokenAccount extends SolanaOperation<

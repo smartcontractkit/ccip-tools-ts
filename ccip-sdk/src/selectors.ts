@@ -943,6 +943,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '10323': {
+    selector: 9211758560309513668n,
+    name: 'mova-testnet',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '11124': {
     selector: 16235373811196386733n,
     name: 'abstract-testnet',
@@ -1232,6 +1238,12 @@ const SELECTORS: Selectors = {
     name: 'treasure-mainnet',
     network_type: 'MAINNET',
     deprecated: true,
+    family: 'EVM',
+  },
+  '61900': {
+    selector: 3314641565992046393n,
+    name: 'mova-mainnet',
+    network_type: 'MAINNET',
     family: 'EVM',
   },
   '68414': {

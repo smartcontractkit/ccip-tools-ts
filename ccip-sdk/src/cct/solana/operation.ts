@@ -8,7 +8,7 @@
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
-import { type TransactionHash, Operation } from '../operation.ts'
+import { type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 
 /** Unsigned Solana operation params include an explicit fee payer. */
@@ -32,7 +32,7 @@ function withPayer<P extends object>(
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
-> extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionHash> {
+> extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult> {
   /** Build instructions after params have been validated. */
   protected abstract buildUnsigned(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
 
@@ -43,7 +43,7 @@ export abstract class SolanaOperation<
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
-  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionHash> {
+  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionResult> {
     const { wallet, computeUnits } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 

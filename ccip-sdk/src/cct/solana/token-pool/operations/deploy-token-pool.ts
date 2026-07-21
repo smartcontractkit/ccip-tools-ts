@@ -4,7 +4,7 @@ import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -54,7 +54,7 @@ export type GenerateDeployTokenPoolResult = UnsignedSolanaTx & {
 export type ExecuteDeployTokenPoolParams = SolanaExecuteParams<DeployTokenPoolParams>
 
 /** Result of executing Solana token pool deploy plus the derived pool state PDA. */
-export type ExecuteDeployTokenPoolResult = TransactionHash & {
+export type ExecuteDeployTokenPoolResult = TransactionResult & {
   poolAddress: string
 }
 

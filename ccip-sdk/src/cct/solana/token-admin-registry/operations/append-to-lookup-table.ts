@@ -5,7 +5,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -38,7 +38,7 @@ export type GenerateAppendToLookupTableResult = UnsignedSolanaTx
 export type ExecuteAppendToLookupTableParams = SolanaExecuteParams<AppendToLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `appendToLookupTable`. */
-export type ExecuteAppendToLookupTableResult = TransactionHash
+export type ExecuteAppendToLookupTableResult = TransactionResult
 
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
