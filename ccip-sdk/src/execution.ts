@@ -7,8 +7,9 @@ import {
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
+import { ChainFamily } from './networks.ts'
 import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
-import { decodeOnRampAddress } from './utils.ts'
+import { decodeAddress, decodeOnRampAddress } from './utils.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -124,6 +125,23 @@ export const discoverOffRamp = memoize(
       // pass
     }
 
+    // OnRamp v2.0 has `offRamp` config
+    const onRampConfig: { typeAndVersion: string; offramp?: string; offRamp?: string } =
+      await source.getOnRampConfig(onRamp, dest.network.chainSelector)
+    if (onRampConfig.offramp || onRampConfig.offRamp) {
+      let decoded = decodeAddress(
+        onRampConfig.offramp || onRampConfig.offRamp!,
+        dest.network.family,
+      )
+      if (
+        (dest.network.family === ChainFamily.Aptos || dest.network.family === ChainFamily.Sui) &&
+        !decoded.includes('::')
+      )
+        decoded += '::offramp'
+      return decoded
+    }
+
+    // fallback to pairing routers offramps
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     const sourceOffRamps = await source.getOffRampsForRouter(
       sourceRouter,
