@@ -2,7 +2,7 @@ import { PublicKey } from '@solana/web3.js'
 
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError, CCTTokenPoolStateDecodeError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type TokenPoolConfig,
   type TokenPoolType,
@@ -115,20 +115,11 @@ export class GetTokenPoolState extends SolanaQuery<
       })
     }
 
-    let decoded: { version: number; config: TokenPoolConfig }
-    try {
-      decoded = decodeTokenPoolState(account.data)
-    } catch (cause) {
-      throw new CCTTokenPoolStateDecodeError(state.toBase58(), {
-        cause: cause instanceof Error ? cause : undefined,
-        context: {
-          mint: params.tokenAddress,
-          poolProgram: programId.toBase58(),
-        },
-      })
-    }
-
-    const { version, config } = decoded
+    const { version, config } = decodeTokenPoolState(account.data, {
+      tokenPool: state.toBase58(),
+      mint: params.tokenAddress,
+      poolProgram: programId.toBase58(),
+    })
     const result = {
       stateAddress: state.toBase58(),
       programId: programId.toBase58(),
