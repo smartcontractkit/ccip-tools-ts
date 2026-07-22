@@ -61,10 +61,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #setPool = new SetPool()
-  readonly #getTokenPoolState = new GetTokenPoolState()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #getTokenPoolState = new GetTokenPoolState()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
