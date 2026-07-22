@@ -18,6 +18,10 @@ import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
+  type DeployTokenPoolParams,
+  DeployTokenPool,
+} from './token-pool/operations/deploy-token-pool.ts'
+import {
   type TransferOwnershipParams,
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
@@ -28,6 +32,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setPool = new SetPool()
   readonly #transferOwnership = new TransferOwnership()
   readonly #deployToken = new DeployToken()
+  readonly #deployTokenPool = new DeployTokenPool()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -100,9 +105,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned pool `transferOwnership` tx (for multisig / offline signing).
+   * `transferOwnership` is version/type-independent, so no on-chain pool probe is performed.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTContractTypeInvalidError} if the pool is not a recognised pool type
-   * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    */
   generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {
     return this.#transferOwnership.generate(this.chain, opts)
@@ -112,12 +116,56 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Proposes a new pool owner (two-step), signing + submitting with `opts.wallet`.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTContractTypeInvalidError} if the pool is not a recognised pool type
-   * @throws {@link CCTContractVersionUnsupportedError} if the pool version is unsupported
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
   transferOwnership(opts: EVMExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
     return this.#transferOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
+   * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
+   * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
+   * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
+   * `{ hash, contractAddress }`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployTokenPool({
+   *   type: 'BurnMintTokenPool', // or BurnFromMint / BurnWithFromMint / LockRelease
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPool(opts: DeployTokenPoolParams): Promise<UnsignedEVMTx> {
+    return this.#deployTokenPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
+   * and the newly deployed pool address. `type` selects the pool contract (a
+   * `DeployableTokenPoolType`, v2.0.0).
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @example
+   * ```typescript
+   * const { hash, contractAddress } = await cct.deployTokenPool({
+   *   type: 'LockReleaseTokenPool',
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
+    return this.#deployTokenPool.execute(this.chain, opts)
   }
 
   /**
@@ -172,5 +220,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { DeployTokenPoolParams } from './token-pool/operations/deploy-token-pool.ts'
 export type { DeployResult, EVMExecuteParams } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
