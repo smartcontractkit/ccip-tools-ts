@@ -20,6 +20,7 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
+import RMNProxy_ABI from './abi/RMNProxy.ts'
 import Router_ABI from './abi/Router.ts'
 import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
@@ -49,6 +50,7 @@ export const interfaces = {
   Router: new Interface(Router_ABI),
   Token: new Interface(Token_ABI),
   TokenAdminRegistry: new Interface(TokenAdminRegistry_ABI),
+  RMNProxy: new Interface(RMNProxy_ABI),
   FeeQuoter_v1_6: new Interface(FeeQuoter_1_6_ABI),
   FeeQuoter_v2_0: new Interface(FeeQuoter_2_0_ABI),
   TokenPool_v2_0: new Interface(TokenPool_2_0_ABI),
