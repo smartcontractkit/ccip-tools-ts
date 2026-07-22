@@ -225,6 +225,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 export * from '../errors.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
-export type { DeployTokenPoolParams } from './token-pool/operations/deploy-token-pool.ts'
+export type {
+  DeployTokenPoolParams,
+  DeployableTokenPoolType,
+} from './token-pool/operations/deploy-token-pool.ts'
 export type { DeployResult, EVMExecuteParams } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'

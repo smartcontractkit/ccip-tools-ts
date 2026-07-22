@@ -53,12 +53,7 @@ export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {
     validateAddress(this.name, 'newOwner', newOwner)
   }
 
-  /**
-   * Resolves the pool's on-chain type + version, then encodes `transferOwnership` against that
-   * ABI, floor-matching the encoder to the same version. The calldata is version-independent
-   * today (one encoder covers all); resolving keeps the interface and encoder in step if it
-   * diverges.
-   */
+  /** Reads the pool's type-and-version, then floor-matches the encoder and its contract interface. */
   protected async buildUnsigned(
     chain: EVMChain,
     { poolAddress, newOwner }: TransferOwnershipParams,
