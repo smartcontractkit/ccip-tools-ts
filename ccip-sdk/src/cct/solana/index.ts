@@ -356,7 +356,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a canonical Burn/Mint or Lock/Release token pool's state account.
+   * Reads a Burn/Mint, Lock/Release, or custom token pool's state account.
+   * Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
    *
    * @example
    * ```ts

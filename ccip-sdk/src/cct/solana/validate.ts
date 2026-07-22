@@ -9,7 +9,11 @@ import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.t
  * Asserts `value` is a valid Solana public key string.
  * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
  */
-export function validatePublicKey(operation: string, param: string, value: unknown): void {
+export function validatePublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string {
   if (typeof value !== 'string') {
     throw new CCTParamsInvalidError(
       operation,
