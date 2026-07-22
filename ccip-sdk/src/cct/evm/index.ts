@@ -128,6 +128,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
    * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
    * `{ hash, contractAddress }`.
+   * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
+   * registered, role-granted, and lane-configured before it can bridge.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -149,6 +151,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
    * and the newly deployed pool address. `type` selects the pool contract (a
    * `DeployableTokenPoolType`, v2.0.0).
+   * @remarks Deploying the pool alone doesn't make it usable: register it with {@link setPool},
+   * grant it the token's mint/burn roles (`grantMintAndBurnRoles`), and configure its remote
+   * pools + rate limits before it can bridge.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
