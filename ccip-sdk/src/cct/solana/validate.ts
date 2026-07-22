@@ -6,14 +6,10 @@ import { CCTParamsInvalidError } from '../errors.ts'
 import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 /**
- * Asserts `value` is a valid Solana public key string.
+ * Parses `value` as a Solana public key.
  * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
  */
-export function validatePublicKey(
-  operation: string,
-  param: string,
-  value: unknown,
-): asserts value is string {
+export function parsePublicKey(operation: string, param: string, value: unknown): PublicKey {
   if (typeof value !== 'string') {
     throw new CCTParamsInvalidError(
       operation,
@@ -23,7 +19,7 @@ export function validatePublicKey(
   }
 
   try {
-    new PublicKey(value)
+    return new PublicKey(value)
   } catch {
     throw new CCTParamsInvalidError(
       operation,
@@ -34,6 +30,18 @@ export function validatePublicKey(
       },
     )
   }
+}
+
+/**
+ * Asserts `value` is a valid Solana public key string.
+ * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
+ */
+export function validatePublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string {
+  parsePublicKey(operation, param, value)
 }
 
 /**

@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js'
+import type { PublicKey } from '@solana/web3.js'
 
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -11,7 +11,7 @@ import {
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { validatePoolType, validatePublicKey } from '../../validate.ts'
+import { parsePublicKey, validatePoolType } from '../../validate.ts'
 
 /** Identifies a canonical token pool or a custom pool program. */
 export type PoolProgramRef =
@@ -66,9 +66,7 @@ function resolvePoolProgram(params: PoolProgramRef): PublicKey {
     return resolveTokenPoolProgram(params.poolType)
   }
 
-  const { poolProgramAddress } = params
-  validatePublicKey('getTokenPoolState', 'poolProgramAddress', poolProgramAddress)
-  return new PublicKey(poolProgramAddress)
+  return parsePublicKey('getTokenPoolState', 'poolProgramAddress', params.poolProgramAddress)
 }
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
@@ -99,10 +97,8 @@ export class GetTokenPoolState extends SolanaQuery<
     chain: SolanaChain,
     params: GetTokenPoolStateParams,
   ): Promise<GetTokenPoolStateResult> {
-    validatePublicKey('getTokenPoolState', 'tokenAddress', params.tokenAddress)
-
+    const mint = parsePublicKey('getTokenPoolState', 'tokenAddress', params.tokenAddress)
     const programId = resolvePoolProgram(params)
-    const mint = new PublicKey(params.tokenAddress)
     const state = deriveTokenPoolConfigPda(programId, mint)
 
     const account = await chain.connection.getAccountInfo(state)

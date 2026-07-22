@@ -1,5 +1,5 @@
 /**
- * CCT-specific error classes.
+ * CCT-specific error classes for write operations (validate → encode → submit).
  * Shared CCIP errors (`CCIPWalletInvalidError`, etc.) live in `../errors/`.
  *
  * @packageDocumentation
@@ -195,7 +195,20 @@ export class CCTOperationUnsupportedError extends CCIPError {
   }
 }
 
-/** Thrown when a CCT token pool state account cannot be decoded. */
+/**
+ * Thrown when a CCT token pool state account cannot be decoded.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.getTokenPoolState({ tokenAddress: mint, poolType: 'burn-mint' })
+ * } catch (error) {
+ *   if (error instanceof CCTTokenPoolStateDecodeError) {
+ *     console.log(`Unable to decode pool state at ${error.context.tokenPool}`)
+ *   }
+ * }
+ * ```
+ */
 export class CCTTokenPoolStateDecodeError extends CCIPError {
   override readonly name = 'CCTTokenPoolStateDecodeError'
   /** Creates a token pool state decode error. */
