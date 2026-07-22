@@ -145,7 +145,7 @@ function createUncircularReplacer() {
     // bigints pass through untouched; serialization to bare JSON numbers is
     // handled by stringifyExtended below.
     const replaced = value
-    if (typeof replaced !== 'object' || replaced === null) return replaced
+    if (typeof replaced !== 'object' || replaced == null) return replaced
 
     while (holderStack.length > 0 && holderStack.at(-1) !== this) {
       holderStack.pop()
@@ -195,6 +195,7 @@ const INT_TAG_RE = new RegExp(`"${INT_TAG}(-?\\d+(?:.0)?)"`, 'g')
  * ```
  */
 export function jsonStringify(value: unknown, space?: string | number): string {
+  if (value == null) return 'null'
   const uncircular = createUncircularReplacer()
   const json = JSON.stringify(
     value,
@@ -210,7 +211,7 @@ export function jsonStringify(value: unknown, space?: string | number): string {
   )
   // JSON.stringify is typed `string` but returns undefined for undefined input.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  return json === undefined ? json : json.replace(INT_TAG_RE, '$1')
+  return json.replace(INT_TAG_RE, '$1')
 }
 
 /**
