@@ -5,8 +5,6 @@ import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
   type ConnectionConfig,
-  type Finality,
-  type SignaturesForAddressOptions,
   type VersionedTransactionResponse,
   Connection,
   PublicKey,

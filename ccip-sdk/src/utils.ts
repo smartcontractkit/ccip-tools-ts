@@ -210,7 +210,6 @@ export function jsonStringify(value: unknown, space?: string | number): string {
     space,
   )
   // JSON.stringify is typed `string` but returns undefined for undefined input.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   return json.replace(INT_TAG_RE, '$1')
 }
 

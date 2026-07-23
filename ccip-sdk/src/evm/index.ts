@@ -2358,10 +2358,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
       // v1.2..v1.5 EVM (only) have separate CommitStore
-      const { commitStore } = await this.getOffRampConfig(
+      const { commitStore } = (await this.getOffRampConfig(
         opts.offRamp,
         request.lane.sourceChainSelector,
-      )
+      )) as Extract<Awaited<ReturnType<EVMChain['getOffRampConfig']>>, { commitStore: unknown }>
       opts.offRamp = commitStore
     }
     // fallback <=v1.6
