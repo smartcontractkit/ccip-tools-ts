@@ -236,6 +236,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If multisig parameters are invalid or the wallet is not the mint authority.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
