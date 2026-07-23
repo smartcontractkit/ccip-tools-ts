@@ -397,7 +397,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
-   * @throws {@link CCTTokenPoolStateDecodeError} If the pool state account cannot be decoded.
+   * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
    *
    * @example
    * ```ts
@@ -407,7 +407,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
+  getTokenPoolState<P extends GetTokenPoolStateParams>(
+    opts: P,
+  ): Promise<GetTokenPoolStateResult<P>> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 

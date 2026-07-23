@@ -7,7 +7,7 @@ import { PublicKey } from '@solana/web3.js'
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTTokenPoolStateDecodeError } from '../../../errors.ts'
+import { CCTDataDecodeError } from '../../../errors.ts'
 
 function key(byte: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
@@ -81,7 +81,8 @@ describe('Solana token pool getTokenPoolState', () => {
     await assert.rejects(
       new GetTokenPoolState().query(chain, { tokenAddress: mint, poolProgramAddress: poolProgram }),
       (error: unknown) => {
-        assert.ok(error instanceof CCTTokenPoolStateDecodeError)
+        assert.ok(error instanceof CCTDataDecodeError)
+        assert.match(error.message, /^Unable to decode token pool state at /)
         assert.equal(error.context.mint, mint)
         assert.equal(error.context.poolProgram, poolProgram)
         assert.ok(error.cause instanceof Error)
