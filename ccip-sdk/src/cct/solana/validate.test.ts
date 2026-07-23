@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import {
@@ -10,7 +9,6 @@ import {
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
-  validateTokenProgram,
   validateWritableIndexes,
 } from './validate.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
@@ -58,15 +56,6 @@ describe('cct/solana validate', () => {
     assert.throws(
       () => validateNonEmptyString('op', 'seed', '   '),
       (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'seed',
-    )
-  })
-
-  it('validates token programs', () => {
-    assert.doesNotThrow(() => validateTokenProgram('op', 'tokenAddress', TOKEN_PROGRAM_ID))
-    assert.throws(
-      () => validateTokenProgram('op', 'tokenAddress', PublicKey.default),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
     )
   })
 

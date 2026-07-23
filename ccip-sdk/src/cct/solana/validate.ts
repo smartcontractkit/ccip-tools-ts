@@ -1,4 +1,3 @@
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
@@ -49,20 +48,6 @@ export function validatePublicKeys(operation: string, param: string, values: unk
 export function validateNonEmptyString(operation: string, param: string, value: unknown): void {
   if (typeof value === 'string' && value.trim().length > 0) return
   throw new CCTParamsInvalidError(operation, param, 'must be a non-empty string')
-}
-
-/**
- * Asserts `tokenProgram` is a supported SPL Token program.
- * @throws CCTParamsInvalidError if `tokenProgram` is not SPL Token or Token-2022.
- */
-export function validateTokenProgram(
-  operation: string,
-  param: string,
-  tokenProgram: PublicKey,
-  message = 'mint is not owned by SPL Token or Token-2022',
-): void {
-  if (tokenProgram.equals(TOKEN_PROGRAM_ID) || tokenProgram.equals(TOKEN_2022_PROGRAM_ID)) return
-  throw new CCTParamsInvalidError(operation, param, message)
 }
 
 /**

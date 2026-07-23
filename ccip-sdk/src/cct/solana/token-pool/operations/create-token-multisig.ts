@@ -5,8 +5,8 @@ import { concat, hexlify, randomBytes, sha256, toUtf8Bytes } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -154,7 +154,8 @@ export class CreateTokenMultisig extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const tokenMint = new PublicKey(opts.tokenAddress)
     const poolProgram = resolveTokenPoolProgram(opts.poolType)
-    const mintAccount = mintContext?.account ?? (await resolveTokenMint(chain.connection, tokenMint))
+    const mintAccount =
+      mintContext?.account ?? (await resolveTokenMint(chain.connection, tokenMint))
 
     const tokenProgram = mintAccount.owner
     const authority =
