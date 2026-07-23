@@ -37,12 +37,12 @@ import {
  * burn-* variants share the `BurnMint` constructor ABI but are distinct contracts with distinct
  * bytecode.
  */
-const TOKEN_POOL_BYTECODE: Partial<Record<TokenPoolType, any>> = {
+const TOKEN_POOL_BYTECODE = {
   BurnMintTokenPool: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-}
+} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
 
 /** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
 export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
@@ -71,13 +71,13 @@ export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBase {
 /** Params for a `LockReleaseTokenPool` — the burn constructor plus `lockBox`. */
 export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBase {
   type: 'LockReleaseTokenPool'
-  /** Lock-box address; defaults to the zero address. */
-  lockBox?: string
+  /** Lock-box address; required and must be non-zero — the v2.0.0 constructor reverts on the zero address. */
+  lockBox: string
 }
 
 /**
  * Parameters for {@link DeployTokenPool}, discriminated on `type`: the burn-* variants share one
- * constructor; `LockReleaseTokenPool` additionally accepts `lockBox` (a compile-time guarantee).
+ * constructor; `LockReleaseTokenPool` additionally requires `lockBox` (a compile-time guarantee).
  */
 export type DeployTokenPoolParams = DeployBurnMintTokenPoolParams | DeployLockReleaseTokenPoolParams
 
@@ -102,7 +102,7 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.advancedPoolHooks ?? ZeroAddress,
     p.rmnProxy,
     p.router,
-    p.type === 'LockReleaseTokenPool' ? (p.lockBox ?? ZeroAddress) : ZeroAddress,
+    p.type === 'LockReleaseTokenPool' ? p.lockBox : ZeroAddress,
   ])
 
 /** Deploys a token pool; `execute` resolves to `{ hash, contractAddress }`. */
@@ -129,8 +129,11 @@ export class DeployTokenPool extends EVMOperation<DeployTokenPoolParams> {
     validateAddress(this.name, 'router', params.router)
     if (params.advancedPoolHooks !== undefined)
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
-    if (params.type === 'LockReleaseTokenPool' && params.lockBox !== undefined)
+    if (params.type === 'LockReleaseTokenPool') {
       validateAddress(this.name, 'lockBox', params.lockBox)
+      if (params.lockBox === ZeroAddress)
+        throw new CCTParamsInvalidError(this.name, 'lockBox', 'must not be the zero address')
+    }
   }
 
   /** Builds a deployment tx (no `to`): creation bytecode + ABI-encoded constructor args. */

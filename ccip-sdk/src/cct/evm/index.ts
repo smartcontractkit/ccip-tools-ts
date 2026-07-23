@@ -104,8 +104,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned pool `transferOwnership` tx (for multisig / offline signing).
-   * `transferOwnership` is version/type-independent, so no on-chain pool probe is performed.
+   * Builds an unsigned pool `transferOwnership` tx (for multisig / offline signing). Probes the
+   * pool's on-chain `typeAndVersion` to resolve its interface + encoder; the `transferOwnership`
+   * calldata is stable across pool versions, so the resolved encoding is version/type-independent.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
   generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {

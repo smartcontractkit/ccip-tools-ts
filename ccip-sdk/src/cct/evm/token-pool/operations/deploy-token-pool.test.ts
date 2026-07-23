@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { makeError } from 'ethers'
+import { ZeroAddress, makeError } from 'ethers'
 
 import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
@@ -135,16 +135,6 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       assert.equal(unsigned.transactions[0]!.data, BURN_MINT_V2_0_0 + zeroHooks)
     })
 
-    it('defaults lockBox to the zero address when omitted (LockRelease)', async () => {
-      const unsigned = await new DeployTokenPool().generate(stubChain(), {
-        ...COMMON,
-        type: 'LockReleaseTokenPool',
-        advancedPoolHooks: HOOKS,
-      })
-      const zeroLockBox = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER + '0'.repeat(64)
-      assert.equal(unsigned.transactions[0]!.data, LOCK_RELEASE_V2_0_0 + zeroLockBox)
-    })
-
     it('omits `from` when no sender is given', async () => {
       const unsigned = await new DeployTokenPool().generate(stubChain(), {
         ...COMMON,
@@ -210,6 +200,32 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
             type: 'BurnToAddressTokenPool',
           } as unknown as DeployTokenPoolParams),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'type',
+      )
+    })
+
+    it('rejects the zero address for a LockRelease lockBox', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'LockReleaseTokenPool',
+            advancedPoolHooks: HOOKS,
+            lockBox: ZeroAddress,
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockBox',
+      )
+    })
+
+    it('rejects an invalid lockBox address', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'LockReleaseTokenPool',
+            advancedPoolHooks: HOOKS,
+            lockBox: 'nope',
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockBox',
       )
     })
     // `lockBox` on a burn pool is a compile-time error (the DeployTokenPoolParams union), so
