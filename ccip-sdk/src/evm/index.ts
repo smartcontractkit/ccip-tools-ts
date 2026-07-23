@@ -164,7 +164,7 @@ function encodeAddressToEvm(address: BytesLike): string {
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
-function isSigner(wallet: unknown): wallet is Signer {
+export function isSigner(wallet: unknown): wallet is Signer {
   return (
     typeof wallet === 'object' &&
     wallet !== null &&
@@ -178,7 +178,7 @@ function isSigner(wallet: unknown): wallet is Signer {
  * Try sendTransaction() first (works with browser wallets),
  * fallback to signTransaction() + broadcastTransaction() if unsupported.
  */
-async function submitTransaction(
+export async function submitTransaction(
   wallet: Signer,
   tx: TransactionRequest,
   provider: JsonRpcApiProvider,
@@ -404,6 +404,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return nonce
       }))
     return this.nonces[address]!++
+  }
+
+  /**
+   * Undo the last {@link nextNonce} increment for a wallet address.
+   * {@link nextNonce} hands out a nonce optimistically; if the send then fails
+   * before broadcast, call this so the counter is reused rather than leaving a
+   * permanent gap that stalls every later transaction. No-op if uncached.
+   * @param address - Wallet address whose cached nonce to roll back
+   */
+  rollbackNonce(address: string): void {
+    if (this.nonces[address] != null) this.nonces[address]--
   }
 
   /**
