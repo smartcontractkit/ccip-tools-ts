@@ -46,7 +46,7 @@ async function* fetchSigsForward(
   allSigs.reverse() // forward
 
   const notAfter =
-    typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint'
+    (typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint') || !opts.endBlock
       ? undefined
       : Number(opts.endBlock) < 0
         ? (await connection.getSlot('confirmed')) + Number(opts.endBlock)
