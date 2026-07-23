@@ -268,11 +268,12 @@ describe('e2e command show EVM', () => {
     'should show complete CCIP transaction details EVM to Solana',
     { timeout: 120000 },
     async () => {
-      // Test transaction hash
-      const TX_HASH = '0xb75ffc2bd00b9a9bf5f7942cad201fa6a832fa58ffd7b773ece39531e6513670'
-      const MESSAGE_ID = '0x0be9c1da6942964676b995697e2d1f1ce3a497f1b00bcbe6a3a3b2ea9c8fd67c'
+      // Test transaction hash (refreshed periodically; devnet prunes old history)
+      const TX_HASH = '0x1490f4a989faa35049a79df1ed0c6b610dd123475f2e6cc162fff8f58e4f366f'
+      const MESSAGE_ID = '0xc5f2b594934389d3a2ca9a7218d76a432540316e9bfd544df7f51ae4d73aa4b9'
       const SENDER = '0x90656946eb4065D9FC2a0c0B9aF7Ff37c02F52a2'
-      const RECEIVER = 'BqmcnLFSbKwyMEgi7VhVeJCis1wW26VySztF34CJrKFq'
+      const RECEIVER = '11111111111111111111111111111111'
+      const TOKEN_RECEIVER = 'HNgbNNzP7YLXLhEkaFcD3PhtBWtaBfxSCNRTCsnGyPNx'
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
       const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
@@ -293,28 +294,28 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*3923n?/)
+      assert.match(output, /sequenceNumber.*10699n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
       assert.doesNotMatch(output, /gasLimit/)
-      assert.match(output, /computeUnits.*200000n?/)
+      assert.match(output, /computeUnits.*0n?/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*e2e test\b/)
+      assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
-      assert.match(output, /tokenReceiver.*11111111111111111111111111111111\b/)
+      assert.match(output, new RegExp(`tokenReceiver.*${TOKEN_RECEIVER}\\b`, 'i'))
 
       // Commit information
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x68da9013b63f098dbb85b2b4d53933a029c8b4f06b0b2fe15ad001da10375eb4/i,
+        /merkleRoot.*0x71def4008dc00677d732f006d15b794f34eeee29bcb63e62afc012c2529bb4ef/i,
       )
-      assert.match(output, /min.*3919/)
-      assert.match(output, /max.*3924/)
-      assert.match(output, /origin.*Cc7sVief2raXko3WqgjeGYDSC7fWAPwqyAWweScSoikM/i)
+      assert.match(output, /min.*10699/)
+      assert.match(output, /max.*10699/)
+      assert.match(output, /origin.*3av6U8FGbv4W3ib6XGKaPxuKR96BsqXAo2FVhsTnwow6/i)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*3iwF1ENtLZEoVMABrFBiWzZ6pMKMngDqvgaRnKtW6NLEjd2SXZsPStwBJQGzaUFawN18CPjHP5HCPkN4mRto9k5L/i,
+        /transactionHash.*5rSzqf9e91SgAAZzLvC9LRR2e4j9f4Ei7FPCW8tgMhELnb4PB5MfT26C4zSfVctX6jCV4S4WDDLptjbgsbsz5jhe/i,
       )
 
       // Receipts information
@@ -322,19 +323,19 @@ describe('e2e command show EVM', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*u2ExFxWm7wnYEEkp89mkxtW2d9EbSap9q8im3vLg4g4NJ3PSpKTv8szhxCKaYTzSZNoJ8JLdZCVxekCFv4faa4E/i,
+        /transactionHash.*3xi8RrvjnTeVWLtAiLG7wDKZR633fUHbiP6hshjSdSQZLj83JFdgfAjccTRedSe7KTZurbmsxfPGYYPuwAdDEfd4/i,
       )
     },
   )
 })
 
 describe('e2e command show Solana', () => {
-  // Test transaction hash
+  // Test transaction hash (refreshed periodically; devnet prunes old history)
   const TX_HASH =
-    'XkdB6ed7LisqoJR6PVAcaLerckoVfyffCxDAyJG6FesLqz1E1ur1FqVCg7CVRAPz81eggyb6XXm3oKPMvfrc9s9'
-  const MESSAGE_ID = '0x6f2f352064ac9aa184ef36179a19cb47349ad754d36f64fe425db372bcb371c7'
-  const SENDER = 'GY3V5RAtSxoJf2dZGqAbzaSxDyXWb8RPMWQdv1mC5PXN'
-  const RECEIVER = '0x8C244f0B2164E6A3BED74ab429B0ebd661Bb14CA'
+    '2cxcWLRnFjkwjVChqLYnVYcqU7Bb3scyCGMaVVMbec9Hmpaa6TGi9TQwqbE8CgkF9mZj7o7UBkSpx7xC5hdriYjo'
+  const MESSAGE_ID = '0x7f1af2d5da6f99acedcd9cfd9134edf5419e153389fde8a05605f23499fa95b1'
+  const SENDER = '6XS768SMgF7iEt7ZX8iJBgu7mXHewc95aqAz6XAj1hu3'
+  const RECEIVER = '0x2840D88F9c3E018544aaD8f9275DCCf12cB35160'
   const ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
   const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 
@@ -359,40 +360,39 @@ describe('e2e command show Solana', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
-      assert.match(output, /sequenceNumber.*3144?/)
+      assert.match(output, /sequenceNumber.*3206?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
-      assert.match(output, /gasLimit.*0n?/)
+      assert.match(output, /gasLimit.*200000n?/)
       assert.match(output, /finalized.*true/)
       assert.match(output, /fee.*\bSOL/)
-      assert.match(output, /tokens.*0\.001 USDC/)
+      assert.match(output, /tokens.*0\.0001 MNT/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*hello from ccip-tools-ts\b/)
+      assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
-
-      // USDC attestation
-      assert.match(output, /Attestations:/i)
-      assert.match(output, /type.*\busdc\b/i)
 
       // Commit information
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x291c126410cefe17ef5596ff79b8629e2875d5307e4d1bde2dc75ebcc49046d3/i,
+        /merkleRoot.*0x3b062bfc1deb01d8d93075a0d28ed958713307f5de0eedcdaef85e4af34c45c8/i,
       )
-      assert.match(output, /min.*3144/)
-      assert.match(output, /max.*3144/)
+      assert.match(output, /min.*3206/)
+      assert.match(output, /max.*3206/)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*0x1274619287fbab9acf047e32c451608b8bc7fcb2d1b51c15440640fd88fd1ede/i,
+        /transactionHash.*0xbca40d1994f2649afe67d023ebd50b27d9d1f45025d3e10c00f3b0b288580c80/i,
       )
 
-      // Receipts information
+      // Receipts information: this message had a failed execution attempt before succeeding
       assert.match(output, /Receipts.*dest/i)
-      assert.match(output, /state.*success/i)
+      const failedMatches = output.match(/failed/gi) || []
+      const successMatches = output.match(/success/gi) || []
+      assert.ok(failedMatches.length >= 1)
+      assert.ok(successMatches.length >= 1)
       assert.match(
         output,
-        /transactionHash.*0x3af7fa68693261beb5b63b38b28674aabaad1004deccca7d8e1fdbd7ec9ed093/i,
+        /transactionHash.*0x55a309abb85173c347450f957a047c9bdad62507d2f38b1505a0ef621cf1037b/i,
       )
     },
   )
