@@ -9,9 +9,9 @@ import {
 } from '@solana/spl-token'
 import { type PublicKey, Keypair } from '@solana/web3.js'
 
+import { CCIPTokenMintInvalidError, CCIPTokenMintNotFoundError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -70,16 +70,14 @@ describe('Solana token createTokenAccount', () => {
   it('rejects a missing mint', async () => {
     await assert.rejects(
       () => generate({}, null),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      (err: unknown) => err instanceof CCIPTokenMintNotFoundError,
     )
   })
 
   it('rejects non-token mint accounts', async () => {
     await assert.rejects(
       () => generate({}, Keypair.generate().publicKey),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      (err: unknown) => err instanceof CCIPTokenMintInvalidError,
     )
   })
 })

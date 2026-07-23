@@ -137,8 +137,17 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds an unsigned idempotent associated token account create instruction.
    *
-   * The owner may be a wallet or PDA. For pool reserve accounts, pass the pool signer PDA as
-   * `ownerAddress`.
+   * @remarks
+   * This operation is idempotent and safe to re-run. For the canonical pool setup flow, pass the
+   * `poolSignerAddress` returned by `generateUnsignedDeployTokenPool` as `ownerAddress`, then call
+   * `generateUnsignedSetPool`.
+   *
+   * @see {@link generateUnsignedDeployTokenPool}
+   * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
    * @example
    * ```ts
@@ -158,6 +167,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Creates an associated token account for a wallet or PDA owner.
+   *
+   * @remarks
+   * This operation is idempotent and safe to re-run. For the canonical pool setup flow, pass the
+   * `poolSignerAddress` returned by `deployTokenPool` as `ownerAddress`, then call `setPool`.
+   *
+   * @see {@link deployTokenPool}
+   * @see {@link setPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
    * @example
    * ```ts
@@ -220,7 +241,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
    * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account.
+   * token account; use the returned `poolSignerAddress` with `generateUnsignedCreateTokenAccount`
+   * before `generateUnsignedSetPool`.
+   *
+   * @see {@link generateUnsignedCreateTokenAccount}
+   * @see {@link generateUnsignedSetPool}
    *
    * @example
    * ```ts
@@ -247,7 +272,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
    * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account.
+   * token account; use the returned `poolSignerAddress` with `createTokenAccount` before `setPool`.
+   *
+   * @see {@link createTokenAccount}
+   * @see {@link setPool}
    *
    * @example
    * ```ts
@@ -315,7 +343,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds unsigned Solana `setPool` instructions.
    *
    * The `payer` pays transaction fees. `authority` defaults to `payer`; Squads/multisig flows
-   * should pass the token admin/vault authority explicitly.
+   * should pass the token admin/vault authority explicitly. For a newly deployed canonical pool,
+   * create the pool signer's ATA before calling this operation.
+   *
+   * @see {@link generateUnsignedDeployTokenPool}
+   * @see {@link generateUnsignedCreateTokenAccount}
    *
    * @example
    * ```ts
@@ -334,7 +366,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Registers a token pool. The wallet must be the token admin authority.
+   * Registers a token pool. The wallet must be the token admin authority. For a newly deployed
+   * canonical pool, create the pool signer's ATA before calling this operation.
+   *
+   * @see {@link deployTokenPool}
+   * @see {@link createTokenAccount}
    *
    * @example
    * ```ts
@@ -371,7 +407,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 }
 
 export * from '../errors.ts'
-export { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
+export {
+  type TokenPoolType,
+  TOKEN_POOL_PROGRAMS,
+  deriveTokenPoolSignerPda,
+  resolveTokenPoolProgram,
+} from './programs/token-pool.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'

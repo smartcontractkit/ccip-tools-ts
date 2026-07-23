@@ -109,7 +109,6 @@ export class CreateLookupTable extends SolanaOperation<
       lookupTableAddress,
       tokenMint,
       poolProgram,
-      authority,
     })
     const addresses = [...ccipAddresses, ...additionalAddresses]
 

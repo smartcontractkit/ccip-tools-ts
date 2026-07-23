@@ -111,7 +111,6 @@ export class AppendToLookupTable extends SolanaOperation<
         lookupTableAddress,
         tokenMint,
         poolProgram,
-        authority,
       })
       const existingAddresses = new Set(
         lookupTable.value.state.addresses.map((address) => address.toBase58()),

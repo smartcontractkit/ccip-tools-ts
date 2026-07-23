@@ -1,16 +1,11 @@
-import {
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-  createAssociatedTokenAccountIdempotentInstruction,
-  getAssociatedTokenAddressSync,
-} from '@solana/spl-token'
+import { createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { resolveATA } from '../../../../solana/utils.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -62,23 +57,10 @@ export class CreateTokenAccount extends SolanaOperation<
     const payer = new PublicKey(params.payer)
     const mint = new PublicKey(params.tokenAddress)
     const owner = new PublicKey(params.ownerAddress)
-    const mintAccount = await chain.connection.getAccountInfo(mint)
-
-    if (!mintAccount) {
-      throw new CCTParamsInvalidError(this.name, 'tokenAddress', 'token mint not found')
-    }
-
-    if (
-      !mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
-      !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)
-    ) {
-      throw new CCTParamsInvalidError(this.name, 'tokenAddress', 'token mint has invalid owner')
-    }
-
-    const tokenAccount = getAssociatedTokenAddressSync(mint, owner, true, mintAccount.owner)
+    const { ata: tokenAccount, tokenProgram } = await resolveATA(chain.connection, mint, owner)
 
     chain.logger.debug(
-      `${this.name}: mint = ${mint.toBase58()}, owner = ${owner.toBase58()}, tokenAccount = ${tokenAccount.toBase58()}, tokenProgram = ${mintAccount.owner.toBase58()}`,
+      `${this.name}: mint = ${mint.toBase58()}, owner = ${owner.toBase58()}, tokenAccount = ${tokenAccount.toBase58()}, tokenProgram = ${tokenProgram.toBase58()}`,
     )
 
     return {
@@ -89,7 +71,7 @@ export class CreateTokenAccount extends SolanaOperation<
           tokenAccount,
           owner,
           mint,
-          mintAccount.owner,
+          tokenProgram,
         ),
       ],
       mainIndex: 0,
