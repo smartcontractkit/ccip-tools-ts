@@ -89,7 +89,6 @@ describe('Solana TokenAdminRegistry appendToLookupTable', () => {
       lookupTableAddress: new PublicKey(LOOKUP_TABLE),
       tokenMint: new PublicKey(TOKEN),
       poolProgram: new PublicKey(POOL_PROGRAM),
-      authority: new PublicKey(AUTHORITY),
     })
 
     await assert.rejects(

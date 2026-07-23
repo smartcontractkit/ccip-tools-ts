@@ -28,7 +28,14 @@ type TokenPoolStateDecodeContext = {
   poolProgram: string
 }
 
-/** Resolves a canonical token pool program type to its address. */
+/**
+ * Resolves a canonical token pool program type to its address.
+ *
+ * @example
+ * ```ts
+ * const poolProgram = resolveTokenPoolProgram('burn-mint')
+ * ```
+ */
 export function resolveTokenPoolProgram(poolType: TokenPoolType): PublicKey {
   return new PublicKey(TOKEN_POOL_PROGRAMS[poolType])
 }
@@ -73,7 +80,15 @@ export function deriveTokenPoolConfigPda(poolProgram: PublicKey, mint: PublicKey
   )[0]
 }
 
-/** Derives a token pool signer PDA for a mint. */
+/**
+ * Derives a token pool signer PDA for a mint.
+ *
+ * @example
+ * ```ts
+ * const poolProgram = resolveTokenPoolProgram('burn-mint')
+ * const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(tokenAddress))
+ * ```
+ */
 export function deriveTokenPoolSignerPda(poolProgram: PublicKey, mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('ccip_tokenpool_signer'), mint.toBuffer()],
