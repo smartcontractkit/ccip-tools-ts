@@ -5,7 +5,7 @@ import { PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -55,7 +55,7 @@ export type GenerateSetPoolResult = UnsignedSolanaTx
 export type ExecuteSetPoolParams = SolanaExecuteParams<SetPoolParams>
 
 /** Result of executing Solana TokenAdminRegistry `setPool`. */
-export type ExecuteSetPoolResult = TransactionHash
+export type ExecuteSetPoolResult = TransactionResult
 
 /** Solana TokenAdminRegistry `setPool` operation. */
 export class SetPool extends SolanaOperation<SetPoolParams> {

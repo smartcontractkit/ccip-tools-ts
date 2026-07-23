@@ -6,7 +6,11 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import {
+  SolanaTokenManager,
+  deriveTokenPoolSignerPda,
+  resolveTokenPoolProgram,
+} from '../../index.ts'
 import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -48,6 +52,13 @@ describe('Solana token pool deployTokenPool', () => {
       unsigned.poolAddress,
       deriveTokenPoolConfigPda(
         new PublicKey(BURN_MINT_POOL_PROGRAM),
+        new PublicKey(TOKEN),
+      ).toBase58(),
+    )
+    assert.equal(
+      unsigned.poolSignerAddress,
+      deriveTokenPoolSignerPda(
+        resolveTokenPoolProgram('burn-mint'),
         new PublicKey(TOKEN),
       ).toBase58(),
     )
