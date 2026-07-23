@@ -5,6 +5,7 @@ import { concat, hexlify, randomBytes, sha256, toUtf8Bytes } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
+import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
@@ -26,7 +27,6 @@ import {
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
-  validateTokenProgram,
 } from '../../validate.ts'
 
 export const SOLANA_MULTISIG_MAX_SIGNERS = 11
@@ -109,14 +109,6 @@ function validatePoolMultisigConfig(
   }
 }
 
-function validateMintAccount(
-  operation: string,
-  mintAccount: Parameters<typeof unpackMint>[1],
-): asserts mintAccount is MintAccount {
-  if (!mintAccount) throw new CCTParamsInvalidError(operation, 'tokenAddress', 'mint not found')
-  validateTokenProgram(operation, 'tokenAddress', mintAccount.owner)
-}
-
 function getMintAuthority(
   operation: string,
   tokenMint: PublicKey,
@@ -162,8 +154,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const tokenMint = new PublicKey(opts.tokenAddress)
     const poolProgram = resolveTokenPoolProgram(opts.poolType)
-    const mintAccount = mintContext?.account ?? (await chain.connection.getAccountInfo(tokenMint))
-    validateMintAccount(this.name, mintAccount)
+    const mintAccount = mintContext?.account ?? (await resolveTokenMint(chain.connection, tokenMint))
 
     const tokenProgram = mintAccount.owner
     const authority =
@@ -224,8 +215,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     this.validate(generateParams)
 
     const tokenMint = new PublicKey(generateParams.tokenAddress)
-    const mintAccount = await chain.connection.getAccountInfo(tokenMint)
-    validateMintAccount(this.name, mintAccount)
+    const mintAccount = await resolveTokenMint(chain.connection, tokenMint)
 
     const tokenProgram = mintAccount.owner
     const mintAuthority = getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)

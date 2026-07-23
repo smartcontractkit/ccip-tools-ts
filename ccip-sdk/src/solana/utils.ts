@@ -45,6 +45,53 @@ export type ResolvedATA = {
 }
 
 /**
+ * Fetches and validates a token mint account.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The validated mint account info.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ */
+export async function resolveTokenMint(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<AccountInfo<Buffer>> {
+  const mintInfo = await connection.getAccountInfo(mint)
+  if (!mintInfo) throw new CCIPTokenMintNotFoundError(mint.toBase58())
+
+  if (!mintInfo.owner.equals(TOKEN_PROGRAM_ID) && !mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
+      TOKEN_PROGRAM_ID.toBase58(),
+      TOKEN_2022_PROGRAM_ID.toBase58(),
+    ])
+  }
+
+  return mintInfo
+}
+
+/**
+ * Resolves and validates the SPL Token program that owns a mint.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The SPL Token or Token-2022 program address that owns the mint.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const tokenProgram = await resolveTokenProgram(connection, mint)
+ * ```
+ */
+export async function resolveTokenProgram(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<PublicKey> {
+  return (await resolveTokenMint(connection, mint)).owner
+}
+
+/**
  * Resolves the Associated Token Account (ATA) for a given mint and owner.
  * Automatically detects the correct token program (SPL Token vs Token-2022).
  *
@@ -65,22 +112,7 @@ export async function resolveATA(
   mint: PublicKey,
   owner: PublicKey,
 ): Promise<ResolvedATA> {
-  const mintInfo = await connection.getAccountInfo(mint)
-  if (!mintInfo) {
-    throw new CCIPTokenMintNotFoundError(mint.toBase58())
-  }
-
-  // Validate the mint is owned by a valid token program
-  const isValidTokenProgram =
-    mintInfo.owner.equals(TOKEN_PROGRAM_ID) || mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
-
-  if (!isValidTokenProgram) {
-    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
-      TOKEN_PROGRAM_ID.toBase58(),
-      TOKEN_2022_PROGRAM_ID.toBase58(),
-    ])
-  }
-
+  const mintInfo = await resolveTokenMint(connection, mint)
   // Allow PDAs as owners (for program vaults, etc.)
   const ata = getAssociatedTokenAddressSync(mint, owner, true, mintInfo.owner)
   return {
