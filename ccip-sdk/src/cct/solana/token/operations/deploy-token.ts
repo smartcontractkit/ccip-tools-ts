@@ -14,7 +14,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -72,7 +72,7 @@ export type GenerateDeployTokenResult = UnsignedSolanaTx & {
 export type ExecuteDeployTokenParams = SolanaExecuteParams<DeployTokenParams>
 
 /** Result of executing Solana token deploy. */
-export type ExecuteDeployTokenResult = TransactionHash & {
+export type ExecuteDeployTokenResult = TransactionResult & {
   tokenAddress: string
   metadataAddress?: string
 }

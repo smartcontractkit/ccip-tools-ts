@@ -5,7 +5,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -16,7 +16,7 @@ import {
   deriveCcipLookupTableAddresses,
 } from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
@@ -53,7 +53,7 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
 export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
-export type ExecuteCreateLookupTableResult = TransactionHash & { lookupTableAddress: string }
+export type ExecuteCreateLookupTableResult = TransactionResult & { lookupTableAddress: string }
 
 /** Builds and submits Solana ALT create instructions, optionally with extend instructions. */
 export class CreateLookupTable extends SolanaOperation<
@@ -109,7 +109,6 @@ export class CreateLookupTable extends SolanaOperation<
       lookupTableAddress,
       tokenMint,
       poolProgram,
-      authority,
     })
     const addresses = [...ccipAddresses, ...additionalAddresses]
 
@@ -158,10 +157,11 @@ export class CreateLookupTable extends SolanaOperation<
     this.validate(generateParams)
 
     const authority = params.authority ? new PublicKey(params.authority) : undefined
-    if (params.mode !== 'createEmpty' && authority && !authority.equals(wallet.publicKey)) {
-      throw new CCTParamsInvalidError(
+    if (params.mode !== 'createEmpty' && authority) {
+      validateAuthorityMatchesWallet(
         this.name,
-        'authority',
+        authority,
+        wallet.publicKey,
         "createAndExtend requires authority to be the executing wallet. Use 'createEmpty' mode for vault-owned ALTs.",
       )
     }
