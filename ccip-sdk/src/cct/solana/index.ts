@@ -49,8 +49,11 @@ import {
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GetTokenPoolStateParams,
+  type GetTokenPoolStateResult,
   CreateTokenMultisig,
   DeployTokenPool,
+  GetTokenPoolState,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -67,6 +70,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token pool operations
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #getTokenPoolState = new GetTokenPoolState()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -449,6 +453,28 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
     return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a Burn/Mint, Lock/Release, or custom token pool's state account.
+   * Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
+   *
+   * @example
+   * ```ts
+   * const state = await cct.getTokenPoolState({
+   *   poolType: 'burn-mint',
+   *   tokenAddress: mint,
+   * })
+   * ```
+   */
+  getTokenPoolState<P extends GetTokenPoolStateParams>(
+    opts: P,
+  ): Promise<GetTokenPoolStateResult<P>> {
+    return this.#getTokenPoolState.query(this.chain, opts)
   }
 
   /**

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { PublicKey } from '@solana/web3.js'
 
 import {
+  parsePublicKey,
   validateInteger,
   validateNonEmptyString,
   validatePoolType,
@@ -14,6 +15,11 @@ import {
 import { CCTParamsInvalidError } from '../errors.ts'
 
 describe('cct/solana validate', () => {
+  it('parses valid public keys', () => {
+    const key = parsePublicKey('op', 'payer', PublicKey.default.toBase58())
+    assert.ok(key.equals(PublicKey.default))
+  })
+
   it('accepts valid public keys', () => {
     assert.doesNotThrow(() => validatePublicKey('op', 'payer', PublicKey.default.toBase58()))
   })
