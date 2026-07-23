@@ -41,10 +41,15 @@ import {
   SetPool,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type ExecuteCreateTokenMultisigParams,
+  type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type GenerateCreateTokenMultisigParams,
+  type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  CreateTokenMultisig,
   DeployTokenPool,
 } from './token-pool/operations/index.ts'
 
@@ -60,6 +65,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #setPool = new SetPool()
 
   // Token pool operations
+  readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -190,6 +196,64 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned SPL Token multisig creation instructions.
+   * The pool signer PDA occupies `threshold` slots; non-pool signers must meet the threshold independently.
+   *
+   * @remarks When `payer` differs from the mint authority, both must sign: the mint authority is
+   * the `createAccountWithSeed` base account.
+   *
+   * @throws {@link CCTParamsInvalidError} If multisig parameters are invalid or the mint has no authority.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCreateTokenMultisig({
+   *   payer,
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   threshold: 2,
+   *   additionalSigners: [admin],
+   * })
+   * ```
+   */
+  generateUnsignedCreateTokenMultisig(
+    opts: GenerateCreateTokenMultisigParams,
+  ): Promise<GenerateCreateTokenMultisigResult> {
+    return this.#createTokenMultisig.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates an SPL Token multisig account.
+   * The pool signer PDA occupies `threshold` slots; non-pool signers must meet the threshold independently.
+   * Wallet pays fees and must match the mint authority.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If multisig parameters are invalid or the wallet is not the mint authority.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { hash, multisigAddress } = await cct.createTokenMultisig({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   threshold: 2,
+   *   additionalSigners: [admin],
+   * })
+   * ```
+   */
+  createTokenMultisig(
+    opts: ExecuteCreateTokenMultisigParams,
+  ): Promise<ExecuteCreateTokenMultisigResult> {
+    return this.#createTokenMultisig.execute(this.chain, opts)
   }
 
   /**
