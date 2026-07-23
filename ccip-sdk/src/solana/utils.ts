@@ -52,8 +52,13 @@ export type ResolvedATA = {
  * @returns The validated mint account info.
  * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
  * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const mintInfo = await resolveTokenMint(connection, mint)
+ * ```
  */
-async function resolveTokenMint(
+export async function resolveTokenMint(
   connection: Connection,
   mint: PublicKey,
 ): Promise<AccountInfo<Buffer>> {
