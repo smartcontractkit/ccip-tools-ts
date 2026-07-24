@@ -3,7 +3,12 @@ import { PublicKey } from '@solana/web3.js'
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
-import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
+import {
+  type PoolProgramRef,
+  type TokenPoolType,
+  TOKEN_POOL_PROGRAMS,
+  resolveTokenPoolProgram,
+} from './programs/token-pool.ts'
 
 /**
  * Parses `value` as a Solana public key.
@@ -89,6 +94,26 @@ export function validatePoolType(
   if (typeof value !== 'string' || !Object.hasOwn(TOKEN_POOL_PROGRAMS, value)) {
     throw new CCTParamsInvalidError(operation, param, 'must be burn-mint or lock-release')
   }
+}
+
+/** Resolves a canonical pool type or custom program address. */
+export function resolvePoolProgram(operation: string, params: PoolProgramRef): PublicKey {
+  const hasPoolType = Object.hasOwn(params, 'poolType')
+  const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
+  if (hasPoolType === hasPoolProgramAddress) {
+    throw new CCTParamsInvalidError(
+      operation,
+      'poolType',
+      'provide exactly one of poolType or poolProgramAddress',
+    )
+  }
+
+  if (hasPoolType) {
+    validatePoolType(operation, 'poolType', params.poolType)
+    return resolveTokenPoolProgram(params.poolType)
+  }
+
+  return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
 }
 
 /**

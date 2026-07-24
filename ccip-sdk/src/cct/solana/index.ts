@@ -100,8 +100,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds unsigned Solana mint creation instructions, optionally with initial supply.
-   *
    * The `payer` defaults as mint, freeze, and metadata update authority.
+   *
+   * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
    *
    * @example
    * ```ts
@@ -125,8 +126,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Creates a Solana mint, optionally with initial supply.
-   *
    * The wallet public key defaults as mint, freeze, and metadata update authority.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
@@ -189,6 +193,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If an address is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
@@ -263,9 +268,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana pool lookup table instructions.
    *
-   * Defaults to create+extend. Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an
-   * EOA payer and vault authority, then populate it later through the authority. If `authority`
-   * is omitted, it defaults to `payer`.
+   * Defaults to create+extend. Specify a canonical `poolType` or custom `poolProgramAddress`.
+   * Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an EOA payer and vault authority,
+   * then populate it later through the authority. If `authority` is omitted, it defaults to `payer`.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
    * @example
    * ```ts
@@ -287,6 +296,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Creates a Solana pool lookup table. Defaults to create+extend; pass `mode: 'createEmpty'` to
    * create an empty ALT owned by `authority` and paid by `wallet`. If `authority` is omitted, it
    * defaults to the wallet public key.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
@@ -314,6 +329,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link generateUnsignedCreateTokenAccount}
    * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
    * @example
    * ```ts
@@ -345,6 +362,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link createTokenAccount}
    * @see {@link setPool}
    *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
@@ -362,8 +383,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana lookup table extend instructions.
    *
-   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
-   * pass `additionalAddresses` to append manual addresses. `authority` defaults to `payer`.
+   * Pass `tokenAddress` with a canonical `poolType` or custom `poolProgramAddress` to append the
+   * standard CCIP pool addresses; pass `additionalAddresses` to append manual addresses. `authority`
+   * defaults to `payer`.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
    * @example
    * ```ts
@@ -387,7 +413,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Extends a Solana lookup table.
    *
-   * Pass `tokenAddress` and `poolProgramAddress` to append the standard CCIP pool addresses;
+   * Pass `tokenAddress` with a canonical `poolType` or custom `poolProgramAddress` to append the
+   * standard CCIP pool addresses.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
@@ -417,6 +450,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedCreateTokenAccount}
    *
+   * @throws {@link CCTParamsInvalidError} If an address or writable index is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not identify a Router.
+   *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
@@ -439,6 +475,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link deployTokenPool}
    * @see {@link createTokenAccount}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or writable index is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not identify a Router.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
    * ```ts
@@ -479,6 +520,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Serializes an unsigned Solana CCT tx for external signing.
+   *
+   * @throws {@link CCTParamsInvalidError} If `payer`, `encoding`, or the transaction format is invalid.
    *
    * @example
    * ```ts

@@ -14,7 +14,7 @@ import {
 } from './validate.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
-describe('cct/solana validate', () => {
+describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {
     const key = parsePublicKey('op', 'payer', PublicKey.default.toBase58())
     assert.ok(key.equals(PublicKey.default))
