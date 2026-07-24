@@ -666,9 +666,8 @@ export { util }
  * @param signal - AbortSignal to convert
  * @returns Promise that rejects with the signal's reason when aborted
  */
-export function signalToPromise(signal: AbortSignal): Promise<never> {
-  if (signal.aborted) return Promise.reject(signal.reason as Error)
-
+export async function signalToPromise(signal: AbortSignal): Promise<never> {
+  signal.throwIfAborted()
   return new Promise<never>((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true })
   })
