@@ -27,14 +27,6 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
-    "./cct/evm": {
-      "types": "./dist/cct/evm/index.d.ts",
-      "default": "./dist/cct/evm/index.js"
-    },
-    "./cct/solana": {
-      "types": "./dist/cct/solana/index.d.ts",
-      "default": "./dist/cct/solana/index.js"
-    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
@@ -47,7 +39,8 @@
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
     "build:dev": "npm run clean && tsc -p ./tsconfig.build.dev.json",
     "clean": "rm -rfv ./dist",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "pack:cct": "npm run build:dev && node ./scripts/pack-cct.mjs"
   },
   "files": [
     "dist",
