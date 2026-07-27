@@ -7,6 +7,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
+import { ExecutionState } from '../../types.ts'
 import {
   FUJI_TO_SOLANA,
   SOLANA_ESTIMATE_RECEIVER_MESSAGE,
@@ -15,7 +16,21 @@ import {
 import { SolanaChain } from '../index.ts'
 
 const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C/rpc'
+const SEPOLIA_RPC =
+  process.env.SEPOLIA_RPC ?? process.env.RPC_SEPOLIA ?? 'https://sepolia.gateway.tenderly.co'
+const SOLANA_DEVNET_RPC =
+  process.env.SOLANA_RPC ?? process.env.RPC_SOLANA ?? 'https://api.devnet.solana.com'
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
+const SOLANA_V2_SEND_TX =
+  '5fLVsRpENWE5qmqhAdY8g88K26C9DZ7qiKRMhZiBxSuZSKyGBJj2EyqUF1b1DaPNPZbLxfP3ufFCYFK7EVcU1Hz'
+const EVM_TO_SOLANA_V2_TX = '0x8be479716729ff555e5ee7a1826af3bf571be820ab3080348f83b28a753cc472'
+const SOLANA_V2_EXEC_TX =
+  '32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E'
+const SOLANA_V2_OFFRAMP = 'offEFR9DhTdnPR43oBmnGJmoj13Y3n7sR93Vbph77TK'
+const SOLANA_V2_SEND_MESSAGE_ID =
+  '0x3067b270c81cd21f1b37150dd75f0af46ead2eaff405b390cd70e5df7d27e8b1'
+const EVM_TO_SOLANA_V2_MESSAGE_ID =
+  '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826'
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
@@ -244,6 +259,92 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
       assert.equal(tokenInfo.symbol, 'USDC')
       assert.equal(tokenInfo.decimals, 6)
     })
+  })
+})
+
+describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 60_000 }, () => {
+  let solanaChain: SolanaChain
+
+  before(async () => {
+    solanaChain = await SolanaChain.fromUrl(SOLANA_DEVNET_RPC, {
+      apiClient: null,
+      logger: testLogger,
+    })
+  })
+
+  it('should synthesize and decode CCIPMessageSentV2 from Anchor CPI event data', async () => {
+    const tx = await solanaChain.getTransaction(SOLANA_V2_SEND_TX)
+
+    const humanLog = tx.logs.find(
+      (log) => typeof log.data === 'string' && log.data.includes('Emitting CCIPMessageSentV2'),
+    )
+    assert.ok(humanLog, 'should preserve human-readable event log')
+    assert.equal(humanLog.type, 'log')
+    assert.equal(humanLog.level, 1)
+
+    const eventLog = tx.logs.find((log) => log.topics[0] === '0x70205df81d5c63bc')
+    assert.ok(eventLog, 'should synthesize data log from emit_cpi inner instruction')
+    assert.equal(eventLog.type, 'data')
+    assert.equal(eventLog.level, 2)
+    assert.equal(eventLog.index, 14)
+
+    const requests = await solanaChain.getMessagesInTx(tx)
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+    assert.equal(request.message.messageId, SOLANA_V2_SEND_MESSAGE_ID)
+    assert.equal(request.message.sequenceNumber, 115n)
+    assert.equal(request.message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
+    assert.equal(request.message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
+    assert.equal(request.message.data, '0xdc1592f138fb77ec')
+    assert.equal(request.lane.onRamp, 'CcipE4LLPo7F6aVFgyvhVQi5DrKUhtgimsDwknaeLVDT')
+    assert.equal(request.lane.version, '2.0.0')
+  })
+
+  it('should decode ExecutionStateChangedV2 from v2 OffRamp execution tx', async () => {
+    const tx = await solanaChain.getTransaction(SOLANA_V2_EXEC_TX)
+    const receipts = tx.logs.flatMap((log) => {
+      const receipt = SolanaChain.decodeReceipt(log)
+      return receipt ? [{ log, receipt }] : []
+    })
+
+    assert.equal(receipts.length, 1)
+    const execution = receipts[0]!
+    assert.equal(execution.log.address, SOLANA_V2_OFFRAMP)
+    assert.equal(execution.log.index, 18)
+    assert.equal(execution.log.level, 2)
+    assert.equal(execution.receipt.messageId, EVM_TO_SOLANA_V2_MESSAGE_ID)
+    assert.equal(execution.receipt.sequenceNumber, 149n)
+    assert.equal(execution.receipt.state, ExecutionState.Success)
+  })
+
+  it('should fetch EVM to Solana v2 OffRamp executions without verifications', async () => {
+    await using disposer = new AsyncDisposableStack()
+    const source = disposer.adopt(
+      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      (source) => source.provider.destroy(),
+    )
+
+    const tx = await source.getTransaction(EVM_TO_SOLANA_V2_TX)
+    const requests = await source.getMessagesInTx(tx)
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+    assert.equal(request.message.messageId, EVM_TO_SOLANA_V2_MESSAGE_ID)
+
+    const executions = []
+    for await (const execution of solanaChain.getExecutionReceipts({
+      offRamp: SOLANA_V2_OFFRAMP,
+      messageId: request.message.messageId,
+      sourceChainSelector: request.lane.sourceChainSelector,
+      startBlock: 479327790,
+    })) {
+      executions.push(execution)
+    }
+
+    assert.equal(executions.length, 1)
+    assert.equal(executions[0]!.receipt.messageId, EVM_TO_SOLANA_V2_MESSAGE_ID)
+    assert.equal(executions[0]!.receipt.sequenceNumber, 149n)
+    assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
+    assert.equal(executions[0]!.log.transactionHash, SOLANA_V2_EXEC_TX)
   })
 })
 
