@@ -138,6 +138,7 @@ export type { UnsignedSolanaTx }
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
+const offrampV2Coder = new BorshCoder(CCIP_OFFRAMP_V2_IDL)
 const TOKEN_POOL_IDL = {
   ...BURN_MINT_TOKEN_POOL,
   types: BASE_TOKEN_POOL.types,
@@ -1169,19 +1170,30 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new CCIPLogDataMissingError()
     }
 
+    let discriminator
     try {
-      // Verify the discriminant matches ExecutionStateChanged
-      if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+      discriminator = dataSlice(getDataBytes(log.data), 0, 8)
+      if (
+        discriminator !== hexDiscriminator('ExecutionStateChanged') &&
+        discriminator !== hexDiscriminator('ExecutionStateChangedV2')
+      )
         return
     } catch (_) {
       return
     }
 
-    const decoded = offrampCoder.events.decode<
-      (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'ExecutionStateChanged' },
-      IdlTypes<typeof CCIP_OFFRAMP_IDL>
-    >(log.data)
-    if (decoded?.name !== 'ExecutionStateChanged') return
+    const decoded =
+      discriminator === hexDiscriminator('ExecutionStateChangedV2')
+        ? offrampV2Coder.events.decode<
+            (typeof CCIP_OFFRAMP_V2_IDL)['events'][number] & { name: 'ExecutionStateChangedV2' },
+            IdlTypes<typeof CCIP_OFFRAMP_V2_IDL>
+          >(log.data)
+        : offrampCoder.events.decode<
+            (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'ExecutionStateChanged' },
+            IdlTypes<typeof CCIP_OFFRAMP_IDL>
+          >(log.data)
+    if (decoded?.name !== 'ExecutionStateChanged' && decoded?.name !== 'ExecutionStateChangedV2')
+      return
     const messageId = hexlify(getDataBytes(decoded.data.messageId))
 
     // Decode state enum (MessageExecutionState)
@@ -1195,6 +1207,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       state = ExecutionState.Failed
     } else throw new CCIPExecutionStateInvalidError(util.inspect(decoded.data.state))
 
+    const eventReturnData =
+      'returnData' in decoded.data && dataLength(decoded.data.returnData) > 0
+        ? hexlify(decoded.data.returnData)
+        : undefined
     let returnData
     if (log.tx?.logs) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
@@ -1207,7 +1223,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (laterReceiptLog) {
         return // ignore intermediary state (InProgress=1) if we can find a later receipt
       } else if (state !== ExecutionState.Success) {
-        returnData = getErrorFromLogs(log.tx.logs as SolanaLog[])
+        returnData = eventReturnData ?? getErrorFromLogs(log.tx.logs as SolanaLog[])
       } else if (log.tx.error) {
         returnData = util.inspect(log.tx.error)
         state = ExecutionState.Failed
@@ -1216,11 +1232,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     return {
       sourceChainSelector: BigInt(decoded.data.sourceChainSelector.toString()),
-      sequenceNumber: BigInt(decoded.data.sequenceNumber.toString()),
+      sequenceNumber:
+        decoded.name === 'ExecutionStateChangedV2'
+          ? BigInt(decoded.data.messageNumber.toString())
+          : BigInt(decoded.data.sequenceNumber.toString()),
       messageId,
-      messageHash: hexlify(getDataBytes(decoded.data.messageHash)),
+      ...(decoded.name === 'ExecutionStateChanged' && {
+        messageHash: hexlify(getDataBytes(decoded.data.messageHash)),
+      }),
       state,
-      returnData,
+      returnData: returnData ?? eventReturnData,
     }
   }
 
@@ -1577,8 +1598,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
     const { offRamp, sourceChainSelector, verifications } = opts
+    const [, version] = await this.typeAndVersion(offRamp)
+    const topics = [
+      version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
+    ]
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
-      Parameters<SolanaChain['getLogs']>[0] = opts
+      Parameters<SolanaChain['getLogs']>[0] = { ...opts, topics }
     if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
@@ -1591,6 +1616,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       )
       opts_ = {
         ...opts,
+        topics,
         programs: [offRamp],
         address: commitReportPda.toBase58(),
       }
