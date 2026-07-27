@@ -5,9 +5,9 @@ import { describe, it } from 'node:test'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
 
@@ -19,6 +19,10 @@ const PAYER = Keypair.generate().publicKey.toBase58()
 const CCIP_ADMIN = Keypair.generate().publicKey
 const CONFIG = deriveRouterConfigPda(new PublicKey(ROUTER))
 const TOKEN_ADMIN_REGISTRY = deriveTokenAdminRegistryPda(new PublicKey(ROUTER), TOKEN)
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
 
 function configAccount() {
   const data = Buffer.alloc(210)
@@ -69,57 +73,77 @@ function generate(opts = {}, registered = false) {
   })
 }
 
-describe('Solana TokenAdminRegistry registerToken', () => {
-  it('builds owner registration instruction', async () => {
-    const unsigned = await generate()
-    const [instruction] = unsigned.instructions
+describe('RegisterToken (cct/solana)', () => {
+  describe('generate', () => {
+    it('builds owner registration with the mint authority as proposed admin', async () => {
+      const unsigned = await generate()
+      const [instruction] = unsigned.instructions
 
-    assert.ok(instruction)
-    assert.equal(unsigned.family, ChainFamily.Solana)
-    assert.equal(unsigned.mainIndex, 0)
-    assert.equal(instruction.programId.toBase58(), ROUTER)
-    assert.ok(instruction.keys.some((key) => key.pubkey.equals(MINT_AUTHORITY)))
-    assert.deepEqual(instruction.data.subarray(-32), MINT_AUTHORITY.toBuffer())
-  })
-
-  it('builds the CCIP-admin registration instruction', async () => {
-    const owner = await generate()
-    const ccipAdmin = await generate({
-      registrationMethod: 'ccip-admin',
-      authority: CCIP_ADMIN.toBase58(),
+      assert.ok(instruction)
+      assert.equal(unsigned.family, ChainFamily.Solana)
+      assert.equal(unsigned.mainIndex, 0)
+      assert.equal(instruction.programId.toBase58(), ROUTER)
+      assert.ok(instruction.keys.some((key) => key.pubkey.equals(MINT_AUTHORITY)))
+      assert.deepEqual(instruction.data.subarray(-32), MINT_AUTHORITY.toBuffer())
     })
 
-    assert.notDeepEqual(ccipAdmin.instructions[0]!.data, owner.instructions[0]!.data)
-    assert.deepEqual(ccipAdmin.instructions[0]!.data.subarray(-32), MINT_AUTHORITY.toBuffer())
+    it('builds the CCIP-admin registration instruction', async () => {
+      const owner = await generate()
+      const ccipAdmin = await generate({
+        registrationMethod: 'ccip-admin',
+        authority: CCIP_ADMIN.toBase58(),
+      })
+
+      assert.notDeepEqual(ccipAdmin.instructions[0]!.data, owner.instructions[0]!.data)
+      assert.deepEqual(ccipAdmin.instructions[0]!.data.subarray(-32), MINT_AUTHORITY.toBuffer())
+    })
   })
 
-  it('rejects owner registration when authority is not the mint authority', async () => {
-    await assert.rejects(
-      () => generate({ authority: PAYER }),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
-    )
+  describe('validation', () => {
+    it('rejects owner registration when authority is not the mint authority', async () => {
+      await assert.rejects(
+        () => generate({ authority: PAYER }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+      )
+    })
+
+    it('rejects a token that is already registered', async () => {
+      await assert.rejects(
+        () => generate({}, true),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
+    })
+
+    it('rejects CCIP-admin registration when authority is not the Router CCIP admin', async () => {
+      await assert.rejects(
+        () => generate({ registrationMethod: 'ccip-admin' }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+      )
+    })
+
+    it('rejects an unknown registration method before RPC', async () => {
+      await assert.rejects(
+        () => generate({ registrationMethod: 'other' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'registrationMethod',
+      )
+    })
   })
 
-  it('rejects a token that is already registered', async () => {
-    await assert.rejects(
-      () => generate({}, true),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
-    )
-  })
-
-  it('rejects CCIP-admin registration when authority is not the Router CCIP admin', async () => {
-    await assert.rejects(
-      () => generate({ registrationMethod: 'ccip-admin' }),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
-    )
-  })
-
-  it('rejects an unknown registration method before RPC', async () => {
-    await assert.rejects(
-      () => generate({ registrationMethod: 'other' }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'registrationMethod',
-    )
+  describe('execute', () => {
+    it('rejects an authority that differs from the executing wallet', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain()).registerToken({
+            tokenAddress: TOKEN.toBase58(),
+            address: ADDRESS,
+            registrationMethod: 'owner',
+            authority: MINT_AUTHORITY.toBase58(),
+            wallet: WALLET,
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+      )
+    })
   })
 })

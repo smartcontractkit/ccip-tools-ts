@@ -196,31 +196,26 @@ export class CCTOperationUnsupportedError extends CCIPError {
 }
 
 /**
- * Thrown when a CCT token pool state account cannot be decoded.
+ * Thrown when CCT account data cannot be decoded.
  *
  * @example
  * ```typescript
  * try {
  *   await cct.getTokenPoolState({ tokenAddress: mint, poolType: 'burn-mint' })
  * } catch (error) {
- *   if (error instanceof CCTTokenPoolStateDecodeError) {
- *     console.log(`Unable to decode pool state at ${error.context.tokenPool}`)
+ *   if (error instanceof CCTDataDecodeError) {
+ *     console.log(error.message)
  *   }
  * }
  * ```
  */
-export class CCTTokenPoolStateDecodeError extends CCIPError {
-  override readonly name = 'CCTTokenPoolStateDecodeError'
-  /** Creates a token pool state decode error. */
-  constructor(tokenPool: string, options?: CCIPErrorOptions) {
-    super(
-      CCIPErrorCode.CCT_TOKEN_POOL_STATE_DECODE_FAILED,
-      `Unable to decode token pool state at ${tokenPool}`,
-      {
-        ...options,
-        isTransient: false,
-        context: { ...options?.context, tokenPool },
-      },
-    )
+export class CCTDataDecodeError extends CCIPError {
+  override readonly name = 'CCTDataDecodeError'
+  /** Creates a CCT data decode error. */
+  constructor(message = 'Unable to decode CCT data', options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.CCT_DATA_DECODE_FAILED, message, {
+      ...options,
+      isTransient: false,
+    })
   }
 }
