@@ -3,9 +3,10 @@
  *
  * We deliberately keep this tiny and only describe what the SDK needs beyond the
  * v1.6 IDL: the `DestChainCcipV2` account (stored under the `dest_chain_state_v2`
- * PDA seed) plus the types it references. Everything else about the v2 router is
- * handled in "compatibility mode" via the existing 1.6.0 IDL — the `Config`
- * account, for instance, is byte-compatible (v2 only appends a trailing field).
+ * PDA seed), the `CCIPMessageSentV2` event, plus the types they reference.
+ * Everything else about the v2 router is handled in "compatibility mode" via the
+ * existing 1.6.0 IDL — the `Config` account, for instance, is byte-compatible
+ * (v2 only appends a trailing field).
  *
  * Anchor 0.29 IDL format. `UsdCents`/`CrossChainGas` are `u32` newtypes in the
  * upstream v2 IDL, inlined here as `u32` (identical borsh layout).
@@ -42,7 +43,68 @@ export type CcipRouterV2 = {
       type: { kind: 'struct'; fields: [] }
     },
   ]
+  events: [
+    {
+      name: 'CCIPMessageSentV2'
+      fields: [
+        { name: 'destChainSelector'; type: 'u64'; index: false },
+        { name: 'sender'; type: 'publicKey'; index: false },
+        { name: 'messageId'; type: { array: ['u8', 32] }; index: false },
+        { name: 'feeToken'; type: 'publicKey'; index: false },
+        {
+          name: 'tokenAmountBeforeTokenPoolFees'
+          type: { defined: 'ProtocolAmount' }
+          index: false
+        },
+        { name: 'encodedMessage'; type: 'bytes'; index: false },
+        { name: 'receipts'; type: { vec: { defined: 'Receipt' } }; index: false },
+        { name: 'verifierBlobs'; type: { vec: 'bytes' }; index: false },
+      ]
+    },
+  ]
   types: [
+    {
+      name: 'CCIPMessageSentV2'
+      docs: ['CCIP 2.0 CCIPMessageSent event with receipts and verifier blobs.']
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'destChainSelector'; type: 'u64' },
+          { name: 'sender'; type: 'publicKey' },
+          { name: 'messageId'; type: { array: ['u8', 32] } },
+          { name: 'feeToken'; type: 'publicKey' },
+          { name: 'tokenAmountBeforeTokenPoolFees'; type: { defined: 'ProtocolAmount' } },
+          { name: 'encodedMessage'; type: 'bytes' },
+          { name: 'receipts'; type: { vec: { defined: 'Receipt' } } },
+          { name: 'verifierBlobs'; type: { vec: 'bytes' } },
+        ]
+      }
+    },
+    {
+      name: 'ProtocolAmount'
+      docs: ['CCIP 2.0 compatible cross-chain amount representation (u256 in big-endian bytes).']
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'beBytes'; type: { array: ['u8', 32] } }]
+      }
+    },
+    {
+      name: 'Receipt'
+      docs: ['CCIP 2.0 fee/gas receipt for a single entity.']
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'issuer'; type: 'publicKey' },
+          { name: 'destGasLimit'; type: 'u32' },
+          { name: 'destBytesOverhead'; type: 'u32' },
+          { name: 'feeTokenAmount'; type: { defined: 'ProtocolAmount' } },
+          { name: 'fee'; type: 'u32' },
+          { name: 'tokenFeeBps'; type: 'u16' },
+          { name: 'isEnabled'; type: 'bool' },
+          { name: 'extraArgs'; type: 'bytes' },
+        ]
+      }
+    },
     {
       name: 'DestChainState'
       type: {
@@ -108,7 +170,68 @@ export const IDL: CcipRouterV2 = {
       type: { kind: 'struct', fields: [] },
     },
   ],
+  events: [
+    {
+      name: 'CCIPMessageSentV2',
+      fields: [
+        { name: 'destChainSelector', type: 'u64', index: false },
+        { name: 'sender', type: 'publicKey', index: false },
+        { name: 'messageId', type: { array: ['u8', 32] }, index: false },
+        { name: 'feeToken', type: 'publicKey', index: false },
+        {
+          name: 'tokenAmountBeforeTokenPoolFees',
+          type: { defined: 'ProtocolAmount' },
+          index: false,
+        },
+        { name: 'encodedMessage', type: 'bytes', index: false },
+        { name: 'receipts', type: { vec: { defined: 'Receipt' } }, index: false },
+        { name: 'verifierBlobs', type: { vec: 'bytes' }, index: false },
+      ],
+    },
+  ],
   types: [
+    {
+      name: 'CCIPMessageSentV2',
+      docs: ['CCIP 2.0 CCIPMessageSent event with receipts and verifier blobs.'],
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'destChainSelector', type: 'u64' },
+          { name: 'sender', type: 'publicKey' },
+          { name: 'messageId', type: { array: ['u8', 32] } },
+          { name: 'feeToken', type: 'publicKey' },
+          { name: 'tokenAmountBeforeTokenPoolFees', type: { defined: 'ProtocolAmount' } },
+          { name: 'encodedMessage', type: 'bytes' },
+          { name: 'receipts', type: { vec: { defined: 'Receipt' } } },
+          { name: 'verifierBlobs', type: { vec: 'bytes' } },
+        ],
+      },
+    },
+    {
+      name: 'ProtocolAmount',
+      docs: ['CCIP 2.0 compatible cross-chain amount representation (u256 in big-endian bytes).'],
+      type: {
+        kind: 'struct',
+        fields: [{ name: 'beBytes', type: { array: ['u8', 32] } }],
+      },
+    },
+    {
+      name: 'Receipt',
+      docs: ['CCIP 2.0 fee/gas receipt for a single entity.'],
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'issuer', type: 'publicKey' },
+          { name: 'destGasLimit', type: 'u32' },
+          { name: 'destBytesOverhead', type: 'u32' },
+          { name: 'feeTokenAmount', type: { defined: 'ProtocolAmount' } },
+          { name: 'fee', type: 'u32' },
+          { name: 'tokenFeeBps', type: 'u16' },
+          { name: 'isEnabled', type: 'bool' },
+          { name: 'extraArgs', type: 'bytes' },
+        ],
+      },
+    },
     {
       name: 'DestChainState',
       type: {

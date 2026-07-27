@@ -461,6 +461,10 @@ export function convertKeysToCamelCase(
   }
 
   if (obj == null) return obj
+  if (mapValues) {
+    const res = mapValues(obj, key)
+    if (res !== obj) return res
+  }
   if (
     typeof obj !== 'object' ||
     !(Object.getPrototypeOf(obj) == null || Object.getPrototypeOf(obj) === Object.prototype)

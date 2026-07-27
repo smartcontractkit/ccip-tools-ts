@@ -109,7 +109,7 @@ import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
-import { buildMessageForDest, normalizeDeep } from '../requests.ts'
+import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
@@ -132,9 +132,11 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
+import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
+const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
 const TOKEN_POOL_IDL = {
   ...BURN_MINT_TOKEN_POOL,
@@ -173,7 +175,7 @@ export type SolanaLog = ChainLog & {
   tx?: SolanaTransaction
   data: string
   level: number
-  type: 'log' | 'data'
+  type: 'log' | 'data' | 'cpi'
 }
 /** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
@@ -396,8 +398,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Parse logs from transaction using helper function
-    const logs_ = tx.meta?.logMessages?.length
-      ? parseSolanaLogs(tx.meta.logMessages).map((l) => ({
+    const logs_ = tx.meta
+      ? parseSolanaLogs(tx.meta.logMessages ?? [], tx).map((l) => ({
           ...l,
           transactionHash: hash,
           blockNumber: tx.slot,
@@ -970,15 +972,31 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Verify the discriminant matches CCIPMessageSent
     try {
-      if (dataSlice(getDataBytes(data), 0, 8) !== hexDiscriminator('CCIPMessageSent')) return
+      if (
+        !['CCIPMessageSent', 'CCIPMessageSentV2']
+          .map(hexDiscriminator)
+          .includes(dataSlice(getDataBytes(data), 0, 8))
+      )
+        return
     } catch (_) {
       return
     }
+    let decoded
+    if (dataSlice(getDataBytes(data), 0, 8) === hexDiscriminator('CCIPMessageSent'))
+      decoded = routerCoder.events.decode<
+        (typeof CCIP_ROUTER_IDL)['events'][number] & { name: 'CCIPMessageSent' },
+        IdlTypes<typeof CCIP_ROUTER_IDL>
+      >(data)
+    else if (dataSlice(getDataBytes(data), 0, 8) === hexDiscriminator('CCIPMessageSentV2'))
+      decoded = routerV2Coder.events.decode<
+        (typeof CCIP_ROUTER_V2_IDL)['events'][number] & { name: 'CCIPMessageSentV2' },
+        IdlTypes<typeof CCIP_ROUTER_V2_IDL>
+      >(data)
 
-    const decoded = routerCoder.events.decode<
-      (typeof CCIP_ROUTER_IDL)['events'][number] & { name: 'CCIPMessageSent' },
-      IdlTypes<typeof CCIP_ROUTER_IDL>
-    >(data)
+    if (decoded?.name === 'CCIPMessageSentV2') {
+      const message = decodeMessageV1(decoded.data.encodedMessage)
+      return decodeMessage({ ...decoded.data, ...message })
+    }
     if (decoded?.name !== 'CCIPMessageSent') return
     const message = decoded.data.message
 

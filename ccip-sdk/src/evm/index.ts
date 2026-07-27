@@ -2356,7 +2356,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         watch:
           opts.watch instanceof AbortSignal
             ? AbortSignal.any([opts.watch, this.abort])
-            : this.abort,
+            : opts.watch
+              ? this.abort
+              : undefined,
       })
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
