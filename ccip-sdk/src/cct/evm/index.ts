@@ -130,12 +130,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
    * `{ hash, contractAddress }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
-   * registered, role-granted, and lane-configured before it can bridge.
+   * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
+   * additionally requires a pre-deployed `lockBox` ({@link DeployLockReleaseTokenPoolParams});
+   * deploying the lockbox and authorizing the pool on it are not yet SDK operations.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedDeployTokenPool({
-   *   type: 'BurnMintTokenPool', // or BurnFromMint / BurnWithFromMint / LockRelease
+   *   type: 'BurnMintTokenPool', // burn-* variant; LockReleaseTokenPool additionally requires `lockBox`
    *   token: '0xToken...',
    *   localTokenDecimals: 18,
    *   rmnProxy: '0xRmnProxy...',
@@ -154,7 +156,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `DeployableTokenPoolType`, v2.0.0).
    * @remarks Deploying the pool alone doesn't make it usable: register it with {@link setPool},
    * grant it the token's mint/burn roles (`grantMintAndBurnRoles`), and configure its remote
-   * pools + rate limits before it can bridge.
+   * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
+   * `lockBox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}) — neither is
+   * an SDK operation yet (follow-up).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -166,6 +170,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   localTokenDecimals: 18,
    *   rmnProxy: '0xRmnProxy...',
    *   router: '0xRouter...',
+   *   lockBox: '0xLockBox...', // required for LockReleaseTokenPool; must be a non-zero address
    *   wallet,
    * })
    * ```

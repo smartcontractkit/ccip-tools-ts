@@ -68,7 +68,15 @@ export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBase {
   type: Exclude<DeployableTokenPoolType, 'LockReleaseTokenPool'>
 }
 
-/** Params for a `LockReleaseTokenPool` — the burn constructor plus `lockBox`. */
+/**
+ * Params for a `LockReleaseTokenPool` — the burn constructor plus `lockBox`.
+ *
+ * @remarks Partial support: `lockBox` must be an already-deployed `ERC20LockBox` for the *same*
+ * `token` (the pool constructor calls `lockBox.isTokenSupported(token)` and reverts otherwise).
+ * This SDK does not yet deploy the lockbox or authorize the pool on it — deploy the `ERC20LockBox`
+ * and add the pool via the lockbox's `applyAuthorizedCallerUpdates` out-of-band before the pool can
+ * lock/release. A `deployLockBox` op + caller-authorization are tracked as a follow-up.
+ */
 export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBase {
   type: 'LockReleaseTokenPool'
   /** Lock-box address; required and must be non-zero — the v2.0.0 constructor reverts on the zero address. */
