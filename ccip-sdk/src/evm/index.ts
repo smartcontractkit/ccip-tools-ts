@@ -447,7 +447,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return { statusCode: resp.status, statusMessage: resp.statusText, headers, body }
       }
       req.retryFunc = () => Promise.resolve(false) // our wrapper owns retries
-      const provider = new JsonRpcProvider(req, undefined, { staticNetwork: true })
+      const provider = new JsonRpcProvider(req, undefined, {
+        staticNetwork: true,
+        batchMaxCount: 20,
+      })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {

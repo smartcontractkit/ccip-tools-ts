@@ -136,7 +136,7 @@ class AdaptiveLimiter {
    * lone request after idle never trips this (its wait is 0). */
   async acquire(signal?: AbortSignal): Promise<void> {
     if (!this.active) return
-    const now = Date.now()
+    const now = performance.now()
     const at = Math.max(now, this.nextSendAt)
     if (at - now > MAX_PACING_WAIT_MS) {
       throw new CCIPError(
@@ -158,13 +158,13 @@ class AdaptiveLimiter {
       // so each consecutive 429 waits twice as long before the next attempt.
       if (this.active) {
         this.windowMs = clampWindow(this.windowMs * 2)
-        this.lastLimitTs = Date.now()
+        this.lastLimitTs = performance.now()
       }
       return
     }
     this.limit = Math.max(1, hint.limit ?? this.limit)
     this.windowMs = clampWindow(hint.windowMs)
-    this.lastLimitTs = Date.now()
+    this.lastLimitTs = performance.now()
     this.nextSendAt = this.lastLimitTs
     this.successStreak = 0
     this.active = true
@@ -179,7 +179,7 @@ class AdaptiveLimiter {
   /** On success: probe faster after a clean run, deactivate after a long one. */
   onSuccess(): void {
     if (!this.active) return
-    const now = Date.now()
+    const now = performance.now()
     if (now - this.lastLimitTs > this.windowMs && ++this.successStreak >= this.limit) {
       this.windowMs = clampWindow(this.windowMs * 0.7)
       this.limit += Math.max(1, Math.floor(this.limit / 4))
@@ -262,7 +262,7 @@ export function parseRetryAfter(value: string | null): number | null {
   // Try delta-seconds first
   const deltaSeconds = Number(trimmed)
   if (!isNaN(deltaSeconds) && isFinite(deltaSeconds)) {
-    return Date.now() + deltaSeconds * 1000
+    return performance.now() + deltaSeconds * 1000
   }
   // Try HTTP-date
   const parsed = Date.parse(trimmed)
@@ -296,7 +296,7 @@ export interface ParsedRateLimitHeaders {
  */
 export function parseRateLimitHeaders(headers: Headers): ParsedRateLimitHeaders {
   const result: ParsedRateLimitHeaders = {}
-  const now = Date.now()
+  const now = performance.now()
   const num = (name: string): number | undefined => {
     const raw = headers.get(name)
     const v = raw == null ? NaN : Number(raw)
@@ -369,7 +369,7 @@ function extractRateHint(response: Response, method?: string): RateHint {
   }
   const std = parseRateLimitHeaders(response.headers)
   const resetAt = std.resetAt ?? std.retryAfterAt
-  const windowMs = resetAt != null ? resetAt - Date.now() : undefined
+  const windowMs = resetAt != null ? resetAt - performance.now() : undefined
   return {
     limit: std.limit,
     remaining: std.remaining,

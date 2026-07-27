@@ -485,7 +485,7 @@ export function convertKeysToCamelCase(
 export const sleep = (ms: number, abort?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (abort?.aborted || !ms) return resolve()
-    let timeout = AbortSignal.timeout(ms)
+    let timeout = AbortSignal.timeout(Math.ceil(ms))
     if (abort) timeout = AbortSignal.any([abort, timeout])
     const onAbort = () => {
       timeout.removeEventListener('abort', onAbort)
