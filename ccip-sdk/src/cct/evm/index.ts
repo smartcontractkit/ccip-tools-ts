@@ -14,6 +14,10 @@ import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
 import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
+import {
+  type AuthorizeLockboxCallersParams,
+  AuthorizeLockboxCallers,
+} from './lockbox/operations/authorize-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
@@ -35,6 +39,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #deployToken = new DeployToken()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #deployLockbox = new DeployLockbox()
+  readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -274,6 +279,48 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     return this.#deployLockbox.execute(this.chain, opts)
   }
 
+  /**
+   * Builds an unsigned `ERC20LockBox` `applyAuthorizedCallerUpdates` tx (for multisig / offline
+   * signing) that adds/removes authorized callers. Authorize a `LockReleaseTokenPool` here so it
+   * can lock/release against the lockbox.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @example
+   * ```typescript
+   * // `sender` must be the lockbox owner
+   * const unsigned = await cct.generateUnsignedAuthorizeLockboxCallers({
+   *   lockbox: '0xLockbox...',
+   *   addedCallers: ['0xPool...'], // the LockReleaseTokenPool to authorize
+   *   sender: '0xLockboxOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedAuthorizeLockboxCallers(
+    opts: AuthorizeLockboxCallersParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#authorizeLockboxCallers.generate(this.chain, opts)
+  }
+
+  /**
+   * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
+   * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must sign as the lockbox owner
+   * const { hash } = await cct.authorizeLockboxCallers({
+   *   lockbox: '0xLockbox...',
+   *   addedCallers: ['0xPool...'],
+   *   wallet,
+   * })
+   * ```
+   */
+  authorizeLockboxCallers(
+    opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
+  ): Promise<TransactionResult> {
+    return this.#authorizeLockboxCallers.execute(this.chain, opts)
+  }
 }
 
 export * from '../errors.ts'
@@ -284,5 +331,6 @@ export type {
   DeployableTokenPoolType,
 } from './token-pool/operations/deploy-token-pool.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
+export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export type { DeployResult, EVMExecuteParams } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
