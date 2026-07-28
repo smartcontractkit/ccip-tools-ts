@@ -5,9 +5,9 @@ import { describe, it } from 'node:test'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
 
@@ -17,6 +17,7 @@ const ADDRESS = Keypair.generate().publicKey.toBase58()
 const ROUTER = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const CCIP_ADMIN = Keypair.generate().publicKey
+const ADMINISTRATOR = Keypair.generate().publicKey
 const CONFIG = deriveRouterConfigPda(new PublicKey(ROUTER))
 const TOKEN_ADMIN_REGISTRY = deriveTokenAdminRegistryPda(new PublicKey(ROUTER), TOKEN)
 const WALLET = {
@@ -32,20 +33,26 @@ function configAccount() {
   return { data, executable: false, lamports: 1, owner: new PublicKey(ROUTER), rentEpoch: 0 }
 }
 
-function mintAccount(mintAuthority = MINT_AUTHORITY) {
+function mintAccount(mintAuthority: PublicKey | null = MINT_AUTHORITY) {
   const data = Buffer.alloc(82)
-  data.writeUInt32LE(1, 0)
-  mintAuthority.toBuffer().copy(data, 4)
+  if (mintAuthority) {
+    data.writeUInt32LE(1, 0)
+    mintAuthority.toBuffer().copy(data, 4)
+  }
   data[44] = 9
   data[45] = 1
   return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
 }
 
-function stubChain(registered = false): SolanaChain {
+function stubChain(
+  registered = false,
+  mintAuthority: PublicKey | null = MINT_AUTHORITY,
+  configAvailable = true,
+): SolanaChain {
   const getAccountInfo = async (address: PublicKey) => {
-    if (address.equals(TOKEN)) return mintAccount()
+    if (address.equals(TOKEN)) return mintAccount(mintAuthority)
     if (address.equals(TOKEN_ADMIN_REGISTRY)) return registered ? mintAccount() : null
-    if (address.equals(CONFIG)) return configAccount()
+    if (address.equals(CONFIG)) return configAvailable ? configAccount() : null
     return assert.fail('unexpected account lookup')
   }
 
@@ -62,18 +69,19 @@ function stubChain(registered = false): SolanaChain {
   } as unknown as SolanaChain
 }
 
-function generate(opts = {}, registered = false) {
-  return SolanaTokenManager.fromChain(stubChain(registered)).generateUnsignedRegisterToken({
+function generate(opts = {}, registered = false, mintAuthority: PublicKey | null = MINT_AUTHORITY) {
+  return SolanaTokenManager.fromChain(
+    stubChain(registered, mintAuthority),
+  ).generateUnsignedRegisterAdmin({
     tokenAddress: TOKEN.toBase58(),
     address: ADDRESS,
-    registrationMethod: 'owner',
     payer: PAYER,
     authority: MINT_AUTHORITY.toBase58(),
     ...opts,
   })
 }
 
-describe('RegisterToken (cct/solana)', () => {
+describe('RegisterAdmin (cct/solana)', () => {
   describe('generate', () => {
     it('builds owner registration with the mint authority as proposed admin', async () => {
       const unsigned = await generate()
@@ -83,19 +91,27 @@ describe('RegisterToken (cct/solana)', () => {
       assert.equal(unsigned.family, ChainFamily.Solana)
       assert.equal(unsigned.mainIndex, 0)
       assert.equal(instruction.programId.toBase58(), ROUTER)
+      assert.equal(instruction.data.subarray(0, 8).toString('hex'), 'af51a0f6ce841216')
       assert.ok(instruction.keys.some((key) => key.pubkey.equals(MINT_AUTHORITY)))
       assert.deepEqual(instruction.data.subarray(-32), MINT_AUTHORITY.toBuffer())
     })
 
-    it('builds the CCIP-admin registration instruction', async () => {
-      const owner = await generate()
-      const ccipAdmin = await generate({
-        registrationMethod: 'ccip-admin',
-        authority: CCIP_ADMIN.toBase58(),
-      })
+    it('builds the CCIP-admin registration instruction without a mint authority', async () => {
+      const ccipAdmin = await generate(
+        {
+          registrationMethod: 'ccip-admin',
+          authority: CCIP_ADMIN.toBase58(),
+          administrator: ADMINISTRATOR.toBase58(),
+        },
+        false,
+        null,
+      )
 
-      assert.notDeepEqual(ccipAdmin.instructions[0]!.data, owner.instructions[0]!.data)
-      assert.deepEqual(ccipAdmin.instructions[0]!.data.subarray(-32), MINT_AUTHORITY.toBuffer())
+      assert.equal(
+        ccipAdmin.instructions[0]!.data.subarray(0, 8).toString('hex'),
+        'da258b6b8ee433db',
+      )
+      assert.deepEqual(ccipAdmin.instructions[0]!.data.subarray(-32), ADMINISTRATOR.toBuffer())
     })
   })
 
@@ -112,6 +128,35 @@ describe('RegisterToken (cct/solana)', () => {
         () => generate({}, true),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
+    })
+
+    it('requires an administrator for CCIP-admin registration without a mint authority', async () => {
+      await assert.rejects(
+        () =>
+          generate(
+            { registrationMethod: 'ccip-admin', authority: CCIP_ADMIN.toBase58() },
+            false,
+            null,
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'administrator',
+      )
+    })
+
+    it('rejects a missing Router config with a typed error', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(
+            stubChain(false, MINT_AUTHORITY, false),
+          ).generateUnsignedRegisterAdmin({
+            tokenAddress: TOKEN.toBase58(),
+            address: ADDRESS,
+            registrationMethod: 'ccip-admin',
+            payer: PAYER,
+            authority: CCIP_ADMIN.toBase58(),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'address',
       )
     })
 
@@ -135,7 +180,7 @@ describe('RegisterToken (cct/solana)', () => {
     it('rejects an authority that differs from the executing wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).registerToken({
+          SolanaTokenManager.fromChain(stubChain()).registerAdmin({
             tokenAddress: TOKEN.toBase58(),
             address: ADDRESS,
             registrationMethod: 'owner',
