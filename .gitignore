@@ -26,3 +26,5 @@ ccip-api-ref/docs-api/v1/*
 
 # Canton CLI config
 canton-config.json
+
+pnpm-lock.yaml
