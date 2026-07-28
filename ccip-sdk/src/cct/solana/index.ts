@@ -30,8 +30,8 @@ import {
   type ExecuteCreateLookupTableResult,
   type ExecuteProposeAdminParams,
   type ExecuteProposeAdminResult,
-  type ExecuteRegisterTokenParams,
-  type ExecuteRegisterTokenResult,
+  type ExecuteRegisterAdminParams,
+  type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
   type GenerateAppendToLookupTableParams,
@@ -40,14 +40,14 @@ import {
   type GenerateCreateLookupTableResult,
   type GenerateProposeAdminParams,
   type GenerateProposeAdminResult,
-  type GenerateRegisterTokenParams,
-  type GenerateRegisterTokenResult,
+  type GenerateRegisterAdminParams,
+  type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
   AppendToLookupTable,
   CreateLookupTable,
   ProposeAdmin,
-  RegisterToken,
+  RegisterAdmin,
   SetPool,
 } from './token-admin-registry/operations/index.ts'
 import {
@@ -76,7 +76,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #proposeAdmin = new ProposeAdmin()
-  readonly #registerToken = new RegisterToken()
+  readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
 
   // Token pool operations
@@ -474,39 +474,47 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds an unsigned Solana token registration instruction.
    *
-   * The mint authority is proposed as the registry administrator. Choose `owner` when the mint
-   * authority signs, or `ccip-admin` when the Router CCIP admin signs.
+   * This proposes the registry administrator. The proposed admin must {@link acceptAdmin} before
+   * calling {@link setPool}. The administrator defaults to the mint authority and the method to
+   * `owner`; choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
+   * to nominate a different admin or register a mint with no mint authority.
+   *
+   * @see {@link acceptAdmin}
+   * @see {@link setPool}
    *
    * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
-   * authority does not match the selected registration method, the mint has no authority, or the
-   * token is already registered.
+   * authority does not match the selected registration method, `administrator` is required, or a
+   * registry entry already exists for the token.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
    * @example
    * ```ts
-   * const unsigned = await cct.generateUnsignedRegisterToken({
+   * const unsigned = await cct.generateUnsignedRegisterAdmin({
    *   tokenAddress: mint,
    *   address: router,
-   *   registrationMethod: 'owner',
    *   payer: mintAuthority,
    * })
    * ```
    */
-  generateUnsignedRegisterToken(
-    opts: GenerateRegisterTokenParams,
-  ): Promise<GenerateRegisterTokenResult> {
-    return this.#registerToken.generate(this.chain, opts)
+  generateUnsignedRegisterAdmin(
+    opts: GenerateRegisterAdminParams,
+  ): Promise<GenerateRegisterAdminResult> {
+    return this.#registerAdmin.generate(this.chain, opts)
   }
 
   /**
-   * Registers a token using the executing wallet as the registration authority and fee payer.
+   * Proposes a token registry administrator using the executing wallet as registration authority
+   * and fee payer. The proposed admin must {@link acceptAdmin} before calling {@link setPool}.
+   *
+   * @see {@link acceptAdmin}
+   * @see {@link setPool}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
-   * authority does not match the selected registration method or executing wallet, the mint has
-   * no authority, or the token is already registered.
+   * authority does not match the selected registration method or executing wallet,
+   * `administrator` is required, or a registry entry already exists for the token.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
@@ -514,25 +522,26 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
-   * await cct.registerToken({
+   * await cct.registerAdmin({
    *   tokenAddress: mint,
    *   address: router,
-   *   registrationMethod: 'owner',
    *   wallet,
    * })
    * ```
    */
-  registerToken(opts: ExecuteRegisterTokenParams): Promise<ExecuteRegisterTokenResult> {
-    return this.#registerToken.execute(this.chain, opts)
+  registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
+    return this.#registerAdmin.execute(this.chain, opts)
   }
 
   /**
    * Builds unsigned Solana `setPool` instructions.
    *
-   * The `payer` pays transaction fees. `authority` defaults to `payer`; Squads/multisig flows
-   * should pass the token admin/vault authority explicitly. For a newly deployed canonical pool,
-   * create the pool signer's ATA before calling this operation.
+   * The token must first be registered and its proposed administrator accepted. The `payer` pays
+   * transaction fees; `authority` defaults to `payer`, while Squads/multisig flows should pass
+   * the token admin/vault authority explicitly. For a newly deployed canonical pool, create the
+   * pool signer's ATA before calling this operation.
    *
+   * @see {@link generateUnsignedRegisterAdmin}
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedCreateTokenAccount}
    *
@@ -556,9 +565,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Registers a token pool. The wallet must be the token admin authority. For a newly deployed
-   * canonical pool, create the pool signer's ATA before calling this operation.
+   * Registers a token pool. The token must first be registered and its proposed administrator
+   * accepted; the wallet must be the token admin authority. For a newly deployed canonical pool,
+   * create the pool signer's ATA before calling this operation.
    *
+   * @see {@link registerAdmin}
    * @see {@link deployTokenPool}
    * @see {@link createTokenAccount}
    *

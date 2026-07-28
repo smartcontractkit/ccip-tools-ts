@@ -32,8 +32,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.appendToLookupTable, 'function')
     assert.equal(typeof cct.generateUnsignedProposeAdmin, 'function')
     assert.equal(typeof cct.proposeAdmin, 'function')
-    assert.equal(typeof cct.generateUnsignedRegisterToken, 'function')
-    assert.equal(typeof cct.registerToken, 'function')
+    assert.equal(typeof cct.generateUnsignedRegisterAdmin, 'function')
+    assert.equal(typeof cct.registerAdmin, 'function')
     assert.equal(typeof cct.generateUnsignedSetPool, 'function')
     assert.equal(typeof cct.setPool, 'function')
 
