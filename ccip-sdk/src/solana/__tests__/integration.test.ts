@@ -19,7 +19,9 @@ const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C
 const SEPOLIA_RPC =
   process.env.SEPOLIA_RPC ?? process.env.RPC_SEPOLIA ?? 'https://sepolia.gateway.tenderly.co'
 const SOLANA_DEVNET_RPC =
-  process.env.SOLANA_RPC ?? process.env.RPC_SOLANA ?? 'https://api.devnet.solana.com'
+  process.env.SOLANA_RPC ??
+  process.env.RPC_SOLANA ??
+  'https://solana-devnet.api.onfinality.io/public'
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5fLVsRpENWE5qmqhAdY8g88K26C9DZ7qiKRMhZiBxSuZSKyGBJj2EyqUF1b1DaPNPZbLxfP3ufFCYFK7EVcU1Hz'
@@ -354,7 +356,7 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
   let chain: SolanaChain | undefined
 
   before(async () => {
-    chain = await SolanaChain.fromUrl('https://api.devnet.solana.com', {
+    chain = await SolanaChain.fromUrl('https://solana-devnet.api.onfinality.io/public', {
       apiClient: null,
       logger: testLogger,
     })
