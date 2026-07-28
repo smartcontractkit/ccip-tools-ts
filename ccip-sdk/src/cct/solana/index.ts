@@ -24,6 +24,8 @@ import {
   CreateTokenAccount,
 } from './token/operations/index.ts'
 import {
+  type ExecuteAcceptAdminParams,
+  type ExecuteAcceptAdminResult,
   type ExecuteAppendToLookupTableParams,
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
@@ -34,6 +36,8 @@ import {
   type ExecuteRegisterTokenResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
+  type GenerateAcceptAdminParams,
+  type GenerateAcceptAdminResult,
   type GenerateAppendToLookupTableParams,
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
@@ -44,6 +48,7 @@ import {
   type GenerateRegisterTokenResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
   ProposeAdmin,
@@ -68,6 +73,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenAccount = new CreateTokenAccount()
 
   // Token admin registry operations
+  readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #proposeAdmin = new ProposeAdmin()
@@ -353,6 +359,48 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteAppendToLookupTableParams,
   ): Promise<ExecuteAppendToLookupTableResult> {
     return this.#appendToLookupTable.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned Solana instruction that accepts a pending token administrator role.
+   *
+   * The supplied authority must be the pending token administrator.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
+   * pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const unsigned = await cct.generateUnsignedAcceptAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer: pendingAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedAcceptAdmin(opts: GenerateAcceptAdminParams): Promise<GenerateAcceptAdminResult> {
+    return this.#acceptAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a pending token administrator role using the pending administrator wallet.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the executing wallet/pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
+   * ```
+   */
+  acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
   }
 
   /**

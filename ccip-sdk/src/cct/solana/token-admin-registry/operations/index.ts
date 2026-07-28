@@ -1,3 +1,4 @@
+export * from './accept-admin.ts'
 export * from './append-to-lookup-table.ts'
 export * from './create-lookup-table.ts'
 export * from './propose-admin.ts'
