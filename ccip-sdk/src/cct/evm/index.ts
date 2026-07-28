@@ -332,5 +332,10 @@ export type {
 } from './token-pool/operations/deploy-token-pool.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
-export type { DeployResult, EVMExecuteParams } from './operation.ts'
+export type {
+  DeployArtifact,
+  DeployResult,
+  DeployVerification,
+  EVMExecuteParams,
+} from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
