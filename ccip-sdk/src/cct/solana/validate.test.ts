@@ -99,6 +99,7 @@ describe('Validate (cct/solana)', () => {
   })
 
   it('resolves pool references with the other key explicitly undefined', () => {
+    // Value semantics: an explicitly-set `undefined` key must not count as provided.
     const custom = PublicKey.default.toBase58()
 
     assert.equal(
