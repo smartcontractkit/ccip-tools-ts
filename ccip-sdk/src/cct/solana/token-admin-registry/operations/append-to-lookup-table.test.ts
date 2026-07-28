@@ -204,6 +204,24 @@ describe('AppendToLookupTable (cct/solana)', () => {
       assert.equal(getLookupTableCalls, 0)
     })
 
+    it('rejects an invalid pool program address', async () => {
+      let getLookupTableCalls = 0
+
+      await assert.rejects(
+        SolanaTokenManager.fromChain(
+          stubChain({ onGetLookupTable: () => getLookupTableCalls++ }),
+        ).generateUnsignedAppendToLookupTable({
+          lookupTableAddress: LOOKUP_TABLE,
+          payer: PAYER,
+          tokenAddress: TOKEN,
+          poolProgramAddress: 'invalid',
+        }),
+        CCTParamsInvalidError,
+      )
+
+      assert.equal(getLookupTableCalls, 0)
+    })
+
     it('requires at least one address source', async () => {
       await assert.rejects(
         () => generate({ additionalAddresses: [] }),
@@ -216,7 +234,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
 
     it('requires token and pool program together', async () => {
       await assert.rejects(
-        () => generate({ tokenAddress: TOKEN, poolProgramAddress: undefined }),
+        () => generate({ tokenAddress: TOKEN }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'appendToLookupTable' &&

@@ -23,21 +23,31 @@ import {
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
 
+type AppendAdditionalAddressesParams = {
+  additionalAddresses: string[]
+  tokenAddress?: never
+  poolType?: never
+  poolProgramAddress?: never
+}
+
+type AppendCanonicalAddressesParams = {
+  tokenAddress: string
+  additionalAddresses?: string[]
+} & PoolProgramRef
+
 /**
  * Parameters shared by Solana TokenAdminRegistry `appendToLookupTable` generation and execution.
  *
  * Provide `tokenAddress` with exactly one of `poolType` or `poolProgramAddress` to append the
- * canonical CCIP addresses; otherwise, provide only `additionalAddresses`.
+ * canonical CCIP addresses. Additional addresses may also be included.
+ *
+ * Otherwise, provide `additionalAddresses` only.
  */
 type AppendToLookupTableParams = {
   lookupTableAddress: string
-  additionalAddresses?: string[]
   /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
-} & (
-  | { tokenAddress?: never; poolType?: never; poolProgramAddress?: never }
-  | ({ tokenAddress: string } & PoolProgramRef)
-)
+} & (AppendAdditionalAddressesParams | AppendCanonicalAddressesParams)
 
 /** Parameters for unsigned Solana lookup table append generation. */
 export type GenerateAppendToLookupTableParams = SolanaGenerateParams<AppendToLookupTableParams>
@@ -64,7 +74,8 @@ export class AppendToLookupTable extends SolanaOperation<
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
 
-    const hasPoolProgram = params.poolType !== undefined || params.poolProgramAddress !== undefined
+    const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
+    const hasPoolProgram = Object.hasOwn(params, 'poolType') || hasPoolProgramAddress
     if (Boolean(params.tokenAddress) !== hasPoolProgram) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -73,6 +84,9 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
     if (params.tokenAddress) validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    if (hasPoolProgramAddress) {
+      validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
+    }
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }

@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js'
 
 import {
   parsePublicKey,
+  resolvePoolProgram,
   validateInteger,
   validateNonEmptyString,
   validatePoolType,
@@ -13,6 +14,7 @@ import {
   validateWritableIndexes,
 } from './validate.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
+import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {
@@ -72,6 +74,28 @@ describe('Validate (cct/solana)', () => {
       () => validatePoolType('op', 'poolType', 'nope'),
       (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'poolType',
     )
+  })
+
+  it('resolves pool programs', () => {
+    assert.equal(
+      resolvePoolProgram('op', { poolType: 'burn-mint' }).toBase58(),
+      TOKEN_POOL_PROGRAMS['burn-mint'],
+    )
+    assert.ok(
+      resolvePoolProgram('op', { poolProgramAddress: PublicKey.default.toBase58() }).equals(
+        PublicKey.default,
+      ),
+    )
+
+    const invalidRefs: unknown[] = [
+      {},
+      { poolType: 'burn-mint', poolProgramAddress: PublicKey.default.toBase58() },
+      { poolType: 'nope' },
+      { poolProgramAddress: 'nope' },
+    ]
+    for (const params of invalidRefs) {
+      assert.throws(() => resolvePoolProgram('op', params as PoolProgramRef), CCTParamsInvalidError)
+    }
   })
 
   it('validates integers', () => {
