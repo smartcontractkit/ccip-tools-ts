@@ -142,6 +142,7 @@ class AdaptiveLimiter {
       throw new CCIPError(
         'ABORT',
         `pacing backlog ${at - now}ms exceeds cap ${MAX_PACING_WAIT_MS}ms`,
+        { isTransient: true },
       )
     }
     this.nextSendAt = at + this.windowMs / this.limit // reserve next slot synchronously
@@ -475,6 +476,7 @@ export function createRateLimitedFetch(
   const opts_ = opts as RateLimitOpts
 
   const isRetryableError = (error: unknown): boolean => {
+    if (error instanceof CCIPError && error.isTransient) return true
     if (error instanceof Error) return !!error.message.match(/\b(429\b|rate.?limit)/i)
     return false
   }
@@ -563,7 +565,12 @@ export function createRateLimitedFetch(
         // Treat a rate-limit-flavored network error as a limit signal: narrow the
         // concurrency cap and back off before retrying (no header → no pacing).
         ep.sem.decrease()
-        if (!lim.active) await sleep(backoffMs(attempt), abort)
+        // A pacing-backlog abort means acquire() itself won't wait next attempt
+        // (it fails fast instead of sleeping past the cap), so back off here —
+        // otherwise a deep backlog just re-throws instantly on every remaining
+        // attempt instead of giving the queue time to drain.
+        const isPacingBacklog = lastError.message.includes('pacing backlog')
+        if (!lim.active || isPacingBacklog) await sleep(backoffMs(attempt), abort)
         continue
       }
 
