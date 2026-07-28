@@ -39,6 +39,7 @@ type BaseConfig = {
 
 type GetTokenPoolStateResultBase = {
   stateAddress: string
+  /** Resolved pool program address: canonical for `poolType`, supplied for `poolProgramAddress`. */
   programId: string
   version: number
 }
@@ -61,7 +62,12 @@ type TokenPoolStateResultByType = {
   'lock-release': LockReleaseGetTokenPoolStateResult
 }
 
-/** State returned for a canonical or custom token pool program. */
+/**
+ * State returned for a canonical or custom token pool program.
+ *
+ * Results queried with `poolProgramAddress` use the base config shape and omit lock-release-only
+ * fields, even when the supplied address is the lock-release program.
+ */
 export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> = P extends {
   poolType: infer T
 }

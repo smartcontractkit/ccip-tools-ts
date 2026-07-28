@@ -73,6 +73,7 @@ export class CreateLookupTable extends SolanaOperation<
     if (params.mode === 'createEmpty') return
 
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }

@@ -506,6 +506,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const state = await cct.getTokenPoolState({
    *   poolType: 'burn-mint',
    *   tokenAddress: mint,
@@ -525,6 +526,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetPool({ ...params, payer })
    * const base58 = await cct.serializeUnsignedTx(unsigned, payer)
    * const base64 = await cct.serializeUnsignedTx(unsigned, payer, 'base64')

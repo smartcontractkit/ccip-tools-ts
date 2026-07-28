@@ -140,6 +140,16 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
+    it('ignores an undefined unused pool reference', async () => {
+      const unsigned = await generate({
+        tokenAddress: TOKEN,
+        poolProgramAddress: POOL_PROGRAM,
+        poolType: undefined,
+      })
+
+      assert.equal(unsigned.instructions.length, 1)
+    })
+
     it('rejects auto-derived CCIP addresses when the canonical block already exists', async () => {
       const chain = stubChain()
       const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {

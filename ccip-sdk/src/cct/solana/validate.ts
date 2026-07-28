@@ -98,8 +98,9 @@ export function validatePoolType(
 
 /** Resolves a canonical pool type or custom program address. */
 export function resolvePoolProgram(operation: string, params: PoolProgramRef): PublicKey {
-  const hasPoolType = Object.hasOwn(params, 'poolType')
-  const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
+  // Value semantics: explicit undefined does not count as provided.
+  const hasPoolType = params.poolType !== undefined
+  const hasPoolProgramAddress = params.poolProgramAddress !== undefined
   if (hasPoolType === hasPoolProgramAddress) {
     throw new CCTParamsInvalidError(
       operation,

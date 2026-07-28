@@ -74,8 +74,8 @@ export class AppendToLookupTable extends SolanaOperation<
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
 
-    const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
-    const hasPoolProgram = Object.hasOwn(params, 'poolType') || hasPoolProgramAddress
+    const hasPoolProgramAddress = params.poolProgramAddress !== undefined
+    const hasPoolProgram = params.poolType !== undefined || hasPoolProgramAddress
     if (Boolean(params.tokenAddress) !== hasPoolProgram) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -84,9 +84,7 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
     if (params.tokenAddress) validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    if (hasPoolProgramAddress) {
-      validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
-    }
+    if (hasPoolProgram) resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }

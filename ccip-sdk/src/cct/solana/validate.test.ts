@@ -98,6 +98,22 @@ describe('Validate (cct/solana)', () => {
     }
   })
 
+  it('resolves pool references with the other key explicitly undefined', () => {
+    const custom = PublicKey.default.toBase58()
+
+    assert.equal(
+      resolvePoolProgram('op', { poolProgramAddress: custom, poolType: undefined }).toBase58(),
+      custom,
+    )
+    assert.equal(
+      resolvePoolProgram('op', {
+        poolType: 'burn-mint',
+        poolProgramAddress: undefined,
+      }).toBase58(),
+      TOKEN_POOL_PROGRAMS['burn-mint'],
+    )
+  })
+
   it('validates integers', () => {
     assert.doesNotThrow(() => validateInteger('op', 'threshold', 1))
     assert.doesNotThrow(() => validateInteger('op', 'decimals', 255, 0, 255))
