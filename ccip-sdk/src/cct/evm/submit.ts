@@ -51,7 +51,9 @@ export async function submit(
   let response: TransactionResponse
   let nonceConsumed = false
   try {
-    let tx: TransactionRequest = { ...unsigned.transactions[0]! }
+    const [first] = unsigned.transactions
+    if (!first) throw new CCTTxFailedError(operation, 'no transaction to submit')
+    let tx: TransactionRequest = { ...first }
     tx.from = undefined // drop any builder-set sender before populate, else ethers throws on a from/signer mismatch
     if (tx.nonce == null) {
       tx.nonce = await chain.nextNonce(sender)

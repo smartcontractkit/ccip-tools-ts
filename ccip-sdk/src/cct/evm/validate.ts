@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 
-import { isAddress } from 'ethers'
+import { ZeroAddress, isAddress } from 'ethers'
 
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
@@ -27,6 +27,16 @@ export function validateAddress(operation: string, param: string, value: unknown
       cause: new CCIPAddressInvalidError(String(value), ChainFamily.EVM),
     },
   )
+}
+
+/**
+ * Asserts `value` is a valid, non-zero EVM address.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a valid address, or is the zero address
+ */
+export function validateNonZeroAddress(operation: string, param: string, value: unknown): void {
+  validateAddress(operation, param, value)
+  if (value === ZeroAddress)
+    throw new CCTParamsInvalidError(operation, param, 'must not be the zero address')
 }
 
 /**
