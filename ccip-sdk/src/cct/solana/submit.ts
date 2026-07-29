@@ -18,7 +18,7 @@ import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
 import { simulateAndSendTxs } from '../../solana/utils.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
-import type { TransactionHash } from '../operation.ts'
+import type { TransactionResult } from '../operation.ts'
 
 /** Signs, simulates, sends, and confirms a Solana CCT transaction. */
 export async function submit(
@@ -27,7 +27,7 @@ export async function submit(
   unsigned: UnsignedSolanaTx,
   operation: string,
   computeUnits?: number,
-): Promise<TransactionHash> {
+): Promise<TransactionResult> {
   if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
   try {

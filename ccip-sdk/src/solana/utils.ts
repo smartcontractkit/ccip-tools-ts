@@ -12,13 +12,15 @@ import {
   type SimulateTransactionConfig,
   type Transaction,
   type TransactionInstruction,
+  type VersionedTransactionResponse,
   ComputeBudgetProgram,
   PublicKey,
   SendTransactionError,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
-import { dataLength, dataSlice, hexlify } from 'ethers'
+import bs58 from 'bs58'
+import { dataLength, dataSlice, encodeBase64, hexlify } from 'ethers'
 
 import {
   CCIPTokenMintInvalidError,
@@ -45,6 +47,58 @@ export type ResolvedATA = {
 }
 
 /**
+ * Fetches and validates a token mint account.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The validated mint account info.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const mintInfo = await resolveTokenMint(connection, mint)
+ * ```
+ */
+export async function resolveTokenMint(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<AccountInfo<Buffer>> {
+  const mintInfo = await connection.getAccountInfo(mint)
+  if (!mintInfo) throw new CCIPTokenMintNotFoundError(mint.toBase58())
+
+  if (!mintInfo.owner.equals(TOKEN_PROGRAM_ID) && !mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
+      TOKEN_PROGRAM_ID.toBase58(),
+      TOKEN_2022_PROGRAM_ID.toBase58(),
+    ])
+  }
+
+  return mintInfo
+}
+
+/**
+ * Resolves and validates the SPL Token program that owns a mint.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The SPL Token or Token-2022 program address that owns the mint.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const tokenProgram = await resolveTokenProgram(connection, mint)
+ * ```
+ */
+export async function resolveTokenProgram(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<PublicKey> {
+  return (await resolveTokenMint(connection, mint)).owner
+}
+
+/**
  * Resolves the Associated Token Account (ATA) for a given mint and owner.
  * Automatically detects the correct token program (SPL Token vs Token-2022).
  *
@@ -65,22 +119,7 @@ export async function resolveATA(
   mint: PublicKey,
   owner: PublicKey,
 ): Promise<ResolvedATA> {
-  const mintInfo = await connection.getAccountInfo(mint)
-  if (!mintInfo) {
-    throw new CCIPTokenMintNotFoundError(mint.toBase58())
-  }
-
-  // Validate the mint is owned by a valid token program
-  const isValidTokenProgram =
-    mintInfo.owner.equals(TOKEN_PROGRAM_ID) || mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
-
-  if (!isValidTokenProgram) {
-    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
-      TOKEN_PROGRAM_ID.toBase58(),
-      TOKEN_2022_PROGRAM_ID.toBase58(),
-    ])
-  }
-
+  const mintInfo = await resolveTokenMint(connection, mint)
   // Allow PDAs as owners (for program vaults, etc.)
   const ata = getAssociatedTokenAddressSync(mint, owner, true, mintInfo.owner)
   return {
@@ -144,6 +183,104 @@ export function camelToSnakeCase(str: string): string {
 }
 
 type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'level' | 'type'>
+type OrderedParsedLog = ParsedLog & { order: number }
+
+type InnerInstructionLike = {
+  programId?: PublicKey | string
+  programIdIndex?: number
+  accounts?: readonly (number | string)[]
+  data?: string
+}
+
+function resolveTransactionAccountKeys(tx: VersionedTransactionResponse): string[] {
+  const { message } = tx.transaction
+  return [
+    ...message.staticAccountKeys.map((key) => key.toBase58()),
+    ...(tx.meta?.loadedAddresses?.writable ?? []).map((key) => key.toBase58()),
+    ...(tx.meta?.loadedAddresses?.readonly ?? []).map((key) => key.toBase58()),
+  ]
+}
+
+function resolveInstructionProgramId(
+  ix: InnerInstructionLike,
+  accountKeys: readonly string[],
+): string | undefined {
+  if (ix.programId) return ix.programId.toString()
+  if (ix.programIdIndex != null) return accountKeys[ix.programIdIndex]
+}
+
+function resolveInstructionAccounts(
+  ix: InnerInstructionLike,
+  accountKeys: readonly string[],
+): string[] {
+  return (ix.accounts ?? [])
+    .map((account) => (typeof account === 'number' ? accountKeys[account] : account))
+    .filter((account): account is string => !!account)
+}
+
+function findNextInvokeLog(
+  invokeLogs: ({ used?: boolean } & Pick<ParsedLog, 'address' | 'index' | 'level'>)[],
+  programId: string,
+) {
+  const invokeLog = invokeLogs.find(
+    (log) => !log.used && log.level > 1 && log.address === programId,
+  )
+  if (invokeLog) invokeLog.used = true
+  return invokeLog
+}
+
+function parseAnchorCpiEventLogs(
+  tx: VersionedTransactionResponse,
+  invokeLogs: ({ used?: boolean } & Pick<ParsedLog, 'address' | 'index' | 'level'>)[],
+  fallbackIndex: number,
+): OrderedParsedLog[] {
+  const accountKeys = resolveTransactionAccountKeys(tx)
+  const results: OrderedParsedLog[] = []
+
+  for (const group of tx.meta?.innerInstructions ?? []) {
+    for (const ix of group.instructions as InnerInstructionLike[]) {
+      const programId = resolveInstructionProgramId(ix, accountKeys)
+      if (!programId || typeof ix.data !== 'string') continue
+
+      const accounts = resolveInstructionAccounts(ix, accountKeys)
+      let eventAuthority: string | undefined
+      try {
+        eventAuthority = PublicKey.findProgramAddressSync(
+          [Buffer.from('__event_authority')],
+          new PublicKey(programId),
+        )[0].toBase58()
+      } catch {
+        continue
+      }
+      if (!accounts.includes(eventAuthority)) continue
+
+      let raw: Uint8Array
+      try {
+        raw = bs58.decode(ix.data)
+      } catch {
+        continue
+      }
+      if (raw.length < 16) continue
+
+      // Anchor `emit_cpi!` stores events in a self-CPI instruction:
+      // [8-byte self-CPI instruction discriminator][8-byte event discriminator][borsh event data].
+      const eventData = raw.slice(8)
+      const invokeLog = findNextInvokeLog(invokeLogs, programId)
+      const index = invokeLog?.index ?? fallbackIndex + results.length
+      results.push({
+        topics: [hexlify(eventData.slice(0, 8))],
+        index,
+        address: programId,
+        data: encodeBase64(eventData),
+        level: invokeLog?.level ?? 1,
+        type: 'data',
+        order: index + 0.5,
+      })
+    }
+  }
+
+  return results
+}
 
 /**
  * Utility function to parse Solana logs with proper address and topic extraction.
@@ -157,14 +294,20 @@ type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'leve
  * This function:
  * 1. Tracks the program call stack to determine which program emitted each log
  * 2. Extracts the first 8 bytes from base64 "Program data:" logs as topics (event discriminants)
- * 3. Converts logs to EVM-compatible ChainLog format for CCIP compatibility
- * 4. Returns ALL logs from the transaction - filtering should be done by the caller
+ * 3. Converts Anchor `emit_cpi!` inner instructions into synthetic `data` logs
+ * 4. Converts logs to EVM-compatible ChainLog format for CCIP compatibility
+ * 5. Returns ALL logs from the transaction - filtering should be done by the caller
  *
  * @param logs - Array of logMessages from Solana transaction
+ * @param tx - Optional full transaction used to synthesize Anchor CPI event logs
  * @returns Array of parsed log objects from all programs in the transaction
  */
-export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
-  const results: ReturnType<typeof parseSolanaLogs> = []
+export function parseSolanaLogs(
+  logs: readonly string[],
+  tx?: VersionedTransactionResponse,
+): ParsedLog[] {
+  const results: OrderedParsedLog[] = []
+  const invokeLogs: ({ used?: boolean } & Pick<ParsedLog, 'address' | 'index' | 'level'>)[] = []
   const programStack: string[] = []
 
   for (const [i, log] of logs.entries()) {
@@ -174,11 +317,16 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
     const matchLog = !matchInvoke && !matchReturn && log.match(/^Program (log|data): /)
     if (matchInvoke) {
       programStack.push(matchInvoke[1]!)
+      invokeLogs.push({
+        address: matchInvoke[1]!,
+        index: i,
+        level: programStack.length,
+      })
     } else if (matchReturn) {
       // Pop from stack when program returns
       programStack.pop()
     } else if (matchLog) {
-      const type = matchLog[1]! as 'log' | 'data'
+      const type = matchLog[1]! as 'log' | 'data' | 'cpi'
       // Extract the actual log data
       const logData = log.slice(matchLog[0].length)
       const currentProgram = programStack[programStack.length - 1]!
@@ -203,11 +351,14 @@ export function parseSolanaLogs(logs: readonly string[]): ParsedLog[] {
         data: logData,
         level: programStack.length,
         type,
+        order: i,
       })
     }
   }
 
-  return results
+  if (tx) results.push(...parseAnchorCpiEventLogs(tx, invokeLogs, logs.length))
+
+  return results.sort((a, b) => a.order - b.order).map(({ order: _, ...log }) => log)
 }
 
 /**
@@ -235,7 +386,7 @@ export function getErrorFromLogs(
         !acc.length || (l.address === acc[0]!.address && !l.topics.length) ? [l, ...acc] : acc,
       [] as typeof logs,
     )
-    .filter(({ type }) => type !== 'data')
+    .filter(({ type }) => type !== 'data' && type !== 'cpi')
     .reduceRight((acc, { data: l }) => {
       l = l.replace(/ (with message|thrown in|at) /, ' $1: ')
       if (l.endsWith(':') && acc.length) l = `${l} ${acc.shift()!}` // cosmetic: join lines ending in ':' with next

@@ -289,6 +289,14 @@ export async function showRequests(
   }
 
   let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
+  let receiptsHeaderPrinted = false
+  const printReceiptsHeader = () => {
+    if (!receiptsHeaderPrinted && argv.format !== Format.json) {
+      output.write('Receipts (dest):')
+      receiptsHeaderPrinted = true
+    }
+  }
+
   if (request.metadata?.receiptTransactionHash) {
     // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
     execs$ = await dest.getExecutionReceiptsInTx(request.metadata.receiptTransactionHash, {
@@ -334,10 +342,14 @@ export async function showRequests(
       }
       if (argv.wait)
         logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
-      else if (argv.format !== Format.json) output.write('Receipts (dest):')
+      else printReceiptsHeader()
       return verifications
     })().catch((err) => {
-      logger.debug('getVerifications error:', err)
+      logger.warn(
+        'Verifications unavailable',
+        err instanceof Error && !argv.verbose ? err.message : err,
+      )
+      if (!argv.wait) printReceiptsHeader()
       return undefined
     })
     execs$ = dest.getExecutionReceipts({
@@ -353,7 +365,6 @@ export async function showRequests(
 
   let found = false
   for await (const exec of execs$) {
-    cancelWaitVerifications?.()
     await verifications$
     const status =
       exec.receipt.state === ExecutionState.Success ? MessageStatus.Success : MessageStatus.Failed
@@ -383,6 +394,9 @@ export async function showRequests(
     found = true
     if (argv.wait) break
   }
-  if (!found) logger.warn(`No execution receipt found for request`)
+  if (!found) {
+    cancelWaitVerifications?.()
+    logger.warn(`No execution receipt found for request`)
+  }
   emitJsonEnvelope()
 }
