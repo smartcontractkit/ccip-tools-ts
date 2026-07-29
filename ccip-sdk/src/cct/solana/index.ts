@@ -485,13 +485,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds an unsigned Solana token registration instruction.
    *
-   * This proposes the registry administrator. The proposed admin must {@link acceptAdmin} before
-   * calling {@link setPool}. The administrator defaults to the mint authority and the method to
-   * `owner`; choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
+   * This proposes the registry administrator. The proposed admin must accept the role using
+   * {@link generateUnsignedAcceptAdmin} before calling {@link generateUnsignedSetPool}. The
+   * administrator defaults to the mint authority and the method to `owner`;
+   * choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
    * to nominate a different admin or register a mint with no mint authority.
    *
-   * @see {@link acceptAdmin}
-   * @see {@link setPool}
+   * @see {@link generateUnsignedAcceptAdmin}
+   * @see {@link generateUnsignedSetPool}
    *
    * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
    * authority does not match the selected registration method, `administrator` is required, or a
@@ -502,6 +503,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRegisterAdmin({
    *   tokenAddress: mint,
    *   address: router,
@@ -533,6 +535,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.registerAdmin({
    *   tokenAddress: mint,
    *   address: router,
