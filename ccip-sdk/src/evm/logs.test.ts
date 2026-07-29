@@ -112,6 +112,26 @@ describe('getEvmLogs — adaptive range pagination', () => {
     assert.ok(learned <= 300, `expected learned range <= 300, got ${learned}`)
   })
 
+  it('learns maxRange for a WebSocketProvider (url via .websocket.url, no _getConnection)', async () => {
+    const url = 'wss://fake-rpc-ws.example.com/rpc'
+    // WS providers have no `_getConnection`; the URL is only reachable via
+    // `provider.websocket.url`. Without deriving it there, shrinks are logged but
+    // never persisted and every call restarts at the default page.
+    const base = makeFakeProvider(300, 1, url) as unknown as Record<string, unknown>
+    delete base._getConnection
+    const provider = { ...base, websocket: { url } } as unknown as JsonRpcApiProvider
+
+    assert.equal(getEndpointLogRange(url), undefined)
+
+    await collect(
+      getEvmLogs({ startBlock: 1, endBlock: 700 }, { provider, getBlockInfo, logger: console }),
+    )
+
+    const learned = getEndpointLogRange(url)
+    assert.ok(learned !== undefined, 'expected WS endpoint to persist a learned log range')
+    assert.ok(learned <= 300, `expected learned range <= 300, got ${learned}`)
+  })
+
   it('second call starts at the smaller page (cross-instance learning)', async () => {
     const url = 'https://fake-rpc-c.example.com/rpc'
     const provider = makeFakeProvider(200, 1, url)

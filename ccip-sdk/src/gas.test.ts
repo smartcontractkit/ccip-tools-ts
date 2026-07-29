@@ -36,6 +36,7 @@ function createMockChains(onRamp: string, offRamp: string) {
     getTokenForTokenPool: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
     getTokenInfo: mock.fn(async () => ({ decimals: 18 })),
     getRouterForOnRamp: mock.fn(async () => sourceRouter),
+    getOnRampConfig: mock.fn(async () => ({ typeAndVersion: 'EVM2EVMOnRamp 1.5.0' })),
     getOnRampForRouter: mock.fn(async (_router: string, _destChainSelector: bigint) => onRamp),
     getOffRampsForRouter: mock.fn(async () => [offRamp]),
     getOnRampsForOffRamp: mock.fn(async () => [destOnRamp]),
