@@ -16,7 +16,15 @@ import { EVMOperation } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import { LOCKBOX_INTERFACE } from '../interface.ts'
 
-/** Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required. */
+/**
+ * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
+ * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
+ * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
+ * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
+ *
+ * Two validations here are SDK-side strictness, not contract behaviour: on-chain only *adds* revert
+ * `ZeroAddressNotAllowed`, and an update with both arrays empty is a successful owner-only no-op.
+ */
 export interface AuthorizeLockboxCallersParams {
   /** Address of the `ERC20LockBox` to update. */
   lockbox: string

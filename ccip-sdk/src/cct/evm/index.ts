@@ -302,7 +302,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
-   * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
+   * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release — until
+   * then its lock/release reverts `UnauthorizedCaller(pool)`.
+   * @remarks Depositing the lockbox's initial liquidity is a manual final step with no SDK op: the
+   * depositor must itself be an authorized caller and have ERC20-approved the lockbox.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
