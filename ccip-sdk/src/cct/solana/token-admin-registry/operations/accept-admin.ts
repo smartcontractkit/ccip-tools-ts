@@ -23,8 +23,8 @@ import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validat
 type AcceptAdminParams = {
   tokenAddress: string
   /**
-   * CCIP contract to resolve the TokenAdminRegistry/Router from — the registry itself,
-   * a Router, OnRamp, OffRamp, or TokenPool address all work.
+   * CCIP contract to resolve the TokenAdminRegistry/Router from — a Router or OffRamp
+   * address works.
    */
   address: string
   /** Pending token admin. Defaults to `payer` for single-signer transactions. */
@@ -66,10 +66,10 @@ export class AcceptAdmin extends SolanaOperation<AcceptAdminParams> {
     const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address))
     const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
 
-    if (
-      !tokenConfig.pendingAdministrator ||
-      !new PublicKey(tokenConfig.pendingAdministrator).equals(authority)
-    ) {
+    if (!tokenConfig.pendingAdministrator) {
+      throw new CCTParamsInvalidError(this.name, 'authority', 'no pending administrator')
+    }
+    if (!new PublicKey(tokenConfig.pendingAdministrator).equals(authority)) {
       throw new CCTParamsInvalidError(
         this.name,
         'authority',

@@ -430,6 +430,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * The supplied authority must be the pending token administrator.
    *
+   * @remarks
+   * Call this after {@link generateUnsignedRegisterAdmin} or {@link generateUnsignedTransferAdmin}
+   * and before {@link generateUnsignedSetPool}. `authority` defaults to `payer`; Squads/vault
+   * flows should use this method with their fee payer and signing authority explicitly.
+   *
+   * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedTransferAdmin}
+   * @see {@link generateUnsignedSetPool}
+   *
    * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
    * pending token administrator.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
@@ -437,6 +446,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedAcceptAdmin({
    *   tokenAddress: mint,
    *   address: router,
@@ -451,6 +461,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Accepts a pending token administrator role using the pending administrator wallet.
    *
+   * @remarks
+   * Call this after {@link registerAdmin} or {@link transferAdmin} and before {@link setPool}.
+   * `authority` defaults to `wallet`; Squads/vault flows should use
+   * {@link generateUnsignedAcceptAdmin} instead.
+   *
+   * @see {@link registerAdmin}
+   * @see {@link transferAdmin}
+   * @see {@link setPool}
+   *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
    * the executing wallet/pending token administrator.
@@ -460,6 +479,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
    * ```
    */
@@ -604,6 +624,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * pool signer's ATA before calling this operation.
    *
    * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedAcceptAdmin}
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedCreateTokenAccount}
    *
@@ -632,6 +653,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * create the pool signer's ATA before calling this operation.
    *
    * @see {@link registerAdmin}
+   * @see {@link acceptAdmin}
    * @see {@link deployTokenPool}
    * @see {@link createTokenAccount}
    *
