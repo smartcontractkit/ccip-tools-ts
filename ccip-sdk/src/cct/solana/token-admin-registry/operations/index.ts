@@ -1,6 +1,7 @@
 export * from './accept-admin.ts'
 export * from './append-to-lookup-table.ts'
 export * from './create-lookup-table.ts'
+export * from './get-token-admin-registry-config.ts'
 export * from './propose-admin.ts'
 export * from './register-token.ts'
 export * from './set-pool.ts'

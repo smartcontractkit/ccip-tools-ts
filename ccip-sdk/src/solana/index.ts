@@ -58,7 +58,6 @@ import {
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
-  CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
@@ -111,6 +110,8 @@ import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
+import { buildMessageForDest, normalizeDeep } from '../requests.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
@@ -118,7 +119,9 @@ import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
+import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import { getTokenAdminRegistryConfig } from './token-admin-registry.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -129,9 +132,6 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForDest, normalizeDeep } from '../requests.ts'
-import { patchBorsh } from './patchBorsh.ts'
-import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -1521,49 +1521,33 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     pendingAdministrator?: string
     tokenPool?: string
   }> {
-    const registry_ = new PublicKey(registry)
-    const tokenMint = new PublicKey(token)
-
-    const [tokenAdminRegistryAddr] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_admin_registry'), tokenMint.toBuffer()],
-      registry_,
-    )
-
-    const tokenAdminRegistry = await this.connection.getAccountInfo(tokenAdminRegistryAddr)
-    if (!tokenAdminRegistry) throw new CCIPTokenNotConfiguredError(token, registry)
-
-    const config: {
-      administrator: string
-      pendingAdministrator?: string
-      tokenPool?: string
-    } = {
-      administrator: encodeBase58(tokenAdminRegistry.data.subarray(9, 9 + 32)),
+    const router = new PublicKey(registry)
+    const config = await getTokenAdminRegistryConfig(this.connection, router, new PublicKey(token))
+    const result: { administrator: string; pendingAdministrator?: string; tokenPool?: string } = {
+      administrator: config.administrator.toBase58(),
     }
-    const pendingAdministrator = new PublicKey(tokenAdminRegistry.data.subarray(41, 41 + 32))
 
-    // Check if pendingAdministrator is set (not system program address)
     if (
-      !pendingAdministrator.equals(SystemProgram.programId) &&
-      !pendingAdministrator.equals(PublicKey.default)
+      !config.pendingAdministrator.equals(SystemProgram.programId) &&
+      !config.pendingAdministrator.equals(PublicKey.default)
     ) {
-      config.pendingAdministrator = pendingAdministrator.toBase58()
+      result.pendingAdministrator = config.pendingAdministrator.toBase58()
     }
 
     // Get token pool from lookup table if available
     try {
-      const lookupTableAddr = new PublicKey(tokenAdminRegistry.data.subarray(73, 73 + 32))
-      const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
+      const lookupTable = await this.connection.getAddressLookupTable(config.lookupTable)
       if (lookupTable.value) {
         // tokenPool state PDA is at index [3]
         const tokenPoolAddress = lookupTable.value.state.addresses[3]
         if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
-          config.tokenPool = tokenPoolAddress.toBase58()
+          result.tokenPool = tokenPoolAddress.toBase58()
         }
       }
     } catch (_err) {
       // Token pool may not be configured yet
     }
-    return config
+    return result
   }
 
   /**

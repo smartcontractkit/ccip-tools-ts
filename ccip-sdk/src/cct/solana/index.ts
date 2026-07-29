@@ -48,9 +48,12 @@ import {
   type GenerateRegisterTokenResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  type GetTokenAdminRegistryConfigParams,
+  type GetTokenAdminRegistryConfigResult,
   AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
+  GetTokenAdminRegistryConfig,
   ProposeAdmin,
   RegisterToken,
   SetPool,
@@ -76,6 +79,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #getTokenAdminRegistryConfig = new GetTokenAdminRegistryConfig()
   readonly #proposeAdmin = new ProposeAdmin()
   readonly #registerToken = new RegisterToken()
   readonly #setPool = new SetPool()
@@ -576,6 +580,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const state = await cct.getTokenPoolState({
    *   poolType: 'burn-mint',
    *   tokenAddress: mint,
@@ -587,6 +592,29 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Reads a token's TokenAdminRegistry administrator, pending administrator, and pool lookup table.
+   *
+   * @throws {@link CCTParamsInvalidError} If `address` or `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const config = await cct.getTokenAdminRegistryConfig({
+   *   address: router,
+   *   tokenAddress: mint,
+   * })
+   * console.log(config.administrator)
+   * ```
+   */
+  getTokenAdminRegistryConfig(
+    opts: GetTokenAdminRegistryConfigParams,
+  ): Promise<GetTokenAdminRegistryConfigResult> {
+    return this.#getTokenAdminRegistryConfig.query(this.chain, opts)
+  }
+
+  /**
    * Serializes an unsigned Solana CCT tx for external signing.
    *
    * @throws {@link CCTParamsInvalidError} If `encoding` is unsupported or the transaction uses
@@ -594,6 +622,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetPool({ ...params, payer })
    * const base58 = await cct.serializeUnsignedTx(unsigned, payer)
    * const base64 = await cct.serializeUnsignedTx(unsigned, payer, 'base64')
