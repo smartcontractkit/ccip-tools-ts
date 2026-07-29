@@ -183,7 +183,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
    * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
-   * → {@link deployTokenPool} (passing the lockbox) → {@link authorizeLockboxCallers}
+   * → {@link deployTokenPool} (passing the lockbox) → `authorizeLockboxCallers`
    * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
@@ -211,7 +211,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
    * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
-   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`) → {@link setPool} →
+   * lockbox) → `authorizeLockboxCallers` (`addedCallers: [pool]`) → {@link setPool} →
    * configure lanes.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -239,7 +239,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
    * `{ hash, contractAddress }`.
    * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
-   * {@link authorizeLockboxCallers} before the pool can lock/release.
+   * `authorizeLockboxCallers` before the pool can lock/release.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -257,7 +257,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Deploys an `ERC20LockBox` (v2.0.0), signing + submitting with `opts.wallet`; resolves to the
    * tx hash and the newly deployed lockbox address.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
-   * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
+   * {@link deployTokenPool} (passing this lockbox) → `authorizeLockboxCallers`
    * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid

@@ -2,7 +2,7 @@
  * deployLockbox — deploys an `ERC20LockBox` (v2.0.0) via raw init-code. The tx has no
  * `to`; `execute` returns the deployed contract address. A lockbox escrows a single token
  * for `LockReleaseTokenPool`s; deploy it before the pool, then authorize the pool on it via
- * {@link AuthorizeLockboxCallers}. Mirrors `token-pool/operations/deploy-token-pool.ts`.
+ * `authorizeLockboxCallers`. Mirrors `token-pool/operations/deploy-token-pool.ts`.
  *
  * @packageDocumentation
  */
