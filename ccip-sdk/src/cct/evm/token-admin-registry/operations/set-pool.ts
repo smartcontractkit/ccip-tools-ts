@@ -15,7 +15,7 @@ import { validateAddress } from '../../validate.ts'
 /** Parameters for `setPool`. Zero `poolAddress` delists the token. */
 export type SetPoolParams = {
   tokenAddress: string
-  /** A zero/empty `poolAddress` delists the token from the registry. */
+  /** The zero address as `poolAddress` delists the token from the registry. */
   poolAddress: string
   /**
    * Contract to resolve the TokenAdminRegistry from. Pass the registry itself for a
