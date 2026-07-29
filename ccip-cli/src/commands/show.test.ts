@@ -10,7 +10,7 @@ function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
     '--rpc',
     ...RPCS,
     '--rpcs-file',
-    'package.json', // Disable rpcs file loading
+    '', // Disable rpcs file loading
     ...additionalArgs,
   ]
 }
@@ -268,11 +268,12 @@ describe('e2e command show EVM', () => {
     'should show complete CCIP transaction details EVM to Solana',
     { timeout: 120000 },
     async () => {
-      // Test transaction hash
-      const TX_HASH = '0xb75ffc2bd00b9a9bf5f7942cad201fa6a832fa58ffd7b773ece39531e6513670'
-      const MESSAGE_ID = '0x0be9c1da6942964676b995697e2d1f1ce3a497f1b00bcbe6a3a3b2ea9c8fd67c'
+      // Test transaction hash (refreshed periodically; devnet prunes old history)
+      const TX_HASH = '0xe46dfcaddb6305cc416120bd188293f5693348ae8f94079dcde932163a2b039e'
+      const MESSAGE_ID = '0xea49c8cc2b802612e91f30e045baff610ec23d98bd66b7f2070f137a777ffc65'
       const SENDER = '0x90656946eb4065D9FC2a0c0B9aF7Ff37c02F52a2'
-      const RECEIVER = 'BqmcnLFSbKwyMEgi7VhVeJCis1wW26VySztF34CJrKFq'
+      const RECEIVER = '11111111111111111111111111111111'
+      const TOKEN_RECEIVER = 'HNgbNNzP7YLXLhEkaFcD3PhtBWtaBfxSCNRTCsnGyPNx'
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
       const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
@@ -293,28 +294,28 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*3923n?/)
+      assert.match(output, /sequenceNumber.*10726n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
       assert.doesNotMatch(output, /gasLimit/)
-      assert.match(output, /computeUnits.*200000n?/)
+      assert.match(output, /computeUnits.*0n?/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*e2e test\b/)
+      assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
-      assert.match(output, /tokenReceiver.*11111111111111111111111111111111\b/)
+      assert.match(output, new RegExp(`tokenReceiver.*${TOKEN_RECEIVER}\\b`, 'i'))
 
       // Commit information
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x68da9013b63f098dbb85b2b4d53933a029c8b4f06b0b2fe15ad001da10375eb4/i,
+        /merkleRoot.*0x67fab9e3b47f247924f4cec9671a99685e4abc07909d8bcf676bb5d990cc437f/i,
       )
-      assert.match(output, /min.*3919/)
-      assert.match(output, /max.*3924/)
-      assert.match(output, /origin.*Cc7sVief2raXko3WqgjeGYDSC7fWAPwqyAWweScSoikM/i)
+      assert.match(output, /min.*10726/)
+      assert.match(output, /max.*10726/)
+      assert.match(output, /origin.*4BSJuForbUiKb5Y2unK6vrrdjQN9a6Fz5epnPrrU6Je6/i)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*3iwF1ENtLZEoVMABrFBiWzZ6pMKMngDqvgaRnKtW6NLEjd2SXZsPStwBJQGzaUFawN18CPjHP5HCPkN4mRto9k5L/i,
+        /transactionHash.*5uVS6SjKKrvP6khfA9hiRk68pwuNVjZXCJQNxwwp1MXs9cozT3q8dkfAhPPKcGheiBqbKnfZaf8yznxJ7pvrLgMM/i,
       )
 
       // Receipts information
@@ -322,19 +323,49 @@ describe('e2e command show EVM', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*u2ExFxWm7wnYEEkp89mkxtW2d9EbSap9q8im3vLg4g4NJ3PSpKTv8szhxCKaYTzSZNoJ8JLdZCVxekCFv4faa4E/i,
+        /transactionHash.*32kjERFwLcmaJskvJUjWQncyrhdoLxnzPgKTT33nKmhKaLeguELxXQ4BKL3hHo8wnvz4vu5UzQztEi7u5G43cgiD/i,
+      )
+    },
+  )
+
+  it(
+    'should show EVM to Solana v2 OffRamp execution without verifications',
+    { timeout: 30000 },
+    async () => {
+      const TX_HASH = '0x8be479716729ff555e5ee7a1826af3bf571be820ab3080348f83b28a753cc472'
+      const MESSAGE_ID = '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826'
+      const ONRAMP = '0x99F6Faf45CcfA166781DED7d9A4D9C548F2aA344'
+      const OFFRAMP = 'offEFR9DhTdnPR43oBmnGJmoj13Y3n7sR93Vbph77TK'
+
+      const result = await spawnCLI(buildShowArgs(TX_HASH), 30000)
+
+      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+      const output = result.stdout
+      assert.match(output, /name.*ethereum-testnet-sepolia.*solana-devnet/i)
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
+      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+      assert.match(output, /sequenceNumber.*149/)
+      assert.match(output, /data.*multi-verifier test/)
+      assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
+      assert.match(result.stderr + output, /Verifications unavailable/i)
+      assert.match(output, /Receipts.*dest/i)
+      assert.match(output, /state.*success/i)
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      assert.match(
+        output,
+        /transactionHash.*32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E/i,
       )
     },
   )
 })
 
 describe('e2e command show Solana', () => {
-  // Test transaction hash
+  // Test transaction hash (refreshed periodically; devnet prunes old history)
   const TX_HASH =
-    'XkdB6ed7LisqoJR6PVAcaLerckoVfyffCxDAyJG6FesLqz1E1ur1FqVCg7CVRAPz81eggyb6XXm3oKPMvfrc9s9'
-  const MESSAGE_ID = '0x6f2f352064ac9aa184ef36179a19cb47349ad754d36f64fe425db372bcb371c7'
-  const SENDER = 'GY3V5RAtSxoJf2dZGqAbzaSxDyXWb8RPMWQdv1mC5PXN'
-  const RECEIVER = '0x8C244f0B2164E6A3BED74ab429B0ebd661Bb14CA'
+    '4FXDDtNsz2X9QNYiUAm1KnYSYPSrRWjderx4PpPaMtuTVpdGAJBWWD2d6NxAYCGmefRhr63QwMnRoVdm6rLdfSfV'
+  const MESSAGE_ID = '0x2192fb7b3728623ce2b6830859b8cbc3146f70d3529469a7ecd21a37dd9a5f68'
+  const SENDER = '6XS768SMgF7iEt7ZX8iJBgu7mXHewc95aqAz6XAj1hu3'
+  const RECEIVER = '0x2840D88F9c3E018544aaD8f9275DCCf12cB35160'
   const ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
   const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 
@@ -359,40 +390,39 @@ describe('e2e command show Solana', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
-      assert.match(output, /sequenceNumber.*3144?/)
+      assert.match(output, /sequenceNumber.*3229/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
-      assert.match(output, /gasLimit.*0n?/)
+      assert.match(output, /gasLimit.*200000n?/)
       assert.match(output, /finalized.*true/)
       assert.match(output, /fee.*\bSOL/)
-      assert.match(output, /tokens.*0\.001 USDC/)
+      assert.match(output, /tokens.*0\.0001 MNT/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*hello from ccip-tools-ts\b/)
+      assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
-
-      // USDC attestation
-      assert.match(output, /Attestations:/i)
-      assert.match(output, /type.*\busdc\b/i)
 
       // Commit information
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x291c126410cefe17ef5596ff79b8629e2875d5307e4d1bde2dc75ebcc49046d3/i,
+        /merkleRoot.*0x8081a0af0284d8925b4f6ee63e6e21c10477e48f301a2c3d6c8064664b9bbe47/i,
       )
-      assert.match(output, /min.*3144/)
-      assert.match(output, /max.*3144/)
+      assert.match(output, /min.*3226/)
+      assert.match(output, /max.*3229/)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*0x1274619287fbab9acf047e32c451608b8bc7fcb2d1b51c15440640fd88fd1ede/i,
+        /transactionHash.*0xb9cf0464382371b41b00a5aea0d6f7e1357cc5a9aad4a8c17fa0904df2dea383/i,
       )
 
-      // Receipts information
+      // Receipts information: this message had a failed execution attempt before succeeding
       assert.match(output, /Receipts.*dest/i)
-      assert.match(output, /state.*success/i)
+      const failedMatches = output.match(/failed/gi) || []
+      const successMatches = output.match(/success/gi) || []
+      assert.ok(failedMatches.length >= 1)
+      assert.ok(successMatches.length >= 1)
       assert.match(
         output,
-        /transactionHash.*0x3af7fa68693261beb5b63b38b28674aabaad1004deccca7d8e1fdbd7ec9ed093/i,
+        /transactionHash.*0x3c352c2b5ac5f11b31e876ccb6b97b819a8946a4227f2fef9f62677dbfd2240a/i,
       )
     },
   )

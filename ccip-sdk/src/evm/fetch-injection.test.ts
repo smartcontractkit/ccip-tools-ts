@@ -102,9 +102,10 @@ describe('SolanaChain._getConnection fetch injection', () => {
   it('installs custom fetch: connection is created with the provided fetch function', () => {
     const customFetch = mock.fn(async () => new Response('{}', { status: 200 }))
 
-    const connection = SolanaChain._getConnection('https://api.devnet.solana.com', {
-      fetch: customFetch as unknown as typeof fetch,
-    })
+    const connection = SolanaChain._getConnection(
+      'https://solana-devnet.api.onfinality.io/public',
+      { fetch: customFetch as unknown as typeof fetch },
+    )
 
     // The Connection object stores its fetch in _rpcWebSocket or config. We verify
     // behaviorally: no exception thrown, and the connection object is created.

@@ -59,7 +59,10 @@ export function normalizeDeep<T extends Record<string, unknown>>(
 ): Normalized<T> {
   return convertKeysToCamelCase(data, (v, k) => {
     if (k === 'chainFamilySelector') return hexlify(getDataBytes(v as number[]))
-    if ((v as { _bn?: unknown } | undefined)?._bn) return (v as PublicKey).toString()
+    if (typeof v === 'object' && v != null && (v as { _bn?: unknown } | undefined)?._bn)
+      return (v as PublicKey).toString()
+    if (typeof v === 'object' && v != null && (v as { beBytes?: unknown } | undefined)?.beBytes)
+      return toBigInt(getDataBytes((v as { beBytes: unknown }).beBytes as string))
     if (
       k?.match(/(selector|amount|nonce|number|limit|bitmap|juels|value)$/i) ||
       (v as { words?: unknown } | undefined)?.words

@@ -576,7 +576,7 @@ describe('isCantonLedgerUrl', () => {
 
   it('does not match EVM JSON-RPC URLs', () => {
     assert.ok(!isCantonLedgerUrl('https://ethereum-sepolia-rpc.publicnode.com'))
-    assert.ok(!isCantonLedgerUrl('https://rpcs.cldev.sh/ethereum/sepolia'))
+    assert.ok(!isCantonLedgerUrl('https://sepolia.gateway.tenderly.co'))
   })
 })
 

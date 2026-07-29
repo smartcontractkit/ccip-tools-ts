@@ -145,7 +145,7 @@ function createUncircularReplacer() {
     // bigints pass through untouched; serialization to bare JSON numbers is
     // handled by stringifyExtended below.
     const replaced = value
-    if (typeof replaced !== 'object' || replaced === null) return replaced
+    if (typeof replaced !== 'object' || replaced == null) return replaced
 
     while (holderStack.length > 0 && holderStack.at(-1) !== this) {
       holderStack.pop()
@@ -195,6 +195,7 @@ const INT_TAG_RE = new RegExp(`"${INT_TAG}(-?\\d+(?:.0)?)"`, 'g')
  * ```
  */
 export function jsonStringify(value: unknown, space?: string | number): string {
+  if (value == null) return 'null'
   const uncircular = createUncircularReplacer()
   const json = JSON.stringify(
     value,
@@ -209,8 +210,7 @@ export function jsonStringify(value: unknown, space?: string | number): string {
     space,
   )
   // JSON.stringify is typed `string` but returns undefined for undefined input.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  return json === undefined ? json : json.replace(INT_TAG_RE, '$1')
+  return json.replace(INT_TAG_RE, '$1')
 }
 
 /**
@@ -461,6 +461,10 @@ export function convertKeysToCamelCase(
   }
 
   if (obj == null) return obj
+  if (mapValues) {
+    const res = mapValues(obj, key)
+    if (res !== obj) return res
+  }
   if (
     typeof obj !== 'object' ||
     !(Object.getPrototypeOf(obj) == null || Object.getPrototypeOf(obj) === Object.prototype)
@@ -485,7 +489,7 @@ export function convertKeysToCamelCase(
 export const sleep = (ms: number, abort?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (abort?.aborted || !ms) return resolve()
-    let timeout = AbortSignal.timeout(ms)
+    let timeout = AbortSignal.timeout(Math.ceil(ms))
     if (abort) timeout = AbortSignal.any([abort, timeout])
     const onAbort = () => {
       timeout.removeEventListener('abort', onAbort)
@@ -666,9 +670,8 @@ export { util }
  * @param signal - AbortSignal to convert
  * @returns Promise that rejects with the signal's reason when aborted
  */
-export function signalToPromise(signal: AbortSignal): Promise<never> {
-  if (signal.aborted) return Promise.reject(signal.reason as Error)
-
+export async function signalToPromise(signal: AbortSignal): Promise<never> {
+  signal.throwIfAborted()
   return new Promise<never>((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true })
   })
