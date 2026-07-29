@@ -14,6 +14,7 @@ import type { UnsignedEVMTx } from '../../evm/types.ts'
 import type { ChainFamily } from '../../networks.ts'
 import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
+import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
@@ -33,6 +34,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferOwnership = new TransferOwnership()
   readonly #deployToken = new DeployToken()
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #deployLockbox = new DeployLockbox()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -124,62 +126,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
-   * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
-   * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
-   * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
-   * `{ hash, contractAddress }`.
-   * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
-   * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
-   * additionally requires a pre-deployed `lockBox` ({@link DeployLockReleaseTokenPoolParams});
-   * deploying the lockbox and authorizing the pool on it are not yet SDK operations.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @example
-   * ```typescript
-   * const unsigned = await cct.generateUnsignedDeployTokenPool({
-   *   type: 'BurnMintTokenPool', // burn-* variant; LockReleaseTokenPool additionally requires `lockBox`
-   *   token: '0xToken...',
-   *   localTokenDecimals: 18,
-   *   rmnProxy: '0xRmnProxy...',
-   *   router: '0xRouter...',
-   *   sender: '0xDeployer...',
-   * })
-   * ```
-   */
-  generateUnsignedDeployTokenPool(opts: DeployTokenPoolParams): Promise<UnsignedEVMTx> {
-    return this.#deployTokenPool.generate(this.chain, opts)
-  }
-
-  /**
-   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
-   * and the newly deployed pool address. `type` selects the pool contract (a
-   * `DeployableTokenPoolType`, v2.0.0).
-   * @remarks Deploying the pool alone doesn't make it usable: register it with {@link setPool},
-   * grant it the token's mint/burn roles (`grantMintAndBurnRoles`), and configure its remote
-   * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
-   * `lockBox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}) — neither is
-   * an SDK operation yet (follow-up).
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
-   * @example
-   * ```typescript
-   * const { hash, contractAddress } = await cct.deployTokenPool({
-   *   type: 'LockReleaseTokenPool',
-   *   token: '0xToken...',
-   *   localTokenDecimals: 18,
-   *   rmnProxy: '0xRmnProxy...',
-   *   router: '0xRouter...',
-   *   lockBox: '0xLockBox...', // required for LockReleaseTokenPool; must be a non-zero address
-   *   wallet,
-   * })
-   * ```
-   */
-  deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
-    return this.#deployTokenPool.execute(this.chain, opts)
-  }
-
-  /**
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress }`.
@@ -226,6 +172,107 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   deployToken(opts: EVMExecuteParams<DeployTokenParams>): Promise<DeployResult> {
     return this.#deployToken.execute(this.chain, opts)
   }
+
+  /**
+   * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
+   * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
+   * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
+   * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
+   * `{ hash, contractAddress }`.
+   * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
+   * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
+   * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
+   * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
+   * → {@link deployTokenPool} (passing the lockbox) → `authorizeLockboxCallers`
+   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployTokenPool({
+   *   type: 'BurnMintTokenPool', // burn-* variant; LockReleaseTokenPool additionally requires `lockbox`
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPool(opts: DeployTokenPoolParams): Promise<UnsignedEVMTx> {
+    return this.#deployTokenPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
+   * and the newly deployed pool address. `type` selects the pool contract (a
+   * `DeployableTokenPoolType`, v2.0.0).
+   * @remarks Deploying the pool alone doesn't make it usable: register it with {@link setPool},
+   * grant it the token's mint/burn roles (`grantMintAndBurnRoles`), and configure its remote
+   * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
+   * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
+   * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
+   * lockbox) → `authorizeLockboxCallers` (`addedCallers: [pool]`) → {@link setPool} →
+   * configure lanes.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @example
+   * ```typescript
+   * const { hash, contractAddress } = await cct.deployTokenPool({
+   *   type: 'LockReleaseTokenPool',
+   *   token: '0xToken...',
+   *   localTokenDecimals: 18,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   lockbox: '0xLockbox...', // required for LockReleaseTokenPool; must be a non-zero address
+   *   wallet,
+   * })
+   * ```
+   */
+  deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
+    return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` (v2.0.0) deployment tx (for multisig / offline signing).
+   * A lockbox escrows a single `token` for `LockReleaseTokenPool`s. The deployed address is
+   * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
+   * `{ hash, contractAddress }`.
+   * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
+   * `authorizeLockboxCallers` before the pool can lock/release.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployLockbox({
+   *   token: '0xToken...', // must be non-zero; the same token the LockReleaseTokenPool manages
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployLockbox(opts: DeployLockboxParams): Promise<UnsignedEVMTx> {
+    return this.#deployLockbox.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys an `ERC20LockBox` (v2.0.0), signing + submitting with `opts.wallet`; resolves to the
+   * tx hash and the newly deployed lockbox address.
+   * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
+   * {@link deployTokenPool} (passing this lockbox) → `authorizeLockboxCallers`
+   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @example
+   * ```typescript
+   * const { hash, contractAddress } = await cct.deployLockbox({
+   *   token: '0xToken...',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployLockbox(opts: EVMExecuteParams<DeployLockboxParams>): Promise<DeployResult> {
+    return this.#deployLockbox.execute(this.chain, opts)
+  }
 }
 
 export * from '../errors.ts'
@@ -235,5 +282,6 @@ export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
 } from './token-pool/operations/deploy-token-pool.ts'
+export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { DeployResult, EVMExecuteParams } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
