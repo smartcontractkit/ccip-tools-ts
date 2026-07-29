@@ -19,12 +19,12 @@ import {
 import { submit } from '../../submit.ts'
 import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
 
-/** Parameters shared by Solana TokenAdminRegistry `proposeAdmin` generation and execution. */
-type ProposeAdminParams = {
+/** Parameters shared by Solana TokenAdminRegistry `transferAdmin` generation and execution. */
+type TransferAdminParams = {
   tokenAddress: string
   /**
-   * CCIP contract to resolve the TokenAdminRegistry/Router from — the registry itself,
-   * a Router, OnRamp, OffRamp, or TokenPool address all work.
+   * CCIP contract to resolve the TokenAdminRegistry/Router from — a Router or OffRamp
+   * address works.
    */
   address: string
   /** The administrator proposed to accept the token's registry admin role. */
@@ -33,24 +33,24 @@ type ProposeAdminParams = {
   authority?: string
 }
 
-/** Parameters for unsigned Solana TokenAdminRegistry `proposeAdmin` generation. */
-export type GenerateProposeAdminParams = SolanaGenerateParams<ProposeAdminParams>
+/** Parameters for unsigned Solana TokenAdminRegistry `transferAdmin` generation. */
+export type GenerateTransferAdminParams = SolanaGenerateParams<TransferAdminParams>
 
-/** Unsigned Solana TokenAdminRegistry `proposeAdmin` result. */
-export type GenerateProposeAdminResult = UnsignedSolanaTx
+/** Unsigned Solana TokenAdminRegistry `transferAdmin` result. */
+export type GenerateTransferAdminResult = UnsignedSolanaTx
 
-/** Parameters for executing Solana TokenAdminRegistry `proposeAdmin`. */
-export type ExecuteProposeAdminParams = SolanaExecuteParams<ProposeAdminParams>
+/** Parameters for executing Solana TokenAdminRegistry `transferAdmin`. */
+export type ExecuteTransferAdminParams = SolanaExecuteParams<TransferAdminParams>
 
-/** Result of executing Solana TokenAdminRegistry `proposeAdmin`. */
-export type ExecuteProposeAdminResult = TransactionResult
+/** Result of executing Solana TokenAdminRegistry `transferAdmin`. */
+export type ExecuteTransferAdminResult = TransactionResult
 
-/** Proposes a new TokenAdminRegistry administrator. The proposed admin must accept separately. */
-export class ProposeAdmin extends SolanaOperation<ProposeAdminParams> {
-  readonly name = 'proposeAdmin'
+/** Transfers a TokenAdminRegistry administrator role. The proposed admin must accept separately. */
+export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
+  readonly name = 'transferAdmin'
 
   /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateProposeAdminParams): void {
+  protected validate(params: GenerateTransferAdminParams): void {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'newAdmin', params.newAdmin)
@@ -61,7 +61,7 @@ export class ProposeAdmin extends SolanaOperation<ProposeAdminParams> {
   /** Builds the unsigned instruction after confirming the caller is the current admin. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateProposeAdminParams,
+    opts: GenerateTransferAdminParams,
   ): Promise<UnsignedSolanaTx> {
     const tokenMint = new PublicKey(opts.tokenAddress)
     const payer = new PublicKey(opts.payer)
@@ -71,10 +71,13 @@ export class ProposeAdmin extends SolanaOperation<ProposeAdminParams> {
     const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
 
     if (!new PublicKey(tokenConfig.administrator).equals(authority)) {
+      const pending = tokenConfig.pendingAdministrator
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        'must be the current token administrator',
+        PublicKey.default.toBase58() === tokenConfig.administrator && pending
+          ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
+          : `must be the current token administrator (${tokenConfig.administrator})`,
       )
     }
 
@@ -97,13 +100,13 @@ export class ProposeAdmin extends SolanaOperation<ProposeAdminParams> {
   /** Generate, sign, simulate, send, and confirm with the current admin wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteProposeAdminParams,
-  ): Promise<ExecuteProposeAdminResult> {
+    params: ExecuteTransferAdminParams,
+  ): Promise<ExecuteTransferAdminResult> {
     const { wallet, computeUnits, ...rest } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
     const payer = wallet.publicKey.toBase58()
-    const generateParams: GenerateProposeAdminParams = { ...rest, payer }
+    const generateParams: GenerateTransferAdminParams = { ...rest, payer }
     this.validate(generateParams)
 
     if (params.authority) {
@@ -111,7 +114,7 @@ export class ProposeAdmin extends SolanaOperation<ProposeAdminParams> {
         this.name,
         new PublicKey(params.authority),
         wallet.publicKey,
-        'proposeAdmin requires authority to be the executing wallet. Use generateUnsignedProposeAdmin for externally signed transactions.',
+        'transferAdmin requires authority to be the executing wallet. Use generateUnsignedTransferAdmin for externally signed transactions.',
       )
     }
 
