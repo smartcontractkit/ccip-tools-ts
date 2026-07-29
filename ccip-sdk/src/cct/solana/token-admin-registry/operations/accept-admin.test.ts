@@ -126,7 +126,7 @@ describe('AcceptAdmin (cct/solana)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'authority' &&
           typeof err.context.reason === 'string' &&
-          err.context.reason.includes('no pending administrator'),
+          err.context.reason.includes('no administrator is pending'),
       )
     })
   })
