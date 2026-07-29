@@ -48,7 +48,7 @@ const TOKEN_POOL_BYTECODE = {
 export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
 
 /** Fields shared by every deployable token pool. */
-interface DeployTokenPoolBase {
+interface DeployTokenPoolBaseParams {
   /** Address of the token the pool manages. */
   token: string
   /** The token's `decimals` (uint8). */
@@ -64,28 +64,26 @@ interface DeployTokenPoolBase {
 }
 
 /** Params for a burn-* mint pool — the burn family shares one constructor shape. */
-export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBase {
+export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBaseParams {
   type: Exclude<DeployableTokenPoolType, 'LockReleaseTokenPool'>
 }
 
 /**
- * Params for a `LockReleaseTokenPool` — the burn constructor plus `lockBox`.
+ * Params for a `LockReleaseTokenPool` — the burn constructor plus `lockbox`.
  *
- * @remarks Partial support: `lockBox` must be an already-deployed `ERC20LockBox` for the *same*
- * `token` (the pool constructor calls `lockBox.isTokenSupported(token)` and reverts otherwise).
- * This SDK does not yet deploy the lockbox or authorize the pool on it — deploy the `ERC20LockBox`
- * and add the pool via the lockbox's `applyAuthorizedCallerUpdates` out-of-band before the pool can
- * lock/release. A `deployLockBox` op + caller-authorization are tracked as a follow-up.
+ * @remarks `lockbox` must be a pre-deployed `ERC20LockBox` for the *same* `token` (the constructor
+ * calls `lockbox.isTokenSupported(token)`). Sequence: deployToken → deployLockbox → deployTokenPool
+ * (this) → authorizeLockboxCallers (`addedCallers: [pool]`) → setPool → configure lanes.
  */
-export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBase {
+export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBaseParams {
   type: 'LockReleaseTokenPool'
-  /** Lock-box address; required and must be non-zero — the v2.0.0 constructor reverts on the zero address. */
-  lockBox: string
+  /** Lockbox address; required and must be non-zero — the v2.0.0 constructor reverts on the zero address. */
+  lockbox: string
 }
 
 /**
  * Parameters for {@link DeployTokenPool}, discriminated on `type`: the burn-* variants share one
- * constructor; `LockReleaseTokenPool` additionally requires `lockBox` (a compile-time guarantee).
+ * constructor; `LockReleaseTokenPool` additionally requires `lockbox` (a compile-time guarantee).
  */
 export type DeployTokenPoolParams = DeployBurnMintTokenPoolParams | DeployLockReleaseTokenPoolParams
 
@@ -102,7 +100,7 @@ const encodeBurnMintTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.router,
   ])
 
-/** LockRelease constructor: the burn-* args plus `lockBox` (only that variant carries it). */
+/** LockRelease constructor: the burn-* args plus `lockbox` (only that variant carries it). */
 const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
   iface.encodeDeploy([
     p.token,
@@ -110,7 +108,7 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.advancedPoolHooks ?? ZeroAddress,
     p.rmnProxy,
     p.router,
-    p.type === 'LockReleaseTokenPool' ? p.lockBox : ZeroAddress,
+    p.type === 'LockReleaseTokenPool' ? p.lockbox : ZeroAddress,
   ])
 
 /** Deploys a token pool; `execute` resolves to `{ hash, contractAddress }`. */
@@ -138,9 +136,9 @@ export class DeployTokenPool extends EVMOperation<DeployTokenPoolParams> {
     if (params.advancedPoolHooks !== undefined)
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     if (params.type === 'LockReleaseTokenPool') {
-      validateAddress(this.name, 'lockBox', params.lockBox)
-      if (params.lockBox === ZeroAddress)
-        throw new CCTParamsInvalidError(this.name, 'lockBox', 'must not be the zero address')
+      validateAddress(this.name, 'lockbox', params.lockbox)
+      if (params.lockbox === ZeroAddress)
+        throw new CCTParamsInvalidError(this.name, 'lockbox', 'must not be the zero address')
     }
   }
 

@@ -18,7 +18,7 @@ const TOKEN = '0x' + '22'.repeat(20)
 const RMN_PROXY = '0x' + '33'.repeat(20)
 const ROUTER = '0x' + '44'.repeat(20)
 const HOOKS = '0x' + '55'.repeat(20)
-const LOCK_BOX = '0x' + '66'.repeat(20)
+const LOCKBOX = '0x' + '66'.repeat(20)
 const DEPLOYED = '0x' + '77'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 
@@ -35,7 +35,7 @@ const W_LOCKBOX = '0000000000000000000000006666666666666666666666666666666666666
 // Golden vectors: pinned 2.0.0 constructor-arg encodings for the fixed inputs above. Independent
 // of the SDK encoder — they guard each pool's init-code against drift. The burn-* variants share
 // the `BurnMint` constructor (token, decimals, advancedPoolHooks, rmnProxy, router); LockRelease
-// adds `lockBox`.
+// adds `lockbox`.
 const BURN_MINT_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER
 const LOCK_RELEASE_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER + W_LOCKBOX
 
@@ -69,7 +69,7 @@ const CASES: {
       ...COMMON,
       type: 'LockReleaseTokenPool',
       advancedPoolHooks: HOOKS,
-      lockBox: LOCK_BOX,
+      lockbox: LOCKBOX,
     },
     bytecode: LOCK_RELEASE_V2_0_0,
     ctorArgs: LOCK_RELEASE_ARGS,
@@ -203,32 +203,32 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       )
     })
 
-    it('rejects the zero address for a LockRelease lockBox', async () => {
+    it('rejects the zero address for a LockRelease lockbox', async () => {
       await assert.rejects(
         () =>
           new DeployTokenPool().generate(stubChain(), {
             ...COMMON,
             type: 'LockReleaseTokenPool',
             advancedPoolHooks: HOOKS,
-            lockBox: ZeroAddress,
+            lockbox: ZeroAddress,
           }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockBox',
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
       )
     })
 
-    it('rejects an invalid lockBox address', async () => {
+    it('rejects an invalid lockbox address', async () => {
       await assert.rejects(
         () =>
           new DeployTokenPool().generate(stubChain(), {
             ...COMMON,
             type: 'LockReleaseTokenPool',
             advancedPoolHooks: HOOKS,
-            lockBox: 'nope',
+            lockbox: 'nope',
           }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockBox',
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
       )
     })
-    // `lockBox` on a burn pool is a compile-time error (the DeployTokenPoolParams union), so
+    // `lockbox` on a burn pool is a compile-time error (the DeployTokenPoolParams union), so
     // there's no runtime case to test.
   })
 
