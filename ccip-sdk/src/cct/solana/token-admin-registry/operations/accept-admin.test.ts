@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Keypair } from '@solana/web3.js'
+import { Keypair, PublicKey } from '@solana/web3.js'
 
+import type { GenerateAcceptAdminParams } from './accept-admin.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
+import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const ADDRESS = Keypair.generate().publicKey.toBase58()
@@ -33,7 +35,7 @@ function stubChain(
   } as unknown as SolanaChain
 }
 
-function generate(opts = {}) {
+function generate(opts: Partial<GenerateAcceptAdminParams> = {}) {
   return SolanaTokenManager.fromChain(stubChain()).generateUnsignedAcceptAdmin({
     tokenAddress: TOKEN,
     address: ADDRESS,
@@ -53,6 +55,31 @@ describe('AcceptAdmin (cct/solana)', () => {
       assert.equal(unsigned.family, ChainFamily.Solana)
       assert.equal(unsigned.mainIndex, 0)
       assert.equal(instruction.programId.toBase58(), ROUTER)
+      assert.equal(instruction.data.toString('hex'), '6af010ad89d5a3f6')
+      assert.deepEqual(
+        instruction.keys.map(({ pubkey, isSigner, isWritable }) => ({
+          pubkey: pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        })),
+        [
+          {
+            pubkey: deriveRouterConfigPda(new PublicKey(ROUTER)).toBase58(),
+            isSigner: false,
+            isWritable: false,
+          },
+          {
+            pubkey: deriveTokenAdminRegistryPda(
+              new PublicKey(ROUTER),
+              new PublicKey(TOKEN),
+            ).toBase58(),
+            isSigner: false,
+            isWritable: true,
+          },
+          { pubkey: TOKEN, isSigner: false, isWritable: false },
+          { pubkey: PENDING_ADMIN, isSigner: true, isWritable: true },
+        ],
+      )
     })
 
     it('resolves the router from address', async () => {
@@ -81,14 +108,25 @@ describe('AcceptAdmin (cct/solana)', () => {
     })
 
     it('rejects when no administrator is pending', async () => {
+      const noPendingChain = {
+        logger: { debug() {}, info() {}, warn() {}, error() {} },
+        connection: {},
+        getTokenAdminRegistryFor: async () => ROUTER,
+        getRegistryTokenConfig: async () => ({ administrator: PAYER }),
+      } as unknown as SolanaChain
+
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain(undefined)).generateUnsignedAcceptAdmin({
+          SolanaTokenManager.fromChain(noPendingChain).generateUnsignedAcceptAdmin({
             tokenAddress: TOKEN,
             address: ADDRESS,
             payer: PAYER,
           }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('no administrator is pending'),
       )
     })
   })
@@ -103,7 +141,11 @@ describe('AcceptAdmin (cct/solana)', () => {
             authority: PENDING_ADMIN,
             wallet: WALLET,
           }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('requires authority to be the executing wallet'),
       )
     })
   })

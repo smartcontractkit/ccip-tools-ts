@@ -11,7 +11,7 @@ import {
 export type { TokenPoolConfig } from '../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
-import { CCTTokenPoolStateDecodeError } from '../../errors.ts'
+import { CCTDataDecodeError } from '../../errors.ts'
 
 /** Canonical Solana token pool program addresses. */
 export const TOKEN_POOL_PROGRAMS = {
@@ -57,9 +57,10 @@ export function decodeTokenPoolState(
   try {
     return tokenPoolCoder.accounts.decode('state', data)
   } catch (cause) {
-    throw new CCTTokenPoolStateDecodeError(context.tokenPool, {
+    throw new CCTDataDecodeError(`Unable to decode token pool state at ${context.tokenPool}`, {
       cause: cause instanceof Error ? cause : undefined,
       context: {
+        tokenPool: context.tokenPool,
         mint: context.mint,
         poolProgram: context.poolProgram,
       },
