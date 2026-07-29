@@ -28,27 +28,27 @@ import {
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
-  type ExecuteProposeAdminParams,
-  type ExecuteProposeAdminResult,
   type ExecuteRegisterAdminParams,
   type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
+  type ExecuteTransferAdminParams,
+  type ExecuteTransferAdminResult,
   type GenerateAppendToLookupTableParams,
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
-  type GenerateProposeAdminParams,
-  type GenerateProposeAdminResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
+  type GenerateTransferAdminParams,
+  type GenerateTransferAdminResult,
   AppendToLookupTable,
   CreateLookupTable,
-  ProposeAdmin,
   RegisterAdmin,
   SetPool,
+  TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
   type ExecuteCreateTokenMultisigParams,
@@ -75,7 +75,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token admin registry operations
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
-  readonly #proposeAdmin = new ProposeAdmin()
+  readonly #transferAdmin = new TransferAdmin()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
 
@@ -420,10 +420,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned Solana instruction that proposes a new token administrator.
+   * Builds an unsigned Solana instruction that transfers a token administrator role.
    *
-   * The supplied authority must be the current token administrator. The proposed administrator
-   * must accept the role separately.
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link generateUnsignedAcceptAdmin} before becoming the
+   * current administrator.
+   *
+   * @see {@link generateUnsignedAcceptAdmin}
    *
    * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
    * current token administrator.
@@ -432,7 +436,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
-   * const unsigned = await cct.generateUnsignedProposeAdmin({
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferAdmin({
    *   tokenAddress: mint,
    *   address: router,
    *   newAdmin,
@@ -440,15 +445,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  generateUnsignedProposeAdmin(
-    opts: GenerateProposeAdminParams,
-  ): Promise<GenerateProposeAdminResult> {
-    return this.#proposeAdmin.generate(this.chain, opts)
+  generateUnsignedTransferAdmin(
+    opts: GenerateTransferAdminParams,
+  ): Promise<GenerateTransferAdminResult> {
+    return this.#transferAdmin.generate(this.chain, opts)
   }
 
   /**
-   * Proposes a new token administrator using the executing wallet as the current administrator.
-   * The proposed administrator must accept the role separately.
+   * Transfers a token administrator role using the executing wallet as the current administrator.
+   *
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link acceptAdmin} before becoming the current administrator.
+   *
+   * @see {@link acceptAdmin}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
@@ -459,7 +469,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
-   * await cct.proposeAdmin({
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferAdmin({
    *   tokenAddress: mint,
    *   address: router,
    *   newAdmin,
@@ -467,8 +478,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * })
    * ```
    */
-  proposeAdmin(opts: ExecuteProposeAdminParams): Promise<ExecuteProposeAdminResult> {
-    return this.#proposeAdmin.execute(this.chain, opts)
+  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
   }
 
   /**
