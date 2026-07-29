@@ -67,7 +67,11 @@ export class AcceptAdmin extends SolanaOperation<AcceptAdminParams> {
     const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
 
     if (!tokenConfig.pendingAdministrator) {
-      throw new CCTParamsInvalidError(this.name, 'authority', 'no pending administrator')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'authority',
+        `no administrator is pending for this token (current administrator: ${tokenConfig.administrator}) — nothing to accept`,
+      )
     }
     if (!new PublicKey(tokenConfig.pendingAdministrator).equals(authority)) {
       throw new CCTParamsInvalidError(
