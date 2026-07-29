@@ -83,7 +83,7 @@ export async function fetchVerifications(
   if (indexer === NetworkType.Mainnet) indexer = MAINNET_INDEXER_URLS
   else if (indexer === NetworkType.Testnet) indexer = TESTNET_INDEXER_URLS
 
-  // Polling loop: retry on CCIPMessageNotVerifiedYetError until watch fires
+  // Polling loop: retry on CCIPMessageNotVerifiedYetError only when watch is supplied.
   let lastErr
   do {
     try {
@@ -111,14 +111,12 @@ export async function fetchVerifications(
       })
     } catch (err) {
       lastErr = err
-      if (!(err instanceof CCIPMessageNotVerifiedYetError)) throw err
-      await signalToPromise(
-        watch
-          ? AbortSignal.any([watch, AbortSignal.timeout(pollInterval)])
-          : AbortSignal.timeout(pollInterval),
-      ).catch(() => {})
+      if (!(err instanceof CCIPMessageNotVerifiedYetError) || !watch) throw err
+      await signalToPromise(AbortSignal.any([watch, AbortSignal.timeout(pollInterval)])).catch(
+        () => {},
+      )
     }
-  } while (!watch?.aborted)
+  } while (!watch.aborted)
   throw lastErr
 }
 

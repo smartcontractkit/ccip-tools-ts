@@ -438,7 +438,7 @@ export async function lookupTxByRawHash(
       headers: { Accept: 'application/json' },
     })
   } catch (error) {
-    logger.error(`TonCenter V3 fetch failed:`, error)
+    logger.debug(`TonCenter V3 fetch failed:`, error)
     throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
   }
 

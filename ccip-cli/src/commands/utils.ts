@@ -489,6 +489,15 @@ export function prettyTable(this: Ctx, args: Record<string, unknown>, opts = { s
       typeof value === 'number'
     ) {
       out.push([key, formatDate(value)])
+    } else if (last?.toString().match(/\berr$/) && value === '0x') {
+      out.push([key, '0x [possibly out-of-gas or abi.decode error]'])
+    } else if (typeof value === 'bigint' && last?.toString().match(/[Ss]el(ector)?$/)) {
+      try {
+        const val = `${value} [${networkInfo(value).name}]`
+        out.push([key, val])
+      } catch {
+        out.push([key, value])
+      }
     } else out.push([key, value])
   }
   return this.output.table(Object.fromEntries(out))

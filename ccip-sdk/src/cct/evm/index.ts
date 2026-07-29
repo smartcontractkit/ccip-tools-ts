@@ -273,7 +273,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   deployLockbox(opts: EVMExecuteParams<DeployLockboxParams>): Promise<DeployResult> {
     return this.#deployLockbox.execute(this.chain, opts)
   }
-
 }
 
 export * from '../errors.ts'

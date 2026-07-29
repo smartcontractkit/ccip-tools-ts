@@ -3,15 +3,15 @@ import { Buffer } from 'buffer'
 import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
-import { IDL as BASE_TOKEN_POOL_IDL } from '../../../solana/idl/1.6.0/BASE_TOKEN_POOL.ts'
-import { IDL as BURN_MINT_TOKEN_POOL_IDL } from '../../../solana/idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
+import {
+  type TokenPoolConfig,
+  TOKEN_POOL_IDL,
+  tokenPoolCoder,
+} from '../../../solana/idl/token-pool-coder.ts'
+export type { TokenPoolConfig } from '../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
-
-const TOKEN_POOL_IDL = {
-  ...BURN_MINT_TOKEN_POOL_IDL,
-  types: BASE_TOKEN_POOL_IDL.types,
-}
+import { CCTDataDecodeError } from '../../errors.ts'
 
 /** Canonical Solana token pool program addresses. */
 export const TOKEN_POOL_PROGRAMS = {
@@ -21,6 +21,12 @@ export const TOKEN_POOL_PROGRAMS = {
 
 /** Canonical Solana token pool program type. */
 export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
+
+type TokenPoolStateDecodeContext = {
+  tokenPool: string
+  mint: string
+  poolProgram: string
+}
 
 /**
  * Resolves a canonical token pool program type to its address.
@@ -41,6 +47,25 @@ export function createTokenPoolProgram(
   payer: PublicKey,
 ) {
   return new Program(TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
+}
+
+/** Decodes a canonical token pool state account. */
+export function decodeTokenPoolState(
+  data: Buffer,
+  context: TokenPoolStateDecodeContext,
+): { version: number; config: TokenPoolConfig } {
+  try {
+    return tokenPoolCoder.accounts.decode('state', data)
+  } catch (cause) {
+    throw new CCTDataDecodeError(`Unable to decode token pool state at ${context.tokenPool}`, {
+      cause: cause instanceof Error ? cause : undefined,
+      context: {
+        tokenPool: context.tokenPool,
+        mint: context.mint,
+        poolProgram: context.poolProgram,
+      },
+    })
+  }
 }
 
 /** Derives the token pool global config PDA. */

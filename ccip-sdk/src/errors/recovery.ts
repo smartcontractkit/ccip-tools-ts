@@ -217,6 +217,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'This contract version is not supported by the CCT SDK. Check the contract address and its typeAndVersion.',
   CCT_OPERATION_UNSUPPORTED:
     'This operation is not available at the contract version in error.context. Verify the contract version supports it.',
+  CCT_DATA_DECODE_FAILED:
+    'Ensure the account belongs to a compatible CCT program and uses the expected data layout.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */
