@@ -1,16 +1,19 @@
 import { Buffer } from 'buffer'
 
 import { BorshAccountsCoder } from '@coral-xyz/anchor'
-import { type Connection, PublicKey } from '@solana/web3.js'
+import { type Connection, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { CCIPDataFormatUnsupportedError, CCIPTokenNotConfiguredError } from '../errors/index.ts'
 
 /** Decoded configuration stored in a Solana TokenAdminRegistry account. */
 export type TokenAdminRegistryConfig = {
+  mint: PublicKey
   administrator: PublicKey
-  pendingAdministrator: PublicKey
-  lookupTable: PublicKey
+  pendingAdministrator?: PublicKey
+  lookupTable?: PublicKey
+  tokenPool?: PublicKey
   writableIndexes: number[]
+  supportsAutoDerivation: boolean
 }
 
 const TOKEN_ADMIN_REGISTRY_DISCRIMINATOR =
@@ -32,7 +35,14 @@ function decodeWritableIndexes(buf: Buffer): number[] {
   return indexes.sort((a, b) => a - b)
 }
 
-function decodeTokenAdminRegistryConfig(data: Buffer): TokenAdminRegistryConfig {
+function isSet(address: PublicKey): boolean {
+  return !address.equals(PublicKey.default) && !address.equals(SystemProgram.programId)
+}
+
+/** Decodes a TokenAdminRegistry account without resolving its pool lookup table. */
+export function decodeTokenAdminRegistryConfig(
+  data: Buffer,
+): Omit<TokenAdminRegistryConfig, 'tokenPool'> {
   if (
     data.length < TOKEN_ADMIN_REGISTRY_SIZE ||
     !data.subarray(0, 8).equals(TOKEN_ADMIN_REGISTRY_DISCRIMINATOR)
@@ -40,11 +50,16 @@ function decodeTokenAdminRegistryConfig(data: Buffer): TokenAdminRegistryConfig 
     throw new CCIPDataFormatUnsupportedError('invalid TokenAdminRegistry account data')
   }
 
+  const pendingAdministrator = new PublicKey(data.subarray(41, 73))
+  const lookupTable = new PublicKey(data.subarray(73, 105))
+
   return {
+    mint: new PublicKey(data.subarray(137, 169)),
     administrator: new PublicKey(data.subarray(9, 41)),
-    pendingAdministrator: new PublicKey(data.subarray(41, 73)),
-    lookupTable: new PublicKey(data.subarray(73, 105)),
+    ...(isSet(pendingAdministrator) && { pendingAdministrator }),
+    ...(isSet(lookupTable) && { lookupTable }),
     writableIndexes: decodeWritableIndexes(data.subarray(105, 137)),
+    supportsAutoDerivation: data.length > TOKEN_ADMIN_REGISTRY_SIZE && data[169] === 1,
   }
 }
 
@@ -69,5 +84,15 @@ export async function getTokenAdminRegistryConfig(
   const account = await connection.getAccountInfo(registry)
   if (!account) throw new CCIPTokenNotConfiguredError(mint.toBase58(), router.toBase58())
 
-  return decodeTokenAdminRegistryConfig(account.data)
+  const config = decodeTokenAdminRegistryConfig(account.data)
+  if (!config.lookupTable) return config
+
+  try {
+    const lookupTable = await connection.getAddressLookupTable(config.lookupTable)
+    const tokenPool = lookupTable.value?.state.addresses[3]
+    if (tokenPool && !tokenPool.equals(PublicKey.default)) return { ...config, tokenPool }
+  } catch {
+    // Token pool may not be configured yet.
+  }
+  return config
 }

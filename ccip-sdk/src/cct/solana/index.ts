@@ -8,7 +8,7 @@ import type { Connection } from '@solana/web3.js'
 
 import type { ChainContext } from '../../chain.ts'
 import type { ChainFamily } from '../../networks.ts'
-import { SolanaChain } from '../../solana/index.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
@@ -48,12 +48,12 @@ import {
   type GenerateSetPoolResult,
   type GenerateTransferAdminParams,
   type GenerateTransferAdminResult,
-  type GetTokenAdminRegistryConfigParams,
-  type GetTokenAdminRegistryConfigResult,
+  type GetTokenAdminRegistryParams,
+  type GetTokenAdminRegistryResult,
   AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
-  GetTokenAdminRegistryConfig,
+  GetTokenAdminRegistry,
   RegisterAdmin,
   SetPool,
   TransferAdmin,
@@ -84,7 +84,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
-  readonly #getTokenAdminRegistryConfig = new GetTokenAdminRegistryConfig()
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
   readonly #transferAdmin = new TransferAdmin()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
@@ -107,11 +107,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /** Creates from a Solana web3.js connection. */
   static async fromProvider(provider: Connection, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
     return new SolanaTokenManager(await SolanaChain.fromConnection(provider, ctx))
   }
 
   /** Creates from an RPC URL. */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
     return new SolanaTokenManager(await SolanaChain.fromUrl(url, ctx))
   }
 
@@ -714,17 +716,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const config = await cct.getTokenAdminRegistryConfig({
+   * const config = await cct.getTokenAdminRegistry({
    *   address: router,
    *   tokenAddress: mint,
    * })
    * console.log(config.administrator)
    * ```
    */
-  getTokenAdminRegistryConfig(
-    opts: GetTokenAdminRegistryConfigParams,
-  ): Promise<GetTokenAdminRegistryConfigResult> {
-    return this.#getTokenAdminRegistryConfig.query(this.chain, opts)
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
   }
 
   /**

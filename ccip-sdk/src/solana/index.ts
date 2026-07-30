@@ -11,7 +11,6 @@ import {
   Connection,
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
-  SystemProgram,
 } from '@solana/web3.js'
 import bs58 from 'bs58'
 import {
@@ -121,7 +120,10 @@ import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
-import { getTokenAdminRegistryConfig } from './token-admin-registry.ts'
+import {
+  decodeTokenAdminRegistryConfig,
+  getTokenAdminRegistryConfig,
+} from './token-admin-registry.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -1523,31 +1525,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }> {
     const router = new PublicKey(registry)
     const config = await getTokenAdminRegistryConfig(this.connection, router, new PublicKey(token))
-    const result: { administrator: string; pendingAdministrator?: string; tokenPool?: string } = {
+    return {
       administrator: config.administrator.toBase58(),
+      ...(config.pendingAdministrator && {
+        pendingAdministrator: config.pendingAdministrator.toBase58(),
+      }),
+      ...(config.tokenPool && { tokenPool: config.tokenPool.toBase58() }),
     }
-
-    if (
-      !config.pendingAdministrator.equals(SystemProgram.programId) &&
-      !config.pendingAdministrator.equals(PublicKey.default)
-    ) {
-      result.pendingAdministrator = config.pendingAdministrator.toBase58()
-    }
-
-    // Get token pool from lookup table if available
-    try {
-      const lookupTable = await this.connection.getAddressLookupTable(config.lookupTable)
-      if (lookupTable.value) {
-        // tokenPool state PDA is at index [3]
-        const tokenPoolAddress = lookupTable.value.state.addresses[3]
-        if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
-          result.tokenPool = tokenPoolAddress.toBase58()
-        }
-      }
-    } catch (_err) {
-      // Token pool may not be configured yet
-    }
-    return result
   }
 
   /**
@@ -1703,8 +1687,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(router: string): Promise<string[]> {
-    // `mint` offset in TokenAdminRegistry account data; more robust against changes in layout
-    const mintOffset = 8 + 1 + 32 + 32 + 32 + 16 * 2 // = 137
     const router_ = new PublicKey(router)
     const res = []
     for (const acc of await this.connection.getProgramAccounts(router_, {
@@ -1717,14 +1699,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         },
       ],
     })) {
-      if (acc.account.data.length < mintOffset + 32) continue
-      const mint = new PublicKey(acc.account.data.subarray(mintOffset, mintOffset + 32))
-      const [derivedPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_admin_registry'), mint.toBuffer()],
-        router_,
-      )
-      if (!acc.pubkey.equals(derivedPda)) continue
-      res.push(mint.toBase58())
+      try {
+        const { mint } = decodeTokenAdminRegistryConfig(acc.account.data)
+        const [derivedPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('token_admin_registry'), mint.toBuffer()],
+          router_,
+        )
+        if (acc.pubkey.equals(derivedPda)) res.push(mint.toBase58())
+      } catch {
+        // Skip malformed TokenAdminRegistry accounts.
+      }
     }
     return res
   }
