@@ -1259,8 +1259,8 @@ describe('jsonStringify', () => {
     assert.equal(jsonStringify(false), 'false')
   })
 
-  it('should return undefined for undefined input', () => {
-    assert.equal(jsonStringify(undefined), undefined)
+  it('should serialize undefined as null', () => {
+    assert.equal(jsonStringify(undefined), 'null')
   })
 
   it('should handle nested objects with bigints', () => {

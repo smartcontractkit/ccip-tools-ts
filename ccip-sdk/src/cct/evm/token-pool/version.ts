@@ -1,37 +1,74 @@
 /**
- * EVM token-pool version axis for CCT: resolve on-chain pool metadata and ABI
- * ({@link resolveTokenPool}), and floor-match encoders ({@link resolveEncoder}).
+ * EVM token-pool version axis for CCT: resolve an on-chain pool's type + version
+ * ({@link resolveTokenPool}), select its cached ABI ({@link getTokenPoolInterface}), and
+ * floor-match version-keyed encoders ({@link resolveEncoder}).
  *
  * @packageDocumentation
  */
 
-import type { InterfaceAbi } from 'ethers'
+import { Interface } from 'ethers'
 
-import LockReleaseTokenPool_1_5 from '../../../evm/abi/LockReleaseTokenPool_1_5.ts'
-import LockReleaseTokenPool_1_5_1 from '../../../evm/abi/LockReleaseTokenPool_1_5_1.ts'
-import LockReleaseTokenPool_1_6_1 from '../../../evm/abi/LockReleaseTokenPool_1_6_1.ts'
-import TokenPool_2_0 from '../../../evm/abi/TokenPool_2_0.ts'
 import type { EVMChain } from '../../../evm/index.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
 } from '../../errors.ts'
+import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts'
+import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
 
-/** Supported pool contract types; unsupported values fail in {@link parseTokenPoolVersion}. */
-export const TOKEN_POOL_TYPES = ['BurnMintTokenPool', 'LockReleaseTokenPool'] as const
+/**
+ * ABI families for pool resolution. The burn-* variants are interface-compatible for CCT
+ * ops (identical constructor + `transferOwnership`, shared TokenPool surface), so they share
+ * the `BurnMint` ABI; `LockRelease` (with its liquidity functions) is distinct.
+ */
+export const TOKEN_POOL_FAMILIES = ['BurnMint', 'LockRelease'] as const
+
+/** An ABI family for pool resolution. */
+export type TokenPoolFamily = (typeof TOKEN_POOL_FAMILIES)[number]
+
+/**
+ * Supported on-chain `typeAndVersion` pool types. The burn-* variants are interface-compatible
+ * for CCT ops and share the `BurnMint` ABI (see {@link getTokenPoolFamily}); `LockReleaseTokenPool`
+ * is distinct. Unsupported values fail in {@link parseTokenPoolVersion}.
+ */
+export const TOKEN_POOL_TYPES = [
+  'BurnMintTokenPool',
+  'BurnFromMintTokenPool',
+  'BurnWithFromMintTokenPool',
+  'BurnToAddressTokenPool',
+  'BurnMintWithLockReleaseFlagTokenPool',
+  'LockReleaseTokenPool',
+  'SiloedLockReleaseTokenPool',
+] as const
 
 /** A supported EVM token-pool contract type. */
 export type TokenPoolType = (typeof TOKEN_POOL_TYPES)[number]
 
 /** Type guard for {@link TOKEN_POOL_TYPES}. */
 export function isTokenPoolType(v: string): v is TokenPoolType {
-  return TOKEN_POOL_TYPES.some((known) => known === v)
+  return (TOKEN_POOL_TYPES as readonly string[]).includes(v)
 }
 
 /**
- * Known pool versions, low to high. Value order drives floor-match in
- * {@link resolveEncoder}.
+ * Classifies a supported pool type into its ABI {@link TokenPoolFamily} by name: every burn-*
+ * mint pool shares the `BurnMint` ABI (identical surface for CCT ops — including
+ * `BurnMintWithLockReleaseFlagTokenPool`, hence the anchored `^Burn`), while the non-burn pools
+ * (`LockReleaseTokenPool`, `SiloedLockReleaseTokenPool`) use the `LockRelease` ABI.
+ * {@link TOKEN_POOL_TYPES} is the gate, so only allowlisted, ABI-compatible names reach here.
+ */
+export function getTokenPoolFamily(type: TokenPoolType): TokenPoolFamily {
+  return /^Burn/.test(type) ? 'BurnMint' : 'LockRelease'
+}
+
+/**
+ * Known pool versions, low to high. Value order drives floor-match in {@link resolveEncoder}.
  */
 export const TokenPoolVersion = {
   V1_5_0: '1.5.0',
@@ -64,46 +101,53 @@ export function parseTokenPoolVersion({
   version: string
 }): { type: TokenPoolType; version: TokenPoolVersion } {
   if (!isTokenPoolType(contractType))
-    throw new CCTContractTypeInvalidError(
-      address,
-      'BurnMintTokenPool or LockReleaseTokenPool',
-      contractType,
-    )
+    throw new CCTContractTypeInvalidError(address, TOKEN_POOL_TYPES.join(', '), contractType)
   if (!isTokenPoolVersion(version))
     throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
   return { type: contractType, version }
 }
 
-/** Vendored pool ABIs keyed by {@link TokenPoolVersion}.
- * TODO: split per type once BurnMint ABIs are imported from `@chainlink/contracts-ccip`  */
-export const TOKEN_POOL_ABIS: Record<TokenPoolVersion, InterfaceAbi> = {
-  [TokenPoolVersion.V1_5_0]: LockReleaseTokenPool_1_5,
-  [TokenPoolVersion.V1_5_1]: LockReleaseTokenPool_1_5_1,
-  [TokenPoolVersion.V1_6_1]: LockReleaseTokenPool_1_6_1,
-  [TokenPoolVersion.V2_0_0]: TokenPool_2_0,
-}
-
 /**
- * Returns the pool ABI for `type` and `version`. `type` keeps call sites stable
- * for a future per-type split; today only `version` selects the ABI. Never throws
- * when `version` came from {@link parseTokenPoolVersion}.
- */
-export function tokenPoolAbi(_type: TokenPoolType, version: TokenPoolVersion): InterfaceAbi {
-  return TOKEN_POOL_ABIS[version]
-}
-
-/**
- * Reads `chain.typeAndVersion(poolAddress)`, narrows the result, and attaches the
- * pool ABI. Shared RPC boundary before versioned pool encoding.
- * @throws the same errors as {@link parseTokenPoolVersion}
+ * Resolves an on-chain pool's type + version from its `typeAndVersion`, narrowed to a known
+ * {@link TokenPoolType} and {@link TokenPoolVersion}.
+ * @throws {@link CCTContractTypeInvalidError} if the reported type is not a supported pool type
+ * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known pool version
  */
 export async function resolveTokenPool(
   chain: EVMChain,
-  poolAddress: string,
-): Promise<{ type: TokenPoolType; version: TokenPoolVersion; abi: InterfaceAbi }> {
-  const [contractType, version] = await chain.typeAndVersion(poolAddress)
-  const pool = parseTokenPoolVersion({ address: poolAddress, contractType, version })
-  return { ...pool, abi: tokenPoolAbi(pool.type, pool.version) }
+  address: string,
+): Promise<{ type: TokenPoolType; version: TokenPoolVersion }> {
+  const [contractType, version] = await chain.typeAndVersion(address)
+  return parseTokenPoolVersion({ address, contractType, version })
+}
+
+/**
+ * Cached pool {@link Interface}s per {@link TokenPoolFamily} and {@link TokenPoolVersion},
+ * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
+ * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
+ */
+export const TOKEN_POOL_INTERFACES: Record<TokenPoolFamily, Record<TokenPoolVersion, Interface>> = {
+  BurnMint: {
+    [TokenPoolVersion.V1_5_0]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_0_ABI),
+    [TokenPoolVersion.V1_5_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI),
+    [TokenPoolVersion.V1_6_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_6_1_ABI),
+    [TokenPoolVersion.V2_0_0]: new Interface(BURN_MINT_TOKEN_POOL_V2_0_0_ABI),
+  },
+  LockRelease: {
+    [TokenPoolVersion.V1_5_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI),
+    [TokenPoolVersion.V1_5_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI),
+    [TokenPoolVersion.V1_6_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
+    [TokenPoolVersion.V2_0_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
+  },
+}
+
+/**
+ * Returns the cached pool {@link Interface} for `type` and `version`, selected by the
+ * type's {@link TokenPoolFamily}. Never throws when both came from
+ * {@link parseTokenPoolVersion}.
+ */
+export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVersion): Interface {
+  return TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
 }
 
 /**

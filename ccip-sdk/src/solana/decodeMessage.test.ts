@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { CCIPMessage, CCIPVersion, ChainLog } from '../types.ts'
+import { type CCIPMessage, type CCIPVersion, type ChainLog, ExecutionState } from '../types.ts'
 import '../index.ts'
 import { SolanaChain } from './index.ts'
 
@@ -66,6 +66,49 @@ describe('SolanaChain.decodeMessage', () => {
     assert.equal(message.extraArgs.toLowerCase(), '0x181dcf107fc9120000000000000000000000000001')
     assert.ok('gasLimit' in message)
     assert.equal(message.gasLimit, 1231231n)
+  })
+
+  it('should correctly decode CCIPMessageSentV2 event from Anchor emit_cpi log', () => {
+    // Solana devnet tx 5fLVsRpENWE5qmqhAdY8g88K26C9DZ7qiKRMhZiBxSuZSKyGBJj2EyqUF1b1DaPNPZbLxfP3ufFCYFK7EVcU1Hz
+    const eventData =
+      'cCBd+B1cY7zZGtnJT7pB3uZGotRqLm/c9xg6PJjoT9mpXSrryUabGzrEiqt+4olhMGeycMgc0h8bNxUN118K9G6tLq/0BbOQzXDl330n6LEGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvwAAAAHj7MfilOM3395Buk/J2RrZAAAAAAAAAHMAAw1AAAMNQAAAAAE7Ip8dm6pP5VWV4qg3Vq/oZR7HQXfcc1A2/Z9AGHO78yCslyn8KiIBZmHvz1BxsB5wpU/64/gE/oBCKg1cS4mTahTrpdeUWUhOVDvRVgemIezimynKmSDmRqLUai5v3PcYOjyY6E/ZqV0q68lGmxs6xIqrfuKJYRQ6peuxDceXysgoUk5ZozPQo3FEPQAAAAAACNwVkvE4+3fsAwAAAKqlPRgFCiGIwesKlHnQJT0Y/VrpdrPglfSNUVoRtM+4QA0DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAz2kwNcN2B3jaUdwjudF2za6/qwnfyFcED6Twh69td14AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAACslyn8KiIBZmHvz1BxsB5wpU/64/gE/oBCKg1cS4mTagAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAEAAAAEAAAA6aBaIA=='
+
+    const message = SolanaChain.decodeMessage({ data: eventData }) as CCIPMessage<
+      typeof CCIPVersion.V1_6
+    >
+
+    assert.ok(message, 'should decode v2 event')
+    assert.equal(
+      message.messageId,
+      '0x3067b270c81cd21f1b37150dd75f0af46ead2eaff405b390cd70e5df7d27e8b1',
+    )
+    assert.equal(message.sourceChainSelector, 16423721717087811551n)
+    assert.equal(message.destChainSelector, 16015286601757825753n)
+    assert.equal(message.sequenceNumber, 115n)
+    assert.equal(message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
+    assert.equal(message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
+    assert.equal(message.data, '0xdc1592f138fb77ec')
+    assert.equal(message.tokenAmounts.length, 0)
+    assert.equal(message.feeToken, 'So11111111111111111111111111111111111111112')
+    assert.equal(message.feeTokenAmount, 0n)
+  })
+
+  it('should correctly decode ExecutionStateChangedV2 event from Solana OffRamp emit_cpi log', () => {
+    // Solana devnet tx 32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E
+    const receipt = SolanaChain.decodeReceipt({
+      data: 'TuP0FnqEV5/ZGtnJT7pB3pUAAAAAAAAArvAaB1hiierxzB5l0CgcIJZseZpb4NgWKVkHq7I2eCYCAAAAAA==',
+      index: 18,
+    })
+
+    assert.ok(receipt, 'should decode v2 receipt')
+    assert.equal(receipt.sourceChainSelector, 16015286601757825753n)
+    assert.equal(receipt.sequenceNumber, 149n)
+    assert.equal(
+      receipt.messageId,
+      '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826',
+    )
+    assert.equal(receipt.state, ExecutionState.Success)
+    assert.equal('messageHash' in receipt, false)
   })
 
   it('should throw error for invalid log data', () => {

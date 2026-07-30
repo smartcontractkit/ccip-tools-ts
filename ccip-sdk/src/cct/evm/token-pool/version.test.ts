@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { Interface } from 'ethers'
+
 import {
-  TOKEN_POOL_ABIS,
+  TOKEN_POOL_FAMILIES,
+  TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
+  getTokenPoolFamily,
+  getTokenPoolInterface,
   isTokenPoolType,
   isTokenPoolVersion,
   parseTokenPoolVersion,
   resolveEncoder,
-  tokenPoolAbi,
 } from './version.ts'
 import {
   CCTContractTypeInvalidError,
@@ -20,15 +24,37 @@ import {
 const ADDR = '0x' + '11'.repeat(20)
 
 describe('pool types', () => {
-  it('lists known EVM pool types', () => {
-    assert.deepEqual([...TOKEN_POOL_TYPES], ['BurnMintTokenPool', 'LockReleaseTokenPool'])
+  it('lists known EVM pool types (burn family + lock release)', () => {
+    assert.deepEqual(
+      [...TOKEN_POOL_TYPES].sort(),
+      [
+        'BurnFromMintTokenPool',
+        'BurnMintTokenPool',
+        'BurnMintWithLockReleaseFlagTokenPool',
+        'BurnToAddressTokenPool',
+        'BurnWithFromMintTokenPool',
+        'LockReleaseTokenPool',
+        'SiloedLockReleaseTokenPool',
+      ].sort(),
+    )
   })
 
-  it('isTokenPoolType narrows supported types and rejects others', () => {
+  it('isTokenPoolType accepts burn-family + lock-release, rejects others', () => {
     assert.equal(isTokenPoolType('BurnMintTokenPool'), true)
+    assert.equal(isTokenPoolType('BurnFromMintTokenPool'), true)
+    assert.equal(isTokenPoolType('BurnWithFromMintTokenPool'), true)
     assert.equal(isTokenPoolType('LockReleaseTokenPool'), true)
     assert.equal(isTokenPoolType('UpgradeableLockReleaseTokenPool'), false)
+    assert.equal(isTokenPoolType('CCTPThroughCCVTokenPool'), false)
     assert.equal(isTokenPoolType('TokenAdminRegistry'), false)
+  })
+
+  it('maps burn-* variants to the BurnMint family, LockRelease to its own', () => {
+    assert.equal(getTokenPoolFamily('BurnFromMintTokenPool'), 'BurnMint')
+    assert.equal(getTokenPoolFamily('BurnWithFromMintTokenPool'), 'BurnMint')
+    assert.equal(getTokenPoolFamily('BurnToAddressTokenPool'), 'BurnMint')
+    assert.equal(getTokenPoolFamily('BurnMintWithLockReleaseFlagTokenPool'), 'BurnMint')
+    assert.equal(getTokenPoolFamily('LockReleaseTokenPool'), 'LockRelease')
   })
 })
 
@@ -45,6 +71,8 @@ describe('pool versions', () => {
   it('isTokenPoolVersion narrows known versions and rejects others', () => {
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_5_1), true)
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V2_0_0), true)
+    // `1.6.0` is a real on-chain string for SiloedLockReleaseTokenPool (v1.6.0 tag), but its ABI
+    // isn't in the 2.0.0 dep, so it's deliberately deferred (rejected) — not "no such version".
     assert.equal(isTokenPoolVersion('1.6.0'), false)
     assert.equal(isTokenPoolVersion('garbage'), false)
   })
@@ -96,6 +124,17 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
+  it('narrows a burn-family variant to its exact type', () => {
+    assert.deepEqual(
+      parseTokenPoolVersion({
+        address: ADDR,
+        contractType: 'BurnFromMintTokenPool',
+        version: '1.5.1',
+      }),
+      { type: 'BurnFromMintTokenPool', version: TokenPoolVersion.V1_5_1 },
+    )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
@@ -109,38 +148,55 @@ describe('parseTokenPoolVersion', () => {
   })
 })
 
-describe('TOKEN_POOL_ABIS', () => {
-  it('returns an array (ABI) for each supported version', () => {
-    assert.ok(Array.isArray(TOKEN_POOL_ABIS[TokenPoolVersion.V1_5_0]))
-    assert.ok(Array.isArray(TOKEN_POOL_ABIS[TokenPoolVersion.V1_5_1]))
-    assert.ok(Array.isArray(TOKEN_POOL_ABIS[TokenPoolVersion.V1_6_1]))
-    assert.ok(Array.isArray(TOKEN_POOL_ABIS[TokenPoolVersion.V2_0_0]))
+describe('TOKEN_POOL_INTERFACES', () => {
+  it('provides a cached ethers Interface for each family and version', () => {
+    for (const family of TOKEN_POOL_FAMILIES) {
+      for (const version of Object.values(TokenPoolVersion)) {
+        assert.ok(TOKEN_POOL_INTERFACES[family][version] instanceof Interface)
+      }
+    }
   })
 
-  it('returns distinct ABI objects for different version slots', () => {
-    assert.notDeepEqual(
-      TOKEN_POOL_ABIS[TokenPoolVersion.V1_5_0],
-      TOKEN_POOL_ABIS[TokenPoolVersion.V1_5_1],
+  it('resolves distinct Interfaces per family at the same version', () => {
+    assert.notEqual(
+      TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1],
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_1],
+    )
+  })
+
+  it('uses the *_and_proxy variant at V1_5_0 (exposes getPreviousPool)', () => {
+    assert.ok(
+      TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_0].hasFunction('getPreviousPool'),
+    )
+    assert.ok(
+      !TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1].hasFunction('getPreviousPool'),
     )
   })
 })
 
-describe('tokenPoolAbi', () => {
-  it('returns the exact ABI for the requested version', () => {
-    assert.equal(
-      tokenPoolAbi('BurnMintTokenPool', TokenPoolVersion.V1_5_0),
-      TOKEN_POOL_ABIS[TokenPoolVersion.V1_5_0],
-    )
-    assert.equal(
-      tokenPoolAbi('LockReleaseTokenPool', TokenPoolVersion.V2_0_0),
-      TOKEN_POOL_ABIS[TokenPoolVersion.V2_0_0],
-    )
+describe('getTokenPoolInterface', () => {
+  it('returns the cached family Interface for the type+version (same instance across calls)', () => {
+    const a = getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_1)
+    const b = getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_1)
+    assert.ok(a instanceof Interface)
+    assert.equal(a, b)
+    assert.equal(a, TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1])
   })
 
-  it('ignores type today: both types resolve to the same ABI per version', () => {
+  it('resolves all burn-* variants to the same BurnMint-family Interface', () => {
+    const burnMint = getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_1)
+    assert.equal(getTokenPoolInterface('BurnFromMintTokenPool', TokenPoolVersion.V1_5_1), burnMint)
     assert.equal(
-      tokenPoolAbi('BurnMintTokenPool', TokenPoolVersion.V1_6_1),
-      tokenPoolAbi('LockReleaseTokenPool', TokenPoolVersion.V1_6_1),
+      getTokenPoolInterface('BurnWithFromMintTokenPool', TokenPoolVersion.V1_5_1),
+      burnMint,
+    )
+    assert.equal(getTokenPoolInterface('BurnToAddressTokenPool', TokenPoolVersion.V1_5_1), burnMint)
+  })
+
+  it('resolves LockRelease to a different Interface than the BurnMint family', () => {
+    assert.notEqual(
+      getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_6_1),
+      getTokenPoolInterface('LockReleaseTokenPool', TokenPoolVersion.V1_6_1),
     )
   })
 })
