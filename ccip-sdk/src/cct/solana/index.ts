@@ -720,7 +720,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   address: router,
    *   tokenAddress: mint,
    * })
-   * console.log(config.administrator)
    * ```
    */
   getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
