@@ -3,6 +3,7 @@ import { Buffer } from 'buffer'
 import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
+import { CCIPError } from '../../../errors/index.ts'
 import {
   type TokenPoolConfig,
   TOKEN_POOL_IDL,
@@ -26,6 +27,7 @@ type TokenPoolStateDecodeContext = {
   tokenPool: string
   mint: string
   poolProgram: string
+  accountOwner: string
 }
 
 /**
@@ -55,14 +57,17 @@ export function decodeTokenPoolState(
   context: TokenPoolStateDecodeContext,
 ): { version: number; config: TokenPoolConfig } {
   try {
-    return tokenPoolCoder.accounts.decode('state', data)
+    return tokenPoolCoder.accounts.decode<{ version: number; config: TokenPoolConfig }>(
+      'state',
+      data,
+    )
   } catch (cause) {
-    throw new CCTDataDecodeError(`Unable to decode token pool state at ${context.tokenPool}`, {
-      cause: cause instanceof Error ? cause : undefined,
+    throw new CCTDataDecodeError(context.tokenPool, {
+      cause: cause instanceof Error ? cause : CCIPError.from(cause),
       context: {
-        tokenPool: context.tokenPool,
         mint: context.mint,
         poolProgram: context.poolProgram,
+        accountOwner: context.accountOwner,
       },
     })
   }
