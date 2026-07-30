@@ -24,26 +24,6 @@ const mockConnection = {
   getSignaturesForAddress: mockGetSignaturesForAddress,
 } as unknown as Connection
 
-function key(byte: number): PublicKey {
-  return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
-}
-
-function tokenAdminRegistryData(
-  administrator: PublicKey,
-  pendingAdministrator: PublicKey,
-  lookupTable: PublicKey,
-  mint: PublicKey,
-): Buffer {
-  const data = Buffer.alloc(170)
-  BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry').copy(data)
-  data[8] = 2
-  administrator.toBuffer().copy(data, 9)
-  pendingAdministrator.toBuffer().copy(data, 41)
-  lookupTable.toBuffer().copy(data, 73)
-  mint.toBuffer().copy(data, 137)
-  return data
-}
-
 const mockNetworkInfo: NetworkInfo = {
   family: ChainFamily.Solana,
   chainId: 'test-chain',
@@ -632,12 +612,32 @@ describe('SolanaChain.encodeExtraArgs', () => {
 })
 
 describe('SolanaChain getRegistryTokenConfig', () => {
+  const key = (byte: number): PublicKey => {
+    return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
+  }
+
   const router = key(1)
   const mint = key(2)
   const administrator = key(3)
   const pendingAdministrator = key(4)
   const lookupTable = key(5)
   const tokenPool = key(6)
+
+  function tokenAdminRegistryData(
+    administrator: PublicKey,
+    pendingAdministrator: PublicKey,
+    lookupTable: PublicKey,
+    mint: PublicKey,
+  ): Buffer {
+    const data = Buffer.alloc(170)
+    BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry').copy(data)
+    data[8] = 2
+    administrator.toBuffer().copy(data, 9)
+    pendingAdministrator.toBuffer().copy(data, 41)
+    lookupTable.toBuffer().copy(data, 73)
+    mint.toBuffer().copy(data, 137)
+    return data
+  }
 
   function chainWithLookupTable(lookup: () => Promise<unknown>): SolanaChain {
     return new SolanaChain(
