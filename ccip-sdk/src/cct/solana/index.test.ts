@@ -38,6 +38,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.registerAdmin, 'function')
     assert.equal(typeof cct.generateUnsignedSetPool, 'function')
     assert.equal(typeof cct.setPool, 'function')
+    assert.equal(typeof cct.getTokenAdminRegistry, 'function')
+    assert.equal(typeof cct.getSupportedTokens, 'function')
 
     // Token pool operations
     assert.equal(typeof cct.generateUnsignedCreateTokenMultisig, 'function')
