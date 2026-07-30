@@ -85,9 +85,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
-  readonly #transferAdmin = new TransferAdmin()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
+  readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
   readonly #createTokenMultisig = new CreateTokenMultisig()
@@ -494,69 +494,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned Solana instruction that transfers a token administrator role.
-   *
-   * @remarks
-   * This transfers an already accepted administrator role; it does not register a token. The
-   * proposed administrator must call {@link generateUnsignedAcceptAdmin} before becoming the
-   * current administrator.
-   *
-   * @see {@link generateUnsignedAcceptAdmin}
-   *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
-   * current token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedTransferAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin,
-   *   payer: currentAdmin,
-   * })
-   * ```
-   */
-  generateUnsignedTransferAdmin(
-    opts: GenerateTransferAdminParams,
-  ): Promise<GenerateTransferAdminResult> {
-    return this.#transferAdmin.generate(this.chain, opts)
-  }
-
-  /**
-   * Transfers a token administrator role using the executing wallet as the current administrator.
-   *
-   * @remarks
-   * This transfers an already accepted administrator role; it does not register a token. The
-   * proposed administrator must call {@link acceptAdmin} before becoming the current administrator.
-   *
-   * @see {@link acceptAdmin}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
-   * the executing wallet/current token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.transferAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin,
-   *   wallet: currentAdminWallet,
-   * })
-   * ```
-   */
-  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
-    return this.#transferAdmin.execute(this.chain, opts)
-  }
-
-  /**
    * Builds an unsigned Solana token registration instruction.
    *
    * This proposes the registry administrator. The proposed admin must accept the role using
@@ -681,6 +618,69 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
     return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned Solana instruction that transfers a token administrator role.
+   *
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link generateUnsignedAcceptAdmin} before becoming the
+   * current administrator.
+   *
+   * @see {@link generateUnsignedAcceptAdmin}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
+   * current token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin,
+   *   payer: currentAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedTransferAdmin(
+    opts: GenerateTransferAdminParams,
+  ): Promise<GenerateTransferAdminResult> {
+    return this.#transferAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Transfers a token administrator role using the executing wallet as the current administrator.
+   *
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link acceptAdmin} before becoming the current administrator.
+   *
+   * @see {@link acceptAdmin}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the executing wallet/current token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin,
+   *   wallet: currentAdminWallet,
+   * })
+   * ```
+   */
+  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
   }
 
   /**

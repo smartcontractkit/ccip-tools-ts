@@ -1,0 +1,77 @@
+/**
+ * authorizeLockboxCallers — adds/removes authorized callers on an `ERC20LockBox` (v2.0.0) via
+ * `applyAuthorizedCallerUpdates`. A `LockReleaseTokenPool` must be an authorized caller of its
+ * lockbox before it can lock/release. Mirrors `token-pool/operations/transfer-ownership.ts`.
+ *
+ * @packageDocumentation
+ */
+
+import { ZeroAddress } from 'ethers'
+
+import type { EVMChain } from '../../../../evm/index.ts'
+import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import { ChainFamily } from '../../../../networks.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { EVMOperation } from '../../operation.ts'
+import { validateAddress } from '../../validate.ts'
+import { LOCKBOX_INTERFACE } from '../interface.ts'
+
+/**
+ * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
+ * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
+ * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
+ * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
+ *
+ * Two validations here are SDK-side strictness, not contract behaviour: on-chain only *adds* revert
+ * `ZeroAddressNotAllowed`, and an update with both arrays empty is a successful owner-only no-op.
+ */
+export interface AuthorizeLockboxCallersParams {
+  /** Address of the `ERC20LockBox` to update. */
+  lockbox: string
+  /** Callers to authorize (e.g. the `LockReleaseTokenPool`); defaults to `[]`. */
+  addedCallers?: string[]
+  /** Callers to deauthorize; defaults to `[]`. */
+  removedCallers?: string[]
+  /** Lockbox owner; sets `tx.from` for offline / multisig signing. */
+  sender?: string
+}
+
+/** Applies authorized-caller updates on an `ERC20LockBox` via `applyAuthorizedCallerUpdates`. */
+export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCallersParams> {
+  readonly name = 'authorizeLockboxCallers'
+
+  /** Validates the lockbox and every caller address; requires at least one caller. */
+  protected validate({
+    lockbox,
+    addedCallers = [],
+    removedCallers = [],
+  }: AuthorizeLockboxCallersParams): void {
+    validateAddress(this.name, 'lockbox', lockbox)
+    if (addedCallers.length + removedCallers.length === 0) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'addedCallers',
+        'at least one caller must be added or removed',
+      )
+    }
+    const validateCaller = (field: string, c: string, i: number): void => {
+      validateAddress(this.name, `${field}[${i}]`, c)
+      if (c === ZeroAddress) {
+        throw new CCTParamsInvalidError(this.name, `${field}[${i}]`, 'must not be the zero address')
+      }
+    }
+    addedCallers.forEach((c, i) => validateCaller('addedCallers', c, i))
+    removedCallers.forEach((c, i) => validateCaller('removedCallers', c, i))
+  }
+
+  /** Builds `applyAuthorizedCallerUpdates` calldata targeting the lockbox. */
+  protected buildUnsigned(
+    _chain: EVMChain,
+    { lockbox, addedCallers = [], removedCallers = [] }: AuthorizeLockboxCallersParams,
+  ): UnsignedEVMTx {
+    const data = LOCKBOX_INTERFACE.encodeFunctionData('applyAuthorizedCallerUpdates', [
+      { addedCallers, removedCallers },
+    ])
+    return { family: ChainFamily.EVM, transactions: [{ to: lockbox, data }] }
+  }
+}
