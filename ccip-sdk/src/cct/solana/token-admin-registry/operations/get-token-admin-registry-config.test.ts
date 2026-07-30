@@ -6,6 +6,7 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { CCIPTokenNotConfiguredError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenAdminRegistryPda } from '../../programs/router.ts'
 
@@ -19,11 +20,10 @@ const REGISTRY = deriveTokenAdminRegistryPda(ROUTER, TOKEN)
 function registryAccount(
   pendingAdministrator = PENDING_ADMINISTRATOR,
   poolLookupTable = LOOKUP_TABLE,
-  version = 2,
 ) {
-  const data = Buffer.alloc(version === 1 ? 169 : 170)
+  const data = Buffer.alloc(170)
   BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry').copy(data)
-  data[8] = version
+  data[8] = 2
   ADMINISTRATOR.toBuffer().copy(data, 9)
   pendingAdministrator.toBuffer().copy(data, 41)
   poolLookupTable.toBuffer().copy(data, 73)
@@ -43,41 +43,69 @@ function stubChain(account: { data: Buffer } | null = registryAccount()): Solana
 }
 
 describe('Solana TokenAdminRegistry getTokenAdminRegistryConfig', () => {
-  it('returns configured administrators, lookup table, and writable indexes', async () => {
-    const config = await SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistryConfig({
-      address: ROUTER.toBase58(),
-      tokenAddress: TOKEN.toBase58(),
+  describe('query', () => {
+    it('returns configured administrators, lookup table, and writable indexes', async () => {
+      const config = await SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistryConfig({
+        address: ROUTER.toBase58(),
+        tokenAddress: TOKEN.toBase58(),
+      })
+
+      assert.deepEqual(config, {
+        administrator: ADMINISTRATOR.toBase58(),
+        pendingAdministrator: PENDING_ADMINISTRATOR.toBase58(),
+        poolLookupTable: LOOKUP_TABLE.toBase58(),
+        writableIndexes: [3, 4, 7, 130],
+      })
     })
 
-    assert.deepEqual(config, {
-      administrator: ADMINISTRATOR.toBase58(),
-      pendingAdministrator: PENDING_ADMINISTRATOR.toBase58(),
-      poolLookupTable: LOOKUP_TABLE.toBase58(),
-      writableIndexes: [3, 4, 7, 130],
+    it('returns default addresses when optional fields are unset', async () => {
+      const config = await SolanaTokenManager.fromChain(
+        stubChain(registryAccount(PublicKey.default, PublicKey.default)),
+      ).getTokenAdminRegistryConfig({ address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() })
+
+      assert.deepEqual(config, {
+        administrator: ADMINISTRATOR.toBase58(),
+        pendingAdministrator: PublicKey.default.toBase58(),
+        poolLookupTable: PublicKey.default.toBase58(),
+        writableIndexes: [3, 4, 7, 130],
+      })
+    })
+
+    it('rejects unregistered tokens', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain(null)).getTokenAdminRegistryConfig({
+            address: ROUTER.toBase58(),
+            tokenAddress: TOKEN.toBase58(),
+          }),
+        CCIPTokenNotConfiguredError,
+      )
     })
   })
 
-  it('returns v1 config when optional fields are unset', async () => {
-    const config = await SolanaTokenManager.fromChain(
-      stubChain(registryAccount(PublicKey.default, PublicKey.default, 1)),
-    ).getTokenAdminRegistryConfig({ address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() })
-
-    assert.deepEqual(config, {
-      administrator: ADMINISTRATOR.toBase58(),
-      pendingAdministrator: PublicKey.default.toBase58(),
-      poolLookupTable: PublicKey.default.toBase58(),
-      writableIndexes: [3, 4, 7, 130],
+  describe('validation', () => {
+    it('rejects an invalid router address', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistryConfig({
+            address: 'invalid',
+            tokenAddress: TOKEN.toBase58(),
+          }),
+        (error: unknown) =>
+          error instanceof CCTParamsInvalidError && error.context.param === 'address',
+      )
     })
-  })
 
-  it('rejects unregistered tokens', async () => {
-    await assert.rejects(
-      () =>
-        SolanaTokenManager.fromChain(stubChain(null)).getTokenAdminRegistryConfig({
-          address: ROUTER.toBase58(),
-          tokenAddress: TOKEN.toBase58(),
-        }),
-      CCIPTokenNotConfiguredError,
-    )
+    it('rejects an invalid token address', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistryConfig({
+            address: ROUTER.toBase58(),
+            tokenAddress: 'invalid',
+          }),
+        (error: unknown) =>
+          error instanceof CCTParamsInvalidError && error.context.param === 'tokenAddress',
+      )
+    })
   })
 })
