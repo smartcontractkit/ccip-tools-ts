@@ -39,7 +39,12 @@ function isSet(address: PublicKey): boolean {
   return !address.equals(PublicKey.default) && !address.equals(SystemProgram.programId)
 }
 
-/** Decodes a TokenAdminRegistry account without resolving its pool lookup table. */
+/**
+ * Decodes a TokenAdminRegistry account
+ *
+ * @param data - Raw TokenAdminRegistry account data.
+ * @returns Decoded registry configuration, excluding the resolved token pool.
+ */
 export function decodeTokenAdminRegistryConfig(
   data: Buffer,
 ): Omit<TokenAdminRegistryConfig, 'tokenPool'> {
