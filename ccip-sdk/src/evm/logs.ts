@@ -52,7 +52,10 @@ function isInvalidBlockRangesError(err: unknown): boolean {
 
 /**
  * Derives a stable URL string from a JsonRpcApiProvider, or undefined if not obtainable.
- * Tries `_getConnection()` which works for JsonRpcProvider (HTTP/HTTPS).
+ * Tries `_getConnection()` (JsonRpcProvider, HTTP/HTTPS) first, then the underlying
+ * socket URL (WebSocketProvider). Without this a WS provider yields no endpoint key,
+ * so learned log-range shrinks are logged but never persisted — every call restarts at
+ * the default page and re-fails the range-too-large error.
  */
 function getProviderUrl(provider: JsonRpcApiProvider): string | undefined {
   try {
@@ -60,6 +63,12 @@ function getProviderUrl(provider: JsonRpcApiProvider): string | undefined {
     if (conn?.url) return conn.url
   } catch {
     // WebSocketProvider or other providers may not have _getConnection
+  }
+  try {
+    const ws = (provider as { websocket?: { url?: string } }).websocket
+    if (ws?.url) return ws.url
+  } catch {
+    // websocket getter throws if the socket isn't established yet
   }
   return undefined
 }

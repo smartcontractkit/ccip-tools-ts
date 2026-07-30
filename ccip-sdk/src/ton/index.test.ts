@@ -26,12 +26,28 @@ async function mockTonFetch(
   if (body.method === 'getBlockHeader') {
     return new Response(
       JSON.stringify({
-        result: { gen_utime: 1, start_lt: '0', end_lt: '9999999999', min_ref_mc_seqno: 1 },
+        result: { gen_utime: 1, start_lt: '0', end_lt: '9999999999999999', min_ref_mc_seqno: 1 },
       }),
       { headers: { 'Content-Type': 'application/json' } },
     )
   }
   throw new Error(`Unexpected fetch: ${util.inspect(_url)}, method=${body.method}`)
+}
+
+// Masterchain/shard stubs the getLogs completeness path needs: a tip well above the
+// mock txs' block (so nothing is held as "unsealed"), and a single root shard covering
+// all basechain accounts (its end_lt is served by mockTonFetch's getBlockHeader).
+const mockMasterchain = {
+  getMasterchainInfo: async () => ({
+    workchain: -1,
+    shard: '-9223372036854775808',
+    latestSeqno: 100,
+    rootHash: '',
+    fileHash: '',
+  }),
+  getWorkchainShards: async (seqno: number) => [
+    { workchain: 0, shard: '-9223372036854775808', seqno },
+  ],
 }
 
 describe('TON index unit tests', () => {
@@ -172,6 +188,8 @@ describe('TON index unit tests', () => {
 
       const mockOffRampTx = {
         lt: BigInt(mockTxLt),
+        prevTransactionLt: 0n, // single tx → account genesis (no predecessor)
+        prevTransactionHash: 0n,
         hash: () => Buffer.from(mockTxHash, 'hex'),
         now: Math.floor(Date.now() / 1000),
         address: BigInt('0x' + offRampAddress.hash.toString('hex')),
@@ -192,6 +210,7 @@ describe('TON index unit tests', () => {
 
       const mockClient = {
         parameters: { endpoint: 'http://mock-ton-api' },
+        ...mockMasterchain,
         runMethod: async (_address: Address, method: string) => {
           if (method === 'seqno') {
             // Return seqno+1 to simulate transaction confirmed
@@ -755,10 +774,18 @@ describe('TON index unit tests', () => {
     function createMockClient(transactions: ReturnType<typeof createMockTransaction>[]) {
       // Sort by lt descending (newest first) to match TON API behavior
       const sortedTxs = [...transactions].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
+      // Link each tx to its predecessor (older = next in the desc list) so the getLogs
+      // contiguity check sees an unbroken chain; the oldest links to genesis (0).
+      sortedTxs.forEach((t, i) => {
+        const tx = t.tx as { prevTransactionLt?: bigint; prevTransactionHash?: bigint }
+        tx.prevTransactionLt = i < sortedTxs.length - 1 ? sortedTxs[i + 1]!.tx.lt : 0n
+        tx.prevTransactionHash = 0n
+      })
 
       let callCount = 0
       return {
         parameters: { endpoint: 'http://mock-ton-api' },
+        ...mockMasterchain,
         getTransactions: async () => {
           // First call returns all transactions, subsequent calls return empty (end of history)
           if (callCount++ === 0) {
@@ -886,20 +913,7 @@ describe('TON index unit tests', () => {
         },
       }
 
-      // Sort by lt descending (newest first)
-      const sortedTxs = [matchingTx, otherTx].sort((a, b) => Number(b.tx.lt) - Number(a.tx.lt))
-
-      let callCount = 0
-      const mockClient = {
-        parameters: { endpoint: 'http://mock-ton-api' },
-        getTransactions: async () => {
-          // First call returns all transactions, subsequent calls return empty
-          if (callCount++ === 0) {
-            return sortedTxs.map((t) => t.tx)
-          }
-          return []
-        },
-      } as unknown as TonClient
+      const mockClient = createMockClient([matchingTx, otherTx])
 
       const tonChain = new TONChain(mockClient, mockNetworkInfo, { fetch: mockTonFetch })
 
@@ -914,6 +928,296 @@ describe('TON index unit tests', () => {
       // Should only have the one with matching messageId
       assert.equal(receipts.length, 1, 'Should have exactly 1 receipt')
       assert.equal(receipts[0]!.receipt.messageId, TEST_MESSAGE_ID)
+    })
+  })
+
+  describe('getTransactions cache', () => {
+    const mockNetworkInfo = networkInfo('ton-testnet')
+    const ADDR = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
+
+    // Build `n` transactions for one account, newest first (descending lt), each
+    // linked to its predecessor via prevTransactionLt/Hash — the on-chain chain the
+    // cache uses to prove a cached page is contiguous. lt = (i+1)*1000.
+    function makeLinkedTxs(n: number) {
+      const txs = [] as {
+        lt: bigint
+        prevTransactionLt: bigint
+        prevTransactionHash: bigint
+        now: number
+        hash: () => Buffer
+        outMessages: Map<number, unknown>
+      }[]
+      for (let i = n; i >= 1; i--) {
+        const lt = BigInt(i * 1000)
+        const h = Buffer.alloc(32, i % 256)
+        txs.push({
+          lt,
+          prevTransactionLt: i > 1 ? BigInt((i - 1) * 1000) : 0n, // 0 => account genesis
+          prevTransactionHash: 0n,
+          now: 100 + i,
+          hash: () => h,
+          outMessages: new Map(),
+        })
+      }
+      return txs // descending lt (newest first), like the TON API
+    }
+
+    // A TonClient whose getTransactions faithfully models the (lt, hash, to_lt, limit)
+    // cursor semantics against a fixed account history, counting real RPC round-trips.
+    function makeCountingClient(all: ReturnType<typeof makeLinkedTxs>) {
+      const state = { rpc: 0 }
+      const client = {
+        parameters: { endpoint: 'http://mock-ton-api' },
+        getTransactions: async (
+          _addr: Address,
+          opts: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
+        ) => {
+          state.rpc++
+          let start = 0
+          if (opts.lt != null) {
+            const at = all.findIndex((t) => t.lt === BigInt(opts.lt!))
+            start = at < 0 ? all.length : opts.inclusive ? at : at + 1 // older than cursor
+          }
+          let page = all.slice(start, start + opts.limit)
+          if (opts.to_lt != null) page = page.filter((t) => t.lt >= BigInt(opts.to_lt!)) // lower bound
+          return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
+        },
+      } as unknown as TonClient
+      return { client, state }
+    }
+
+    it('serves a contiguous cursor page from cache without an RPC call', async () => {
+      const all = makeLinkedTxs(30)
+      const { client, state } = makeCountingClient(all)
+      const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
+      const addr = Address.parse(ADDR)
+
+      await chain.provider.getTransactions(addr, { limit: 30 }) // populate head window
+      const afterHead = state.rpc
+      // Cursor at all[5]; all[6..15] are cached and contiguous → cache hit.
+      const page = await chain.provider.getTransactions(addr, {
+        limit: 10,
+        lt: all[5]!.lt.toString(),
+        hash: all[5]!.hash().toString('base64'),
+      })
+      assert.equal(state.rpc - afterHead, 0, 'cursor page must be served from cache (no RPC)')
+      assert.equal(page.length, 10)
+      assert.equal(page[0]!.lt, all[6]!.lt, 'served page starts right after the cursor')
+      assert.ok(
+        page.every((t, i) => i === 0 || page[i - 1]!.prevTransactionLt === t.lt),
+        'served page is contiguous',
+      )
+    })
+
+    it('does not treat a bounded (to_lt) short fetch as end-of-history', async () => {
+      // Regression: a poll-style to_lt fetch returns few txs; that must NOT cap a
+      // later backward scan (the txDepleted bug that hid older transactions).
+      const all = makeLinkedTxs(30)
+      const { client, state } = makeCountingClient(all)
+      const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
+      const addr = Address.parse(ADDR)
+
+      // Bounded recent window: only the newest tx (lt 30000) is >= to_lt → short batch.
+      const bounded = await chain.provider.getTransactions(addr, { limit: 99, to_lt: '30000' })
+      assert.equal(bounded.length, 1, 'bounded window returns a short batch')
+
+      // Now walk backward past the freshest page; the old txs must still be fetched.
+      const head = await chain.provider.getTransactions(addr, { limit: 5 }) // newest 5
+      const older = await chain.provider.getTransactions(addr, {
+        limit: 5,
+        lt: head[head.length - 1]!.lt.toString(),
+        hash: head[head.length - 1]!.hash().toString('base64'),
+      })
+      assert.equal(older.length, 5, 'older page must be reachable, not capped by the bounded fetch')
+      assert.equal(older[0]!.lt, all[5]!.lt, 'pagination continues past the freshest window')
+      assert.ok(
+        state.rpc >= 3,
+        'the older page was actually fetched from RPC, not a stale cache slice',
+      )
+    })
+
+    it('drops the cache after the 5s TTL', async () => {
+      const all = makeLinkedTxs(30)
+      const { client, state } = makeCountingClient(all)
+      // Enable the mocked clock up front so every Date.now() the cache reads is on the
+      // same (advanceable) timeline.
+      mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+      try {
+        const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
+        const addr = Address.parse(ADDR)
+
+        await chain.provider.getTransactions(addr, { limit: 30 })
+        const cursor = {
+          limit: 10,
+          lt: all[5]!.lt.toString(),
+          hash: all[5]!.hash().toString('base64'),
+        }
+        await chain.provider.getTransactions(addr, cursor) // cache hit, within TTL
+        const beforeExpiry = state.rpc
+
+        mock.timers.tick(5_001) // advance past the 5s TTL
+        await chain.provider.getTransactions(addr, cursor)
+        assert.ok(state.rpc > beforeExpiry, 'a stale (>5s) cache must be refetched, not served')
+      } finally {
+        mock.timers.reset()
+      }
+    })
+  })
+
+  describe('getLogs completeness (only whole, sealed masterchain blocks)', () => {
+    const mockNetworkInfo = networkInfo('ton-testnet')
+    const OFFRAMP = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
+    const ROOT_SHARD = '-9223372036854775808'
+    const topicCrc = crc32('ExecutionStateChanged')
+
+    // Each masterchain block N commits account txs up to shard end_lt N*1000. Account txs
+    // live at lt = block*1000 + k (k in 1..99), all within block N's shard block.
+    const SHARD_END = (seqno: number) => BigInt(seqno * 1000 + 999)
+    const blockOf = (lt: bigint) => Math.floor(Number(lt) / 1000)
+
+    function tx(lt: number) {
+      const buf = Buffer.alloc(32)
+      buf.writeUInt32BE(lt >>> 0, 28)
+      const cell = beginCell()
+        .storeUint(16015286601757825753n, 64)
+        .storeUint(1n, 64)
+        .storeUint(BigInt('0x' + '1'.repeat(64)), 256)
+        .storeUint(2, 8)
+        .endCell()
+      return {
+        lt: BigInt(lt),
+        hash: () => buf,
+        now: 100 + lt,
+        address: BigInt('0x' + Address.parse(OFFRAMP).hash.toString('hex')),
+        outMessages: new Map([
+          [
+            0,
+            {
+              info: {
+                type: 'external-out' as const,
+                src: Address.parse(OFFRAMP),
+                dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+                createdLt: BigInt(lt),
+              },
+              body: cell,
+            },
+          ],
+        ]),
+      }
+    }
+
+    // Build a chain whose masterchain tip is `latest` and whose real account history is
+    // `all` (ascending); the client only returns `all \ missing`, so a `missing` lt appears
+    // on-chain (its successor still links to it via prevTransactionLt) but isn't indexed yet —
+    // i.e. a gap. lookupBlock deliberately UNDER-assigns (returns block-1) to exercise the
+    // committingSeqno climb. getTransactions honours the (lt, hash, to_lt, limit) cursor.
+    function makeChain(latest: number, all: number[], missing: number[] = []) {
+      const asc = [...all].sort((a, b) => a - b)
+      // Link each lt to its true on-chain predecessor (over the FULL history).
+      const prevLt = new Map<bigint, bigint>()
+      asc.forEach((lt, i) => prevLt.set(BigInt(lt), i > 0 ? BigInt(asc[i - 1]!) : 0n))
+      const present = asc.filter((lt) => !missing.includes(lt))
+      const linked = present
+        .map(tx)
+        .reverse()
+        .map((t) => ({ ...t, prevTransactionLt: prevLt.get(t.lt)!, prevTransactionHash: 0n }))
+
+      const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
+        const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
+        if (body.method === 'lookupBlock') {
+          const seqno = Math.max(1, blockOf(BigInt(body.params!.lt!)) - 1) // under-assign by 1
+          return new Response(JSON.stringify({ result: { seqno } }), {
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        throw new Error(`unexpected fetch method=${body.method}`)
+      }) as unknown as typeof fetch
+
+      const client = {
+        parameters: { endpoint: 'http://mock-ton-api' },
+        getMasterchainInfo: async () => ({ workchain: -1, shard: ROOT_SHARD, latestSeqno: latest }),
+        getWorkchainShards: async (seqno: number) => [{ workchain: 0, shard: ROOT_SHARD, seqno }],
+        getTransactions: async (
+          _a: Address,
+          o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
+        ) => {
+          let start = 0
+          if (o.lt != null) {
+            const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
+            start = at < 0 ? linked.length : o.inclusive ? at : at + 1
+          }
+          let page = linked.slice(start, start + o.limit)
+          if (o.to_lt != null) page = page.filter((t) => t.lt >= BigInt(o.to_lt!))
+          return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
+        },
+      } as unknown as TonClient
+
+      const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
+      // The block header (shard end_lt) is fetched via rateLimitedFetch → override it here
+      // to serve SHARD_END per seqno, since our fetchImpl only handles lookupBlock.
+      ;(
+        chain as unknown as {
+          getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
+        }
+      ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno)
+      return chain
+    }
+
+    async function collect(chain: TONChain, opts: Record<string, unknown>) {
+      const out: { block: number; lt: string }[] = []
+      for await (const l of chain.getLogs({
+        address: OFFRAMP,
+        topics: ['ExecutionStateChanged'],
+        finality: -1,
+        ...opts,
+      } as never)) {
+        assert.equal(l.topics[0], topicCrc)
+        out.push({ block: l.blockNumber, lt: String(l.index) })
+      }
+      return out
+    }
+
+    it('assigns the authoritative committing seqno despite lookupBlock under-assigning', async () => {
+      const chain = makeChain(20, [10_005]) // block 10; lookupBlock returns 9
+      const seqno = await (
+        chain as unknown as { committingSeqno: (lt: bigint, a: Address) => Promise<number> }
+      ).committingSeqno(10_005n, Address.parse(OFFRAMP))
+      assert.equal(seqno, 10, 'climbs from the under-assigned 9 to the true committing block 10')
+    })
+
+    it('emits sealed blocks but holds the unsealed tip block', async () => {
+      // Tip = block 12; conf=1 ⇒ cutoff 11. Txs in blocks 10, 11 (sealed) and 12 (tip).
+      const chain = makeChain(12, [10_001, 11_001, 12_001])
+      const logs = await collect(chain, { startBlock: 1 })
+      assert.deepEqual(
+        logs.map((l) => l.block),
+        [10, 11],
+        'blocks 10 & 11 emitted; the tip block 12 is withheld until sealed',
+      )
+    })
+
+    it('stops before a block missing a transaction (index lag → chain gap)', async () => {
+      // Block 11 should have txs 11_001 and 11_002, but 11_002 is not yet indexed. The gap
+      // (11_003.prevTransactionLt points at the missing 11_002) must prevent emitting block
+      // 11 at all — only the fully-contiguous block 10 is emitted.
+      const chain = makeChain(20, [10_001, 11_001, 11_002, 11_003, 12_001], [11_002])
+      const logs = await collect(chain, { startBlock: 1 })
+      assert.deepEqual(
+        logs.map((l) => l.block),
+        [10],
+        'a gap in block 11 withholds block 11 and everything after; block 10 still emits',
+      )
+    })
+
+    it('resumes strictly after the startBlock in account-shard lt space', async () => {
+      // startBlock 11 ⇒ resume after block 10's shard end_lt; block 10 txs must be excluded.
+      const chain = makeChain(13, [10_001, 11_001, 12_001])
+      const logs = await collect(chain, { startBlock: 11 })
+      assert.deepEqual(
+        logs.map((l) => l.block),
+        [11, 12],
+        'block 10 (below startBlock) excluded; 11 & 12 are sealed (tip 13)',
+      )
     })
   })
 
