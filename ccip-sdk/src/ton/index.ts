@@ -26,6 +26,7 @@ import {
   CCIPArgumentInvalidError,
   CCIPExecutionReportChainMismatchError,
   CCIPHttpError,
+  CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
@@ -76,6 +77,22 @@ function isTvmError(error: unknown): error is Error & { exitCode: number } {
 }
 
 /**
+ * Whether the shard `shardStr` (a signed-64-bit shard prefix, as returned by
+ * getWorkchainShards) contains `acct`. A TON shard is identified by its address
+ * prefix with the lowest set bit marking the prefix boundary; the root shard
+ * 0x8000000000000000 covers the whole workchain. Used to pick the shard block an
+ * account's transactions live in when a workchain is split into multiple shards.
+ */
+function shardContainsAccount(shardStr: string, acct: Address): boolean {
+  const shard = BigInt.asUintN(64, BigInt(shardStr))
+  // Account's top 64 address bits — the part a shard prefix discriminates on.
+  const accPrefix = BigInt.asUintN(64, BigInt('0x' + acct.hash.subarray(0, 8).toString('hex')))
+  const delimiter = shard & (~shard + 1n) // lowest set bit
+  const mask = BigInt.asUintN(64, ~((delimiter << 1n) - 1n)) // bits strictly above the delimiter
+  return (accPrefix & mask) === (shard & mask)
+}
+
+/**
  * TON chain implementation supporting TON networks.
  *
  * TON uses two different ordering concepts:
@@ -106,43 +123,85 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     super(network, ctx)
     this.provider = client
 
+    // Per-address transaction cache backing getLogs. getLogs paginates an account's
+    // history backward with (lt, hash) cursors, and successive/overlapping getLogs
+    // calls (and watch-mode re-polls) re-request the same cursor pages — the cache
+    // serves those from memory instead of re-hitting the RPC.
+    //
+    // Two invariants keep it from serving wrong data (the failure mode it must avoid
+    // is silently dropping txs a caller can never recover):
+    //   - Contiguity: a cached cursor page is served only when the entries form an
+    //     unbroken on-chain chain (each tx's prevTransactionLt == the next-older tx's
+    //     lt). `allTxs` merges many fetches and CAN have gaps (e.g. a recent bounded
+    //     poll window plus an older historical scan); blindly slicing it would splice
+    //     across a gap and return non-consecutive txs as if consecutive.
+    //   - Bottom: a short page is served as "no more txs" only when the account's
+    //     genesis tx (prevTransactionLt == 0) is actually in the run, or the request's
+    //     own to_lt lower bound is reached. A previous `txDepleted` flag conflated a
+    //     short *bounded* (to_lt) batch with end-of-history, which capped every later
+    //     backward scan at the freshest page and hid older txs.
+    // Entries expire TX_CACHE_TTL after the last fetch so a later burst restarts from
+    // a fresh head and never serves reorged-away txs.
+    const TX_CACHE_TTL = 5_000
     const txCache = new Map<string, Transaction[]>()
-    const txDepleted: Record<string, boolean> = {}
+    const txCacheExpiry = new Map<string, number>()
     const origGetTransactions = this.provider.getTransactions.bind(this.provider)
+    // Walk allTxs[idx...] (descending lt) following prevTransactionLt links, returning
+    // the contiguous run up to `limit`. Stops at the first broken link (a gap) or the
+    // array end, so the result is always a real consecutive slice of chain history.
+    const collectContiguous = (allTxs: Transaction[], idx: number, limit: number) => {
+      const run: Transaction[] = []
+      for (let j = idx; j < allTxs.length && run.length < limit; j++) {
+        const last = run[run.length - 1]
+        if (last && last.prevTransactionLt !== allTxs[j]!.lt) break // gap: not contiguous
+        run.push(allTxs[j]!)
+      }
+      return run
+    }
     // cached getTransactions, used for getLogs
     this.provider.getTransactions = async (
       address: Address,
       opts: Parameters<typeof this.provider.getTransactions>[1],
     ): Promise<Transaction[]> => {
       const key = address.toString()
-      let allTxs
-      if (txCache.has(key)) {
-        allTxs = txCache.get(key)!
-      } else {
-        allTxs = [] as Transaction[]
+      let allTxs = txCache.get(key)
+      // Fresh or expired: start a new window (stale entries could be past a reorg).
+      if (!allTxs || (txCacheExpiry.get(key) ?? 0) <= Date.now()) {
+        allTxs = []
         txCache.set(key, allTxs)
       }
       let txs
       if (!opts.hash) {
-        // if no cursor, always fetch most recent transactions
+        // No cursor: always fetch the (moving) most-recent head; never cache-served.
         txs = await origGetTransactions(address, opts)
       } else {
         const hash = opts.hash
-        // otherwise, look to see if we have it already cached
+        // Cursor page: try to serve a contiguous run from cache.
         let idx = allTxs.findIndex((tx) => tx.hash().toString('base64') === hash)
-        if (idx >= 0 && !opts.inclusive) idx++ // skip first if not inclusive
-        // if found, and we have more than requested limit in cache, or we'd previously reached bottom of address
-        if (idx >= 0 && (allTxs.length - idx >= opts.limit || txDepleted[key])) {
-          return allTxs.slice(idx, idx + opts.limit) // return cached
+        if (idx >= 0 && !opts.inclusive) idx++ // skip the cursor tx itself unless asked
+        if (idx >= 0) {
+          const run = collectContiguous(allTxs, idx, opts.limit)
+          const oldest = run[run.length - 1]
+          const toLt = opts.to_lt != null ? BigInt(opts.to_lt) : undefined
+          // Serve when the run is a full page, reaches the account's first tx, or
+          // (for a bounded request) already covers everything down to to_lt. In every
+          // case contiguity guarantees no on-chain tx in the range is skipped.
+          if (
+            run.length === opts.limit ||
+            (oldest && oldest.prevTransactionLt === 0n) ||
+            (toLt != null && oldest != null && oldest.lt <= toLt)
+          ) {
+            return run
+          }
         }
-        // otherwise, fetch after end
+        // Cache miss (cursor unknown, gap, or run too short): fetch older txs.
         txs = await origGetTransactions(address, opts)
       }
-      // add/merge unique/new/unseen txs to allTxs
+      // Merge new/unseen txs into the cached window, keeping it sorted descending by lt.
       const allTxsHashes = new Set(allTxs.map((tx) => tx.hash().toString('base64')))
       allTxs.push(...txs.filter((tx) => !allTxsHashes.has(tx.hash().toString('base64'))))
-      allTxs.sort((a, b) => Number(b.lt - a.lt)) // merge sorted inverse order
-      if (txs.length < opts.limit) txDepleted[key] = true // bottom reached
+      allTxs.sort((a, b) => Number(b.lt - a.lt))
+      txCacheExpiry.set(key, Date.now() + TX_CACHE_TTL)
       return txs
     }
 
@@ -187,6 +246,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+    })
+    this.getWorkchainShards = memoize(this.getWorkchainShards.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.getShardBlockEndLt = memoize(this.getShardBlockEndLt.bind(this), {
+      async: true,
+      maxArgs: 3,
+      maxSize: 200,
     })
   }
 
@@ -314,6 +383,80 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * List the shard blocks referenced by a masterchain block. Thin memoized wrapper
+   * over the provider call, used to resolve which shard block committed an account's
+   * transactions at a given masterchain seqno.
+   * @internal
+   */
+  async getWorkchainShards(mcSeqno: number) {
+    return this.provider.getWorkchainShards(mcSeqno)
+  }
+
+  /**
+   * The `end_lt` of a shard block — the highest logical time it commits. Fetched via
+   * getBlockHeader for an arbitrary (workchain, shard, seqno), unlike getMCBlockHeader
+   * which is masterchain-only.
+   * @internal
+   */
+  async getShardBlockEndLt(workchain: number, shard: string, seqno: number): Promise<bigint> {
+    const res = await this.rateLimitedFetch(this.provider.parameters.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'getBlockHeader',
+        params: { workchain, shard, seqno },
+      }),
+    })
+    if (!res.ok) {
+      throw new CCIPHttpError(
+        res.status,
+        `Failed to getBlockHeader by shard=${shard} seqno=${seqno}: ${await res.text()}`,
+      )
+    }
+    const { result } = (await res.json()) as { result: { end_lt: string } }
+    return BigInt(result.end_lt)
+  }
+
+  /**
+   * The highest account logical time committed by masterchain block `mcSeqno` for the
+   * shard `acct` lives in — i.e. the `end_lt` of that shard block. This is the exact,
+   * authoritative boundary between what masterchain block `mcSeqno` finalizes and what
+   * a later block does, unlike the masterchain-lt-range approximation `getMCSeqNoByLt`
+   * (which under-assigns). getLogs uses it to page in account-shard-lt space and to cut
+   * scans at complete blocks.
+   * @internal
+   */
+  async accountShardEndLt(mcSeqno: number, acct: Address): Promise<bigint> {
+    const shards = await this.getWorkchainShards(mcSeqno)
+    const inWorkchain = shards.filter((s) => s.workchain === acct.workChain)
+    const shard =
+      inWorkchain.find((s) => shardContainsAccount(s.shard, acct)) ?? inWorkchain[0] ?? shards[0]
+    if (!shard) throw new CCIPHttpError(0, `No shard for workchain=${acct.workChain} @${mcSeqno}`)
+    return this.getShardBlockEndLt(shard.workchain, shard.shard, shard.seqno)
+  }
+
+  /**
+   * The masterchain seqno that actually commits the account transaction at logical time
+   * `lt` — the first block whose account-shard `end_lt` covers `lt`. `getMCSeqNoByLt`
+   * maps by masterchain lt range and under-assigns (returns a block at/earlier than the
+   * committing one); this climbs from that lower bound to the true committing block, so
+   * a tx's `blockNumber` is stable and never appears "in" an already-passed block.
+   * @internal
+   */
+  async committingSeqno(lt: number | bigint, acct: Address): Promise<number> {
+    let n = await this.getMCSeqNoByLt(lt)
+    const ltBig = BigInt(lt)
+    // Climb while the candidate block's shard end_lt is below lt (under-assignment); the
+    // under-assignment is small, so this is a handful of memoized lookups at most. Bounded
+    // so inconsistent/stale RPC shard data can never spin forever — overshooting the cap
+    // just under-assigns, which at worst makes the poller re-scan (idempotent), never skip.
+    for (let i = 0; i < 256 && ltBig > (await this.accountShardEndLt(n, acct)); i++) n++
+    return n
+  }
+
+  /**
    * Fetch the timestamp for a given masterchain block or the latest finalized block.
    *
    * @param block - Masterchain block seqno, or 'finalized'/'latest' for the latest block
@@ -391,7 +534,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // Extract logs from outgoing external messages
     // Build composite hash format: workchain:address:lt:hash
     const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
-    const seqno = await this.getMCSeqNoByLt(tx.lt)
+    // Authoritative committing masterchain seqno (not the lt-range approximation), so a
+    // tx's blockNumber is the block that actually finalizes it and matches getLogs.
+    const seqno = await this.committingSeqno(tx.lt, address)
     const res = {
       hash: compositeHash,
       logs: [] as ChainLog[],
@@ -435,9 +580,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * Async generator that yields logs from TON transactions.
    *
-   * `startBlock`/`endBlock` are masterchain seqnos (public interface). Internally,
-   * they are converted to lt ranges before being passed to `streamTransactionsForAddress`,
-   * which uses lt for TON transaction API pagination.
+   * `startBlock`/`endBlock` are masterchain seqnos (public interface). Internally they
+   * are converted to the account's *shard* logical-time range — not the masterchain lt
+   * range — before paginating, because account transactions carry shard lt: converting
+   * through masterchain lt would skip shard txs whose lt falls below a masterchain
+   * block's start_lt.
+   *
+   * Completeness invariant (non-watch): a masterchain block's account transactions land
+   * asynchronously as shards commit, so a block can gain txs after it first appears. The
+   * poller advances a per-block watermark and never re-scans below it, so getLogs must
+   * only emit a block once it is proven complete — either a later block's tx has been
+   * observed with the on-chain tx chain intact across the boundary, or the scan reached
+   * a sealed cutoff (`latest - confirmations`). A break in the chain (a `prevTransactionLt`
+   * link that does not match) means a committed tx is not yet indexed, so getLogs stops
+   * before that block and the poller retries. Watch mode streams live (no buffering).
    *
    * @param opts - Log filter options (startBlock/endBlock are masterchain seqnos)
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
@@ -452,7 +608,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
             : this.abort,
       }
     }
-    let topics
+    let topics: Set<string> | undefined
     if (opts.topics?.length) {
       if (!opts.topics.every((topic) => typeof topic === 'string'))
         throw new CCIPTopicsInvalidError(opts.topics)
@@ -462,23 +618,83 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => crc32(t)),
       ])
     }
-    // streamTransactionsForAddress expects LT for startBlock/endBlock, so convert MC seqno to LT range as needed
+    const matches = (log: ChainLog) => !topics || topics.has(log.topics[0]!)
+
+    if (!opts.address) throw new CCIPLogsAddressRequiredError()
+    const acct = Address.parse(opts.address)
+
+    // Resume strictly after everything masterchain block (startBlock-1) committed, in
+    // account-shard lt space.
     const opts_ = { ...opts }
     if (opts.startBlock != null) {
-      opts_.startBlock = BigInt((await this.getMCBlockHeader(opts.startBlock)).start_lt)
+      const b = Number(opts.startBlock)
+      opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
     }
+
+    // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
+    // below serves the watermark-driven poller, which does not watch).
+    if (opts.watch) {
+      for await (const tx of streamTransactionsForAddress(opts_, this)) {
+        for (const log of tx.logs) if (matches(log)) yield log
+      }
+      return
+    }
+
+    // Completeness cutoff: the highest masterchain block we may emit. An explicit
+    // positive endBlock bounds it; otherwise it's `latest - confirmations` so the
+    // unsealed tip is never emitted. `finality` (a negative depth, as the poller passes)
+    // overrides the default confirmation depth.
+    const finality = (opts as { finality?: unknown }).finality
+    const confirmations = typeof finality === 'number' && finality < 0 ? -finality : 1
+    let cutoff = Number.MAX_SAFE_INTEGER
     if (
       (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
-      opts.endBlock > 0
+      Number(opts.endBlock) > 0
     ) {
-      opts_.endBlock = BigInt((await this.getMCBlockHeader(opts.endBlock)).end_lt)
+      cutoff = Number(opts.endBlock)
+    } else {
+      const latest = (await this.provider.getMasterchainInfo()).latestSeqno
+      cutoff = Math.max(1, latest - Math.max(1, confirmations))
     }
+    // Cap the fetch just past the cutoff so a tx of block (cutoff+1) can confirm the
+    // cutoff block complete, without pulling the whole unsealed tip.
+    opts_.endBlock = await this.accountShardEndLt(cutoff + 1, acct).catch(() =>
+      this.accountShardEndLt(cutoff, acct),
+    )
+
+    let curBlock: number | undefined
+    let buf: ChainLog[] = []
+    let prevLt: bigint | undefined
+    // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
+    const drain = (): ChainLog[] => {
+      const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
+      buf = []
+      return out
+    }
+
     for await (const tx of streamTransactionsForAddress(opts_, this)) {
-      for (const log of tx.logs) {
-        if (topics && !topics.has(log.topics[0]!)) continue
-        yield log
+      const raw = (tx as { tx?: { lt: bigint; prevTransactionLt: bigint } }).tx
+      if (raw && prevLt !== undefined && raw.prevTransactionLt !== prevLt) {
+        // Gap: a committed tx between prevLt and this one is not yet indexed — the
+        // current block may be incomplete. Drop it and stop; the poller retries.
+        buf = []
+        curBlock = undefined
+        break
       }
+      const block = tx.blockNumber
+      // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
+      if (curBlock !== undefined && block !== curBlock) yield* drain()
+      curBlock = block
+      if (block > cutoff) {
+        // Reached the unsealed region (prior block already drained). Stop.
+        curBlock = undefined
+        break
+      }
+      for (const log of tx.logs) if (matches(log)) buf.push(log)
+      if (raw) prevLt = raw.lt
     }
+    // Exhausted within the sealed cutoff (no gap): the last block is complete.
+    yield* drain()
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

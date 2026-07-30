@@ -7,7 +7,7 @@ import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTContractVersionUnsupportedError, CCTParamsInvalidError } from '../errors.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -161,21 +161,39 @@ describe('EVMTokenManager (cct/evm)', () => {
   })
 
   describe('transferOwnership', () => {
-    it('builds transferOwnership to the pool (floor-match across versions)', async () => {
-      const cct = EVMTokenManager.fromChain(stubChain({}, '1.6.1'))
+    it('probes the pool type/version, then builds transferOwnership to the pool', async () => {
+      const probed: string[] = []
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          typeAndVersion: ((address: string) => {
+            probed.push(address)
+            return Promise.resolve(['BurnMintTokenPool', '1.5.1', 'BurnMintTokenPool 1.5.1'])
+          }) as unknown as EVMChain['typeAndVersion'],
+        }),
+      )
       const unsigned = await cct.generateUnsignedTransferOwnership({
         poolAddress: POOL,
         newOwner: TOKEN,
       })
+      assert.deepEqual(probed, [POOL]) // resolved the pool's type/version from its own address
       assert.equal(unsigned.transactions[0]!.to, POOL)
       assert.equal(unsigned.transactions[0]!.data, EXPECTED_TRANSFER)
     })
 
-    it('throws for an unsupported pool version', async () => {
-      const cct = EVMTokenManager.fromChain(stubChain({}, '1.6.0'))
+    it('surfaces an unsupported pool type reported by the probe', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          typeAndVersion: (() =>
+            Promise.resolve([
+              'NotATokenPool',
+              '1.5.1',
+              'NotATokenPool 1.5.1',
+            ])) as unknown as EVMChain['typeAndVersion'],
+        }),
+      )
       await assert.rejects(
-        () => cct.generateUnsignedTransferOwnership({ poolAddress: POOL, newOwner: TOKEN }),
-        CCTContractVersionUnsupportedError,
+        cct.generateUnsignedTransferOwnership({ poolAddress: POOL, newOwner: TOKEN }),
+        (err: unknown) => err instanceof CCTContractTypeInvalidError,
       )
     })
   })
