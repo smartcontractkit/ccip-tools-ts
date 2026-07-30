@@ -28,16 +28,21 @@ import {
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
+  type ExecuteRegisterAdminParams,
+  type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
   type GenerateAppendToLookupTableParams,
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
+  type GenerateRegisterAdminParams,
+  type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
   AppendToLookupTable,
   CreateLookupTable,
+  RegisterAdmin,
   SetPool,
 } from './token-admin-registry/operations/index.ts'
 import {
@@ -65,6 +70,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token admin registry operations
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
 
   // Token pool operations
@@ -408,14 +414,84 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned Solana token registration instruction.
+   *
+   * This proposes the registry administrator. The proposed admin must accept the role using
+   * {@link generateUnsignedAcceptAdmin} before calling {@link generateUnsignedSetPool}. The
+   * administrator defaults to the mint authority and the method to `owner`;
+   * choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
+   * to nominate a different admin or register a mint with no mint authority.
+   *
+   * @see {@link generateUnsignedAcceptAdmin}
+   * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
+   * authority does not match the selected registration method, `administrator` is required, or a
+   * registry entry already exists for the token.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedRegisterAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedRegisterAdmin(
+    opts: GenerateRegisterAdminParams,
+  ): Promise<GenerateRegisterAdminResult> {
+    return this.#registerAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a token registry administrator using the executing wallet as registration authority
+   * and fee payer. The proposed admin must {@link acceptAdmin} before calling {@link setPool}.
+   *
+   * @see {@link acceptAdmin}
+   * @see {@link setPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
+   * authority does not match the selected registration method or executing wallet,
+   * `administrator` is required, or a registry entry already exists for the token.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.registerAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   wallet,
+   * })
+   * ```
+   */
+  registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
+    return this.#registerAdmin.execute(this.chain, opts)
+  }
+
+  /**
    * Builds unsigned Solana `setPool` instructions.
    *
-   * The `payer` pays transaction fees. `authority` defaults to `payer`; Squads/multisig flows
-   * should pass the token admin/vault authority explicitly. For a newly deployed canonical pool,
-   * create the pool signer's ATA before calling this operation.
+   * The token must first be registered and its proposed administrator accepted. The `payer` pays
+   * transaction fees; `authority` defaults to `payer`, while Squads/multisig flows should pass
+   * the token admin/vault authority explicitly. For a newly deployed canonical pool, create the
+   * pool signer's ATA before calling this operation.
    *
+   * @see {@link generateUnsignedRegisterAdmin}
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedCreateTokenAccount}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    *
    * @example
    * ```ts
@@ -434,11 +510,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Registers a token pool. The wallet must be the token admin authority. For a newly deployed
-   * canonical pool, create the pool signer's ATA before calling this operation.
+   * Registers a token pool. The token must first be registered and its proposed administrator
+   * accepted; the wallet must be the token admin authority. For a newly deployed canonical pool,
+   * create the pool signer's ATA before calling this operation.
    *
+   * @see {@link registerAdmin}
    * @see {@link deployTokenPool}
    * @see {@link createTokenAccount}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
    *
    * @example
    * ```ts
@@ -479,6 +562,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Serializes an unsigned Solana CCT tx for external signing.
+   *
+   * @throws {@link CCTParamsInvalidError} If `encoding` is unsupported or the transaction uses
+   * address lookup tables, which legacy-message serialization cannot represent.
    *
    * @example
    * ```ts

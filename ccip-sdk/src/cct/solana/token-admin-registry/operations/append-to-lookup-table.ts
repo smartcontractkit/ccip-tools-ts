@@ -13,7 +13,7 @@ import {
 } from '../../operation.ts'
 import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
@@ -171,10 +171,11 @@ export class AppendToLookupTable extends SolanaOperation<
     this.validate(generateParams)
 
     const authority = params.authority ? new PublicKey(params.authority) : undefined
-    if (authority && !authority.equals(wallet.publicKey)) {
-      throw new CCTParamsInvalidError(
+    if (authority) {
+      validateAuthorityMatchesWallet(
         this.name,
-        'authority',
+        authority,
+        wallet.publicKey,
         'appendToLookupTable requires authority to be the executing wallet. Use generateUnsignedAppendToLookupTable for vault-owned ALTs and have the vault sign/execute it.',
       )
     }
