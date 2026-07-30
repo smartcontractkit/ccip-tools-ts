@@ -9,7 +9,7 @@ export const RPCS = [
   process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co',
   process.env['RPC_AVAX'] || 'https://api.avax-test.network/ext/bc/C/rpc',
   process.env['RPC_APTOS'] || 'testnet',
-  process.env['RPC_SOLANA'] || 'https://api.devnet.solana.com',
+  process.env['RPC_SOLANA'] || 'https://solana-devnet.api.onfinality.io/public',
   process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
 ]
 

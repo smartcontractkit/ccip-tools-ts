@@ -122,6 +122,7 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
+import type RMNProxy_ABI from './abi/RMNProxy.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
@@ -457,7 +458,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return { statusCode: resp.status, statusMessage: resp.statusText, headers, body }
       }
       req.retryFunc = () => Promise.resolve(false) // our wrapper owns retries
-      const provider = new JsonRpcProvider(req, undefined, { staticNetwork: true })
+      const provider = new JsonRpcProvider(req, undefined, {
+        staticNetwork: true,
+        batchMaxCount: 20,
+      })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
@@ -962,6 +966,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const sourceFamily = sourceChainSelector
       ? networkInfo(sourceChainSelector).family
       : ChainFamily.EVM
+
+    const getRmn = async (rmnProxy: string): Promise<{ rmn?: string }> => {
+      if (!rmnProxy && rmnProxy === ZeroAddress) return {}
+      const proxyContract = new Contract(
+        rmnProxy,
+        interfaces.RMNProxy,
+        this.provider,
+      ) as unknown as TypedContract<typeof RMNProxy_ABI>
+      const rmn = await proxyContract.getARM()
+      return { rmn: rmn as CleanAddressable<typeof rmn> }
+    }
+
     let offRampABI, commitStoreABI
     switch (version) {
       case CCIPVersion.V1_2:
@@ -1003,6 +1019,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...csDynamicConfig,
           ...staticConfig,
           ...dynamicConfig,
+          ...(await getRmn(
+            'armProxy' in staticConfig ? staticConfig.armProxy : staticConfig.rmnProxy,
+          )),
           onRamps: [staticConfig.onRamp],
           typeAndVersion,
         }
@@ -1028,6 +1047,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return {
           ...staticConfig,
           ...dynamicConfig,
+          ...(await getRmn(staticConfig.rmnRemote)),
           sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
@@ -1048,6 +1068,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
         return {
           ...staticConfig,
+          ...(await getRmn(staticConfig.rmnRemote)),
           sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
@@ -2346,7 +2367,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         watch:
           opts.watch instanceof AbortSignal
             ? AbortSignal.any([opts.watch, this.abort])
-            : this.abort,
+            : opts.watch
+              ? this.abort
+              : undefined,
       })
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
