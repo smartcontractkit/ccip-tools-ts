@@ -6,24 +6,18 @@
  * @packageDocumentation
  */
 
-import { ZeroAddress } from 'ethers'
-
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation } from '../../operation.ts'
-import { validateAddress } from '../../validate.ts'
-import { LOCKBOX_INTERFACE } from '../interface.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
+import { validateNonZeroAddress } from '../../validate.ts'
+import { LOCKBOX_INTERFACE } from '../contracts.ts'
 
 /**
  * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
  * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
  * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
  * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
- *
- * Two validations here are SDK-side strictness, not contract behaviour: on-chain only *adds* revert
- * `ZeroAddressNotAllowed`, and an update with both arrays empty is a successful owner-only no-op.
  */
 export interface AuthorizeLockboxCallersParams {
   /** Address of the `ERC20LockBox` to update. */
@@ -46,7 +40,7 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
     addedCallers = [],
     removedCallers = [],
   }: AuthorizeLockboxCallersParams): void {
-    validateAddress(this.name, 'lockbox', lockbox)
+    validateNonZeroAddress(this.name, 'lockbox', lockbox)
     if (addedCallers.length + removedCallers.length === 0) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -54,12 +48,8 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
         'at least one caller must be added or removed',
       )
     }
-    const validateCaller = (field: string, c: string, i: number): void => {
-      validateAddress(this.name, `${field}[${i}]`, c)
-      if (c === ZeroAddress) {
-        throw new CCTParamsInvalidError(this.name, `${field}[${i}]`, 'must not be the zero address')
-      }
-    }
+    const validateCaller = (field: string, c: string, i: number): void =>
+      validateNonZeroAddress(this.name, `${field}[${i}]`, c)
     addedCallers.forEach((c, i) => validateCaller('addedCallers', c, i))
     removedCallers.forEach((c, i) => validateCaller('removedCallers', c, i))
   }
@@ -72,6 +62,6 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
     const data = LOCKBOX_INTERFACE.encodeFunctionData('applyAuthorizedCallerUpdates', [
       { addedCallers, removedCallers },
     ])
-    return { family: ChainFamily.EVM, transactions: [{ to: lockbox, data }] }
+    return callTx(lockbox, data)
   }
 }
