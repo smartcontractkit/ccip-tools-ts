@@ -11,6 +11,7 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
 } from '@solana/web3.js'
+import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -39,6 +40,7 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
+import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
@@ -71,6 +73,7 @@ import {
 } from '../extra-args.ts'
 import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
+import { cleanUpBuffers } from './cleanup.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
@@ -105,7 +108,6 @@ import {
   toLeArray,
   util,
 } from '../utils.ts'
-import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
@@ -1533,12 +1535,66 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Solana specialization: use getProgramAccounts to fetch commit reports from PDAs
+   * Solana specialization: for v2 lanes, resolve the verification policy from the offRamp's
+   * `getCcvsForMsg` view and fetch CCV results from the indexers (no onchain commit exists);
+   * for v1.x, use getProgramAccounts to fetch commit reports from PDAs
    */
   override async getVerifications(
     opts: Parameters<Chain['getVerifications']>[0],
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
+    if (request.lane.version >= CCIPVersion.V2_0) {
+      const message = request.message as CCIPMessage
+      const offRampPk = new PublicKey(offRamp)
+      const program = new Program(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
+      const pda = (seed: string, ...extra: Uint8Array[]) =>
+        PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
+      // receiver is consulted only for arbitrary (data) messages; default pubkey means none
+      let messageReceiver = PublicKey.default
+      if (!message.tokenAmounts.length) {
+        try {
+          messageReceiver = new PublicKey(message.receiver)
+        } catch {
+          // leave default: non-svm or zero receiver
+        }
+      }
+      const ccvs = (await program.methods
+        .getCcvsForMsg({
+          // TODO: token transfers require 5 pool remaining-accounts to include pool CCVs;
+          // lane defaults + mandated CCVs are still reported (view is non-authoritative)
+          tokenTransfer: null,
+          messageReceiver,
+          resolutionMetadata: Buffer.alloc(0),
+          remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
+          requestedFinality: { flags: 0, blockDepth: 0 },
+        })
+        .accounts({
+          config: pda('config'),
+          referenceAddresses: pda('reference_addresses'),
+          sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
+        })
+        .view()) as {
+        requiredCcvs: PublicKey[]
+        optionalCcvs: PublicKey[]
+        optionalThreshold: number
+      }
+      const verificationPolicy = {
+        requiredCCVs: ccvs.requiredCcvs.map((c) => c.toBase58()),
+        optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
+        optionalThreshold: ccvs.optionalThreshold,
+      }
+      const verifications = await fetchVerifications(request.message.messageId, {
+        apiClient: this.apiClient,
+        indexer: opts.indexer ?? this.network.networkType,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : opts.watch
+              ? this.abort
+              : undefined,
+      })
+      return { verificationPolicy, verifications }
+    }
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
       filters: [
         {
