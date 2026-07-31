@@ -24,6 +24,8 @@ import {
   CreateTokenAccount,
 } from './token/operations/index.ts'
 import {
+  type ExecuteAcceptAdminParams,
+  type ExecuteAcceptAdminResult,
   type ExecuteAppendToLookupTableParams,
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
@@ -34,6 +36,8 @@ import {
   type ExecuteSetPoolResult,
   type ExecuteTransferAdminParams,
   type ExecuteTransferAdminResult,
+  type GenerateAcceptAdminParams,
+  type GenerateAcceptAdminResult,
   type GenerateAppendToLookupTableParams,
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
@@ -44,6 +48,7 @@ import {
   type GenerateSetPoolResult,
   type GenerateTransferAdminParams,
   type GenerateTransferAdminResult,
+  AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
   RegisterAdmin,
@@ -73,6 +78,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenAccount = new CreateTokenAccount()
 
   // Token admin registry operations
+  readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
   readonly #registerAdmin = new RegisterAdmin()
@@ -420,6 +426,68 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned Solana instruction that accepts a pending token administrator role.
+   *
+   * The supplied authority must be the pending token administrator.
+   *
+   * @remarks
+   * Call this after {@link generateUnsignedRegisterAdmin} or {@link generateUnsignedTransferAdmin}
+   * and before {@link generateUnsignedSetPool}. `authority` defaults to `payer`; Squads/vault
+   * flows should use this method with their fee payer and signing authority explicitly.
+   *
+   * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedTransferAdmin}
+   * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
+   * pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer: pendingAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedAcceptAdmin(opts: GenerateAcceptAdminParams): Promise<GenerateAcceptAdminResult> {
+    return this.#acceptAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a pending token administrator role using the pending administrator wallet.
+   *
+   * @remarks
+   * Call this after {@link registerAdmin} or {@link transferAdmin} and before {@link setPool}.
+   * `authority` defaults to `wallet`; Squads/vault flows should use
+   * {@link generateUnsignedAcceptAdmin} instead.
+   *
+   * @see {@link registerAdmin}
+   * @see {@link transferAdmin}
+   * @see {@link setPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the executing wallet/pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
+   * ```
+   */
+  acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned Solana token registration instruction.
    *
    * This proposes the registry administrator. The proposed admin must accept the role using
@@ -493,6 +561,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * pool signer's ATA before calling this operation.
    *
    * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedAcceptAdmin}
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedCreateTokenAccount}
    *
@@ -521,6 +590,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * create the pool signer's ATA before calling this operation.
    *
    * @see {@link registerAdmin}
+   * @see {@link acceptAdmin}
    * @see {@link deployTokenPool}
    * @see {@link createTokenAccount}
    *
