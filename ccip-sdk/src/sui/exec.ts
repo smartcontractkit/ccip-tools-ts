@@ -15,7 +15,12 @@ import {
   type TokenConfig,
   buildManualExecutionPTB,
 } from './manuallyExec/index.ts'
-import { fetchTokenConfigs, getObjectRef, getReceiverModule } from './objects.ts'
+import {
+  fetchTokenConfigs,
+  getLatestPackageId,
+  getObjectRef,
+  getReceiverModule,
+} from './objects.ts'
 import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
 import { ChainFamily } from '../networks.ts'
 
@@ -38,23 +43,32 @@ export async function generateUnsignedExecutePTB(
     throw new CCIPExecutionReportChainMismatchError('Sui')
   }
 
-  const ccip = await getCcipStateAddress(offRamp, client)
+  // Move calls must target the latest packages (old versions are version-gated
+  // and revert); state pointers/object refs are resolved from the originals
+  const latestOffRamp = await getLatestPackageId(offRamp, client)
+  const ccip = await getCcipStateAddress(latestOffRamp, client)
+  const latestCcip = await getLatestPackageId(ccip, client)
 
   const ccipObjectRef = await getObjectRef(ccip, client)
   const [offrampStateObject, receiverConfig] = await Promise.all([
     getObjectRef(offRamp, client),
-    getReceiverModule(client, ccip, ccipObjectRef, input.message.receiver),
+    getReceiverModule(client, latestCcip, ccipObjectRef, input.message.receiver),
   ])
 
   let tokenConfigs: TokenConfig[] = []
   if (input.message.tokenAmounts.length !== 0) {
-    tokenConfigs = await fetchTokenConfigs(client, ccip, ccipObjectRef, input.message.tokenAmounts)
+    tokenConfigs = await fetchTokenConfigs(
+      client,
+      latestCcip,
+      ccipObjectRef,
+      input.message.tokenAmounts,
+    )
   }
 
   const suiInput: SuiManuallyExecuteInput = {
     executionReport: input,
-    offrampAddress: offRamp,
-    ccipAddress: ccip,
+    offrampAddress: latestOffRamp,
+    ccipAddress: latestCcip,
     ccipObjectRef,
     offrampStateObject,
     receiverConfig,

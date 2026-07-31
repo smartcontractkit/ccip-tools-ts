@@ -143,10 +143,17 @@ export const discoverOffRamp = memoize(
 
     // fallback to pairing routers offramps
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
-    const sourceOffRamps = await source.getOffRampsForRouter(
-      sourceRouter,
-      dest.network.chainSelector,
-    )
+    let sourceOffRamps: string[] = []
+    try {
+      sourceOffRamps = await source.getOffRampsForRouter(sourceRouter, dest.network.chainSelector)
+    } catch (err) {
+      // Source-side offRamp enumeration can be impossible (e.g. Sui on
+      // history-pruned RPCs); fall through to dest-side discovery below
+      logger.debug(
+        'discoverOffRamp: source-side offRamp enumeration failed; trying dest-side only',
+        err,
+      )
+    }
     for (const offRamp of sourceOffRamps) {
       let destOnRamps
       try {
@@ -161,11 +168,19 @@ export const discoverOffRamp = memoize(
         continue
       }
       for (const destOnRamp of destOnRamps) {
-        const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
-        const destOffRamps = await dest.getOffRampsForRouter(
-          destRouter,
-          source.network.chainSelector,
-        )
+        let destOffRamps
+        try {
+          const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
+          destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
+        } catch (err) {
+          logger.debug(
+            'discoverOffRamp: skipping dest onRamp',
+            destOnRamp,
+            '(dest-side offRamp enumeration failed)',
+            err,
+          )
+          continue
+        }
         for (const offRamp of destOffRamps) {
           let offRampsOnRamps
           try {
