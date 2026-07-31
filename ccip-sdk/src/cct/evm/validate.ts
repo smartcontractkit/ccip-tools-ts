@@ -5,19 +5,23 @@
  * @packageDocumentation
  */
 
-import { ZeroAddress, isAddress } from 'ethers'
+import { ZeroAddress, getAddress, isAddress } from 'ethers'
 
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 
 /**
- * Asserts `value` is a valid EVM address. Links the canonical
- * {@link CCIPAddressInvalidError} as the `cause`, keeping the
+ * Asserts `value` is a valid EVM address, narrowing it to `string` for callers. Links the
+ * canonical {@link CCIPAddressInvalidError} as the `cause`, keeping the
  * {@link operation}/{@link param} context on top.
  * @throws {@link CCTParamsInvalidError} if `value` is not a valid address
  */
-export function validateAddress(operation: string, param: string, value: unknown): void {
+export function validateAddress(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string {
   if (typeof value === 'string' && isAddress(value)) return
   throw new CCTParamsInvalidError(
     operation,
@@ -31,11 +35,13 @@ export function validateAddress(operation: string, param: string, value: unknown
 
 /**
  * Asserts `value` is a valid, non-zero EVM address.
+ * @remarks Normalises with `getAddress` first: a literal `=== ZeroAddress` misses the ICAP
+ * spelling, and a tx to `0x0` hits no code, so it mines as a successful no-op.
  * @throws {@link CCTParamsInvalidError} if `value` is not a valid address, or is the zero address
  */
 export function validateNonZeroAddress(operation: string, param: string, value: unknown): void {
   validateAddress(operation, param, value)
-  if (value === ZeroAddress)
+  if (getAddress(value) === ZeroAddress)
     throw new CCTParamsInvalidError(operation, param, 'must not be the zero address')
 }
 

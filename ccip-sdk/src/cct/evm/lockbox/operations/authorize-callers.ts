@@ -13,7 +13,12 @@ import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { LOCKBOX_INTERFACE } from '../contracts.ts'
 
-/** Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required. */
+/**
+ * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
+ * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
+ * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
+ * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
+ */
 export interface AuthorizeLockboxCallersParams {
   /** Address of the `ERC20LockBox` to update. */
   lockbox: string

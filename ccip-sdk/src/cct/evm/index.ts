@@ -134,7 +134,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress, verification }`.
-   * This path returns the unsigned tx only — no `verification`; see {@link deployToken}.
    * @remarks Same post-deploy roles caveat as {@link deployToken} — the pool needs
    * `grantMintAndBurnRoles` before it can bridge.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -185,8 +184,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
    * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
    * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
-   * `{ hash, contractAddress, verification }`. This path returns the unsigned tx only, with no
-   * `verification`.
+   * `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
@@ -246,8 +244,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `ERC20LockBox` (v2.0.0) deployment tx (for multisig / offline signing).
    * A lockbox escrows a single `token` for `LockReleaseTokenPool`s. The deployed address is
    * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
-   * `{ hash, contractAddress, verification }`. This path returns the unsigned tx only, with no
-   * `verification`.
+   * `{ hash, contractAddress, verification }`.
    * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
    * {@link authorizeLockboxCallers} before the pool can lock/release.
    * @throws {@link CCTParamsInvalidError} if any param is invalid

@@ -30,21 +30,26 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
 }
 
 /**
- * Inputs a block explorer needs to verify a deployed contract's source: the contract name and
- * its ABI-encoded constructor args. Captured at deploy time with no extra RPC.
+ * The deploy-side inputs a block explorer needs to verify a contract's source: its name and
+ * ABI-encoded constructor args, captured while deploying with no extra RPC.
+ * @remarks A constructor-args companion, *not* proof of verification — nothing here is read back
+ * from the chain or submitted anywhere. A full submission also needs the source/compiler side
+ * (standard-json input plus the matching solc version and settings), which this SDK does not
+ * vendor; those ship in the `@chainlink/contracts-ccip` package.
  *
- * @remarks This is a constructor-args companion, *not* proof of verification — nothing here is
- * checked against the chain or submitted anywhere. Completing a verification also needs the
- * source/compiler side (standard-json input + matching solc version and settings), which the
- * SDK does not vendor; those ship in the `@chainlink/contracts-ccip` npm package.
- *
- * Etherscan's "Constructor Arguments" field expects {@link encodedConstructorArgs} *without*
- * the leading `0x`.
+ * Only available from `execute`, which deploys and so learns the address. The
+ * `generateUnsigned*` builders return the unsigned tx alone.
+ * @example Verifying on Etherscan, whose "Constructor Arguments" field wants the args bare:
+ * ```typescript
+ * const { contractAddress, verification } = await cct.deployTokenPool({ ...params, wallet })
+ * console.log(verification.contract) // 'LockReleaseTokenPool'
+ * console.log(verification.encodedConstructorArgs.slice(2)) // drop the `0x`
+ * ```
  */
 export interface ExplorerVerificationInput {
-  /** Contract name as compiled, e.g. `BurnMintTokenPool` — matches the artifact, unqualified. */
+  /** Contract name as compiled, e.g. `BurnMintTokenPool`; unqualified, matching the artifact. */
   contract: string
-  /** 0x-prefixed ABI-encoded constructor args (`0x` when the constructor takes none). */
+  /** 0x-prefixed ABI-encoded constructor args, or just `0x` when the constructor takes none. */
   encodedConstructorArgs: string
 }
 
@@ -138,9 +143,8 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
     const unsigned = await this.generate(chain, params)
     const { contract, iface } = this.artifact(params)
-    // Same value `buildUnsigned` appended to the creation bytecode. Taking it straight from
-    // `encode` (rather than slicing it back out of the init-code) keeps this independent of
-    // the tx layout.
+    // Same value `buildUnsigned` appended to the bytecode. Taken from `encode` rather than
+    // sliced back out of the init-code, so it stays correct regardless of the tx layout.
     const encodedConstructorArgs = this.encode(iface, params)
     const { response, receipt } = await submit(chain, params.wallet, unsigned, this.name)
     if (!receipt.contractAddress)
