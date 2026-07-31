@@ -7,13 +7,13 @@ import { GetSupportedTokens } from './get-supported-tokens.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 
-const ADDRESS = Keypair.generate().publicKey.toBase58()
+const OFF_RAMP = Keypair.generate().publicKey.toBase58()
 const ROUTER = Keypair.generate().publicKey.toBase58()
 const TOKENS = [Keypair.generate().publicKey.toBase58()]
 
 describe('GetSupportedTokens (cct/solana)', () => {
   describe('query', () => {
-    it('resolves the Router and lists its configured token mints', async () => {
+    it('resolves an OffRamp to the Router and lists configured token mints', async () => {
       let resolvedAddress: string | undefined
       let supportedTokensRouter: string | undefined
       const chain = {
@@ -27,8 +27,8 @@ describe('GetSupportedTokens (cct/solana)', () => {
         },
       } as unknown as SolanaChain
 
-      assert.deepEqual(await new GetSupportedTokens().query(chain, { address: ADDRESS }), TOKENS)
-      assert.equal(resolvedAddress, ADDRESS)
+      assert.deepEqual(await new GetSupportedTokens().query(chain, { address: OFF_RAMP }), TOKENS)
+      assert.equal(resolvedAddress, OFF_RAMP)
       assert.equal(supportedTokensRouter, ROUTER)
     })
   })

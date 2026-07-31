@@ -730,7 +730,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Lists SPL token mints configured in a Router's TokenAdminRegistry.
+   * Lists all SPL token mints configured in a Router's TokenAdminRegistry in a single scan;
+   * pagination is not supported.
    *
    * @throws {@link CCTParamsInvalidError} If `address` is not a valid Solana public key.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
