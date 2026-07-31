@@ -1,38 +1,20 @@
-import type { PublicKey } from '@solana/web3.js'
-
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
+  type PoolProgramRef,
   type TokenPoolConfig,
   decodeTokenPoolState,
   deriveTokenPoolConfigPda,
-  resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { parsePublicKey, validatePoolType } from '../../validate.ts'
+import { parsePublicKey, resolvePoolProgram } from '../../validate.ts'
 
-/** Identifies a canonical burn-mint token pool program. */
-export type BurnMintPoolProgramRef = {
-  poolType: 'burn-mint'
-  poolProgramAddress?: never
-}
-
-/** Identifies a canonical lock-release token pool program. */
-export type LockReleasePoolProgramRef = {
-  poolType: 'lock-release'
-  poolProgramAddress?: never
-}
-
-/** Identifies a custom token pool program. */
-export type CustomPoolProgramRef = {
-  poolProgramAddress: string
-  poolType?: never
-}
-
-/** Identifies a canonical token pool or a custom pool program. */
-export type PoolProgramRef =
-  BurnMintPoolProgramRef | LockReleasePoolProgramRef | CustomPoolProgramRef
+export type {
+  BurnMintPoolProgramRef,
+  CustomPoolProgramRef,
+  LockReleasePoolProgramRef,
+  PoolProgramRef,
+} from '../../programs/token-pool.ts'
 
 /** Parameters for reading a Solana token pool state. */
 export type GetTokenPoolStateParams = PoolProgramRef & {
@@ -57,6 +39,7 @@ type BaseConfig = {
 
 type GetTokenPoolStateResultBase = {
   stateAddress: string
+  /** Resolved pool program address: canonical for `poolType`, supplied for `poolProgramAddress`. */
   programId: string
   version: number
 }
@@ -74,30 +57,24 @@ export type LockReleaseGetTokenPoolStateResult = GetTokenPoolStateResultBase & {
   }
 }
 
-/** State returned for a canonical or custom token pool program. */
-export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> =
-  P extends LockReleasePoolProgramRef
-    ? LockReleaseGetTokenPoolStateResult
-    : BaseGetTokenPoolStateResult
-
-function resolvePoolProgram(params: PoolProgramRef): PublicKey {
-  const hasPoolType = Object.hasOwn(params, 'poolType')
-  const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
-  if (hasPoolType === hasPoolProgramAddress) {
-    throw new CCTParamsInvalidError(
-      'getTokenPoolState',
-      'poolType',
-      'provide exactly one of poolType or poolProgramAddress',
-    )
-  }
-
-  if (hasPoolType) {
-    validatePoolType('getTokenPoolState', 'poolType', params.poolType)
-    return resolveTokenPoolProgram(params.poolType)
-  }
-
-  return parsePublicKey('getTokenPoolState', 'poolProgramAddress', params.poolProgramAddress)
+type TokenPoolStateResultByType = {
+  'burn-mint': BaseGetTokenPoolStateResult
+  'lock-release': LockReleaseGetTokenPoolStateResult
 }
+
+/**
+ * State returned for a canonical or custom token pool program.
+ *
+ * Results queried with `poolProgramAddress` use the base config shape and omit lock-release-only
+ * fields, even when the supplied address is the lock-release program.
+ */
+export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> = P extends {
+  poolType: infer T
+}
+  ? T extends keyof TokenPoolStateResultByType
+    ? TokenPoolStateResultByType[T]
+    : BaseGetTokenPoolStateResult
+  : BaseGetTokenPoolStateResult
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   return {
@@ -127,8 +104,16 @@ export class GetTokenPoolState extends SolanaQuery<
     chain: SolanaChain,
     params: P,
   ): Promise<GetTokenPoolStateResult<P>> {
+    return this.fetchPoolState(chain, params) as Promise<GetTokenPoolStateResult<P>>
+  }
+
+  /** Fetches and serializes the token pool configuration account. */
+  private async fetchPoolState(
+    chain: SolanaChain,
+    params: GetTokenPoolStateParams,
+  ): Promise<GetTokenPoolStateResult> {
     const mint = parsePublicKey('getTokenPoolState', 'tokenAddress', params.tokenAddress)
-    const programId = resolvePoolProgram(params)
+    const programId = resolvePoolProgram('getTokenPoolState', params)
     const state = deriveTokenPoolConfigPda(programId, mint)
 
     const account = await chain.connection.getAccountInfo(state)
@@ -161,9 +146,9 @@ export class GetTokenPoolState extends SolanaQuery<
           rebalancer: config.rebalancer.toBase58(),
           canAcceptLiquidity: config.canAcceptLiquidity,
         },
-      } as GetTokenPoolStateResult<P>
+      }
     }
 
-    return { ...result, config: baseConfig } as GetTokenPoolStateResult<P>
+    return { ...result, config: baseConfig }
   }
 }

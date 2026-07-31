@@ -15,8 +15,13 @@ import {
   buildCreateLookupTableInstruction,
   deriveCcipLookupTableAddresses,
 } from '../../programs/alt.ts'
+import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
-import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
+import {
+  resolvePoolProgram,
+  validateAuthorityMatchesWallet,
+  validatePublicKey,
+} from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
@@ -25,15 +30,14 @@ type CreateLookupTableMode = 'createAndExtend' | 'createEmpty'
 
 /** Parameters shared by Solana TokenAdminRegistry `createLookupTable` generation and execution. */
 type CreateLookupTableParams =
-  | {
+  | (PoolProgramRef & {
       /** Defaults to `createAndExtend`; use `createEmpty` to skip extending the ALT. */
       mode?: Extract<CreateLookupTableMode, 'createAndExtend'>
       tokenAddress: string
-      poolProgramAddress: string
       additionalAddresses?: string[]
       /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
       authority?: string
-    }
+    })
   | {
       /** Creates an empty ALT without extend instructions. */
       mode: Extract<CreateLookupTableMode, 'createEmpty'>
@@ -62,14 +66,14 @@ export class CreateLookupTable extends SolanaOperation<
 > {
   readonly name = 'createLookupTable'
 
-  /** Validates all public keys before any RPC. */
+  /** Validates params before `buildUnsigned()` performs any RPC. */
   protected validate(params: GenerateCreateLookupTableParams): void {
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
     if (params.mode === 'createEmpty') return
 
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
+    resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
@@ -83,13 +87,12 @@ export class CreateLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
 
-    const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
-      authority,
-      payer,
-      recentSlot: await chain.connection.getSlot('finalized'),
-    })
-
     if (opts.mode === 'createEmpty') {
+      const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
+        authority,
+        payer,
+        recentSlot: await chain.connection.getSlot('finalized'),
+      })
       chain.logger.debug(
         `${this.name}: mode = createEmpty, lookupTable = ${lookupTableAddress.toBase58()}`,
       )
@@ -101,9 +104,16 @@ export class CreateLookupTable extends SolanaOperation<
       }
     }
 
-    const poolProgram = new PublicKey(opts.poolProgramAddress)
+    // Validate and parse the pool program before calling slot RPC below.
+    const poolProgram = resolvePoolProgram(this.name, opts)
     const tokenMint = new PublicKey(opts.tokenAddress)
     const additionalAddresses = (opts.additionalAddresses ?? []).map((a) => new PublicKey(a))
+
+    const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
+      authority,
+      payer,
+      recentSlot: await chain.connection.getSlot('finalized'),
+    })
 
     const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
       lookupTableAddress,
