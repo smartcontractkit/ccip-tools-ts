@@ -12,21 +12,42 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
+import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
-import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
+import {
+  resolvePoolProgram,
+  validateAuthorityMatchesWallet,
+  validatePublicKey,
+} from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
 
-/** Parameters shared by Solana TokenAdminRegistry `appendToLookupTable` generation and execution. */
+type AppendAdditionalAddressesParams = {
+  additionalAddresses: string[]
+  tokenAddress?: never
+  poolType?: never
+  poolProgramAddress?: never
+}
+
+type AppendCanonicalAddressesParams = {
+  tokenAddress: string
+  additionalAddresses?: string[]
+} & PoolProgramRef
+
+/**
+ * Parameters shared by Solana TokenAdminRegistry `appendToLookupTable` generation and execution.
+ *
+ * Provide `tokenAddress` with exactly one of `poolType` or `poolProgramAddress` to append the
+ * canonical CCIP addresses. Additional addresses may also be included.
+ *
+ * Otherwise, provide `additionalAddresses` only.
+ */
 type AppendToLookupTableParams = {
   lookupTableAddress: string
-  tokenAddress?: string
-  poolProgramAddress?: string
-  additionalAddresses?: string[]
   /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
-}
+} & (AppendAdditionalAddressesParams | AppendCanonicalAddressesParams)
 
 /** Parameters for unsigned Solana lookup table append generation. */
 export type GenerateAppendToLookupTableParams = SolanaGenerateParams<AppendToLookupTableParams>
@@ -52,21 +73,22 @@ export class AppendToLookupTable extends SolanaOperation<
     validatePublicKey(this.name, 'lookupTableAddress', params.lookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
     if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
-    if (params.tokenAddress) validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    if (params.poolProgramAddress) {
-      validatePublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
+
+    const hasPoolProgramAddress = params.poolProgramAddress !== undefined
+    const hasPoolProgram = params.poolType !== undefined || hasPoolProgramAddress
+    if (Boolean(params.tokenAddress) !== hasPoolProgram) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenAddress',
+        'tokenAddress and exactly one of poolType or poolProgramAddress must be provided together',
+      )
     }
+    if (params.tokenAddress) validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    if (hasPoolProgram) resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
 
-    if (Boolean(params.tokenAddress) !== Boolean(params.poolProgramAddress)) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        'tokenAddress and poolProgramAddress must be provided together',
-      )
-    }
     if (!params.tokenAddress && !params.additionalAddresses?.length) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -84,6 +106,7 @@ export class AppendToLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
     const lookupTableAddress = new PublicKey(opts.lookupTableAddress)
+    const poolProgram = opts.tokenAddress ? resolvePoolProgram(this.name, opts) : undefined
     const lookupTable = await chain.connection.getAddressLookupTable(lookupTableAddress)
 
     if (!lookupTable.value) {
@@ -104,8 +127,7 @@ export class AppendToLookupTable extends SolanaOperation<
 
     const addresses = [...(opts.additionalAddresses ?? []).map((a) => new PublicKey(a))]
 
-    if (opts.tokenAddress && opts.poolProgramAddress) {
-      const poolProgram = new PublicKey(opts.poolProgramAddress)
+    if (opts.tokenAddress && poolProgram) {
       const tokenMint = new PublicKey(opts.tokenAddress)
       const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
         lookupTableAddress,

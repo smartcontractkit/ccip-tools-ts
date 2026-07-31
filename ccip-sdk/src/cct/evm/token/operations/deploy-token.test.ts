@@ -218,7 +218,20 @@ describe('DeployToken (cct/evm)', () => {
       ...INPUTS,
       wallet: fakeSigner({ contractAddress: DEPLOYED }),
     })
-    assert.deepEqual(result, { hash: HASH, contractAddress: DEPLOYED })
+    assert.deepEqual(result, {
+      hash: HASH,
+      contractAddress: DEPLOYED,
+      verification: { contract: 'CrossChainToken', encodedConstructorArgs: '0x' + CTOR_ARGS },
+    })
+  })
+
+  it('carries the verification handle recovered from the init-code', async () => {
+    const result = await new DeployToken().execute(stubChain(), {
+      ...INPUTS,
+      wallet: fakeSigner({ contractAddress: DEPLOYED }),
+    })
+    assert.equal(result.verification.contract, 'CrossChainToken')
+    assert.equal(result.verification.encodedConstructorArgs, '0x' + CTOR_ARGS)
   })
 
   it('throws CCTTxFailedError when the receipt carries no contract address', async () => {

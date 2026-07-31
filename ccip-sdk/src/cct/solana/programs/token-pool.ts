@@ -23,6 +23,28 @@ export const TOKEN_POOL_PROGRAMS = {
 /** Canonical Solana token pool program type. */
 export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
 
+/** Identifies a canonical burn-mint token pool program. */
+export type BurnMintPoolProgramRef = {
+  poolType: 'burn-mint'
+  poolProgramAddress?: never
+}
+
+/** Identifies a canonical lock-release token pool program. */
+export type LockReleasePoolProgramRef = {
+  poolType: 'lock-release'
+  poolProgramAddress?: never
+}
+
+/** Identifies a custom token pool program. */
+export type CustomPoolProgramRef = {
+  poolProgramAddress: string
+  poolType?: never
+}
+
+/** Identifies a canonical token pool or a custom pool program. */
+export type PoolProgramRef =
+  BurnMintPoolProgramRef | LockReleasePoolProgramRef | CustomPoolProgramRef
+
 type TokenPoolStateDecodeContext = {
   tokenPool: string
   mint: string

@@ -9,15 +9,14 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { ChainFamily } from '../../../../networks.ts'
-import { EVMOperation } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
-} from '../version.ts'
+} from '../contracts.ts'
 
 /** Parameters for {@link TransferOwnership}. */
 export interface TransferOwnershipParams {
@@ -30,10 +29,8 @@ export interface TransferOwnershipParams {
 /** Encodes `transferOwnership` calldata against the resolved pool {@link Interface}. */
 type Encoder = (iface: Interface, params: TransferOwnershipParams) => UnsignedEVMTx
 
-const encodeTransferOwnership: Encoder = (iface, { newOwner, poolAddress }) => {
-  const data = iface.encodeFunctionData('transferOwnership', [newOwner])
-  return { family: ChainFamily.EVM, transactions: [{ to: poolAddress, data }] }
-}
+const encodeTransferOwnership: Encoder = (iface, { newOwner, poolAddress }) =>
+  callTx(poolAddress, iface.encodeFunctionData('transferOwnership', [newOwner]))
 
 /** Proposes a new TokenPool owner via Ownable2Step `transferOwnership`. */
 export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {

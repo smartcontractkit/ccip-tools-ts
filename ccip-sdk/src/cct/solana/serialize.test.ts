@@ -22,7 +22,7 @@ const unsigned = {
   ],
 }
 
-describe('cct/solana serialize', () => {
+describe('Serialize (cct/solana)', () => {
   it('serializes unsigned Solana txs as legacy messages in supported encodings', async () => {
     const base58 = await serializeUnsignedSolanaTx(connection, unsigned, KEY)
     const base64 = await serializeUnsignedSolanaTx(connection, unsigned, KEY, 'base64')

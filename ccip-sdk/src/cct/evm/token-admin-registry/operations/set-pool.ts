@@ -8,8 +8,7 @@
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { ChainFamily } from '../../../../networks.ts'
-import { EVMOperation } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 
 /** Parameters for `setPool`. Zero `poolAddress` delists the token. */
@@ -45,6 +44,6 @@ export class SetPool extends EVMOperation<SetPoolParams> {
       p.tokenAddress,
       p.poolAddress,
     ])
-    return { family: ChainFamily.EVM, transactions: [{ to, data }] }
+    return callTx(to, data)
   }
 }
