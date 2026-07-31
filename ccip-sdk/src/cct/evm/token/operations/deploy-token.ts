@@ -55,7 +55,7 @@ function encodeCrossChainToken(iface: Interface, p: DeployTokenParams): string {
   ])
 }
 
-/** Deploys a `CrossChainToken`; `execute` resolves to `{ hash, contractAddress }`. */
+/** Deploys a `CrossChainToken`; `execute` resolves to `{ hash, contractAddress, verification }`. */
 export class DeployToken extends EVMDeployOperation<DeployTokenParams> {
   readonly name = 'deployToken'
 

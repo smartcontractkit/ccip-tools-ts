@@ -21,7 +21,7 @@ export interface DeployLockboxParams {
   sender?: string
 }
 
-/** Deploys an `ERC20LockBox`; `execute` resolves to `{ hash, contractAddress }`. */
+/** Deploys an `ERC20LockBox`; `execute` resolves to `{ hash, contractAddress, verification }`. */
 export class DeployLockbox extends EVMDeployOperation<DeployLockboxParams> {
   readonly name = 'deployLockbox'
 

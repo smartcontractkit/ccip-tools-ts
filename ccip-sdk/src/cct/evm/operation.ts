@@ -29,23 +29,23 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
   return { family: ChainFamily.EVM, transactions: [{ to, data }] }
 }
 
-/** Block-explorer verification handle for a deployed contract: its name and ABI-encoded ctor args. */
-export interface DeployVerification {
-  contract: string
-  encodedConstructorArgs: string
-}
-
 /**
- * Recovers the verification handle from a deployment's init-code with no extra RPC.
- * {@link deployTx} builds `data = bytecode + ctorArgs.slice(2)`, so slicing off
- * `bytecode.length` chars recovers the (0x-prefixed) ABI-encoded constructor args.
+ * Inputs a block explorer needs to verify a deployed contract's source: the contract name and
+ * its ABI-encoded constructor args. Captured at deploy time with no extra RPC.
+ *
+ * @remarks This is a constructor-args companion, *not* proof of verification — nothing here is
+ * checked against the chain or submitted anywhere. Completing a verification also needs the
+ * source/compiler side (standard-json input + matching solc version and settings), which the
+ * SDK does not vendor; those ship in the `@chainlink/contracts-ccip` npm package.
+ *
+ * Etherscan's "Constructor Arguments" field expects {@link encodedConstructorArgs} *without*
+ * the leading `0x`.
  */
-export function buildDeployVerification(
-  contract: string,
-  deployData: string,
-  bytecode: string,
-): DeployVerification {
-  return { contract, encodedConstructorArgs: `0x${deployData.slice(bytecode.length)}` }
+export interface ExplorerVerificationInput {
+  /** Contract name as compiled, e.g. `BurnMintTokenPool` — matches the artifact, unqualified. */
+  contract: string
+  /** 0x-prefixed ABI-encoded constructor args (`0x` when the constructor takes none). */
+  encodedConstructorArgs: string
 }
 
 /**
@@ -63,13 +63,13 @@ export type EVMExecuteParams<P extends object> = ExecuteParams<P>
 
 /**
  * Result of a successful EVM deployment write: the tx hash plus the deployed
- * contract address (token, pool, etc.). Also carries a {@link DeployVerification}
- * handle (contract name + ABI-encoded ctor args) recovered from the init-code at
- * deploy time — additive, so readers of `{ hash, contractAddress }` are unaffected.
+ * contract address (token, pool, etc.). Also carries the
+ * {@link ExplorerVerificationInput} needed to verify the contract's source on a
+ * block explorer — additive, so readers of `{ hash, contractAddress }` are unaffected.
  */
 export type DeployResult = TransactionResult & {
   contractAddress: string
-  verification: DeployVerification
+  verification: ExplorerVerificationInput
 }
 
 /**
@@ -114,7 +114,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
  * EVM contract-deployment base. Subclasses supply {@link validate}, {@link artifact} (name +
  * ctor {@link Interface} + creation bytecode), and {@link encode}; the base wires
  * {@link buildUnsigned} (init-code = bytecode + encoded ctor args) and {@link execute} (submit,
- * then read the deployed address and recover a {@link DeployVerification} from the init-code).
+ * then read the deployed address and pair it with an {@link ExplorerVerificationInput}).
  */
 export abstract class EVMDeployOperation<P extends { sender?: string }> extends EVMOperation<P> {
   /** Contract name, ctor {@link Interface}, and creation bytecode for this deployment. */
@@ -131,15 +131,17 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
 
   /**
    * {@link generate}, then sign and submit; resolves to the tx hash and the newly deployed
-   * contract address (read from the mined receipt), plus a {@link DeployVerification} handle
-   * recovered from the init-code.
+   * contract address (read from the mined receipt), plus the
+   * {@link ExplorerVerificationInput} for verifying its source on a block explorer.
    * @throws {@link CCTTxFailedError} if the tx mined without producing a contract address
    */
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
     const unsigned = await this.generate(chain, params)
-    const data = unsigned.transactions[0]?.data
-    if (data == null) throw new CCTTxFailedError(this.name, 'deployment tx has no init-code')
-    const { contract, bytecode } = this.artifact(params)
+    const { contract, iface } = this.artifact(params)
+    // Same value `buildUnsigned` appended to the creation bytecode. Taking it straight from
+    // `encode` (rather than slicing it back out of the init-code) keeps this independent of
+    // the tx layout.
+    const encodedConstructorArgs = this.encode(iface, params)
     const { response, receipt } = await submit(chain, params.wallet, unsigned, this.name)
     if (!receipt.contractAddress)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
@@ -148,7 +150,7 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
     return {
       hash: response.hash,
       contractAddress: receipt.contractAddress,
-      verification: buildDeployVerification(contract, data, bytecode),
+      verification: { contract, encodedConstructorArgs },
     }
   }
 }

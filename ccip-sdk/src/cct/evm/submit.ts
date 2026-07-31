@@ -48,11 +48,12 @@ export async function submit(
   const sender = await wallet.getAddress()
   chain.logger.debug(`${operation}: submitting...`)
 
+  const [first] = unsigned.transactions
+  if (!first) throw new CCTTxFailedError(operation, 'no transaction to submit')
+
   let response: TransactionResponse
   let nonceConsumed = false
   try {
-    const [first] = unsigned.transactions
-    if (!first) throw new CCTTxFailedError(operation, 'no transaction to submit')
     let tx: TransactionRequest = { ...first }
     tx.from = undefined // drop any builder-set sender before populate, else ethers throws on a from/signer mismatch
     if (tx.nonce == null) {

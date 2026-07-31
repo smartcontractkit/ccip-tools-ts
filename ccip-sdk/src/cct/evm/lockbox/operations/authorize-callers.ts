@@ -10,7 +10,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
-import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
+import { validateNonZeroAddress } from '../../validate.ts'
 import { LOCKBOX_INTERFACE } from '../contracts.ts'
 
 /** Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required. */
@@ -29,13 +29,17 @@ export interface AuthorizeLockboxCallersParams {
 export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCallersParams> {
   readonly name = 'authorizeLockboxCallers'
 
-  /** Validates the lockbox and every caller address; requires at least one caller. */
+  /**
+   * Validates the lockbox and every caller address; requires at least one caller.
+   * @remarks `lockbox` must be non-zero: a call to `0x0` hits no code, so it would mine
+   * successfully (status 1, no logs) while authorizing nothing.
+   */
   protected validate({
     lockbox,
     addedCallers = [],
     removedCallers = [],
   }: AuthorizeLockboxCallersParams): void {
-    validateAddress(this.name, 'lockbox', lockbox)
+    validateNonZeroAddress(this.name, 'lockbox', lockbox)
     if (addedCallers.length + removedCallers.length === 0) {
       throw new CCTParamsInvalidError(
         this.name,

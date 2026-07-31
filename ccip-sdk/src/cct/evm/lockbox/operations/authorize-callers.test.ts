@@ -129,6 +129,21 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       )
     })
 
+    it('rejects a zero-address lockbox', async () => {
+      // a call to 0x0 hits no code, so it would mine as a successful no-op
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain(), {
+            lockbox: ZeroAddress,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.param === 'lockbox',
+      )
+    })
+
     it('rejects when no callers are supplied', async () => {
       await assert.rejects(
         () => new AuthorizeLockboxCallers().generate(stubChain(), { lockbox: LOCKBOX }),

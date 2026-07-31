@@ -86,7 +86,7 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.type === 'LockReleaseTokenPool' ? p.lockbox : ZeroAddress,
   ])
 
-/** Deploys a token pool; `execute` resolves to `{ hash, contractAddress }`. */
+/** Deploys a token pool; `execute` resolves to `{ hash, contractAddress, verification }`. */
 export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   readonly name = 'deployTokenPool'
 
