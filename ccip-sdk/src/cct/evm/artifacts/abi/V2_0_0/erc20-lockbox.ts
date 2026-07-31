@@ -250,4 +250,5 @@ export default [
     inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const

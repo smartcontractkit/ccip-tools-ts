@@ -19,16 +19,32 @@ describe('SolanaTokenManager (cct/solana)', () => {
     const cct = SolanaTokenManager.fromChain(chain)
     assert.equal(cct.chain, chain)
     assert.equal(cct.provider, chain.connection)
+    // Token operations
     assert.equal(typeof cct.generateUnsignedDeployToken, 'function')
     assert.equal(typeof cct.deployToken, 'function')
-    assert.equal(typeof cct.generateUnsignedDeployTokenPool, 'function')
-    assert.equal(typeof cct.deployTokenPool, 'function')
+    assert.equal(typeof cct.generateUnsignedCreateTokenAccount, 'function')
+    assert.equal(typeof cct.createTokenAccount, 'function')
+
+    // Token admin registry operations
+    assert.equal(typeof cct.generateUnsignedAcceptAdmin, 'function')
+    assert.equal(typeof cct.acceptAdmin, 'function')
     assert.equal(typeof cct.generateUnsignedCreateLookupTable, 'function')
     assert.equal(typeof cct.createLookupTable, 'function')
     assert.equal(typeof cct.generateUnsignedAppendToLookupTable, 'function')
     assert.equal(typeof cct.appendToLookupTable, 'function')
+    assert.equal(typeof cct.generateUnsignedRegisterAdmin, 'function')
+    assert.equal(typeof cct.registerAdmin, 'function')
     assert.equal(typeof cct.generateUnsignedSetPool, 'function')
     assert.equal(typeof cct.setPool, 'function')
+    assert.equal(typeof cct.generateUnsignedTransferAdmin, 'function')
+    assert.equal(typeof cct.transferAdmin, 'function')
+
+    // Token pool operations
+    assert.equal(typeof cct.generateUnsignedCreateTokenMultisig, 'function')
+    assert.equal(typeof cct.createTokenMultisig, 'function')
+    assert.equal(typeof cct.generateUnsignedDeployTokenPool, 'function')
+    assert.equal(typeof cct.deployTokenPool, 'function')
+    assert.equal(typeof cct.getTokenPoolState, 'function')
   })
 
   it('creates from a connection provider', async (t) => {

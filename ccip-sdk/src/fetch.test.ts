@@ -13,6 +13,15 @@ import {
   setEndpointLogRange,
 } from './fetch.ts'
 
+function withMockedPerformanceNow<T>(now: number, fn: () => T): T {
+  const performanceNow = mock.method(performance, 'now', () => now)
+  try {
+    return fn()
+  } finally {
+    performanceNow.mock.restore()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // parseRetryAfter
 // ---------------------------------------------------------------------------
@@ -23,21 +32,17 @@ describe('parseRetryAfter', () => {
   })
 
   it('handles delta-seconds integer', () => {
-    const before = Date.now()
-    const result = parseRetryAfter('30')
-    const after = Date.now()
-    assert.ok(result !== null)
-    assert.ok(result >= before + 30_000)
-    assert.ok(result <= after + 30_000)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRetryAfter('30')
+      assert.equal(result, 31_000)
+    })
   })
 
   it('handles delta-seconds zero', () => {
-    const before = Date.now()
-    const result = parseRetryAfter('0')
-    const after = Date.now()
-    assert.ok(result !== null)
-    assert.ok(result >= before)
-    assert.ok(result <= after)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRetryAfter('0')
+      assert.equal(result, 1_000)
+    })
   })
 
   it('handles HTTP-date format', () => {
@@ -71,52 +76,51 @@ describe('parseRateLimitHeaders', () => {
   })
 
   it('parses Retry-After delta-seconds', () => {
-    const before = Date.now()
-    const result = parseRateLimitHeaders(makeHeaders({ 'Retry-After': '10' }))
-    assert.ok(result.retryAfterAt !== undefined)
-    assert.ok(result.retryAfterAt >= before + 10_000)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRateLimitHeaders(makeHeaders({ 'Retry-After': '10' }))
+      assert.equal(result.retryAfterAt, 11_000)
+    })
   })
 
   it('parses IETF draft individual headers (reset = delta-seconds)', () => {
-    const before = Date.now()
-    const result = parseRateLimitHeaders(
-      makeHeaders({
-        'RateLimit-Limit': '100',
-        'RateLimit-Remaining': '50',
-        'RateLimit-Reset': '60',
-      }),
-    )
-    assert.equal(result.limit, 100)
-    assert.equal(result.remaining, 50)
-    assert.ok(result.resetAt !== undefined)
-    assert.ok(result.resetAt >= before + 60_000)
-    assert.ok(result.resetAt <= Date.now() + 60_001)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRateLimitHeaders(
+        makeHeaders({
+          'RateLimit-Limit': '100',
+          'RateLimit-Remaining': '50',
+          'RateLimit-Reset': '60',
+        }),
+      )
+      assert.equal(result.limit, 100)
+      assert.equal(result.remaining, 50)
+      assert.equal(result.resetAt, 61_000)
+    })
   })
 
   it('parses combined RateLimit header', () => {
-    const before = Date.now()
-    const result = parseRateLimitHeaders(
-      makeHeaders({ RateLimit: 'limit=100, remaining=20, reset=30' }),
-    )
-    assert.equal(result.limit, 100)
-    assert.equal(result.remaining, 20)
-    assert.ok(result.resetAt !== undefined)
-    assert.ok(result.resetAt >= before + 30_000)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRateLimitHeaders(
+        makeHeaders({ RateLimit: 'limit=100, remaining=20, reset=30' }),
+      )
+      assert.equal(result.limit, 100)
+      assert.equal(result.remaining, 20)
+      assert.equal(result.resetAt, 31_000)
+    })
   })
 
   it('parses X-RateLimit-* de-facto headers (reset as delta-seconds)', () => {
-    const before = Date.now()
-    const result = parseRateLimitHeaders(
-      makeHeaders({
-        'X-RateLimit-Limit': '200',
-        'X-RateLimit-Remaining': '100',
-        'X-RateLimit-Reset': '45',
-      }),
-    )
-    assert.equal(result.limit, 200)
-    assert.equal(result.remaining, 100)
-    assert.ok(result.resetAt !== undefined)
-    assert.ok(result.resetAt >= before + 45_000)
+    withMockedPerformanceNow(1_000, () => {
+      const result = parseRateLimitHeaders(
+        makeHeaders({
+          'X-RateLimit-Limit': '200',
+          'X-RateLimit-Remaining': '100',
+          'X-RateLimit-Reset': '45',
+        }),
+      )
+      assert.equal(result.limit, 200)
+      assert.equal(result.remaining, 100)
+      assert.equal(result.resetAt, 46_000)
+    })
   })
 
   it('parses X-RateLimit-Reset as epoch-seconds when > 1e9', () => {
@@ -367,7 +371,7 @@ describe('parseLogRangeError', () => {
       code: 'SERVER_ERROR',
       message: 'server response 413 Request Entity Too Large',
       info: {
-        requestUrl: 'https://rpcs.cldev.sh/hyperliquid/testnet',
+        requestUrl: 'https://rpcs.chain.link/hyperevm/testnet',
         responseStatus: '413 Request Entity Too Large',
         responseBody: JSON.stringify({
           jsonrpc: '2.0',
@@ -415,7 +419,7 @@ describe('parseLogRangeError', () => {
       message:
         'server response 413 Request Entity Too Large (request={}, response={}, error=null, info={"responseBody":"{\\"error\\":{\\"code\\":-32012,\\"message\\":\\"query exceeds max block range 1000\\"}}","responseStatus":"413 Request Entity Too Large"})',
       info: {
-        requestUrl: 'https://rpcs.cldev.sh/hyperliquid/testnet',
+        requestUrl: 'https://rpcs.chain.link/hyperevm/testnet',
         responseStatus: '413 Request Entity Too Large',
         responseBody: JSON.stringify({
           error: { code: -32012, message: 'query exceeds max block range 1000' },

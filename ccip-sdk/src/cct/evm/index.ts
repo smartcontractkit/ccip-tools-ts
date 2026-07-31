@@ -236,12 +236,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   lockbox: '0xLockbox...', // required for LockReleaseTokenPool; must be a non-zero address
    *   wallet,
    * })
-   *
-   * // To verify the source on a block explorer, look up `contractAddress` and supply:
-   * //   Contract name:          verification.contract  ('LockReleaseTokenPool')
-   * //   Constructor Arguments:  verification.encodedConstructorArgs, WITHOUT the leading `0x`
-   * console.log(verification.encodedConstructorArgs.slice(2))
-   * // The sources + solc settings are not vendored here; they ship in `@chainlink/contracts-ccip`.
    * ```
    */
   deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {

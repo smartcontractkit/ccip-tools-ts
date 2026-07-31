@@ -29,11 +29,7 @@ export interface AuthorizeLockboxCallersParams {
 export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCallersParams> {
   readonly name = 'authorizeLockboxCallers'
 
-  /**
-   * Validates the lockbox and every caller address; requires at least one caller.
-   * @remarks `lockbox` must be non-zero: a call to `0x0` hits no code, so it would mine
-   * successfully (status 1, no logs) while authorizing nothing.
-   */
+  /** Validates the lockbox and every caller address; requires at least one caller. */
   protected validate({
     lockbox,
     addedCallers = [],

@@ -5,7 +5,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionHash } from '../../../operation.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -13,7 +13,7 @@ import {
 } from '../../operation.ts'
 import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
 const EXTEND_CHUNK_SIZE = 30
@@ -38,7 +38,7 @@ export type GenerateAppendToLookupTableResult = UnsignedSolanaTx
 export type ExecuteAppendToLookupTableParams = SolanaExecuteParams<AppendToLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `appendToLookupTable`. */
-export type ExecuteAppendToLookupTableResult = TransactionHash
+export type ExecuteAppendToLookupTableResult = TransactionResult
 
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
@@ -111,7 +111,6 @@ export class AppendToLookupTable extends SolanaOperation<
         lookupTableAddress,
         tokenMint,
         poolProgram,
-        authority,
       })
       const existingAddresses = new Set(
         lookupTable.value.state.addresses.map((address) => address.toBase58()),
@@ -172,10 +171,11 @@ export class AppendToLookupTable extends SolanaOperation<
     this.validate(generateParams)
 
     const authority = params.authority ? new PublicKey(params.authority) : undefined
-    if (authority && !authority.equals(wallet.publicKey)) {
-      throw new CCTParamsInvalidError(
+    if (authority) {
+      validateAuthorityMatchesWallet(
         this.name,
-        'authority',
+        authority,
+        wallet.publicKey,
         'appendToLookupTable requires authority to be the executing wallet. Use generateUnsignedAppendToLookupTable for vault-owned ALTs and have the vault sign/execute it.',
       )
     }

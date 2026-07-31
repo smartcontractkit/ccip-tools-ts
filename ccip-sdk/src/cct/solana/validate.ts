@@ -6,10 +6,10 @@ import { CCTParamsInvalidError } from '../errors.ts'
 import { type TokenPoolType, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 /**
- * Asserts `value` is a valid Solana public key string.
+ * Parses `value` as a Solana public key.
  * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
  */
-export function validatePublicKey(operation: string, param: string, value: unknown): void {
+export function parsePublicKey(operation: string, param: string, value: unknown): PublicKey {
   if (typeof value !== 'string') {
     throw new CCTParamsInvalidError(
       operation,
@@ -19,7 +19,7 @@ export function validatePublicKey(operation: string, param: string, value: unkno
   }
 
   try {
-    new PublicKey(value)
+    return new PublicKey(value)
   } catch {
     throw new CCTParamsInvalidError(
       operation,
@@ -33,12 +33,33 @@ export function validatePublicKey(operation: string, param: string, value: unkno
 }
 
 /**
+ * Asserts `value` is a valid Solana public key string.
+ * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
+ */
+export function validatePublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string {
+  parsePublicKey(operation, param, value)
+}
+
+/**
  * Asserts `values` is an array of valid Solana public key strings.
  * @throws CCTParamsInvalidError if `values` is not an array or any item is invalid.
  */
 export function validatePublicKeys(operation: string, param: string, values: unknown): void {
   if (!Array.isArray(values)) throw new CCTParamsInvalidError(operation, param, 'must be an array')
   for (const [i, value] of values.entries()) validatePublicKey(operation, `${param}[${i}]`, value)
+}
+
+/**
+ * Asserts `value` is a non-empty string.
+ * @throws CCTParamsInvalidError if `value` is not a non-empty string.
+ */
+export function validateNonEmptyString(operation: string, param: string, value: unknown): void {
+  if (typeof value === 'string' && value.trim().length > 0) return
+  throw new CCTParamsInvalidError(operation, param, 'must be a non-empty string')
 }
 
 /**
@@ -71,8 +92,29 @@ export function validatePoolType(
 }
 
 /**
+ * Asserts `value` is an integer, optionally inside inclusive bounds.
+ * @throws CCTParamsInvalidError if `value` is not an integer or is outside bounds.
+ */
+export function validateInteger(
+  operation: string,
+  param: string,
+  value: unknown,
+  min?: number,
+  max?: number,
+): void {
+  const validInteger = Number.isInteger(value)
+  const validMin = min === undefined || (validInteger && Number(value) >= min)
+  const validMax = max === undefined || (validInteger && Number(value) <= max)
+
+  if (!validInteger || !validMin || !validMax) {
+    const range = min !== undefined && max !== undefined ? ` between ${min} and ${max}` : ''
+    throw new CCTParamsInvalidError(operation, param, `must be an integer${range}`)
+  }
+}
+
+/**
  * Asserts ALT writable indexes are a non-empty list of byte values when provided.
- * @throws CCTParamsInvalidError if `writableIndexes` is invalid.
+ * @throws CCTParamsInvalidError if indexes are empty or outside byte range.
  */
 export function validateWritableIndexes(
   operation: string,
@@ -85,12 +127,6 @@ export function validateWritableIndexes(
   }
 
   for (const [i, index] of writableIndexes.entries()) {
-    if (!Number.isInteger(index) || index < 0 || index > 255) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${param}[${i}]`,
-        'must be an integer between 0 and 255',
-      )
-    }
+    validateInteger(operation, `${param}[${i}]`, index, 0, 255)
   }
 }
