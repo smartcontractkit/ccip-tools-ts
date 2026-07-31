@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, makeError } from 'ethers'
+import { ZeroAddress, getIcapAddress, makeError } from 'ethers'
 
 import { AuthorizeLockboxCallers } from './authorize-callers.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
@@ -126,6 +126,33 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'authorizeLockboxCallers' &&
           err.context.param === 'lockbox',
+      )
+    })
+
+    it('rejects a zero-address lockbox', async () => {
+      // a call to 0x0 hits no code, so it would mine as a successful no-op
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain(), {
+            lockbox: ZeroAddress,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.param === 'lockbox',
+      )
+    })
+
+    it('rejects the zero address written in ICAP form', async () => {
+      // isAddress() accepts ICAP, and this never equals ZeroAddress literally
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain(), {
+            lockbox: getIcapAddress(ZeroAddress),
+            addedCallers: [POOL],
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
       )
     })
 

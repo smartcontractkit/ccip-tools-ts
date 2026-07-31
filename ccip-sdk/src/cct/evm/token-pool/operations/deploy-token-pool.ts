@@ -8,44 +8,19 @@
 
 import { type Interface, ZeroAddress } from 'ethers'
 
-import type { EVMChain } from '../../../../evm/index.ts'
-import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
-import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
-import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
-import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type DeployArtifact, EVMDeployOperation } from '../../operation.ts'
+import { validateAddress, validateNonZeroAddress, validateUint8 } from '../../validate.ts'
 import {
-  type DeployResult,
-  type EVMExecuteParams,
-  EVMOperation,
-  deploymentTx,
-} from '../../operation.ts'
-import { submit } from '../../submit.ts'
-import { validateAddress, validateUint8 } from '../../validate.ts'
-import {
+  type DeployableTokenPoolType,
   type TokenPoolFamily,
-  type TokenPoolType,
-  TokenPoolVersion,
+  getTokenPoolArtifact,
   getTokenPoolFamily,
-  getTokenPoolInterface,
-} from '../version.ts'
+  isDeployableTokenPoolType,
+} from '../contracts.ts'
 
-/**
- * Creation bytecode per deployable pool type (2.0.0 only — pre-2.0.0 bytecode is not vendored).
- * The keys define the deployable set ({@link DeployableTokenPoolType} derives from them). The
- * burn-* variants share the `BurnMint` constructor ABI but are distinct contracts with distinct
- * bytecode.
- */
-const TOKEN_POOL_BYTECODE = {
-  BurnMintTokenPool: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
-
-/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
-export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
+/** Deployable pool types + their creation bytecode/artifact live in `../contracts.ts`. */
+export type { DeployableTokenPoolType }
 
 /** Fields shared by every deployable token pool. */
 interface DeployTokenPoolBaseParams {
@@ -111,8 +86,8 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.type === 'LockReleaseTokenPool' ? p.lockbox : ZeroAddress,
   ])
 
-/** Deploys a token pool; `execute` resolves to `{ hash, contractAddress }`. */
-export class DeployTokenPool extends EVMOperation<DeployTokenPoolParams> {
+/** Deploys a token pool; `execute` resolves to `{ hash, contractAddress, verification }`. */
+export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   readonly name = 'deployTokenPool'
 
   /** Constructor encoder per ABI {@link TokenPoolFamily}; `type` narrows to its family. */
@@ -123,7 +98,7 @@ export class DeployTokenPool extends EVMOperation<DeployTokenPoolParams> {
 
   /** Validates the constructor params before building init-code. */
   protected validate(params: DeployTokenPoolParams): void {
-    if (!Object.hasOwn(TOKEN_POOL_BYTECODE, params.type))
+    if (!isDeployableTokenPoolType(params.type))
       throw new CCTParamsInvalidError(
         this.name,
         'type',
@@ -135,39 +110,17 @@ export class DeployTokenPool extends EVMOperation<DeployTokenPoolParams> {
     validateAddress(this.name, 'router', params.router)
     if (params.advancedPoolHooks !== undefined)
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
-    if (params.type === 'LockReleaseTokenPool') {
-      validateAddress(this.name, 'lockbox', params.lockbox)
-      if (params.lockbox === ZeroAddress)
-        throw new CCTParamsInvalidError(this.name, 'lockbox', 'must not be the zero address')
-    }
+    if (params.type === 'LockReleaseTokenPool')
+      validateNonZeroAddress(this.name, 'lockbox', params.lockbox)
   }
 
-  /** Builds a deployment tx (no `to`): creation bytecode + ABI-encoded constructor args. */
-  protected buildUnsigned(_chain: EVMChain, params: DeployTokenPoolParams): UnsignedEVMTx {
-    const iface = getTokenPoolInterface(params.type, TokenPoolVersion.V2_0_0)
-    const encode = this.encoders[getTokenPoolFamily(params.type)]
-    return deploymentTx(TOKEN_POOL_BYTECODE[params.type], encode(iface, params))
+  /** Deploy artifact for the selected pool `type` (v2.0.0): name + ctor interface + bytecode. */
+  protected artifact(p: DeployTokenPoolParams): DeployArtifact {
+    return getTokenPoolArtifact(p.type)
   }
 
-  /**
-   * {@link generate}, then sign and submit; resolves to the tx hash and the newly deployed
-   * pool address (read from the mined receipt).
-   * @throws {@link CCTTxFailedError} if the tx mined without producing a contract address
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<DeployTokenPoolParams>,
-  ): Promise<DeployResult> {
-    const { response, receipt } = await submit(
-      chain,
-      params.wallet,
-      await this.generate(chain, params),
-      this.name,
-    )
-    if (!receipt.contractAddress)
-      throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
-        context: { txHash: response.hash },
-      })
-    return { hash: response.hash, contractAddress: receipt.contractAddress }
+  /** ABI-encodes the pool constructor args via the encoder for the type's ABI family. */
+  protected encode(iface: Interface, p: DeployTokenPoolParams): string {
+    return this.encoders[getTokenPoolFamily(p.type)](iface, p)
   }
 }

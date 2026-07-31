@@ -133,7 +133,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
-   * use {@link deployToken} to deploy and receive `{ hash, contractAddress }`.
+   * use {@link deployToken} to deploy and receive `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy roles caveat as {@link deployToken} — the pool needs
    * `grantMintAndBurnRoles` before it can bridge.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -155,7 +155,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Deploys a `CrossChainToken` (v2.0.0), signing + submitting with `opts.wallet`; resolves
-   * to the tx hash and the newly deployed token address.
+   * to the tx hash, the newly deployed token address, and a `verification`
+   * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Mint/burn are role-gated (`MINTER_ROLE`/`BURNER_ROLE`); the token grants neither
    * to any pool at deploy. `preMint` mints initial supply to `preMintRecipient`, but before a
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
@@ -164,7 +165,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
    * @example
    * ```typescript
-   * const { hash, contractAddress } = await cct.deployToken({
+   * const { hash, contractAddress, verification } = await cct.deployToken({
    *   name: 'My Token',
    *   symbol: 'MTK',
    *   decimals: 18,
@@ -183,7 +184,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
    * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
    * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
-   * `{ hash, contractAddress }`.
+   * `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
@@ -208,8 +209,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash
-   * and the newly deployed pool address. `type` selects the pool contract (a
+   * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash, the
+   * newly deployed pool address, and a `verification` ({@link ExplorerVerificationInput}) for
+   * verifying the source on a block explorer. `type` selects the pool contract (a
    * `DeployableTokenPoolType`, v2.0.0).
    * @remarks Deploying the pool alone doesn't make it usable: register it with {@link setPool},
    * grant it the token's mint/burn roles (`grantMintAndBurnRoles`), and configure its remote
@@ -223,7 +225,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
    * @example
    * ```typescript
-   * const { hash, contractAddress } = await cct.deployTokenPool({
+   * const { hash, contractAddress, verification } = await cct.deployTokenPool({
    *   type: 'LockReleaseTokenPool',
    *   token: '0xToken...',
    *   localTokenDecimals: 18,
@@ -242,7 +244,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `ERC20LockBox` (v2.0.0) deployment tx (for multisig / offline signing).
    * A lockbox escrows a single `token` for `LockReleaseTokenPool`s. The deployed address is
    * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
-   * `{ hash, contractAddress }`.
+   * `{ hash, contractAddress, verification }`.
    * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
    * {@link authorizeLockboxCallers} before the pool can lock/release.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -260,7 +262,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Deploys an `ERC20LockBox` (v2.0.0), signing + submitting with `opts.wallet`; resolves to the
-   * tx hash and the newly deployed lockbox address.
+   * tx hash, the newly deployed lockbox address, and a `verification`
+   * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
    * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
    * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
@@ -269,7 +272,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
    * @example
    * ```typescript
-   * const { hash, contractAddress } = await cct.deployLockbox({
+   * const { hash, contractAddress, verification } = await cct.deployLockbox({
    *   token: '0xToken...',
    *   wallet,
    * })
@@ -302,10 +305,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
-   * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release — until
-   * then its lock/release reverts `UnauthorizedCaller(pool)`.
-   * @remarks Depositing the lockbox's initial liquidity is a manual final step with no SDK op: the
-   * depositor must itself be an authorized caller and have ERC20-approved the lockbox.
+   * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
@@ -335,5 +335,10 @@ export type {
 } from './token-pool/operations/deploy-token-pool.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
-export type { DeployResult, EVMExecuteParams } from './operation.ts'
+export type {
+  DeployArtifact,
+  DeployResult,
+  EVMExecuteParams,
+  ExplorerVerificationInput,
+} from './operation.ts'
 export type { TransactionResult } from '../operation.ts'

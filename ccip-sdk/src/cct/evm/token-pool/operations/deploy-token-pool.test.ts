@@ -244,8 +244,26 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         ...params,
         wallet: fakeSigner({ contractAddress: DEPLOYED }),
       })
-      assert.deepEqual(result, { hash: HASH, contractAddress: DEPLOYED })
+      assert.deepEqual(result, {
+        hash: HASH,
+        contractAddress: DEPLOYED,
+        verification: {
+          contract: 'BurnMintTokenPool',
+          encodedConstructorArgs: '0x' + BURN_MINT_ARGS,
+        },
+      })
     })
+
+    for (const { label, params: caseParams, ctorArgs } of CASES) {
+      it(`carries the verification handle for ${label}`, async () => {
+        const result = await new DeployTokenPool().execute(stubChain(), {
+          ...caseParams,
+          wallet: fakeSigner({ contractAddress: DEPLOYED }),
+        })
+        assert.equal(result.verification.contract, caseParams.type)
+        assert.equal(result.verification.encodedConstructorArgs, '0x' + ctorArgs)
+      })
+    }
 
     it('throws CCTTxFailedError when the receipt carries no contract address', async () => {
       await assert.rejects(
