@@ -14,7 +14,7 @@ import {
   isTokenPoolVersion,
   parseTokenPoolVersion,
   resolveEncoder,
-} from './version.ts'
+} from './contracts.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,

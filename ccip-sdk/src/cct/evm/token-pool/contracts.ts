@@ -1,7 +1,8 @@
 /**
- * EVM token-pool version axis for CCT: resolve an on-chain pool's type + version
- * ({@link resolveTokenPool}), select its cached ABI ({@link getTokenPoolInterface}), and
- * floor-match version-keyed encoders ({@link resolveEncoder}).
+ * EVM token-pool contract layer for CCT: cached {@link Interface}s + on-chain type/version
+ * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
+ * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
+ * ({@link getTokenPoolArtifact}). Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
@@ -22,6 +23,11 @@ import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-t
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
+import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import type { DeployArtifact } from '../operation.ts'
 
 /**
  * ABI families for pool resolution. The burn-* variants are interface-compatible for CCT
@@ -148,6 +154,38 @@ export const TOKEN_POOL_INTERFACES: Record<TokenPoolFamily, Record<TokenPoolVers
  */
 export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVersion): Interface {
   return TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
+}
+
+/**
+ * Creation bytecode per deployable pool type (2.0.0 only — pre-2.0.0 bytecode is not vendored).
+ * The keys define the deployable set ({@link DeployableTokenPoolType}). The burn-* variants share
+ * the `BurnMint` constructor ABI but are distinct contracts with distinct bytecode.
+ */
+const TOKEN_POOL_BYTECODE = {
+  BurnMintTokenPool: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
+} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
+
+/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
+export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
+
+/** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
+export function isDeployableTokenPoolType(type: string): type is DeployableTokenPoolType {
+  return Object.hasOwn(TOKEN_POOL_BYTECODE, type)
+}
+
+/**
+ * Deploy artifact for a deployable pool `type` (v2.0.0): contract name (= `type`), the cached
+ * constructor {@link Interface}, and the creation bytecode.
+ */
+export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtifact {
+  return {
+    contract: type,
+    iface: getTokenPoolInterface(type, TokenPoolVersion.V2_0_0),
+    bytecode: TOKEN_POOL_BYTECODE[type],
+  }
 }
 
 /**

@@ -109,7 +109,11 @@ describe('DeployLockbox (cct/evm lockbox operation)', () => {
         token: TOKEN,
         wallet: fakeSigner({ contractAddress: DEPLOYED }),
       })
-      assert.deepEqual(result, { hash: HASH, contractAddress: DEPLOYED })
+      assert.deepEqual(result, {
+        hash: HASH,
+        contractAddress: DEPLOYED,
+        verification: { contract: 'ERC20LockBox', encodedConstructorArgs: '0x' + W_TOKEN },
+      })
     })
 
     it('throws CCTTxFailedError when the receipt carries no contract address', async () => {
