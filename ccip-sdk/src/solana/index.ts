@@ -44,6 +44,7 @@ import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
+  CCIPCommitNotFoundError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
@@ -1535,35 +1536,101 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const message = request.message as CCIPMessage
+      // For v2 messages, there is no onchain commit — the verification policy (required/optional
+      // CCVs) comes from the OffRamp's `getCcvsForMsg` view, and the actual verifier results
+      // come from the CCIP v2 indexer.
+      //
+      // The view resolves CCVs from three sources (see chainlink-ccip-solana
+      // `get_ccvs_for_msg/processor.rs`):
+      //   1. Lane defaults + mandated CCVs (always, from SourceChain config)
+      //   2. Receiver CCVs (for arbitrary/data messages, via CPI to the receiver program)
+      //   3. Pool CCVs (for token transfers, via CPI to the token pool)
+      //
+      // We resolve receiver CCVs by deriving the `receiver_registry` PDA from the router
+      // (read from ReferenceAddresses) and the receiver address. If the registry is owned by
+      // the router, the receiver is v2 and we also pass [receiver_program, source_chain_ccv_config]
+      // as remaining_accounts for the CPI. If the registry doesn't exist or is system-owned, the
+      // receiver is v1 and only the registry is passed.
+      //
+      // Token transfer CCVs are not yet resolved (TODO: needs 5 pool remaining_accounts).
       const offRampPk = new PublicKey(offRamp)
       const program = new Program(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
       const pda = (seed: string, ...extra: Uint8Array[]) =>
         PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
-      // receiver is consulted only for arbitrary (data) messages; default pubkey means none
+
+      // Read ReferenceAddresses to get the router for receiver_registry PDA derivation
+      const refAddrPda = pda('reference_addresses')
+      const refAddrAcc = await this.connection.getAccountInfo(refAddrPda)
+      if (!refAddrAcc) {
+        throw new CCIPCommitNotFoundError(
+          String(request.lane.sourceChainSelector),
+          request.message.sequenceNumber,
+        )
+      }
+      // ReferenceAddresses layout: 8(disc) + 1(ver) + 1(bump) + 32(router) + ...
+      const router = new PublicKey(refAddrAcc.data.subarray(10, 42))
+
+      // Resolve the receiver and its remaining_accounts
+      const message = request.message as CCIPMessage
       let messageReceiver = PublicKey.default
-      if (!message.tokenAmounts.length) {
+      const remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = []
+      if (message.receiver && message.receiver !== '0x') {
         try {
           messageReceiver = new PublicKey(message.receiver)
         } catch {
-          // leave default: non-svm or zero receiver
+          // non-svm or zero receiver — leave default, skip receiver consultation
         }
       }
+      if (!messageReceiver.equals(PublicKey.default)) {
+        // receiver_registry PDA: [RECEIVER_REGISTRY, receiver] under router
+        const [registryPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('receiver_registry'), messageReceiver.toBuffer()],
+          router,
+        )
+        const registryAcc = await this.connection.getAccountInfo(registryPda)
+        const isV2 =
+          registryAcc != null && registryAcc.owner.equals(router) && registryAcc.data.length >= 8
+        remainingAccounts.push({
+          pubkey: registryPda,
+          isSigner: false,
+          isWritable: false,
+        })
+        if (isV2) {
+          // v2 receiver: also pass [receiver_program, source_chain_ccv_config]
+          // source_chain_ccv_config PDA: [ccv_config, sourceChainSelectorLE] under receiver
+          const [ccvConfigPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from('ccv_config'), toLeArray(request.lane.sourceChainSelector, 8)],
+            messageReceiver,
+          )
+          remainingAccounts.push({
+            pubkey: messageReceiver,
+            isSigner: false,
+            isWritable: false,
+          })
+          remainingAccounts.push({
+            pubkey: ccvConfigPda,
+            isSigner: false,
+            isWritable: false,
+          })
+        }
+      }
+
       const ccvs = (await program.methods
         .getCcvsForMsg({
-          // TODO: token transfers require 5 pool remaining-accounts to include pool CCVs;
-          // lane defaults + mandated CCVs are still reported (view is non-authoritative)
+          // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
           tokenTransfer: null,
           messageReceiver,
+          sender: Buffer.from(getAddressBytes(message.sender)),
           resolutionMetadata: Buffer.alloc(0),
           remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
           requestedFinality: { flags: 0, blockDepth: 0 },
         })
         .accounts({
           config: pda('config'),
-          referenceAddresses: pda('reference_addresses'),
+          referenceAddress: refAddrPda,
           sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
         })
+        .remainingAccounts(remainingAccounts)
         .view()) as {
         requiredCcvs: PublicKey[]
         optionalCcvs: PublicKey[]
