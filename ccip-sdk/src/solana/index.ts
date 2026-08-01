@@ -15,7 +15,6 @@ import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
-  concat,
   dataLength,
   dataSlice,
   encodeBase58,
@@ -49,7 +48,6 @@ import {
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
-  CCIPExtraArgsEncodingUnsupportedError,
   CCIPExtraArgsInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
@@ -71,9 +69,11 @@ import {
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
 } from '../extra-args.ts'
-import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import { cleanUpBuffers } from './cleanup.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import { encodeSolanaExtraArgs } from './extra-args.ts'
+import { getV16SolanaLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
@@ -98,7 +98,6 @@ import {
 } from '../types.ts'
 import {
   bytesToBuffer,
-  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
@@ -110,7 +109,6 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
-import { getV16SolanaLeafHasher } from './hasher.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
@@ -1093,14 +1091,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('computeUnits' in args)
-      throw new CCIPExtraArgsEncodingUnsupportedError(ChainFamily.Solana, 'EVMExtraArgsV2 format')
-    const gasLimitUint128Le = toLeArray(args.gasLimit ?? 0n, 16)
-    return concat([
-      EVMExtraArgsV2Tag,
-      gasLimitUint128Le,
-      'allowOutOfOrderExecution' in args && args.allowOutOfOrderExecution ? '0x01' : '0x00',
-    ])
+    return encodeSolanaExtraArgs(args)
   }
 
   /**
