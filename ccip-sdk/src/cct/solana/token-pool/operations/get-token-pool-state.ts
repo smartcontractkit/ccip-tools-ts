@@ -10,7 +10,7 @@ import {
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { parsePublicKey, validatePoolType } from '../../validate.ts'
+import { parsePublicKey, validatePoolType, validatePublicKey } from '../../validate.ts'
 
 /** Identifies a canonical burn-mint token pool program. */
 export type BurnMintPoolProgramRef = {
@@ -80,23 +80,23 @@ export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> =
     ? LockReleaseGetTokenPoolStateResult
     : BaseGetTokenPoolStateResult
 
-function resolvePoolProgram(params: PoolProgramRef): PublicKey {
+function resolvePoolProgram(operation: string, params: PoolProgramRef): PublicKey {
   const hasPoolType = Object.hasOwn(params, 'poolType')
   const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
   if (hasPoolType === hasPoolProgramAddress) {
     throw new CCTParamsInvalidError(
-      'getTokenPoolState',
+      operation,
       'poolType',
       'provide exactly one of poolType or poolProgramAddress',
     )
   }
 
   if (hasPoolType) {
-    validatePoolType('getTokenPoolState', 'poolType', params.poolType)
+    validatePoolType(operation, 'poolType', params.poolType)
     return resolveTokenPoolProgram(params.poolType)
   }
 
-  return parsePublicKey('getTokenPoolState', 'poolProgramAddress', params.poolProgramAddress)
+  return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
 }
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
@@ -122,13 +122,25 @@ export class GetTokenPoolState extends SolanaQuery<
   GetTokenPoolStateParams,
   GetTokenPoolStateResult
 > {
-  /** Reads and serializes the token pool configuration account. */
-  async query<P extends GetTokenPoolStateParams>(
+  readonly name = 'getTokenPoolState'
+
+  /**
+   * Validates the mint and the pool-program reference before any RPC.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a public key, or if the pool
+   * program is identified by neither or both of `poolType` / `poolProgramAddress`
+   */
+  protected validate(params: GetTokenPoolStateParams): void {
+    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    resolvePoolProgram(this.name, params)
+  }
+
+  /** Reads and serializes the token pool config account; the facade's overloads narrow the arm. */
+  protected async read(
     chain: SolanaChain,
-    params: P,
-  ): Promise<GetTokenPoolStateResult<P>> {
-    const mint = parsePublicKey('getTokenPoolState', 'tokenAddress', params.tokenAddress)
-    const programId = resolvePoolProgram(params)
+    params: GetTokenPoolStateParams,
+  ): Promise<GetTokenPoolStateResult> {
+    const mint = parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    const programId = resolvePoolProgram(this.name, params)
     const state = deriveTokenPoolConfigPda(programId, mint)
 
     const account = await chain.connection.getAccountInfo(state)
@@ -161,9 +173,9 @@ export class GetTokenPoolState extends SolanaQuery<
           rebalancer: config.rebalancer.toBase58(),
           canAcceptLiquidity: config.canAcceptLiquidity,
         },
-      } as GetTokenPoolStateResult<P>
+      }
     }
 
-    return { ...result, config: baseConfig } as GetTokenPoolStateResult<P>
+    return { ...result, config: baseConfig }
   }
 }

@@ -56,6 +56,9 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type BaseGetTokenPoolStateResult,
+  type BurnMintPoolProgramRef,
+  type CustomPoolProgramRef,
   type ExecuteCreateTokenMultisigParams,
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
@@ -66,6 +69,8 @@ import {
   type GenerateDeployTokenPoolResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type LockReleaseGetTokenPoolStateResult,
+  type LockReleasePoolProgramRef,
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
@@ -678,8 +683,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a Burn/Mint, Lock/Release, or custom token pool's state account.
-   * Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
+   * fields (`rebalancer`, `canAcceptLiquidity`).
    *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
@@ -688,14 +693,23 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const state = await cct.getTokenPoolState({
-   *   poolType: 'burn-mint',
+   *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
    * ```
    */
-  getTokenPoolState<P extends GetTokenPoolStateParams>(
-    opts: P,
-  ): Promise<GetTokenPoolStateResult<P>> {
+  getTokenPoolState(
+    opts: LockReleasePoolProgramRef & { tokenAddress: string },
+  ): Promise<LockReleaseGetTokenPoolStateResult>
+  /**
+   * Reads a Burn/Mint or custom token pool's state account; its config carries no liquidity
+   * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   */
+  getTokenPoolState(
+    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
+  ): Promise<BaseGetTokenPoolStateResult>
+  /** Reads a pool state account whose program type is not known statically. */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 

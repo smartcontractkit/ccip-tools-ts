@@ -61,6 +61,8 @@ describe('Solana token pool getTokenPoolState', () => {
     assert.equal(lockRelease.version, 1)
     assert.equal(lockRelease.config.mint, mint.toBase58())
     assert.equal(lockRelease.config.decimals, 6)
+    // the op resolves to the union; the facade's overloads are what narrow for callers
+    assert.ok('canAcceptLiquidity' in lockRelease.config)
     assert.equal(lockRelease.config.canAcceptLiquidity, true)
     assert.equal(lockRelease.config.listEnabled, true)
     assert.deepEqual(lockRelease.config.allowList, [key(12).toBase58(), key(13).toBase58()])
