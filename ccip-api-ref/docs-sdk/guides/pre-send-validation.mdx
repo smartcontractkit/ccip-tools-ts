@@ -1,40 +1,61 @@
 ---
 id: pre-send-validation
 title: 'Validating a Transfer Before Sending'
-description: 'estimateReceiveExecution checks that a message can execute on the destination — not only its gas — so you can catch a would-be-stuck transfer before ccipSend.'
+description: 'estimateReceiveExecution runs a point-in-time destination pool-leg check — not only a gas estimate — so you can catch a would-be-stuck transfer before ccipSend.'
 sidebar_label: Pre-Send Validation
 sidebar_position: 7
 ---
 
 # Validating a Transfer Before Sending
 
-`estimateReceiveExecution` is often described as a gas helper, but it does more than return a gas number. Before it estimates gas it runs a **destination-side preflight**: it checks that the message could actually execute on the destination chain. Calling it before `ccipSend` lets you catch conditions that would otherwise strand the transfer on the destination — where the tokens are not lost, but require a later manual execution once the cause is fixed.
+`estimateReceiveExecution` is often described as a gas helper, but it does more than return a gas number. Before it estimates gas it runs a **destination-side preflight**: a point-in-time check of the _token-pool leg_ of destination execution. Calling it before `ccipSend` lets you catch many conditions that would otherwise strand the transfer on the destination — where the tokens are not lost, but require a later manual execution once the cause is fixed.
 
 ## Why this matters
 
 A CCIP send succeeds on the source chain even when the destination cannot complete it. The message then sits on the destination until the blocking condition clears. Common causes:
 
-- The receiver rejects the message's requested finality.
 - The destination token pool cannot release or mint: not enough liquidity in a LockRelease pool or its lockbox, an inbound rate limit or xERC20 bridge limit, an RMN curse, the pool missing mint authority on the token, or a lane that is not wired for the source pool/chain.
+- The OffRamp's source lane is disabled, or the sending OnRamp is not among its allowed onRamps.
+- The receiver rejects the message's requested finality.
 
-`estimateReceiveExecution` simulates the destination execution and **throws a typed error** for these cases, so your application can block the send and surface the reason instead of committing funds to a stuck transfer.
+`estimateReceiveExecution` checks these and **throws a typed error**, so your application can block the send and surface the reason instead of committing funds to a stuck transfer.
 
-## What it validates
+## What it validates — and what it cannot
 
 When you pass both `source` and `dest` chain instances, `estimateReceiveExecution`:
 
-1. Resolves the destination OffRamp for the lane.
+1. Resolves the destination OffRamp for the lane and checks its **source-lane gates**: lane enabled, and (when the message names its OnRamp) the sending OnRamp allowed.
 2. Checks the receiver accepts the requested finality (for data-carrying messages).
-3. For each token transfer, first simulates the **source** pool's `lockOrBurn` to obtain the exact `destPoolData` a real transfer would carry (see [below](#how-source-pool-data-is-obtained)), then simulates the **destination** pool's `releaseOrMint` directly (an `eth_call` with `from` set to the registered OffRamp), running the real release path — liquidity, inbound rate limit, RMN curse, mint authority, source-pool wiring, and pool compatibility.
-4. Returns the `ccipReceive` gas limit (unchanged from a gas-only estimate).
+3. Checks the generic pool-config layer: inbound rate limits (typed `CCIPRateLimitExceededError`) and LockRelease pool/lockbox liquidity (typed `CCIPInsufficientBalanceError`).
+4. For each token transfer, first simulates the **source** pool's `lockOrBurn` — with the message's `tokenArgs` and `tokenReceiver`, obtaining the exact `destPoolData` and the **post-fee `destTokenAmount`** the OnRamp would write into the emitted message (see [below](#how-source-pool-data-is-obtained)) — then simulates the **destination** pool's `releaseOrMint` directly (an `eth_call` with `from` set to the registered OffRamp), running the real release path: liquidity, inbound rate limit, RMN curse, mint authority, source-pool wiring, pool compatibility, and pool hooks.
+5. Returns the `ccipReceive` gas limit (unchanged from a gas-only estimate).
 
-**Whenever a message carries token transfers this destination simulation is not optional** — a transfer whose destination pool cannot release or mint would strand on the destination, so the check always runs. If the `releaseOrMint` simulation reverts, the message would not execute on the destination, so the send is **always blocked** — that verdict does not depend on whether the SDK recognizes the specific revert. Recognizing the revert only selects a more specific error; an unrecognized revert still blocks (as `CCIPDestExecutionRevertError`, carrying the decoded name or raw selector). The one case that is neither a pass nor a block is a transport/RPC failure that prevents the simulation from running at all — reported as the transient `CCIPDestSimulationUnavailableError` so you can retry. The returned gas number is unchanged.
+This is a **point-in-time pool-leg check**, not a full destination execution. It does **not** cover:
+
+- **CCV quorum and verifier results** (v2.0): required/optional CCVs and their inbound implementations are not resolved or checked. (`OffRamp.getCCVsForMessage` is the canonical resolver; a follow-up will route the preflight through it now that the simulated message matches the emitted one.)
+- **CCV-managed minting**: for pools like `CCTPThroughCCVTokenPool` (USDC v2.0), the pool leg intentionally does nothing — the real mint happens in the verifier. A passing simulation there validates wiring and gating, not the mint itself.
+- **The receiver's `ccipReceive`** logic (only its finality config is read).
+- **State races**: a check that passes now can still fail at execution time if liquidity, limits, curses, or configs change in between.
+
+## Attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x)
+
+Some destination pools decode **offchain token data** — a CCTP attestation or a bridge proof — inside `releaseOrMint`. That data only exists _after_ the message is sent, so the pool leg is fundamentally impossible to simulate pre-send (empty bytes would revert on decode, which says nothing about the real transfer). For these pools the preflight reports itself **unavailable** instead of blocking:
+
+- **Pre-send** → `CCIPDestSimulationUnavailableError` with `reason: 'attestation-required'` (`isTransient: false` — retrying pre-send can never help). The CLI's default `send` treats this as a warning and continues.
+- **Post-send** (e.g. `manual-exec --estimate-gas-limit`) → the CLI fetches the real attestations via `getOffchainTokenData` and passes them as `message.offchainTokenData`, so the simulation runs the real release path.
+
+USDC hybrid pools flag lock-release transfers in their `sourcePoolData` (`LOCK_RELEASE_FLAG`); those simulate normally, since no attestation is involved. v2.0 pools never consume offchain token data (the 2.0 OffRamp hardcodes it empty), so this only concerns v1.x lanes.
+
+## Verdicts, not guesses
+
+If the `releaseOrMint` simulation reverts, the message would not execute on the destination, so the send is **blocked** — that verdict does not depend on whether the SDK recognizes the specific revert. Recognizing the revert only selects a more specific error; an unrecognized revert still blocks (as `CCIPDestExecutionRevertError`, carrying the decoded name or raw selector). Cases that are neither a pass nor a block are reported as `CCIPDestSimulationUnavailableError`: a transport/RPC failure (`reason: 'transport'`, transient — retry) or the pre-send attestation gap above. The returned gas number is unchanged.
 
 ```typescript
 import { estimateReceiveExecution, EVMChain } from '@chainlink/ccip-sdk'
 import {
   CCIPDestExecutionRevertError,
   CCIPDestSimulationUnavailableError,
+  CCIPSourcePoolRevertError,
 } from '@chainlink/ccip-sdk'
 
 const source = await EVMChain.fromUrl(sourceRpcUrl)
@@ -47,15 +68,22 @@ try {
     routerOrRamp: sourceRouter,
     message: { sender, receiver, data: '0x', tokenAmounts: [{ token, amount }] },
   })
-  // safe to send; use gasLimit in extraArgs
+  // safe to send (pool leg validated); use gasLimit in extraArgs
 } catch (error) {
   if (error instanceof CCIPDestExecutionRevertError) {
     // the destination releaseOrMint reverts, so the transfer would not execute — blocked.
     // decode the exact cause from the raw encoded revert:
     const parsed = EVMChain.parse(error.context.revert)
     console.log('dest would revert:', parsed?.error, '— retryable:', error.isTransient)
+  } else if (error instanceof CCIPSourcePoolRevertError) {
+    // the SOURCE pool's lockOrBurn reverts (allowlist, outbound rate limit, finality gate):
+    // ccipSend itself would revert the same way — blocked.
   } else if (error instanceof CCIPDestSimulationUnavailableError) {
-    // could not run the check (RPC/transport error) — transient, retry
+    if (error.reason === 'transport') {
+      // could not run the check (RPC/transport error) — transient, retry
+    } else {
+      // attestation-required: fundamentally unavailable pre-send; decide per your risk policy
+    }
   }
 }
 ```
@@ -64,14 +92,18 @@ try {
 
 A single error models a destination-pool revert. Rather than classify the revert into bespoke subclasses, it carries the **raw encoded revert** in `context.revert` so you decode it yourself with the SDK's standard parse (`EVMChain.parse`) and branch on the exact cause. Each error extends `CCIPError`, so it carries a `code`, a `context`, an `isTransient` flag, and a `recovery` hint. The CLI surfaces these automatically.
 
-| Error                                | Raised when                                                                                                                                                                                                                                                                                                                        | Transient |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `CCIPFinalityNotAllowedError`        | the receiver does not accept the requested finality                                                                                                                                                                                                                                                                                | no        |
-| `CCIPContractTypeInvalidError`       | the registered pool is not a CCIP-compatible pool                                                                                                                                                                                                                                                                                  | no        |
-| `CCIPDestExecutionRevertError`       | the `releaseOrMint` simulation reverts — the transfer would not execute. `context.revert` carries the raw encoded revert; `isTransient` is `true` when the revert is one that recovers on its own (liquidity shortfall, inbound rate/bridge limit, RMN curse) and `false` otherwise (mint authority, lane config, or unrecognized) | varies    |
-| `CCIPDestSimulationUnavailableError` | a destination check could not be performed at all (RPC/transport error reading the pool wiring or running the simulation), so executability is undetermined — retry                                                                                                                                                                | yes       |
+| Error                                | Raised when                                                                                                                                                                                                                                                                                                                                           | Transient |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `CCIPFinalityNotAllowedError`        | the receiver does not accept the requested finality                                                                                                                                                                                                                                                                                                   | no        |
+| `CCIPSourceChainUnsupportedError`    | the OffRamp's source lane is disabled, or the sending OnRamp is not allowed (`context.reason`)                                                                                                                                                                                                                                                        | no        |
+| `CCIPRateLimitExceededError`         | the transfer exceeds the inbound rate limit currently available                                                                                                                                                                                                                                                                                       | yes       |
+| `CCIPInsufficientBalanceError`       | a LockRelease destination pool (or its lockbox) lacks liquidity                                                                                                                                                                                                                                                                                       | no        |
+| `CCIPContractTypeInvalidError`       | the registered pool is not a CCIP-compatible pool                                                                                                                                                                                                                                                                                                     | no        |
+| `CCIPSourcePoolRevertError`          | the **source** pool's `lockOrBurn` simulation reverts with a genuine gate (sender allowlist, outbound rate limit, finality gate) — `ccipSend` would revert the same way. `context.revert` carries the raw revert                                                                                                                                      | varies    |
+| `CCIPDestExecutionRevertError`       | the `releaseOrMint` simulation reverts — the transfer would not execute. `context.revert` carries the raw encoded revert; `isTransient` is `true` when the revert is one that recovers on its own (liquidity shortfall, refillable rate/bridge limit, RMN curse) and `false` otherwise (capacity exceeded, mint authority, lane config, unrecognized) | varies    |
+| `CCIPDestSimulationUnavailableError` | a destination check could not be performed: `reason: 'transport'` (RPC error — retry) or `reason: 'attestation-required'` (pool needs post-send offchain data)                                                                                                                                                                                        | varies    |
 
-A revert always blocks: whether or not the SDK recognizes the specific error, a reverting `releaseOrMint` means the message would not execute on the destination. The check never returns a pass on a revert. To act on the specific cause, parse `context.revert`:
+To act on the specific cause of a revert, parse `context.revert`:
 
 ```typescript
 const parsed = EVMChain.parse(error.context.revert) // { error: 'InsufficientLiquidity(...)', ...args } | undefined
@@ -80,20 +112,28 @@ if (parsed?.error?.startsWith('InsufficientLiquidity')) {
 }
 ```
 
+`isTransient` classification notes: `TokenRateLimitReached` is refillable and transient — except when emitted with `minWaitInSeconds == type(uint256).max` (a v2.0 zero-rate bucket that never refills). `TokenMaxCapacityExceeded` means the amount exceeds the bucket's **static capacity** — permanent for that amount; split the transfer or raise the limit.
+
 ## How source pool data is obtained
 
-Simulating the destination `releaseOrMint` faithfully requires the same `sourcePoolData` a real transfer would carry — the `destPoolData` the **source** pool returns from its `lockOrBurn`. Because you have the source chain instance, `estimateReceiveExecution` obtains it for you: for each token it first simulates the source pool's `lockOrBurn`, takes the returned `destPoolData` and source pool address, and feeds them into the destination `releaseOrMint` simulation.
+Simulating the destination `releaseOrMint` faithfully requires the same message a real transfer would carry: the `destPoolData` the **source** pool returns from its `lockOrBurn` (consumed as `sourcePoolData`), and — for fee-charging v2.0 pools — the **post-fee `destTokenAmount`** the OnRamp writes into `TokenTransferV1.amount` in place of your input amount. Because you have the source chain instance, `estimateReceiveExecution` obtains both for you: for each token it simulates the source pool's `lockOrBurn` (passing your `tokenArgs` and resolving the pool receiver from `tokenReceiver`, exactly like the OnRamp) and feeds the results into the destination simulation.
 
-This matters for pools that encode real state in `destPoolData` — USDC/CCTP, siloed, and Lombard pools among them. For a plain base `TokenPool` the source data is just the source token's decimals (an identity conversion).
+This matters for pools that encode real state in `destPoolData` — USDC/CCTP, siloed, and Lombard pools among them. For a plain base `TokenPool` the source data is just the source token's decimals (an identity conversion) and the amount passes through unchanged.
 
-The source `lockOrBurn` simulation runs only for **EVM sources** (which implement `simulateLockOrBurn`). For **non-EVM sources (e.g. Solana), which do not implement it, or any token whose message already carries `extraData`**, it is skipped and the check falls back to the source token's decimals as `sourcePoolData` — the identity conversion above — and still runs. In other words, supplying the message's own `tokenAmounts[].extraData` (the real source pool data) short-circuits the source simulation.
+Three paths skip the source simulation:
+
+- **Post-send messages** (tokenAmounts carrying `sourcePoolAddress`/`destTokenAddress`, e.g. from `manual-exec`): the **emitted fields are trusted verbatim** — the SDK never re-derives the source pool from current destination config (it may have migrated since the send) nor re-simulates `lockOrBurn`.
+- **Caller-supplied `extraData`** on a pre-send `{token, amount}` entry: used as `sourcePoolData` as-is.
+- **Non-EVM sources** (which don't implement `simulateLockOrBurn`): the check falls back to declaring the amount in the source token's decimals — the identity conversion — and still runs.
+
+A genuine revert from the source `lockOrBurn` simulation (sender allowlist, outbound rate limit, finality gate) raises `CCIPSourcePoolRevertError` and blocks — the real `ccipSend` would revert the same way. Only reverts attributable to the simulation setup itself (the pool's token balance is best-effort state-overridden) fall back to the decimals default.
 
 If you drive the two simulations yourself, obtain the source data first with the `simulateLockOrBurn` primitive and pass it into `simulateReleaseOrMint` as `sourcePoolData`:
 
 ```typescript
 import { simulateLockOrBurn, simulateReleaseOrMint } from '@chainlink/ccip-sdk'
 
-const { sourcePoolAddress, destPoolData } = await simulateLockOrBurn({
+const { sourcePoolAddress, destPoolData, destTokenAmount } = await simulateLockOrBurn({
   provider: source.provider,
   pool: sourcePool,
   onRamp,
@@ -104,7 +144,11 @@ await simulateReleaseOrMint({
   provider: dest.provider,
   pool: destPool,
   offRamp,
-  input: { sourcePoolAddress, sourcePoolData: destPoolData /* ... */ },
+  input: {
+    sourcePoolAddress,
+    sourcePoolData: destPoolData,
+    sourceDenominatedAmount: destTokenAmount /* ... */,
+  },
 })
 ```
 
@@ -113,12 +157,18 @@ await simulateReleaseOrMint({
 For advanced flows the same building blocks are exported directly:
 
 - `simulateReleaseOrMint({ provider, pool, offRamp, input })` — simulate a destination pool's `releaseOrMint` and get the pool-computed destination amount, or the raw revert.
-- `simulateLockOrBurn({ provider, pool, onRamp, input })` — simulate the source pool's `lockOrBurn` to obtain the `destPoolData` a real transfer would carry (used internally to feed the destination simulation for exotic source pools).
-- `isTransientReleaseOrMintRevert(data)` — whether a raw revert is one that recovers on its own (liquidity, rate/bridge limit, RMN curse) and is therefore worth retrying. Decode the revert itself with `EVMChain.parse(data)`.
+- `simulateLockOrBurn({ provider, pool, onRamp, input, tokenArgs? })` — simulate the source pool's `lockOrBurn` to obtain the `destPoolData` and post-fee `destTokenAmount` a real transfer would carry.
+- `classifyPoolRevert(data)` — decode a raw pool revert (best-effort name) and whether it recovers on its own (`isTransient`) and is therefore worth retrying. Decode the full revert with `EVMChain.parse(data)`.
+
+## CLI behavior
+
+`ccip-cli send` runs this preflight by default. **Definitive verdicts block the send** (any of the typed block errors above). **Inconclusive checks warn and continue**: a `CCIPDestSimulationUnavailableError` (destination RPC unreachable, or an attestation-consuming pool pre-send) is logged as a warning and the send proceeds with the default gas limit. Passing `--estimate-gas-limit`/`--only-estimate` makes every preflight error fatal — you asked for the estimate explicitly. `--estimate-gas-limit -100` skips the preflight entirely.
+
+`ccip-cli manual-exec --estimate-gas-limit` fetches the message's real offchain token data (attestations) first, so attestation lanes are estimable post-send; if the check is unavailable it warns and proceeds with the original gas limit.
 
 ## Availability
 
-The **destination-side `releaseOrMint` preflight described on this page is EVM-only** — the pool-direct simulation and its typed errors run only when the destination is an EVM chain.
+The **destination-side `releaseOrMint` preflight described on this page is EVM-only** — the pool-direct simulation and its typed errors run only when the destination is an EVM chain. Non-EVM destinations still get the generic layer: inbound rate limits and LockRelease pool/lockbox liquidity.
 
 `estimateReceiveExecution` itself (the gas / compute-unit estimate) is also implemented on **Solana**, but there it only estimates the compute units of the OffRamp's `execute` — it does not run the token-pool `releaseOrMint` validation or raise the typed errors above. Aptos, Sui, TON, and Canton do not implement `estimateReceiveExecution` at all.
 

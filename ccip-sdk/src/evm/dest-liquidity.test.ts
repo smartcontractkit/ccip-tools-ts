@@ -4,6 +4,7 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 import {
   AbiCoder,
   Interface,
+  MaxUint256,
   getAddress,
   hexlify,
   randomBytes,
@@ -18,16 +19,23 @@ import { EVMChain } from './index.ts'
 import {
   CCIP_POOL_V1_INTERFACE_ID,
   IPOOL_V2_INTERFACE_ID,
+  classifyPoolRevert,
   isTransientReleaseOrMintRevert,
   simulateLockOrBurn,
   simulateReleaseOrMint,
 } from './simulate.ts'
 import {
   type CCIPError,
+  CCIPArgumentInvalidError,
   CCIPContractTypeInvalidError,
   CCIPDestExecutionRevertError,
   CCIPDestSimulationUnavailableError,
+  CCIPInsufficientBalanceError,
+  CCIPRateLimitExceededError,
+  CCIPSourceChainUnsupportedError,
+  CCIPSourcePoolRevertError,
   CCIPTokenNotInRegistryError,
+  CCIPTokenPoolChainConfigNotFoundError,
 } from '../errors/index.ts'
 import { ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 
@@ -53,6 +61,8 @@ const poolErrors = new Interface([
   'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
   'error TokenMaxCapacityExceeded(uint256 capacity, uint256 requested, address tokenAddress)',
   'error TokenRateLimitReached(uint256 minWaitInSeconds, uint256 available, address tokenAddress)',
+  'error AggregateValueRateLimitReached(uint256 minWaitInSeconds, uint256 available)',
+  'error AggregateValueMaxCapacityExceeded(uint256 capacity, uint256 requested)',
   'error CursedByRMN()',
   'error ChainNotAllowed(uint64 remoteChainSelector)',
   'error InvalidSourcePoolAddress(bytes sourcePoolAddress)',
@@ -72,22 +82,28 @@ const encodeErr = (sig: string, args: readonly unknown[] = []) =>
 describe('isTransientReleaseOrMintRevert', () => {
   const A = () => getAddress(hexlify(randomBytes(20)))
 
-  it('flags liquidity / rate-limit / curse reverts as transient (they recover on their own)', () => {
+  it('flags liquidity / rate-limit / bridge-limit / curse reverts as transient (they recover on their own)', () => {
     const transient = [
       encodeErr('InsufficientLiquidity()'),
       encodeErr('InsufficientLiquidity(uint256,uint256)', [1n, 2n]),
       encodeErr('InsufficientBalance(uint256,uint256)', [2n, 1n]),
       encodeErr('ERC20InsufficientBalance(address,uint256,uint256)', [A(), 1n, 2n]),
-      encodeErr('TokenMaxCapacityExceeded(uint256,uint256,address)', [1n, 2n, A()]),
-      encodeErr('TokenRateLimitReached(uint256,uint256,address)', [1n, 2n, A()]),
+      encodeErr('InsufficientLockboxBalance(uint256,uint256)', [1n, 2n]),
+      encodeErr('TokenRateLimitReached(uint256,uint256,address)', [60n, 1n, A()]),
+      encodeErr('AggregateValueRateLimitReached(uint256,uint256)', [60n, 1n]),
       encodeErr('CursedByRMN()'),
+      encodeErr('NotHighEnoughLimits()'),
+      encodeErr('IXERC20_NotHighEnoughLimits()'),
     ]
     for (const enc of transient)
       assert.equal(isTransientReleaseOrMintRevert(enc), true, enc.slice(0, 10))
   })
 
-  it('flags authority / config / unknown reverts as non-transient (they need a fix)', () => {
+  it('flags capacity-exceeded / authority / config / unknown reverts as non-transient (they need a fix)', () => {
     const permanent = [
+      // amount > the bucket's STATIC capacity — the maximum never refills, waiting cannot help
+      encodeErr('TokenMaxCapacityExceeded(uint256,uint256,address)', [1n, 2n, A()]),
+      encodeErr('AggregateValueMaxCapacityExceeded(uint256,uint256)', [1n, 2n]),
       encodeErr('AccessControlUnauthorizedAccount(address,bytes32)', [
         A(),
         hexlify(randomBytes(32)),
@@ -102,6 +118,22 @@ describe('isTransientReleaseOrMintRevert', () => {
     for (const enc of permanent)
       assert.equal(isTransientReleaseOrMintRevert(enc), false, enc.slice(0, 10))
   })
+
+  it('TokenRateLimitReached with minWait=maxUint256 (v2.0 zero-rate bucket) is permanent', () => {
+    // RateLimiter v2.0: `if (rate == 0) revert TokenRateLimitReached(type(uint256).max, ...)` —
+    // the bucket never refills, so retrying can never succeed
+    const enc = encodeErr('TokenRateLimitReached(uint256,uint256,address)', [MaxUint256, 5n, A()])
+    assert.equal(isTransientReleaseOrMintRevert(enc), false)
+    assert.deepEqual(classifyPoolRevert(enc), { name: 'TokenRateLimitReached', isTransient: false })
+  })
+
+  it('classifyPoolRevert names decoded reverts and leaves unknowns unnamed', () => {
+    assert.deepEqual(classifyPoolRevert(encodeErr('CursedByRMN()')), {
+      name: 'CursedByRMN',
+      isTransient: true,
+    })
+    assert.deepEqual(classifyPoolRevert('0xdeadbeef'), { isTransient: false })
+  })
 })
 
 // ============================================================================
@@ -114,6 +146,8 @@ function makeProvider(opts: {
   revert?: string
   rpcError?: boolean
   destinationAmount?: bigint
+  /** make the supportsInterface probes fail: a contract revert vs a transport error */
+  probeError?: 'call-exception' | 'transport'
 }) {
   const calls: Call[] = []
   const provider = {
@@ -122,6 +156,10 @@ function makeProvider(opts: {
       calls.push(tx)
       const sel = (tx.data ?? '0x').slice(0, 10)
       if (sel === SUPPORTS_SEL) {
+        if (opts.probeError === 'call-exception')
+          // how ethers surfaces a contract reverting/returning nothing on the probe
+          throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
+        if (opts.probeError === 'transport') throw new Error('could not detect network')
         const [id] = pool.decodeFunctionData('supportsInterface', tx.data!)
         const supported =
           (id === IPOOL_V2_INTERFACE_ID && opts.isV2) ||
@@ -206,6 +244,54 @@ describe('simulateReleaseOrMint', () => {
         }),
       CCIPContractTypeInvalidError,
     )
+  })
+
+  it('probes reverting (non-ERC165 contract) => "unsupported", same typed error', async () => {
+    // a contract revert on the probe is a successful "no" — only this may mean incompatible
+    const provider = makeProvider({ isV2: false, probeError: 'call-exception' })
+    await assert.rejects(
+      () =>
+        simulateReleaseOrMint({
+          provider: provider as never,
+          pool: POOL,
+          offRamp: OFFRAMP,
+          input: baseInput,
+        }),
+      CCIPContractTypeInvalidError,
+    )
+  })
+
+  it('transport failure during the probes => raw error propagates (NOT "incompatible pool")', async () => {
+    const provider = makeProvider({ isV2: false, probeError: 'transport' })
+    await assert.rejects(
+      () =>
+        simulateReleaseOrMint({
+          provider: provider as never,
+          pool: POOL,
+          offRamp: OFFRAMP,
+          input: baseInput,
+        }),
+      (err: Error) => {
+        assert.ok(!(err instanceof CCIPContractTypeInvalidError))
+        assert.match(err.message, /could not detect network/)
+        return true
+      },
+    )
+  })
+
+  it('poolInterface hint skips the ERC165 probes', async () => {
+    // probes would fail loudly if attempted; the hint (e.g. from a memoized typeAndVersion)
+    // dispatches directly
+    const provider = makeProvider({ isV2: false, probeError: 'transport', destinationAmount: 7n })
+    const result = await simulateReleaseOrMint({
+      provider: provider as never,
+      pool: POOL,
+      offRamp: OFFRAMP,
+      input: baseInput,
+      poolInterface: 'IPoolV1',
+    })
+    assert.equal(result.poolInterface, 'IPoolV1')
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(SUPPORTS_SEL)))
   })
 
   it('propagates the raw revert (classifiable by the caller)', async () => {
@@ -303,6 +389,204 @@ describe('simulateLockOrBurn', () => {
     assert.equal(result.poolInterface, 'IPoolV2')
     assert.equal(result.destPoolData, destPoolData)
     assert.equal(result.destTokenAddress, destTokenAddress)
+    // the 2nd return value is the post-fee amount the OnRamp emits — must be surfaced
+    assert.equal(result.destTokenAmount, 900n)
+  })
+
+  it('IPoolV2: caller tokenArgs are passed as the 3rd lockOrBurn argument', async () => {
+    const lobV2Frag = 'lockOrBurn((bytes,uint64,address,uint256,address),bytes4,bytes)'
+    const provider = {
+      call: mock.fn(async (tx: Call) => {
+        const [id] = pool.decodeFunctionData('supportsInterface', tx.data!)
+        return pool.encodeFunctionResult('supportsInterface', [id === IPOOL_V2_INTERFACE_ID])
+      }),
+      send: mock.fn(async (_method: string, [tx]: [Call]) => {
+        const [, , tokenArgs] = pool.decodeFunctionData(lobV2Frag, tx.data!)
+        assert.equal(tokenArgs, '0x12345678')
+        return pool.encodeFunctionResult(lobV2Frag, [
+          [zeroPadValue(TOKEN, 32), abi.encode(['uint256'], [18n])],
+          1000n,
+        ])
+      }),
+    }
+    const result = await simulateLockOrBurn({
+      provider: provider as never,
+      pool: POOL,
+      onRamp: OFFRAMP,
+      tokenArgs: '0x12345678',
+      input: {
+        receiver: zeroPadValue(RECEIVER, 32),
+        remoteChainSelector: DEST_SELECTOR,
+        originalSender: RECEIVER,
+        amount: 1000n,
+        localToken: TOKEN,
+      },
+    })
+    assert.equal(result.destTokenAmount, 1000n)
+  })
+
+  it('IPoolV1: destTokenAmount = input amount (legacy overload never deducts); tokenArgs rejected', async () => {
+    const provider = {
+      call: mock.fn(async (tx: Call) => {
+        const [id] = pool.decodeFunctionData('supportsInterface', tx.data!)
+        return pool.encodeFunctionResult('supportsInterface', [id === CCIP_POOL_V1_INTERFACE_ID])
+      }),
+      send: mock.fn(async (_method: string, [tx]: [Call]) => {
+        assert.equal((tx.data ?? '0x').slice(0, 10), LOB_V1_SEL)
+        return pool.encodeFunctionResult(LOB_V1_FRAG, [
+          [zeroPadValue(TOKEN, 32), abi.encode(['uint256'], [18n])],
+        ])
+      }),
+    }
+    const input = {
+      receiver: zeroPadValue(RECEIVER, 32),
+      remoteChainSelector: DEST_SELECTOR,
+      originalSender: RECEIVER,
+      amount: 1000n,
+      localToken: TOKEN,
+    }
+    const result = await simulateLockOrBurn({
+      provider: provider as never,
+      pool: POOL,
+      onRamp: OFFRAMP,
+      input,
+    })
+    assert.equal(result.destTokenAmount, 1000n)
+    // mirroring OnRamp's TokenArgsNotSupportedOnPoolV1: non-empty tokenArgs cannot reach a v1 pool
+    await assert.rejects(
+      () =>
+        simulateLockOrBurn({
+          provider: provider as never,
+          pool: POOL,
+          onRamp: OFFRAMP,
+          tokenArgs: '0x1234',
+          input,
+        }),
+      CCIPArgumentInvalidError,
+    )
+  })
+})
+
+// EVMChain.simulateLockOrBurn — dispatch must follow the ONRAMP version (live-found defect:
+// v1.5 OnRamps always call the 1-arg lockOrBurn, even on migrated 2.0.0 proxy pools whose
+// IPoolV2 path would reject the legacy mechanism)
+describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
+  it('v1.5 OnRamp + 2.0 proxy pool => 1-arg lockOrBurn, never IPoolV2', async () => {
+    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+    const lobV2Frag = 'lockOrBurn((bytes,uint64,address,uint256,address),bytes4,bytes)'
+    const lobV2Sel = pool.getFunction(lobV2Frag)!.selector
+    const sendCalls: Call[] = []
+    const provider = {
+      call: mock.fn(async () => {
+        throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
+      }),
+      send: mock.fn(async (_method: string, [tx]: [Call]) => {
+        sendCalls.push(tx)
+        assert.equal((tx.data ?? '0x').slice(0, 10), LOB_V1_SEL)
+        return pool.encodeFunctionResult(LOB_V1_FRAG, [
+          [zeroPadValue(TOKEN, 32), '0x' + 'f3567d18' + '00'.repeat(60)],
+        ])
+      }),
+    }
+    const chain = Object.create(EVMChain.prototype) as EVMChain
+    Object.assign(chain, {
+      provider,
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      network: {
+        name: 'ethereum-testnet-sepolia',
+        chainSelector: SOURCE_SELECTOR,
+        family: ChainFamily.EVM,
+        networkType: NetworkType.Testnet,
+      },
+      getTokenAdminRegistryFor: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
+      getRegistryTokenConfig: mock.fn(async () => ({ tokenPool: POOL })),
+      typeAndVersion: mock.fn(async (address: string) =>
+        address === ONRAMP
+          ? (['EVM2EVMOnRamp', '1.5.0', 'EVM2EVMOnRamp 1.5.0'] as const)
+          : (['USDCTokenPoolProxy', '2.0.0', 'USDCTokenPoolProxy 2.0.0'] as const),
+      ),
+    })
+    const result = await chain.simulateLockOrBurn({
+      onRamp: ONRAMP,
+      destChainSelector: DEST_SELECTOR,
+      token: TOKEN,
+      amount: 1000n,
+      originalSender: RECEIVER,
+      receiver: RECEIVER,
+    })
+    assert.equal(result.destTokenAmount, 1000n) // 1-arg overload: amount passthrough
+    assert.ok(sendCalls.length >= 1)
+    assert.ok(!sendCalls.some((c) => c.data?.startsWith(lobV2Sel)))
+  })
+
+  function makeSourceEvmChain(revert: string) {
+    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+    const chain = Object.create(EVMChain.prototype) as EVMChain
+    Object.assign(chain, {
+      provider: {
+        call: mock.fn(async () => {
+          throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
+        }),
+        send: mock.fn(async () => {
+          throw Object.assign(new Error('execution reverted'), { data: revert })
+        }),
+      },
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      network: {
+        name: 'ethereum-testnet-sepolia',
+        chainSelector: SOURCE_SELECTOR,
+        family: ChainFamily.EVM,
+        networkType: NetworkType.Testnet,
+      },
+      getTokenAdminRegistryFor: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
+      getRegistryTokenConfig: mock.fn(async () => ({ tokenPool: POOL })),
+      typeAndVersion: mock.fn(async (address: string) =>
+        address === ONRAMP
+          ? (['EVM2EVMOnRamp', '1.5.0', 'EVM2EVMOnRamp 1.5.0'] as const)
+          : (['BurnMintTokenPool', '1.5.1', 'BurnMintTokenPool 1.5.1'] as const),
+      ),
+    })
+    return { chain, ONRAMP }
+  }
+  const lobOpts = (chain: EVMChain, onRamp: string) => ({
+    onRamp,
+    destChainSelector: DEST_SELECTOR,
+    token: TOKEN,
+    amount: 1000n,
+    originalSender: RECEIVER,
+    receiver: RECEIVER,
+  })
+
+  it('genuine source-gate revert => typed CCIPSourcePoolRevertError with raw revert', async () => {
+    const revert = interfaces.Custom.encodeErrorResult('SenderNotAllowed', [
+      DEST_SELECTOR,
+      RECEIVER,
+    ])
+    const { chain, ONRAMP } = makeSourceEvmChain(revert)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, ONRAMP)),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourcePoolRevertError, String(err))
+        assert.equal(err.context['revert'], revert)
+        return true
+      },
+    )
+  })
+
+  it('balance/allowance reverts (state-override artifacts) rethrow RAW for best-effort fallback', async () => {
+    const revert = interfaces.Custom.encodeErrorResult('ERC20InsufficientBalance', [
+      POOL,
+      0n,
+      1000n,
+    ])
+    const { chain, ONRAMP } = makeSourceEvmChain(revert)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, ONRAMP)),
+      (err: Error) => {
+        assert.ok(!(err instanceof CCIPSourcePoolRevertError), 'artifact must not block')
+        return true
+      },
+    )
   })
 })
 
@@ -315,17 +599,28 @@ function makeChain(opts: {
   isV1?: boolean
   revert?: string
   rpcError?: boolean
+  probeError?: 'call-exception' | 'transport'
   remotePoolsRpcError?: boolean
   remotePoolsRevert?: string
   noPool?: boolean
   poolTypeAndVersion?: string
+  /** OffRamp typeAndVersion — defaults to the same generation as the pool */
+  offRampTypeAndVersion?: string
   remotePools?: string[]
+  /** OffRamp source-chain config for the lane gates (default: gate no-op, 1.2/1.5-like shape) */
+  offRampConfig?: { isEnabled?: boolean; onRamps: string[] }
+  /** pool/lockbox token balance seen by the base LockRelease liquidity check */
+  balance?: bigint
+  inboundRateLimiterState?: { tokens: bigint; capacity: bigint; rate: bigint }
+  /** make getTokenPoolRemote throw this typed SDK error (F9: must pass through untouched) */
+  remotePoolsTypedError?: Error
 }) {
   const provider = makeProvider({
     isV2: opts.isV2 ?? true,
     isV1: opts.isV1,
     revert: opts.revert,
     rpcError: opts.rpcError,
+    probeError: opts.probeError,
   })
   const tokenPool = opts.noPool ? undefined : POOL
   const warn = mock.fn()
@@ -340,6 +635,19 @@ function makeChain(opts: {
       family: ChainFamily.EVM,
       networkType: NetworkType.Testnet,
     },
+    // mirrors EVMChain.typeAndVersion's [type, version, full] return, keyed by address (the
+    // OffRamp's version drives dispatch; the pool's drives classification); only mocked when the
+    // test declares one — otherwise checkExecute falls back to the ERC165 probes
+    ...((opts.poolTypeAndVersion != null || opts.offRampTypeAndVersion != null) && {
+      typeAndVersion: mock.fn(async (address: string) => {
+        const tnv =
+          address === OFFRAMP
+            ? (opts.offRampTypeAndVersion ?? opts.poolTypeAndVersion!)
+            : (opts.poolTypeAndVersion ?? opts.offRampTypeAndVersion!)
+        const sep = tnv.lastIndexOf(' ')
+        return [tnv.slice(0, sep), tnv.slice(sep + 1), tnv] as const
+      }),
+    }),
     getTokenAdminRegistryFor: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
     getRegistryTokenConfig: mock.fn(async () => ({ tokenPool })),
     getTokenPoolConfig: mock.fn(async () => ({
@@ -347,6 +655,7 @@ function makeChain(opts: {
       lockBox: undefined,
     })),
     getTokenPoolRemote: mock.fn(async () => {
+      if (opts.remotePoolsTypedError) throw opts.remotePoolsTypedError
       // an RPC/transport failure has no revert data attached
       if (opts.remotePoolsRpcError) throw new Error('could not detect network')
       // an on-chain revert carries revert data
@@ -355,12 +664,13 @@ function makeChain(opts: {
       return {
         remoteToken: TOKEN,
         remotePools: opts.remotePools ?? [SRC_POOL_BYTES],
-        inboundRateLimiterState: undefined,
+        inboundRateLimiterState: opts.inboundRateLimiterState,
         outboundRateLimiterState: undefined,
       }
     }),
+    getOffRampConfig: mock.fn(async () => opts.offRampConfig ?? { onRamps: [] }),
     getTokenInfo: mock.fn(async () => ({ decimals: 18, symbol: 'TEST', name: 'Test' })),
-    getBalance: mock.fn(async () => 10n ** 24n),
+    getBalance: mock.fn(async () => opts.balance ?? 10n ** 24n),
   })
   return { chain, provider, warn }
 }
@@ -550,9 +860,11 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     // when the caller has not supplied source pool data (the wrapper normally obtains it via
     // simulateLockOrBurn), checkExecute declares the amount in the dest token's own decimals — the
     // identity conversion, correct for every base TokenPool — and still runs the simulation.
+    // A pool identifying as 1.5.1 predates IPoolV2, so it dispatches 1-arg without ERC165 probes.
     const { chain, provider } = makeChain({ poolTypeAndVersion: 'LockReleaseTokenPool 1.5.1' })
     assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true)
-    assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+    assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V1_SEL)))
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(SUPPORTS_SEL)))
   })
 
   it('uses message tokenAmounts extraData as sourcePoolData when present', async () => {
@@ -577,6 +889,317 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     assert.equal(decoded.sourcePoolData, extraData)
     assert.equal(decoded.sourcePoolAddress, SRC_POOL_BYTES)
   })
+
+  // ==========================================================================
+  // attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x)
+  // ==========================================================================
+
+  const USDC_LOCK_RELEASE_FLAG = '0xfa7c07de' // bytes4(keccak256('NO_CCTP_USE_LOCK_RELEASE'))
+
+  it('USDC/CCTP v1 pool pre-send => unavailable (attestation-required), NOT a block', async () => {
+    // pre-send there is no CCTP attestation; simulating the pool with empty offchainTokenData
+    // would revert on decode and false-block a valid transfer. The check must report itself
+    // unavailable instead — non-transient, since retrying pre-send can never help.
+    for (const tnv of [
+      'USDCTokenPool 1.5.1', // also what deployed 1.5.1 Hybrid pools report
+      'USDCTokenPool 1.6.2',
+      'USDCTokenPoolCCTPV2 1.6.4',
+      'USDCTokenPoolProxy 1.6.4',
+      'HybridLockReleaseUSDCTokenPool 1.6.2',
+      'LombardTokenPoolV2 1.6.1',
+      'LombardTokenPool 1.6.1',
+    ]) {
+      const { chain, provider } = makeChain({ poolTypeAndVersion: tnv, isV1: true, isV2: false })
+      await assert.rejects(
+        () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+        (err: CCIPError) => {
+          assert.ok(err instanceof CCIPDestSimulationUnavailableError, tnv)
+          assert.equal(err.reason, 'attestation-required', tnv)
+          assert.equal(err.isTransient, false, tnv)
+          return true
+        },
+        tnv,
+      )
+      // the simulation never ran — unavailability is a classification, not a revert
+      assert.ok(!provider.calls.some((c) => c.data?.startsWith(ROM_V1_SEL)), tnv)
+    }
+  })
+
+  it('v2.0 pools never need offchainTokenData => simulation runs normally', async () => {
+    // the 2.0 OffRamp hardcodes offchainTokenData "" — CCTP/Lombard 2.0 pool legs are no-ops
+    // (minting is verifier-side), so pre-send simulation is valid for them
+    for (const tnv of [
+      'USDCTokenPoolProxy 2.0.0',
+      'LombardTokenPool 2.0.0',
+      'CCTPThroughCCVTokenPool 2.0.0',
+      'SiloedUSDCTokenPool 2.0.0',
+    ]) {
+      const { chain, provider } = makeChain({ poolTypeAndVersion: tnv })
+      assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true, tnv)
+      assert.ok(
+        provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)),
+        tnv,
+      )
+    }
+  })
+
+  it('USDC hybrid lock-release branch (LOCK_RELEASE_FLAG sourcePoolData) => simulates normally', async () => {
+    // the hybrid pool releases from local liquidity — no attestation involved — when the source
+    // pool flagged the transfer as lock-release; the flag, not the type string, discriminates
+    const { chain, provider } = makeChain({
+      poolTypeAndVersion: 'USDCTokenPool 1.5.1',
+      isV1: true,
+      isV2: false,
+    })
+    const extraData = abi.encode(['bytes4'], [USDC_LOCK_RELEASE_FLAG])
+    assert.equal(
+      await chain.checkExecute({
+        offRamp: OFFRAMP,
+        message: {
+          ...MESSAGE,
+          tokenAmounts: [
+            {
+              sourcePoolAddress: SRC_POOL_BYTES,
+              destTokenAddress: TOKEN,
+              amount: 1000n,
+              extraData,
+            },
+          ],
+        },
+      }),
+      true,
+    )
+    const simCall = provider.calls.find((c) => c.data?.startsWith(ROM_V1_SEL))!
+    assert.ok(simCall, 'the releaseOrMint simulation ran')
+    const [decoded] = pool.decodeFunctionData(ROM_V1_FRAG, simCall.data!)
+    assert.equal(decoded.sourcePoolData, extraData)
+  })
+
+  it('post-send offchainTokenData (manual-exec) => attestation pools simulate with the real data', async () => {
+    const { chain, provider } = makeChain({
+      poolTypeAndVersion: 'USDCTokenPool 1.5.1',
+      isV1: true,
+      isV2: false,
+    })
+    const usdcData = { _tag: 'usdc', message: '0x1234', attestation: '0xabcd' } as const
+    assert.equal(
+      await chain.checkExecute({
+        offRamp: OFFRAMP,
+        message: { ...MESSAGE, offchainTokenData: [usdcData] },
+      }),
+      true,
+    )
+    const simCall = provider.calls.find((c) => c.data?.startsWith(ROM_V1_SEL))!
+    assert.ok(simCall, 'the releaseOrMint simulation ran')
+    const [decoded] = pool.decodeFunctionData(ROM_V1_FRAG, simCall.data!)
+    assert.equal(
+      decoded.offchainTokenData,
+      abi.encode(['tuple(bytes message, bytes attestation)'], [usdcData]),
+    )
+  })
+
+  it('generic rate-limit verdict defers to the simulation (amount denominations differ)', async () => {
+    // the check payload carries SOURCE-denominated amounts while the base layer's bucket is in
+    // dest units — the sim (which consumes the rate limit with correct local amounts) decides
+    const { chain, provider } = makeChain({
+      inboundRateLimiterState: { tokens: 10n, capacity: 100n, rate: 1n }, // < amount 1000n
+    })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true)
+    assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+    // without a receiver (no simulation possible) the typed verdict is kept
+    const { chain: chain2 } = makeChain({
+      inboundRateLimiterState: { tokens: 10n, capacity: 100n, rate: 1n },
+    })
+    await assert.rejects(
+      () =>
+        chain2.checkExecute({
+          offRamp: OFFRAMP,
+          message: { sourceChainSelector: SOURCE_SELECTOR, tokenAmounts: MESSAGE.tokenAmounts },
+        }),
+      CCIPRateLimitExceededError,
+    )
+  })
+
+  it('a deferred definitive verdict is never downgraded to "inconclusive"', async () => {
+    // deferred rate-limit verdict + sim transport failure => the typed verdict is re-raised
+    const { chain } = makeChain({
+      inboundRateLimiterState: { tokens: 10n, capacity: 100n, rate: 1n },
+      rpcError: true,
+    })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      CCIPRateLimitExceededError,
+    )
+    // deferred balance verdict + attestation-consuming pool => the typed verdict is re-raised
+    const { chain: chain2 } = makeChain({
+      poolTypeAndVersion: 'USDCTokenPool 1.5.1',
+      isV1: true,
+      isV2: false,
+      balance: 0n, // USDCTokenPool doesn't include 'LockRelease', so force via rate limiter
+      inboundRateLimiterState: { tokens: 10n, capacity: 100n, rate: 1n },
+    })
+    await assert.rejects(
+      () => chain2.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      CCIPRateLimitExceededError,
+    )
+  })
+
+  it('zero/empty tokenReceiver never overrides the receiver (OnRamp fallback rule)', async () => {
+    const { chain, provider } = makeChain({})
+    await chain.checkExecute({
+      offRamp: OFFRAMP,
+      message: {
+        ...MESSAGE,
+        tokenReceiver: '0x',
+        tokenAmounts: [
+          {
+            sourcePoolAddress: SRC_POOL_BYTES,
+            destTokenAddress: TOKEN,
+            amount: 1000n,
+            tokenReceiver: zeroPadValue('0x', 20), // zero address on the emitted message
+          },
+        ],
+      },
+    })
+    const simCall = provider.calls.find((c) => c.data?.startsWith(ROM_V2_SEL))!
+    const [decoded] = pool.decodeFunctionData(ROM_V2_FRAG, simCall.data!)
+    assert.equal(decoded.receiver, RECEIVER)
+  })
+
+  it('LockRelease balance heuristic defers to the simulation (AndProxy pools hold liquidity on previousPool)', async () => {
+    // live-found: the generic heuristic reads the registry pool's balance, but deployed
+    // *AndProxy pools release through their previousPool — the simulation is the oracle
+    const { chain, provider } = makeChain({
+      poolTypeAndVersion: 'LockReleaseTokenPoolAndProxy 1.5.0',
+      balance: 0n, // heuristic would block; sim passes => transfer IS releasable
+    })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true)
+    assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V1_SEL)))
+    // ...but with no receiver (no simulation possible) the heuristic verdict is kept
+    const { chain: chain2 } = makeChain({
+      poolTypeAndVersion: 'LockReleaseTokenPoolAndProxy 1.5.0',
+      balance: 0n,
+    })
+    await assert.rejects(
+      () =>
+        chain2.checkExecute({
+          offRamp: OFFRAMP,
+          message: { sourceChainSelector: SOURCE_SELECTOR, tokenAmounts: MESSAGE.tokenAmounts },
+        }),
+      CCIPInsufficientBalanceError,
+    )
+  })
+
+  it('typed SDK config errors pass through untouched — never "transient unavailable" (F9)', async () => {
+    const typedError = new CCIPTokenPoolChainConfigNotFoundError(POOL, POOL, 'avalanche-fuji')
+    const { chain } = makeChain({ remotePoolsTypedError: typedError })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      (err: unknown) => {
+        assert.equal(err, typedError) // the exact typed error, not wrapped, not transient
+        return true
+      },
+    )
+  })
+
+  it('OffRamp lane gates: disabled source lane => typed block before any simulation', async () => {
+    const { chain, provider } = makeChain({
+      offRampConfig: { isEnabled: false, onRamps: [] },
+    })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourceChainUnsupportedError)
+        assert.equal(err.context['reason'], 'SourceChainNotEnabled')
+        return true
+      },
+    )
+    assert.equal(provider.calls.length, 0)
+  })
+
+  it('OffRamp lane gates: sending OnRamp not allowed => typed block', async () => {
+    const allowed = getAddress(hexlify(randomBytes(20)))
+    const other = getAddress(hexlify(randomBytes(20)))
+    const { chain } = makeChain({ offRampConfig: { isEnabled: true, onRamps: [allowed] } })
+    await assert.rejects(
+      () =>
+        chain.checkExecute({
+          offRamp: OFFRAMP,
+          message: { ...MESSAGE, onRampAddress: other },
+        }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourceChainUnsupportedError)
+        assert.equal(err.context['reason'], 'InvalidOnRamp')
+        return true
+      },
+    )
+    // matching OnRamp (case-insensitive) => gate passes, sim runs
+    const { chain: okChain } = makeChain({
+      offRampConfig: { isEnabled: true, onRamps: [allowed] },
+    })
+    assert.equal(
+      await okChain.checkExecute({
+        offRamp: OFFRAMP,
+        message: { ...MESSAGE, onRampAddress: allowed.toLowerCase() },
+      }),
+      true,
+    )
+  })
+
+  it('OffRamp lane gates: 1.2/1.5 config shape (no isEnabled) => gate no-ops', async () => {
+    const { chain } = makeChain({ offRampConfig: { onRamps: [] } })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true)
+  })
+
+  it('v1.x OffRamp + migrated 2.0 USDC proxy pool => attestation-required, and 1-arg dispatch with real data', async () => {
+    // live-found defect: dispatch/classification must follow the OFFRAMP version — a 2.0.0 proxy
+    // behind a v1.5 OffRamp executes its legacy 1-arg path, which consumes the CCTP attestation
+    const opts = {
+      poolTypeAndVersion: 'USDCTokenPoolProxy 2.0.0',
+      offRampTypeAndVersion: 'EVM2EVMOffRamp 1.5.0',
+      isV1: true,
+      isV2: true,
+    } as const
+    const { chain } = makeChain(opts)
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPDestSimulationUnavailableError)
+        assert.equal(err.reason, 'attestation-required')
+        return true
+      },
+    )
+    // with the real attestation (post-send) the sim runs — through the 1-arg overload the v1.5
+    // OffRamp will actually call, NOT the pool's IPoolV2
+    const { chain: chain2, provider } = makeChain(opts)
+    assert.equal(
+      await chain2.checkExecute({
+        offRamp: OFFRAMP,
+        message: {
+          ...MESSAGE,
+          offchainTokenData: [{ _tag: 'usdc', message: '0x12', attestation: '0x34' } as const],
+        },
+      }),
+      true,
+    )
+    assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V1_SEL)))
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+  })
+
+  it('transport failure during the ERC165 probes => unavailable (transport), not "incompatible pool"', async () => {
+    // no typeAndVersion knob: checkExecute falls back to probing, and the probe's RPC failure
+    // must NOT read as "supports neither interface" (a hard CCIPContractTypeInvalidError block)
+    const { chain } = makeChain({ probeError: 'transport' })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPDestSimulationUnavailableError)
+        assert.equal(err.reason, 'transport')
+        assert.equal(err.isTransient, true)
+        return true
+      },
+    )
+  })
 })
 
 // ============================================================================
@@ -591,16 +1214,24 @@ describe('estimateReceiveExecution wrapper — source pool data enrichment', () 
   const SRC_POOL = getAddress(hexlify(randomBytes(20)))
   const DEST_POOL_DATA = abi.encode(['uint256'], [6n])
 
-  function makeSourceChain(opts: { lockOrBurnFails?: boolean }) {
+  function makeSourceChain(opts: {
+    lockOrBurnFails?: boolean
+    lockOrBurnError?: Error
+    destTokenAmount?: bigint
+  }) {
     const chain = Object.create(EVMChain.prototype) as EVMChain
-    const simulateLockOrBurnMock = mock.fn(async () => {
-      if (opts.lockOrBurnFails) throw new Error('lockOrBurn simulation failed')
-      return {
-        sourcePoolAddress: SRC_POOL,
-        destTokenAddress: zeroPadValue(TOKEN, 32),
-        destPoolData: DEST_POOL_DATA,
-      }
-    })
+    const simulateLockOrBurnMock = mock.fn(
+      async (_opts: Parameters<NonNullable<EVMChain['simulateLockOrBurn']>>[0]) => {
+        if (opts.lockOrBurnError) throw opts.lockOrBurnError
+        if (opts.lockOrBurnFails) throw new Error('lockOrBurn simulation failed')
+        return {
+          sourcePoolAddress: SRC_POOL,
+          destTokenAddress: zeroPadValue(TOKEN, 32),
+          destPoolData: DEST_POOL_DATA,
+          destTokenAmount: opts.destTokenAmount ?? 5000n,
+        }
+      },
+    )
     Object.assign(chain, {
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       network: {
@@ -637,7 +1268,7 @@ describe('estimateReceiveExecution wrapper — source pool data enrichment', () 
       estimateReceiveExecution: estimateMock,
       getTokenInfo: mock.fn(async () => ({ decimals: 18, symbol: 'DST', name: 'Dst' })),
     })
-    return { chain, checkExecuteMock }
+    return { chain, checkExecuteMock, estimateMock }
   }
 
   const message = {
@@ -676,6 +1307,93 @@ describe('estimateReceiveExecution wrapper — source pool data enrichment', () 
     const ta = payload.message.tokenAmounts[0]!
     assert.equal(ta['token'], TOKEN)
     assert.equal(ta['extraData'], undefined)
+  })
+
+  it('fee-charging IPoolV2 pool => post-fee destTokenAmount flows into both payloads', async () => {
+    // the OnRamp writes the pool-returned post-fee amount into the emitted message; the check
+    // must see exactly that, and the gas-estimate amount scales by the same ratio
+    const { chain: source } = makeSourceChain({ destTokenAmount: 4950n }) // 1% fee on 5000
+    const { chain: dest, checkExecuteMock, estimateMock } = makeDestChain()
+    await estimateReceiveExecution({ source, dest, routerOrRamp: ONRAMP, message })
+    const checkPayload = checkExecuteMock.mock.calls[0]!.arguments[0] as {
+      message: { tokenAmounts: readonly Record<string, unknown>[] }
+    }
+    assert.equal(checkPayload.message.tokenAmounts[0]!['amount'], 4950n)
+    const estPayload = estimateMock.mock.calls[0]!.arguments[0] as {
+      message: { tokenAmounts: readonly { amount: bigint }[] }
+    }
+    assert.equal(estPayload.message.tokenAmounts[0]!.amount, 4950n) // same decimals here (18/18)
+  })
+
+  it('post-send message (emitted fields) => passed to the check verbatim, no re-simulation', async () => {
+    const { chain: source, simulateLockOrBurnMock } = makeSourceChain({})
+    const { chain: dest, checkExecuteMock } = makeDestChain()
+    const emitted = {
+      amount: 5000n,
+      sourceTokenAddress: SRC_TOKEN,
+      sourcePoolAddress: SRC_POOL,
+      destTokenAddress: TOKEN,
+      extraData: '0xfa7c07de', // the emitted destPoolData is authoritative, whatever its shape
+    }
+    await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: ONRAMP,
+      message: { ...message, tokenAmounts: [emitted] },
+    })
+    // trust emitted fields: never reconstruct the source pool or re-run lockOrBurn post-send
+    assert.equal(simulateLockOrBurnMock.mock.calls.length, 0)
+    const payload = checkExecuteMock.mock.calls[0]!.arguments[0] as {
+      message: { tokenAmounts: readonly Record<string, unknown>[] }
+    }
+    assert.deepEqual(payload.message.tokenAmounts[0], emitted)
+  })
+
+  it('pre-send caller-supplied extraData => kept for the check (skips the simulation)', async () => {
+    const { chain: source, simulateLockOrBurnMock } = makeSourceChain({})
+    const { chain: dest, checkExecuteMock } = makeDestChain()
+    const extraData = abi.encode(['uint256'], [6n])
+    await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: ONRAMP,
+      message: { ...message, tokenAmounts: [{ token: SRC_TOKEN, amount: 5000n, extraData }] },
+    })
+    assert.equal(simulateLockOrBurnMock.mock.calls.length, 0)
+    const payload = checkExecuteMock.mock.calls[0]!.arguments[0] as {
+      message: { tokenAmounts: readonly Record<string, unknown>[] }
+    }
+    assert.equal(payload.message.tokenAmounts[0]!['extraData'], extraData)
+    assert.equal(payload.message.tokenAmounts[0]!['amount'], 5000n)
+  })
+
+  it('genuine source-side revert => CCIPSourcePoolRevertError blocks (ccipSend would revert too)', async () => {
+    const { chain: source } = makeSourceChain({
+      lockOrBurnError: new CCIPSourcePoolRevertError('SenderNotAllowed (0xd0d2597600)', {
+        context: { revert: '0xd0d25976' },
+      }),
+    })
+    const { chain: dest, checkExecuteMock } = makeDestChain()
+    await assert.rejects(
+      () => estimateReceiveExecution({ source, dest, routerOrRamp: ONRAMP, message }),
+      CCIPSourcePoolRevertError,
+    )
+    assert.equal(checkExecuteMock.mock.calls.length, 0)
+  })
+
+  it('threads tokenReceiver and tokenArgs into the source lockOrBurn simulation', async () => {
+    const { chain: source, simulateLockOrBurnMock } = makeSourceChain({})
+    const { chain: dest } = makeDestChain()
+    const tokenReceiver = getAddress(hexlify(randomBytes(20)))
+    await estimateReceiveExecution({
+      source,
+      dest,
+      routerOrRamp: ONRAMP,
+      message: { ...message, tokenReceiver, tokenArgs: '0x1234' },
+    })
+    const simArgs = simulateLockOrBurnMock.mock.calls[0]!.arguments[0]
+    assert.equal(simArgs.tokenReceiver, tokenReceiver)
+    assert.equal(simArgs.tokenArgs, '0x1234')
   })
 })
 

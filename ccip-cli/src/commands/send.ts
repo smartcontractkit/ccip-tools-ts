@@ -23,6 +23,7 @@ import {
   type ChainStatic,
   type MessageInput,
   CCIPArgumentInvalidError,
+  CCIPDestSimulationUnavailableError,
   CCIPInsufficientBalanceError,
   CCIPMethodUnsupportedError,
   CCIPTokenNotFoundError,
@@ -378,9 +379,21 @@ async function sendMessage(
     } catch (err) {
       // if user requested estimation explicitly, surface any error
       if (argv.estimateGasLimit != null || argv.onlyEstimate) throw err
-      // otherwise, surface anything other than unimplemented error (e.g. CCIPRateLimitExceededError)
-      if (!(err instanceof CCIPMethodUnsupportedError)) throw err
-      logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
+      if (err instanceof CCIPMethodUnsupportedError) {
+        logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
+      } else if (err instanceof CCIPDestSimulationUnavailableError) {
+        // inconclusive, not a verdict (dest RPC unreachable, or an attestation-consuming pool
+        // that fundamentally can't be checked pre-send) — by default warn and continue with
+        // default gasLimit; pass --estimate-gas-limit/--only-estimate to make it fatal
+        logger.warn(
+          'Destination preflight could not be performed — continuing without it:',
+          err.message,
+        )
+      } else {
+        // definitive verdicts (e.g. CCIPDestExecutionRevertError, CCIPRateLimitExceededError)
+        // always block the send
+        throw err
+      }
     }
 
   let feeToken, feeTokenInfo

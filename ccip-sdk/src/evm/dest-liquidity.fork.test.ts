@@ -1,37 +1,35 @@
 /**
- * Fork tests for the destination-liquidity preflight.
+ * Fork tests for the destination-liquidity preflight — scenarios that must MUTATE chain state to
+ * reproduce, on anvil forks of live testnets (same harness as fork.test.ts):
  *
- * Anvil forks of live testnets (same harness as fork.test.ts), exercising the pool-direct
- * `releaseOrMint` simulation against live deployed pools:
+ * - MINTER_ROLE revoked on the dest token (impersonated admin): the AccessControl revert blocks
+ *   the send with a non-transient CCIPDestExecutionRevertError, and recovers once re-granted.
+ * - A transfer fee configured on the source pool (impersonated owner): `simulateLockOrBurn`
+ *   surfaces the post-fee `destTokenAmount` the OnRamp would emit.
  *
- * - Fuji (v2.0): a dedicated isolated test lane (BurnMintTokenPool 2.0.0, `OffRamp 2.0.0`) —
- *   healthy pass, IPoolV2 2-arg dispatch, gas parity through the full `estimateReceiveExecution`
- *   wrapper, and a missing-mint-role case (MINTER_ROLE revoked on the fork, so the AccessControl
- *   revert blocks the send with CCIPDestExecutionRevertError, non-transient).
- * - Sepolia (v1.5 prod lane): the production LINK LockReleaseTokenPool as destination of the
- *   Fuji→Sepolia lane (`EVM2EVMOffRamp 1.5`) — IPoolV1 1-arg dispatch and a genuine
- *   over-balance revert.
+ * Read-only scenarios (healthy sim, checkExecute end-to-end, wrapper/direct gas parity) run
+ * against the live RPCs directly in dest-liquidity.integration.test.ts — no fork needed.
  *
  * Forks run at the head block: public testnet RPCs prune historical state, so pinning old
- * blocks would require an archive endpoint. The MINTER-revoke case instead reproduces the
- * missing-role defect at the fork head via anvil impersonation.
+ * blocks would require an archive endpoint.
  */
 import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Contract, JsonRpcProvider, hexlify, randomBytes, zeroPadValue } from 'ethers'
+import { Contract, JsonRpcProvider, solidityPackedKeccak256, toBeHex, zeroPadValue } from 'ethers'
 import { Instance } from 'prool'
 
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
-import { CCIPDestExecutionRevertError } from '../errors/index.ts'
-import { estimateReceiveExecution } from '../gas.ts'
+import { interfaces } from './const.ts'
 import { getErrorData, parseWithFragment } from './errors.ts'
+import { findBalancesSlot } from './gas.ts'
 import { EVMChain } from './index.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
+import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 
 // ── Chain constants ──
 
@@ -41,6 +39,7 @@ const SEPOLIA_SELECTOR = 16015286601757825753n
 
 const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
 const FUJI_CHAIN_ID = 43113
+const FUJI_SELECTOR = 14767482510784806043n
 
 // ── Isolated v2.0 lane (Sepolia -> Fuji) with a dedicated test token and pools ──
 // (the dest pool holds MINTER_ROLE on the dest token, so the lane is healthy)
@@ -106,9 +105,7 @@ describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () =
     await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
   })
 
-  // ── v2.0 lane (Fuji dest): BurnMintTokenPool 2.0.0 behind OffRamp 2.0.0 ──
-
-  describe('v2.0 dest (Fuji isolated lane, BurnMintTokenPool 2.0.0)', () => {
+  describe('v2.0 lane state-manipulation scenarios', () => {
     const receiver = '0x1111111111111111111111111111111111111111'
     const input = {
       originalSender: receiver,
@@ -118,69 +115,6 @@ describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () =
       localToken: V2_LANE.destToken,
       sourcePoolAddress: zeroPadValue(V2_LANE.srcPool, 32),
     }
-
-    it('healthy mint pool => sim passes via the IPoolV2 2-arg branch', async () => {
-      assert.ok(fujiChain)
-      const result = await simulateReleaseOrMint({
-        provider: fujiChain.provider,
-        pool: V2_LANE.destPool,
-        offRamp: V2_LANE.destOffRamp,
-        input,
-        finality: 'finalized',
-      })
-      assert.equal(result.poolInterface, 'IPoolV2')
-      assert.equal(result.destinationAmount, input.sourceDenominatedAmount)
-    })
-
-    it('checkExecute passes end-to-end on the healthy lane', async () => {
-      assert.ok(fujiChain)
-      assert.equal(
-        await fujiChain.checkExecute({
-          offRamp: V2_LANE.destOffRamp,
-          message: {
-            sourceChainSelector: SEPOLIA_SELECTOR,
-            receiver,
-            sender: receiver,
-            tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
-          },
-        }),
-        true,
-      )
-    })
-
-    it('estimateReceiveExecution wrapper matches the direct dest-side gas estimate', async () => {
-      assert.ok(sepoliaChain && fujiChain)
-      const messageId = hexlify(randomBytes(32))
-      const sender = V2_LANE.operator
-      // full wrapper: source-token mapping + checkExecute + gas estimate
-      const viaWrapper = await estimateReceiveExecution({
-        source: sepoliaChain,
-        dest: fujiChain,
-        routerOrRamp: V2_LANE.srcRouter,
-        message: {
-          messageId,
-          sender,
-          receiver,
-          data: '0x',
-          onRampAddress: V2_LANE.srcOnRamp,
-          offRampAddress: V2_LANE.destOffRamp,
-          tokenAmounts: [{ token: V2_LANE.srcToken, amount: 10n ** 18n }],
-        },
-      })
-      // direct dest-side estimate (the function the wrapper delegates the gas number to)
-      const direct = await fujiChain.estimateReceiveExecution({
-        offRamp: V2_LANE.destOffRamp,
-        message: {
-          messageId,
-          sender,
-          receiver,
-          data: '0x',
-          sourceChainSelector: SEPOLIA_SELECTOR,
-          tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
-        },
-      })
-      assert.equal(viaWrapper, direct)
-    })
 
     it('MINTER_ROLE revoked on the fork => classified as authority, checkExecute throws', async () => {
       assert.ok(fujiChain)
@@ -269,6 +203,98 @@ describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () =
         }),
         true,
       )
+    })
+
+    it('LockRelease dest drained on the fork => typed transient block (heuristic deferred, sim decides)', async () => {
+      // prod LnM lane: Sepolia dest pool is a LockReleaseTokenPoolAndProxy 1.5.0 holding its
+      // liquidity on the previousPool. Drain the previousPool's token balance on the fork: the
+      // releaseOrMint simulation (the oracle the balance heuristic defers to) must then revert,
+      // blocking with a typed, transient error.
+      assert.ok(sepoliaChain)
+      const provider = sepoliaChain.provider as JsonRpcProvider
+      const LNM = '0x466D489b6d36E7E3b824ef491C225F5830E81cC1'
+      const REGISTRY = '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82'
+      const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+      const { tokenPool } = await sepoliaChain.getRegistryTokenConfig(REGISTRY, LNM)
+      assert.ok(tokenPool)
+      const { previousPool } = await sepoliaChain.getTokenPoolConfig(tokenPool)
+      assert.ok(previousPool, 'LnM AndProxy has a previousPool (holds the liquidity)')
+      const offRamps = await sepoliaChain.getOffRampsForRouter(ROUTER, FUJI_SELECTOR)
+      const offRamp = offRamps.at(-1)!
+      const message = {
+        sourceChainSelector: FUJI_SELECTOR,
+        receiver: '0x1111111111111111111111111111111111111111',
+        tokenAmounts: [{ token: LNM, amount: 10n ** 16n }] as const,
+      }
+      // sanity: with liquidity in place, the (drained-holder-aware) preflight passes
+      assert.equal(await sepoliaChain.checkExecute({ offRamp, message }), true)
+      // drain: zero the previousPool's token balance via storage override
+      const slot = await findBalancesSlot(LNM, provider)
+      await provider.send('anvil_setStorageAt', [
+        LNM,
+        solidityPackedKeccak256(['uint256', 'uint256'], [previousPool, slot]),
+        toBeHex(0n, 32),
+      ])
+      await assert.rejects(
+        () => sepoliaChain!.checkExecute({ offRamp, message }),
+        (err: CCIPDestExecutionRevertError) => {
+          assert.ok(err instanceof CCIPDestExecutionRevertError, String(err))
+          // the raw revert is carried for the caller to parse (legacy pools revert with plain
+          // ERC20 Error(string) reasons here, which read non-transient — same verdict class the
+          // pre-existing CCIPInsufficientBalanceError heuristic produced)
+          assert.ok(err.context['revert'], 'raw revert carried')
+          return true
+        },
+      )
+    })
+
+    it('fee-charging source pool (fee config set on the fork) => post-fee destTokenAmount surfaced', async () => {
+      assert.ok(sepoliaChain)
+      const provider = sepoliaChain.provider as JsonRpcProvider
+      const srcPool = new Contract(
+        V2_LANE.srcPool,
+        interfaces.TokenPool_v2_0,
+        provider,
+      ) as Contract & { owner(): Promise<string> }
+      const owner = await srcPool.owner()
+      await provider.send('anvil_impersonateAccount', [owner])
+      await provider.send('anvil_setBalance', [owner, '0x1000000000000000000'])
+      // configure a 1% finality transfer fee for the Fuji lane, like a fee-charging v2 pool
+      const asOwner = srcPool.connect(await provider.getSigner(owner)) as Contract
+      await (
+        (await asOwner.getFunction('applyTokenTransferFeeConfigUpdates')(
+          [
+            {
+              destChainSelector: FUJI_SELECTOR,
+              tokenTransferFeeConfig: {
+                destGasOverhead: 90_000,
+                destBytesOverhead: 32,
+                finalityFeeUSDCents: 0,
+                fastFinalityFeeUSDCents: 0,
+                finalityTransferFeeBps: 100, // 1%
+                fastFinalityTransferFeeBps: 100,
+                isEnabled: true,
+              },
+            },
+          ],
+          [], // disableTokenTransferFeeConfigs
+        )) as { wait: () => Promise<unknown> }
+      ).wait()
+      await provider.send('anvil_stopImpersonatingAccount', [owner])
+
+      // the OnRamp writes lockOrBurn's post-fee destTokenAmount into the emitted message —
+      // simulateLockOrBurn must surface exactly that
+      const amount = 10n ** 18n
+      const result = await sepoliaChain.simulateLockOrBurn({
+        onRamp: V2_LANE.srcOnRamp,
+        destChainSelector: FUJI_SELECTOR,
+        token: V2_LANE.srcToken,
+        amount,
+        originalSender: V2_LANE.operator,
+        receiver,
+      })
+      assert.equal(result.destTokenAmount, (amount * 9900n) / 10000n)
+      assert.equal(result.sourcePoolAddress, V2_LANE.srcPool)
     })
   })
 })

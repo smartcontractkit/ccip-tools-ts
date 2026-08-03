@@ -73,6 +73,7 @@ export {
   type SimulateReleaseOrMintOpts,
   CCIP_POOL_V1_INTERFACE_ID,
   IPOOL_V2_INTERFACE_ID,
+  classifyPoolRevert,
   isTransientReleaseOrMintRevert,
   simulateLockOrBurn,
   simulateReleaseOrMint,

@@ -12,11 +12,20 @@
  * `CCIP_POOL_V1` for the 1-arg variant, following the pool's own ERC165 answer the same way
  * `OffRamp._releaseOrMintSingleToken` does.
  */
-import { type BytesLike, type JsonRpcApiProvider, hexlify, toBeHex, zeroPadValue } from 'ethers'
+import {
+  type BytesLike,
+  type JsonRpcApiProvider,
+  MaxUint256,
+  hexlify,
+  id,
+  isError,
+  toBeHex,
+  zeroPadValue,
+} from 'ethers'
 
 import { interfaces } from './const.ts'
 import { parseWithFragment } from './errors.ts'
-import { CCIPContractTypeInvalidError } from '../errors/index.ts'
+import { CCIPArgumentInvalidError, CCIPContractTypeInvalidError } from '../errors/index.ts'
 import { type FinalityRequested, encodeFinality } from '../extra-args.ts'
 import { getAddressBytes, getDataBytes } from '../utils.ts'
 
@@ -29,41 +38,65 @@ export const IPOOL_V2_INTERFACE_ID = '0x940a1542'
  * ERC165 interface id of v1 pools: `Pool.CCIP_POOL_V1 = bytes4(keccak256("CCIP_POOL_V1"))`
  * (1-arg `releaseOrMint`/`lockOrBurn`; v1.5.0 through v1.6.x, incl. the oUSDT pools).
  */
-export const CCIP_POOL_V1_INTERFACE_ID = '0xaff2afbf'
+export const CCIP_POOL_V1_INTERFACE_ID = id('CCIP_POOL_V1').substring(0, 10) as '0xaff2afbf'
 
 /** Which pool release interface the simulation dispatched to (mirroring the OffRamp). */
 export type PoolInterfaceVersion = 'IPoolV2' | 'IPoolV1'
 
-// Destination `releaseOrMint` revert names that typically clear on their own — a liquidity
-// shortfall is topped up, a rate limit refills, an RMN curse is lifted. Used ONLY to flag the
-// generic dest-execution error as transient (retryable); it never selects an error type or the
-// block decision. Names are matched against the shared SDK ABI bundle, so every entry is a
-// standard chainlink-ccip pool / RateLimiter error. External errors not in the bundle (oUSDT
-// lockbox, xERC20 bridge limits) read as non-transient — the caller can parse `context.revert`
-// (the raw encoded revert) with `EVMChain.parse` to refine.
+// Pool revert names that typically clear on their own — a liquidity shortfall is topped up, a
+// rate limit refills, an xERC20 bridge limit replenishes, an RMN curse is lifted. Used ONLY to
+// flag the raised error as transient (retryable); it never selects an error type or the block
+// decision. Names are matched against the shared SDK ABI bundle, so every entry is a standard
+// chainlink-ccip pool / RateLimiter (or well-known bridge) error. NOT here, deliberately:
+// `TokenMaxCapacityExceeded` / `AggregateValueMaxCapacityExceeded` mean amount > the bucket's
+// static capacity — the maximum never refills, so the transfer can never succeed at that amount.
 const TRANSIENT_REVERT_NAMES = new Set([
   'InsufficientLiquidity',
   'InsufficientBalance',
   'ERC20InsufficientBalance',
-  'TokenMaxCapacityExceeded',
+  'InsufficientLockboxBalance',
   'TokenRateLimitReached',
+  'AggregateValueRateLimitReached',
   'CursedByRMN',
+  'NotHighEnoughLimits',
+  'IXERC20_NotHighEnoughLimits',
 ])
 
 /**
- * Whether a destination `releaseOrMint` revert is one that typically clears on its own, so a later
- * retry may succeed. Decodes the selector against the shared SDK ABI bundle (the standard parse)
- * and checks it against {@link TRANSIENT_REVERT_NAMES}; anything unrecognized reads as
- * non-transient. This only sets the `isTransient` flag on the raised error — a revert always
- * blocks the send regardless.
+ * Classify a pool revert (source `lockOrBurn` or destination `releaseOrMint`): best-effort decode
+ * against the shared SDK ABI bundle, plus whether the revert typically clears on its own so a
+ * later retry may succeed. Anything unrecognized reads as non-transient. This single classifier
+ * feeds the `isTransient` flag of both `CCIPDestExecutionRevertError` and
+ * `CCIPSourcePoolRevertError` — a revert always blocks regardless. (The codes-level
+ * `TRANSIENT_ERROR_CODES` table covers non-revert errors; for these two codes the instance flag
+ * decided here wins.)
+ *
+ * Special case: `TokenRateLimitReached(minWaitInSeconds, ...)` is refillable — EXCEPT v2.0
+ * zero-rate buckets, which emit it with `minWaitInSeconds == type(uint256).max` (the bucket never
+ * refills) — permanent.
+ *
+ * @param data - raw revert data (`0x`-prefixed) from the failed `eth_call`
+ * @returns decoded error `name` (when a known ABI matches) and the `isTransient` verdict
+ */
+export function classifyPoolRevert(data: BytesLike): { name?: string; isTransient: boolean } {
+  const hex = hexlify(getDataBytes(data))
+  if (hex.length < 10) return { isTransient: false }
+  const parsed = parseWithFragment(hex)
+  if (!parsed) return { isTransient: false }
+  const name = parsed[0].name
+  if (name === 'TokenRateLimitReached' && parsed[2]?.[0] === MaxUint256)
+    return { name, isTransient: false }
+  return { name, isTransient: TRANSIENT_REVERT_NAMES.has(name) }
+}
+
+/**
+ * Whether a pool revert is one that typically clears on its own, so a later retry may succeed —
+ * shorthand for {@link classifyPoolRevert}`.isTransient`.
  *
  * @param data - raw revert data (`0x`-prefixed) from the failed `eth_call`
  */
 export function isTransientReleaseOrMintRevert(data: BytesLike): boolean {
-  const hex = hexlify(getDataBytes(data))
-  if (hex.length < 10) return false
-  const parsed = parseWithFragment(hex.slice(0, 10))
-  return parsed != null && TRANSIENT_REVERT_NAMES.has(parsed[0].name)
+  return classifyPoolRevert(data).isTransient
 }
 
 /**
@@ -125,6 +158,11 @@ export type SimulateReleaseOrMintOpts = {
   input: ReleaseOrMintSimInput
   /** Requested finality (v2/IPoolV2 pools only; encoded as the 2nd `releaseOrMint` arg). */
   finality?: FinalityRequested
+  /**
+   * Known pool interface generation, when the caller already resolved it (e.g. from the pool's
+   * `typeAndVersion`). Skips the ERC165 probes; omit to mirror the OffRamp's own ERC165 dispatch.
+   */
+  poolInterface?: PoolInterfaceVersion
 }
 
 async function probeSupportsInterface(
@@ -138,9 +176,32 @@ async function probeSupportsInterface(
       data: interfaces.TokenPool_v2_0.encodeFunctionData('supportsInterface', [interfaceId]),
     })
     return !!interfaces.TokenPool_v2_0.decodeFunctionResult('supportsInterface', result)[0]
-  } catch {
-    return false // non-ERC165 contract
+  } catch (err) {
+    // Only a completed call answers the ERC165 question: a revert (non-ERC165 contracts revert or
+    // return nothing on the unknown selector) or an undecodable/empty return means "unsupported".
+    // A transport/RPC failure answers nothing — rethrow so the caller reports the check as
+    // unavailable instead of mislabeling the pool as incompatible.
+    if (isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')) return false
+    throw err
   }
+}
+
+/**
+ * Resolve which pool interface generation to dispatch to, mirroring the OffRamp's own ERC165
+ * probing order (IPoolV2 first, then the CCIP_POOL_V1 tag).
+ *
+ * @throws {@link CCIPContractTypeInvalidError} if the pool supports neither
+ * @throws The raw provider error on RPC/transport failure (the ERC165 question was never answered)
+ */
+async function resolvePoolInterface(
+  provider: JsonRpcApiProvider,
+  pool: string,
+): Promise<PoolInterfaceVersion> {
+  if (await probeSupportsInterface(provider, pool, IPOOL_V2_INTERFACE_ID)) return 'IPoolV2'
+  if (await probeSupportsInterface(provider, pool, CCIP_POOL_V1_INTERFACE_ID)) return 'IPoolV1'
+  throw new CCIPContractTypeInvalidError(pool, 'unknown (not ERC165 IPoolV2/CCIP_POOL_V1)', [
+    'TokenPool',
+  ])
 }
 
 function encodeReleaseOrMintIn(input: ReleaseOrMintSimInput) {
@@ -205,29 +266,25 @@ export async function simulateReleaseOrMint({
   offRamp,
   input,
   finality,
+  poolInterface: poolInterfaceHint,
 }: SimulateReleaseOrMintOpts): Promise<{
   poolInterface: PoolInterfaceVersion
   destinationAmount: bigint
 }> {
   const releaseOrMintIn = encodeReleaseOrMintIn(input)
 
-  let poolInterface: PoolInterfaceVersion, calldata: string
-  if (await probeSupportsInterface(provider, pool, IPOOL_V2_INTERFACE_ID)) {
-    poolInterface = 'IPoolV2'
+  const poolInterface = poolInterfaceHint ?? (await resolvePoolInterface(provider, pool))
+  let calldata: string
+  if (poolInterface === 'IPoolV2') {
     calldata = interfaces.TokenPool_v2_0.encodeFunctionData(
       'releaseOrMint((bytes,uint64,address,uint256,address,bytes,bytes,bytes),bytes4)',
       [releaseOrMintIn, toBeHex(encodeFinality(finality ?? 0n), 4)],
     )
-  } else if (await probeSupportsInterface(provider, pool, CCIP_POOL_V1_INTERFACE_ID)) {
-    poolInterface = 'IPoolV1'
+  } else {
     calldata = interfaces.TokenPool_v2_0.encodeFunctionData(
       'releaseOrMint((bytes,uint64,address,uint256,address,bytes,bytes,bytes))',
       [releaseOrMintIn],
     )
-  } else {
-    throw new CCIPContractTypeInvalidError(pool, 'unknown (not ERC165 IPoolV2/CCIP_POOL_V1)', [
-      'TokenPool',
-    ])
   }
 
   const result = await provider.call({ from: offRamp, to: pool, data: calldata })
@@ -275,22 +332,40 @@ export type SimulateLockOrBurnOpts = {
    * balance overridden to reach the `destPoolData` return.
    */
   stateOverrides?: Record<string, unknown>
+  /**
+   * Known pool interface generation, when the caller already resolved it (e.g. from the pool's
+   * `typeAndVersion`). Skips the ERC165 probes; omit to mirror the OnRamp's own ERC165 dispatch.
+   */
+  poolInterface?: PoolInterfaceVersion
+  /**
+   * Message-level `GenericExtraArgsV3.tokenArgs`, passed through to `IPoolV2.lockOrBurn` exactly
+   * like the OnRamp does (pools/hooks may branch on it). Empty for legacy V1/V2 extraArgs.
+   * IPoolV1 pools don't take it — the OnRamp reverts `TokenArgsNotSupportedOnPoolV1` for
+   * non-empty tokenArgs there, mirrored here as a typed error.
+   */
+  tokenArgs?: BytesLike
 }
 
 /**
- * Simulate the source pool's `lockOrBurn` to obtain `destPoolData`, the value the
- * destination `releaseOrMint` consumes as `sourcePoolData`. Needed only for source pools whose
- * `lockOrBurn` returns something other than decimals (every base-`TokenPool` pool returns
- * `abi.encode(uint256(localDecimals))`, so the {@link simulateReleaseOrMint} default covers them).
+ * Simulate the source pool's `lockOrBurn` to obtain `destPoolData` (the value the destination
+ * `releaseOrMint` consumes as `sourcePoolData`) and `destTokenAmount` — the post-fee amount the
+ * OnRamp writes into the emitted message (`TokenTransferV1.amount`), which for fee-charging
+ * IPoolV2 pools differs from the input amount. Needed for any destination check that must match
+ * the real message (every base-`TokenPool` pool returns `abi.encode(uint256(localDecimals))` and
+ * deducts its configured bps fee, if any).
  *
  * Note this is a superset of "fetch destPoolData": it also exercises the source pool's
  * `_validateLockOrBurn` gates (onRamp check, allowlist, outbound rate limit, finality gate), so a
  * revert here may equally indicate a source-side block.
  *
  * @param opts - {@link SimulateLockOrBurnOpts}
- * @returns pool interface used, `destTokenAddress` and `destPoolData` as returned by the pool
+ * @returns pool interface used, `destTokenAddress` and `destPoolData` as returned by the pool,
+ *   and `destTokenAmount` (post-fee for IPoolV2; the legacy 1-arg overload never deducts, so it
+ *   equals `input.amount` there)
  *
  * @throws {@link CCIPContractTypeInvalidError} if the pool supports neither IPoolV2 nor CCIP_POOL_V1
+ * @throws {@link CCIPArgumentInvalidError} if `tokenArgs` is non-empty for an IPoolV1 pool (the
+ *   OnRamp would revert `TokenArgsNotSupportedOnPoolV1`)
  * @throws The raw `eth_call` provider error on any revert
  */
 export async function simulateLockOrBurn({
@@ -300,10 +375,13 @@ export async function simulateLockOrBurn({
   input,
   finality,
   stateOverrides,
+  poolInterface: poolInterfaceHint,
+  tokenArgs,
 }: SimulateLockOrBurnOpts): Promise<{
   poolInterface: PoolInterfaceVersion
   destTokenAddress: string
   destPoolData: string
+  destTokenAmount: bigint
 }> {
   const lockOrBurnIn = {
     receiver: hexlify(getDataBytes(input.receiver)),
@@ -312,22 +390,24 @@ export async function simulateLockOrBurn({
     amount: input.amount,
     localToken: input.localToken,
   }
+  const tokenArgsHex = hexlify(getDataBytes(tokenArgs ?? '0x'))
 
-  let poolInterface: PoolInterfaceVersion, fragment: string, args: unknown[]
-  if (await probeSupportsInterface(provider, pool, IPOOL_V2_INTERFACE_ID)) {
+  const poolInterface = poolInterfaceHint ?? (await resolvePoolInterface(provider, pool))
+  let fragment: string, args: unknown[]
+  if (poolInterface === 'IPoolV2') {
     // IPoolV2.lockOrBurn(LockOrBurnInV1, bytes4 requestedFinalityConfig, bytes tokenArgs)
-    // returns (LockOrBurnOutV1, uint256 destTokenAmount); tokenArgs is empty for base pools
-    poolInterface = 'IPoolV2'
+    // returns (LockOrBurnOutV1, uint256 destTokenAmount)
     fragment = 'lockOrBurn((bytes,uint64,address,uint256,address),bytes4,bytes)'
-    args = [lockOrBurnIn, toBeHex(encodeFinality(finality ?? 0n), 4), '0x']
-  } else if (await probeSupportsInterface(provider, pool, CCIP_POOL_V1_INTERFACE_ID)) {
-    poolInterface = 'IPoolV1'
+    args = [lockOrBurnIn, toBeHex(encodeFinality(finality ?? 0n), 4), tokenArgsHex]
+  } else {
+    if (tokenArgsHex !== '0x')
+      throw new CCIPArgumentInvalidError(
+        'tokenArgs',
+        'not supported by IPoolV1 pools (OnRamp reverts TokenArgsNotSupportedOnPoolV1)',
+        { context: { pool, tokenArgs: tokenArgsHex } },
+      )
     fragment = 'lockOrBurn((bytes,uint64,address,uint256,address))'
     args = [lockOrBurnIn]
-  } else {
-    throw new CCIPContractTypeInvalidError(pool, 'unknown (not ERC165 IPoolV2/CCIP_POOL_V1)', [
-      'TokenPool',
-    ])
   }
   const calldata = interfaces.TokenPool_v2_0.encodeFunctionData(fragment, args)
 
@@ -336,9 +416,12 @@ export async function simulateLockOrBurn({
     'latest',
     ...(stateOverrides ? [stateOverrides] : []),
   ])) as string
-  const [{ destTokenAddress, destPoolData }] = interfaces.TokenPool_v2_0.decodeFunctionResult(
-    fragment,
-    result,
-  ) as unknown as [{ destTokenAddress: string; destPoolData: string }]
-  return { poolInterface, destTokenAddress, destPoolData }
+  const decoded = interfaces.TokenPool_v2_0.decodeFunctionResult(fragment, result) as unknown as [
+    { destTokenAddress: string; destPoolData: string },
+    bigint?,
+  ]
+  const [{ destTokenAddress, destPoolData }] = decoded
+  // the legacy 1-arg overload never deducts fees — the OnRamp passes the input amount through
+  const destTokenAmount = poolInterface === 'IPoolV2' ? (decoded[1] ?? input.amount) : input.amount
+  return { poolInterface, destTokenAddress, destPoolData, destTokenAmount }
 }

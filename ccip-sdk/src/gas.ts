@@ -6,6 +6,7 @@ import {
   CCIPContractTypeInvalidError,
   CCIPMethodUnsupportedError,
   CCIPOnRampRequiredError,
+  CCIPSourcePoolRevertError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
@@ -14,7 +15,7 @@ import { discoverOffRamp } from './execution.ts'
 import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
-import type { CCIPMessage, MessageInput } from './types.ts'
+import type { CCIPMessage, MessageInput, OffchainTokenData } from './types.ts'
 import { getDataBytes } from './utils.ts'
 
 /**
@@ -46,8 +47,23 @@ export type EstimateMessageInput = Simplify<
             sourceTokenAddress?: string
             sourcePoolAddress: string
             destTokenAddress: string
+            /** per-token receiver (v2.0 `TokenTransferV1.tokenReceiver`), when known */
+            tokenReceiver?: string
           }
       ))[]
+      /**
+       * Message-level `GenericExtraArgsV3.tokenArgs` — the OnRamp passes it through to
+       * `IPoolV2.lockOrBurn`, so pools/hooks branching on it must see the same value here.
+       * Empty for legacy V1/V2 extraArgs.
+       */
+      tokenArgs?: string
+      /**
+       * Offchain token data (CCTP attestations, bridge proofs), index-aligned with
+       * `tokenAmounts`. Only exists post-send — fetch with `source.getOffchainTokenData(request)`
+       * when estimating for an already-sent message (e.g. manual execution); enables the
+       * destination preflight for pools whose `releaseOrMint` consumes it.
+       */
+      offchainTokenData?: readonly OffchainTokenData[]
     }
 >
 
@@ -264,54 +280,92 @@ export async function estimateReceiveExecution({
   const resolvedTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (tokenAmount) => {
       const destTokenAmount = await getDestTokenAmount({ source, dest, onRamp, tokenAmount })
-      // with the source chain at hand, obtain the pool-reported destPoolData from the source
-      // pool's lockOrBurn, so the destination releaseOrMint simulation consumes the same
-      // sourcePoolData a real transfer would carry (paired with the source-denominated amount)
       let forCheck: NonNullable<EstimateMessageInput['tokenAmounts']>[number] = destTokenAmount
-      if (source.simulateLockOrBurn && 'token' in tokenAmount && !tokenAmount.extraData) {
+      let destForEstimate = destTokenAmount
+      if ('sourcePoolAddress' in tokenAmount) {
+        // post-send (an already-emitted message, e.g. manual-exec): the emitted fields are the
+        // authoritative truth — pass them through verbatim; never re-derive the source pool from
+        // current dest config (it may have migrated) nor re-simulate lockOrBurn
+        forCheck = tokenAmount
+      } else if (tokenAmount.extraData && getDataBytes(tokenAmount.extraData).length) {
+        // caller-supplied source pool data: keep it for the check (it declares the source
+        // decimals / pool payload the amount is denominated in)
+        forCheck = {
+          token: destTokenAmount.token,
+          amount: tokenAmount.amount,
+          extraData: tokenAmount.extraData,
+        }
+      } else if (source.simulateLockOrBurn) {
+        // pre-send: obtain the pool-reported destPoolData and post-fee destTokenAmount from the
+        // source pool's lockOrBurn, so the destination releaseOrMint simulation consumes the same
+        // message the OnRamp would actually emit
         try {
-          const { sourcePoolAddress, destPoolData } = await source.simulateLockOrBurn({
+          const {
+            sourcePoolAddress,
+            destPoolData,
+            destTokenAmount: postFeeAmount,
+          } = await source.simulateLockOrBurn({
             onRamp,
             destChainSelector: dest.network.chainSelector,
             token: tokenAmount.token,
             amount: tokenAmount.amount,
             originalSender: message.sender,
             receiver: message.receiver,
+            tokenReceiver: message.tokenReceiver,
+            tokenArgs: message.tokenArgs,
             finality: message.finality,
           })
           forCheck = {
-            amount: tokenAmount.amount,
+            // the OnRamp writes the pool-returned post-fee amount into the emitted message
+            amount: postFeeAmount,
             sourceTokenAddress: tokenAmount.token,
             sourcePoolAddress,
             destTokenAddress: destTokenAmount.token,
             extraData: destPoolData,
           }
+          if (postFeeAmount !== tokenAmount.amount && tokenAmount.amount > 0n)
+            // scale the dest-denominated estimate amount by the same fee ratio
+            destForEstimate = {
+              token: destTokenAmount.token,
+              amount: (destTokenAmount.amount * postFeeAmount) / tokenAmount.amount,
+            }
         } catch (err) {
+          // a genuine source-side gate blocks the send (ccipSend would revert the same way);
+          // anything else (transport, state-override artifacts) falls back to the decimals default
+          if (err instanceof CCIPSourcePoolRevertError) throw err
           source.logger.debug(
             `lockOrBurn simulation unavailable for token=${tokenAmount.token}; using decimals default:`,
             err,
           )
         }
       }
-      return { dest: destTokenAmount, forCheck }
+      return { dest: destForEstimate, forCheck }
     }),
   )
   const destTokenAmounts = resolvedTokenAmounts.map(({ dest }) => dest)
-  const payload = {
+  // one resolution pass, two payloads: the check consumes the source-pool-reported shape
+  // (source-denominated post-fee amount + pool destPoolData, or the emitted fields verbatim),
+  // while the gas estimate keeps the dest-denominated tokenAmounts `buildMessageForDest` shaped
+  const baseMessage = {
+    ...buildMessageForDest({ ...message, tokenAmounts: destTokenAmounts }, dest.network.family),
+    messageId: message.messageId ?? hexlify(randomBytes(32)),
+    sourceChainSelector: source.network.chainSelector,
+  }
+  await dest.checkExecute({
     offRamp,
     message: {
-      ...buildMessageForDest({ ...message, tokenAmounts: destTokenAmounts }, dest.network.family),
-      // the source-pool-reported shape (source-denominated amount + pool destPoolData) takes
-      // precedence for the destination checks; getDestTokenAmount re-derives dest amounts
+      ...baseMessage,
       tokenAmounts: resolvedTokenAmounts.map(({ forCheck }) => forCheck),
-      messageId: message.messageId ?? hexlify(randomBytes(32)),
-      sourceChainSelector: source.network.chainSelector,
+      // the resolved OnRamp lets the dest OffRamp's allowed-onRamps lane gate run pre-send too
+      onRampAddress: onRamp,
+      // post-send only (fetched from the source request); enables the destination preflight for
+      // attestation-consuming pools
+      offchainTokenData: message.offchainTokenData,
     },
-  }
-  await dest.checkExecute(payload)
+  })
 
   if (!dest.estimateReceiveExecution)
     throw new CCIPMethodUnsupportedError(dest.constructor.name, 'estimateReceiveExecution')
 
-  return dest.estimateReceiveExecution(payload)
+  return dest.estimateReceiveExecution({ offRamp, message: baseMessage })
 }

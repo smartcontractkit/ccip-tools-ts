@@ -3767,12 +3767,60 @@ export class CCIPDestExecutionRevertError extends CCIPError {
 }
 
 /**
- * Thrown when the destination pool's `releaseOrMint` simulation could not be performed at all —
- * the `eth_call` failed with a transport/RPC error rather than a contract revert. Executability is
- * therefore undetermined (neither proven nor disproven), so this is **transient**
- * (`isTransient === true`): the caller should retry, optionally against a different destination
- * RPC. It is distinct from {@link CCIPDestExecutionRevertError}, which means the call did revert
- * and the message would not execute.
+ * Thrown when the source pool's `lockOrBurn` simulation reverts with a genuine on-chain gate —
+ * sender allowlist, outbound rate limit, finality gate, chain not allowed. The real `ccipSend`
+ * would revert with the same cause, so the send is blocked at preflight. Like
+ * {@link CCIPDestExecutionRevertError}, the raw encoded revert is carried in `context.revert` for
+ * the caller to decode with `EVMChain.parse` and branch on the exact cause.
+ *
+ * Reverts attributable to the simulation setup itself (the pool's token balance is only
+ * best-effort state-overridden) are NOT raised as this error — they fall back to the decimals
+ * default instead of blocking.
+ *
+ * @example
+ * ```typescript
+ * import { CCIPSourcePoolRevertError, EVMChain } from '@chainlink/ccip-sdk'
+ *
+ * try {
+ *   await estimateReceiveExecution({ source, dest, routerOrRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPSourcePoolRevertError) {
+ *     const parsed = EVMChain.parse(error.context.revert)
+ *     console.log(`ccipSend would revert: ${parsed?.error}`, 'retryable:', error.isTransient)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPSourcePoolRevertError extends CCIPError {
+  override readonly name = 'CCIPSourcePoolRevertError'
+  /**
+   * Creates a source-pool revert error.
+   * @param detail - Best-effort decoded revert for the message (name + data, or raw selector).
+   * @param options - Optional error options. Put the raw encoded revert in `context.revert` for
+   *   the caller to parse, and pass `isTransient` when the revert is one that recovers on its own.
+   */
+  constructor(detail: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.SOURCE_POOL_REVERT, `Source pool lockOrBurn would revert: ${detail}`, {
+      ...options,
+      isTransient: options?.isTransient ?? false,
+    })
+  }
+}
+
+/**
+ * Thrown when the destination pool's `releaseOrMint` simulation could not be performed at all, so
+ * executability is undetermined (neither proven nor disproven). It is distinct from
+ * {@link CCIPDestExecutionRevertError}, which means the call did revert and the message would not
+ * execute. The `reason` (also in `context.reason`) tells why the check could not run:
+ *
+ * - `'transport'`: the `eth_call` failed with an RPC/transport error rather than a contract
+ *   revert. **Transient** (`isTransient === true`) — retry, optionally against a different
+ *   destination RPC.
+ * - `'attestation-required'`: the destination pool consumes offchain token data (a CCTP
+ *   attestation or bridge proof — e.g. USDC/CCTP v1, Lombard v1 pools) that only exists after the
+ *   message is sent, so the check is fundamentally unavailable pre-send. **Not transient** —
+ *   retrying pre-send can never succeed; the check becomes possible post-send (e.g.
+ *   `manual-exec --estimate-gas-limit`, where the real attestation is supplied).
  *
  * @example
  * ```typescript
@@ -3787,15 +3835,27 @@ export class CCIPDestExecutionRevertError extends CCIPError {
  */
 export class CCIPDestSimulationUnavailableError extends CCIPError {
   override readonly name = 'CCIPDestSimulationUnavailableError'
+  /** Why the simulation could not be performed. */
+  readonly reason: 'transport' | 'attestation-required'
   /**
    * Creates a destination-simulation-unavailable error.
+   * @param reason - `'transport'` for RPC/transport failures (transient),
+   *   `'attestation-required'` for pools whose `releaseOrMint` needs offchain token data that
+   *   doesn't exist pre-send (not transient).
    * @param options - Optional error options; pass the underlying RPC error as `cause`.
    */
-  constructor(options?: CCIPErrorOptions) {
+  constructor(reason: 'transport' | 'attestation-required', options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.DEST_SIMULATION_UNAVAILABLE,
-      'Destination releaseOrMint simulation could not be performed (RPC/transport error)',
-      { ...options, isTransient: true },
+      reason === 'transport'
+        ? 'Destination releaseOrMint simulation could not be performed (RPC/transport error)'
+        : 'Destination releaseOrMint cannot be simulated pre-send: pool requires offchain token data (attestation/proof) that only exists after sending',
+      {
+        ...options,
+        isTransient: reason === 'transport',
+        context: { ...options?.context, reason },
+      },
     )
+    this.reason = reason
   }
 }

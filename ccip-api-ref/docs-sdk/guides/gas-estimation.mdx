@@ -22,7 +22,7 @@ On EVM, both simulate the `ccipReceive` call on the destination chain and return
 :::
 
 :::tip
-When called before sending with both `source` and `dest`, `estimateReceiveExecution` also validates that the message can execute on the destination and throws a typed error if it cannot. For a message that carries token transfers this destination check is mandatory, not opt-in — see [Validating a Transfer Before Sending](./pre-send-validation.mdx). The returned gas number is unchanged.
+When called before sending with both `source` and `dest`, `estimateReceiveExecution` also runs a point-in-time destination preflight (lane gates, rate limits, LockRelease liquidity, and a pool-direct `releaseOrMint` simulation) and throws a typed error on a definitive block; checks that cannot run (destination RPC failure, or attestation-consuming pools pre-send) report themselves unavailable instead — see [Validating a Transfer Before Sending](./pre-send-validation.mdx) for exactly what is and is not covered. The returned gas number is unchanged.
 :::
 
 ## Estimate Before Sending
