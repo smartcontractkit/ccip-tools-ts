@@ -8,7 +8,7 @@ import { createCCTSubmitError } from './submit.ts'
 
 const OP = 'setPool'
 
-describe('cct/solana submit error mapping', () => {
+describe('Submit error mapping (cct/solana)', () => {
   it('maps post-broadcast confirmation errors with a signature to not-confirmed', () => {
     const cause = Object.assign(new Error('transaction was not confirmed'), { signature: 'abc' })
     const err = createCCTSubmitError(OP, cause)

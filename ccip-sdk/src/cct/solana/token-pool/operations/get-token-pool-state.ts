@@ -1,38 +1,20 @@
-import type { PublicKey } from '@solana/web3.js'
-
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
+  type PoolProgramRef,
   type TokenPoolConfig,
   decodeTokenPoolState,
   deriveTokenPoolConfigPda,
-  resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { parsePublicKey, validatePoolType, validatePublicKey } from '../../validate.ts'
+import { parsePublicKey, resolvePoolProgram, validatePublicKey } from '../../validate.ts'
 
-/** Identifies a canonical burn-mint token pool program. */
-export type BurnMintPoolProgramRef = {
-  poolType: 'burn-mint'
-  poolProgramAddress?: never
-}
-
-/** Identifies a canonical lock-release token pool program. */
-export type LockReleasePoolProgramRef = {
-  poolType: 'lock-release'
-  poolProgramAddress?: never
-}
-
-/** Identifies a custom token pool program. */
-export type CustomPoolProgramRef = {
-  poolProgramAddress: string
-  poolType?: never
-}
-
-/** Identifies a canonical token pool or a custom pool program. */
-export type PoolProgramRef =
-  BurnMintPoolProgramRef | LockReleasePoolProgramRef | CustomPoolProgramRef
+export type {
+  BurnMintPoolProgramRef,
+  CustomPoolProgramRef,
+  LockReleasePoolProgramRef,
+  PoolProgramRef,
+} from '../../programs/token-pool.ts'
 
 /** Parameters for reading a Solana token pool state. */
 export type GetTokenPoolStateParams = PoolProgramRef & {
@@ -57,6 +39,7 @@ type BaseConfig = {
 
 type GetTokenPoolStateResultBase = {
   stateAddress: string
+  /** Resolved pool program address: canonical for `poolType`, supplied for `poolProgramAddress`. */
   programId: string
   version: number
 }
@@ -74,30 +57,16 @@ export type LockReleaseGetTokenPoolStateResult = GetTokenPoolStateResultBase & {
   }
 }
 
-/** State returned for a canonical or custom token pool program. */
-export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> =
-  P extends LockReleasePoolProgramRef
-    ? LockReleaseGetTokenPoolStateResult
-    : BaseGetTokenPoolStateResult
-
-function resolvePoolProgram(operation: string, params: PoolProgramRef): PublicKey {
-  const hasPoolType = Object.hasOwn(params, 'poolType')
-  const hasPoolProgramAddress = Object.hasOwn(params, 'poolProgramAddress')
-  if (hasPoolType === hasPoolProgramAddress) {
-    throw new CCTParamsInvalidError(
-      operation,
-      'poolType',
-      'provide exactly one of poolType or poolProgramAddress',
-    )
-  }
-
-  if (hasPoolType) {
-    validatePoolType(operation, 'poolType', params.poolType)
-    return resolveTokenPoolProgram(params.poolType)
-  }
-
-  return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
-}
+/**
+ * State returned for a canonical or custom token pool program.
+ *
+ * Reads queried with `poolProgramAddress` use the base config shape and omit lock-release-only
+ * fields, even when the supplied address is the lock-release program. The
+ * {@link SolanaTokenManager.getTokenPoolState} overloads pick the arm per pool type, so callers
+ * only narrow this union when the program is not known statically.
+ */
+export type GetTokenPoolStateResult =
+  BaseGetTokenPoolStateResult | LockReleaseGetTokenPoolStateResult
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   return {
