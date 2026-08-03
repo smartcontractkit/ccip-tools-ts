@@ -17,11 +17,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import {
-  validateAuthorityMatchesWallet,
-  validateOptionalPublicKey,
-  validatePublicKey,
-} from '../../validate.ts'
+import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 
 /** Parameters shared by Solana TokenAdminRegistry `acceptAdmin` generation and execution. */
 type AcceptAdminParams = {
@@ -33,6 +29,13 @@ type AcceptAdminParams = {
   address: string
   /** Pending token admin. Defaults to `payer` for single-signer transactions. */
   authority?: string
+}
+
+type ParsedAcceptAdminParams = {
+  tokenAddress: PublicKey
+  address: PublicKey
+  payer: PublicKey
+  authority: PublicKey
 }
 
 /** Parameters for unsigned Solana TokenAdminRegistry `acceptAdmin` generation. */
@@ -48,26 +51,37 @@ export type ExecuteAcceptAdminParams = SolanaExecuteParams<AcceptAdminParams>
 export type ExecuteAcceptAdminResult = TransactionResult
 
 /** Accepts a pending TokenAdminRegistry administrator role. */
-export class AcceptAdmin extends SolanaOperation<AcceptAdminParams> {
+export class AcceptAdmin extends SolanaOperation<
+  AcceptAdminParams,
+  UnsignedSolanaTx,
+  ParsedAcceptAdminParams
+> {
   readonly name = 'acceptAdmin'
 
-  /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateAcceptAdminParams): void {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'address', params.address)
-    validatePublicKey(this.name, 'payer', params.payer)
-    validateOptionalPublicKey(this.name, 'authority', params.authority)
+  /** No cross-field constraints; {@link parse} validates individual public-key parameters. */
+  protected validate(_params: GenerateAcceptAdminParams): void {}
+
+  /** Parses public keys and defaults authority to payer without mutating caller params. */
+  protected override parse(params: GenerateAcceptAdminParams): ParsedAcceptAdminParams {
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    return {
+      tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      address: parsePublicKey(this.name, 'address', params.address),
+      payer,
+      authority:
+        params.authority === undefined
+          ? payer
+          : parsePublicKey(this.name, 'authority', params.authority),
+    }
   }
 
   /** Builds the unsigned instruction after confirming the caller is the pending admin. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateAcceptAdminParams,
+    opts: ParsedAcceptAdminParams,
   ): Promise<UnsignedSolanaTx> {
-    const tokenMint = new PublicKey(opts.tokenAddress)
-    const payer = new PublicKey(opts.payer)
-    const authority = new PublicKey(opts.authority ?? opts.payer)
-    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address))
+    const { tokenAddress: tokenMint, payer, authority } = opts
+    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
     const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
 
     if (!tokenConfig.pendingAdministrator) {
@@ -111,23 +125,17 @@ export class AcceptAdmin extends SolanaOperation<AcceptAdminParams> {
 
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateAcceptAdminParams = { ...rest, payer }
-    this.validate(generateParams)
+    const parsed = this.prepare(generateParams)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,
-        new PublicKey(params.authority),
+        parsed.authority,
         wallet.publicKey,
         'acceptAdmin requires authority to be the executing wallet. Use generateUnsignedAcceptAdmin for externally signed transactions.',
       )
     }
 
-    return submit(
-      chain,
-      wallet,
-      await this.buildUnsigned(chain, generateParams),
-      this.name,
-      computeUnits,
-    )
+    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
   }
 }
