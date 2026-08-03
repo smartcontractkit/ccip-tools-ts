@@ -110,6 +110,7 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
@@ -123,6 +124,7 @@ import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -133,7 +135,6 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -241,6 +242,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
       maxSize: 100,
     })
+    // cache whole signature lists per address (up to 30min), to speed up consecutive
+    // paginations over the same address
+    this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxSize: 1024,
@@ -1711,14 +1715,31 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, verifications } = opts
+    const { offRamp, sourceChainSelector, verifications, messageId } = opts
     const [, version] = await this.typeAndVersion(offRamp)
     const topics = [
       version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
     ]
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
       Parameters<SolanaChain['getLogs']>[0] = { ...opts, topics }
-    if (sourceChainSelector && verifications && 'report' in verifications) {
+    if (version >= CCIPVersion.V2_0 && messageId) {
+      // Every v2 execution attempt (executor or manual, including retries) touches
+      // the per-message `message_exec_state` PDA (seeded with the message id) on the
+      // offRamp, so the message's execution txs are exactly the signatures of that
+      // PDA. Narrowing the scan to it replaces a full offRamp-address sweep (one
+      // getTransaction per tx in the start window — the dominant cost under load)
+      // with the handful of txs of this message's own attempts.
+      const [messageExecStatePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('message_exec_state'), bytesToBuffer(messageId)],
+        new PublicKey(offRamp),
+      )
+      opts_ = {
+        ...opts,
+        topics,
+        programs: [offRamp],
+        address: messageExecStatePda.toBase58(),
+      }
+    } else if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
         [
