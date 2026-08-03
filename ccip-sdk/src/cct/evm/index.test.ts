@@ -197,4 +197,43 @@ describe('EVMTokenManager (cct/evm)', () => {
       )
     })
   })
+
+  describe('getTokenPoolState', () => {
+    it('reads through the wrapped chain', async () => {
+      const probed: string[] = []
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          typeAndVersion: ((address: string) => {
+            probed.push(address)
+            return Promise.resolve(['BurnMintTokenPool', '2.0.0', 'BurnMintTokenPool 2.0.0'])
+          }) as unknown as EVMChain['typeAndVersion'],
+        }),
+      )
+
+      // the pool getters themselves need a real provider, so this rejects after the probe
+      await assert.rejects(cct.getTokenPoolState({ poolAddress: POOL }))
+      assert.deepEqual(probed, [POOL], 'probes the requested pool on the wrapped chain')
+    })
+
+    it('rejects an invalid pool address before any RPC, tagged with the operation', async () => {
+      let probed = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          typeAndVersion: (() => {
+            probed = true
+            return Promise.resolve(['BurnMintTokenPool', '2.0.0', 'BurnMintTokenPool 2.0.0'])
+          }) as unknown as EVMChain['typeAndVersion'],
+        }),
+      )
+
+      await assert.rejects(
+        () => cct.getTokenPoolState({ poolAddress: 'not-an-address' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'getTokenPoolState' &&
+          err.context.param === 'poolAddress',
+      )
+      assert.equal(probed, false, 'validation fails before the typeAndVersion probe')
+    })
+  })
 })

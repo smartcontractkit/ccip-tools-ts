@@ -27,6 +27,11 @@ import {
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
 import {
+  type GetTokenPoolStateParams,
+  type GetTokenPoolStateResult,
+  GetTokenPoolState,
+} from './token-pool/operations/get-token-pool-state.ts'
+import {
   type TransferOwnershipParams,
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
@@ -34,10 +39,18 @@ import {
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
-  readonly #setPool = new SetPool()
-  readonly #transferOwnership = new TransferOwnership()
+  // Token operations
   readonly #deployToken = new DeployToken()
+
+  // Token admin registry operations
+  readonly #setPool = new SetPool()
+
+  // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #transferOwnership = new TransferOwnership()
+  readonly #getTokenPoolState = new GetTokenPoolState()
+
+  // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
   readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
 
@@ -324,6 +337,34 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   ): Promise<TransactionResult> {
     return this.#authorizeLockboxCallers.execute(this.chain, opts)
   }
+
+  /**
+   * Reads a pool's admin state, v1.5.0 through v2.0.0: the `owner` every pool write is gated on,
+   * the `rateLimitAdmin` role, its token/router and configured lanes — plus, on v2.0.0 pools, the
+   * `feeAdmin` role, the allowed finality window, and a lock/release pool's `lockBox`.
+   * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
+   * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
+   * (see the example). A v2.0.0 `SiloedLockReleaseTokenPool` is rejected — it escrows per remote
+   * chain (`getLockBox(uint64)`). For a legacy pool's `allowList` / `rebalancer`, proxy/USDC
+   * pools, or v1.5.0 `*AndProxy` pools, use `cct.chain.getTokenPoolConfig()`, the tolerant
+   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is
+   * not readable here.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool is not a supported CCT pool type
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool's version is not a known one
+   * @example
+   * ```typescript
+   * const state = await cct.getTokenPoolState({ poolAddress: '0xPool...' })
+   * // state.owner must sign transferOwnership / lane config; state.rateLimitAdmin may set rate limits
+   * if (state.version === '2.0.0') {
+   *   console.log(state.feeAdmin, state.finalityDepth)
+   *   if (state.type === 'LockReleaseTokenPool') console.log(state.lockBox)
+   * }
+   * ```
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
+    return this.#getTokenPoolState.query(this.chain, opts)
+  }
 }
 
 export * from '../errors.ts'
@@ -333,6 +374,14 @@ export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
 } from './token-pool/operations/deploy-token-pool.ts'
+export type {
+  BurnMintTokenPoolStateV2_0_0,
+  GetTokenPoolStateParams,
+  GetTokenPoolStateResult,
+  LegacyTokenPoolState,
+  LockReleaseTokenPoolStateV2_0_0,
+  TokenPoolStateV2_0_0,
+} from './token-pool/operations/get-token-pool-state.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export type {
