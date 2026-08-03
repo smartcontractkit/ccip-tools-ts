@@ -8,6 +8,7 @@ import {
   resolvePoolProgram,
   validateInteger,
   validateNonEmptyString,
+  validateOptionalPublicKey,
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
@@ -24,6 +25,14 @@ describe('Validate (cct/solana)', () => {
 
   it('accepts valid public keys', () => {
     assert.doesNotThrow(() => validatePublicKey('op', 'payer', PublicKey.default.toBase58()))
+  })
+
+  it('accepts omitted and rejects invalid optional public keys', () => {
+    assert.doesNotThrow(() => validateOptionalPublicKey('op', 'authority', undefined))
+    assert.throws(
+      () => validateOptionalPublicKey('op', 'authority', ''),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+    )
   })
 
   it('rejects non-string public keys', () => {

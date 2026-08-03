@@ -49,6 +49,15 @@ export function validatePublicKey(
   parsePublicKey(operation, param, value)
 }
 
+/** Asserts an optional `value` is a valid Solana public key string when provided. */
+export function validateOptionalPublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string | undefined {
+  if (value !== undefined) validatePublicKey(operation, param, value)
+}
+
 /**
  * Asserts `values` is an array of valid Solana public key strings.
  * @throws CCTParamsInvalidError if `values` is not an array or any item is invalid.

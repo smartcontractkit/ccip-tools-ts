@@ -38,7 +38,7 @@ function stateData(mint: PublicKey): Buffer {
   ])
 }
 
-describe('Solana token pool getTokenPoolState', () => {
+describe('GetTokenPoolState (cct/solana)', () => {
   describe('query', () => {
     it('returns decoded state fields', async () => {
       const mint = key(2)

@@ -17,6 +17,7 @@ import { submit } from '../../submit.ts'
 import {
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateOptionalPublicKey,
   validatePublicKey,
 } from '../../validate.ts'
 
@@ -72,24 +73,25 @@ export class AppendToLookupTable extends SolanaOperation<
   protected validate(params: GenerateAppendToLookupTableParams): void {
     validatePublicKey(this.name, 'lookupTableAddress', params.lookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
 
+    const hasTokenAddress = params.tokenAddress !== undefined
     const hasPoolProgramAddress = params.poolProgramAddress !== undefined
     const hasPoolProgram = params.poolType !== undefined || hasPoolProgramAddress
-    if (Boolean(params.tokenAddress) !== hasPoolProgram) {
+    if (hasTokenAddress !== hasPoolProgram) {
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
         'tokenAddress and exactly one of poolType or poolProgramAddress must be provided together',
       )
     }
-    if (params.tokenAddress) validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    validateOptionalPublicKey(this.name, 'tokenAddress', params.tokenAddress)
     if (hasPoolProgram) resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
 
-    if (!params.tokenAddress && !params.additionalAddresses?.length) {
+    if (params.tokenAddress === undefined && !params.additionalAddresses?.length) {
       throw new CCTParamsInvalidError(
         this.name,
         'additionalAddresses',
@@ -106,7 +108,8 @@ export class AppendToLookupTable extends SolanaOperation<
     const payer = new PublicKey(opts.payer)
     const authority = new PublicKey(opts.authority ?? opts.payer)
     const lookupTableAddress = new PublicKey(opts.lookupTableAddress)
-    const poolProgram = opts.tokenAddress ? resolvePoolProgram(this.name, opts) : undefined
+    const poolProgram =
+      opts.tokenAddress !== undefined ? resolvePoolProgram(this.name, opts) : undefined
     const lookupTable = await chain.connection.getAddressLookupTable(lookupTableAddress)
 
     if (!lookupTable.value) {
@@ -127,7 +130,7 @@ export class AppendToLookupTable extends SolanaOperation<
 
     const addresses = [...(opts.additionalAddresses ?? []).map((a) => new PublicKey(a))]
 
-    if (opts.tokenAddress && poolProgram) {
+    if (opts.tokenAddress !== undefined && poolProgram) {
       const tokenMint = new PublicKey(opts.tokenAddress)
       const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
         lookupTableAddress,
@@ -192,7 +195,7 @@ export class AppendToLookupTable extends SolanaOperation<
     const generateParams: GenerateAppendToLookupTableParams = { ...rest, payer }
     this.validate(generateParams)
 
-    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {
       validateAuthorityMatchesWallet(
         this.name,
