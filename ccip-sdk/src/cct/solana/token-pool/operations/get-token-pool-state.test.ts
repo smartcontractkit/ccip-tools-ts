@@ -6,8 +6,10 @@ import { PublicKey } from '@solana/web3.js'
 
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
+import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTDataDecodeError } from '../../../errors.ts'
+import { decodeTokenPoolState, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 
 function key(byte: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
@@ -37,96 +39,133 @@ function stateData(mint: PublicKey): Buffer {
 }
 
 describe('Solana token pool getTokenPoolState', () => {
-  it('returns decoded state fields', async () => {
-    const mint = key(2)
-    const chain = {
-      connection: { getAccountInfo: async () => ({ owner: key(1), data: stateData(mint) }) },
-    } as unknown as SolanaChain
+  describe('query', () => {
+    it('returns decoded state fields', async () => {
+      const mint = key(2)
+      const chain = {
+        connection: { getAccountInfo: async () => ({ owner: key(1), data: stateData(mint) }) },
+      } as unknown as SolanaChain
 
-    const getTokenPoolState = new GetTokenPoolState()
-    const lockRelease = await getTokenPoolState.query(chain, {
-      poolType: 'lock-release',
-      tokenAddress: mint.toBase58(),
-    })
-    const burnMint = await getTokenPoolState.query(chain, {
-      poolType: 'burn-mint',
-      tokenAddress: mint.toBase58(),
-    })
-    const customProgram = key(15).toBase58()
-    const custom = await getTokenPoolState.query(chain, {
-      poolProgramAddress: customProgram,
-      tokenAddress: mint.toBase58(),
+      const getTokenPoolState = new GetTokenPoolState()
+      const lockRelease = await getTokenPoolState.query(chain, {
+        poolType: 'lock-release',
+        tokenAddress: mint.toBase58(),
+      })
+      const burnMint = await getTokenPoolState.query(chain, {
+        poolType: 'burn-mint',
+        tokenAddress: mint.toBase58(),
+      })
+      const customProgram = key(15).toBase58()
+      const custom = await getTokenPoolState.query(chain, {
+        poolProgramAddress: customProgram,
+        tokenAddress: mint.toBase58(),
+      })
+
+      assert.equal(lockRelease.version, 1)
+      assert.equal(lockRelease.config.mint, mint.toBase58())
+      assert.equal(lockRelease.config.decimals, 6)
+      // the op resolves to the union; the facade's overloads are what narrow for callers
+      assert.ok('canAcceptLiquidity' in lockRelease.config)
+      assert.equal(lockRelease.config.canAcceptLiquidity, true)
+      assert.equal(lockRelease.config.listEnabled, true)
+      assert.deepEqual(lockRelease.config.allowList, [key(12).toBase58(), key(13).toBase58()])
+      assert.equal(lockRelease.config.rmnRemote, key(14).toBase58())
+      assert.ok(!('rebalancer' in burnMint.config))
+      assert.ok(!('canAcceptLiquidity' in burnMint.config))
+      assert.equal(custom.programId, customProgram)
+      assert.equal(custom.config.mint, mint.toBase58())
     })
 
-    assert.equal(lockRelease.version, 1)
-    assert.equal(lockRelease.config.mint, mint.toBase58())
-    assert.equal(lockRelease.config.decimals, 6)
-    // the op resolves to the union; the facade's overloads are what narrow for callers
-    assert.ok('canAcceptLiquidity' in lockRelease.config)
-    assert.equal(lockRelease.config.canAcceptLiquidity, true)
-    assert.equal(lockRelease.config.listEnabled, true)
-    assert.deepEqual(lockRelease.config.allowList, [key(12).toBase58(), key(13).toBase58()])
-    assert.equal(lockRelease.config.rmnRemote, key(14).toBase58())
-    assert.ok(!('rebalancer' in burnMint.config))
-    assert.ok(!('canAcceptLiquidity' in burnMint.config))
-    assert.equal(custom.programId, customProgram)
-    assert.equal(custom.config.mint, mint.toBase58())
+    it('wraps decode failures with pool context', async () => {
+      const mint = key(2).toBase58()
+      const poolProgram = key(15).toBase58()
+      const chain = {
+        connection: { getAccountInfo: async () => ({ owner: key(1), data: Buffer.alloc(8) }) },
+      } as unknown as SolanaChain
+
+      await assert.rejects(
+        new GetTokenPoolState().query(chain, {
+          tokenAddress: mint,
+          poolProgramAddress: poolProgram,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCTDataDecodeError)
+          assert.equal(
+            error.context.account,
+            deriveTokenPoolConfigPda(new PublicKey(poolProgram), new PublicKey(mint)).toBase58(),
+          )
+          assert.equal(error.context.mint, mint)
+          assert.equal(error.context.poolProgram, poolProgram)
+          assert.equal(error.context.accountOwner, key(1).toBase58())
+          assert.ok(error.cause instanceof Error)
+          return true
+        },
+      )
+    })
+
+    it('wraps non-Error decode causes', (t) => {
+      t.mock.method(tokenPoolCoder.accounts, 'decode', () => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- verify unknown decoder throws are normalized.
+        throw 'invalid account data'
+      })
+
+      assert.throws(
+        () =>
+          decodeTokenPoolState(Buffer.alloc(8), {
+            tokenPool: key(1).toBase58(),
+            mint: key(2).toBase58(),
+            poolProgram: key(3).toBase58(),
+            accountOwner: key(4).toBase58(),
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCTDataDecodeError)
+          assert.ok(error.cause instanceof Error)
+          assert.equal(error.cause.message, 'invalid account data')
+          return true
+        },
+      )
+    })
+
+    it('includes the mint and program in missing-state context', async () => {
+      const mint = key(2).toBase58()
+      const poolProgram = key(15).toBase58()
+      const chain = {
+        connection: { getAccountInfo: async () => null },
+      } as unknown as SolanaChain
+
+      await assert.rejects(
+        new GetTokenPoolState().query(chain, {
+          tokenAddress: mint,
+          poolProgramAddress: poolProgram,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCIPTokenPoolStateNotFoundError)
+          assert.match(error.message, /^TokenPool State PDA not found at /)
+          assert.equal(error.context.mint, mint)
+          assert.equal(error.context.poolProgram, poolProgram)
+          return true
+        },
+      )
+    })
   })
 
-  it('wraps decode failures with pool context', async () => {
-    const mint = key(2).toBase58()
-    const poolProgram = key(15).toBase58()
-    const chain = {
-      connection: { getAccountInfo: async () => ({ owner: key(1), data: Buffer.alloc(8) }) },
-    } as unknown as SolanaChain
+  describe('validation', () => {
+    it('requires exactly one pool program reference', async () => {
+      const getTokenPoolState = new GetTokenPoolState()
+      const tokenAddress = key(2).toBase58()
+      const poolProgramAddress = key(15).toBase58()
 
-    await assert.rejects(
-      new GetTokenPoolState().query(chain, { tokenAddress: mint, poolProgramAddress: poolProgram }),
-      (error: unknown) => {
-        assert.ok(error instanceof CCTDataDecodeError)
-        assert.match(error.message, /^Unable to decode token pool state at /)
-        assert.equal(error.context.mint, mint)
-        assert.equal(error.context.poolProgram, poolProgram)
-        assert.ok(error.cause instanceof Error)
-        return true
-      },
-    )
-  })
-
-  it('includes the mint and program in missing-state context', async () => {
-    const mint = key(2).toBase58()
-    const poolProgram = key(15).toBase58()
-    const chain = {
-      connection: { getAccountInfo: async () => null },
-    } as unknown as SolanaChain
-
-    await assert.rejects(
-      new GetTokenPoolState().query(chain, { tokenAddress: mint, poolProgramAddress: poolProgram }),
-      (error: unknown) => {
-        assert.ok(error instanceof CCIPTokenPoolStateNotFoundError)
-        assert.match(error.message, /^TokenPool State PDA not found at /)
-        assert.equal(error.context.mint, mint)
-        assert.equal(error.context.poolProgram, poolProgram)
-        return true
-      },
-    )
-  })
-
-  it('requires exactly one pool program reference', async () => {
-    const getTokenPoolState = new GetTokenPoolState()
-    const tokenAddress = key(2).toBase58()
-    const poolProgramAddress = key(15).toBase58()
-
-    await assert.rejects(
-      getTokenPoolState.query(
-        {} as SolanaChain,
-        {
-          tokenAddress,
-          poolType: 'burn-mint',
-          poolProgramAddress,
-        } as never,
-      ),
-    )
-    await assert.rejects(getTokenPoolState.query({} as SolanaChain, { tokenAddress } as never))
+      await assert.rejects(
+        getTokenPoolState.query(
+          {} as SolanaChain,
+          {
+            tokenAddress,
+            poolType: 'burn-mint',
+            poolProgramAddress,
+          } as never,
+        ),
+      )
+      await assert.rejects(getTokenPoolState.query({} as SolanaChain, { tokenAddress } as never))
+    })
   })
 })

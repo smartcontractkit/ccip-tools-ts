@@ -126,6 +126,7 @@ export class GetTokenPoolState extends SolanaQuery<
       tokenPool: state.toBase58(),
       mint: params.tokenAddress,
       poolProgram: programId.toBase58(),
+      accountOwner: account.owner.toBase58(),
     })
     const result = {
       stateAddress: state.toBase58(),

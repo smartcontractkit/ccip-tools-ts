@@ -109,7 +109,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_MINT_INVALID:
     'The address is not a valid SPL token mint. Ensure the address is owned by TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID.',
   TOKEN_AMOUNT_INVALID: 'Token amount must have a valid address and positive amount.',
-  TOKEN_POOL_STATE_NOT_FOUND: 'TokenPool state PDA not found.',
+  TOKEN_POOL_STATE_NOT_FOUND:
+    'Verify poolType matches the deployed pool, pass poolProgramAddress for a custom pool, and confirm the pool is initialized for this mint on this cluster.',
   TOKEN_POOL_INFO_NOT_FOUND:
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   TOKEN_ACCOUNT_NOT_FOUND:
