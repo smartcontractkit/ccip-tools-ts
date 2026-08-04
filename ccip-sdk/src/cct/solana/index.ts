@@ -8,7 +8,7 @@ import type { Connection } from '@solana/web3.js'
 
 import type { ChainContext } from '../../chain.ts'
 import type { ChainFamily } from '../../networks.ts'
-import { SolanaChain } from '../../solana/index.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
@@ -48,9 +48,12 @@ import {
   type GenerateSetPoolResult,
   type GenerateTransferAdminParams,
   type GenerateTransferAdminResult,
+  type GetTokenAdminRegistryParams,
+  type GetTokenAdminRegistryResult,
   AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
+  GetTokenAdminRegistry,
   RegisterAdmin,
   SetPool,
   TransferAdmin,
@@ -81,6 +84,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
@@ -103,11 +107,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /** Creates from a Solana web3.js connection. */
   static async fromProvider(provider: Connection, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
     return new SolanaTokenManager(await SolanaChain.fromConnection(provider, ctx))
   }
 
   /** Creates from an RPC URL. */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
     return new SolanaTokenManager(await SolanaChain.fromUrl(url, ctx))
   }
 
@@ -731,6 +737,26 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: P,
   ): Promise<GetTokenPoolStateResult<P>> {
     return this.#getTokenPoolState.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a token's TokenAdminRegistry administrator, pending administrator, and pool lookup table.
+   *
+   * @throws {@link CCTParamsInvalidError} If `address` or `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const config = await cct.getTokenAdminRegistry({
+   *   address: router,
+   *   tokenAddress: mint,
+   * })
+   * ```
+   */
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
   }
 
   /**
