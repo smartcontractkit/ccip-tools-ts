@@ -9,7 +9,6 @@ import {
   Connection,
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
-  SystemProgram,
 } from '@solana/web3.js'
 import bs58 from 'bs58'
 import {
@@ -56,7 +55,6 @@ import {
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenDataParseError,
-  CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
@@ -122,6 +120,10 @@ import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import {
+  decodeTokenAdminRegistryConfig,
+  getTokenAdminRegistryConfig,
+} from './token-admin-registry.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -1636,49 +1638,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     pendingAdministrator?: string
     tokenPool?: string
   }> {
-    const registry_ = new PublicKey(registry)
-    const tokenMint = new PublicKey(token)
-
-    const [tokenAdminRegistryAddr] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_admin_registry'), tokenMint.toBuffer()],
-      registry_,
-    )
-
-    const tokenAdminRegistry = await this.connection.getAccountInfo(tokenAdminRegistryAddr)
-    if (!tokenAdminRegistry) throw new CCIPTokenNotConfiguredError(token, registry)
-
-    const config: {
-      administrator: string
-      pendingAdministrator?: string
-      tokenPool?: string
-    } = {
-      administrator: encodeBase58(tokenAdminRegistry.data.subarray(9, 9 + 32)),
+    const router = new PublicKey(registry)
+    const config = await getTokenAdminRegistryConfig(this.connection, router, new PublicKey(token))
+    return {
+      administrator: config.administrator.toBase58(),
+      ...(config.pendingAdministrator && {
+        pendingAdministrator: config.pendingAdministrator.toBase58(),
+      }),
+      ...(config.tokenPool && { tokenPool: config.tokenPool.toBase58() }),
     }
-    const pendingAdministrator = new PublicKey(tokenAdminRegistry.data.subarray(41, 41 + 32))
-
-    // Check if pendingAdministrator is set (not system program address)
-    if (
-      !pendingAdministrator.equals(SystemProgram.programId) &&
-      !pendingAdministrator.equals(PublicKey.default)
-    ) {
-      config.pendingAdministrator = pendingAdministrator.toBase58()
-    }
-
-    // Get token pool from lookup table if available
-    try {
-      const lookupTableAddr = new PublicKey(tokenAdminRegistry.data.subarray(73, 73 + 32))
-      const lookupTable = await this.connection.getAddressLookupTable(lookupTableAddr)
-      if (lookupTable.value) {
-        // tokenPool state PDA is at index [3]
-        const tokenPoolAddress = lookupTable.value.state.addresses[3]
-        if (tokenPoolAddress && !tokenPoolAddress.equals(PublicKey.default)) {
-          config.tokenPool = tokenPoolAddress.toBase58()
-        }
-      }
-    } catch (_err) {
-      // Token pool may not be configured yet
-    }
-    return config
   }
 
   /**
@@ -1834,8 +1802,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(router: string): Promise<string[]> {
-    // `mint` offset in TokenAdminRegistry account data; more robust against changes in layout
-    const mintOffset = 8 + 1 + 32 + 32 + 32 + 16 * 2 // = 137
     const router_ = new PublicKey(router)
     const res = []
     for (const acc of await this.connection.getProgramAccounts(router_, {
@@ -1848,14 +1814,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         },
       ],
     })) {
-      if (acc.account.data.length < mintOffset + 32) continue
-      const mint = new PublicKey(acc.account.data.subarray(mintOffset, mintOffset + 32))
-      const [derivedPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_admin_registry'), mint.toBuffer()],
-        router_,
-      )
-      if (!acc.pubkey.equals(derivedPda)) continue
-      res.push(mint.toBase58())
+      try {
+        const { mint } = decodeTokenAdminRegistryConfig(acc.account.data)
+        const [derivedPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('token_admin_registry'), mint.toBuffer()],
+          router_,
+        )
+        if (acc.pubkey.equals(derivedPda)) res.push(mint.toBase58())
+      } catch {
+        // Skip malformed TokenAdminRegistry accounts.
+      }
     }
     return res
   }
