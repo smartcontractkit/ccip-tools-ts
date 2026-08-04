@@ -6,8 +6,10 @@ import { PublicKey } from '@solana/web3.js'
 
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
+import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTDataDecodeError } from '../../../errors.ts'
+import { decodeTokenPoolState, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 
 function key(byte: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
@@ -86,10 +88,37 @@ describe('Solana token pool getTokenPoolState', () => {
         }),
         (error: unknown) => {
           assert.ok(error instanceof CCTDataDecodeError)
-          assert.match(error.message, /^Unable to decode token pool state at /)
+          assert.equal(
+            error.context.account,
+            deriveTokenPoolConfigPda(new PublicKey(poolProgram), new PublicKey(mint)).toBase58(),
+          )
           assert.equal(error.context.mint, mint)
           assert.equal(error.context.poolProgram, poolProgram)
+          assert.equal(error.context.accountOwner, key(1).toBase58())
           assert.ok(error.cause instanceof Error)
+          return true
+        },
+      )
+    })
+
+    it('wraps non-Error decode causes', (t) => {
+      t.mock.method(tokenPoolCoder.accounts, 'decode', () => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- verify unknown decoder throws are normalized.
+        throw 'invalid account data'
+      })
+
+      assert.throws(
+        () =>
+          decodeTokenPoolState(Buffer.alloc(8), {
+            tokenPool: key(1).toBase58(),
+            mint: key(2).toBase58(),
+            poolProgram: key(3).toBase58(),
+            accountOwner: key(4).toBase58(),
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCTDataDecodeError)
+          assert.ok(error.cause instanceof Error)
+          assert.equal(error.cause.message, 'invalid account data')
           return true
         },
       )
