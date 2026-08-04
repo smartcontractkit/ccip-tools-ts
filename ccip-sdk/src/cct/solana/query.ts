@@ -9,4 +9,9 @@ import type { SolanaChain } from '../../solana/index.ts'
 import { Query } from '../query.ts'
 
 /** Shared base for read-only Solana CCT queries; see {@link Query}. */
-export abstract class SolanaQuery<P extends object, R> extends Query<SolanaChain, P, R> {}
+export abstract class SolanaQuery<P extends object, R, Parsed = P> extends Query<
+  SolanaChain,
+  P,
+  R,
+  Parsed
+> {}

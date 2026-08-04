@@ -751,7 +751,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   getTokenPoolState(
     opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
   ): Promise<BaseGetTokenPoolStateResult>
-  /** Reads a pool state account whose program type is not known statically. */
+  /**
+   * Reads a pool state account whose program is not known statically; narrow the result on the
+   * presence of the lock-release-only config fields.
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult>
+  /**
+   * Implementation for the overloads above; callers always resolve to one of those.
+   * */
   getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }

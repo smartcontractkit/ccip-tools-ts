@@ -1,3 +1,5 @@
+import type { PublicKey } from '@solana/web3.js'
+
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import {
@@ -7,7 +9,7 @@ import {
   deriveTokenPoolConfigPda,
 } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { parsePublicKey, resolvePoolProgram, validatePublicKey } from '../../validate.ts'
+import { parsePublicKey, resolvePoolProgram } from '../../validate.ts'
 
 export type {
   BurnMintPoolProgramRef,
@@ -86,30 +88,39 @@ function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   }
 }
 
+/** {@link GetTokenPoolStateParams} with its mint and pool program resolved to public keys. */
+type ParsedGetTokenPoolStateParams = GetTokenPoolStateParams & {
+  mint: PublicKey
+  programId: PublicKey
+}
+
 /** Reads the complete state of a Solana token pool. */
 export class GetTokenPoolState extends SolanaQuery<
   GetTokenPoolStateParams,
-  GetTokenPoolStateResult
+  GetTokenPoolStateResult,
+  ParsedGetTokenPoolStateParams
 > {
   readonly name = 'getTokenPoolState'
 
   /**
-   * Validates the mint and the pool-program reference before any RPC.
+   * Converts the mint and resolves the pool program.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a public key, or if the pool
    * program is identified by neither or both of `poolType` / `poolProgramAddress`
    */
-  protected validate(params: GetTokenPoolStateParams): void {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    resolvePoolProgram(this.name, params)
+  protected prepare(params: GetTokenPoolStateParams): ParsedGetTokenPoolStateParams {
+    return {
+      ...params,
+      mint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      programId: resolvePoolProgram(this.name, params),
+    }
   }
 
   /** Reads and serializes the token pool config account; the facade's overloads narrow the arm. */
   protected async read(
     chain: SolanaChain,
-    params: GetTokenPoolStateParams,
+    params: ParsedGetTokenPoolStateParams,
   ): Promise<GetTokenPoolStateResult> {
-    const mint = parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    const programId = resolvePoolProgram(this.name, params)
+    const { mint, programId } = params
     const state = deriveTokenPoolConfigPda(programId, mint)
 
     const account = await chain.connection.getAccountInfo(state)

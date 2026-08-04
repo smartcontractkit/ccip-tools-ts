@@ -1,29 +1,28 @@
 /**
- * Cross-family CCT read contract: the read-only counterpart of `cct/operation.ts`.
- * {@link Query} wires validate → read, so params are rejected before any RPC; each chain family
- * binds it to its own `Chain` type.
+ * Cross-family CCT read contract: {@link Query} wires prepare → read, the read-only counterpart
+ * of `cct/operation.ts`. Each chain family binds it to its own `Chain` type.
  *
  * @packageDocumentation
  */
 
 /**
- * Abstract CCT read operation. Subclasses supply {@link Query.validate} and {@link Query.read};
- * the base wires {@link Query.query}, mirroring how `Operation.generate` gates `buildUnsigned`.
- * No wallet, no calldata, no submit.
+ * Abstract CCT read base. Subclasses supply {@link prepare} and {@link read}; no wallet, no
+ * calldata, no submit.
+ * @remarks Validation lives in `prepare`, not a hook of its own: a parser that converts an address
+ * validates it on the way through, so splitting them would check the same field twice.
  */
-export abstract class Query<Chain, Params extends object, Result> {
+export abstract class Query<Chain, Params extends object, Result, Parsed = Params> {
   /** camelCase id; matches the token-manager facade method and error context. */
   abstract readonly name: string
 
-  /** Reject invalid params before any chain RPC. */
-  protected abstract validate(params: Params): void
+  /** Validate and normalize params before any chain RPC, without mutating the caller's input. */
+  protected abstract prepare(params: Params): Parsed
 
-  /** Read and normalize chain state; runs only after {@link Query.validate} passes. */
-  protected abstract read(chain: Chain, params: Params): Promise<Result>
+  /** Read and normalize chain state; runs only after {@link prepare} passes. */
+  protected abstract read(chain: Chain, params: Parsed): Promise<Result>
 
-  /** Run {@link Query.validate}, then {@link Query.read}. */
+  /** Run {@link prepare} and {@link read}; no wallet. */
   async query(chain: Chain, params: Params): Promise<Result> {
-    this.validate(params)
-    return this.read(chain, params)
+    return this.read(chain, this.prepare(params))
   }
 }

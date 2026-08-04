@@ -237,9 +237,10 @@ async function readLockReleaseTokenPoolV2_0_0(
 export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetTokenPoolStateResult> {
   readonly name = 'getTokenPoolState'
 
-  /** Validates the address before any RPC; the base runs this ahead of {@link read}. */
-  protected validate({ poolAddress }: GetTokenPoolStateParams): void {
-    validateAddress(this.name, 'poolAddress', poolAddress)
+  /** Validates the pool address; nothing to convert for {@link read}. */
+  protected prepare(params: GetTokenPoolStateParams): GetTokenPoolStateParams {
+    validateAddress(this.name, 'poolAddress', params.poolAddress)
+    return params
   }
 
   /**

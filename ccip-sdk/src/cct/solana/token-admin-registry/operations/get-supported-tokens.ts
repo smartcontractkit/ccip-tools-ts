@@ -15,9 +15,10 @@ export type GetSupportedTokensParams = {
 export class GetSupportedTokens extends SolanaQuery<GetSupportedTokensParams, string[]> {
   readonly name = 'getSupportedTokens'
 
-  /** Validates the resolution address before any RPC; the base runs this ahead of {@link read}. */
-  protected validate(params: GetSupportedTokensParams): void {
+  /** Validates the resolution address; nothing to convert for {@link read}. */
+  protected prepare(params: GetSupportedTokensParams): GetSupportedTokensParams {
     validatePublicKey(this.name, 'address', params.address)
+    return params
   }
 
   /** Resolves the Router and lists its configured token mints. */

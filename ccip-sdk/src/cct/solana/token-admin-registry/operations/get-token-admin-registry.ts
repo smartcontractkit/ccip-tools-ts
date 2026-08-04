@@ -25,27 +25,32 @@ export type GetTokenAdminRegistryResult = RegistryTokenConfig & {
   supportsAutoDerivation: boolean
 }
 
+/** {@link GetTokenAdminRegistryParams} with its mint resolved to a public key. */
+type ParsedGetTokenAdminRegistryParams = GetTokenAdminRegistryParams & {
+  tokenMint: PublicKey
+}
+
 /** Reads a token's TokenAdminRegistry account. */
 export class GetTokenAdminRegistry extends SolanaQuery<
   GetTokenAdminRegistryParams,
-  GetTokenAdminRegistryResult
+  GetTokenAdminRegistryResult,
+  ParsedGetTokenAdminRegistryParams
 > {
   readonly name = 'getTokenAdminRegistry'
 
-  /** Validates both addresses before any RPC; the base runs this ahead of {@link read}. */
-  protected validate(params: GetTokenAdminRegistryParams): void {
+  /** Converts the mint; `address` stays a string for the Router lookup in {@link read}. */
+  protected prepare(params: GetTokenAdminRegistryParams): ParsedGetTokenAdminRegistryParams {
     validatePublicKey(this.name, 'address', params.address)
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    return { ...params, tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress) }
   }
 
   /** Reads and serializes the TokenAdminRegistry account. */
   protected async read(
     chain: SolanaChain,
-    params: GetTokenAdminRegistryParams,
+    params: ParsedGetTokenAdminRegistryParams,
   ): Promise<GetTokenAdminRegistryResult> {
     const router = new PublicKey(await chain.getTokenAdminRegistryFor(params.address))
-    const tokenMint = parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    const config = await getTokenAdminRegistryConfig(chain.connection, router, tokenMint)
+    const config = await getTokenAdminRegistryConfig(chain.connection, router, params.tokenMint)
 
     return {
       mint: config.mint.toBase58(),
