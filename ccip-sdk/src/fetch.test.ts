@@ -565,6 +565,44 @@ describe('createRateLimitedFetch', () => {
     assert.equal(typeof rateLimitedFetch, 'function')
   })
 
+  it('should retry transient network aborts (slow RPC) unless caller cancelled', async () => {
+    const abortError = Object.assign(
+      new Error(
+        'Request was aborted. This is usually intentional (e.g. user cancellation or component unmount).',
+      ),
+      { name: 'AbortError' },
+    )
+
+    // A slow RPC that aborts once, then responds → retried to success.
+    let callCount = 0
+    globalThis.fetch = mockedFetch = mock.fn(() => {
+      callCount++
+      if (callCount === 1) return Promise.reject(abortError)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+    const result = await createRateLimitedFetch({ maxRetries: 3 })(
+      'https://rl-test-abort.example.com',
+    )
+    assert.equal(result.ok, true)
+    assert.equal(mockedFetch.mock.calls.length, 2)
+
+    // A caller-aborted signal must NOT be retried.
+    const aborted = AbortSignal.abort()
+    globalThis.fetch = mockedFetch = mock.fn(() => Promise.reject(abortError))
+    await assert.rejects(
+      createRateLimitedFetch({ maxRetries: 3 })('https://rl-test-abort2.example.com', {
+        signal: aborted,
+      }),
+      /aborted/i,
+    )
+    assert.equal(mockedFetch.mock.calls.length, 1)
+  })
+
   it('should handle network errors with retry logic', async () => {
     let callCount = 0
     globalThis.fetch = mockedFetch = mock.fn(() => {
