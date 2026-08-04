@@ -212,10 +212,11 @@ export class CCTOperationUnsupportedError extends CCIPError {
 export class CCTDataDecodeError extends CCIPError {
   override readonly name = 'CCTDataDecodeError'
   /** Creates a CCT data decode error. */
-  constructor(message = 'Unable to decode CCT data', options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.CCT_DATA_DECODE_FAILED, message, {
+  constructor(account: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.CCT_DATA_DECODE_FAILED, `Unable to decode CCT data at ${account}`, {
       ...options,
       isTransient: false,
+      context: { ...options?.context, account },
     })
   }
 }

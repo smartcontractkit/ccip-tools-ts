@@ -56,7 +56,7 @@ function stubChain(account: { data: Buffer } | null = registryAccount()): Solana
   } as unknown as SolanaChain
 }
 
-describe('Solana TokenAdminRegistry getTokenAdminRegistry', () => {
+describe('GetTokenAdminRegistry (cct/solana)', () => {
   describe('query', () => {
     it('returns configured administrators, lookup table, and writable indexes', async () => {
       const config = await SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistry({

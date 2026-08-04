@@ -48,11 +48,13 @@ import {
   type GenerateSetPoolResult,
   type GenerateTransferAdminParams,
   type GenerateTransferAdminResult,
+  type GetSupportedTokensParams,
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
   AcceptAdmin,
   AppendToLookupTable,
   CreateLookupTable,
+  GetSupportedTokens,
   GetTokenAdminRegistry,
   RegisterAdmin,
   SetPool,
@@ -84,6 +86,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #appendToLookupTable = new AppendToLookupTable()
   readonly #createLookupTable = new CreateLookupTable()
+  readonly #getSupportedTokens = new GetSupportedTokens()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
@@ -757,6 +760,23 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
     return this.#getTokenAdminRegistry.query(this.chain, opts)
+  }
+
+  /**
+   * Lists all SPL token mints configured in a Router's TokenAdminRegistry in a single scan;
+   * pagination is not supported.
+   *
+   * @throws {@link CCTParamsInvalidError} If `address` is not a valid Solana public key.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const tokens = await cct.getSupportedTokens({ address: router })
+   * ```
+   */
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
+    return this.#getSupportedTokens.query(this.chain, opts)
   }
 
   /**
