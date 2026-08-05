@@ -1,10 +1,10 @@
 import { bcs } from '@mysten/sui/bcs'
 import type { Keypair } from '@mysten/sui/cryptography'
-import { SuiGraphQLClient } from '@mysten/sui/graphql'
 import { JsonRpcHTTPTransport, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
 import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
+import { memoize } from 'micro-memoize'
 import type { SetOptional } from 'type-fest'
 
 import {
@@ -17,7 +17,7 @@ import {
   Chain,
 } from '../chain.ts'
 import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
-import { type CommitEvent, streamSuiLogs } from './events.ts'
+import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { getSuiLeafHasher } from './hasher.ts'
 import { deriveObjectID, getLatestPackageId, getObjectRef } from './objects.ts'
 import {
@@ -79,7 +79,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   override readonly network: NetworkInfo<typeof ChainFamily.Sui>
   readonly client: SuiJsonRpcClient
-  readonly graphqlClient: SuiGraphQLClient
 
   /**
    * Creates a new SuiChain instance.
@@ -96,26 +95,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     this.client = client
     this.network = network
 
-    // TODO: Graphql client should come from config
-    let graphqlUrl: string
-    let suiNetwork: string
-    if (this.network.name === 'sui-mainnet') {
-      // Sui mainnet (sui:1)
-      graphqlUrl = 'https://graphql.mainnet.sui.io/graphql'
-      suiNetwork = 'mainnet'
-    } else if (this.network.name === 'sui-testnet') {
-      // Sui testnet (sui:2)
-      graphqlUrl = 'https://graphql.testnet.sui.io/graphql'
-      suiNetwork = 'testnet'
-    } else {
-      // Localnet (sui:4) or unknown
-      graphqlUrl = 'https://graphql.devnet.sui.io/graphql'
-      suiNetwork = 'devnet'
-    }
-
-    this.graphqlClient = new SuiGraphQLClient({
-      url: graphqlUrl,
-      network: suiNetwork,
+    // typeAndVersion is a devInspect per call, but changes only on package
+    // upgrades; dedupe repeated lookups (ramps activities call it 2+ times
+    // per attempt) while still picking up upgrades within a minute
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
     })
   }
 
@@ -165,14 +151,27 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Object.assign(chain, { url })
   }
 
-  /** {@inheritDoc Chain.getBlockInfo} */
+  /**
+   * Gets checkpoint metadata for a sequence number or tag.
+   * Sui checkpoints are finalized once committed, so 'finalized' and 'latest'
+   * both resolve to the latest checkpoint. Non-positive numbers are treated as
+   * depths relative to latest (e.g. -5 means 5 checkpoints behind latest).
+   * @param block - Checkpoint sequence number, depth, or tag.
+   * @returns Checkpoint number and Unix timestamp (seconds).
+   */
   async getBlockInfo(block: number | 'finalized' | 'latest'): Promise<BlockInfo> {
-    if (typeof block !== 'number' || block <= 0) {
-      const now = Math.floor(Date.now() / 1000)
-      return { number: now, timestamp: now }
+    let seq: number
+    if ((typeof block === 'number' || typeof block === 'bigint') && block > 0) {
+      seq = block
+    } else {
+      const latest = Number(await this.client.getLatestCheckpointSequenceNumber())
+      seq =
+        typeof block === 'number' || typeof block === 'bigint'
+          ? Math.max(0, latest + Number(block))
+          : latest
     }
     const checkpoint = await this.client.getCheckpoint({
-      id: String(block),
+      id: String(seq),
     })
     return {
       number: Number(checkpoint.sequenceNumber),
@@ -298,10 +297,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
+
+    // fee_quoter lives in the ccip package (reachable from any ramp via
+    // get_ccip_package_id); report it by its original package id
+    const ccip = await getCcipStateAddress(onRamp, this.client)
+    const feeQuoter = `${ccip.split('::')[0]}::fee_quoter`
+
     return {
+      // source-side router: Sui has no router contract; the onramp package itself
+      // plays that role (consistent with getOnRampForRouter)
       router: onRamp,
       destChainSelector,
-      feeQuoter: onRamp, // FIXME
+      feeQuoter,
       typeAndVersion,
     }
   }
@@ -309,13 +316,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.getOffRampConfig} */
   async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
-    offRamp = await getLatestPackageId(offRamp, this.client)
+    const latestOffRamp = await getLatestPackageId(offRamp, this.client)
     const functionName = 'get_source_chain_config'
-    const target = offRamp.includes('::')
-      ? `${offRamp}::${functionName}`
-      : `${offRamp}::offramp::${functionName}`
+    const target = latestOffRamp.includes('::')
+      ? `${latestOffRamp}::${functionName}`
+      : `${latestOffRamp}::offramp::${functionName}`
 
-    const ccip = await getCcipStateAddress(offRamp, this.client)
+    const ccip = await getCcipStateAddress(latestOffRamp, this.client)
+    // state pointers live on the original packages; view calls target latest
     const offrampStateObject = await getObjectRef(offRamp, this.client)
     const ccipObjectRef = await getObjectRef(ccip, this.client)
     const tx = new Transaction()
@@ -345,7 +353,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const routerBytes = configBytes.slice(offset, offset + 32)
     offset += 32
-    const router = `0x${Buffer.from(routerBytes).toString('hex')}`
+    // Sui offramp hardcodes `router: @ccip` (placeholder — no router contract);
+    // expose it in our canonical ccip form (`pkg::state_object`) when it matches
+    const routerHex = normalizeSuiAddress(hexlify(routerBytes))
+    const router = routerHex === ccip.split('::')[0] ? ccip : routerHex
 
     const isEnabled = configBytes[offset]! !== 0
     offset += 1
@@ -402,6 +413,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPDataFormatUnsupportedError} if view call fails
    */
   override async getTokenForTokenPool(tokenPool: string): Promise<string> {
+    return withLookupRetry(() => this.getTokenForTokenPool_(tokenPool))
+  }
+
+  /** {@inheritDoc SuiChain.getTokenForTokenPool} */
+  private async getTokenForTokenPool_(tokenPool: string): Promise<string> {
     const normalizedTokenPool = normalizeSuiAddress(tokenPool)
 
     // Get objects owned by this package (looking for state pointers)
@@ -466,11 +482,21 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
     const tokenType = typeMatch[1]
 
+    // Walk the state's package_ids to the latest pool package for the call
+    // (type strings carry the original package, whose functions are version-gated)
+    const poolContent = info.data?.content
+    const packageIds =
+      poolContent?.dataType === 'moveObject'
+        ? (poolContent.fields as Record<string, unknown>)['package_ids']
+        : undefined
+    const latestPoolPackage =
+      Array.isArray(packageIds) && packageIds.length
+        ? (packageIds[packageIds.length - 1] as string)
+        : type.split('<')[0]!.split('::')[0]!
+    const poolModule = type.split('<')[0]!.split('::')[1]!
+
     // Call get_token function from managed_token_pool contract with the type parameter
-    const target = type.split('<')[0]?.split('::').slice(0, 2).join('::') + '::get_token'
-    if (!target) {
-      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid pool state type format: ${type}`)
-    }
+    const target = `${latestPoolPackage}::${poolModule}::get_token`
     const tx = new Transaction()
     tx.moveCall({
       target,
@@ -503,6 +529,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPError} if token address is invalid or metadata cannot be loaded
    */
   async getTokenInfo(token: string): Promise<{ symbol: string; decimals: number }> {
+    return withLookupRetry(() => this.getTokenInfo_(token))
+  }
+
+  /** {@inheritDoc SuiChain.getTokenInfo} */
+  private async getTokenInfo_(token: string): Promise<{ symbol: string; decimals: number }> {
     const normalizedTokenAddress = normalizeSuiAddress(token)
     if (!isValidSuiAddress(normalizedTokenAddress)) {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
@@ -510,7 +541,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const objectResponse = await this.client.getObject({
       id: normalizedTokenAddress,
-      options: { showType: true },
+      options: { showType: true, showContent: true },
     })
 
     const getCoinFromMetadata = (metadata: string) => {
@@ -529,6 +560,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     // Check if this is a CoinMetadata object or a coin type string
     if (objectType?.includes('CoinMetadata')) {
+      // Read symbol/decimals from the metadata object itself; the node's
+      // coin-registry lookup (suix_getCoinMetadata) is unreliable on some
+      // indexers (returns null for existing metadata objects)
+      const content = objectResponse.data?.content
+      if (content?.dataType === 'moveObject') {
+        const fields = content.fields as { symbol?: unknown; decimals?: unknown }
+        if (typeof fields.symbol === 'string' && typeof fields.decimals === 'number') {
+          return { symbol: fields.symbol, decimals: fields.decimals }
+        }
+      }
       coinType = getCoinFromMetadata(objectType)
     } else if (token.includes('::')) {
       // This is a coin type string (e.g., "0xabc::coin::COIN")
@@ -568,9 +609,17 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return Promise.reject(new CCIPNotImplementedError('SuiChain.getBalance'))
   }
 
-  /** {@inheritDoc Chain.getTokenAdminRegistryFor} */
-  getTokenAdminRegistryFor(_address: string): Promise<string> {
-    return Promise.reject(new CCIPNotImplementedError())
+  /**
+   * Gets the token admin registry for a ramp of this CCIP deployment.
+   * The token admin registry is a module of the ccip package, reachable from
+   * any ramp of the deployment through `get_ccip_package_id`.
+   * @param address - Ramp (onramp/offramp/router) package address.
+   * @param _destChainSelector - Unused on Sui (registry is global to the deployment).
+   * @returns Token admin registry address in `package::module` form.
+   */
+  async getTokenAdminRegistryFor(address: string, _destChainSelector?: bigint): Promise<string> {
+    const ccip = await getCcipStateAddress(address, this.client)
+    return `${ccip.split('::')[0]}::token_admin_registry`
   }
 
   // Static methods for decoding

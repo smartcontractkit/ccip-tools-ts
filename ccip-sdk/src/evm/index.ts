@@ -74,13 +74,17 @@ import {
 } from '../errors/index.ts'
 import {
   type ExtraArgs,
-  type FinalityAllowed,
   type FinalityRequested,
   decodeFinalityAllowed,
   encodeFinality,
 } from '../extra-args.ts'
 import { fetchProfileForUrl } from '../fetch.ts'
-import { type EstimateMessageInput, getDestTokenAmount } from '../gas.ts'
+import {
+  type EstimateMessageInput,
+  type GetRequiredCCVsMessage,
+  type GetRequiredCCVsResult,
+  getDestTokenAmount,
+} from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
@@ -113,7 +117,6 @@ import {
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
-import type Receiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
 import CommitStore_1_2_ABI from './abi/CommitStore_1_2.ts'
 import CommitStore_1_5_ABI from './abi/CommitStore_1_5.ts'
@@ -130,6 +133,7 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
+import type RMNProxy_ABI from './abi/RMNProxy.ts'
 import type Router_ABI from './abi/Router.ts'
 import type TokenAdminRegistry_1_5_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import type TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
@@ -152,6 +156,7 @@ import {
 import { estimateExecGas, findBalancesSlot } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
+import { type MessageV1TokenTransfer, encodeMessageV1 } from './messageCodec.ts'
 import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import {
@@ -514,7 +519,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return { statusCode: resp.status, statusMessage: resp.statusText, headers, body }
       }
       req.retryFunc = () => Promise.resolve(false) // our wrapper owns retries
-      const provider = new JsonRpcProvider(req, undefined, { staticNetwork: true })
+      const provider = new JsonRpcProvider(req, undefined, {
+        staticNetwork: true,
+        batchMaxCount: 20,
+      })
       abort?.addEventListener('abort', () => provider.destroy(), { once: true })
       providerReady = Promise.resolve(provider)
     } else {
@@ -1019,6 +1027,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const sourceFamily = sourceChainSelector
       ? networkInfo(sourceChainSelector).family
       : ChainFamily.EVM
+
+    const getRmn = async (rmnProxy: string): Promise<{ rmn?: string }> => {
+      if (!rmnProxy && rmnProxy === ZeroAddress) return {}
+      const proxyContract = new Contract(
+        rmnProxy,
+        interfaces.RMNProxy,
+        this.provider,
+      ) as unknown as TypedContract<typeof RMNProxy_ABI>
+      const rmn = await proxyContract.getARM()
+      return { rmn: rmn as CleanAddressable<typeof rmn> }
+    }
+
     let offRampABI, commitStoreABI
     switch (version) {
       case CCIPVersion.V1_2:
@@ -1060,6 +1080,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...csDynamicConfig,
           ...staticConfig,
           ...dynamicConfig,
+          ...(await getRmn(
+            'armProxy' in staticConfig ? staticConfig.armProxy : staticConfig.rmnProxy,
+          )),
           onRamps: [staticConfig.onRamp],
           typeAndVersion,
         }
@@ -1085,6 +1108,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         return {
           ...staticConfig,
           ...dynamicConfig,
+          ...(await getRmn(staticConfig.rmnRemote)),
           sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
@@ -1105,6 +1129,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
         return {
           ...staticConfig,
+          ...(await getRmn(staticConfig.rmnRemote)),
           sourceChainSelector: sourceChainSelector!,
           ...sourceChainConfig,
           onRamps,
@@ -2425,7 +2450,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         watch:
           opts.watch instanceof AbortSignal
             ? AbortSignal.any([opts.watch, this.abort])
-            : this.abort,
+            : opts.watch
+              ? this.abort
+              : undefined,
       })
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
@@ -2956,6 +2983,88 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
+  /**
+   * Resolve the CCVs the destination OffRamp will require for a candidate message, and whether its
+   * finality is accepted, via the on-chain `getCCVsForMessage(bytes)` view (a read; no send). Builds the
+   * MessageV1 candidate with {@link encodeMessageV1}; a rejected finality throws
+   * {@link CCIPFinalityNotAllowedError} (decoded from the resolver's `InvalidRequestedFinality`).
+   *
+   * The required set is sender-scoped: pass the real `sender`, or an omitted one yields the lane-default
+   * view. CCIP v2.0 lanes only.
+   *
+   * @param opts - Destination OffRamp (v2.0) address and the candidate message.
+   * @returns `{ requiredCCVs, optionalCCVs, optionalThreshold }`.
+   */
+  override async getRequiredCCVs(opts: {
+    offRamp: string
+    message: GetRequiredCCVsMessage
+  }): Promise<GetRequiredCCVsResult> {
+    const { offRamp, message } = opts
+    const firstToken = message.destTokenAmounts?.[0]
+    let tokenTransfer: MessageV1TokenTransfer | undefined
+    if (firstToken) {
+      const destTokenAddress = firstToken.token ?? firstToken.destTokenAddress
+      if (destTokenAddress != null) {
+        tokenTransfer = {
+          amount: firstToken.amount,
+          destTokenAddress: getAddress(destTokenAddress),
+          extraData: firstToken.extraData,
+        }
+      }
+    }
+    const encoded = encodeMessageV1({
+      sourceChainSelector: message.sourceChainSelector,
+      destChainSelector: this.network.chainSelector,
+      ccipReceiveGasLimit: Number(message.ccipReceiveGasLimit ?? message.gasLimit ?? 0),
+      finality: toBeHex(encodeFinality(message.finality ?? 'finalized'), 4),
+      // Source-side addresses are abi.encode(address) (32 bytes); dest-side receiver is raw 20 bytes.
+      sender: message.sender ? zeroPadValue(getAddress(message.sender), 32) : ZeroHash,
+      receiver: getAddress(message.receiver),
+      data: message.data != null ? hexlify(message.data) : '0x',
+      tokenTransfer,
+    })
+    const contract = new Contract(
+      offRamp,
+      interfaces.OffRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+    try {
+      const ccvs = await contract.getCCVsForMessage(encoded)
+      const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
+        resultToObject,
+      ) as unknown as CleanAddressable<typeof ccvs>
+      return { requiredCCVs, optionalCCVs, optionalThreshold: Number(optionalThreshold) }
+    } catch (err) {
+      if (isError(err, 'CALL_EXCEPTION')) {
+        const parsed = err.data ? interfaces.OffRamp_v2_0.parseError(err.data) : null
+        if ((err.revert?.name ?? parsed?.name) === 'InvalidRequestedFinality') {
+          const args = err.revert?.args ?? parsed?.args
+          const receiverAllowed = args ? String(args[1]) : '0x00000000'
+          throw new CCIPFinalityNotAllowedError(
+            message.finality ?? 'finalized',
+            decodeFinalityAllowed(receiverAllowed),
+            {
+              context: {
+                source: networkInfo(message.sourceChainSelector).name,
+                sender: message.sender,
+                dest: this.network.name,
+                receiver: message.receiver,
+              },
+            },
+          )
+        }
+        // getCCVsForMessage exists only on a v2.0 OffRamp; an older OffRamp reverts with no data.
+        // Probe the version to surface a clear error rather than a raw CALL_EXCEPTION.
+        const tv = await this.typeAndVersion(offRamp).catch(() => null)
+        if (tv && (!tv[0].includes('OffRamp') || tv[1] < CCIPVersion.V2_0))
+          throw new CCIPVersionUnsupportedError(tv[2] || offRamp, {
+            context: { offRamp, dest: this.network.name },
+          })
+      }
+      throw err
+    }
+  }
+
   /** {@inheritDoc Chain.estimateReceiveExecution} */
   override async estimateReceiveExecution(
     opts: Parameters<NonNullable<Chain['estimateReceiveExecution']>>[0],
@@ -2996,61 +3105,24 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
 
-    // v2: check allowed finality — but SKIP for token-only transfers (empty data + no receive-gas),
-    // mirroring the OffRamp which delegates finality to the pool and does not consult the receiver
-    // for token-only transfers (see isTokenOnlyEstimate / OffRamp._isTokenOnlyTransfer).
+    // v2 finality gate via the OffRamp getCCVsForMessage resolver. Skipped for token-only transfers
+    // (OffRamp._isTokenOnlyTransfer delegates their finality to the pool). Best-effort: the finality
+    // rejection propagates; any other failure (non-v2 lane, transient RPC) is swallowed so the estimate
+    // still returns.
     if (
       'finality' in opts_.message &&
       opts_.message.finality &&
       opts_.message.finality !== 'finalized' &&
       !isTokenOnlyEstimate(opts_.message)
     ) {
-      let allowedFinality: FinalityAllowed = {
-        finalityDepth: 1,
-        finalitySafe: true,
-      } // default=loose for non-receivers
       try {
-        const receiver = new Contract(
-          opts_.message.receiver,
-          interfaces.Receiver_v2_0,
-          this.provider,
-        ) as unknown as TypedContract<typeof Receiver_2_0_ABI>
-        if (await receiver.supportsInterface(receiver.ccipReceive.fragment.selector))
-          allowedFinality = { finalityDepth: 0 } // default=finalized for legacy receivers
-
-        const [, , , allowedFinality_] = await receiver.getCCVsAndFinalityConfig(
-          opts_.message.sourceChainSelector,
-          opts_.message.sender ?? ZeroHash,
-        )
-        allowedFinality = decodeFinalityAllowed(allowedFinality_)
+        await this.getRequiredCCVs({ offRamp: opts_.offRamp, message: opts_.message })
       } catch (err) {
+        if (err instanceof CCIPFinalityNotAllowedError) throw err
         this.logger.debug(
-          `Failed to fetch allowed finality config from receiver="${opts_.message.receiver}", defaulting to: ${JSON.stringify(allowedFinality)}. Error:`,
+          'CCV/finality preflight unavailable; continuing with gas estimate. Error:',
           err,
         )
-      }
-      if (opts_.message.finality === 'safe') {
-        if (!allowedFinality.finalitySafe)
-          throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
-            context: {
-              source: networkInfo(opts_.message.sourceChainSelector).name,
-              sender: opts_.message.sender,
-              dest: this.network.name,
-              receiver: opts_.message.receiver,
-            },
-          })
-      } else if (
-        allowedFinality.finalityDepth == 0 ||
-        opts_.message.finality < allowedFinality.finalityDepth
-      ) {
-        throw new CCIPFinalityNotAllowedError(opts_.message.finality, allowedFinality, {
-          context: {
-            source: networkInfo(opts_.message.sourceChainSelector).name,
-            sender: opts_.message.sender,
-            dest: this.network.name,
-            receiver: opts_.message.receiver,
-          },
-        })
       }
     }
 

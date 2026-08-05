@@ -7,8 +7,9 @@ import {
   CCIPOffRampNotFoundError,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
+import { ChainFamily } from './networks.ts'
 import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
-import { decodeOnRampAddress } from './utils.ts'
+import { decodeAddress, decodeOnRampAddress } from './utils.ts'
 
 /**
  * Pure/sync function to calculate/generate OffRamp.executeManually report for messageIds
@@ -124,11 +125,35 @@ export const discoverOffRamp = memoize(
       // pass
     }
 
+    // OnRamp v2.0 has `offRamp` config
+    const onRampConfig: { typeAndVersion: string; offramp?: string; offRamp?: string } =
+      await source.getOnRampConfig(onRamp, dest.network.chainSelector)
+    if (onRampConfig.offramp || onRampConfig.offRamp) {
+      let decoded = decodeAddress(
+        onRampConfig.offramp || onRampConfig.offRamp!,
+        dest.network.family,
+      )
+      if (
+        (dest.network.family === ChainFamily.Aptos || dest.network.family === ChainFamily.Sui) &&
+        !decoded.includes('::')
+      )
+        decoded += '::offramp'
+      return decoded
+    }
+
+    // fallback to pairing routers offramps
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
-    const sourceOffRamps = await source.getOffRampsForRouter(
-      sourceRouter,
-      dest.network.chainSelector,
-    )
+    let sourceOffRamps: string[] = []
+    try {
+      sourceOffRamps = await source.getOffRampsForRouter(sourceRouter, dest.network.chainSelector)
+    } catch (err) {
+      // Source-side offRamp enumeration can be impossible (e.g. Sui on
+      // history-pruned RPCs); fall through to dest-side discovery below
+      logger.debug(
+        'discoverOffRamp: source-side offRamp enumeration failed; trying dest-side only',
+        err,
+      )
+    }
     for (const offRamp of sourceOffRamps) {
       let destOnRamps
       try {
@@ -143,11 +168,19 @@ export const discoverOffRamp = memoize(
         continue
       }
       for (const destOnRamp of destOnRamps) {
-        const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
-        const destOffRamps = await dest.getOffRampsForRouter(
-          destRouter,
-          source.network.chainSelector,
-        )
+        let destOffRamps
+        try {
+          const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
+          destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
+        } catch (err) {
+          logger.debug(
+            'discoverOffRamp: skipping dest onRamp',
+            destOnRamp,
+            '(dest-side offRamp enumeration failed)',
+            err,
+          )
+          continue
+        }
         for (const offRamp of destOffRamps) {
           let offRampsOnRamps
           try {
@@ -203,7 +236,9 @@ export const discoverOffRamp = memoize(
         }
       }
     }
-    throw new CCIPOffRampNotFoundError(onRamp, dest.network.name)
+    throw new CCIPOffRampNotFoundError(onRamp, dest.network.name, {
+      context: { sourceRouter, sourceOffRamps },
+    })
   },
   {
     transformKey: ([source, dest, onRamp]) =>

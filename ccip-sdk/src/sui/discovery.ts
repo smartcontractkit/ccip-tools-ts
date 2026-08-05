@@ -7,6 +7,8 @@ import { memoize } from 'micro-memoize'
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import { getAddressBytes } from '../utils.ts'
+import { withLookupRetry } from './events.ts'
+import { getLatestPackageId, getObjectRef } from './objects.ts'
 
 /**
  * Discovers the CCIP package ID associated with a given Sui onramp package.
@@ -17,7 +19,9 @@ import { getAddressBytes } from '../utils.ts'
  */
 export const getCcipStateAddress = memoize(
   async (ramp: string, client: SuiJsonRpcClient): Promise<string> => {
-    // Remove ::onramp suffix if present, then add it back with the function name
+    // View calls must target the latest package (old versions are
+    // version-gated and revert); state pointers are resolved by the callee
+    ramp = await getLatestPackageId(ramp, client)
     const tx = new Transaction()
     tx.moveCall({
       target: `${ramp}::get_ccip_package_id`,
@@ -39,25 +43,126 @@ export const getCcipStateAddress = memoize(
 )
 
 /**
+ * Discovers the offramp package via MCMS upgrade history within retention:
+ * the owner of the CCIPObjectRef is the MCMS package; its
+ * `mcms_deployer::commit_upgrade` transactions publish new package versions.
+ * Scanning them (and their created objects) finds the offramp package without
+ * needing the pruned publish tx. Works on history-pruned RPCs as long as one
+ * upgrade happened within transaction retention.
+ */
+async function findOffRampPackageByUpgrades(
+  ccip: string,
+  client: SuiJsonRpcClient,
+): Promise<string | undefined> {
+  const ccipRefId = await getObjectRef(ccip, client)
+  const ccipRef = await withLookupRetry(() =>
+    client.getObject({ id: ccipRefId, options: { showContent: true } }),
+  )
+  const content = ccipRef.data?.content
+  if (content?.dataType !== 'moveObject') return
+  const owner = (
+    (content.fields as Record<string, unknown>)['ownable_state'] as
+      { fields?: { owner?: unknown } } | undefined
+  )?.fields?.owner
+  if (typeof owner !== 'string') return
+
+  let cursor: string | null | undefined
+  do {
+    const txs = await withLookupRetry(() =>
+      client.queryTransactionBlocks({
+        filter: {
+          MoveFunction: {
+            package: normalizeSuiAddress(owner),
+            module: 'mcms_deployer',
+            function: 'commit_upgrade',
+          },
+        },
+        options: { showEffects: true },
+        cursor,
+        limit: 50,
+        order: 'descending',
+      }),
+    )
+    for (const tx of txs.data) {
+      for (const created of tx.effects?.created ?? []) {
+        const modules = await client
+          .getNormalizedMoveModulesByPackage({ package: created.reference.objectId })
+          .catch(() => null)
+        if (!modules || !('offramp' in modules)) continue
+        // module.address is the *original* package id (possibly not zero-padded)
+        return normalizeSuiAddress(modules['offramp'].address) + '::offramp'
+      }
+    }
+    cursor = txs.hasNextPage ? txs.nextCursor : null
+  } while (cursor)
+}
+
+/**
+ * Discovers the offramp package by scanning recent events for offramp event
+ * types (`<pkg>::offramp::*`). Works on history-pruned RPCs once any offramp
+ * activity (commit/execute/config) exists within event retention.
+ */
+async function findOffRampPackageByEvents(
+  client: SuiJsonRpcClient,
+  { maxPages = 100, limit = 50 }: { maxPages?: number; limit?: number } = {},
+): Promise<string | undefined> {
+  const filter = { TimeRange: { startTime: '0', endTime: Date.now().toString() } }
+  let cursor: { txDigest: string; eventSeq: string } | null | undefined
+  for (let page = 0; page < maxPages; page++) {
+    const res = await withLookupRetry(() =>
+      client.queryEvents({ query: filter, cursor, limit, order: 'descending' }),
+    )
+    for (const event of res.data) {
+      const match = event.type.match(/^(0x[0-9a-fA-F]+)::offramp::/)
+      if (match) return normalizeSuiAddress(match[1]!) + '::offramp'
+    }
+    if (!res.hasNextPage || !res.data.length) break
+    cursor = res.nextCursor
+  }
+}
+
+/**
  * Gets the Sui offramp package ID associated with a given CCIP package ID.
  *
  * @param ccip - Sui CCIP Package Id
  * @param client - Sui client
  * @returns Sui offramp package id
  */
-export const getOffRampForCcip = async (ccip: string, client: SuiJsonRpcClient) => {
+export const getOffRampForCcip = memoize(
+  async (ccip: string, client: SuiJsonRpcClient) => {
+    let historyErr: unknown
+    try {
+      return await getOffRampForCcip_(ccip, client)
+    } catch (err) {
+      // The history path is brittle on pruned/limited indexers (missing publish
+      // tx, pruned OwnerCap objects, stripped effects); fall back to MCMS
+      // upgrade txs within retention, then to scanning recent events
+      historyErr = err
+    }
+    const offramp =
+      (await findOffRampPackageByUpgrades(ccip, client).catch(() => undefined)) ??
+      (await findOffRampPackageByEvents(client).catch(() => undefined))
+    if (offramp) return offramp
+    throw historyErr
+  },
+  { maxArgs: 1, async: true, expires: 300e3 },
+)
+
+const getOffRampForCcip_ = async (ccip: string, client: SuiJsonRpcClient) => {
   // Get CCIP publish tx info
   // Get the owner cap created in that tx.
   // Get owner of the ownercap object.
   // Get objects owned by that owner.
   // Trough each of the objects owned by that owner, get the original transaction that created them.
   // Take any of the objects created by that transaction, check its info to find the OffRamp package.
-  const ccipObject = await client.getObject({
-    id: ccip.split('::')[0]!,
-    options: {
-      showPreviousTransaction: true,
-    },
-  })
+  const ccipObject = await withLookupRetry(() =>
+    client.getObject({
+      id: ccip.split('::')[0]!,
+      options: {
+        showPreviousTransaction: true,
+      },
+    }),
+  )
 
   // Get the tx that created the ownercap object.
   const ccipCreationTxDigest = ccipObject.data?.previousTransaction
@@ -72,12 +177,22 @@ export const getOffRampForCcip = async (ccip: string, client: SuiJsonRpcClient) 
     throw new CCIPError(CCIPErrorCode.UNKNOWN, 'CCIP object has no previous transaction')
   }
 
-  const ccipCreationTx = await client.getTransactionBlock({
-    digest: ccipCreationTxDigest,
-    options: {
-      showEffects: true,
-      showInput: true,
-    },
+  const ccipCreationTx = await withLookupRetry(() =>
+    client.getTransactionBlock({
+      digest: ccipCreationTxDigest,
+      options: {
+        showEffects: true,
+        showInput: true,
+      },
+    }),
+  ).catch((err) => {
+    if (err instanceof Error && /could not find the referenced transaction/i.test(err.message)) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `CCIP creation transaction ${ccipCreationTxDigest} was pruned on this RPC`,
+      )
+    }
+    throw err
   })
 
   let mcmsPackageId: string | undefined

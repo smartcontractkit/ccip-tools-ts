@@ -5,14 +5,13 @@ import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
   type ConnectionConfig,
-  type Finality,
-  type SignaturesForAddressOptions,
   type VersionedTransactionResponse,
   Connection,
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
   SystemProgram,
 } from '@solana/web3.js'
+import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -41,6 +40,7 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
+import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
@@ -73,6 +73,7 @@ import {
 } from '../extra-args.ts'
 import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
+import { cleanUpBuffers } from './cleanup.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
@@ -107,17 +108,21 @@ import {
   toLeArray,
   util,
 } from '../utils.ts'
-import { cleanUpBuffers } from './cleanup.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
+import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
+import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
+import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
+import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
@@ -129,13 +134,13 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { buildMessageForDest, normalizeDeep } from '../requests.ts'
-import { patchBorsh } from './patchBorsh.ts'
-import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
+import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
+const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
 const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
+const offrampV2Coder = new BorshCoder(CCIP_OFFRAMP_V2_IDL)
 const TOKEN_POOL_IDL = {
   ...BURN_MINT_TOKEN_POOL,
   types: BASE_TOKEN_POOL.types,
@@ -173,7 +178,7 @@ export type SolanaLog = ChainLog & {
   tx?: SolanaTransaction
   data: string
   level: number
-  type: 'log' | 'data'
+  type: 'log' | 'data' | 'cpi'
 }
 /** Solana-specific transaction structure with versioned transaction response. */
 export type SolanaTransaction = MergeArrayElements<
@@ -246,6 +251,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 5e3,
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
@@ -257,32 +263,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
       maxSize: 100,
     })
-    this.connection.getSignaturesForAddress = memoize(
-      this.connection.getSignaturesForAddress.bind(this.connection),
-      {
-        async: true,
-        maxSize: 100,
-        // if options.before is defined, caches for long, otherwise for short (recent signatures)
-        expires: (key) => (key[1] ? 2 ** 31 - 1 : 5e3),
-        transformKey: ([address, options, commitment]: [
-          address: PublicKey,
-          options?: SignaturesForAddressOptions,
-          commitment?: Finality,
-        ]) =>
-          [
-            address.toBase58(),
-            options?.before,
-            options?.until,
-            options?.limit,
-            commitment,
-          ] as const,
-      },
-    )
     // cache account info for 30 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
       maxSize: 100,
       maxArgs: 2,
-      expires: 30e3,
+      expires: 5e3,
       transformKey: ([address, commitment]) =>
         [(address as PublicKey).toString(), commitment] as const,
     })
@@ -416,8 +401,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Parse logs from transaction using helper function
-    const logs_ = tx.meta?.logMessages?.length
-      ? parseSolanaLogs(tx.meta.logMessages).map((l) => ({
+    const logs_ = tx.meta
+      ? parseSolanaLogs(tx.meta.logMessages ?? [], tx).map((l) => ({
           ...l,
           transactionHash: hash,
           blockNumber: tx.slot,
@@ -594,8 +579,37 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
-    const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
+    const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
     const routerConfig = await this._getRouterConfig(onRamp)
+
+    // CCIP v2 router (`ccip-router 2.0.0-dev`) stores the per-lane dest chain state under a
+    // different PDA seed (`dest_chain_state_v2`) and account type (`DestChainCcipV2`), and folds
+    // the lane fee config into that account instead of a separate FeeQuoter dest_chain account
+    // (fees are quoted by a committee-verifier CCV at send time). Handle it separately; the rest
+    // of the router (Config account) stays byte-compatible with the 1.6 IDL.
+    if (version.startsWith('2.')) {
+      const program = new Program(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
+        connection: this.connection,
+      })
+      const [destChainStatePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('dest_chain_state_v2'), toLeArray(destChainSelector, 8)],
+        new PublicKey(onRamp),
+      )
+      const destChainState = await program.account.destChainCcipV2.fetch(destChainStatePda)
+      return normalizeDeep(
+        {
+          ...routerConfig,
+          destChainSelector,
+          ...destChainState.config,
+          router: onRamp,
+          typeAndVersion,
+        },
+        {
+          sourceFamily: (this.constructor as typeof SolanaChain).family,
+          destFamily: networkInfo(destChainSelector).family,
+        },
+      )
+    }
 
     const program = new Program(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
       connection: this.connection,
@@ -658,22 +672,28 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
     const offRamp_ = new PublicKey(offRamp)
-    const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
+    const [, version, typeAndVersion] = await this.typeAndVersion(offRamp)
 
+    // referenceAddresses is byte-identical across 1.6 and 2.0, so read it with the 1.6 IDL always.
     const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
 
-    // Read referenceAddresses PDA for router and other fields
-    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
+    // The `source_chain_state` PDA seed is unchanged in v2, but the `SourceChain` account layout
+    // differs: v2 dropped the `state` (minSeqNr) field and reshaped `SourceChainConfig`. Decode
+    // with the matching IDL.
+    const isV2 = version.startsWith('2.')
+    const program = new Program(isV2 ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL, offRamp_, {
+      connection: this.connection,
+    })
 
     // Read source_chain_state PDA for onRamp and other config fields
     const [statePda] = PublicKey.findProgramAddressSync(
       [Buffer.from('source_chain_state'), toLeArray(sourceChainSelector, 8)],
       offRamp_,
     )
-    const {
-      config: { onRamp: onRampField, ...sourceConfig },
-      state,
-    } = await program.account.sourceChain.fetch(statePda)
+    const sourceChain = await program.account.sourceChain.fetch(statePda)
+    const { onRamp: onRampField, ...sourceConfig } = sourceChain.config
+    // v1 carries a per-lane `state` (minSeqNr); v2 has none.
+    const state = 'state' in sourceChain ? sourceChain.state : undefined
     const onRamp = decodeAddress(
       getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
       networkInfo(sourceChainSelector).family,
@@ -705,6 +725,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPSolanaOffRampEventsNotFoundError} if no OffRamp events found
    */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
+    const [, version] = await this.typeAndVersion(router)
+    if (version.startsWith('2.')) {
+      return this._getOffRampsForRouterV2(router, sourceChainSelector)
+    }
+
     // feeQuoter is present in router's config, and has a DestChainState account which is updated by
     // the offramps, so we can use it to narrow the search for the offramp
     const { feeQuoter } = await this._getRouterConfig(router)
@@ -724,6 +749,57 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       return [log.address] // assume single offramp per router/deployment on Solana
     }
     throw new CCIPSolanaOffRampEventsNotFoundError(feeQuoter.toString())
+  }
+
+  /**
+   * OffRamp discovery for CCIP v2 routers.
+   *
+   * v2 OffRamps don't touch the FeeQuoter's `dest_chain` state, so the v1 event-scan heuristic
+   * finds nothing. Instead, the router owns an `AllowedOfframp` marker PDA per allowed
+   * `(sourceChainSelector, offRamp)` pair, seeded as `[allowed_offramp, selectorLE, offRamp]`.
+   * The offRamp pubkey lives only in the seeds (marker data is just the discriminator), so we:
+   *  1. enumerate the router's `AllowedOfframp` markers,
+   *  2. read each marker's transaction history (offRamps reference their marker when executing),
+   *  3. for every account key seen in those txs, re-derive the marker PDA for our
+   *     `sourceChainSelector` and keep the keys that reproduce the marker address.
+   * A match proves both that the key is the offRamp program and that it's allowed for this source.
+   */
+  private async _getOffRampsForRouterV2(
+    router: string,
+    sourceChainSelector: bigint,
+  ): Promise<string[]> {
+    const routerPk = new PublicKey(router)
+    const program = new Program(CCIP_ROUTER_V2_IDL, routerPk, { connection: this.connection })
+    const markers = await program.account.allowedOfframp.all()
+
+    const offRamps = new Set<string>()
+    for (const { publicKey: marker } of markers) {
+      // Quick check: does this marker belong to our source selector for any candidate offRamp?
+      // We can only answer by testing candidate keys pulled from the marker's txs.
+      const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
+      for (const { signature } of sigs) {
+        const tx = await this.connection.getTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+          commitment: 'confirmed',
+        })
+        if (!tx) continue
+        const keys = tx.transaction.message
+          .getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
+          .keySegments()
+          .flat()
+        for (const key of keys) {
+          const [pda] = PublicKey.findProgramAddressSync(
+            [Buffer.from('allowed_offramp'), toLeArray(sourceChainSelector, 8), key.toBuffer()],
+            routerPk,
+          )
+          if (pda.equals(marker)) offRamps.add(key.toBase58())
+        }
+        if (offRamps.size) break // found the offRamp for this marker
+      }
+    }
+
+    if (!offRamps.size) throw new CCIPSolanaOffRampEventsNotFoundError(router)
+    return [...offRamps]
   }
 
   /** {@inheritDoc Chain.getOnRampForRouter} */
@@ -899,15 +975,31 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // Verify the discriminant matches CCIPMessageSent
     try {
-      if (dataSlice(getDataBytes(data), 0, 8) !== hexDiscriminator('CCIPMessageSent')) return
+      if (
+        !['CCIPMessageSent', 'CCIPMessageSentV2']
+          .map(hexDiscriminator)
+          .includes(dataSlice(getDataBytes(data), 0, 8))
+      )
+        return
     } catch (_) {
       return
     }
+    let decoded
+    if (dataSlice(getDataBytes(data), 0, 8) === hexDiscriminator('CCIPMessageSent'))
+      decoded = routerCoder.events.decode<
+        (typeof CCIP_ROUTER_IDL)['events'][number] & { name: 'CCIPMessageSent' },
+        IdlTypes<typeof CCIP_ROUTER_IDL>
+      >(data)
+    else if (dataSlice(getDataBytes(data), 0, 8) === hexDiscriminator('CCIPMessageSentV2'))
+      decoded = routerV2Coder.events.decode<
+        (typeof CCIP_ROUTER_V2_IDL)['events'][number] & { name: 'CCIPMessageSentV2' },
+        IdlTypes<typeof CCIP_ROUTER_V2_IDL>
+      >(data)
 
-    const decoded = routerCoder.events.decode<
-      (typeof CCIP_ROUTER_IDL)['events'][number] & { name: 'CCIPMessageSent' },
-      IdlTypes<typeof CCIP_ROUTER_IDL>
-    >(data)
+    if (decoded?.name === 'CCIPMessageSentV2') {
+      const message = decodeMessageV1(decoded.data.encodedMessage)
+      return decodeMessage({ ...decoded.data, ...message })
+    }
     if (decoded?.name !== 'CCIPMessageSent') return
     const message = decoded.data.message
 
@@ -1080,19 +1172,30 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       throw new CCIPLogDataMissingError()
     }
 
+    let discriminator
     try {
-      // Verify the discriminant matches ExecutionStateChanged
-      if (dataSlice(getDataBytes(log.data), 0, 8) !== hexDiscriminator('ExecutionStateChanged'))
+      discriminator = dataSlice(getDataBytes(log.data), 0, 8)
+      if (
+        discriminator !== hexDiscriminator('ExecutionStateChanged') &&
+        discriminator !== hexDiscriminator('ExecutionStateChangedV2')
+      )
         return
     } catch (_) {
       return
     }
 
-    const decoded = offrampCoder.events.decode<
-      (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'ExecutionStateChanged' },
-      IdlTypes<typeof CCIP_OFFRAMP_IDL>
-    >(log.data)
-    if (decoded?.name !== 'ExecutionStateChanged') return
+    const decoded =
+      discriminator === hexDiscriminator('ExecutionStateChangedV2')
+        ? offrampV2Coder.events.decode<
+            (typeof CCIP_OFFRAMP_V2_IDL)['events'][number] & { name: 'ExecutionStateChangedV2' },
+            IdlTypes<typeof CCIP_OFFRAMP_V2_IDL>
+          >(log.data)
+        : offrampCoder.events.decode<
+            (typeof CCIP_OFFRAMP_IDL)['events'][number] & { name: 'ExecutionStateChanged' },
+            IdlTypes<typeof CCIP_OFFRAMP_IDL>
+          >(log.data)
+    if (decoded?.name !== 'ExecutionStateChanged' && decoded?.name !== 'ExecutionStateChangedV2')
+      return
     const messageId = hexlify(getDataBytes(decoded.data.messageId))
 
     // Decode state enum (MessageExecutionState)
@@ -1106,6 +1209,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       state = ExecutionState.Failed
     } else throw new CCIPExecutionStateInvalidError(util.inspect(decoded.data.state))
 
+    const eventReturnData =
+      'returnData' in decoded.data && dataLength(decoded.data.returnData) > 0
+        ? hexlify(decoded.data.returnData)
+        : undefined
     let returnData
     if (log.tx?.logs) {
       // use only last receipt per tx+message (i.e. skip intermediary InProgress=1 states for Solana)
@@ -1118,7 +1225,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       if (laterReceiptLog) {
         return // ignore intermediary state (InProgress=1) if we can find a later receipt
       } else if (state !== ExecutionState.Success) {
-        returnData = getErrorFromLogs(log.tx.logs as SolanaLog[])
+        returnData = eventReturnData ?? getErrorFromLogs(log.tx.logs as SolanaLog[])
       } else if (log.tx.error) {
         returnData = util.inspect(log.tx.error)
         state = ExecutionState.Failed
@@ -1127,11 +1234,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     return {
       sourceChainSelector: BigInt(decoded.data.sourceChainSelector.toString()),
-      sequenceNumber: BigInt(decoded.data.sequenceNumber.toString()),
+      sequenceNumber:
+        decoded.name === 'ExecutionStateChangedV2'
+          ? BigInt(decoded.data.messageNumber.toString())
+          : BigInt(decoded.data.sequenceNumber.toString()),
       messageId,
-      messageHash: hexlify(getDataBytes(decoded.data.messageHash)),
+      ...(decoded.name === 'ExecutionStateChanged' && {
+        messageHash: hexlify(getDataBytes(decoded.data.messageHash)),
+      }),
       state,
-      returnData,
+      returnData: returnData ?? eventReturnData,
     }
   }
 
@@ -1423,12 +1535,66 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Solana specialization: use getProgramAccounts to fetch commit reports from PDAs
+   * Solana specialization: for v2 lanes, resolve the verification policy from the offRamp's
+   * `getCcvsForMsg` view and fetch CCV results from the indexers (no onchain commit exists);
+   * for v1.x, use getProgramAccounts to fetch commit reports from PDAs
    */
   override async getVerifications(
     opts: Parameters<Chain['getVerifications']>[0],
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
+    if (request.lane.version >= CCIPVersion.V2_0) {
+      const message = request.message as CCIPMessage
+      const offRampPk = new PublicKey(offRamp)
+      const program = new Program(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
+      const pda = (seed: string, ...extra: Uint8Array[]) =>
+        PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
+      // receiver is consulted only for arbitrary (data) messages; default pubkey means none
+      let messageReceiver = PublicKey.default
+      if (!message.tokenAmounts.length) {
+        try {
+          messageReceiver = new PublicKey(message.receiver)
+        } catch {
+          // leave default: non-svm or zero receiver
+        }
+      }
+      const ccvs = (await program.methods
+        .getCcvsForMsg({
+          // TODO: token transfers require 5 pool remaining-accounts to include pool CCVs;
+          // lane defaults + mandated CCVs are still reported (view is non-authoritative)
+          tokenTransfer: null,
+          messageReceiver,
+          resolutionMetadata: Buffer.alloc(0),
+          remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
+          requestedFinality: { flags: 0, blockDepth: 0 },
+        })
+        .accounts({
+          config: pda('config'),
+          referenceAddresses: pda('reference_addresses'),
+          sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
+        })
+        .view()) as {
+        requiredCcvs: PublicKey[]
+        optionalCcvs: PublicKey[]
+        optionalThreshold: number
+      }
+      const verificationPolicy = {
+        requiredCCVs: ccvs.requiredCcvs.map((c) => c.toBase58()),
+        optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
+        optionalThreshold: ccvs.optionalThreshold,
+      }
+      const verifications = await fetchVerifications(request.message.messageId, {
+        apiClient: this.apiClient,
+        indexer: opts.indexer ?? this.network.networkType,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : opts.watch
+              ? this.abort
+              : undefined,
+      })
+      return { verificationPolicy, verifications }
+    }
     const commitsAroundSeqNum = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
       filters: [
         {
@@ -1488,8 +1654,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
     const { offRamp, sourceChainSelector, verifications } = opts
+    const [, version] = await this.typeAndVersion(offRamp)
+    const topics = [
+      version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
+    ]
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
-      Parameters<SolanaChain['getLogs']>[0] = opts
+      Parameters<SolanaChain['getLogs']>[0] = { ...opts, topics }
     if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
@@ -1502,6 +1672,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       )
       opts_ = {
         ...opts,
+        topics,
         programs: [offRamp],
         address: commitReportPda.toBase58(),
       }
