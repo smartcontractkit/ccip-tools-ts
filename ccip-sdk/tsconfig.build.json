@@ -11,6 +11,7 @@
     "node_modules",
     "**/*.test.*",
     "**/__tests__",
-    "**/__mocks__"
+    "**/__mocks__",
+    "./src/cct"
   ]
 }

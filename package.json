@@ -27,6 +27,7 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
+    "@chainlink/contracts-ccip": "2.0.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "26.0.1",
     "c8": "^11.0.0",

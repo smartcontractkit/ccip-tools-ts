@@ -109,7 +109,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_MINT_INVALID:
     'The address is not a valid SPL token mint. Ensure the address is owned by TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID.',
   TOKEN_AMOUNT_INVALID: 'Token amount must have a valid address and positive amount.',
-  TOKEN_POOL_STATE_NOT_FOUND: 'TokenPool state PDA not found.',
+  TOKEN_POOL_STATE_NOT_FOUND:
+    'Verify poolType matches the deployed pool, pass poolProgramAddress for a custom pool, and confirm the pool is initialized for this mint on this cluster.',
   TOKEN_POOL_INFO_NOT_FOUND:
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   TOKEN_ACCOUNT_NOT_FOUND:
@@ -205,6 +206,20 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   CANTON_API_ERROR:
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
+
+  // Cross-Chain Token
+  CCT_PARAMS_INVALID:
+    'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TX_FAILED:
+    'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
+  CCT_TX_NOT_CONFIRMED:
+    'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
+  CCT_CONTRACT_VERSION_UNSUPPORTED:
+    'This contract version is not supported by the CCT SDK. Check the contract address and its typeAndVersion.',
+  CCT_OPERATION_UNSUPPORTED:
+    'This operation is not available at the contract version in error.context. Verify the contract version supports it.',
+  CCT_DATA_DECODE_FAILED:
+    'Ensure the account belongs to a compatible CCT program and uses the expected data layout.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */
