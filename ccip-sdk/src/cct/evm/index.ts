@@ -26,6 +26,10 @@ import {
   AcceptAdmin,
 } from './token-admin-registry/operations/accept-admin.ts'
 import {
+  type GetSupportedTokensParams,
+  GetSupportedTokens,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
+import {
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
   GetTokenAdminRegistry,
@@ -65,6 +69,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferAdmin = new TransferAdmin()
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #getSupportedTokens = new GetSupportedTokens()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -323,6 +328,21 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Lists every token configured in the TokenAdminRegistry resolved from `address`.
+   * @remarks The registry paginates via `getAllConfiguredTokens` — `opts.page` sets the batch size per call; omit it to read the
+   * whole registry in one round trip per 1000 tokens.
+   * @throws {@link CCTParamsInvalidError} if `address` is not a valid address, or `page` is given
+   * and is not a positive integer
+   * @example
+   * ```typescript
+   * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
+   * ```
+   */
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
+    return this.#getSupportedTokens.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned pool `transferOwnership` tx (for multisig / offline signing). Probes the
    * pool's on-chain `typeAndVersion` to resolve its interface + encoder; the `transferOwnership`
    * calldata is stable across pool versions, so the resolved encoding is version/type-independent.
@@ -578,6 +598,7 @@ export type {
 } from './token-admin-registry/operations/get-token-admin-registry.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
+export type { GetSupportedTokensParams } from './token-admin-registry/operations/get-supported-tokens.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
   DeployTokenPoolParams,
