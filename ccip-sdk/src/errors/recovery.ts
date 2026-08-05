@@ -128,6 +128,13 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   FINALITY_NOT_ALLOWED:
     "The receiver contract does not accept the requested finality. Check the receiver's getCCVsAndFinalityConfig() for the allowed depth or safe flag.",
 
+  DEST_EXECUTION_REVERT:
+    'The destination pool releaseOrMint reverts, so the message would not execute on the destination. Parse context.revert (the raw encoded revert) with EVMChain.parse to find the cause, resolve it, then retry.',
+  DEST_SIMULATION_UNAVAILABLE:
+    'The destination releaseOrMint simulation could not be performed, so executability is undetermined. On a transport error, retry (optionally with a different destination RPC); for attestation-consuming pools the check only becomes possible post-send.',
+  SOURCE_POOL_REVERT:
+    'The source pool lockOrBurn reverts, so ccipSend would revert with the same cause. Parse context.revert (the raw encoded revert) with EVMChain.parse to find the cause (allowlist, outbound rate limit, finality gate), resolve it, then retry.',
+
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',
   LBTC_ATTESTATION_NOT_FOUND: 'LBTC attestation not found. Verify the payload hash.',

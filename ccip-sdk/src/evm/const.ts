@@ -1,5 +1,5 @@
 import { parseAbi } from 'abitype'
-import { type EventFragment, AbiCoder, Interface } from 'ethers'
+import { type EventFragment, type InterfaceAbi, AbiCoder, Interface } from 'ethers'
 
 import Token_ABI from './abi/BurnMintERC677Token.ts'
 import CCIPReceiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
@@ -26,6 +26,7 @@ import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
 import VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
+import * as poolErrorAbis from './abi/pool-errors.ts'
 
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 
@@ -41,6 +42,11 @@ const customErrors = [
   'error FailedInnerCall()',
   'error SenderNotAllowed(uint64 sourceChainSelector, bytes sender)',
   'error ERC20InsufficientBalance(address from, uint256 fromBalance, uint256 value)',
+  // external pool-adjacent errors the destination preflight classifies as transient:
+  // oUSDT lockbox shortfall, xERC20 bridge rate limits
+  'error InsufficientLockboxBalance(uint256 lockboxBalance, uint256 localAmount)',
+  'error NotHighEnoughLimits()',
+  'error IXERC20_NotHighEnoughLimits()',
 ] as const
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
@@ -102,3 +108,19 @@ export const commitsFragments = getAllFragmentsMatchingEvents([
   'CommitReportAccepted',
 ])
 export const receiptsFragments = getAllFragmentsMatchingEvents(['ExecutionStateChanged'])
+
+/**
+ * Error-only Interfaces of the specialized pool/token contracts (USDC/CCTP, Lombard, siloed,
+ * fast-transfer, hooks…), consulted by `parseWithFragment` only after the main {@link interfaces}
+ * scan misses — they add revert-decoding coverage without eagerly bundling the full ABIs.
+ * Built lazily on first use.
+ */
+export function getPoolErrorInterfaces(): Readonly<Record<string, Interface>> {
+  return (poolErrorInterfaces ??= Object.fromEntries(
+    Object.entries(poolErrorAbis).map(([name, abi]) => [
+      name.replace(/_errors$/, ''),
+      new Interface(abi as InterfaceAbi),
+    ]),
+  ))
+}
+let poolErrorInterfaces: Record<string, Interface> | undefined
