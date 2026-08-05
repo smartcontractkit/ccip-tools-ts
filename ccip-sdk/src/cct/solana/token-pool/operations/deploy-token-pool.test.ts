@@ -87,6 +87,38 @@ describe('DeployTokenPool (cct/solana)', () => {
     })
   })
 
+  describe('validation', () => {
+    it('rejects invalid pool types', async () => {
+      await assert.rejects(
+        () => generate({ poolType: 'custom' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'poolType',
+      )
+    })
+
+    it('rejects an empty authority', async () => {
+      await assert.rejects(
+        () => generate({ authority: '' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'authority',
+      )
+    })
+
+    it('rejects invalid allowlist addresses', async () => {
+      await assert.rejects(
+        () => generate({ allowlist: ['not-a-pubkey'] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'allowlist[0]',
+      )
+    })
+  })
+
   describe('execute', () => {
     it('rejects signed deploy when authority is not the wallet', async () => {
       await assert.rejects(
@@ -101,28 +133,6 @@ describe('DeployTokenPool (cct/solana)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'deployTokenPool' &&
           err.context.param === 'authority',
-      )
-    })
-  })
-
-  describe('validation', () => {
-    it('rejects invalid pool types', async () => {
-      await assert.rejects(
-        () => generate({ poolType: 'custom' }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'deployTokenPool' &&
-          err.context.param === 'poolType',
-      )
-    })
-
-    it('rejects invalid allowlist addresses', async () => {
-      await assert.rejects(
-        () => generate({ allowlist: ['not-a-pubkey'] }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'deployTokenPool' &&
-          err.context.param === 'allowlist[0]',
       )
     })
   })

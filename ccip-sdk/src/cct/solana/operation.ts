@@ -28,7 +28,13 @@ function withPayer<P extends object>(
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
-/** Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
+/**
+ * Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}.
+ *
+ * Use {@link validate} for cross-field constraints. Override {@link parse} for per-field
+ * validation, defaults, or conversion; it must be overridden whenever `Parsed` differs from
+ * `SolanaGenerateParams<P>`.
+ */
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
@@ -36,7 +42,9 @@ export abstract class SolanaOperation<
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult> {
   /**
    * Normalize params without mutating the caller's input.
-   * Override to apply defaults, convert values, or validate individual fields.
+   *
+   * The default returns params unchanged. Override this method whenever `Parsed` differs from
+   * `SolanaGenerateParams<P>`, for example to apply defaults, convert values, or validate fields.
    */
   protected parse(params: SolanaGenerateParams<P>): Parsed {
     return params as Parsed

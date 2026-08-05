@@ -27,12 +27,20 @@ describe('Validate (cct/solana)', () => {
     assert.doesNotThrow(() => validatePublicKey('op', 'payer', PublicKey.default.toBase58()))
   })
 
-  it('accepts omitted and rejects invalid optional public keys', () => {
+  it('accepts omitted and valid optional public keys', () => {
     assert.doesNotThrow(() => validateOptionalPublicKey('op', 'authority', undefined))
-    assert.throws(
-      () => validateOptionalPublicKey('op', 'authority', ''),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+    assert.doesNotThrow(() =>
+      validateOptionalPublicKey('op', 'authority', PublicKey.default.toBase58()),
     )
+  })
+
+  it('rejects invalid optional public keys', () => {
+    for (const value of [null, '']) {
+      assert.throws(
+        () => validateOptionalPublicKey('op', 'authority', value),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+      )
+    }
   })
 
   it('rejects non-string public keys', () => {

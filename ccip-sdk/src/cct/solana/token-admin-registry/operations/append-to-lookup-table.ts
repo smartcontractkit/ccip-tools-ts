@@ -91,7 +91,7 @@ export class AppendToLookupTable extends SolanaOperation<
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
 
-    if (params.tokenAddress === undefined && !params.additionalAddresses?.length) {
+    if (params.tokenAddress === undefined && !params.additionalAddresses.length) {
       throw new CCTParamsInvalidError(
         this.name,
         'additionalAddresses',
