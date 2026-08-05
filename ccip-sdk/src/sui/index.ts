@@ -32,7 +32,7 @@ import {
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import { fetchProfileForUrl } from '../fetch.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
@@ -54,7 +54,6 @@ import type {
   WithLogger,
 } from '../types.ts'
 import {
-  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   getDataBytes,

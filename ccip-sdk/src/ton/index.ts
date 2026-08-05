@@ -36,7 +36,7 @@ import {
 } from '../errors/index.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import { createAxiosFetchAdapter, fetchProfileForUrl } from '../fetch.ts'
+import { createAxiosFetchAdapter, createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
@@ -57,12 +57,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from '../types.ts'
-import {
-  bytesToBuffer,
-  createRateLimitedFetch,
-  decodeAddress,
-  parseTypeAndVersion,
-} from '../utils.ts'
+import { bytesToBuffer, decodeAddress, parseTypeAndVersion } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'

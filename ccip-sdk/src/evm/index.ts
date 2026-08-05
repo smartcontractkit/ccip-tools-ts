@@ -78,7 +78,7 @@ import {
   decodeFinalityAllowed,
   encodeFinality,
 } from '../extra-args.ts'
-import { fetchProfileForUrl } from '../fetch.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import {
   type EstimateMessageInput,
   type GetRequiredCCVsMessage,
@@ -107,7 +107,6 @@ import {
   CCIPVersion,
 } from '../types.ts'
 import {
-  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   encodeAddressToAny,

@@ -6,7 +6,7 @@ import type { RateLimiterState } from '../chain.ts'
 import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
-import { getAddressBytes, jsonStringify, util } from '../utils.ts'
+import { getAddressBytes, jsonStringify, util } from '../shared/codec.ts'
 
 // Chain/Network
 

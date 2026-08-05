@@ -22,7 +22,7 @@ export type CcipOfframpV2 = {
       ]
       accounts: [
         { name: 'config'; isMut: false; isSigner: false },
-        { name: 'referenceAddresses'; isMut: false; isSigner: false },
+        { name: 'referenceAddress'; isMut: false; isSigner: false },
         { name: 'sourceChain'; isMut: false; isSigner: false },
       ]
       args: [{ name: 'params'; type: { defined: 'GetCcvsForMsgParams' } }]
@@ -36,6 +36,7 @@ export type CcipOfframpV2 = {
         kind: 'struct'
         fields: [
           { name: 'version'; type: 'u8' },
+          { name: 'bump'; type: 'u8' },
           { name: 'chainSelector'; type: 'u64' },
           { name: 'config'; type: { defined: 'SourceChainConfig' } },
         ]
@@ -106,6 +107,7 @@ export type CcipOfframpV2 = {
         fields: [
           { name: 'tokenTransfer'; type: { option: { defined: 'TokenTransferV1' } } },
           { name: 'messageReceiver'; type: 'publicKey' },
+          { name: 'sender'; type: 'bytes' },
           { name: 'resolutionMetadata'; type: 'bytes' },
           { name: 'remoteChainSelector'; type: 'u64' },
           { name: 'requestedFinality'; type: { defined: 'FinalityConfig' } },
@@ -167,7 +169,7 @@ export const IDL: CcipOfframpV2 = {
       ],
       accounts: [
         { name: 'config', isMut: false, isSigner: false },
-        { name: 'referenceAddresses', isMut: false, isSigner: false },
+        { name: 'referenceAddress', isMut: false, isSigner: false },
         { name: 'sourceChain', isMut: false, isSigner: false },
       ],
       args: [{ name: 'params', type: { defined: 'GetCcvsForMsgParams' } }],
@@ -181,6 +183,7 @@ export const IDL: CcipOfframpV2 = {
         kind: 'struct',
         fields: [
           { name: 'version', type: 'u8' },
+          { name: 'bump', type: 'u8' },
           { name: 'chainSelector', type: 'u64' },
           { name: 'config', type: { defined: 'SourceChainConfig' } },
         ],
@@ -254,6 +257,7 @@ export const IDL: CcipOfframpV2 = {
         fields: [
           { name: 'tokenTransfer', type: { option: { defined: 'TokenTransferV1' } } },
           { name: 'messageReceiver', type: 'publicKey' },
+          { name: 'sender', type: 'bytes' },
           { name: 'resolutionMetadata', type: 'bytes' },
           { name: 'remoteChainSelector', type: 'u64' },
           { name: 'requestedFinality', type: { defined: 'FinalityConfig' } },

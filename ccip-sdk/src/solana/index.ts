@@ -15,7 +15,6 @@ import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
-  concat,
   dataLength,
   dataSlice,
   encodeBase58,
@@ -45,11 +44,11 @@ import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
+  CCIPCommitNotFoundError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
-  CCIPExtraArgsEncodingUnsupportedError,
   CCIPExtraArgsInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
@@ -71,9 +70,11 @@ import {
   type SVMExtraArgsV1,
   EVMExtraArgsV2Tag,
 } from '../extra-args.ts'
-import { fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import { cleanUpBuffers } from './cleanup.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import { encodeSolanaExtraArgs } from './extra-args.ts'
+import { getV16SolanaLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import SELECTORS from '../selectors.ts'
@@ -98,7 +99,6 @@ import {
 } from '../types.ts'
 import {
   bytesToBuffer,
-  createRateLimitedFetch,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
@@ -110,7 +110,7 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { estimateExecComputeUnits } from './gas.ts'
-import { getV16SolanaLeafHasher } from './hasher.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
@@ -124,6 +124,7 @@ import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -134,7 +135,6 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-import { decodeMessageV1 } from '../messages.ts'
 export type { UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
@@ -242,6 +242,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxArgs: 1,
       maxSize: 100,
     })
+    // cache whole signature lists per address (up to 30min), to speed up consecutive
+    // paginations over the same address
+    this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxSize: 1024,
@@ -1093,14 +1096,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
-    if ('computeUnits' in args)
-      throw new CCIPExtraArgsEncodingUnsupportedError(ChainFamily.Solana, 'EVMExtraArgsV2 format')
-    const gasLimitUint128Le = toLeArray(args.gasLimit ?? 0n, 16)
-    return concat([
-      EVMExtraArgsV2Tag,
-      gasLimitUint128Le,
-      'allowOutOfOrderExecution' in args && args.allowOutOfOrderExecution ? '0x01' : '0x00',
-    ])
+    return encodeSolanaExtraArgs(args)
   }
 
   /**
@@ -1544,35 +1540,101 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const message = request.message as CCIPMessage
+      // For v2 messages, there is no onchain commit — the verification policy (required/optional
+      // CCVs) comes from the OffRamp's `getCcvsForMsg` view, and the actual verifier results
+      // come from the CCIP v2 indexer.
+      //
+      // The view resolves CCVs from three sources (see chainlink-ccip-solana
+      // `get_ccvs_for_msg/processor.rs`):
+      //   1. Lane defaults + mandated CCVs (always, from SourceChain config)
+      //   2. Receiver CCVs (for arbitrary/data messages, via CPI to the receiver program)
+      //   3. Pool CCVs (for token transfers, via CPI to the token pool)
+      //
+      // We resolve receiver CCVs by deriving the `receiver_registry` PDA from the router
+      // (read from ReferenceAddresses) and the receiver address. If the registry is owned by
+      // the router, the receiver is v2 and we also pass [receiver_program, source_chain_ccv_config]
+      // as remaining_accounts for the CPI. If the registry doesn't exist or is system-owned, the
+      // receiver is v1 and only the registry is passed.
+      //
+      // Token transfer CCVs are not yet resolved (TODO: needs 5 pool remaining_accounts).
       const offRampPk = new PublicKey(offRamp)
       const program = new Program(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
       const pda = (seed: string, ...extra: Uint8Array[]) =>
         PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
-      // receiver is consulted only for arbitrary (data) messages; default pubkey means none
+
+      // Read ReferenceAddresses to get the router for receiver_registry PDA derivation
+      const refAddrPda = pda('reference_addresses')
+      const refAddrAcc = await this.connection.getAccountInfo(refAddrPda)
+      if (!refAddrAcc) {
+        throw new CCIPCommitNotFoundError(
+          String(request.lane.sourceChainSelector),
+          request.message.sequenceNumber,
+        )
+      }
+      // ReferenceAddresses layout: 8(disc) + 1(ver) + 1(bump) + 32(router) + ...
+      const router = new PublicKey(refAddrAcc.data.subarray(10, 42))
+
+      // Resolve the receiver and its remaining_accounts
+      const message = request.message as CCIPMessage
       let messageReceiver = PublicKey.default
-      if (!message.tokenAmounts.length) {
+      const remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = []
+      if (message.receiver && message.receiver !== '0x') {
         try {
           messageReceiver = new PublicKey(message.receiver)
         } catch {
-          // leave default: non-svm or zero receiver
+          // non-svm or zero receiver — leave default, skip receiver consultation
         }
       }
+      if (!messageReceiver.equals(PublicKey.default)) {
+        // receiver_registry PDA: [RECEIVER_REGISTRY, receiver] under router
+        const [registryPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('receiver_registry'), messageReceiver.toBuffer()],
+          router,
+        )
+        const registryAcc = await this.connection.getAccountInfo(registryPda)
+        const isV2 =
+          registryAcc != null && registryAcc.owner.equals(router) && registryAcc.data.length >= 8
+        remainingAccounts.push({
+          pubkey: registryPda,
+          isSigner: false,
+          isWritable: false,
+        })
+        if (isV2) {
+          // v2 receiver: also pass [receiver_program, source_chain_ccv_config]
+          // source_chain_ccv_config PDA: [ccv_config, sourceChainSelectorLE] under receiver
+          const [ccvConfigPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from('ccv_config'), toLeArray(request.lane.sourceChainSelector, 8)],
+            messageReceiver,
+          )
+          remainingAccounts.push({
+            pubkey: messageReceiver,
+            isSigner: false,
+            isWritable: false,
+          })
+          remainingAccounts.push({
+            pubkey: ccvConfigPda,
+            isSigner: false,
+            isWritable: false,
+          })
+        }
+      }
+
       const ccvs = (await program.methods
         .getCcvsForMsg({
-          // TODO: token transfers require 5 pool remaining-accounts to include pool CCVs;
-          // lane defaults + mandated CCVs are still reported (view is non-authoritative)
+          // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
           tokenTransfer: null,
           messageReceiver,
+          sender: Buffer.from(getAddressBytes(message.sender)),
           resolutionMetadata: Buffer.alloc(0),
           remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
           requestedFinality: { flags: 0, blockDepth: 0 },
         })
         .accounts({
           config: pda('config'),
-          referenceAddresses: pda('reference_addresses'),
+          referenceAddress: refAddrPda,
           sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
         })
+        .remainingAccounts(remainingAccounts)
         .view()) as {
         requiredCcvs: PublicKey[]
         optionalCcvs: PublicKey[]
@@ -1653,14 +1715,31 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, verifications } = opts
+    const { offRamp, sourceChainSelector, verifications, messageId } = opts
     const [, version] = await this.typeAndVersion(offRamp)
     const topics = [
       version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
     ]
     let opts_: Parameters<Chain['getExecutionReceipts']>[0] &
       Parameters<SolanaChain['getLogs']>[0] = { ...opts, topics }
-    if (sourceChainSelector && verifications && 'report' in verifications) {
+    if (version >= CCIPVersion.V2_0 && messageId) {
+      // Every v2 execution attempt (executor or manual, including retries) touches
+      // the per-message `message_exec_state` PDA (seeded with the message id) on the
+      // offRamp, so the message's execution txs are exactly the signatures of that
+      // PDA. Narrowing the scan to it replaces a full offRamp-address sweep (one
+      // getTransaction per tx in the start window — the dominant cost under load)
+      // with the handful of txs of this message's own attempts.
+      const [messageExecStatePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('message_exec_state'), bytesToBuffer(messageId)],
+        new PublicKey(offRamp),
+      )
+      opts_ = {
+        ...opts,
+        topics,
+        programs: [offRamp],
+        address: messageExecStatePda.toBase58(),
+      }
+    } else if (sourceChainSelector && verifications && 'report' in verifications) {
       // if we know of commit, use `commit_report` PDA as more specialized address
       const [commitReportPda] = PublicKey.findProgramAddressSync(
         [
