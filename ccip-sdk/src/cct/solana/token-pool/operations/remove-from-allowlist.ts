@@ -27,8 +27,8 @@ import {
 type RemoveFromAllowlistParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Addresses to remove from the pool allowlist. */
-  allowlist: string[]
+  /** Addresses to remove from the pool allowlist. Must be non-empty and contain no duplicates. */
+  remove: string[]
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
@@ -36,7 +36,7 @@ type RemoveFromAllowlistParams = PoolProgramRef & {
 type ParsedRemoveFromAllowlistParams = {
   tokenAddress: PublicKey
   poolProgram: PublicKey
-  allowlist: PublicKey[]
+  remove: PublicKey[]
   payer: PublicKey
   authority: PublicKey
 }
@@ -68,17 +68,22 @@ export class RemoveFromAllowlist extends SolanaOperation<
   protected override parse(
     params: GenerateRemoveFromAllowlistParams,
   ): ParsedRemoveFromAllowlistParams {
-    if (!Array.isArray(params.allowlist)) {
-      throw new CCTParamsInvalidError(this.name, 'allowlist', 'must be an array')
+    if (!Array.isArray(params.remove) || params.remove.length === 0) {
+      throw new CCTParamsInvalidError(this.name, 'remove', 'must be a non-empty array')
+    }
+
+    const remove = params.remove.map((address, index) =>
+      parsePublicKey(this.name, `remove[${index}]`, address),
+    )
+    if (new Set(remove.map((address) => address.toBase58())).size !== remove.length) {
+      throw new CCTParamsInvalidError(this.name, 'remove', 'must not contain duplicate addresses')
     }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       poolProgram: resolvePoolProgram(this.name, params),
-      allowlist: params.allowlist.map((address, index) =>
-        parsePublicKey(this.name, `allowlist[${index}]`, address),
-      ),
+      remove,
       payer,
       authority:
         params.authority === undefined
@@ -96,7 +101,7 @@ export class RemoveFromAllowlist extends SolanaOperation<
     const state = deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress)
 
     const instruction = await program.methods
-      .removeFromAllowList(opts.allowlist)
+      .removeFromAllowList(opts.remove)
       .accountsStrict({
         state,
         mint: opts.tokenAddress,

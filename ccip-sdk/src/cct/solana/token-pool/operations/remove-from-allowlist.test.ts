@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
+import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
@@ -14,6 +15,8 @@ const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const ALLOWED = Keypair.generate().publicKey.toBase58()
+const SECOND_ALLOWED = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -26,13 +29,28 @@ function stubChain(): SolanaChain {
   } as unknown as SolanaChain
 }
 
+function submitChain(): SolanaChain {
+  return {
+    ...stubChain(),
+    connection: {
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  } as unknown as SolanaChain
+}
+
 function generate(opts = {}) {
   return SolanaTokenManager.fromChain(stubChain()).generateUnsignedRemoveFromAllowlist({
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
-    allowlist: [ALLOWED],
+    remove: [ALLOWED],
     ...opts,
   })
 }
@@ -71,6 +89,18 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
       )
     })
 
+    it('encodes multiple addresses', async () => {
+      const unsigned = await generate({ remove: [ALLOWED, SECOND_ALLOWED] })
+      const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+
+      assert.ok(decoded)
+      assert.equal(decoded.name, 'removeFromAllowList')
+      assert.deepEqual(
+        (decoded.data as { remove: PublicKey[] }).remove.map((address) => address.toBase58()),
+        [ALLOWED, SECOND_ALLOWED],
+      )
+    })
+
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
       const unsigned = await SolanaTokenManager.fromChain(
@@ -80,7 +110,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
         poolProgramAddress,
         payer: PAYER,
         authority: AUTHORITY,
-        allowlist: [ALLOWED],
+        remove: [ALLOWED],
       })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
@@ -98,18 +128,51 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
       )
     })
 
-    it('rejects invalid allowlist addresses', async () => {
+    it('rejects an empty or non-array removal list', async () => {
+      for (const remove of [[], 'not-an-array']) {
+        await assert.rejects(
+          () => generate({ remove }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'removeFromAllowlist' &&
+            err.context.param === 'remove',
+        )
+      }
+    })
+
+    it('rejects invalid removal addresses', async () => {
       await assert.rejects(
-        () => generate({ allowlist: ['not-a-pubkey'] }),
+        () => generate({ remove: ['not-a-pubkey'] }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'removeFromAllowlist' &&
-          err.context.param === 'allowlist[0]',
+          err.context.param === 'remove[0]',
+      )
+    })
+
+    it('rejects duplicate removal addresses', async () => {
+      await assert.rejects(
+        () => generate({ remove: [ALLOWED, ALLOWED] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'removeFromAllowlist' &&
+          err.context.param === 'remove',
       )
     })
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      const result = await SolanaTokenManager.fromChain(submitChain()).removeFromAllowlist({
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        remove: [ALLOWED],
+        wallet: WALLET,
+      })
+
+      assert.deepEqual(result, { hash: HASH })
+    })
+
     it('rejects a non-wallet authority for signed removal', async () => {
       await assert.rejects(
         () =>
@@ -117,7 +180,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,
-            allowlist: [ALLOWED],
+            remove: [ALLOWED],
             wallet: WALLET,
           }),
         (err: unknown) =>

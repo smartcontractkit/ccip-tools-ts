@@ -684,7 +684,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
-   *   allowlist: [sender],
+   *   remove: [sender],
    *   payer,
    *   authority,
    * })
@@ -712,7 +712,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.removeFromAllowlist({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
-   *   allowlist: [sender],
+   *   remove: [sender],
    *   wallet,
    * })
    * ```
