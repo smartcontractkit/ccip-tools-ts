@@ -103,6 +103,22 @@ const EXPECTED_DATA = new Interface([
 const EXPECTED_TRANSFER = new Interface([
   'function transferOwnership(address to)',
 ]).encodeFunctionData('transferOwnership', [TOKEN])
+const ACCEPT_ADMIN_SELECTOR = id('acceptAdminRole(address)').slice(0, 10)
+const EXPECTED_ACCEPT_ADMIN = new Interface([
+  'function acceptAdminRole(address localToken)',
+]).encodeFunctionData('acceptAdminRole', [TOKEN])
+
+/** Fake provider whose `call` answers `getTokenConfig` with `pendingAdministrator = TOKEN`. */
+function acceptAdminProvider(pendingAdministrator: string) {
+  return {
+    call: () =>
+      Promise.resolve(
+        interfaces.TokenAdminRegistry.encodeFunctionResult('getTokenConfig', [
+          [ZeroAddress, pendingAdministrator, ZeroAddress],
+        ]),
+      ),
+  }
+}
 
 describe('EVMTokenManager (cct/evm)', () => {
   describe('construction', () => {
@@ -464,6 +480,124 @@ describe('EVMTokenManager (cct/evm)', () => {
           err.context.param === 'poolAddress',
       )
       assert.equal(probed, false, 'validation fails before the typeAndVersion probe')
+    })
+  })
+  describe('generateUnsignedAcceptAdmin', () => {
+    it('encodes acceptAdminRole(token) to the discovered TAR when sender is pending', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      const unsigned = await cct.generateUnsignedAcceptAdmin({
+        tokenAddress: TOKEN,
+        address: ROUTER,
+        sender: TOKEN,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TAR)
+      assert.equal(tx.from, TOKEN)
+      assert.ok(
+        tx.data!.startsWith(ACCEPT_ADMIN_SELECTOR),
+        'data starts with acceptAdminRole selector',
+      )
+      assert.equal(tx.data, EXPECTED_ACCEPT_ADMIN)
+    })
+
+    it('rejects an invalid address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () =>
+          cct.generateUnsignedAcceptAdmin({
+            tokenAddress: 'not-an-address',
+            address: ROUTER,
+            sender: TOKEN,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'tokenAddress',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+
+    it('rejects when sender is not the pending administrator', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(POOL) as never }),
+      )
+      await assert.rejects(
+        cct.generateUnsignedAcceptAdmin({
+          tokenAddress: TOKEN,
+          address: ROUTER,
+          sender: TOKEN,
+        }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+
+  describe('acceptAdmin', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      const result = await cct.acceptAdmin({
+        tokenAddress: TOKEN,
+        address: ROUTER,
+        sender: TOKEN,
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      await assert.rejects(
+        () =>
+          cct.acceptAdmin({
+            tokenAddress: TOKEN,
+            address: ROUTER,
+            sender: TOKEN,
+            wallet: {},
+          }),
+        (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+
+    it('rejects a sender that does not match the executing wallet', async () => {
+      // fakeSigner().getAddress() resolves to TOKEN; a `sender` other than TOKEN must be
+      // rejected rather than silently accepted and broadcast from the mismatched wallet.
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      await assert.rejects(
+        () =>
+          cct.acceptAdmin({
+            tokenAddress: TOKEN,
+            address: ROUTER,
+            sender: POOL,
+            wallet: fakeSigner(),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender',
+      )
     })
   })
 })
