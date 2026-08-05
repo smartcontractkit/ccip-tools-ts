@@ -1543,7 +1543,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         usdcDomains.destDomain,
         this.network.networkType,
       )
-      const fast = finality !== 0
+      const fast = encodeFinality(finality) !== 0
       // Tiers are sorted ascending by finalityThreshold; findLast for fast ensures
       // we pick the highest tier still within the fast threshold.
       const tier = fast
