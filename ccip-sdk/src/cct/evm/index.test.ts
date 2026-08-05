@@ -16,11 +16,22 @@ const ROUTER = '0x' + '33'.repeat(20)
 const TAR = '0x' + '44'.repeat(20)
 const REGISTRY_MODULE = '0x' + '55'.repeat(20)
 const ADMIN = '0x' + '66'.repeat(20)
+// Distinct from ADMIN/REGISTRY_MODULE on purpose: sharing a value would let an assertion pass
+// against the wrong address.
+const CURRENT_ADMIN = '0x' + '77'.repeat(20)
+const NEW_ADMIN = '0x' + '88'.repeat(20)
+
+/** Encodes a `getTokenConfig` result the way the on-chain TAR would. */
+function encodeTokenConfig(administrator: string, pendingAdministrator = ZeroAddress) {
+  return interfaces.TokenAdminRegistry.encodeFunctionResult('getTokenConfig', [
+    [administrator, pendingAdministrator, ZeroAddress],
+  ])
+}
 
 /** Minimal EVMChain stub — only the members EVMTokenManager touches. */
 function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EVMChain {
   return {
-    provider: {} as never,
+    provider: { call: async () => encodeTokenConfig(CURRENT_ADMIN) },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
     typeAndVersion: (address: string) =>
@@ -82,6 +93,10 @@ function registerAdminProvider() {
 }
 
 const SET_POOL_SELECTOR = id('setPool(address,address)').slice(0, 10)
+const TRANSFER_ADMIN_ROLE_SELECTOR = id('transferAdminRole(address,address)').slice(0, 10)
+const EXPECTED_TRANSFER_ADMIN = new Interface([
+  'function transferAdminRole(address localToken, address newAdmin)',
+]).encodeFunctionData('transferAdminRole', [TOKEN, NEW_ADMIN])
 const EXPECTED_DATA = new Interface([
   'function setPool(address localToken, address pool)',
 ]).encodeFunctionData('setPool', [TOKEN, POOL])
@@ -298,6 +313,76 @@ describe('EVMTokenManager (cct/evm)', () => {
             tokenAddress: TOKEN,
             poolAddress: POOL,
             address: ROUTER,
+            wallet: {},
+          }),
+        (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+  })
+
+  describe('generateUnsignedTransferAdmin', () => {
+    it('encodes transferAdminRole(token, newAdmin) to the discovered TAR', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const unsigned = await cct.generateUnsignedTransferAdmin({
+        tokenAddress: TOKEN,
+        newAdmin: NEW_ADMIN,
+        address: ROUTER,
+        sender: CURRENT_ADMIN,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TAR)
+      assert.equal(tx.from, CURRENT_ADMIN)
+      assert.ok(
+        tx.data!.startsWith(TRANSFER_ADMIN_ROLE_SELECTOR),
+        'data starts with transferAdminRole selector',
+      )
+      assert.equal(tx.data, EXPECTED_TRANSFER_ADMIN)
+    })
+
+    it('rejects a sender that is not the current registry administrator', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      await assert.rejects(
+        () =>
+          cct.generateUnsignedTransferAdmin({
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            address: ROUTER,
+            sender: NEW_ADMIN,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'transferAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+
+  describe('transferAdmin', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const result = await cct.transferAdmin({
+        tokenAddress: TOKEN,
+        newAdmin: NEW_ADMIN,
+        address: ROUTER,
+        sender: CURRENT_ADMIN,
+        wallet: fakeSigner(CURRENT_ADMIN),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      await assert.rejects(
+        () =>
+          cct.transferAdmin({
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            address: ROUTER,
+            sender: CURRENT_ADMIN,
             wallet: {},
           }),
         (err: unknown) => err instanceof CCIPWalletInvalidError,

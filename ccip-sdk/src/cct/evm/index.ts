@@ -27,6 +27,10 @@ import {
 } from './token-admin-registry/operations/register-admin.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
+  type TransferAdminParams,
+  TransferAdmin,
+} from './token-admin-registry/operations/transfer-admin.ts'
+import {
   type DeployTokenPoolParams,
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
@@ -49,6 +53,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
+  readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -189,6 +194,52 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setPool(opts: EVMExecuteParams<SetPoolParams>): Promise<TransactionResult> {
     return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned TokenAdminRegistry `transferAdmin` tx (for multisig / offline signing).
+   * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the
+   * handoff. This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
+   * (see {@link transferOwnership}); do not confuse the two.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is not the
+   * token's current registry administrator (including a not-yet-accepted registration)
+   * @example
+   * ```typescript
+   * // `sender` must be the token's current registry administrator
+   * const unsigned = await cct.generateUnsignedTransferAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...', // must separately call acceptAdmin
+   *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedTransferAdmin(opts: TransferAdminParams): Promise<UnsignedEVMTx> {
+    return this.#transferAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new TokenAdminRegistry administrator, signing + submitting with `opts.wallet`
+   * (the current registry admin). Two-step: `newAdmin` must separately call `acceptAdmin`.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
+   * token's current registry administrator (including a not-yet-accepted registration), or if an
+   * explicit `opts.sender` does not match the wallet's address
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must sign as the token's current registry administrator; `sender` defaults to its
+   * // address, so pass it only for offline builds via generateUnsignedTransferAdmin.
+   * const { hash } = await cct.transferAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   address: '0xTokenAdminRegistry...',
+   *   wallet,
+   * })
+   * ```
+   */
+  transferAdmin(opts: EVMExecuteParams<TransferAdminParams>): Promise<TransactionResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -441,6 +492,7 @@ export type {
   RegisterAdminParams,
 } from './token-admin-registry/operations/register-admin.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
+export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
   DeployTokenPoolParams,
