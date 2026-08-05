@@ -1028,13 +1028,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       : ChainFamily.EVM
 
     const getRmn = async (rmnProxy: string): Promise<{ rmn?: string }> => {
-      if (!rmnProxy && rmnProxy === ZeroAddress) return {}
+      if (!rmnProxy || rmnProxy === ZeroAddress) return {}
       const proxyContract = new Contract(
         rmnProxy,
         interfaces.RMNProxy,
         this.provider,
       ) as unknown as TypedContract<typeof RMNProxy_ABI>
       const rmn = await proxyContract.getARM()
+      if (rmn === ZeroAddress) return {}
       return { rmn: rmn as CleanAddressable<typeof rmn> }
     }
 
