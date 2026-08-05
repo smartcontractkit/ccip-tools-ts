@@ -5,11 +5,11 @@
  * @packageDocumentation
  */
 
-import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
+import { getTokenAdminRegistryInterface } from '../contracts.ts'
 
 /** Parameters for `setPool`. Zero `poolAddress` delists the token. */
 export type SetPoolParams = {
@@ -40,7 +40,7 @@ export class SetPool extends EVMOperation<SetPoolParams> {
   protected async buildUnsigned(chain: EVMChain, p: SetPoolParams): Promise<UnsignedEVMTx> {
     const to = await chain.getTokenAdminRegistryFor(p.address)
     // TAR.setPool encoding is version-stable across v1.5–v2.0; no version dispatch needed.
-    const data = interfaces.TokenAdminRegistry.encodeFunctionData('setPool', [
+    const data = getTokenAdminRegistryInterface().encodeFunctionData('setPool', [
       p.tokenAddress,
       p.poolAddress,
     ])

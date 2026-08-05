@@ -21,6 +21,10 @@ import {
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
+import {
+  type RegisterAdminParams,
+  RegisterAdmin,
+} from './token-admin-registry/operations/register-admin.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
   type DeployTokenPoolParams,
@@ -43,6 +47,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #deployToken = new DeployToken()
 
   // Token admin registry operations
+  readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
 
   // Token pool operations
@@ -81,6 +86,69 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /** Provider of the underlying chain. */
   get provider(): JsonRpcApiProvider {
     return this.chain.provider
+  }
+
+  /**
+   * Builds an unsigned `registerAdmin` tx (for multisig / offline signing): proposes a token's
+   * administrator in the TokenAdminRegistry via a RegistryModuleOwnerCustom. Two-step by design —
+   * the proposed administrator must then call {@link acceptAdmin}.
+   * @remarks The administrator is not a parameter — the module derives it on-chain. `owner`/`ccip-admin` read the token's own `owner()`/`getCCIPAdmin()`, so
+   * the result is independent of who signs; a wrong signer simply reverts (`CanOnlySelfRegister`).
+   *
+   * `access-control-default-admin` behaves differently and warrants care on this offline path: the
+   * module registers **`msg.sender`** after checking it holds the token's `DEFAULT_ADMIN_ROLE`.
+   * `sender` here only drives the local pre-flight probe, so if the built tx is ultimately signed
+   * by a *different* address that also holds that role, the **signer** becomes the token's
+   * administrator — silently, with no revert to catch it. Confirm the signing key before relaying
+   * an `access-control-default-admin` registration. {@link registerAdmin} is not exposed to this,
+   * since it rejects a `sender` that differs from its wallet.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `registryModule` is not a
+   * registered TAR module, `registrationMethod` needs a v1.6+ module, `sender` doesn't match the
+   * token's authority for the chosen method, or the token is already registered (or pending
+   * acceptance)
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the token's owner (or
+   * // CCIP admin / default admin, matching `registrationMethod`).
+   * const unsigned = await cct.generateUnsignedRegisterAdmin({
+   *   tokenAddress: '0xToken...',
+   *   registryModule: '0xRegistryModuleOwnerCustom...', // not discoverable on-chain
+   *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/OnRamp/OffRamp/pool to resolve it from
+   *   sender: '0xTokenOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedRegisterAdmin(opts: RegisterAdminParams): Promise<UnsignedEVMTx> {
+    return this.#registerAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a token's administrator in the TokenAdminRegistry via a RegistryModuleOwnerCustom,
+   * signing + submitting with `opts.wallet`. Two-step by design — the proposed administrator
+   * must then call {@link acceptAdmin}.
+   * @remarks The administrator is not a parameter — see {@link generateUnsignedRegisterAdmin}. `sender` also defaults to `opts.wallet`'s address here
+   * (unlike the unsigned builder, where it's optional for offline/multisig flows), so the
+   * token-authority check always runs before this signs and submits.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `registryModule` is not a
+   * registered TAR module, `registrationMethod` needs a v1.6+ module, `sender` doesn't match the
+   * token's authority for the chosen method, or the token is already registered (or pending
+   * acceptance)
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must be the token's owner (or CCIP admin / hold DEFAULT_ADMIN_ROLE, matching
+   * // `registrationMethod`) — enforced automatically since `sender` defaults to its address.
+   * const { hash } = await cct.registerAdmin({
+   *   tokenAddress: '0xToken...',
+   *   registryModule: '0xRegistryModuleOwnerCustom...',
+   *   address: '0xTokenAdminRegistry...',
+   *   wallet,
+   * })
+   * ```
+   */
+  registerAdmin(opts: EVMExecuteParams<RegisterAdminParams>): Promise<TransactionResult> {
+    return this.#registerAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -368,6 +436,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export * from '../errors.ts'
+export type {
+  RegisterAdminMethod,
+  RegisterAdminParams,
+} from './token-admin-registry/operations/register-admin.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
