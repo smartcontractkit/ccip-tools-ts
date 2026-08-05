@@ -27,8 +27,8 @@ import {
 type ConfigureAllowlistParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Addresses to add to the pool allowlist. */
-  allowlist: string[]
+  /** Addresses to append to the pool allowlist. Must not contain duplicates. */
+  add: string[]
   /** Whether the pool should enforce its allowlist. */
   enabled: boolean
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
@@ -38,7 +38,7 @@ type ConfigureAllowlistParams = PoolProgramRef & {
 type ParsedConfigureAllowlistParams = {
   tokenAddress: PublicKey
   poolProgram: PublicKey
-  allowlist: PublicKey[]
+  add: PublicKey[]
   enabled: boolean
   payer: PublicKey
   authority: PublicKey
@@ -71,20 +71,25 @@ export class ConfigureAllowlist extends SolanaOperation<
   protected override parse(
     params: GenerateConfigureAllowlistParams,
   ): ParsedConfigureAllowlistParams {
-    if (!Array.isArray(params.allowlist)) {
-      throw new CCTParamsInvalidError(this.name, 'allowlist', 'must be an array')
+    if (!Array.isArray(params.add)) {
+      throw new CCTParamsInvalidError(this.name, 'add', 'must be an array')
     }
     if (typeof params.enabled !== 'boolean') {
       throw new CCTParamsInvalidError(this.name, 'enabled', 'must be a boolean')
+    }
+
+    const add = params.add.map((address, index) =>
+      parsePublicKey(this.name, `add[${index}]`, address),
+    )
+    if (new Set(add.map((address) => address.toBase58())).size !== add.length) {
+      throw new CCTParamsInvalidError(this.name, 'add', 'must not contain duplicate addresses')
     }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       poolProgram: resolvePoolProgram(this.name, params),
-      allowlist: params.allowlist.map((address, index) =>
-        parsePublicKey(this.name, `allowlist[${index}]`, address),
-      ),
+      add,
       enabled: params.enabled,
       payer,
       authority:
@@ -103,7 +108,7 @@ export class ConfigureAllowlist extends SolanaOperation<
     const state = deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress)
 
     const instruction = await program.methods
-      .configureAllowList(opts.allowlist, opts.enabled)
+      .configureAllowList(opts.add, opts.enabled)
       .accountsStrict({
         state,
         mint: opts.tokenAddress,

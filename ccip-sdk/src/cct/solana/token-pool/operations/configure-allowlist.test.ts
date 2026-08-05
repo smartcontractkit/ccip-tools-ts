@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
+import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
@@ -13,6 +14,8 @@ const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const ALLOWED = Keypair.generate().publicKey.toBase58()
+const SECOND_ALLOWED = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -25,13 +28,28 @@ function stubChain(): SolanaChain {
   } as unknown as SolanaChain
 }
 
+function submitChain(): SolanaChain {
+  return {
+    ...stubChain(),
+    connection: {
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  } as unknown as SolanaChain
+}
+
 function generate(opts = {}) {
   return SolanaTokenManager.fromChain(stubChain()).generateUnsignedConfigureAllowlist({
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
-    allowlist: [ALLOWED],
+    add: [ALLOWED],
     enabled: true,
     ...opts,
   })
@@ -67,6 +85,29 @@ describe('ConfigureAllowlist (cct/solana)', () => {
       )
     })
 
+    it('encodes multiple addresses and overwrites enforcement', async () => {
+      const unsigned = await generate({ add: [ALLOWED, SECOND_ALLOWED], enabled: false })
+      const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+
+      assert.ok(decoded)
+      assert.equal(decoded.name, 'configureAllowList')
+      assert.deepEqual(
+        (decoded.data as { add: PublicKey[] }).add.map((address) => address.toBase58()),
+        [ALLOWED, SECOND_ALLOWED],
+      )
+      assert.equal((decoded.data as { enabled: boolean }).enabled, false)
+    })
+
+    it('encodes a toggle without addresses', async () => {
+      const unsigned = await generate({ add: [], enabled: false })
+      const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+
+      assert.ok(decoded)
+      assert.equal(decoded.name, 'configureAllowList')
+      assert.deepEqual((decoded.data as { add: PublicKey[] }).add, [])
+      assert.equal((decoded.data as { enabled: boolean }).enabled, false)
+    })
+
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
       const unsigned = await SolanaTokenManager.fromChain(
@@ -76,7 +117,7 @@ describe('ConfigureAllowlist (cct/solana)', () => {
         poolProgramAddress,
         payer: PAYER,
         authority: AUTHORITY,
-        allowlist: [ALLOWED],
+        add: [ALLOWED],
         enabled: true,
       })
 
@@ -95,13 +136,33 @@ describe('ConfigureAllowlist (cct/solana)', () => {
       )
     })
 
-    it('rejects invalid allowlist addresses', async () => {
+    it('rejects non-array addresses to add', async () => {
       await assert.rejects(
-        () => generate({ allowlist: ['not-a-pubkey'] }),
+        () => generate({ add: 'not-an-array' }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'configureAllowlist' &&
-          err.context.param === 'allowlist[0]',
+          err.context.param === 'add',
+      )
+    })
+
+    it('rejects invalid addresses to add', async () => {
+      await assert.rejects(
+        () => generate({ add: ['not-a-pubkey'] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'configureAllowlist' &&
+          err.context.param === 'add[0]',
+      )
+    })
+
+    it('rejects duplicate addresses to add', async () => {
+      await assert.rejects(
+        () => generate({ add: [ALLOWED, ALLOWED] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'configureAllowlist' &&
+          err.context.param === 'add',
       )
     })
 
@@ -117,6 +178,18 @@ describe('ConfigureAllowlist (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      const result = await SolanaTokenManager.fromChain(submitChain()).configureAllowlist({
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        add: [ALLOWED],
+        enabled: true,
+        wallet: WALLET,
+      })
+
+      assert.deepEqual(result, { hash: HASH })
+    })
+
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
@@ -124,7 +197,7 @@ describe('ConfigureAllowlist (cct/solana)', () => {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,
-            allowlist: [ALLOWED],
+            add: [ALLOWED],
             enabled: true,
             wallet: WALLET,
           }),
