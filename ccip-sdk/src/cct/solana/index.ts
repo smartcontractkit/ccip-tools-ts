@@ -351,10 +351,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction to add token pool allowlist addresses and toggle enforcement.
-   * The pool must be initialized first. Pass canonical `poolType` or a compatible
+   * Builds an unsigned instruction to append addresses to a token pool allowlist and toggle
+   * enforcement. Every call overwrites enforcement; pass `add: []` to toggle it without appending
+   * an address. Addresses in `add` must be unique; existing allowlist entries are rejected by the
+   * program. The pool must be initialized first. Pass canonical `poolType` or a compatible
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
+   * @remarks Removing addresses is not yet supported by the SDK.
+   *
+   * @see {@link configureAllowlist}
    * @see {@link generateUnsignedDeployTokenPool}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
@@ -365,7 +370,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const unsigned = await cct.generateUnsignedConfigureAllowlist({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
-   *   allowlist: [allowedSender],
+   *   add: [allowedSender],
    *   enabled: true,
    *   payer,
    *   authority,
@@ -379,8 +384,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Configures an initialized Solana token pool allowlist using the pool owner wallet.
+   * Appends addresses to and configures an initialized Solana token pool allowlist using the pool
+   * owner wallet. Every call overwrites enforcement; pass `add: []` to toggle it without
+   * appending an address. Addresses in `add` must be unique; existing allowlist entries are
+   * rejected by the program.
    *
+   * @remarks Removing addresses is not yet supported by the SDK.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
    * @see {@link deployTokenPool}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
@@ -394,8 +405,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.configureAllowlist({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
-   *   allowlist: [allowedSender],
-   *   enabled: true,
+   *   add: [],
+   *   enabled: false,
    *   wallet,
    * })
    * ```
