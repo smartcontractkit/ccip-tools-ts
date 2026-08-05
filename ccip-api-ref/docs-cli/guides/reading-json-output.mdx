@@ -1,0 +1,91 @@
+---
+id: reading-json-output
+title: 'Reading JSON Output'
+description: 'How to parse --format=json output without losing precision on chain selectors, amounts, and fees.'
+sidebar_label: Reading JSON Output
+sidebar_position: 5
+---
+
+# Reading JSON Output
+
+`--format=json` writes CCIP integer fields (`chainSelector`, token amounts, fees, gas limits) as
+plain JSON numbers. These are `uint64` and `uint256` values, so they routinely exceed 2^53.
+
+Python, and Go with `json.Number`, read such values at full precision. JavaScript does not:
+`JSON.parse` represents every JSON number as an IEEE-754 double, which holds 53 bits of integer
+precision, so larger values come back rounded, with no error raised.
+
+```js
+JSON.parse('{"chainSelector":11344663589394136015}').chainSelector
+// => 11344663589394135000   (expected 11344663589394136015)
+```
+
+This is deliberate: the format targets engines with native big-integer support. The requirement is
+on the reader.
+
+## JavaScript and TypeScript
+
+Use `jsonParse` from `@chainlink/ccip-sdk`. It returns large integers as `bigint`. Pass a type
+parameter for the shape you expect; it returns `unknown` by default:
+
+```typescript
+import { jsonParse } from '@chainlink/ccip-sdk'
+
+type ShowOutput = { request: { lane: { sourceChainSelector: bigint } } }
+
+const parsed = jsonParse<ShowOutput>(stdout)
+parsed.request.lane.sourceChainSelector
+// => 16015286601757825753n
+```
+
+If you're not importing the SDK, [`lossless-json`](https://www.npmjs.com/package/lossless-json)
+solves the same problem.
+
+## jq
+
+jq 1.7 and later keep large integers as literal text through passthrough and field selection. Any
+numeric operation converts the value to a double and rounds it. jq 1.6 and earlier round these
+values even on plain `jq .`, so check your version first:
+
+```sh
+jq --version   # jq-1.7 or later required for the passthrough behavior below
+
+ccip-cli show <tx> --format=json | jq '.request.lane.sourceChainSelector'
+# 16015286601757825753
+
+ccip-cli show <tx> --format=json | jq '.request.lane.sourceChainSelector + 0'
+# 16015286601757825000
+```
+
+Use `| tostring` when a shell variable is needed instead of a numeric operation.
+
+## Python, Go
+
+Python's `json.loads` returns arbitrary-precision `int` and needs no special handling.
+
+In Go, the default decode produces `float64`. Use `json.Decoder.UseNumber()`, or unmarshal into a
+`string` or `*big.Int` field:
+
+```go
+dec := json.NewDecoder(r)
+dec.UseNumber()
+```
+
+## The rule
+
+**Keep CCIP integer fields as text or `bigint` in every language.** Converting them to a native
+floating-point number loses precision.
+
+## Testing your pipeline
+
+Round values such as `1e18` are exactly representable as doubles and survive `JSON.parse`
+unchanged, so a "1 token" test passes while the pipeline is still broken. Test with a non-round
+value:
+
+```js
+JSON.parse('{"amount":1234567890123456789}').amount
+// => 1234567890123456800
+```
+
+For the `jsonStringify`/`jsonParse` pair and how they round-trip, see the SDK's
+[JSON Integer Precision guide](https://docs.chain.link/ccip/tools/sdk/guides/json-integer-precision).

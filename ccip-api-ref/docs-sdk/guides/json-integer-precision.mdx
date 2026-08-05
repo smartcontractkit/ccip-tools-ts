@@ -1,0 +1,84 @@
+---
+id: json-integer-precision
+title: 'JSON Integer Precision'
+description: 'Why chain selectors, amounts, and fees look wrong after JSON.parse, and how to read them correctly.'
+sidebar_label: JSON Integer Precision
+sidebar_position: 16
+---
+
+# JSON Integer Precision
+
+CCIP fields like `chainSelector`, token amounts, and fees are `uint64`/`uint256` values, bigger
+than the 53 bits of integer precision a JSON number can safely hold in most languages.
+`--format json` and `jsonStringify` emit these as plain JSON numbers. Python, Postgres `JSONB`,
+and Go with `json.Number` read them at full precision. JavaScript does not: `JSON.parse`
+represents every JSON number as an IEEE-754 double, which holds 53 bits of integer precision, so
+larger values come back rounded, with no error raised. This is a deliberate design choice, not a
+bug. The requirement is on the reader.
+
+## The failure
+
+```typescript
+// CLI/SDK output, correct on the wire
+const output = '{"chainSelector":11344663589394136015}'
+
+JSON.parse(output).chainSelector
+// => 11344663589394135000   (expected 11344663589394136015)
+```
+
+This affects every `--format json` command (`show`, `search`, `parse`, `send --only-get-fee`,
+`lane`, `token`, …) and any bigint field above `2^53` (~9 × 10^15). Round token amounts like `1e18`
+happen to survive because they're exactly representable. Use a non-round value when testing your
+own pipeline.
+
+## Reading the output in JavaScript
+
+The SDK exports `jsonParse`, which reads large integers as `bigint`. Pass a type parameter for the
+shape you expect; it returns `unknown` by default:
+
+```typescript
+import { jsonParse } from '@chainlink/ccip-sdk'
+
+const output = '{"chainSelector":11344663589394136015}'
+
+jsonParse<{ chainSelector: bigint }>(output).chainSelector
+// => 11344663589394136015n
+```
+
+If you're parsing your own object with `jsonStringify`, `jsonParse` is the matching reader:
+
+```typescript
+import { jsonParse, jsonStringify } from '@chainlink/ccip-sdk'
+
+const encoded = jsonStringify({ amount: 1234567890123456789n, note: 'not a bigint' })
+// => '{"amount":1234567890123456789,"note":"not a bigint"}'
+
+jsonParse<{ amount: bigint; note: string }>(encoded)
+// => { amount: 1234567890123456789n, note: 'not a bigint' }
+```
+
+`jsonParse` distinguishes a `bigint` (bare integer) from a plain `number` integer (tagged with a
+`.0` suffix by `jsonStringify`, e.g. `2.0`), so `{"a":1,"b":2.0}` round-trips as `{ a: 1n, b: 2 }`,
+not `{ a: 1n, b: 2n }`.
+
+## Other consumers
+
+- Python: `json.loads` parses JSON integers as arbitrary-precision `int` natively. No special
+  handling needed.
+- Go: use `json.Decoder.UseNumber()` (or unmarshal into a `*big.Int`/`string` field) to avoid Go's
+  default `float64` decoding, which has the same precision limit as JS.
+- Postgres: a `JSONB` column stores JSON numbers at full precision. Cast to `numeric` on read,
+  keeping the extraction in parentheses. `payload->>'amount'::numeric` is a precedence error and
+  fails with `invalid input syntax for type numeric`, since `::` binds tighter than `->>`. Never
+  cast to `float8`; it rounds the value the same way `JSON.parse` does:
+  ```sql
+  SELECT (payload->>'amount')::numeric FROM messages;
+  ```
+- jq: jq 1.7 and later preserve big integers as literal text through pure passthrough or field
+  selection (`jq .`, `jq '{amount: .amount}'`). Any arithmetic (`jq '.amount + 0'`) forces the
+  value through a `double` and corrupts it the same way `JSON.parse` does. jq 1.6 and earlier round
+  these values even on plain `jq .`, so check `jq --version` before relying on passthrough. Treat
+  these fields as opaque text in jq pipelines; use `| tostring` rather than any numeric operation.
+
+**Keep CCIP integer fields as text or `bigint` in every language.** Converting them to a native
+floating-point number loses precision.

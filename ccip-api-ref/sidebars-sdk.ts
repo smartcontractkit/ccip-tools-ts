@@ -41,6 +41,7 @@ const sidebars: SidebarsConfig = {
         'guides/browser-setup',
         'guides/error-handling',
         'guides/error-reference',
+        'guides/json-integer-precision',
       ],
     },
     {
