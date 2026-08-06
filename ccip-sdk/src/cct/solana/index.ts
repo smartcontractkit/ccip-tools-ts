@@ -67,18 +67,23 @@ import {
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteRemoveFromAllowlistParams,
+  type ExecuteRemoveFromAllowlistResult,
   type GenerateConfigureAllowlistParams,
   type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateRemoveFromAllowlistParams,
+  type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
+  RemoveFromAllowlist,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -102,6 +107,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #removeFromAllowlist = new RemoveFromAllowlist()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -357,10 +363,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * program. The pool must be initialized first. Pass canonical `poolType` or a compatible
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
-   * @remarks Removing addresses is not yet supported by the SDK.
-   *
    * @see {@link configureAllowlist}
    * @see {@link generateUnsignedDeployTokenPool}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
@@ -389,10 +394,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * appending an address. Addresses in `add` must be unique; existing allowlist entries are
    * rejected by the program.
    *
-   * @remarks Removing addresses is not yet supported by the SDK.
-   *
    * @see {@link generateUnsignedConfigureAllowlist}
    * @see {@link deployTokenPool}
+   * @see {@link removeFromAllowlist}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
@@ -665,6 +669,70 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
     return this.#registerAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
+   * be initialized first. Pass canonical `poolType` or a compatible `poolProgramAddress`;
+   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
+   * transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link removeFromAllowlist}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remove: [sender],
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedRemoveFromAllowlist(
+    opts: GenerateRemoveFromAllowlistParams,
+  ): Promise<GenerateRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.generate(this.chain, opts)
+  }
+
+  /**
+   * Removes addresses from an initialized Solana token pool allowlist using the pool owner wallet.
+   * Every removed address must already be allowlisted or the transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.removeFromAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remove: [sender],
+   *   wallet,
+   * })
+   * ```
+   */
+  removeFromAllowlist(
+    opts: ExecuteRemoveFromAllowlistParams,
+  ): Promise<ExecuteRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.execute(this.chain, opts)
   }
 
   /**
