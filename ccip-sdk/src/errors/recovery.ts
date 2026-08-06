@@ -220,6 +220,10 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'This operation is not available at the contract version in error.context. Verify the contract version supports it.',
   CCT_DATA_DECODE_FAILED:
     'Ensure the account belongs to a compatible CCT program and uses the expected data layout.',
+  CCT_VERIFICATION_FAILED:
+    'The explorer rejected the verification submission. See error.context for the explorer response, the fully-qualified contract name, the compiler version and the optimizer runs.',
+  CCT_VERIFICATION_NOT_CONFIRMED:
+    'The submission was accepted but the explorer did not reach a terminal status in time. It may still succeed; re-verify to pick up the result, or poll the explorer with the guid in error.context.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */

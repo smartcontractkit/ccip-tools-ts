@@ -122,6 +122,14 @@ export default defineConfig(
           message:
             'Assign `new AsyncDisposableStack()` with `await using` so it is automatically disposed at end of scope.',
         },
+        // Appended here, not in a new config object: flat config REPLACES rule options from a
+        // later matching object, so a second `no-restricted-syntax` block would silently delete
+        // every selector above for the files it matches.
+        {
+          selector: "ImportExpression[source.type='TemplateLiteral']",
+          message:
+            'Use a string-literal specifier in dynamic import(). A template literal makes tsc emit __rewriteRelativeImportExtension and makes bundlers enumerate the whole directory, pulling every module into the graph.',
+        },
       ],
     },
   },
@@ -135,6 +143,60 @@ export default defineConfig(
         'error',
         {
           allow: ['buffer'], // Allowed because we explicitly import { Buffer } from 'buffer'
+        },
+      ],
+    },
+  },
+  {
+    // Verification is an opt-in subpath: nothing else inside ccip-sdk/src may reach into it, not
+    // even with `import type` — that keeps the `.` and `cct/evm` entry points free of any edge
+    // into verify/ and its ~335 KB of vendored Solidity sources. Consumers outside src (the
+    // playground, the future CLI) are intentionally unaffected.
+    // `basePath` is mandatory: without it the rule resolves targets against process.cwd(), which
+    // is ccip-sdk under `npm run lint --workspaces`, so the zone would match no file and enforce
+    // nothing.
+    files: ['ccip-sdk/src/**/*.ts'],
+    ignores: [
+      'ccip-sdk/src/cct/evm/verify/**',
+      '**/*.test.ts',
+      '**/__tests__/**',
+      '**/__mocks__/**',
+    ],
+    rules: {
+      'import-x/no-restricted-paths': [
+        'error',
+        {
+          basePath: import.meta.dirname,
+          zones: [
+            {
+              target: 'ccip-sdk/src',
+              from: 'ccip-sdk/src/cct/evm/verify',
+              message:
+                'Verification is an opt-in subpath. Import @chainlink/ccip-sdk/cct/evm/verify; shared types belong in src/cct/evm/deployable.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // ...and verify/ must not reach back into the deploy side, or its fixture pool would be
+    // dragged into the cct/evm chunk.
+    files: ['ccip-sdk/src/cct/evm/verify/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**', '**/__mocks__/**'],
+    rules: {
+      'import-x/no-restricted-paths': [
+        'error',
+        {
+          basePath: import.meta.dirname,
+          zones: [
+            {
+              target: 'ccip-sdk/src/cct/evm/verify',
+              from: ['ccip-sdk/src/cct/evm/artifacts', 'ccip-sdk/src/cct/evm/index.ts'],
+              message:
+                'verify/ must not pull vendored ABI/bytecode modules or the cct/evm barrel into its chunk — use src/cct/evm/deployable.ts.',
+            },
+          ],
         },
       ],
     },
