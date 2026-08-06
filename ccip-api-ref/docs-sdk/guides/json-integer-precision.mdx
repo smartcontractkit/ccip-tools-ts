@@ -61,6 +61,12 @@ jsonParse<{ amount: bigint; note: string }>(encoded)
 `.0` suffix by `jsonStringify`, e.g. `2.0`), so `{"a":1,"b":2.0}` round-trips as `{ a: 1n, b: 2 }`,
 not `{ a: 1n, b: 2n }`.
 
+The `.0` suffix is a convention, not a requirement. `2.0` and `2` are the same JSON number. The
+suffix only marks a value as safely castable to a `number`, opting out of the `bigint` default.
+Every numeric input in the SDK's public interfaces accepts `number` or `bigint`, so a value from a
+source that doesn't carry the convention (Python, Go, and Postgres all emit `2`) still comes back
+as a `bigint` and still works.
+
 ## Other consumers
 
 - Python: `json.loads` parses JSON integers as arbitrary-precision `int` natively. No special
