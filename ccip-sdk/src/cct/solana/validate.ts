@@ -19,7 +19,7 @@ export function parsePublicKey(operation: string, param: string, value: unknown)
     throw new CCTParamsInvalidError(
       operation,
       param,
-      `must be a valid Solana public key, got ${String(value)}`,
+      `must be a valid Solana public key, got "${String(value)}"`,
     )
   }
 
@@ -29,7 +29,7 @@ export function parsePublicKey(operation: string, param: string, value: unknown)
     throw new CCTParamsInvalidError(
       operation,
       param,
-      `must be a valid Solana public key, got ${String(value)}`,
+      `must be a valid Solana public key, got "${String(value)}"`,
       {
         cause: new CCIPAddressInvalidError(value, ChainFamily.Solana),
       },
@@ -47,6 +47,19 @@ export function validatePublicKey(
   value: unknown,
 ): asserts value is string {
   parsePublicKey(operation, param, value)
+}
+
+/**
+ * Asserts `value` is a valid Solana public key string, or is absent.
+ * Only `undefined` counts as absent; `null` and `''` are treated as provided and rejected.
+ * @throws {@link CCTParamsInvalidError} if a non-`undefined` `value` is not a valid public key string.
+ */
+export function validateOptionalPublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string | undefined {
+  if (value !== undefined) validatePublicKey(operation, param, value)
 }
 
 /**
