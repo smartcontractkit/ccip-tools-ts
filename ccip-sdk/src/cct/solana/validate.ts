@@ -218,7 +218,11 @@ export function parseHexBytes(
   maxBytes?: number,
 ): Buffer {
   const hex = typeof value === 'string' ? value.replace(/^0x/, '') : ''
-  if (!/^(?:[\da-fA-F]{2})*$/.test(hex) || (maxBytes !== undefined && hex.length / 2 > maxBytes)) {
+  if (
+    typeof value !== 'string' ||
+    !/^(?:[\da-fA-F]{2})*$/.test(hex) ||
+    (maxBytes !== undefined && hex.length / 2 > maxBytes)
+  ) {
     const size = maxBytes === undefined ? '' : ` of at most ${maxBytes} bytes`
     throw new CCTParamsInvalidError(operation, param, `must be a hex string${size}`)
   }
