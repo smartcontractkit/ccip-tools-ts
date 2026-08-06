@@ -61,16 +61,21 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type ExecuteConfigureAllowlistParams,
+  type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type GenerateConfigureAllowlistParams,
+  type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  ConfigureAllowlist,
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
@@ -93,6 +98,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
+  readonly #configureAllowlist = new ConfigureAllowlist()
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #getTokenPoolState = new GetTokenPoolState()
@@ -342,6 +348,73 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   createLookupTable(opts: ExecuteCreateLookupTableParams): Promise<ExecuteCreateLookupTableResult> {
     return this.#createLookupTable.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to append addresses to a token pool allowlist and toggle
+   * enforcement. Every call overwrites enforcement; pass `add: []` to toggle it without appending
+   * an address. Addresses in `add` must be unique; existing allowlist entries are rejected by the
+   * program. The pool must be initialized first. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks Removing addresses is not yet supported by the SDK.
+   *
+   * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedDeployTokenPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedConfigureAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   add: [allowedSender],
+   *   enabled: true,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedConfigureAllowlist(
+    opts: GenerateConfigureAllowlistParams,
+  ): Promise<GenerateConfigureAllowlistResult> {
+    return this.#configureAllowlist.generate(this.chain, opts)
+  }
+
+  /**
+   * Appends addresses to and configures an initialized Solana token pool allowlist using the pool
+   * owner wallet. Every call overwrites enforcement; pass `add: []` to toggle it without
+   * appending an address. Addresses in `add` must be unique; existing allowlist entries are
+   * rejected by the program.
+   *
+   * @remarks Removing addresses is not yet supported by the SDK.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link deployTokenPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.configureAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   add: [],
+   *   enabled: false,
+   *   wallet,
+   * })
+   * ```
+   */
+  configureAllowlist(
+    opts: ExecuteConfigureAllowlistParams,
+  ): Promise<ExecuteConfigureAllowlistResult> {
+    return this.#configureAllowlist.execute(this.chain, opts)
   }
 
   /**
