@@ -20,6 +20,7 @@ import { submit } from '../../submit.ts'
 import {
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateOptionalPublicKey,
   validatePublicKey,
 } from '../../validate.ts'
 
@@ -69,7 +70,7 @@ export class CreateLookupTable extends SolanaOperation<
   /** Validates params before `buildUnsigned()` performs any RPC. */
   protected validate(params: GenerateCreateLookupTableParams): void {
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
     if (params.mode === 'createEmpty') return
 
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
@@ -166,7 +167,7 @@ export class CreateLookupTable extends SolanaOperation<
 
     this.validate(generateParams)
 
-    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (params.mode !== 'createEmpty' && authority) {
       validateAuthorityMatchesWallet(
         this.name,

@@ -16,7 +16,11 @@ import {
   deriveRouterConfigPda,
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
-import { validatePublicKey, validateWritableIndexes } from '../../validate.ts'
+import {
+  validateOptionalPublicKey,
+  validatePublicKey,
+  validateWritableIndexes,
+} from '../../validate.ts'
 
 /** Standard BurnMint/LockRelease pool ALT writable positions. */
 export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
@@ -67,7 +71,7 @@ export class SetPool extends SolanaOperation<SetPoolParams> {
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'poolLookupTableAddress', params.poolLookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
     validateWritableIndexes(this.name, 'writableIndexes', params.writableIndexes)
   }
 

@@ -65,97 +65,103 @@ function generate(opts = {}) {
   })
 }
 
-describe('Solana token createTokenMultisig', () => {
-  it('builds a pool-autonomous threshold-two multisig', async () => {
-    const unsigned = await generate({
-      threshold: 2,
-      additionalSigners: [Keypair.generate().publicKey.toBase58()],
+describe('CreateTokenMultisig (cct/solana)', () => {
+  describe('generate', () => {
+    it('builds a pool-autonomous threshold-two multisig', async () => {
+      const unsigned = await generate({
+        threshold: 2,
+        additionalSigners: [Keypair.generate().publicKey.toBase58()],
+      })
+      const [createIx, initIx] = unsigned.instructions
+      assert.ok(createIx)
+      assert.ok(initIx)
+
+      assert.equal(unsigned.family, ChainFamily.Solana)
+      assert.equal(unsigned.mainIndex, 0)
+      assert.match(unsigned.multisigAddress, /^[1-9A-HJ-NP-Za-km-z]+$/)
+      assert.equal(createIx.programId.toBase58(), SystemProgram.programId.toBase58())
+      assert.equal(initIx.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58())
+      assert.equal(initIx.data[0], 2) // InitializeMultisig
+      assert.equal(initIx.data[1], 2) // threshold
+
+      const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
+      assert.equal(initIx.keys.filter((key) => key.pubkey.equals(poolSigner)).length, 2)
+      assert.ok(initIx.keys.some((key) => key.pubkey.equals(new PublicKey(AUTHORITY))))
+      assert.ok(!initIx.keys.some((key) => key.pubkey.equals(new PublicKey(PAYER))))
     })
-    const [createIx, initIx] = unsigned.instructions
-    assert.ok(createIx)
-    assert.ok(initIx)
 
-    assert.equal(unsigned.family, ChainFamily.Solana)
-    assert.equal(unsigned.mainIndex, 0)
-    assert.match(unsigned.multisigAddress, /^[1-9A-HJ-NP-Za-km-z]+$/)
-    assert.equal(createIx.programId.toBase58(), SystemProgram.programId.toBase58())
-    assert.equal(initIx.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58())
-    assert.equal(initIx.data[0], 2) // InitializeMultisig
-    assert.equal(initIx.data[1], 2) // threshold
+    it('builds the canonical threshold-one pool multisig', async () => {
+      const unsigned = await generate({ threshold: 1 })
+      const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
 
-    const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
-    assert.equal(initIx.keys.filter((key) => key.pubkey.equals(poolSigner)).length, 2)
-    assert.ok(initIx.keys.some((key) => key.pubkey.equals(new PublicKey(AUTHORITY))))
-    assert.ok(!initIx.keys.some((key) => key.pubkey.equals(new PublicKey(PAYER))))
+      assert.equal(unsigned.instructions[1]!.data[1], 1)
+      assert.equal(
+        unsigned.instructions[1]!.keys.filter((key) => key.pubkey.equals(poolSigner)).length,
+        1,
+      )
+    })
+
+    it('adds additional signers', async () => {
+      const signer = Keypair.generate().publicKey
+      const unsigned = await generate({ additionalSigners: [signer.toBase58()] })
+
+      assert.ok(unsigned.instructions[1]!.keys.some((key) => key.pubkey.equals(signer)))
+    })
   })
 
-  it('builds the canonical threshold-one pool multisig', async () => {
-    const unsigned = await generate({ threshold: 1 })
-    const poolSigner = deriveTokenPoolSignerPda(new PublicKey(POOL_PROGRAM), new PublicKey(MINT))
+  describe('validation', () => {
+    it('rejects invalid pool type', async () => {
+      await assert.rejects(
+        () => generate({ poolType: 'custom' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'createTokenMultisig' &&
+          err.context.param === 'poolType',
+      )
+    })
 
-    assert.equal(unsigned.instructions[1]!.data[1], 1)
-    assert.equal(
-      unsigned.instructions[1]!.keys.filter((key) => key.pubkey.equals(poolSigner)).length,
-      1,
-    )
+    it('requires an independent governance quorum', async () => {
+      await assert.rejects(
+        () => generate(),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'createTokenMultisig' &&
+          err.context.param === 'threshold',
+      )
+    })
+
+    it('rejects mint without mint authority', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain(null)).generateUnsignedCreateTokenMultisig({
+            tokenAddress: MINT,
+            poolType: 'burn-mint',
+            threshold: 2,
+            payer: PAYER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'createTokenMultisig' &&
+          err.context.param === 'tokenAddress',
+      )
+    })
   })
 
-  it('adds additional signers', async () => {
-    const signer = Keypair.generate().publicKey
-    const unsigned = await generate({ additionalSigners: [signer.toBase58()] })
-
-    assert.ok(unsigned.instructions[1]!.keys.some((key) => key.pubkey.equals(signer)))
-  })
-
-  it('rejects invalid pool type', async () => {
-    await assert.rejects(
-      () => generate({ poolType: 'custom' }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'createTokenMultisig' &&
-        err.context.param === 'poolType',
-    )
-  })
-
-  it('requires an independent governance quorum', async () => {
-    await assert.rejects(
-      () => generate(),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'createTokenMultisig' &&
-        err.context.param === 'threshold',
-    )
-  })
-
-  it('rejects mint without mint authority', async () => {
-    await assert.rejects(
-      () =>
-        SolanaTokenManager.fromChain(stubChain(null)).generateUnsignedCreateTokenMultisig({
-          tokenAddress: MINT,
-          poolType: 'burn-mint',
-          threshold: 2,
-          payer: PAYER,
-        }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'createTokenMultisig' &&
-        err.context.param === 'tokenAddress',
-    )
-  })
-
-  it('rejects signed execute when wallet is not mint authority', async () => {
-    await assert.rejects(
-      () =>
-        SolanaTokenManager.fromChain(stubChain()).createTokenMultisig({
-          tokenAddress: MINT,
-          poolType: 'burn-mint',
-          threshold: 2,
-          wallet: WALLET,
-        }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'createTokenMultisig' &&
-        err.context.param === 'authority',
-    )
+  describe('execute', () => {
+    it('rejects signed execute when wallet is not mint authority', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain()).createTokenMultisig({
+            tokenAddress: MINT,
+            poolType: 'burn-mint',
+            threshold: 2,
+            wallet: WALLET,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'createTokenMultisig' &&
+          err.context.param === 'authority',
+      )
+    })
   })
 })
