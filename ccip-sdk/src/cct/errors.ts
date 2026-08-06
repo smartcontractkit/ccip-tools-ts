@@ -220,3 +220,67 @@ export class CCTDataDecodeError extends CCIPError {
     })
   }
 }
+
+// Contract verification
+
+/**
+ * Thrown when a block explorer definitively rejects a verification submission, or returns a
+ * terminal status this SDK does not recognise. Permanent: the same submission will not start
+ * passing. `context` carries the explorer's raw response alongside every input that could be
+ * wrong — the fully-qualified name, compiler version, optimizer runs, verifier and body size.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await verifyDeployedContract(deploy, { chainId, apiKey })
+ * } catch (error) {
+ *   if (error instanceof CCTVerificationFailedError) {
+ *     console.log(`${error.context.verifier} rejected it: ${error.context.result}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTVerificationFailedError extends CCIPError {
+  override readonly name = 'CCTVerificationFailedError'
+  /** Creates a verification-failed error. */
+  constructor(verifier: string, result: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.CCT_VERIFICATION_FAILED, `${verifier} verification failed: ${result}`, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context, verifier, result },
+    })
+  }
+}
+
+/**
+ * Thrown when a verification was accepted but did not reach a terminal status within the poll
+ * budget. Transient: the explorer may still be working. `context.guid` is the submission id, so
+ * a later re-verify resolves to `already-verified` rather than losing the work.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await verifyDeployedContract(deploy, { chainId, apiKey })
+ * } catch (error) {
+ *   if (error instanceof CCTVerificationNotConfirmedError) {
+ *     console.log(`Still pending (${error.context.guid}); retry in ${error.retryAfterMs}ms`)
+ *   }
+ * }
+ * ```
+ */
+export class CCTVerificationNotConfirmedError extends CCIPError {
+  override readonly name = 'CCTVerificationNotConfirmedError'
+  /** Creates a verification-not-confirmed error. */
+  constructor(verifier: string, guid: string, timeoutMs: number, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.CCT_VERIFICATION_NOT_CONFIRMED,
+      `${verifier} verification not confirmed within ${timeoutMs}ms (submission ${guid})`,
+      {
+        ...options,
+        isTransient: true,
+        retryAfterMs: 5000,
+        context: { ...options?.context, verifier, guid, timeoutMs },
+      },
+    )
+  }
+}

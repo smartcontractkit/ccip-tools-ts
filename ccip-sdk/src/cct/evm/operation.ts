@@ -11,6 +11,7 @@
 
 import type { Interface } from 'ethers'
 
+import type { DeployableContract } from './deployable.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
@@ -33,9 +34,10 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
  * The deploy-side inputs a block explorer needs to verify a contract's source: its name and
  * ABI-encoded constructor args, captured while deploying with no extra RPC.
  * @remarks A constructor-args companion, *not* proof of verification — nothing here is read back
- * from the chain or submitted anywhere. A full submission also needs the source/compiler side
- * (standard-json input plus the matching solc version and settings), which this SDK does not
- * vendor; those ship in the `@chainlink/contracts-ccip` package.
+ * from the chain or submitted anywhere. The source/compiler half of a submission (standard-json
+ * sources plus the matching solc version and settings) ships in the opt-in
+ * `@chainlink/ccip-sdk/cct/evm/verify` subpath, which consumes this handle directly.
+ * @see {@link verifyDeployedContract} — pass the whole `DeployResult` to it.
  *
  * Only available from `execute`, which deploys and so learns the address. The
  * `generateUnsigned*` builders return the unsigned tx alone.
@@ -45,10 +47,16 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
  * console.log(verification.contract) // 'LockReleaseTokenPool'
  * console.log(verification.encodedConstructorArgs.slice(2)) // drop the `0x`
  * ```
+ * @example Or hand the whole deploy result to the verify subpath, which does that for you:
+ * ```typescript
+ * const deploy = await cct.deployTokenPool({ ...params, wallet })
+ * const { verifyDeployedContract } = await import('@chainlink/ccip-sdk/cct/evm/verify')
+ * const result = await verifyDeployedContract(deploy, { chainId, apiKey })
+ * ```
  */
 export interface ExplorerVerificationInput {
   /** Contract name as compiled, e.g. `BurnMintTokenPool`; unqualified, matching the artifact. */
-  contract: string
+  contract: DeployableContract
   /** 0x-prefixed ABI-encoded constructor args, or just `0x` when the constructor takes none. */
   encodedConstructorArgs: string
 }
@@ -58,7 +66,7 @@ export interface ExplorerVerificationInput {
  * {@link Interface}, and the creation bytecode. Field is `iface` (not `interface`, a reserved word).
  */
 export interface DeployArtifact {
-  contract: string
+  contract: DeployableContract
   iface: Interface
   bytecode: `0x${string}`
 }
