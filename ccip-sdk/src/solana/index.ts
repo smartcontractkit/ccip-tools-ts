@@ -724,82 +724,60 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * {@inheritDoc Chain.getOffRampsForRouter}
-   * @throws {@link CCIPSolanaOffRampEventsNotFoundError} if no OffRamp events found
+   * {@link Chain.getOffRampsForRouter}
+   *
+   * Both 1.6 and v2 routers maintain `allowed_offramp` marker PDAs per
+   * `(sourceChainSelector, offRamp)` pair, seeded as `[allowed_offramp, selectorLE, offRamp]`.
+   * The offRamp pubkey lives only in the seeds (marker data is just the 8-byte
+   * discriminator), so we:
+   *  1. enumerate all `allowed_offramp` marker accounts owned by the router
+   *     (filtered by 8-byte data length),
+   *  2. read each marker's transaction history (offRamps reference their marker
+   *     when executing commit/execute),
+   *  3. for every account key seen in those txs, re-derive the marker PDA for
+   *     our `sourceChainSelector` and keep the keys that reproduce the marker
+   *     address.
+   * A match proves both that the key is the offRamp program and that it's
+   * allowed for this source chain. All matching offRamps are returned (not just
+   * the first), so lanes with multiple historical offRamps are fully discovered.
+   *
+   * @throws {@link CCIPSolanaOffRampEventsNotFoundError} if no OffRamp markers
+   *         match for this source chain.
    */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
-    const [, version] = await this.typeAndVersion(router)
-    if (version.startsWith('2.')) {
-      return this._getOffRampsForRouterV2(router, sourceChainSelector)
-    }
-
-    // feeQuoter is present in router's config, and has a DestChainState account which is updated by
-    // the offramps, so we can use it to narrow the search for the offramp
-    const { feeQuoter } = await this._getRouterConfig(router)
-
-    const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
-      [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
-      feeQuoter,
-    )
-
-    for await (const log of this.getLogs({
-      programs: true,
-      address: feeQuoterDestChainStateAccountAddress.toBase58(),
-      startBlock: 0, // use getLogs special-case to do a single getSignaturesForAddress pass
-      endBlock: 'finalized',
-      topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
-    })) {
-      return [log.address] // assume single offramp per router/deployment on Solana
-    }
-    throw new CCIPSolanaOffRampEventsNotFoundError(feeQuoter.toString())
-  }
-
-  /**
-   * OffRamp discovery for CCIP v2 routers.
-   *
-   * v2 OffRamps don't touch the FeeQuoter's `dest_chain` state, so the v1 event-scan heuristic
-   * finds nothing. Instead, the router owns an `AllowedOfframp` marker PDA per allowed
-   * `(sourceChainSelector, offRamp)` pair, seeded as `[allowed_offramp, selectorLE, offRamp]`.
-   * The offRamp pubkey lives only in the seeds (marker data is just the discriminator), so we:
-   *  1. enumerate the router's `AllowedOfframp` markers,
-   *  2. read each marker's transaction history (offRamps reference their marker when executing),
-   *  3. for every account key seen in those txs, re-derive the marker PDA for our
-   *     `sourceChainSelector` and keep the keys that reproduce the marker address.
-   * A match proves both that the key is the offRamp program and that it's allowed for this source.
-   */
-  private async _getOffRampsForRouterV2(
-    router: string,
-    sourceChainSelector: bigint,
-  ): Promise<string[]> {
     const routerPk = new PublicKey(router)
-    const program = new Program(CCIP_ROUTER_V2_IDL, routerPk, { connection: this.connection })
-    const markers = await program.account.allowedOfframp.all()
+    // `allowed_offramp` markers are 8-byte accounts (discriminator only) on both
+    // 1.6 and v2 routers. Filter by data length to find them without needing a
+    // Program/IDL instance.
+    const markers = await this.connection.getProgramAccounts(routerPk, {
+      filters: [{ dataSize: 8 }],
+      encoding: 'base64',
+    })
 
     const offRamps = new Set<string>()
-    for (const { publicKey: marker } of markers) {
-      // Quick check: does this marker belong to our source selector for any candidate offRamp?
-      // We can only answer by testing candidate keys pulled from the marker's txs.
-      const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
-      for (const { signature } of sigs) {
-        const tx = await this.connection.getTransaction(signature, {
-          maxSupportedTransactionVersion: 0,
-          commitment: 'confirmed',
-        })
-        if (!tx) continue
-        const keys = tx.transaction.message
-          .getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
-          .keySegments()
-          .flat()
-        for (const key of keys) {
-          const [pda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('allowed_offramp'), toLeArray(sourceChainSelector, 8), key.toBuffer()],
-            routerPk,
-          )
-          if (pda.equals(marker)) offRamps.add(key.toBase58())
+    await Promise.all(
+      markers.map(async ({ pubkey: marker }) => {
+        const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 1 })
+        for (const { signature } of sigs) {
+          const tx = await this.connection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed',
+          })
+          if (!tx) continue
+          const keys = tx.transaction.message
+            .getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
+            .keySegments()
+            .flat()
+          for (const key of keys) {
+            const [pda] = PublicKey.findProgramAddressSync(
+              [Buffer.from('allowed_offramp'), toLeArray(sourceChainSelector, 8), key.toBuffer()],
+              routerPk,
+            )
+            if (!pda.equals(marker)) offRamps.add(key.toBase58())
+          }
         }
-        if (offRamps.size) break // found the offRamp for this marker
-      }
-    }
+      }),
+    )
 
     if (!offRamps.size) throw new CCIPSolanaOffRampEventsNotFoundError(router)
     return [...offRamps]
