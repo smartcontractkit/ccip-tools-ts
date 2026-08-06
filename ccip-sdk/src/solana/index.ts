@@ -67,17 +67,30 @@ import {
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type GenericExtraArgsV3,
   type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
+  GenericExtraArgsV3Tag,
+  SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 import { getDestTokenAmount } from '../gas.ts'
 import { cleanUpBuffers } from './cleanup.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
-import { encodeSolanaExtraArgs } from './extra-args.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
+import {
+  decodeSolanaGenericExtraArgsV3,
+  decodeSolanaSuiExtraArgsV1,
+  encodeSolanaExtraArgs,
+} from './extra-args.ts'
+import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
+import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import SELECTORS from '../selectors.ts'
+import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
   type AnyMessage,
@@ -108,11 +121,6 @@ import {
   toLeArray,
   util,
 } from '../utils.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
-import { estimateExecComputeUnits } from './gas.ts'
-import { decodeMessageV1 } from '../messages.ts'
-import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
-import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
@@ -299,7 +307,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
-      maxArgs: 1,
+      maxArgs: 2,
+      maxSize: 20,
     })
   }
 
@@ -757,7 +766,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const offRamps = new Set<string>()
     await Promise.all(
       markers.map(async ({ pubkey: marker }) => {
-        const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 1 })
+        const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
         for (const { signature } of sigs) {
           const tx = await this.connection.getTransaction(signature, {
             maxSupportedTransactionVersion: 0,
@@ -773,7 +782,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
               [Buffer.from('allowed_offramp'), toLeArray(sourceChainSelector, 8), key.toBuffer()],
               routerPk,
             )
-            if (!pda.equals(marker)) offRamps.add(key.toBase58())
+            const keyAddr = key.toBase58()
+            if (pda.equals(marker)) offRamps.add(keyAddr)
+            if (keyAddr.toLowerCase().startsWith('off')) return
           }
         }
       }),
@@ -1018,7 +1029,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const extraArgs = hexlify(message.extraArgs)
     const parsed = this.decodeExtraArgs(extraArgs)
     if (!parsed) throw new CCIPExtraArgsInvalidError('SVM', extraArgs)
-    const { _tag, ...rest } = parsed
+    const { _tag, ...rest } = parsed as Record<string, unknown>
 
     return {
       // merge header fields to message
@@ -1036,24 +1047,35 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       feeValueJuels,
       extraArgs,
       ...rest,
-    }
+    } as unknown as CCIPMessage
   }
 
   /**
-   * Decodes extra arguments from Solana CCIP messages.
+   * Decodes extra arguments from Solana CCIP messages (Borsh-encoded, produced
+   * BY Solana targeting remote chain families).
+   *
+   * Handles:
+   * - `GenericExtraArgsV2` (EVMExtraArgsV2 tag) — Solana → EVM 1.6
+   * - `GenericExtraArgsV3` — Solana → EVM 2.0
+   * - `SuiExtraArgsV1` — Solana → Sui
+   *
    * @param extraArgs - Encoded extra arguments bytes.
-   * @returns Decoded EVMExtraArgsV2 or undefined if unknown format.
+   * @returns Decoded extra arguments or undefined if unknown format.
    * @throws {@link CCIPExtraArgsLengthInvalidError} if extra args length is invalid
    */
   static decodeExtraArgs(
     extraArgs: BytesLike,
-  ): (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' }) | undefined {
+  ):
+    | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
+    | undefined {
     const data = getDataBytes(extraArgs),
       tag = dataSlice(data, 0, 4)
     switch (tag) {
       case EVMExtraArgsV2Tag: {
         if (dataLength(data) === 4 + 16 + 1) {
-          // Solana-generated EVMExtraArgsV2 (21 bytes total)
+          // Solana-generated EVMExtraArgsV2 (Borsh: 21 bytes total, u128 LE gasLimit)
           return {
             _tag: 'EVMExtraArgsV2',
             gasLimit: leToBigInt(dataSlice(data, 4, 4 + 16)), // from Uint128LE
@@ -1062,16 +1084,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         }
         throw new CCIPExtraArgsLengthInvalidError(dataLength(data))
       }
+      case GenericExtraArgsV3Tag: {
+        return decodeSolanaGenericExtraArgsV3(data)
+      }
+      case SuiExtraArgsV1Tag: {
+        return decodeSolanaSuiExtraArgsV1(data)
+      }
       default:
         return
     }
   }
 
   /**
-   * Encodes extra arguments for Solana CCIP messages.
+   * Encodes extra arguments for Solana CCIP messages in Borsh format.
+   *
+   * Handles messages FROM Solana TO remote chain families:
+   * - `EVMExtraArgsV2` / `GenericExtraArgsV2` (EVM dest): Borsh `{gasLimit: u128, ...}`
+   * - `GenericExtraArgsV3` (EVM v2 dest): Borsh `{gas_limit: u32, finality, ccvs, ...}`
+   * - `SuiExtraArgsV1` (Sui dest): Borsh `{gasLimit: u64, ...}`
+   *
    * @param args - Extra arguments to encode.
    * @returns Encoded extra arguments as hex string.
-   * @throws {@link CCIPSolanaExtraArgsEncodingError} if SVMExtraArgsV1 encoding is attempted
    */
   static encodeExtraArgs(args: ExtraArgs): string {
     return encodeSolanaExtraArgs(args)

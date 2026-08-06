@@ -527,7 +527,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
-    assert.equal(decoded?.gasLimit, 1n)
+    assert.equal(decoded?._tag, 'EVMExtraArgsV2')
+    assert.equal(decoded.gasLimit, 1n)
   })
 
   it('should encode empty args object by using defaults', () => {
@@ -540,6 +541,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
     assert.ok(decoded)
+    assert.equal(decoded._tag, 'EVMExtraArgsV2')
     assert.equal(decoded.gasLimit, 200000n)
   })
 
@@ -586,6 +588,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     // Verify it can be decoded
     const decoded = SolanaChain.decodeExtraArgs(encoded)
     assert.ok(decoded)
+    assert.equal(decoded._tag, 'EVMExtraArgsV2')
     assert.equal(decoded.gasLimit, gasLimit)
     assert.equal(decoded.allowOutOfOrderExecution, allowOutOfOrder)
   })
