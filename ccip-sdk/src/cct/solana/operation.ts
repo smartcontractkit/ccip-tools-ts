@@ -1,5 +1,5 @@
 /**
- * Solana {@link Operation} lifecycle: validate → build unsigned tx → submit.
+ * Solana {@link Operation} lifecycle: prepare (validate → parse) → build unsigned tx → submit.
  * Default execution uses wallet.publicKey as payer; use generateUnsigned* for a custom payer.
  *
  * @packageDocumentation
@@ -28,18 +28,41 @@ function withPayer<P extends object>(
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
-/** Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}. */
+// TODO: migrate remaining Solana operations to parse normalized params.
+/**
+ * Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}.
+ *
+ * Use {@link validate} for cross-field constraints. Override {@link parse} for per-field
+ * validation, defaults, or conversion; it must be overridden whenever `Parsed` differs from
+ * `SolanaGenerateParams<P>`.
+ */
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
+  Parsed = SolanaGenerateParams<P>,
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult> {
-  /** Build instructions after params have been validated. */
-  protected abstract buildUnsigned(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx>
+  /**
+   * Normalize params without mutating the caller's input.
+   *
+   * The default returns params unchanged. Override this method whenever `Parsed` differs from
+   * `SolanaGenerateParams<P>`, for example to apply defaults, convert values, or validate fields.
+   */
+  protected parse(params: SolanaGenerateParams<P>): Parsed {
+    return params as Parsed
+  }
 
-  /** Run {@link validate} and {@link buildUnsigned}; no signing. */
-  async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
+  /** Validates and normalizes params for generation or custom execution flows. */
+  protected prepare(params: SolanaGenerateParams<P>): Parsed {
     this.validate(params)
-    return this.buildUnsigned(chain, params)
+    return this.parse(params)
+  }
+
+  /** Build instructions from validated, parsed params. */
+  protected abstract buildUnsigned(chain: SolanaChain, params: Parsed): Promise<Tx>
+
+  /** Run {@link prepare} and {@link buildUnsigned}; no signing. */
+  async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
+    return this.buildUnsigned(chain, this.prepare(params))
   }
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */

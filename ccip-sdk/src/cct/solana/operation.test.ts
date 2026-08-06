@@ -27,9 +27,65 @@ class TestOperation extends SolanaOperation<{ value: string }> {
   }
 }
 
+class ParsedTestOperation extends SolanaOperation<
+  { value: string },
+  UnsignedSolanaTx,
+  { payer: string; value: number }
+> {
+  readonly name = 'parsedTestOperation'
+  readonly lifecycle: string[] = []
+  captured?: { payer: string; value: number }
+
+  protected validate(params: { payer: string; value: string }): void {
+    this.lifecycle.push(`validate:${params.value}`)
+  }
+
+  protected override parse(params: { payer: string; value: string }): {
+    payer: string
+    value: number
+  } {
+    this.lifecycle.push(`parse:${params.value}`)
+    return { ...params, value: Number(params.value) }
+  }
+
+  protected buildUnsigned(
+    _chain: SolanaChain,
+    params: { payer: string; value: number },
+  ): Promise<UnsignedSolanaTx> {
+    this.lifecycle.push(`build:${params.value}`)
+    this.captured = params
+    return Promise.resolve({ family: ChainFamily.Solana, instructions: [] })
+  }
+}
+
 const chain = { logger: console, connection: {} } as unknown as SolanaChain
 
 describe('SolanaOperation', () => {
+  it('validates, parses, then builds without mutating input', async () => {
+    const op = new ParsedTestOperation()
+    const params = { payer: PublicKey.default.toBase58(), value: '42' }
+
+    await op.generate(chain, params)
+
+    assert.deepEqual(op.lifecycle, ['validate:42', 'parse:42', 'build:42'])
+    assert.deepEqual(op.captured, { payer: params.payer, value: 42 })
+    assert.equal(params.value, '42')
+  })
+
+  it('stops before parsing or building when validation fails', async () => {
+    class RejectingOperation extends ParsedTestOperation {
+      protected override validate(params: { payer: string; value: string }): void {
+        this.lifecycle.push(`validate:${params.value}`)
+        throw new Error('invalid params')
+      }
+    }
+
+    const op = new RejectingOperation()
+
+    await assert.rejects(() => op.generate(chain, { payer: 'payer', value: '42' }))
+    assert.deepEqual(op.lifecycle, ['validate:42'])
+  })
+
   it('uses wallet public key as payer without mutating caller params', async () => {
     const op = new TestOperation()
     const wallet = {
