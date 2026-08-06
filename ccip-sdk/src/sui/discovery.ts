@@ -102,11 +102,15 @@ async function findOffRampPackageByUpgrades(
  * types (`<pkg>::offramp::*`). Works on history-pruned RPCs once any offramp
  * activity (commit/execute/config) exists within event retention.
  */
-async function findOffRampPackageByEvents(
+export async function findOffRampPackageByEvents(
   client: SuiJsonRpcClient,
-  { maxPages = 100, limit = 50 }: { maxPages?: number; limit?: number } = {},
+  {
+    maxPages = 100,
+    limit = 50,
+    startTime = 0,
+  }: { maxPages?: number; limit?: number; startTime?: number } = {},
 ): Promise<string | undefined> {
-  const filter = { TimeRange: { startTime: '0', endTime: Date.now().toString() } }
+  const filter = { TimeRange: { startTime: startTime.toString(), endTime: Date.now().toString() } }
   let cursor: { txDigest: string; eventSeq: string } | null | undefined
   for (let page = 0; page < maxPages; page++) {
     const res = await withLookupRetry(() =>
@@ -117,6 +121,15 @@ async function findOffRampPackageByEvents(
       if (match) return normalizeSuiAddress(match[1]!) + '::offramp'
     }
     if (!res.hasNextPage || !res.data.length) break
+    // Guard against stuck pagination (some RPCs return the same cursor repeatedly
+    // on very large event ranges)
+    if (
+      cursor &&
+      res.nextCursor &&
+      res.nextCursor.txDigest === cursor.txDigest &&
+      res.nextCursor.eventSeq === cursor.eventSeq
+    )
+      break
     cursor = res.nextCursor
   }
 }

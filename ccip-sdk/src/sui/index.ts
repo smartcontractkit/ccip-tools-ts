@@ -102,6 +102,17 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       maxArgs: 1,
       maxSize: 100,
     })
+    this.client.getTransactionBlock = memoize(this.client.getTransactionBlock.bind(this.client), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 5e3,
+      transformKey: ([args]: Parameters<typeof this.client.getTransactionBlock>) => [
+        args.digest,
+        args.options?.showEffects,
+        args.options?.showInput,
+      ],
+    })
   }
 
   /**
