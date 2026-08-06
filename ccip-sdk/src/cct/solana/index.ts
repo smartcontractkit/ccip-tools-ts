@@ -672,9 +672,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction to remove addresses from a token pool allowlist.
+   * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
+   * be initialized first. Pass canonical `poolType` or a compatible `poolProgramAddress`;
+   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
+   * transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
    *
    * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link removeFromAllowlist}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
@@ -698,8 +705,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Removes addresses from an initialized Solana token pool allowlist using the pool owner wallet.
+   * Every removed address must already be allowlisted or the transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
    *
    * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs

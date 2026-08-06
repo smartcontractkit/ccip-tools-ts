@@ -27,7 +27,11 @@ import {
 type RemoveFromAllowlistParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Addresses to remove from the pool allowlist. Must be non-empty and contain no duplicates. */
+  /**
+   * Addresses to remove from the pool allowlist. Must be non-empty and contain no duplicates.
+   * Every address must currently be allowlisted; if any is absent, the program reverts the entire
+   * removal.
+   */
   remove: string[]
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
