@@ -28,6 +28,7 @@ function withPayer<P extends object>(
   return { ...rest, payer } as SolanaGenerateParams<P>
 }
 
+// TODO: migrate remaining Solana operations to parse normalized params.
 /**
  * Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}.
  *
