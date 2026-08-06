@@ -72,6 +72,20 @@ describe('SolanaOperation', () => {
     assert.equal(params.value, '42')
   })
 
+  it('stops before parsing or building when validation fails', async () => {
+    class RejectingOperation extends ParsedTestOperation {
+      protected override validate(params: { payer: string; value: string }): void {
+        this.lifecycle.push(`validate:${params.value}`)
+        throw new Error('invalid params')
+      }
+    }
+
+    const op = new RejectingOperation()
+
+    await assert.rejects(() => op.generate(chain, { payer: 'payer', value: '42' }))
+    assert.deepEqual(op.lifecycle, ['validate:42'])
+  })
+
   it('uses wallet public key as payer without mutating caller params', async () => {
     const op = new TestOperation()
     const wallet = {
