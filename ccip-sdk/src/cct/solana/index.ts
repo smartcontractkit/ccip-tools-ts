@@ -728,6 +728,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
    * fields (`rebalancer`, `canAcceptLiquidity`).
    *
+   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
+   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
+   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
+   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
+   *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
    * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
@@ -739,6 +745,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
+   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
+   * console.log(state.config.owner, state.config.mint, state.config.decimals)
+   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
+   * console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
    * ```
    */
   getTokenPoolState(
