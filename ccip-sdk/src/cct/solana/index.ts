@@ -67,6 +67,8 @@ import {
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteInitChainRemoteConfigParams,
+  type ExecuteInitChainRemoteConfigResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
   type GenerateConfigureAllowlistParams,
@@ -75,6 +77,8 @@ import {
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateInitChainRemoteConfigParams,
+  type GenerateInitChainRemoteConfigResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
@@ -83,6 +87,7 @@ import {
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
+  InitChainRemoteConfig,
   RemoveFromAllowlist,
 } from './token-pool/operations/index.ts'
 
@@ -107,6 +112,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -482,6 +488,66 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that initializes a Solana token pool remote-chain config.
+   * The program requires remote pools to be empty during initialization.
+   * Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to
+   * `payer`.
+   *
+   * @see {@link initChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedInitChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x...',
+   *   remoteTokenDecimals: 18,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedInitChainRemoteConfig(
+    opts: GenerateInitChainRemoteConfigParams,
+  ): Promise<GenerateInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Initializes a Solana token pool remote-chain config with the pool owner wallet. The program
+   * requires remote pools to be empty during initialization.
+   *
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.initChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x...',
+   *   remoteTokenDecimals: 18,
+   *   wallet,
+   * })
+   * ```
+   */
+  initChainRemoteConfig(
+    opts: ExecuteInitChainRemoteConfigParams,
+  ): Promise<ExecuteInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
