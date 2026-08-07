@@ -508,6 +508,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress`; `authority` defaults to
    * `payer`.
    *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
    * @see {@link initChainRemoteConfig}
    * @see {@link generateUnsignedEditChainRemoteConfig}
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
@@ -521,7 +524,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
    *   payer,
    *   authority,
@@ -537,6 +540,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Initializes a Solana token pool remote-chain config for a previously unconfigured selector
    * with the pool owner wallet.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
    *
    * @see {@link generateUnsignedInitChainRemoteConfig}
    * @see {@link editChainRemoteConfig}
@@ -554,7 +560,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
    *   wallet,
    * })
@@ -648,8 +654,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
-   *   remotePoolAddresses: ['0x...'],
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   remoteTokenDecimals: 18,
    *   payer,
    *   authority,
@@ -683,8 +689,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
-   *   remotePoolAddresses: ['0x...'],
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   remoteTokenDecimals: 18,
    *   wallet,
    * })
