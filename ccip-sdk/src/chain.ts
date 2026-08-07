@@ -1710,6 +1710,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   - `totalMs` - Estimated delivery time in milliseconds
    *
    * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
+   * @throws {@link CCIPLaneLatencyInsufficientDataError} if the API has too little history for the lane
    * @throws {@link CCIPHttpError} if API request fails (network error, 4xx, 5xx status)
    *
    * @remarks

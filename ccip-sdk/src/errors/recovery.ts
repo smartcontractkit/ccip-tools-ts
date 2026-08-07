@@ -48,6 +48,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Upgrade to a supported lane version. Check version compatibility: https://docs.chain.link/ccip/directory',
   LANE_NOT_FOUND:
     'This lane may not exist or is not yet supported by CCIP. Check the CCIP Directory for supported lanes: https://docs.chain.link/ccip/directory',
+  LANE_LATENCY_INSUFFICIENT_DATA:
+    'The lane exists but has too little history for this estimate. If a source token was requested, retry without it to get the lane-wide latency.',
 
   COMMIT_NOT_FOUND: 'Wait for the commit report. DON commit typically takes a few minutes.',
   MERKLE_ROOT_MISMATCH:

@@ -43,6 +43,7 @@ The latency estimate includes time for:
 | Option                  | Alias | Type   | Default                       | Description                                                                                            |
 | ----------------------- | ----- | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `--block-confirmations` | `-c`  | number | -                             | Number of block confirmations for latency calculation. When omitted, uses the lane's default finality. |
+| `--source-token`        |       | string | -                             | Source-chain token address, for a token-specific latency profile instead of the lane-wide estimate.    |
 | `--api`                 |       | string | `https://api.ccip.chain.link` | Custom CCIP API URL                                                                                    |
 
 See [Configuration](/cli/configuration) for global options (`--format`, `--no-api`, etc.).
@@ -77,6 +78,14 @@ ccip-cli lane-latency 5009297550715157269 4949039107694359620
 ccip-cli lane-latency 1 42161
 ```
 
+### Query latency for a specific token
+
+```bash
+ccip-cli lane-latency 1 42161 --source-token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+```
+
+This estimates from that token's history alone rather than the lane's. Most lanes carry too little traffic to estimate from at all: when there is not enough history the API answers `INSUFFICIENT_DATA` and the command exits `1`. Adding a token narrows the sample further, so a lane that answers without `--source-token` may still fail with it.
+
 ### Output as JSON for scripting
 
 ```bash
@@ -97,6 +106,7 @@ The command displays lane latency information in a table format:
 | ---------------------- | ---------------------------------------------------------- |
 | **Source**             | Source network name and chain selector                     |
 | **Destination**        | Destination network name and chain selector                |
+| **Source Token**       | Source token address, when `--source-token` is given       |
 | **Estimated Delivery** | Human-readable estimated delivery time (e.g., ~20 minutes) |
 | **Latency (ms)**       | Estimated latency in milliseconds                          |
 
@@ -126,10 +136,10 @@ The `totalMs` value represents the estimated delivery time in milliseconds (1200
 
 ## Exit Codes
 
-| Code | Meaning                                                   |
-| ---- | --------------------------------------------------------- |
-| `0`  | Success - latency information retrieved                   |
-| `1`  | Error (network not found, API failure, invalid arguments) |
+| Code | Meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
+| `0`  | Success - latency information retrieved                                      |
+| `1`  | Error (network not found, insufficient data, API failure, invalid arguments) |
 
 Use in scripts:
 
