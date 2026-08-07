@@ -39,7 +39,10 @@ type EditChainRemoteConfigParams = PoolProgramRef & {
   remoteChainSelector: bigint
   /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. Left-padded in the instruction. */
   remoteTokenAddress: string
-  /** Hex-encoded remote pool addresses, optionally `0x`-prefixed. */
+  /**
+   * Hex-encoded remote pool addresses, optionally `0x`-prefixed. Stored at native byte length;
+   * unlike `remoteTokenAddress`, they are not left-padded.
+   */
   remotePoolAddresses: string[]
   /** Remote token decimals (`u8`): an integer from 0 to 255; 0 is valid. */
   remoteTokenDecimals: number
@@ -70,7 +73,13 @@ export type ExecuteEditChainRemoteConfigParams = SolanaExecuteParams<EditChainRe
 /** Result of executing Solana token pool remote configuration editing. */
 export type ExecuteEditChainRemoteConfigResult = TransactionResult
 
-/** Edits an initialized remote-chain config. */
+/**
+ * Replaces an initialized remote-chain config.
+ *
+ * @remarks
+ * Full replacement, not a partial update — pass the complete intended config for all three fields,
+ * or omitted values are cleared. For example, `remotePoolAddresses: []` clears all remote pools.
+ */
 export class EditChainRemoteConfig extends SolanaOperation<
   EditChainRemoteConfigParams,
   UnsignedSolanaTx,
@@ -127,12 +136,12 @@ export class EditChainRemoteConfig extends SolanaOperation<
       opts.remoteChainSelector,
       opts.tokenAddress,
     )
-    const tokenAddress = Buffer.alloc(32)
-    opts.remoteTokenAddress.copy(tokenAddress, 32 - opts.remoteTokenAddress.length)
+    const paddedRemoteToken = Buffer.alloc(32)
+    opts.remoteTokenAddress.copy(paddedRemoteToken, 32 - opts.remoteTokenAddress.length)
 
     const instruction = await program.methods
       .editChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
-        tokenAddress: { address: tokenAddress },
+        tokenAddress: { address: paddedRemoteToken },
         poolAddresses: opts.remotePoolAddresses.map((address) => ({ address })),
         decimals: opts.remoteTokenDecimals,
       })

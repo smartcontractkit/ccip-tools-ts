@@ -61,6 +61,9 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type BaseGetTokenPoolStateResult,
+  type BurnMintPoolProgramRef,
+  type CustomPoolProgramRef,
   type ExecuteConfigureAllowlistParams,
   type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
@@ -91,6 +94,8 @@ import {
   type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type LockReleaseGetTokenPoolStateResult,
+  type LockReleasePoolProgramRef,
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeleteChainRemoteConfig,
@@ -508,6 +513,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress`; `authority` defaults to
    * `payer`.
    *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
    * @see {@link initChainRemoteConfig}
    * @see {@link generateUnsignedEditChainRemoteConfig}
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
@@ -521,7 +529,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
    *   payer,
    *   authority,
@@ -537,6 +545,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Initializes a Solana token pool remote-chain config for a previously unconfigured selector
    * with the pool owner wallet.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
    *
    * @see {@link generateUnsignedInitChainRemoteConfig}
    * @see {@link editChainRemoteConfig}
@@ -554,7 +565,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
    *   wallet,
    * })
@@ -567,17 +578,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. The
-   * configured lane can no longer be used until it is initialized again; the closed account's rent
-   * is returned to `authority`. Pass canonical `poolType` or a compatible `poolProgramAddress`;
-   * `authority` defaults to `payer`.
+   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. Pass
+   * canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to `authority`.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `generateUnsignedInitChainRemoteConfig`. On-chain execution requires `authority` to be the
+   * token pool owner and the chain config to exist.
    *
    * @see {@link deleteChainRemoteConfig}
    * @see {@link generateUnsignedInitChainRemoteConfig}
    * @see {@link generateUnsignedEditChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote chain selector is invalid.
-   * The instruction requires `authority` to be the token pool owner and the chain config to exist.
    *
    * @example
    * ```ts
@@ -598,9 +612,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Closes an initialized Solana token pool remote-chain config with the pool owner wallet. The
-   * configured lane can no longer be used until it is initialized again, and the account rent is
-   * returned to the wallet.
+   * Closes an initialized Solana token pool remote-chain config with the pool owner wallet.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to the wallet.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `initChainRemoteConfig`.
    *
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
    * @see {@link initChainRemoteConfig}
@@ -648,8 +665,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
-   *   remotePoolAddresses: ['0x...'],
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   remoteTokenDecimals: 18,
    *   payer,
    *   authority,
@@ -683,8 +700,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x...',
-   *   remotePoolAddresses: ['0x...'],
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   remoteTokenDecimals: 18,
    *   wallet,
    * })
@@ -1073,8 +1090,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a Burn/Mint, Lock/Release, or custom token pool's state account.
-   * Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
+   * fields (`rebalancer`, `canAcceptLiquidity`).
+   *
+   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
+   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
+   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
+   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
    *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
@@ -1084,14 +1107,34 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const state = await cct.getTokenPoolState({
-   *   poolType: 'burn-mint',
+   *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
+   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
+   * console.log(state.config.owner, state.config.mint, state.config.decimals)
+   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
+   * console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
    * ```
    */
-  getTokenPoolState<P extends GetTokenPoolStateParams>(
-    opts: P,
-  ): Promise<GetTokenPoolStateResult<P>> {
+  getTokenPoolState(
+    opts: LockReleasePoolProgramRef & { tokenAddress: string },
+  ): Promise<LockReleaseGetTokenPoolStateResult>
+  /**
+   * Reads a Burn/Mint or custom token pool's state account; its config carries no liquidity
+   * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   */
+  getTokenPoolState(
+    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
+  ): Promise<BaseGetTokenPoolStateResult>
+  /**
+   * Reads a pool state account whose program is not known statically; narrow the result on the
+   * presence of the lock-release-only config fields.
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult>
+  /**
+   * Implementation for the overloads above; callers always resolve to one of those.
+   * */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 
