@@ -68,6 +68,8 @@ import {
   type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
   type ExecuteCreateTokenMultisigResult,
+  type ExecuteDeleteChainRemoteConfigParams,
+  type ExecuteDeleteChainRemoteConfigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
   type ExecuteEditChainRemoteConfigParams,
@@ -80,6 +82,8 @@ import {
   type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
   type GenerateCreateTokenMultisigResult,
+  type GenerateDeleteChainRemoteConfigParams,
+  type GenerateDeleteChainRemoteConfigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
   type GenerateEditChainRemoteConfigParams,
@@ -94,6 +98,7 @@ import {
   type LockReleasePoolProgramRef,
   ConfigureAllowlist,
   CreateTokenMultisig,
+  DeleteChainRemoteConfig,
   DeployTokenPool,
   EditChainRemoteConfig,
   GetTokenPoolState,
@@ -121,6 +126,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #configureAllowlist = new ConfigureAllowlist()
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig()
   readonly #editChainRemoteConfig = new EditChainRemoteConfig()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
@@ -511,6 +517,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * remote pools and rate limits separately before using the lane.
    *
    * @see {@link initChainRemoteConfig}
+   * @see {@link generateUnsignedEditChainRemoteConfig}
+   * @see {@link generateUnsignedDeleteChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
    *
@@ -542,6 +550,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * remote pools and rate limits separately before using the lane.
    *
    * @see {@link generateUnsignedInitChainRemoteConfig}
+   * @see {@link editChainRemoteConfig}
+   * @see {@link deleteChainRemoteConfig}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
@@ -568,6 +578,75 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. Pass
+   * canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to `authority`.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `generateUnsignedInitChainRemoteConfig`. On-chain execution requires `authority` to be the
+   * token pool owner and the chain config to exist.
+   *
+   * @see {@link deleteChainRemoteConfig}
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   * @see {@link generateUnsignedEditChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote chain selector is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeleteChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedDeleteChainRemoteConfig(
+    opts: GenerateDeleteChainRemoteConfigParams,
+  ): Promise<GenerateDeleteChainRemoteConfigResult> {
+    return this.#deleteChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Closes an initialized Solana token pool remote-chain config with the pool owner wallet.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to the wallet.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `initChainRemoteConfig`.
+   *
+   * @see {@link generateUnsignedDeleteChainRemoteConfig}
+   * @see {@link initChainRemoteConfig}
+   * @see {@link editChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the chain config does not exist, the wallet is not the pool
+   * owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deleteChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   wallet,
+   * })
+   * ```
+   */
+  deleteChainRemoteConfig(
+    opts: ExecuteDeleteChainRemoteConfigParams,
+  ): Promise<ExecuteDeleteChainRemoteConfigResult> {
+    return this.#deleteChainRemoteConfig.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
    * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
    * replaces the remote token address, pool addresses, and decimals. Pass canonical `poolType` or
@@ -575,6 +654,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link editChainRemoteConfig}
    * @see {@link generateUnsignedInitChainRemoteConfig}
+   * @see {@link generateUnsignedDeleteChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
    *
@@ -606,6 +686,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link generateUnsignedEditChainRemoteConfig}
    * @see {@link initChainRemoteConfig}
+   * @see {@link deleteChainRemoteConfig}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
