@@ -600,4 +600,72 @@ describe('EVMTokenManager (cct/evm)', () => {
       )
     })
   })
+  describe('getTokenAdminRegistry', () => {
+    const GET_TOKEN_CONFIG_IFACE = new Interface([
+      'function getTokenConfig(address token) view returns (tuple(address administrator, address pendingAdministrator, address tokenPool))',
+    ])
+    const ADMINISTRATOR = '0x' + '77'.repeat(20)
+
+    /**
+     * Chain stub whose provider answers `getTokenConfig` with `administrator`/zeroed others —
+     * but only for a call to `TAR` decoding to `TOKEN`. Mirrors the target/argument assertions in
+     * `token-admin-registry/operations/get-token-admin-registry.test.ts`'s `stubChain`: matching
+     * on the selector alone can't tell a correct read from one with the call target or decoded
+     * token swapped, since both would still reach this branch and get `encoded` back.
+     */
+    function stubTarChain(administrator: string) {
+      const selector = GET_TOKEN_CONFIG_IFACE.getFunction('getTokenConfig')!.selector
+      const encoded = GET_TOKEN_CONFIG_IFACE.encodeFunctionResult('getTokenConfig', [
+        [administrator, ZeroAddress, ZeroAddress],
+      ])
+      return stubChain({
+        provider: {
+          call: async ({ to, data }: { to?: string; data: string }) => {
+            if (data.slice(0, 10) !== selector) return '0x'
+            assert.equal(to, TAR, 'calls the resolved TAR, not `address`')
+            const [token] = GET_TOKEN_CONFIG_IFACE.decodeFunctionData('getTokenConfig', data)
+            assert.equal(token, TOKEN, 'reads the config for `tokenAddress`')
+            return encoded
+          },
+        } as never,
+      })
+    }
+
+    it('reads through the wrapped chain, resolving the TAR from `address`', async () => {
+      const config = await EVMTokenManager.fromChain(
+        stubTarChain(ADMINISTRATOR),
+      ).getTokenAdminRegistry({
+        address: ROUTER,
+        tokenAddress: TOKEN,
+      })
+      assert.deepEqual(config, { administrator: ADMINISTRATOR })
+    })
+
+    it('reports a zero administrator rather than throwing', async () => {
+      const config = await EVMTokenManager.fromChain(
+        stubTarChain(ZeroAddress),
+      ).getTokenAdminRegistry({ address: ROUTER, tokenAddress: TOKEN })
+      assert.equal(config.administrator, ZeroAddress)
+    })
+
+    it('rejects an invalid token address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () => cct.getTokenAdminRegistry({ address: ROUTER, tokenAddress: 'not-an-address' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'getTokenAdminRegistry' &&
+          err.context.param === 'tokenAddress',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+  })
 })
