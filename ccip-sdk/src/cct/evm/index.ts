@@ -22,6 +22,10 @@ import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/de
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
+  type AcceptAdminParams,
+  AcceptAdmin,
+} from './token-admin-registry/operations/accept-admin.ts'
+import {
   type RegisterAdminParams,
   RegisterAdmin,
 } from './token-admin-registry/operations/register-admin.ts'
@@ -54,6 +58,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
+  readonly #acceptAdmin = new AcceptAdmin()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -242,6 +247,50 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   transferAdmin(opts: EVMExecuteParams<TransferAdminParams>): Promise<TransactionResult> {
     return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `acceptAdminRole` tx (for multisig / offline signing). Second half of
+   * the two-step admin handshake: a registry module's `registerAdmin` (fresh registration) or
+   * the current admin's `transferAdmin` (hand-off) proposes `opts.sender` as
+   * `pendingAdministrator`; `acceptAdmin` then confirms it on-chain before encoding, after which
+   * {@link setPool} becomes callable by the new administrator.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
+   *   pending administrator
+   * @example
+   * ```typescript
+   * // `sender` must be the pending administrator proposed by registerAdmin/transferAdmin
+   * const unsigned = await cct.generateUnsignedAcceptAdmin({
+   *   tokenAddress: '0xToken...',
+   *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
+   *   sender: '0xPendingAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptAdmin(opts: AcceptAdminParams): Promise<UnsignedEVMTx> {
+    return this.#acceptAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a pending TokenAdminRegistry administrator role, signing + submitting with
+   * `opts.wallet` (the pending administrator). Completes the `registerAdmin`/`transferAdmin` →
+   * `acceptAdmin` handshake, after which {@link setPool} becomes callable.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
+   *   pending administrator
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must sign as the pending administrator
+   * const { hash } = await cct.acceptAdmin({
+   *   tokenAddress: '0xToken...',
+   *   address: '0xTokenAdminRegistry...',
+   *   wallet,
+   * })
+   * ```
+   */
+  acceptAdmin(opts: EVMExecuteParams<AcceptAdminParams>): Promise<TransactionResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -489,6 +538,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export * from '../errors.ts'
+export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
 export type {
   RegisterAdminMethod,
   RegisterAdminParams,
