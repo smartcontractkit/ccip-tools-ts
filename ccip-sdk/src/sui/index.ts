@@ -36,7 +36,7 @@ import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
-import { decodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
+import { decodeMoveExtraArgs, encodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type {
   AnyMessage,
@@ -101,6 +101,17 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+    })
+    this.client.getTransactionBlock = memoize(this.client.getTransactionBlock.bind(this.client), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 5e3,
+      transformKey: ([args]: Parameters<typeof this.client.getTransactionBlock>) => [
+        args.digest,
+        args.options?.showEffects,
+        args.options?.showInput,
+      ],
     })
   }
 
@@ -653,18 +664,22 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   ):
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
     return decodeMoveExtraArgs(extraArgs)
   }
 
   /**
-   * Encodes extra arguments for CCIP messages.
-   * @param _extraArgs - Extra arguments to encode.
+   * Encodes extra arguments for Sui CCIP messages in BCS format.
+   * Dispatches to the correct encoder based on the destination chain's extraArgs type:
+   * - `SVMExtraArgsV1` (Solana dest): BCS `{computeUnits, accountIsWritableBitmap, ...}`
+   * - `SuiExtraArgsV1` (Sui dest): BCS `{gasLimit, allowOutOfOrderExecution, ...}`
+   * - `EVMExtraArgsV2` / `GenericExtraArgsV2` (EVM dest): BCS `{gasLimit: u256, ...}`
+   * @param args - Extra arguments to encode.
    * @returns Encoded extra arguments as a hex string.
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented)
    */
-  static encodeExtraArgs(_extraArgs: ExtraArgs): string {
-    throw new CCIPNotImplementedError()
+  static encodeExtraArgs(args: ExtraArgs): string {
+    return encodeMoveExtraArgs(args)
   }
 
   /**

@@ -47,6 +47,7 @@ import {
   type EVMExtraArgsV2,
   type ExtraArgs,
   type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
@@ -530,6 +531,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   ):
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
+    | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
     return decodeMoveExtraArgs(extraArgs)
   }

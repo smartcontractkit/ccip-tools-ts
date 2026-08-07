@@ -25,13 +25,13 @@ const SOLANA_DEVNET_RPC =
   process.env.SOLANA_RPC ?? process.env.RPC_SOLANA ?? 'https://devnet.rpcpool.com'
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
-  '5fLVsRpENWE5qmqhAdY8g88K26C9DZ7qiKRMhZiBxSuZSKyGBJj2EyqUF1b1DaPNPZbLxfP3ufFCYFK7EVcU1Hz'
+  '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'
 const EVM_TO_SOLANA_V2_TX = '0x8be479716729ff555e5ee7a1826af3bf571be820ab3080348f83b28a753cc472'
 const SOLANA_V2_EXEC_TX =
   '32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E'
 const SOLANA_V2_OFFRAMP = 'offEFR9DhTdnPR43oBmnGJmoj13Y3n7sR93Vbph77TK'
 const SOLANA_V2_SEND_MESSAGE_ID =
-  '0x3067b270c81cd21f1b37150dd75f0af46ead2eaff405b390cd70e5df7d27e8b1'
+  '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722'
 const EVM_TO_SOLANA_V2_MESSAGE_ID =
   '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826'
 
@@ -278,10 +278,13 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should synthesize and decode CCIPMessageSentV2 from Anchor CPI event data', async () => {
     const tx = await solanaChain.getTransaction(SOLANA_V2_SEND_TX)
 
+    // Post-redeploy ccip-router 2.0.0-dev no longer logs a human-readable "Emitting CCIPMessageSentV2"
+    // line; the router's top-level entry log ("Instruction: CcipSendV2") is the human-readable
+    // marker that the SDK preserves at level 1.
     const humanLog = tx.logs.find(
-      (log) => typeof log.data === 'string' && log.data.includes('Emitting CCIPMessageSentV2'),
+      (log) => typeof log.data === 'string' && log.data.includes('Instruction: CcipSendV2'),
     )
-    assert.ok(humanLog, 'should preserve human-readable event log')
+    assert.ok(humanLog, 'should preserve human-readable router entry log')
     assert.equal(humanLog.type, 'log')
     assert.equal(humanLog.level, 1)
 
@@ -289,17 +292,17 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     assert.ok(eventLog, 'should synthesize data log from emit_cpi inner instruction')
     assert.equal(eventLog.type, 'data')
     assert.equal(eventLog.level, 2)
-    assert.equal(eventLog.index, 14)
+    assert.equal(eventLog.index, 37)
 
     const requests = await solanaChain.getMessagesInTx(tx)
     assert.equal(requests.length, 1)
     const request = requests[0]!
     assert.equal(request.message.messageId, SOLANA_V2_SEND_MESSAGE_ID)
-    assert.equal(request.message.sequenceNumber, 115n)
+    assert.equal(request.message.sequenceNumber, 4348n)
     assert.equal(request.message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
     assert.equal(request.message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
-    assert.equal(request.message.data, '0xdc1592f138fb77ec')
-    assert.equal(request.lane.onRamp, 'CcipE4LLPo7F6aVFgyvhVQi5DrKUhtgimsDwknaeLVDT')
+    assert.equal(request.message.data, '0xeac2e11afaf847db')
+    assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
     assert.equal(request.lane.version, '2.0.0')
   })
 

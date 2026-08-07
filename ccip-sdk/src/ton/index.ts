@@ -621,9 +621,30 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // Resume strictly after everything masterchain block (startBlock-1) committed, in
     // account-shard lt space.
     const opts_ = { ...opts }
+    let startSeqno: number | undefined
     if (opts.startBlock != null) {
       const b = Number(opts.startBlock)
+      startSeqno = b
       opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
+      // Consistency gate on the two directions of the mc-seqno↔lt mapping. The caller's
+      // cursor is an mc seqno but the fetch pages in lt, so resuming at `b` is only
+      // lossless while the floor derived here stays at or below the block committingSeqno
+      // would assign that lt to. If the floor lands PAST `b`, the scan silently starts
+      // above txs that belong to `b` and skips them for good: the poller never re-scans
+      // below its watermark, so those logs are lost AND its still-pending handlers for
+      // them get cancelled as phantom reorgs. Fail loudly instead — the getLogs activity
+      // retries (visible as attempts), and a fresh chain instance re-resolves the
+      // memoized shard headers this check distrusts.
+      if (b > 1) {
+        const floorSeqno = await this.committingSeqno(opts_.startBlock, acct)
+        if (floorSeqno > b)
+          throw new CCIPHttpError(
+            0,
+            `Inconsistent TON cursor for ${opts.address}: resume lt=${opts_.startBlock} ` +
+              `derived from startBlock=${b} commits at ${floorSeqno} > ${b} — shard/masterchain ` +
+              `lt mapping disagrees, refusing to scan and skip blocks ${b}..${floorSeqno - 1}`,
+          )
+      }
     }
 
     // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
@@ -677,6 +698,24 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         break
       }
       const block = tx.blockNumber
+      // Same mapping disagreement as the cursor gate above, caught from the emit side:
+      // the fetch floor was derived from startSeqno, so every tx it returns must commit
+      // at or after it — and must sit at or above the floor in lt space. A violation
+      // means blockNumber under-assigns relative to the resume boundary, which would
+      // advance the poller's watermark past blocks this scan never covered. Drop the
+      // in-progress block and stop, exactly like the gap case; the poller retries.
+      if (
+        (startSeqno !== undefined && block < startSeqno) ||
+        (raw && opts_.startBlock != null && raw.lt < BigInt(opts_.startBlock))
+      ) {
+        this.logger.warn(
+          `TON getLogs: tx lt=${raw?.lt} commits at block ${block}, below the ` +
+            `startBlock=${startSeqno} / lt=${opts_.startBlock} resume boundary; stopping scan`,
+        )
+        buf = []
+        curBlock = undefined
+        break
+      }
       // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
       if (curBlock !== undefined && block !== curBlock) yield* drain()
       curBlock = block

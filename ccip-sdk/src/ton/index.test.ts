@@ -1219,6 +1219,35 @@ describe('TON index unit tests', () => {
         'block 10 (below startBlock) excluded; 11 & 12 are sealed (tip 13)',
       )
     })
+
+    it('refuses to scan when the resume floor lands past startBlock', async () => {
+      // Reproduces the disagreement that lost a finalized execution on ton-testnet: block
+      // 10's shard end_lt comes back one bucket too high (11_999 instead of 10_999 — the
+      // masterchain-vs-shard lt offset), so resuming at startBlock 11 would begin at lt
+      // 12_000 and skip block 11's tx for good. Fail loudly rather than scan and skip.
+      const chain = makeChain(13, [11_001, 12_001])
+      ;(
+        chain as unknown as {
+          getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
+        }
+      ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno === 10 ? 11 : seqno)
+      await assert.rejects(
+        () => collect(chain, { startBlock: 11 }),
+        /Inconsistent TON cursor/,
+        'a floor above startBlock must throw, not silently skip block 11',
+      )
+    })
+
+    it('stops the scan when a tx commits below startBlock', async () => {
+      // The same disagreement from the emit side: the floor checks out, but the tx it
+      // returns is assigned a block below startBlock. Emitting it would rewind the poller's
+      // watermark over blocks this scan never covered, so the scan stops with nothing.
+      const chain = makeChain(13, [11_001, 12_001])
+      ;(
+        chain as unknown as { committingSeqno: (lt: bigint, a: Address) => Promise<number> }
+      ).committingSeqno = async () => 10
+      assert.deepEqual(await collect(chain, { startBlock: 11 }), [])
+    })
   })
 
   describe('generateUnsignedSendMessage', () => {
