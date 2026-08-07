@@ -1,3 +1,5 @@
+import type { PublicKey } from '@solana/web3.js'
+
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import {
@@ -57,24 +59,16 @@ export type LockReleaseGetTokenPoolStateResult = GetTokenPoolStateResultBase & {
   }
 }
 
-type TokenPoolStateResultByType = {
-  'burn-mint': BaseGetTokenPoolStateResult
-  'lock-release': LockReleaseGetTokenPoolStateResult
-}
-
 /**
  * State returned for a canonical or custom token pool program.
  *
- * Results queried with `poolProgramAddress` use the base config shape and omit lock-release-only
- * fields, even when the supplied address is the lock-release program.
+ * Reads queried with `poolProgramAddress` use the base config shape and omit lock-release-only
+ * fields, even when the supplied address is the lock-release program. The
+ * {@link SolanaTokenManager.getTokenPoolState} overloads pick the arm per pool type, so callers
+ * only narrow this union when the program is not known statically.
  */
-export type GetTokenPoolStateResult<P extends PoolProgramRef = PoolProgramRef> = P extends {
-  poolType: infer T
-}
-  ? T extends keyof TokenPoolStateResultByType
-    ? TokenPoolStateResultByType[T]
-    : BaseGetTokenPoolStateResult
-  : BaseGetTokenPoolStateResult
+export type GetTokenPoolStateResult =
+  BaseGetTokenPoolStateResult | LockReleaseGetTokenPoolStateResult
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   return {
@@ -94,26 +88,39 @@ function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   }
 }
 
+/** {@link GetTokenPoolStateParams} with its mint and pool program resolved to public keys. */
+type ParsedGetTokenPoolStateParams = GetTokenPoolStateParams & {
+  mint: PublicKey
+  programId: PublicKey
+}
+
 /** Reads the complete state of a Solana token pool. */
 export class GetTokenPoolState extends SolanaQuery<
   GetTokenPoolStateParams,
-  GetTokenPoolStateResult
+  GetTokenPoolStateResult,
+  ParsedGetTokenPoolStateParams
 > {
-  /** Reads and serializes the token pool configuration account. */
-  async query<P extends GetTokenPoolStateParams>(
-    chain: SolanaChain,
-    params: P,
-  ): Promise<GetTokenPoolStateResult<P>> {
-    return this.fetchPoolState(chain, params) as Promise<GetTokenPoolStateResult<P>>
+  readonly name = 'getTokenPoolState'
+
+  /**
+   * Converts the mint and resolves the pool program.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a public key, or if the pool
+   * program is identified by neither or both of `poolType` / `poolProgramAddress`
+   */
+  protected prepare(params: GetTokenPoolStateParams): ParsedGetTokenPoolStateParams {
+    return {
+      ...params,
+      mint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      programId: resolvePoolProgram(this.name, params),
+    }
   }
 
-  /** Fetches and serializes the token pool configuration account. */
-  private async fetchPoolState(
+  /** Reads and serializes the token pool config account; the facade's overloads narrow the arm. */
+  protected async read(
     chain: SolanaChain,
-    params: GetTokenPoolStateParams,
+    params: ParsedGetTokenPoolStateParams,
   ): Promise<GetTokenPoolStateResult> {
-    const mint = parsePublicKey('getTokenPoolState', 'tokenAddress', params.tokenAddress)
-    const programId = resolvePoolProgram('getTokenPoolState', params)
+    const { mint, programId } = params
     const state = deriveTokenPoolConfigPda(programId, mint)
 
     const account = await chain.connection.getAccountInfo(state)
