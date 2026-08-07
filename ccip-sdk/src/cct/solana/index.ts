@@ -61,6 +61,9 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
+  type BaseGetTokenPoolStateResult,
+  type BurnMintPoolProgramRef,
+  type CustomPoolProgramRef,
   type ExecuteConfigureAllowlistParams,
   type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
@@ -79,6 +82,8 @@ import {
   type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type LockReleaseGetTokenPoolStateResult,
+  type LockReleasePoolProgramRef,
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeployTokenPool,
@@ -861,8 +866,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a Burn/Mint, Lock/Release, or custom token pool's state account.
-   * Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
+   * fields (`rebalancer`, `canAcceptLiquidity`).
+   *
+   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
+   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
+   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
+   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
    *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
@@ -872,14 +883,34 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const state = await cct.getTokenPoolState({
-   *   poolType: 'burn-mint',
+   *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
+   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
+   * console.log(state.config.owner, state.config.mint, state.config.decimals)
+   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
+   * console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
    * ```
    */
-  getTokenPoolState<P extends GetTokenPoolStateParams>(
-    opts: P,
-  ): Promise<GetTokenPoolStateResult<P>> {
+  getTokenPoolState(
+    opts: LockReleasePoolProgramRef & { tokenAddress: string },
+  ): Promise<LockReleaseGetTokenPoolStateResult>
+  /**
+   * Reads a Burn/Mint or custom token pool's state account; its config carries no liquidity
+   * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
+   */
+  getTokenPoolState(
+    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
+  ): Promise<BaseGetTokenPoolStateResult>
+  /**
+   * Reads a pool state account whose program is not known statically; narrow the result on the
+   * presence of the lock-release-only config fields.
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult>
+  /**
+   * Implementation for the overloads above; callers always resolve to one of those.
+   * */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 
