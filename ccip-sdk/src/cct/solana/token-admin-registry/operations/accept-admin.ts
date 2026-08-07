@@ -58,9 +58,6 @@ export class AcceptAdmin extends SolanaOperation<
 > {
   readonly name = 'acceptAdmin'
 
-  /** No cross-field constraints; {@link parse} validates individual public-key parameters. */
-  protected validate(_params: GenerateAcceptAdminParams): void {}
-
   /** Parses public keys and defaults authority to payer without mutating caller params. */
   protected override parse(params: GenerateAcceptAdminParams): ParsedAcceptAdminParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)

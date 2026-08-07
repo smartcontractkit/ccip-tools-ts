@@ -1,4 +1,4 @@
-import { type PublicKey } from '@solana/web3.js'
+import type { PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
 import { ChainFamily } from '../../../../networks.ts'
@@ -64,9 +64,6 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
   ParsedDeleteChainRemoteConfigParams
 > {
   readonly name = 'deleteChainRemoteConfig'
-
-  /** Validation runs in {@link parse}. */
-  protected validate(_params: GenerateDeleteChainRemoteConfigParams): void {}
 
   /** Parses addresses and defaults authority to payer without mutating caller params. */
   protected override parse(
