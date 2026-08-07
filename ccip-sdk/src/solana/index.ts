@@ -754,6 +754,28 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *         match for this source chain.
    */
   async getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]> {
+    const [, version] = await this.typeAndVersion(router)
+    if (version.startsWith('1.')) {
+      // feeQuoter is present in router's config, and has a DestChainState account which is updated by
+      // the offramps, so we can use it to narrow the search for the offramp
+      const { feeQuoter } = await this._getRouterConfig(router)
+
+      const [feeQuoterDestChainStateAccountAddress] = PublicKey.findProgramAddressSync(
+        [Buffer.from('dest_chain'), toLeArray(sourceChainSelector, 8)],
+        feeQuoter,
+      )
+
+      for await (const log of this.getLogs({
+        programs: true,
+        address: feeQuoterDestChainStateAccountAddress.toBase58(),
+        startBlock: 0, // use getLogs special-case to do a single getSignaturesForAddress pass
+        endBlock: 'finalized',
+        topics: ['ExecutionStateChanged', 'CommitReportAccepted', 'Transmitted'],
+      })) {
+        return [log.address] // assume single offramp per router/deployment on Solana
+      }
+    }
+
     const routerPk = new PublicKey(router)
     // `allowed_offramp` markers are 8-byte accounts (discriminator only) on both
     // 1.6 and v2 routers. Filter by data length to find them without needing a
