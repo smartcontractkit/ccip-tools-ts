@@ -68,7 +68,7 @@ export type ExecuteInitChainRemoteConfigParams = SolanaExecuteParams<InitChainRe
 /** Result of executing Solana token pool remote configuration initialization. */
 export type ExecuteInitChainRemoteConfigResult = TransactionResult
 
-/** Initializes a remote-chain config with no remote pools. */
+/** Initializes a previously unconfigured remote-chain config. */
 export class InitChainRemoteConfig extends SolanaOperation<
   InitChainRemoteConfigParams,
   UnsignedSolanaTx,
