@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, id } from 'ethers'
+import { Interface, ZeroAddress, id } from 'ethers'
 
 import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
+import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
@@ -13,6 +14,8 @@ const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
 const ROUTER = '0x' + '33'.repeat(20)
 const TAR = '0x' + '44'.repeat(20)
+const REGISTRY_MODULE = '0x' + '55'.repeat(20)
+const ADMIN = '0x' + '66'.repeat(20)
 
 /** Minimal EVMChain stub — only the members EVMTokenManager touches. */
 function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EVMChain {
@@ -20,7 +23,12 @@ function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EV
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
-    typeAndVersion: (_address: string) => Promise.resolve(['BurnMintTokenPool', poolVersion]),
+    typeAndVersion: (address: string) =>
+      Promise.resolve(
+        address === REGISTRY_MODULE
+          ? ['RegistryModuleOwnerCustom', '1.6.0']
+          : ['BurnMintTokenPool', poolVersion],
+      ),
     nextNonce: async () => 0,
     rollbackNonce: () => {},
     ...overrides,
@@ -30,13 +38,46 @@ function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EV
 const HASH = '0x' + 'ab'.repeat(32)
 
 /** Fake ethers Signer whose broadcast resolves to a confirmed receipt. */
-function fakeSigner() {
+function fakeSigner(address = TOKEN) {
   return {
     signTransaction: () => Promise.resolve('0x'),
-    getAddress: () => Promise.resolve(TOKEN),
+    getAddress: () => Promise.resolve(address),
     populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
     sendTransaction: () =>
       Promise.resolve({ hash: HASH, wait: () => Promise.resolve({ status: 1 }) }),
+  }
+}
+
+const REGISTER_ADMIN_SELECTOR = id('registerAdminViaOwner(address)').slice(0, 10)
+const IS_REGISTRY_MODULE_SELECTOR =
+  interfaces.TokenAdminRegistry.getFunction('isRegistryModule')!.selector
+const GET_TOKEN_CONFIG_SELECTOR =
+  interfaces.TokenAdminRegistry.getFunction('getTokenConfig')!.selector
+const OWNER_SELECTOR = new Interface(['function owner() view returns (address)']).getFunction(
+  'owner',
+)!.selector
+
+/**
+ * Selector-aware `provider.call` for `registerAdmin`'s on-chain checks: the module is
+ * registered, the token is unregistered, and `owner()` resolves to `ADMIN`.
+ */
+function registerAdminProvider() {
+  return {
+    call: async (tx: { data?: string }) => {
+      const sel = (tx.data ?? '0x').slice(0, 10)
+      if (sel === IS_REGISTRY_MODULE_SELECTOR)
+        return interfaces.TokenAdminRegistry.encodeFunctionResult('isRegistryModule', [true])
+      if (sel === GET_TOKEN_CONFIG_SELECTOR)
+        return interfaces.TokenAdminRegistry.encodeFunctionResult('getTokenConfig', [
+          [ZeroAddress, ZeroAddress, ZeroAddress],
+        ])
+      if (sel === OWNER_SELECTOR)
+        return new Interface(['function owner() view returns (address)']).encodeFunctionResult(
+          'owner',
+          [ADMIN],
+        )
+      throw new Error(`registerAdminProvider: unexpected call, selector ${sel}`)
+    },
   }
 }
 
@@ -56,6 +97,110 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.ok(cct instanceof EVMTokenManager)
       assert.equal(cct.chain, chain)
       assert.equal(cct.provider, chain.provider)
+    })
+  })
+
+  describe('generateUnsignedRegisterAdmin', () => {
+    it('encodes registerAdminViaOwner(token) to the registry module', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: registerAdminProvider() as never }),
+      )
+      const unsigned = await cct.generateUnsignedRegisterAdmin({
+        tokenAddress: TOKEN,
+        registryModule: REGISTRY_MODULE,
+        address: ROUTER,
+        sender: ADMIN,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, REGISTRY_MODULE)
+      assert.equal(tx.from, ADMIN)
+      assert.ok(
+        tx.data!.startsWith(REGISTER_ADMIN_SELECTOR),
+        'data starts with registerAdminViaOwner selector',
+      )
+    })
+
+    it('rejects an invalid address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () =>
+          cct.generateUnsignedRegisterAdmin({
+            tokenAddress: 'not-an-address',
+            registryModule: REGISTRY_MODULE,
+            address: ROUTER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'registerAdmin' &&
+          err.context.param === 'tokenAddress',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+  })
+
+  describe('registerAdmin', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: registerAdminProvider() as never }),
+      )
+      // `sender` is left off `opts` — `registerAdmin` defaults it to the wallet's own address
+      // (see `RegisterAdmin.execute`), which must equal `owner()` (ADMIN, per `registerAdminProvider`).
+      const result = await cct.registerAdmin({
+        tokenAddress: TOKEN,
+        registryModule: REGISTRY_MODULE,
+        address: ROUTER,
+        wallet: fakeSigner(ADMIN),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: registerAdminProvider() as never }),
+      )
+      await assert.rejects(
+        () =>
+          cct.registerAdmin({
+            tokenAddress: TOKEN,
+            registryModule: REGISTRY_MODULE,
+            address: ROUTER,
+            wallet: {},
+          }),
+        (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+
+    it('rejects a wallet that is not the token owner before any tx is submitted', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: registerAdminProvider() as never }),
+      )
+      // No explicit `sender` — this is the default `registerAdmin({ ...params, wallet })` shape,
+      // the exact path the authority check must not skip (it defaults `sender` to the wallet's
+      // own address, so a wallet that isn't `owner()` is caught here, pre-tx).
+      await assert.rejects(
+        () =>
+          cct.registerAdmin({
+            tokenAddress: TOKEN,
+            registryModule: REGISTRY_MODULE,
+            address: ROUTER,
+            wallet: fakeSigner(), // TOKEN address, not ADMIN — not the token's owner()
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'registerAdmin' &&
+          err.context.param === 'sender',
+      )
     })
   })
 
