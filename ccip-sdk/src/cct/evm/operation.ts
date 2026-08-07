@@ -9,12 +9,13 @@
  * @packageDocumentation
  */
 
-import type { Interface } from 'ethers'
+import { type Interface, getAddress } from 'ethers'
 
-import type { EVMChain } from '../../evm/index.ts'
+import { CCIPWalletInvalidError } from '../../errors/index.ts'
+import { type EVMChain, isSigner } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTTxFailedError } from '../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 import { validateAddress } from './validate.ts'
@@ -101,6 +102,34 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
     const unsigned = await this.buildUnsigned(chain, params)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
     return unsigned
+  }
+
+  /**
+   * Resolves the address a signed submission is authorized against: the signing wallet's own.
+   * The chain gates on `msg.sender`, and {@link submit} clears any builder-set `tx.from` before
+   * populating the tx (so ethers' own from/signer guard never fires) — an explicit `sender` that
+   * differs from the wallet would therefore let an op's pre-tx checks authorize one address while
+   * a different one actually signs, passing every local guard and reverting on-chain. Ops that
+   * gate on an on-chain role call this from `execute`; build with `generateUnsigned*` instead
+   * when the eventual signer isn't known yet, where `sender` is trusted as given.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
+   */
+  protected async senderBoundToWallet(wallet: unknown, sender?: string): Promise<string> {
+    if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const walletAddress = await wallet.getAddress()
+    if (sender === undefined) return walletAddress
+    // Validated before `getAddress`, which throws a raw ethers TypeError on a malformed string.
+    // This runs ahead of `generate`'s own validate(), so without it the documented
+    // CCTParamsInvalidError contract would leak an ethers error for a bad `sender`.
+    validateAddress(this.name, 'sender', sender)
+    if (getAddress(sender) !== getAddress(walletAddress))
+      throw new CCTParamsInvalidError(
+        this.name,
+        'sender',
+        `must be the executing wallet address (${walletAddress}) — use generateUnsigned${this.name[0]!.toUpperCase()}${this.name.slice(1)} for externally-signed transactions`,
+      )
+    return sender
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
