@@ -22,17 +22,24 @@ export type SolanaExecuteParams<P extends object> = P & {
 
 // TODO: migrate remaining Solana operations to parse normalized params.
 /**
- * Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}.
+ * Solana CCT write base. Subclasses supply {@link parse} and {@link buildUnsigned}.
  *
- * Use {@link validate} for cross-field constraints. Override {@link parse} for per-field
- * validation, defaults, or conversion; it must be overridden whenever `Parsed` differs from
- * `SolanaGenerateParams<P>`.
+ * Override {@link parse} for validation, defaults, or conversion; it must be overridden whenever
+ * `Parsed` differs from `SolanaGenerateParams<P>`.
  */
 export abstract class SolanaOperation<
   P extends object,
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
   Parsed = SolanaGenerateParams<P>,
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult> {
+  /**
+   * Validate params without changing them.
+   *
+   * The default performs no validation. Override this when validation does not need parsing or
+   * normalization.
+   */
+  protected validate(_params: SolanaGenerateParams<P>): void {}
+
   /**
    * Normalize params without mutating the caller's input.
    *

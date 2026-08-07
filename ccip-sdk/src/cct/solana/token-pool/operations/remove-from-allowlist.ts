@@ -65,9 +65,6 @@ export class RemoveFromAllowlist extends SolanaOperation<
 > {
   readonly name = 'removeFromAllowlist'
 
-  /** Validation runs in {@link parse}. */
-  protected validate(_params: GenerateRemoveFromAllowlistParams): void {}
-
   /** Parses public keys and defaults authority to payer without mutating caller params. */
   protected override parse(
     params: GenerateRemoveFromAllowlistParams,
