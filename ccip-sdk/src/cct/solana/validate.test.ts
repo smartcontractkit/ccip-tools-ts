@@ -34,6 +34,7 @@ describe('Validate (cct/solana)', () => {
         err instanceof CCTParamsInvalidError &&
         err.context.reason === 'must be a hex string of at most 2 bytes',
     )
+    assert.throws(() => parseHexBytes('op', 'address', null), CCTParamsInvalidError)
   })
 
   it('accepts valid public keys', () => {

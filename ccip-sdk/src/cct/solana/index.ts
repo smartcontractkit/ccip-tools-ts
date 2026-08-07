@@ -497,9 +497,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that initializes a Solana token pool remote-chain config.
-   * The program requires remote pools to be empty during initialization.
-   * Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to
+   * Builds an unsigned instruction that initializes a Solana token pool remote-chain config for a
+   * previously unconfigured selector. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to
    * `payer`.
    *
    * @see {@link initChainRemoteConfig}
@@ -527,8 +527,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Initializes a Solana token pool remote-chain config with the pool owner wallet. The program
-   * requires remote pools to be empty during initialization.
+   * Initializes a Solana token pool remote-chain config for a previously unconfigured selector
+   * with the pool owner wallet.
    *
    * @see {@link generateUnsignedInitChainRemoteConfig}
    *

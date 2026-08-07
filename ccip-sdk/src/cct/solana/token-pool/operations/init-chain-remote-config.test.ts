@@ -129,7 +129,10 @@ describe('InitChainRemoteConfig (cct/solana)', () => {
         [{ remoteChainSelector: 1 }, 'remoteChainSelector'],
         [{ remoteChainSelector: -1n }, 'remoteChainSelector'],
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
+        [{ remoteTokenAddress: '' }, 'remoteTokenAddress'],
+        [{ remoteTokenAddress: '0x' }, 'remoteTokenAddress'],
         [{ remoteTokenAddress: '0x123' }, 'remoteTokenAddress'],
+        [{ remoteTokenAddress: null }, 'remoteTokenAddress'],
         [{ remoteTokenDecimals: 256 }, 'remoteTokenDecimals'],
       ] as const) {
         await assert.rejects(

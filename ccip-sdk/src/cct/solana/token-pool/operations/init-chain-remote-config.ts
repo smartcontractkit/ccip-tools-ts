@@ -6,6 +6,7 @@ import BN from 'bn.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -66,7 +67,7 @@ export type ExecuteInitChainRemoteConfigParams = SolanaExecuteParams<InitChainRe
 /** Result of executing Solana token pool remote configuration initialization. */
 export type ExecuteInitChainRemoteConfigResult = TransactionResult
 
-/** Initializes a remote-chain config with no remote pools. */
+/** Initializes a previously unconfigured remote-chain config. */
 export class InitChainRemoteConfig extends SolanaOperation<
   InitChainRemoteConfigParams,
   UnsignedSolanaTx,
@@ -90,6 +91,10 @@ export class InitChainRemoteConfig extends SolanaOperation<
       params.remoteTokenAddress,
       32,
     )
+
+    if (!remoteTokenAddress.length) {
+      throw new CCTParamsInvalidError(this.name, 'remoteTokenAddress', 'must not be empty')
+    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
