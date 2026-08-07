@@ -40,7 +40,7 @@ type InitChainRemoteConfigParams = PoolProgramRef & {
   remoteChainSelector: bigint
   /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. Left-padded in the instruction. */
   remoteTokenAddress: string
-  /** Remote token decimals (`u8`): an integer from 0 to 255; 0 is valid. */
+  /** Decimals of the remote token (`u8`), not the local mint: an integer from 0 to 255; 0 is valid. */
   remoteTokenDecimals: number
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
@@ -68,7 +68,11 @@ export type ExecuteInitChainRemoteConfigParams = SolanaExecuteParams<InitChainRe
 /** Result of executing Solana token pool remote configuration initialization. */
 export type ExecuteInitChainRemoteConfigResult = TransactionResult
 
-/** Initializes a previously unconfigured remote-chain config. */
+/**
+ * Initializes a previously unconfigured remote-chain config.
+ *
+ * @remarks Fails if the chain config already exists.
+ */
 export class InitChainRemoteConfig extends SolanaOperation<
   InitChainRemoteConfigParams,
   UnsignedSolanaTx,
@@ -124,12 +128,12 @@ export class InitChainRemoteConfig extends SolanaOperation<
       opts.remoteChainSelector,
       opts.tokenAddress,
     )
-    const tokenAddress = Buffer.alloc(32)
-    opts.remoteTokenAddress.copy(tokenAddress, 32 - opts.remoteTokenAddress.length)
+    const paddedRemoteToken = Buffer.alloc(32)
+    opts.remoteTokenAddress.copy(paddedRemoteToken, 32 - opts.remoteTokenAddress.length)
 
     const instruction = await program.methods
       .initChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
-        tokenAddress: { address: tokenAddress },
+        tokenAddress: { address: paddedRemoteToken },
         poolAddresses: [],
         decimals: opts.remoteTokenDecimals,
       })
