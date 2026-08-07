@@ -3,10 +3,9 @@ import { Buffer } from 'buffer'
 import { type PublicKey, SystemProgram } from '@solana/web3.js'
 import BN from 'bn.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -159,14 +158,8 @@ export class EditChainRemoteConfig extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteEditChainRemoteConfigParams,
   ): Promise<ExecuteEditChainRemoteConfigResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
-    const generateParams: GenerateEditChainRemoteConfigParams = {
-      ...rest,
-      payer: wallet.publicKey.toBase58(),
-    }
-    const parsed = this.prepare(generateParams)
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,

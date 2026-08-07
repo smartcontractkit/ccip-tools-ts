@@ -20,14 +20,6 @@ export type SolanaExecuteParams<P extends object> = P & {
   computeUnits?: number
 }
 
-function withPayer<P extends object>(
-  params: SolanaExecuteParams<P>,
-  payer: string,
-): SolanaGenerateParams<P> {
-  const { wallet: _wallet, computeUnits: _computeUnits, ...rest } = params
-  return { ...rest, payer } as SolanaGenerateParams<P>
-}
-
 // TODO: migrate remaining Solana operations to parse normalized params.
 /**
  * Solana CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned}.
@@ -65,12 +57,23 @@ export abstract class SolanaOperation<
     return this.buildUnsigned(chain, this.prepare(params))
   }
 
-  /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
-  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionResult> {
-    const { wallet, computeUnits } = params
+  /** Validates the wallet and prepares signed execution parameters with it as payer. */
+  protected prepareWalletExecution(params: SolanaExecuteParams<P>) {
+    const { wallet, computeUnits, ...rest } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-    const tx = await this.generate(chain, withPayer(params, wallet.publicKey.toBase58()))
-    return submit(chain, wallet, tx, this.name, computeUnits)
+    const payer = wallet.publicKey
+    return {
+      wallet,
+      payer,
+      computeUnits,
+      parsed: this.prepare({ ...rest, payer: payer.toBase58() } as SolanaGenerateParams<P>),
+    }
+  }
+
+  /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
+  async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionResult> {
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
   }
 }
