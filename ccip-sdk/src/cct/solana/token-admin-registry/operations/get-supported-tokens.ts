@@ -13,10 +13,16 @@ export type GetSupportedTokensParams = {
 
 /** Lists all SPL token mints configured in a TokenAdminRegistry in a single scan; pagination is not supported. */
 export class GetSupportedTokens extends SolanaQuery<GetSupportedTokensParams, string[]> {
-  /** Resolves the Router and lists its configured token mints. */
-  async query(chain: SolanaChain, params: GetSupportedTokensParams): Promise<string[]> {
-    validatePublicKey(this.constructor.name, 'address', params.address)
+  readonly name = 'getSupportedTokens'
 
+  /** Validates the resolution address; nothing to convert for {@link read}. */
+  protected prepare(params: GetSupportedTokensParams): GetSupportedTokensParams {
+    validatePublicKey(this.name, 'address', params.address)
+    return params
+  }
+
+  /** Resolves the Router and lists its configured token mints. */
+  protected async read(chain: SolanaChain, params: GetSupportedTokensParams): Promise<string[]> {
     const router = await chain.getTokenAdminRegistryFor(params.address)
     return chain.getSupportedTokens(router)
   }

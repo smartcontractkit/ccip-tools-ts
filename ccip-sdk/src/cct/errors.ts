@@ -120,15 +120,26 @@ export class CCTTxNotConfirmedError extends CCIPError {
  */
 export class CCTContractTypeInvalidError extends CCIPError {
   override readonly name = 'CCTContractTypeInvalidError'
-  /** Creates a contract-type-invalid error. */
-  constructor(address: string, expected: string, actual: string, options?: CCIPErrorOptions) {
+  /**
+   * Creates a contract-type-invalid error. `reason` is appended to the message and kept in
+   * `context`; pass it when `actual` is a recognized type rejected on its own grounds, so the
+   * message does not read as "wrong address".
+   */
+  constructor(
+    address: string,
+    expected: string,
+    actual: string,
+    reason?: string,
+    options?: CCIPErrorOptions,
+  ) {
     super(
       CCIPErrorCode.CONTRACT_TYPE_INVALID,
-      `Expected a ${expected} contract at ${address}, got "${actual}"`,
+      `Expected a ${expected} contract at ${address}, got "${actual}"` +
+        (reason ? ` — ${reason}` : ''),
       {
         ...options,
         isTransient: false,
-        context: { ...options?.context, address, expected, actual },
+        context: { ...options?.context, address, expected, actual, ...(reason && { reason }) },
       },
     )
   }

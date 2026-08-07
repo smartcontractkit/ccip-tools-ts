@@ -57,6 +57,12 @@ export const TOKEN_POOL_TYPES = [
 /** A supported EVM token-pool contract type. */
 export type TokenPoolType = (typeof TOKEN_POOL_TYPES)[number]
 
+/** The burn-* mint pool types, which share the `BurnMint` ABI. */
+export type BurnMintTokenPoolType = Extract<TokenPoolType, `Burn${string}`>
+
+/** The lock/release pool types, which share the `LockRelease` ABI. */
+export type LockReleaseTokenPoolType = Exclude<TokenPoolType, BurnMintTokenPoolType>
+
 /** Type guard for {@link TOKEN_POOL_TYPES}. */
 export function isTokenPoolType(v: string): v is TokenPoolType {
   return (TOKEN_POOL_TYPES as readonly string[]).includes(v)
@@ -71,6 +77,11 @@ export function isTokenPoolType(v: string): v is TokenPoolType {
  */
 export function getTokenPoolFamily(type: TokenPoolType): TokenPoolFamily {
   return /^Burn/.test(type) ? 'BurnMint' : 'LockRelease'
+}
+
+/** Narrows a pool type to the {@link LockReleaseTokenPoolType}s, per {@link getTokenPoolFamily}. */
+export function isLockReleaseTokenPoolType(type: TokenPoolType): type is LockReleaseTokenPoolType {
+  return getTokenPoolFamily(type) === 'LockRelease'
 }
 
 /**

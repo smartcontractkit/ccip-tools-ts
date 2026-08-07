@@ -10,6 +10,7 @@ import {
   TokenPoolVersion,
   getTokenPoolFamily,
   getTokenPoolInterface,
+  isLockReleaseTokenPoolType,
   isTokenPoolType,
   isTokenPoolVersion,
   parseTokenPoolVersion,
@@ -47,6 +48,17 @@ describe('pool types', () => {
     assert.equal(isTokenPoolType('UpgradeableLockReleaseTokenPool'), false)
     assert.equal(isTokenPoolType('CCTPThroughCCVTokenPool'), false)
     assert.equal(isTokenPoolType('TokenAdminRegistry'), false)
+  })
+
+  it('narrows lock-release types with isLockReleaseTokenPoolType, matching the family split', () => {
+    assert.equal(isLockReleaseTokenPoolType('LockReleaseTokenPool'), true)
+    assert.equal(isLockReleaseTokenPoolType('SiloedLockReleaseTokenPool'), true)
+    assert.equal(isLockReleaseTokenPoolType('BurnMintTokenPool'), false)
+    // the anchored ^Burn rule: a burn pool naming lock-release is still BurnMint
+    assert.equal(isLockReleaseTokenPoolType('BurnMintWithLockReleaseFlagTokenPool'), false)
+    // the predicate must agree with getTokenPoolFamily for every supported type
+    for (const type of TOKEN_POOL_TYPES)
+      assert.equal(isLockReleaseTokenPoolType(type), getTokenPoolFamily(type) === 'LockRelease')
   })
 
   it('maps burn-* variants to the BurnMint family, LockRelease to its own', () => {
