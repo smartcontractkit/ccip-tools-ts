@@ -48,6 +48,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.createTokenMultisig, 'function')
     assert.equal(typeof cct.generateUnsignedDeployTokenPool, 'function')
     assert.equal(typeof cct.deployTokenPool, 'function')
+    assert.equal(typeof cct.generateUnsignedDeleteChainRemoteConfig, 'function')
+    assert.equal(typeof cct.deleteChainRemoteConfig, 'function')
     assert.equal(typeof cct.generateUnsignedEditChainRemoteConfig, 'function')
     assert.equal(typeof cct.editChainRemoteConfig, 'function')
     assert.equal(typeof cct.generateUnsignedRemoveFromAllowlist, 'function')
