@@ -20,11 +20,14 @@ export type GetSupportedTokensParams = {
   address: string
   /**
    * Batch size `chain.getSupportedTokens` requests per `getAllConfiguredTokens` call while it
-   * paginates. Optional — a very large registry may need a smaller batch to stay under an RPC's
-   * response-size limit.
+   * paginates. Defaults to 1000. Optional — a very large registry may need a smaller batch to
+   * stay under an RPC's response-size limit.
    */
   page?: number
 }
+
+/** Result of {@link GetSupportedTokens}: array of token addresses. */
+export type GetSupportedTokensResult = string[]
 
 /**
  * Lists every token configured in the TokenAdminRegistry resolved from `address`, paginating

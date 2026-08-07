@@ -27,6 +27,7 @@ import {
 } from './token-admin-registry/operations/accept-admin.ts'
 import {
   type GetSupportedTokensParams,
+  type GetSupportedTokensResult,
   GetSupportedTokens,
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 import {
@@ -598,7 +599,10 @@ export type {
 } from './token-admin-registry/operations/get-token-admin-registry.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
-export type { GetSupportedTokensParams } from './token-admin-registry/operations/get-supported-tokens.ts'
+export type {
+  GetSupportedTokensParams,
+  GetSupportedTokensResult,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
   DeployTokenPoolParams,
