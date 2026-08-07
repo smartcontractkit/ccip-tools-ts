@@ -4,6 +4,10 @@ import { describe, it } from 'node:test'
 import { Connection } from '@solana/web3.js'
 
 import { SolanaTokenManager } from './index.ts'
+import type {
+  GetTokenPoolStateParams,
+  GetTokenPoolStateResult,
+} from './token-pool/operations/index.ts'
 import { SolanaChain } from '../../solana/index.ts'
 
 function stubChain(): SolanaChain {
@@ -78,5 +82,16 @@ describe('SolanaTokenManager (cct/solana)', () => {
     const cct = await SolanaTokenManager.fromUrl('http://localhost:8899')
 
     assert.equal(cct.chain, chain)
+  })
+
+  it('getTokenPoolState accepts params whose pool program is not known statically', () => {
+    const cct = SolanaTokenManager.fromChain(stubChain())
+    // A parameter is not narrowed to one PoolProgramRef arm the way a const literal is, so this
+    // only compiles while a `GetTokenPoolStateParams` overload is declared: TypeScript never
+    // exposes the implementation signature to callers.
+    const read = (opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> =>
+      cct.getTokenPoolState(opts)
+
+    assert.equal(typeof read, 'function')
   })
 })
