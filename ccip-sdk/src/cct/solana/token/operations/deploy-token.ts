@@ -21,7 +21,7 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { validateOptionalPublicKey, validatePublicKey } from '../../validate.ts'
 
 type BaseDeployTokenParams = {
   /** Mint decimals. Must be an integer between 0 and 255. */
@@ -248,7 +248,7 @@ function validateBaseParams(operation: string, params: GenerateDeployTokenParams
   if (params.seed !== undefined && (!params.seed || utf8ByteLength(params.seed) > 32)) {
     throw new CCTParamsInvalidError(operation, 'seed', 'must be non-empty and <= 32 UTF-8 bytes')
   }
-  if (params.mintAuthority) validatePublicKey(operation, 'mintAuthority', params.mintAuthority)
+  validateOptionalPublicKey(operation, 'mintAuthority', params.mintAuthority)
   if (params.freezeAuthority !== undefined && params.freezeAuthority !== null) {
     validatePublicKey(operation, 'freezeAuthority', params.freezeAuthority)
   }
@@ -268,8 +268,7 @@ function validatePreMintParams(operation: string, params: GenerateDeployTokenPar
       'is required when preMint is set',
     )
   }
-  if (params.preMintRecipient)
-    validatePublicKey(operation, 'preMintRecipient', params.preMintRecipient)
+  validateOptionalPublicKey(operation, 'preMintRecipient', params.preMintRecipient)
 }
 
 function validateMetaplexParams(operation: string, params: GenerateDeployTokenParams): void {

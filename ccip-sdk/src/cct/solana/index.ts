@@ -64,21 +64,36 @@ import {
   type BaseGetTokenPoolStateResult,
   type BurnMintPoolProgramRef,
   type CustomPoolProgramRef,
+  type ExecuteConfigureAllowlistParams,
+  type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteInitChainRemoteConfigParams,
+  type ExecuteInitChainRemoteConfigResult,
+  type ExecuteRemoveFromAllowlistParams,
+  type ExecuteRemoveFromAllowlistResult,
+  type GenerateConfigureAllowlistParams,
+  type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateInitChainRemoteConfigParams,
+  type GenerateInitChainRemoteConfigResult,
+  type GenerateRemoveFromAllowlistParams,
+  type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
   type LockReleasePoolProgramRef,
+  ConfigureAllowlist,
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
+  InitChainRemoteConfig,
+  RemoveFromAllowlist,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -98,9 +113,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
+  readonly #configureAllowlist = new ConfigureAllowlist()
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #initChainRemoteConfig = new InitChainRemoteConfig()
+  readonly #removeFromAllowlist = new RemoveFromAllowlist()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -350,6 +368,71 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned instruction to append addresses to a token pool allowlist and toggle
+   * enforcement. Every call overwrites enforcement; pass `add: []` to toggle it without appending
+   * an address. Addresses in `add` must be unique; existing allowlist entries are rejected by the
+   * program. The pool must be initialized first. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedDeployTokenPool}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedConfigureAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   add: [allowedSender],
+   *   enabled: true,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedConfigureAllowlist(
+    opts: GenerateConfigureAllowlistParams,
+  ): Promise<GenerateConfigureAllowlistResult> {
+    return this.#configureAllowlist.generate(this.chain, opts)
+  }
+
+  /**
+   * Appends addresses to and configures an initialized Solana token pool allowlist using the pool
+   * owner wallet. Every call overwrites enforcement; pass `add: []` to toggle it without
+   * appending an address. Addresses in `add` must be unique; existing allowlist entries are
+   * rejected by the program.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link deployTokenPool}
+   * @see {@link removeFromAllowlist}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.configureAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   add: [],
+   *   enabled: false,
+   *   wallet,
+   * })
+   * ```
+   */
+  configureAllowlist(
+    opts: ExecuteConfigureAllowlistParams,
+  ): Promise<ExecuteConfigureAllowlistResult> {
+    return this.#configureAllowlist.execute(this.chain, opts)
+  }
+
+  /**
    * Builds unsigned Solana token pool initialize instructions.
    *
    * @remarks
@@ -410,6 +493,72 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that initializes a Solana token pool remote-chain config for a
+   * previously unconfigured selector. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to
+   * `payer`.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
+   * @see {@link initChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedInitChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remoteTokenDecimals: 18,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedInitChainRemoteConfig(
+    opts: GenerateInitChainRemoteConfigParams,
+  ): Promise<GenerateInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Initializes a Solana token pool remote-chain config for a previously unconfigured selector
+   * with the pool owner wallet.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.initChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remoteTokenDecimals: 18,
+   *   wallet,
+   * })
+   * ```
+   */
+  initChainRemoteConfig(
+    opts: ExecuteInitChainRemoteConfigParams,
+  ): Promise<ExecuteInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
@@ -600,6 +749,70 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
+   * be initialized first. Pass canonical `poolType` or a compatible `poolProgramAddress`;
+   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
+   * transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link removeFromAllowlist}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remove: [sender],
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedRemoveFromAllowlist(
+    opts: GenerateRemoveFromAllowlistParams,
+  ): Promise<GenerateRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.generate(this.chain, opts)
+  }
+
+  /**
+   * Removes addresses from an initialized Solana token pool allowlist using the pool owner wallet.
+   * Every removed address must already be allowlisted or the transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.removeFromAllowlist({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remove: [sender],
+   *   wallet,
+   * })
+   * ```
+   */
+  removeFromAllowlist(
+    opts: ExecuteRemoveFromAllowlistParams,
+  ): Promise<ExecuteRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.execute(this.chain, opts)
+  }
+
+  /**
    * Builds unsigned Solana `setPool` instructions.
    *
    * The token must first be registered and its proposed administrator accepted. The `payer` pays
@@ -728,6 +941,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
    * fields (`rebalancer`, `canAcceptLiquidity`).
    *
+   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
+   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
+   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
+   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
+   *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
    * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
@@ -739,6 +958,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
+   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
+   * console.log(state.config.owner, state.config.mint, state.config.decimals)
+   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
+   * console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
    * ```
    */
   getTokenPoolState(

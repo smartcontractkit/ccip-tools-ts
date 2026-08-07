@@ -22,6 +22,7 @@ import {
 import { submit } from '../../submit.ts'
 import {
   validateAuthorityMatchesWallet,
+  validateOptionalPublicKey,
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
@@ -81,7 +82,7 @@ export class DeployTokenPool extends SolanaOperation<
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePoolType(this.name, 'poolType', params.poolType)
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
     if (params.allowlist !== undefined) validatePublicKeys(this.name, 'allowlist', params.allowlist)
   }
 
@@ -152,7 +153,7 @@ export class DeployTokenPool extends SolanaOperation<
     const generateParams: GenerateDeployTokenPoolParams = { ...rest, payer }
     this.validate(generateParams)
 
-    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {
       validateAuthorityMatchesWallet(
         this.name,

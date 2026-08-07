@@ -45,7 +45,6 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
-    "build:dev": "npm run clean && tsc -p ./tsconfig.build.dev.json",
     "clean": "rm -rfv ./dist",
     "prepare": "npm run build"
   },
@@ -55,9 +54,7 @@
     "tsconfig.json",
     "!**/*.test.*",
     "!**/__tests__",
-    "!**/__mocks__",
-    "!dist/cct/**",
-    "!src/cct/**"
+    "!**/__mocks__"
   ],
   "peerDependencies": {
     "viem": "^2.0.0"

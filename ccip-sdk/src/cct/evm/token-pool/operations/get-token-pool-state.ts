@@ -219,7 +219,12 @@ async function readLockReleaseTokenPoolV2_0_0(
   type: LockReleaseTokenPoolType,
 ): Promise<LockReleaseTokenPoolStateV2_0_0> {
   if (type !== 'LockReleaseTokenPool')
-    throw new CCTContractTypeInvalidError(poolAddress, 'LockReleaseTokenPool', type)
+    throw new CCTContractTypeInvalidError(
+      poolAddress,
+      'LockReleaseTokenPool',
+      type,
+      'siloed pools escrow per remote chain; read per-lane lockboxes via getLockBox(remoteChainSelector)',
+    )
 
   const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
   const [state, lockBox] = await Promise.all([
@@ -245,9 +250,11 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
 
   /**
    * Resolves the pool's type + version, then reads it through the getters that version has.
-   * @remarks Dispatch is explicit, not floor-matched like the write ops' encoders: a read's shape
-   * is bound to the ABI it decodes through, so adding a pool version has to fail to compile here
-   * rather than silently inherit a reader.
+   * @remarks Dispatch is an exhaustive `switch`, not floor-matched like the write ops' encoders: a
+   * read's shape is bound to the ABI it decodes through, and the v2.0.0 reader reports its version
+   * as the literal that discriminates {@link GetTokenPoolStateResult}. Floor-matching would make a
+   * newer pool misreport itself and silently drop any admin field its version added, so a new
+   * {@link TokenPoolVersion} fails to compile here until it is pointed at a reader.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a v2.0.0 lock/release variant other
    * than `LockReleaseTokenPool` — a siloed pool escrows per remote chain (`getLockBox(uint64)`),
    * so no single `lockBox` describes it
@@ -259,12 +266,21 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
   ): Promise<GetTokenPoolStateResult> {
     const { type, version } = await resolveTokenPool(chain, poolAddress)
 
-    // pre-v2.0.0 has no lockbox at all, so both families read the same way
-    if (version !== TokenPoolVersion.V2_0_0)
-      return readLegacyTokenPool(chain, poolAddress, type, version)
-
-    return isLockReleaseTokenPoolType(type)
-      ? readLockReleaseTokenPoolV2_0_0(chain, poolAddress, type)
-      : readBurnMintTokenPoolV2_0_0(chain, poolAddress, type)
+    switch (version) {
+      // pre-v2.0.0 has no lockbox at all, so both families read the same way
+      case TokenPoolVersion.V1_5_0:
+      case TokenPoolVersion.V1_5_1:
+      case TokenPoolVersion.V1_6_1:
+        return readLegacyTokenPool(chain, poolAddress, type, version)
+      case TokenPoolVersion.V2_0_0:
+        return isLockReleaseTokenPoolType(type)
+          ? readLockReleaseTokenPoolV2_0_0(chain, poolAddress, type)
+          : readBurnMintTokenPoolV2_0_0(chain, poolAddress, type)
+      default: {
+        // a new TokenPoolVersion lands here and fails to compile until it gets a reader
+        const unread: never = version
+        return unread
+      }
+    }
   }
 }

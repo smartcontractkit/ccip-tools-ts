@@ -417,6 +417,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools, or v1.5.0 `*AndProxy` pools, use `cct.chain.getTokenPoolConfig()`, the tolerant
    * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is
    * not readable here.
+   * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
+   * shape: its fields nest under `state.config` where these are flat, it spells `token` /
+   * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its
+   * `version` is the account-layout number, not this protocol semver. `owner`, `rateLimitAdmin`
+   * and `router` are named alike on both.
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a supported CCT pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool's version is not a known one
