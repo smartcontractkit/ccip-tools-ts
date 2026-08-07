@@ -480,6 +480,50 @@ export class CCIPLaneNotFoundError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when the API has too little history to estimate latency for the requested lane.
+ *
+ * The lane exists, unlike {@link CCIPLaneNotFoundError}: there is simply not enough history to
+ * compute the estimate. Most lanes carry too little traffic for one. A `sourceTokenAddress`
+ * narrows the sample further, so retrying without it may succeed where the token request did not.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   latency = await api.getLaneLatency(src, dest, undefined, { sourceTokenAddress: token })
+ * } catch (error) {
+ *   if (!(error instanceof CCIPLaneLatencyInsufficientDataError)) throw error
+ *   latency = await api.getLaneLatency(src, dest) // lane-wide
+ * }
+ * ```
+ */
+export class CCIPLaneLatencyInsufficientDataError extends CCIPError {
+  override readonly name = 'CCIPLaneLatencyInsufficientDataError'
+  /** Creates a lane latency insufficient data error. */
+  constructor(
+    sourceChainSelector: bigint,
+    destChainSelector: bigint,
+    sourceTokenAddress?: string,
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.LANE_LATENCY_INSUFFICIENT_DATA,
+      `Not enough historical data to estimate latency for lane ${sourceChainSelector} → ${destChainSelector}` +
+        (sourceTokenAddress ? ` with token ${sourceTokenAddress}` : ''),
+      {
+        ...options,
+        isTransient: false,
+        context: {
+          ...options?.context,
+          sourceChainSelector,
+          destChainSelector,
+          ...(sourceTokenAddress ? { sourceTokenAddress } : {}),
+        },
+      },
+    )
+  }
+}
+
 // Commit & Merkle
 
 /**

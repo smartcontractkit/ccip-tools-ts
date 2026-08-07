@@ -28,7 +28,9 @@ All filters are optional. Omit a field to leave it unfiltered.
 | `sourceChainSelector` | `bigint` | Source chain selector |
 | `destChainSelector` | `bigint` | Destination chain selector |
 | `sourceTransactionHash` | `string` | Source transaction hash |
+| `sourceTokenAddress` | `string` | Source token address |
 | `readyForManualExecOnly` | `boolean` | When `true`, return only messages eligible for manual execution |
+| `q` | `string` | Free-text match on source and destination token address, source pool address, transaction hashes, messageId, sender, and receiver. Comma-separate several terms; all must match |
 
 :::note
 `api.getMessageIdsInTx(txHash)` is a convenience wrapper that calls `searchMessages` with `sourceTransactionHash` internally.
@@ -100,7 +102,7 @@ while (page.hasNextPage) {
 ```
 
 :::note
-When paginating with a cursor, the `filters` parameter is ignored — the cursor encodes the original filters.
+When paginating with a cursor, filters may be repeated or omitted, but must not contradict the cursor. The API answers `400 INVALID_PARAMETER_COMBINATION` if they differ.
 :::
 
 ## Combine Filters

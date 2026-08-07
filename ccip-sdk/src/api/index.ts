@@ -5,6 +5,7 @@ import type { SetRequired } from 'type-fest'
 import {
   CCIPApiClientNotAvailableError,
   CCIPHttpError,
+  CCIPLaneLatencyInsufficientDataError,
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
@@ -231,10 +232,14 @@ export class CCIPAPIClient {
    *   integer, the API returns latency for that custom finality value (sent as `numOfBlocks`
    *   query parameter).
    * @param options - Optional request options.
+   *   - `sourceTokenAddress` — token-specific latency profile instead of the lane-wide estimate.
+   *     Most lanes have none and throw {@link CCIPLaneLatencyInsufficientDataError}.
    *   - `signal` — an `AbortSignal` to cancel the request.
    * @returns Promise resolving to {@link LaneLatencyResponse} with totalMs
    *
    * @throws {@link CCIPLaneNotFoundError} when lane not found (404)
+   * @throws {@link CCIPLaneLatencyInsufficientDataError} when the API has too little history for
+   *   the requested profile (400 `INSUFFICIENT_DATA`)
    * @throws {@link CCIPTimeoutError} if request times out
    * @throws {@link CCIPAbortError} if request is aborted via signal
    * @throws {@link CCIPHttpError} on other HTTP errors with context:
@@ -261,6 +266,17 @@ export class CCIPAPIClient {
    * )
    * ```
    *
+   * @example Token-specific latency, falling back to the lane-wide estimate
+   * ```typescript
+   * let latency
+   * try {
+   *   latency = await api.getLaneLatency(src, dest, undefined, { sourceTokenAddress: token })
+   * } catch (err) {
+   *   if (!(err instanceof CCIPLaneLatencyInsufficientDataError)) throw err
+   *   latency = await api.getLaneLatency(src, dest)
+   * }
+   * ```
+   *
    * @example Handling specific API errors
    * ```typescript
    * try {
@@ -276,13 +292,16 @@ export class CCIPAPIClient {
     sourceChainSelector: bigint,
     destChainSelector: bigint,
     numberOfBlocks?: number,
-    options?: { signal?: AbortSignal },
+    options?: { sourceTokenAddress?: string; signal?: AbortSignal },
   ): Promise<LaneLatencyResponse> {
     const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
     url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
     url.searchParams.set('destChainSelector', destChainSelector.toString())
     if (numberOfBlocks) {
       url.searchParams.set('numOfBlocks', numberOfBlocks.toString())
+    }
+    if (options?.sourceTokenAddress) {
+      url.searchParams.set('sourceTokenAddress', options.sourceTokenAddress)
     }
 
     this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
@@ -308,6 +327,21 @@ export class CCIPAPIClient {
               }
             : undefined,
         })
+      }
+
+      // Keyed on the body's error code, not the status: the API returns 400 for INVALID_PARAMETERS too
+      if (apiError?.error === 'INSUFFICIENT_DATA') {
+        throw new CCIPLaneLatencyInsufficientDataError(
+          sourceChainSelector,
+          destChainSelector,
+          options?.sourceTokenAddress,
+          {
+            context: {
+              apiErrorCode: apiError.error,
+              apiErrorMessage: apiError.message,
+            },
+          },
+        )
       }
 
       // Generic HTTP error for other cases
@@ -543,6 +577,20 @@ export class CCIPAPIClient {
    * }
    * ```
    *
+   * @example Search by token pool address
+   * ```typescript
+   * // No named filter for pool address; `q` covers it.
+   * const pool = '0x20B79D39Bd44dEee4F89B1e9d0e3b945fde06491'
+   * const page = await api.searchMessages({ q: pool })
+   * // `q` spans several fields, so check the one you meant:
+   * for (const msg of page.data) {
+   *   const detail = await api.getMessageById(msg.messageId)
+   *   if (detail.message.tokenAmounts.some((t) => t.sourcePoolAddress === pool)) {
+   *     console.log(msg.messageId)
+   *   }
+   * }
+   * ```
+   *
    * @example Filter by lane and sender
    * ```typescript
    * const page = await api.searchMessages({
@@ -574,6 +622,7 @@ export class CCIPAPIClient {
         url.searchParams.set('sourceTokenAddress', filters.sourceTokenAddress)
       if (filters.readyForManualExecOnly != null)
         url.searchParams.set('readyForManualExecOnly', String(filters.readyForManualExecOnly))
+      if (filters.q) url.searchParams.set('q', filters.q)
     }
 
     if (options?.limit != null) url.searchParams.set('limit', options.limit.toString())
@@ -633,6 +682,10 @@ export class CCIPAPIClient {
    * @param options - Optional request options:
    *   - `limit` — per-page fetch size (number of results fetched per API call). The total
    *     number of results is controlled by the consumer — break out of the loop to stop early.
+   *   - `cursor` — resume from a cursor returned by an earlier {@link CCIPAPIClient.searchMessages}
+   *     call instead of starting at the first page. The cursor already encodes the filters it was
+   *     issued for; `filters` may repeat them or be omitted, but must not contradict them (the API
+   *     answers `400 INVALID_PARAMETER_COMBINATION` if they differ).
    *   - `signal` — an `AbortSignal` that, when aborted, cancels the next page fetch.
    * @returns AsyncGenerator yielding {@link MessageSearchResult} one at a time, across all pages.
    *
@@ -661,9 +714,9 @@ export class CCIPAPIClient {
    */
   async *searchAllMessages(
     filters?: MessageSearchFilters,
-    options?: { limit?: number; signal?: AbortSignal },
+    options?: { limit?: number; cursor?: string; signal?: AbortSignal },
   ): AsyncGenerator<MessageSearchResult> {
-    let cursor: string | undefined
+    let cursor: string | undefined = options?.cursor
     do {
       const page = await this.searchMessages(filters, {
         limit: options?.limit,

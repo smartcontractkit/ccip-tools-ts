@@ -39,6 +39,7 @@ export {
 
 // Specialized errors - Lane & Routing
 export {
+  CCIPLaneLatencyInsufficientDataError,
   CCIPLaneNotFoundError,
   CCIPLaneVersionUnsupportedError,
   CCIPOffRampNotFoundError,

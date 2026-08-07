@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SDK: `sendMessage` and `execute` methods now accept `opts.txGasLimit`, skips estimation
 - CLI: `send` and `manual-exec --tx-gas-limit` option to force gas limit for txs
+- SDK/CLI: add `q` free-text filter to `searchMessages` and `-q` to `search messages`; matches token and pool addresses, tx hashes, messageId, sender and receiver
+- SDK: `searchAllMessages` accepts `options.cursor` to resume from a previous page
+- CLI: `search messages --cursor` resumes an earlier run; when `--limit` caps the results, the next cursor is printed to stderr
+- SDK/CLI: `CCIPAPIClient.getLaneLatency` accepts `options.sourceTokenAddress`, exposed as `lane-latency --source-token`
+- SDK: **Breaking**: lane latency `INSUFFICIENT_DATA` now throws `CCIPLaneLatencyInsufficientDataError` instead of `CCIPHttpError`
 
 ## [1.10.0] - 2026-06-30
 
