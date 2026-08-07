@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer'
+
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPAddressInvalidError } from '../../errors/index.ts'
@@ -19,7 +21,7 @@ export function parsePublicKey(operation: string, param: string, value: unknown)
     throw new CCTParamsInvalidError(
       operation,
       param,
-      `must be a valid Solana public key, got ${String(value)}`,
+      `must be a valid Solana public key, got "${String(value)}"`,
     )
   }
 
@@ -29,7 +31,7 @@ export function parsePublicKey(operation: string, param: string, value: unknown)
     throw new CCTParamsInvalidError(
       operation,
       param,
-      `must be a valid Solana public key, got ${String(value)}`,
+      `must be a valid Solana public key, got "${String(value)}"`,
       {
         cause: new CCIPAddressInvalidError(value, ChainFamily.Solana),
       },
@@ -47,6 +49,19 @@ export function validatePublicKey(
   value: unknown,
 ): asserts value is string {
   parsePublicKey(operation, param, value)
+}
+
+/**
+ * Asserts `value` is a valid Solana public key string, or is absent.
+ * Only `undefined` counts as absent; `null` and `''` are treated as provided and rejected.
+ * @throws {@link CCTParamsInvalidError} if a non-`undefined` `value` is not a valid public key string.
+ */
+export function validateOptionalPublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string | undefined {
+  if (value !== undefined) validatePublicKey(operation, param, value)
 }
 
 /**
@@ -133,8 +148,43 @@ export function validateInteger(
   const validMax = max === undefined || (validInteger && Number(value) <= max)
 
   if (!validInteger || !validMin || !validMax) {
-    const range = min !== undefined && max !== undefined ? ` between ${min} and ${max}` : ''
+    const range =
+      min !== undefined && max !== undefined
+        ? ` between ${min} and ${max}`
+        : min !== undefined
+          ? ` >= ${min}`
+          : max !== undefined
+            ? ` <= ${max}`
+            : ''
     throw new CCTParamsInvalidError(operation, param, `must be an integer${range}`)
+  }
+}
+
+/**
+ * Asserts `value` is a bigint, optionally inside inclusive bounds.
+ * @throws CCTParamsInvalidError if `value` is not a bigint or is outside bounds.
+ */
+export function validateBigInt(
+  operation: string,
+  param: string,
+  value: unknown,
+  min?: bigint,
+  max?: bigint,
+): asserts value is bigint {
+  const validBigInt = typeof value === 'bigint'
+  const validMin = min === undefined || (validBigInt && value >= min)
+  const validMax = max === undefined || (validBigInt && value <= max)
+
+  if (!validBigInt || !validMin || !validMax) {
+    const range =
+      min !== undefined && max !== undefined
+        ? ` between ${min} and ${max}`
+        : min !== undefined
+          ? ` >= ${min}`
+          : max !== undefined
+            ? ` <= ${max}`
+            : ''
+    throw new CCTParamsInvalidError(operation, param, `must be a bigint${range}`)
   }
 }
 
@@ -155,4 +205,26 @@ export function validateWritableIndexes(
   for (const [i, index] of writableIndexes.entries()) {
     validateInteger(operation, `${param}[${i}]`, index, 0, 255)
   }
+}
+
+/**
+ * Parses an optionally `0x`-prefixed hex string into bytes, with an optional maximum size.
+ * @throws CCTParamsInvalidError if `value` is not valid hex or exceeds the requested size.
+ */
+export function parseHexBytes(
+  operation: string,
+  param: string,
+  value: unknown,
+  maxBytes?: number,
+): Buffer {
+  const hex = typeof value === 'string' ? value.replace(/^0x/, '') : ''
+  if (
+    typeof value !== 'string' ||
+    !/^(?:[\da-fA-F]{2})*$/.test(hex) ||
+    (maxBytes !== undefined && hex.length / 2 > maxBytes)
+  ) {
+    const size = maxBytes === undefined ? '' : ` of at most ${maxBytes} bytes`
+    throw new CCTParamsInvalidError(operation, param, `must be a hex string${size}`)
+  }
+  return Buffer.from(hex, 'hex')
 }

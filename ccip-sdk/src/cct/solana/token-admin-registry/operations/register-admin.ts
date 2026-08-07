@@ -19,7 +19,11 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
+import {
+  validateAuthorityMatchesWallet,
+  validateOptionalPublicKey,
+  validatePublicKey,
+} from '../../validate.ts'
 
 /** Authorization paths used to register a token in the TokenAdminRegistry. */
 const REGISTER_ADMIN_METHODS = {
@@ -135,8 +139,8 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.administrator) validatePublicKey(this.name, 'administrator', params.administrator)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'administrator', params.administrator)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
     if (
       params.registrationMethod !== undefined &&
       !Object.values(REGISTER_ADMIN_METHODS).includes(params.registrationMethod)
@@ -162,7 +166,8 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
 
     const mintAccount = await resolveTokenMint(chain.connection, tokenMint)
     const { mintAuthority } = unpackMint(tokenMint, mintAccount, mintAccount.owner)
-    const administrator = opts.administrator ? new PublicKey(opts.administrator) : mintAuthority
+    const administrator =
+      opts.administrator !== undefined ? new PublicKey(opts.administrator) : mintAuthority
     const method = opts.registrationMethod ?? REGISTER_ADMIN_METHODS.OWNER
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
@@ -224,7 +229,7 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
     const generateParams: GenerateRegisterAdminParams = { ...rest, payer }
     this.validate(generateParams)
 
-    const authority = params.authority ? new PublicKey(params.authority) : undefined
+    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {
       validateAuthorityMatchesWallet(
         this.name,

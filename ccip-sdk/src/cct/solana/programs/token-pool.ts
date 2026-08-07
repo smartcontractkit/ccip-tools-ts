@@ -124,6 +124,20 @@ export function deriveTokenPoolSignerPda(poolProgram: PublicKey, mint: PublicKey
   )[0]
 }
 
+/** Derives a token pool chain configuration PDA. */
+export function deriveTokenPoolChainConfigPda(
+  poolProgram: PublicKey,
+  remoteChainSelector: bigint,
+  mint: PublicKey,
+): PublicKey {
+  const selector = Buffer.alloc(8)
+  selector.writeBigUInt64LE(remoteChainSelector)
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('ccip_tokenpool_chainconfig'), selector, mint.toBuffer()],
+    poolProgram,
+  )[0]
+}
+
 /** Derives the token pool program data PDA. */
 export function deriveTokenPoolProgramDataPda(poolProgram: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(

@@ -6,7 +6,11 @@ import { getAddress, makeError, toBeHex } from 'ethers'
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
 
 const POOL = '0x' + '11'.repeat(20)
@@ -302,6 +306,35 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
           err.context.actual === 'SiloedLockReleaseTokenPool',
+      )
+    })
+
+    it('tells a siloed pool apart from a wrong address, naming the per-lane getter', async () => {
+      const chain = stubChain({
+        typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
+        family: 'LockRelease',
+        reads: READS,
+      })
+
+      await assert.rejects(
+        () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          // the reason, not just the type mismatch — otherwise this reads as "wrong address"
+          err.message.includes('getLockBox(remoteChainSelector)') &&
+          err.context.reason === (err.message.split(' — ')[1] as string),
+      )
+    })
+
+    it('rejects a supported pool type reporting a version the SDK does not know', async () => {
+      const chain = stubChain({ typeAndVersion: 'BurnMintTokenPool 9.9.9', reads: READS })
+
+      await assert.rejects(
+        () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
+        (err: unknown) =>
+          err instanceof CCTContractVersionUnsupportedError &&
+          err.context.contractType === 'BurnMintTokenPool' &&
+          err.context.version === '9.9.9',
       )
     })
   })

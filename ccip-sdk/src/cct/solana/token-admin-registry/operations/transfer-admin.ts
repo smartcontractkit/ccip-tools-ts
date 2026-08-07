@@ -17,7 +17,11 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import { validateAuthorityMatchesWallet, validatePublicKey } from '../../validate.ts'
+import {
+  validateAuthorityMatchesWallet,
+  validateOptionalPublicKey,
+  validatePublicKey,
+} from '../../validate.ts'
 
 /** Parameters shared by Solana TokenAdminRegistry `transferAdmin` generation and execution. */
 type TransferAdminParams = {
@@ -55,7 +59,7 @@ export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'newAdmin', params.newAdmin)
     validatePublicKey(this.name, 'payer', params.payer)
-    if (params.authority) validatePublicKey(this.name, 'authority', params.authority)
+    validateOptionalPublicKey(this.name, 'authority', params.authority)
   }
 
   /** Builds the unsigned instruction after confirming the caller is the current admin. */
@@ -109,7 +113,7 @@ export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
     const generateParams: GenerateTransferAdminParams = { ...rest, payer }
     this.validate(generateParams)
 
-    if (params.authority) {
+    if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,
         new PublicKey(params.authority),

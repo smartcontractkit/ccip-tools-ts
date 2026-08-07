@@ -40,84 +40,100 @@ function generate(opts = {}) {
   })
 }
 
-describe('Solana token pool deployTokenPool', () => {
-  it('builds unsigned initialize pool instruction', async () => {
-    const unsigned = await generate()
+describe('DeployTokenPool (cct/solana)', () => {
+  describe('generate', () => {
+    it('builds unsigned initialize pool instruction', async () => {
+      const unsigned = await generate()
 
-    assert.equal(unsigned.family, ChainFamily.Solana)
-    assert.equal(unsigned.mainIndex, 0)
-    assert.equal(unsigned.instructions.length, 1)
-    assert.equal(unsigned.instructions[0]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
-    assert.equal(
-      unsigned.poolAddress,
-      deriveTokenPoolConfigPda(
-        new PublicKey(BURN_MINT_POOL_PROGRAM),
-        new PublicKey(TOKEN),
-      ).toBase58(),
-    )
-    assert.equal(
-      unsigned.poolSignerAddress,
-      deriveTokenPoolSignerPda(
-        resolveTokenPoolProgram('burn-mint'),
-        new PublicKey(TOKEN),
-      ).toBase58(),
-    )
-  })
-
-  it('adds configure allowlist instruction when provided', async () => {
-    const unsigned = await generate({
-      allowlist: [Keypair.generate().publicKey.toBase58()],
+      assert.equal(unsigned.family, ChainFamily.Solana)
+      assert.equal(unsigned.mainIndex, 0)
+      assert.equal(unsigned.instructions.length, 1)
+      assert.equal(unsigned.instructions[0]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+      assert.equal(
+        unsigned.poolAddress,
+        deriveTokenPoolConfigPda(
+          new PublicKey(BURN_MINT_POOL_PROGRAM),
+          new PublicKey(TOKEN),
+        ).toBase58(),
+      )
+      assert.equal(
+        unsigned.poolSignerAddress,
+        deriveTokenPoolSignerPda(
+          resolveTokenPoolProgram('burn-mint'),
+          new PublicKey(TOKEN),
+        ).toBase58(),
+      )
     })
 
-    assert.equal(unsigned.instructions.length, 2)
-    assert.equal(unsigned.instructions[1]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+    it('adds configure allowlist instruction when provided', async () => {
+      const unsigned = await generate({
+        allowlist: [Keypair.generate().publicKey.toBase58()],
+      })
+
+      assert.equal(unsigned.instructions.length, 2)
+      assert.equal(unsigned.instructions[1]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+    })
+
+    it('uses canonical lock-release pool program', async () => {
+      const unsigned = await generate({ poolType: 'lock-release' })
+
+      assert.equal(unsigned.instructions[0]!.programId.toBase58(), LOCK_RELEASE_POOL_PROGRAM)
+    })
+
+    it('defaults authority to payer', async () => {
+      const unsigned = await generate({ authority: undefined })
+
+      assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === PAYER))
+    })
   })
 
-  it('uses canonical lock-release pool program', async () => {
-    const unsigned = await generate({ poolType: 'lock-release' })
+  describe('validation', () => {
+    it('rejects invalid pool types', async () => {
+      await assert.rejects(
+        () => generate({ poolType: 'custom' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'poolType',
+      )
+    })
 
-    assert.equal(unsigned.instructions[0]!.programId.toBase58(), LOCK_RELEASE_POOL_PROGRAM)
+    it('rejects an empty authority', async () => {
+      await assert.rejects(
+        () => generate({ authority: '' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'authority',
+      )
+    })
+
+    it('rejects invalid allowlist addresses', async () => {
+      await assert.rejects(
+        () => generate({ allowlist: ['not-a-pubkey'] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'allowlist[0]',
+      )
+    })
   })
 
-  it('defaults authority to payer', async () => {
-    const unsigned = await generate({ authority: undefined })
-
-    assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === PAYER))
-  })
-
-  it('rejects signed deploy when authority is not the wallet', async () => {
-    await assert.rejects(
-      () =>
-        SolanaTokenManager.fromChain(stubChain()).deployTokenPool({
-          tokenAddress: TOKEN,
-          poolType: 'burn-mint',
-          wallet: WALLET,
-          authority: AUTHORITY,
-        }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'deployTokenPool' &&
-        err.context.param === 'authority',
-    )
-  })
-
-  it('rejects invalid pool types', async () => {
-    await assert.rejects(
-      () => generate({ poolType: 'custom' }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'deployTokenPool' &&
-        err.context.param === 'poolType',
-    )
-  })
-
-  it('rejects invalid allowlist addresses', async () => {
-    await assert.rejects(
-      () => generate({ allowlist: ['not-a-pubkey'] }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.operation === 'deployTokenPool' &&
-        err.context.param === 'allowlist[0]',
-    )
+  describe('execute', () => {
+    it('rejects signed deploy when authority is not the wallet', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(stubChain()).deployTokenPool({
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            wallet: WALLET,
+            authority: AUTHORITY,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'authority',
+      )
+    })
   })
 })
