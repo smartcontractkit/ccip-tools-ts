@@ -70,6 +70,8 @@ import {
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteInitChainRemoteConfigParams,
+  type ExecuteInitChainRemoteConfigResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
   type GenerateConfigureAllowlistParams,
@@ -78,6 +80,8 @@ import {
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateInitChainRemoteConfigParams,
+  type GenerateInitChainRemoteConfigResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
   type GetTokenPoolStateParams,
@@ -88,6 +92,7 @@ import {
   CreateTokenMultisig,
   DeployTokenPool,
   GetTokenPoolState,
+  InitChainRemoteConfig,
   RemoveFromAllowlist,
 } from './token-pool/operations/index.ts'
 
@@ -112,6 +117,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
 
   /** Creates a Solana CCT manager for an existing chain. */
@@ -487,6 +493,72 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that initializes a Solana token pool remote-chain config for a
+   * previously unconfigured selector. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to
+   * `payer`.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
+   * @see {@link initChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedInitChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remoteTokenDecimals: 18,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedInitChainRemoteConfig(
+    opts: GenerateInitChainRemoteConfigParams,
+  ): Promise<GenerateInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Initializes a Solana token pool remote-chain config for a previously unconfigured selector
+   * with the pool owner wallet.
+   *
+   * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
+   * remote pools and rate limits separately before using the lane.
+   *
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.initChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remoteTokenDecimals: 18,
+   *   wallet,
+   * })
+   * ```
+   */
+  initChainRemoteConfig(
+    opts: ExecuteInitChainRemoteConfigParams,
+  ): Promise<ExecuteInitChainRemoteConfigResult> {
+    return this.#initChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
