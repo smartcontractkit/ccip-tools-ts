@@ -26,7 +26,11 @@ export type GetTokenAdminRegistryParams = {
   tokenAddress: string
 }
 
-/** Result of {@link GetTokenAdminRegistry}: the TAR entry for one token. */
+/**
+ * Result of {@link GetTokenAdminRegistry}: the TAR entry for one token.
+ * @remarks `administrator` may be {@link ZeroAddress} for a token pending acceptance;
+ * test with `=== ZeroAddress`, not truthiness.
+ */
 export type GetTokenAdminRegistryResult = RegistryTokenConfig
 
 /**
