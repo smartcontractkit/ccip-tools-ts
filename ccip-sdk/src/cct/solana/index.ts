@@ -70,6 +70,8 @@ import {
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteEditChainRemoteConfigParams,
+  type ExecuteEditChainRemoteConfigResult,
   type ExecuteInitChainRemoteConfigParams,
   type ExecuteInitChainRemoteConfigResult,
   type ExecuteRemoveFromAllowlistParams,
@@ -80,6 +82,8 @@ import {
   type GenerateCreateTokenMultisigResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateEditChainRemoteConfigParams,
+  type GenerateEditChainRemoteConfigResult,
   type GenerateInitChainRemoteConfigParams,
   type GenerateInitChainRemoteConfigResult,
   type GenerateRemoveFromAllowlistParams,
@@ -91,6 +95,7 @@ import {
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeployTokenPool,
+  EditChainRemoteConfig,
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
@@ -116,6 +121,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #configureAllowlist = new ConfigureAllowlist()
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #editChainRemoteConfig = new EditChainRemoteConfig()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
@@ -559,6 +565,71 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteInitChainRemoteConfigParams,
   ): Promise<ExecuteInitChainRemoteConfigResult> {
     return this.#initChainRemoteConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
+   * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
+   * replaces the remote token address, pool addresses, and decimals. Pass canonical `poolType` or
+   * a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @see {@link editChainRemoteConfig}
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedEditChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *   remoteTokenDecimals: 18,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedEditChainRemoteConfig(
+    opts: GenerateEditChainRemoteConfigParams,
+  ): Promise<GenerateEditChainRemoteConfigResult> {
+    return this.#editChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initialized Solana token pool remote-chain config with the pool owner wallet.
+   * Initialize the config first with `initChainRemoteConfig`. Each call replaces the remote token
+   * address, pool addresses, and decimals.
+   *
+   * @see {@link generateUnsignedEditChainRemoteConfig}
+   * @see {@link initChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.editChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *   remoteTokenDecimals: 18,
+   *   wallet,
+   * })
+   * ```
+   */
+  editChainRemoteConfig(
+    opts: ExecuteEditChainRemoteConfigParams,
+  ): Promise<ExecuteEditChainRemoteConfigResult> {
+    return this.#editChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**

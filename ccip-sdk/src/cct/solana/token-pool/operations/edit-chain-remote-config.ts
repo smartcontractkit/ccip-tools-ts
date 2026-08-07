@@ -31,61 +31,69 @@ import {
 
 const U64_MAX = 0xffff_ffff_ffff_ffffn
 
-/** Parameters shared by Solana token pool remote-config initialization generation and execution. */
-type InitChainRemoteConfigParams = PoolProgramRef & {
+/** Parameters shared by Solana token pool remote-config editing generation and execution. */
+type EditChainRemoteConfigParams = PoolProgramRef & {
   /** Token mint address managed by the local pool. */
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
   /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. Left-padded in the instruction. */
   remoteTokenAddress: string
-  /** Decimals of the remote token (`u8`), not the local mint: an integer from 0 to 255; 0 is valid. */
+  /**
+   * Hex-encoded remote pool addresses, optionally `0x`-prefixed. Stored at native byte length;
+   * unlike `remoteTokenAddress`, they are not left-padded.
+   */
+  remotePoolAddresses: string[]
+  /** Remote token decimals (`u8`): an integer from 0 to 255; 0 is valid. */
   remoteTokenDecimals: number
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
 
-type ParsedInitChainRemoteConfigParams = {
+type ParsedEditChainRemoteConfigParams = {
   tokenAddress: PublicKey
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
   remoteTokenAddress: Buffer
+  remotePoolAddresses: Buffer[]
   remoteTokenDecimals: number
 }
 
-/** Parameters for unsigned Solana token pool remote configuration initialization. */
-export type GenerateInitChainRemoteConfigParams = SolanaGenerateParams<InitChainRemoteConfigParams>
+/** Parameters for unsigned Solana token pool remote configuration editing. */
+export type GenerateEditChainRemoteConfigParams = SolanaGenerateParams<EditChainRemoteConfigParams>
 
-/** Unsigned Solana token pool remote configuration initialization result. */
-export type GenerateInitChainRemoteConfigResult = UnsignedSolanaTx
+/** Unsigned Solana token pool remote configuration editing result. */
+export type GenerateEditChainRemoteConfigResult = UnsignedSolanaTx
 
-/** Parameters for executing Solana token pool remote configuration initialization. */
-export type ExecuteInitChainRemoteConfigParams = SolanaExecuteParams<InitChainRemoteConfigParams>
+/** Parameters for executing Solana token pool remote configuration editing. */
+export type ExecuteEditChainRemoteConfigParams = SolanaExecuteParams<EditChainRemoteConfigParams>
 
-/** Result of executing Solana token pool remote configuration initialization. */
-export type ExecuteInitChainRemoteConfigResult = TransactionResult
+/** Result of executing Solana token pool remote configuration editing. */
+export type ExecuteEditChainRemoteConfigResult = TransactionResult
 
 /**
- * Initializes a previously unconfigured remote-chain config.
+ * Replaces an initialized remote-chain config.
  *
- * @remarks Fails if the chain config already exists.
+ * @remarks
+ * Full replacement, not a partial update — pass the complete intended config for all three fields,
+ * or omitted values are cleared. For example, `remotePoolAddresses: []` clears all remote pools.
  */
-export class InitChainRemoteConfig extends SolanaOperation<
-  InitChainRemoteConfigParams,
+export class EditChainRemoteConfig extends SolanaOperation<
+  EditChainRemoteConfigParams,
   UnsignedSolanaTx,
-  ParsedInitChainRemoteConfigParams
+  ParsedEditChainRemoteConfigParams
 > {
-  readonly name = 'initChainRemoteConfig'
+  readonly name = 'editChainRemoteConfig'
 
   /** Validation runs in {@link parse}. */
-  protected validate(_params: GenerateInitChainRemoteConfigParams): void {}
+  protected validate(_params: GenerateEditChainRemoteConfigParams): void {}
 
   /** Parses config values and defaults authority to payer without mutating caller params. */
   protected override parse(
-    params: GenerateInitChainRemoteConfigParams,
-  ): ParsedInitChainRemoteConfigParams {
+    params: GenerateEditChainRemoteConfigParams,
+  ): ParsedEditChainRemoteConfigParams {
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
     validateInteger(this.name, 'remoteTokenDecimals', params.remoteTokenDecimals, 0, 255)
 
@@ -96,9 +104,12 @@ export class InitChainRemoteConfig extends SolanaOperation<
       32,
     )
 
-    if (!remoteTokenAddress.length) {
-      throw new CCTParamsInvalidError(this.name, 'remoteTokenAddress', 'must not be empty')
+    if (!Array.isArray(params.remotePoolAddresses)) {
+      throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be an array')
     }
+    const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
+      parseHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
+    )
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -111,14 +122,15 @@ export class InitChainRemoteConfig extends SolanaOperation<
           : parsePublicKey(this.name, 'authority', params.authority),
       remoteChainSelector: params.remoteChainSelector,
       remoteTokenAddress,
+      remotePoolAddresses,
       remoteTokenDecimals: params.remoteTokenDecimals,
     }
   }
 
-  /** Builds the unsigned Solana `initChainRemoteConfig` instruction. */
+  /** Builds the unsigned Solana `editChainRemoteConfig` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedInitChainRemoteConfigParams,
+    opts: ParsedEditChainRemoteConfigParams,
   ): Promise<UnsignedSolanaTx> {
     const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
     const state = deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress)
@@ -131,9 +143,9 @@ export class InitChainRemoteConfig extends SolanaOperation<
     opts.remoteTokenAddress.copy(paddedRemoteToken, 32 - opts.remoteTokenAddress.length)
 
     const instruction = await program.methods
-      .initChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
+      .editChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
         tokenAddress: { address: paddedRemoteToken },
-        poolAddresses: [],
+        poolAddresses: opts.remotePoolAddresses.map((address) => ({ address })),
         decimals: opts.remoteTokenDecimals,
       })
       .accountsStrict({
@@ -153,8 +165,8 @@ export class InitChainRemoteConfig extends SolanaOperation<
   /** Generate, sign, simulate, send, and confirm with the pool owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteInitChainRemoteConfigParams,
-  ): Promise<ExecuteInitChainRemoteConfigResult> {
+    params: ExecuteEditChainRemoteConfigParams,
+  ): Promise<ExecuteEditChainRemoteConfigResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
@@ -162,7 +174,7 @@ export class InitChainRemoteConfig extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'initChainRemoteConfig requires authority to be the executing wallet. Use generateUnsignedInitChainRemoteConfig for externally signed transactions.',
+        'editChainRemoteConfig requires authority to be the executing wallet. Use generateUnsignedEditChainRemoteConfig for externally signed transactions.',
       )
     }
 
