@@ -4,8 +4,10 @@ import { describe, it } from 'node:test'
 import { PublicKey } from '@solana/web3.js'
 
 import {
+  parseHexBytes,
   parsePublicKey,
   resolvePoolProgram,
+  validateBigInt,
   validateInteger,
   validateNonEmptyString,
   validateOptionalPublicKey,
@@ -21,6 +23,18 @@ describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {
     const key = parsePublicKey('op', 'payer', PublicKey.default.toBase58())
     assert.ok(key.equals(PublicKey.default))
+  })
+
+  it('parses hex bytes with an optional maximum size', () => {
+    assert.deepEqual(parseHexBytes('op', 'address', '0x01ab', 2), Buffer.from('01ab', 'hex'))
+    assert.deepEqual(parseHexBytes('op', 'address', ''), Buffer.alloc(0))
+    assert.throws(
+      () => parseHexBytes('op', 'address', '0x123', 2),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.reason === 'must be a hex string of at most 2 bytes',
+    )
+    assert.throws(() => parseHexBytes('op', 'address', null), CCTParamsInvalidError)
   })
 
   it('accepts valid public keys', () => {
@@ -138,6 +152,20 @@ describe('Validate (cct/solana)', () => {
     assert.throws(
       () => validateInteger('op', 'decimals', 256, 0, 255),
       (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'decimals',
+    )
+  })
+
+  it('validates bigint bounds with useful errors', () => {
+    assert.doesNotThrow(() => validateBigInt('op', 'selector', 0n, 0n))
+    assert.throws(
+      () => validateBigInt('op', 'selector', -1n, 0n),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.reason === 'must be a bigint >= 0',
+    )
+    assert.throws(
+      () => validateBigInt('op', 'selector', 2n, undefined, 1n),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.reason === 'must be a bigint <= 1',
     )
   })
 
