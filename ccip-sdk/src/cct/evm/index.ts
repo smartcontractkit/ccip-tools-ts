@@ -221,6 +221,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Proposes a new TokenAdminRegistry administrator, signing + submitting with `opts.wallet`
    * (the current registry admin). Two-step: `newAdmin` must separately call `acceptAdmin`.
+   * This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
+   * (see {@link transferOwnership}); do not confuse the two.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
    * token's current registry administrator (including a not-yet-accepted registration), or if an

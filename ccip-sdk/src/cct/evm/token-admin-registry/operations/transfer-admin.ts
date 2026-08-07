@@ -36,7 +36,9 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
 export type TransferAdminParams = {
   /** Token whose registry admin role is being handed over. */
   tokenAddress: string
-  /** The administrator proposed to accept the token's registry admin role. */
+  /** The administrator proposed to accept the token's registry admin role. Pass {@link ZeroAddress}
+   * to cancel any pending transfer — the pending proposal is discarded without accepting the role.
+   */
   newAdmin: string
   /**
    * Contract to resolve the TokenAdminRegistry from. Pass the registry itself for a
