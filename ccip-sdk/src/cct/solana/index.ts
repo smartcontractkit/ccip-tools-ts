@@ -573,17 +573,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. The
-   * configured lane can no longer be used until it is initialized again; the closed account's rent
-   * is returned to `authority`. Pass canonical `poolType` or a compatible `poolProgramAddress`;
-   * `authority` defaults to `payer`.
+   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. Pass
+   * canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to `authority`.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `generateUnsignedInitChainRemoteConfig`. On-chain execution requires `authority` to be the
+   * token pool owner and the chain config to exist.
    *
    * @see {@link deleteChainRemoteConfig}
    * @see {@link generateUnsignedInitChainRemoteConfig}
    * @see {@link generateUnsignedEditChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote chain selector is invalid.
-   * The instruction requires `authority` to be the token pool owner and the chain config to exist.
    *
    * @example
    * ```ts
@@ -604,9 +607,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Closes an initialized Solana token pool remote-chain config with the pool owner wallet. The
-   * configured lane can no longer be used until it is initialized again, and the account rent is
-   * returned to the wallet.
+   * Closes an initialized Solana token pool remote-chain config with the pool owner wallet.
+   *
+   * @remarks
+   * Destructive: this closes the remote-chain config account and returns its rent to the wallet.
+   * CCIP transfers for `remoteChainSelector` fail until the config is recreated with
+   * `initChainRemoteConfig`.
    *
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
    * @see {@link initChainRemoteConfig}
