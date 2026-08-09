@@ -78,6 +78,8 @@ import {
   type ExecuteInitChainRemoteConfigResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
+  type ExecuteSetChainRateLimitParams,
+  type ExecuteSetChainRateLimitResult,
   type GenerateConfigureAllowlistParams,
   type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
@@ -92,6 +94,8 @@ import {
   type GenerateInitChainRemoteConfigResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
+  type GenerateSetChainRateLimitParams,
+  type GenerateSetChainRateLimitResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
@@ -104,6 +108,7 @@ import {
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
+  SetChainRateLimit,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -131,6 +136,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
+  readonly #setChainRateLimit = new SetChainRateLimit()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -644,6 +650,72 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteDeleteChainRemoteConfigParams,
   ): Promise<ExecuteDeleteChainRemoteConfigResult> {
     return this.#deleteChainRemoteConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that sets inbound and outbound rate limits for an initialized
+   * Solana token pool remote-chain config. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin.
+   * Enabled limits require `rate <= capacity`; disabled limits require both values to be zero.
+   *
+   * @see {@link setChainRateLimit}
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, rate limit, or selector is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetChainRateLimit({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetChainRateLimit(
+    opts: GenerateSetChainRateLimitParams,
+  ): Promise<GenerateSetChainRateLimitResult> {
+    return this.#setChainRateLimit.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets inbound and outbound rate limits for an initialized Solana token pool remote-chain config
+   * with the pool owner or rate-limit admin wallet.
+   *
+   * @remarks Enabled limits require `rate <= capacity`; disabled limits require both values to be
+   * zero.
+   *
+   * @see {@link generateUnsignedSetChainRateLimit}
+   * @see {@link initChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or rate limit is invalid, or the
+   * authority differs from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the chain config does not exist, the wallet is neither the
+   * pool owner nor rate-limit admin, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setChainRateLimit({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   wallet,
+   * })
+   * ```
+   */
+  setChainRateLimit(opts: ExecuteSetChainRateLimitParams): Promise<ExecuteSetChainRateLimitResult> {
+    return this.#setChainRateLimit.execute(this.chain, opts)
   }
 
   /**
