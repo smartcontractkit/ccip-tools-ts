@@ -287,6 +287,26 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
 }
 
 /**
+ * Reads the source decimals a source pool declares in its `destPoolData`/`extraData`.
+ * Mirrors `TokenPool._parseRemoteDecimals`: only a 32-byte plausible-decimals payload declares
+ * them; anything else (absent, short, or a pool-specific payload) means the amount is already
+ * in local decimals.
+ * @param extraData - The token transfer's `extraData`/`destPoolData`.
+ * @returns The declared source decimals, or `undefined`.
+ */
+export function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
+  if (!extraData) return undefined
+  try {
+    const bytes = getDataBytes(extraData)
+    if (bytes.length !== 32) return undefined
+    const decimals = toBigInt(bytes)
+    return 0 < decimals && decimals <= 36 ? decimals : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Converts bytes to a Node.js Buffer.
  * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
  * @returns Node.js Buffer.

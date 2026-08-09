@@ -63,7 +63,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { getDataBytes, util, withRetry } from './utils.ts'
+import { getDataBytes, getSourceDecimalsFromExtraData, util, withRetry } from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -1390,10 +1390,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }): Promise<true> {
     let registry
     for (const ta of message.tokenAmounts ?? []) {
-      const amount = ta.amount
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
       // Native value transfers aren't pool-managed — skip the token-pool preflight.
       if (!token || token.match(/^(0x)?0*$/i)) continue
+      // liquidity and inbound rate-limit state below are dest-denominated, so rescale a
+      // source-denominated amount here; `ta.amount` itself must stay source-denominated —
+      // EVMChain's override feeds it to releaseOrMint as sourceDenominatedAmount
+      const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
+      let amount = ta.amount
+      if (sourceDecimals != null) {
+        const { decimals: destDecimals } = await this.getTokenInfo(token)
+        amount =
+          (ta.amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
+      }
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)

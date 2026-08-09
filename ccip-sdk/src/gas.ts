@@ -1,4 +1,4 @@
-import { type BytesLike, formatUnits, hexlify, randomBytes, toBigInt } from 'ethers'
+import { type BytesLike, formatUnits, hexlify, randomBytes } from 'ethers'
 import type { Simplify } from 'type-fest'
 
 import type { Chain } from './chain.ts'
@@ -17,7 +17,7 @@ import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage, MessageInput, OffchainTokenData } from './types.ts'
-import { getDataBytes } from './utils.ts'
+import { getDataBytes, getSourceDecimalsFromExtraData } from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
@@ -171,18 +171,6 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
     sourcePoolAddress,
     sourceTokenAddress,
     destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
-  }
-}
-
-function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
-  if (!extraData) return undefined
-  try {
-    const bytes = getDataBytes(extraData)
-    if (bytes.length !== 32) return undefined
-    const decimals = toBigInt(bytes)
-    return 0 < decimals && decimals <= 36 ? decimals : undefined
-  } catch {
-    return undefined
   }
 }
 

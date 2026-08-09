@@ -890,6 +890,31 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     assert.equal(decoded.sourcePoolAddress, SRC_POOL_BYTES)
   })
 
+  it('the generic layer rescales for its own comparisons, never for the simulation', async () => {
+    // base checkExecute converts the amount to dest decimals for the rate-limit/liquidity reads;
+    // releaseOrMint must still see it exactly as the source pool reported it
+    const { chain, provider } = makeChain({
+      inboundRateLimiterState: { tokens: 10n ** 16n, capacity: 10n ** 18n, rate: 1n },
+    })
+    await chain.checkExecute({
+      offRamp: OFFRAMP,
+      message: {
+        ...MESSAGE,
+        tokenAmounts: [
+          {
+            sourcePoolAddress: SRC_POOL_BYTES,
+            destTokenAddress: TOKEN,
+            amount: 1000n,
+            extraData: abi.encode(['uint256'], [6n]), // source 6 decimals, dest mock is 18
+          },
+        ],
+      },
+    })
+    const simCall = provider.calls.find((c) => c.data?.startsWith(ROM_V2_SEL))!
+    const [decoded] = pool.decodeFunctionData(ROM_V2_FRAG, simCall.data!)
+    assert.equal(decoded.sourceDenominatedAmount, 1000n) // not 1000 * 10**12
+  })
+
   // ==========================================================================
   // attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x)
   // ==========================================================================
