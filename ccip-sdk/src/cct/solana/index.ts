@@ -64,6 +64,8 @@ import {
   type BaseGetTokenPoolStateResult,
   type BurnMintPoolProgramRef,
   type CustomPoolProgramRef,
+  type ExecuteApplyChainUpdatesParams,
+  type ExecuteApplyChainUpdatesResult,
   type ExecuteConfigureAllowlistParams,
   type ExecuteConfigureAllowlistResult,
   type ExecuteCreateTokenMultisigParams,
@@ -82,6 +84,8 @@ import {
   type ExecuteSetChainRateLimitResult,
   type ExecuteSetRateLimitAdminParams,
   type ExecuteSetRateLimitAdminResult,
+  type GenerateApplyChainUpdatesParams,
+  type GenerateApplyChainUpdatesResult,
   type GenerateConfigureAllowlistParams,
   type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
@@ -104,6 +108,7 @@ import {
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
   type LockReleasePoolProgramRef,
+  ApplyChainUpdates,
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeleteChainRemoteConfig,
@@ -133,6 +138,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
+  readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #configureAllowlist = new ConfigureAllowlist()
   readonly #createTokenMultisig = new CreateTokenMultisig()
   readonly #deployTokenPool = new DeployTokenPool()
@@ -517,6 +523,88 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds one unsigned transaction that removes remote-chain configs and adds new configs with
+   * their remote pools and rate limits. This accepts the same `remoteChainSelectorsToRemove` and
+   * `chainsToAdd` parameters as EVM `applyChainUpdates`.
+   *
+   * @remarks Solana preserves EVM ordering with separate instructions: all removals run first,
+   * then each addition is initialized, configured with remote pools, and assigned both rate-limit
+   * configs, including disabled ones. A chain in `chainsToAdd` must not already exist; to replace
+   * one, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`. Solana
+   * additionally requires `remoteTokenDecimals`. Pass canonical `poolType` or a compatible
+   * `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @see {@link applyChainUpdates}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or chain update is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApplyChainUpdates({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelectorsToRemove: [oldSelector],
+   *   chainsToAdd: [{
+   *     remoteChainSelector: newSelector,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: false },
+   *     outboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   }],
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedApplyChainUpdates(
+    opts: GenerateApplyChainUpdatesParams,
+  ): Promise<GenerateApplyChainUpdatesResult> {
+    return this.#applyChainUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Applies EVM-equivalent remote-chain configuration changes with the pool owner wallet.
+   *
+   * @remarks All removals run before additions. Each addition initializes the chain config, sets
+   * remote pools, and applies both rate-limit configs, including disabled configs. To replace an
+   * existing config, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`.
+   * This is atomic: if any instruction fails, none commit. `wallet` is both the fee payer and
+   * default authority; specify `authority` only when it is the same wallet.
+   *
+   * @see {@link generateUnsignedApplyChainUpdates}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or chain update is invalid, or the
+   * authority differs from the executing wallet.
+   * @throws {@link CCTTxFailedError} If a chain config already exists or is missing, the wallet is
+   * not the pool owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.applyChainUpdates({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelectorsToRemove: [],
+   *   chainsToAdd: [{
+   *     remoteChainSelector: selector,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: false },
+   *     outboundRateLimiterConfig: { enabled: false },
+   *   }],
+   *   wallet,
+   * })
+   * ```
+   */
+  applyChainUpdates(opts: ExecuteApplyChainUpdatesParams): Promise<ExecuteApplyChainUpdatesResult> {
+    return this.#applyChainUpdates.execute(this.chain, opts)
   }
 
   /**
