@@ -27,14 +27,75 @@ import {
 
 const U64_MAX = 0xffff_ffff_ffff_ffffn
 
-/** Configuration for one direction of a token pool rate limiter. */
-export type RateLimitConfig = {
-  /** Whether this directional rate limit is enforced. Disabled limits require zero capacity and rate. */
+/**
+ * Configuration for one direction of a token pool rate limiter.
+ *
+ * @remarks For a mint with 6 decimals, pass `1_000_000n` to represent one token.
+ */
+export type RateLimitConfig =
+  | {
+      /** Whether this directional rate limit is enforced. */
+      enabled: true
+      /** Maximum token amount in the bucket (`u64`), at least `rate`. */
+      capacity: bigint
+      /** Token amount restored to the bucket per second (`u64`), no greater than `capacity`. */
+      rate: bigint
+    }
+  | {
+      /** Whether this directional rate limit is enforced. */
+      enabled: false
+      /** Must be zero when provided; defaults to zero. */
+      capacity?: bigint
+      /** Must be zero when provided; defaults to zero. */
+      rate?: bigint
+    }
+
+type ParsedRateLimitConfig = {
   enabled: boolean
-  /** Maximum tokens available in the rate-limit bucket (`u64`). Must be at least `rate` when enabled. */
   capacity: bigint
-  /** Tokens replenished per second (`u64`). Must not exceed `capacity` when enabled. */
   rate: bigint
+}
+
+function parseRateLimitConfig(
+  operation: string,
+  direction: string,
+  config: unknown,
+): ParsedRateLimitConfig {
+  if (typeof config !== 'object' || config === null) {
+    throw new CCTParamsInvalidError(operation, direction, 'must be a rate-limit configuration')
+  }
+
+  const {
+    enabled,
+    capacity: inputCapacity,
+    rate: inputRate,
+  } = config as Partial<ParsedRateLimitConfig>
+
+  if (typeof enabled !== 'boolean') {
+    throw new CCTParamsInvalidError(operation, `${direction}.enabled`, 'must be a boolean')
+  }
+
+  const capacity = !enabled && inputCapacity === undefined ? 0n : inputCapacity
+  const rate = !enabled && inputRate === undefined ? 0n : inputRate
+
+  validateBigInt(operation, `${direction}.capacity`, capacity, 0n, U64_MAX)
+  validateBigInt(operation, `${direction}.rate`, rate, 0n, U64_MAX)
+
+  if (enabled && rate > capacity) {
+    throw new CCTParamsInvalidError(
+      operation,
+      `${direction}.rate`,
+      'must not exceed capacity when enabled',
+    )
+  }
+  if (!enabled && (capacity !== 0n || rate !== 0n)) {
+    throw new CCTParamsInvalidError(
+      operation,
+      direction,
+      'must have zero capacity and rate when disabled',
+    )
+  }
+  return { enabled, capacity, rate }
 }
 
 /** Parameters shared by Solana token pool rate-limit generation and execution. */
@@ -43,9 +104,9 @@ type SetChainRateLimitParams = PoolProgramRef & {
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
-  /** Rate limit for tokens received from the remote chain. */
+  /** Rate limit for tokens received from the remote chain. Disabled limits default omitted values to zero. */
   inbound: RateLimitConfig
-  /** Rate limit for tokens sent to the remote chain. */
+  /** Rate limit for tokens sent to the remote chain. Disabled limits default omitted values to zero. */
   outbound: RateLimitConfig
   /** Pool owner or rate-limit admin. Defaults to `payer` for single-signer transactions. */
   authority?: string
@@ -57,8 +118,8 @@ type ParsedSetChainRateLimitParams = {
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
-  inbound: RateLimitConfig
-  outbound: RateLimitConfig
+  inbound: ParsedRateLimitConfig
+  outbound: ParsedRateLimitConfig
 }
 
 /** Parameters for unsigned Solana token pool rate-limit configuration. */
@@ -84,33 +145,8 @@ export class SetChainRateLimit extends SolanaOperation<
   /** Parses rate limits and defaults authority to payer without mutating caller params. */
   protected override parse(params: GenerateSetChainRateLimitParams): ParsedSetChainRateLimitParams {
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
-    for (const [direction, config] of Object.entries({
-      inbound: params.inbound,
-      outbound: params.outbound,
-    })) {
-      if (typeof config.enabled !== 'boolean') {
-        throw new CCTParamsInvalidError(this.name, `${direction}.enabled`, 'must be a boolean')
-      }
-
-      validateBigInt(this.name, `${direction}.capacity`, config.capacity, 0n, U64_MAX)
-      validateBigInt(this.name, `${direction}.rate`, config.rate, 0n, U64_MAX)
-
-      if (config.enabled && config.rate > config.capacity) {
-        throw new CCTParamsInvalidError(
-          this.name,
-          `${direction}.rate`,
-          'must not exceed capacity when enabled',
-        )
-      }
-      if (!config.enabled && (config.capacity !== 0n || config.rate !== 0n)) {
-        throw new CCTParamsInvalidError(
-          this.name,
-          direction,
-          'must have zero capacity and rate when disabled',
-        )
-      }
-    }
-
+    const inbound = parseRateLimitConfig(this.name, 'inbound', params.inbound)
+    const outbound = parseRateLimitConfig(this.name, 'outbound', params.outbound)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
@@ -121,8 +157,8 @@ export class SetChainRateLimit extends SolanaOperation<
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
       remoteChainSelector: params.remoteChainSelector,
-      inbound: params.inbound,
-      outbound: params.outbound,
+      inbound,
+      outbound,
     }
   }
 

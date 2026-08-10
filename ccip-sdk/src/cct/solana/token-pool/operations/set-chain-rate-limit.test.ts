@@ -120,14 +120,50 @@ describe('SetChainRateLimit (cct/solana)', () => {
       assert.equal(data.outbound.rate.toString(), '20')
     })
 
-    it('supports zero selectors and rate limits', async () => {
-      await assert.doesNotReject(() =>
-        generate({
-          remoteChainSelector: 0n,
-          inbound: { enabled: false, capacity: 0n, rate: 0n },
-          outbound: { enabled: false, capacity: 0n, rate: 0n },
-        }),
-      )
+    it('encodes each enabled and disabled direction combination', async () => {
+      for (const [inbound, outbound, expected] of [
+        [{ enabled: false }, { enabled: false }, [false, '0', '0', false, '0', '0']],
+        [
+          { enabled: false, capacity: 0n, rate: 0n },
+          { enabled: true, capacity: 200n, rate: 20n },
+          [false, '0', '0', true, '200', '20'],
+        ],
+        [
+          { enabled: true, capacity: 100n, rate: 10n },
+          { enabled: false },
+          [true, '100', '10', false, '0', '0'],
+        ],
+      ] as const) {
+        const unsigned = await generate({ remoteChainSelector: 0n, inbound, outbound })
+        const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+        assert.ok(decoded)
+        const data = decoded.data as {
+          remoteChainSelector: { toString(): string }
+          inbound: {
+            enabled: boolean
+            capacity: { toString(): string }
+            rate: { toString(): string }
+          }
+          outbound: {
+            enabled: boolean
+            capacity: { toString(): string }
+            rate: { toString(): string }
+          }
+        }
+
+        assert.equal(data.remoteChainSelector.toString(), '0')
+        assert.deepEqual(
+          [
+            data.inbound.enabled,
+            data.inbound.capacity.toString(),
+            data.inbound.rate.toString(),
+            data.outbound.enabled,
+            data.outbound.capacity.toString(),
+            data.outbound.rate.toString(),
+          ],
+          expected,
+        )
+      }
     })
 
     it('uses a compatible custom pool program', async () => {

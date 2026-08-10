@@ -658,7 +658,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin.
-   * Enabled limits require `rate <= capacity`; disabled limits require both values to be zero.
+   * Enabled limits require `rate <= capacity`; disabled limits default omitted values to zero and
+   * reject nonzero values.
    *
    * @see {@link setChainRateLimit}
    * @see {@link generateUnsignedInitChainRemoteConfig}
@@ -673,7 +674,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
-   *   outbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: false }, // Disabled limits default capacity and rate to zero.
    *   payer,
    *   authority,
    * })
@@ -689,8 +690,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Sets inbound and outbound rate limits for an initialized Solana token pool remote-chain config
    * with the pool owner or rate-limit admin wallet.
    *
-   * @remarks Enabled limits require `rate <= capacity`; disabled limits require both values to be
-   * zero.
+   * @remarks Enabled limits require `rate <= capacity`; disabled limits default omitted values to
+   * zero and reject nonzero values.
    *
    * @see {@link generateUnsignedSetChainRateLimit}
    * @see {@link initChainRemoteConfig}
@@ -709,7 +710,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
-   *   outbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: false }, // Disabled limits default capacity and rate to zero.
    *   wallet,
    * })
    * ```
