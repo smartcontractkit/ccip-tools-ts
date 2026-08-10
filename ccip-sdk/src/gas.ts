@@ -17,7 +17,7 @@ import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage, MessageInput, OffchainTokenData } from './types.ts'
-import { getDataBytes, getSourceDecimalsFromExtraData } from './utils.ts'
+import { getDataBytes, getSourceDecimalsFromExtraData, scaleDecimals } from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
@@ -219,8 +219,7 @@ export async function getDestTokenAmount({
         ).decimals
       : destDecimals)
 
-  const destAmount =
-    (tokenAmount.amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
+  const destAmount = scaleDecimals(tokenAmount.amount, sourceDecimals, destDecimals)
   if (destAmount === 0n)
     throw new CCIPTokenDecimalsInsufficientError(
       destTokenAddress,

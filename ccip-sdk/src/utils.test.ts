@@ -16,11 +16,14 @@ import {
   getAddressBytes,
   getDataBytes,
   getSomeBlockNumberBefore,
+  getSourceDecimalsFromExtraData,
   isBase64,
+  isVersionBelow,
   jsonParse,
   jsonStringify,
   leToBigInt,
   parseTypeAndVersion,
+  scaleDecimals,
   sleep,
   snakeToCamel,
   toLeArray,
@@ -1343,5 +1346,58 @@ describe('jsonParse', () => {
     assert.equal(parsed.x, val.x)
     assert.equal(parsed.y, val.y)
     assert.equal(parsed.z, val.z)
+  })
+})
+
+describe('getSourceDecimalsFromExtraData', () => {
+  const word = (n: bigint) => '0x' + n.toString(16).padStart(64, '0')
+
+  it('reads a 32-byte decimals word, including 0', () => {
+    assert.equal(getSourceDecimalsFromExtraData(word(0n)), 0)
+    assert.equal(getSourceDecimalsFromExtraData(word(6n)), 6)
+    assert.equal(getSourceDecimalsFromExtraData(word(18n)), 18)
+    assert.equal(getSourceDecimalsFromExtraData(word(36n)), 36)
+  })
+
+  it('declares nothing for absent, wrong-length or implausible payloads', () => {
+    for (const extraData of [
+      undefined,
+      '0x',
+      word(0n).slice(0, -2), // 31 bytes
+      word(0n) + '00', // 33 bytes
+      word(37n),
+      word(2n ** 251n), // a Lombard-style payload hash
+      'not-hex',
+    ]) {
+      assert.equal(getSourceDecimalsFromExtraData(extraData), undefined, String(extraData))
+    }
+  })
+})
+
+describe('scaleDecimals', () => {
+  it('scales up, down and not at all', () => {
+    assert.equal(scaleDecimals(10n ** 15n, 18, 9), 10n ** 6n)
+    assert.equal(scaleDecimals(10n ** 6n, 9, 18), 10n ** 15n)
+    assert.equal(scaleDecimals(1234n, 6, 6), 1234n)
+  })
+
+  it('truncates like the pools do', () => {
+    assert.equal(scaleDecimals(1n, 18, 9), 0n)
+    assert.equal(scaleDecimals(1_999_999_999n, 18, 9), 1n)
+  })
+})
+
+describe('isVersionBelow', () => {
+  it('compares numerically, not lexically', () => {
+    assert.equal(isVersionBelow('LockReleaseTokenPool 1.5.1', '1.6.1'), true)
+    assert.equal(isVersionBelow('LockReleaseTokenPool 1.6.0', '1.6.1'), true)
+    assert.equal(isVersionBelow('LockReleaseTokenPool 1.6.1', '1.6.1'), false)
+    assert.equal(isVersionBelow('BurnMintTokenPool 1.6.10', '1.6.1'), false)
+    assert.equal(isVersionBelow('BurnMintTokenPool 2.0.0', '1.6.1'), false)
+  })
+
+  it('treats an unparseable version as recent', () => {
+    assert.equal(isVersionBelow(undefined, '1.6.1'), false)
+    assert.equal(isVersionBelow('BurnMintTokenPool', '1.6.1'), false)
   })
 })

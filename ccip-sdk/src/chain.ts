@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, hexlify, isBytesLike, keccak256 } from 'ethers'
+import { type BytesLike, dataLength, formatUnits, hexlify, isBytesLike, keccak256 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -14,6 +14,7 @@ import {
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
+  CCIPTokenDecimalsInsufficientError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -31,7 +32,7 @@ import type {
 import type { EstimateMessageInput, GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
-import { type ChainFamily, type NetworkInfo, type NetworkType, networkInfo } from './networks.ts'
+import { type NetworkInfo, type NetworkType, ChainFamily, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import {
   getMessagesInBatch,
@@ -63,7 +64,14 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { getDataBytes, getSourceDecimalsFromExtraData, util, withRetry } from './utils.ts'
+import {
+  getDataBytes,
+  getSourceDecimalsFromExtraData,
+  isVersionBelow,
+  scaleDecimals,
+  util,
+  withRetry,
+} from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -1393,42 +1401,65 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
       // Native value transfers aren't pool-managed — skip the token-pool preflight.
       if (!token || token.match(/^(0x)?0*$/i)) continue
-      // liquidity and inbound rate-limit state below are dest-denominated, so rescale a
-      // source-denominated amount here; `ta.amount` itself must stay source-denominated —
-      // EVMChain's override feeds it to releaseOrMint as sourceDenominatedAmount
-      const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
-      let amount = ta.amount
-      if (sourceDecimals != null) {
-        const { decimals: destDecimals } = await this.getTokenInfo(token)
-        amount =
-          (ta.amount * BigInt(10) ** BigInt(destDecimals)) / BigInt(10) ** BigInt(sourceDecimals)
-      }
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
-      // if a LockReleaseTokenPool, also check it has enough liquidity
-      if (typeAndVersion?.includes('LockRelease')) {
-        const [balance, { symbol }] = await Promise.all([
-          this.getBalance({ holder: lockBox || tokenPool!, token }),
-          this.getTokenInfo(token),
-        ])
-        if (balance < amount) {
-          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
-            context: { tokenPool, token, typeAndVersion, network: this.network.name },
-          })
+
+      // `ta.amount` is source-denominated whenever `extraData` declares the source decimals.
+      // Convert for the comparisons below, but never touch `ta.amount`: EVMChain's override
+      // forwards it to releaseOrMint as sourceDenominatedAmount.
+      const isLockRelease = Boolean(typeAndVersion?.includes('LockRelease'))
+      const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
+      const tokenInfo =
+        sourceDecimals != null || isLockRelease ? await this.getTokenInfo(token) : undefined
+      let localAmount = ta.amount
+      let scaled
+      if (sourceDecimals != null) {
+        localAmount = scaleDecimals(ta.amount, sourceDecimals, tokenInfo!.decimals)
+        scaled = { sourceAmount: ta.amount, sourceDecimals, destDecimals: tokenInfo!.decimals }
+        // the dest token cannot represent the transfer at all — the pool would release nothing
+        if (localAmount === 0n && ta.amount > 0n)
+          throw new CCIPTokenDecimalsInsufficientError(
+            token,
+            tokenInfo!.decimals,
+            this.network.name,
+            formatUnits(ta.amount, sourceDecimals),
+          )
+      }
+
+      // pool balances are in local units in every pool version
+      if (isLockRelease) {
+        const balance = await this.getBalance({ holder: lockBox || tokenPool!, token })
+        if (balance < localAmount) {
+          throw new CCIPInsufficientBalanceError(
+            balance.toString(),
+            localAmount.toString(),
+            tokenInfo!.symbol,
+            {
+              context: { tokenPool, token, typeAndVersion, network: this.network.name, ...scaled },
+            },
+          )
         }
       }
 
       const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
       if (!remote.inboundRateLimiterState) continue
-      if (amount > remote.inboundRateLimiterState.tokens) {
+      // EVM pools debit the inbound bucket in local units only from 1.6.1
+      // (TokenPool._validateReleaseOrMint); 1.5.1 and 1.6.0 consume the source-denominated
+      // amount. Every other family debits local units at all versions.
+      const bucketAmount =
+        this.network.family === ChainFamily.EVM && isVersionBelow(typeAndVersion, '1.6.1')
+          ? ta.amount
+          : localAmount
+      if (bucketAmount > remote.inboundRateLimiterState.tokens) {
         throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
           token,
-          amount,
+          amount: bucketAmount,
           tokenPool: tokenPool!,
           registry,
           sourceChainSelector: message.sourceChainSelector,
           destChainSelector: this.network.chainSelector,
+          ...(bucketAmount === localAmount ? scaled : undefined),
         })
       }
     }

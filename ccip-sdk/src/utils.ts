@@ -288,22 +288,53 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
 
 /**
  * Reads the source decimals a source pool declares in its `destPoolData`/`extraData`.
- * Mirrors `TokenPool._parseRemoteDecimals`: only a 32-byte plausible-decimals payload declares
- * them; anything else (absent, short, or a pool-specific payload) means the amount is already
- * in local decimals.
- * @param extraData - The token transfer's `extraData`/`destPoolData`.
- * @returns The declared source decimals, or `undefined`.
+ * Deliberately narrower than `TokenPool._parseRemoteDecimals`, which reverts on a non-empty
+ * non-32-byte payload and accepts any `uint8`: pools that override it (USDC/CCTP, Lombard) put
+ * their own payloads here, so only a 32-byte word in the plausible `0..36` range is read as a
+ * declaration.
+ * @param extraData - The transfer's `extraData`/`destPoolData`.
+ * @returns Declared source decimals, or `undefined` when the amount is already in local decimals.
  */
-export function getSourceDecimalsFromExtraData(extraData?: string): bigint | undefined {
+export function getSourceDecimalsFromExtraData(extraData?: string): number | undefined {
   if (!extraData) return undefined
   try {
     const bytes = getDataBytes(extraData)
     if (bytes.length !== 32) return undefined
     const decimals = toBigInt(bytes)
-    return 0 < decimals && decimals <= 36 ? decimals : undefined
+    // 0 is a legal declaration — 0-decimal tokens exist
+    return 0n <= decimals && decimals <= 36n ? Number(decimals) : undefined
   } catch {
     return undefined
   }
+}
+
+/**
+ * Rescales `amount` from one token's decimals to another's, truncating like the pools do.
+ * @param amount - Amount in `fromDecimals` units.
+ * @param fromDecimals - Decimals `amount` is denominated in.
+ * @param toDecimals - Decimals to convert to.
+ * @returns `amount` in `toDecimals` units.
+ */
+export function scaleDecimals(amount: bigint, fromDecimals: number, toDecimals: number): bigint {
+  if (fromDecimals === toDecimals) return amount
+  return (amount * BigInt(10) ** BigInt(toDecimals)) / BigInt(10) ** BigInt(fromDecimals)
+}
+
+/**
+ * Whether a `typeAndVersion` string's version is below `minVersion`.
+ * @param typeAndVersion - E.g. `'LockReleaseTokenPool 1.6.0'`; an unparseable one reads as not-below.
+ * @param minVersion - Exclusive lower bound, e.g. `'1.6.1'`.
+ * @returns True only when the parsed version is strictly below `minVersion`.
+ */
+export function isVersionBelow(typeAndVersion: string | undefined, minVersion: string): boolean {
+  const found = typeAndVersion?.match(/(\d+)\.(\d+)\.(\d+)/)
+  if (!found) return false
+  const bounds = minVersion.split('.')
+  for (const [i, bound] of bounds.entries()) {
+    const part = Number(found[i + 1])
+    if (part !== Number(bound)) return part < Number(bound)
+  }
+  return false
 }
 
 /**
