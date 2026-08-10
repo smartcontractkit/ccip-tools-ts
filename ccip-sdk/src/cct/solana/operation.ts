@@ -33,10 +33,10 @@ export abstract class SolanaOperation<
   Parsed = SolanaGenerateParams<P>,
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult> {
   /**
-   * Validate params without changing them.
+   * Optional validation hook required by the shared CCT operation contract.
    *
-   * The default performs no validation. Override this when validation does not need parsing or
-   * normalization.
+   * The default performs no validation. Prefer {@link parse} for Solana operation validation and
+   * normalization; override this only when parsing is unnecessary.
    */
   protected validate(_params: SolanaGenerateParams<P>): void {}
 
