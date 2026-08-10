@@ -22,10 +22,28 @@ import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/de
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
+  type AcceptAdminParams,
+  AcceptAdmin,
+} from './token-admin-registry/operations/accept-admin.ts'
+import {
+  type GetSupportedTokensParams,
+  type GetSupportedTokensResult,
+  GetSupportedTokens,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
+import {
+  type GetTokenAdminRegistryParams,
+  type GetTokenAdminRegistryResult,
+  GetTokenAdminRegistry,
+} from './token-admin-registry/operations/get-token-admin-registry.ts'
+import {
   type RegisterAdminParams,
   RegisterAdmin,
 } from './token-admin-registry/operations/register-admin.ts'
 import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
+import {
+  type TransferAdminParams,
+  TransferAdmin,
+} from './token-admin-registry/operations/transfer-admin.ts'
 import {
   type DeployTokenPoolParams,
   DeployTokenPool,
@@ -49,6 +67,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
+  readonly #transferAdmin = new TransferAdmin()
+  readonly #acceptAdmin = new AcceptAdmin()
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #getSupportedTokens = new GetSupportedTokens()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -189,6 +211,138 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setPool(opts: EVMExecuteParams<SetPoolParams>): Promise<TransactionResult> {
     return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned TokenAdminRegistry `transferAdmin` tx (for multisig / offline signing).
+   * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the
+   * handoff. This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
+   * (see {@link transferOwnership}); do not confuse the two.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is not the
+   * token's current registry administrator (including a not-yet-accepted registration)
+   * @example
+   * ```typescript
+   * // `sender` must be the token's current registry administrator
+   * const unsigned = await cct.generateUnsignedTransferAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...', // must separately call acceptAdmin
+   *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedTransferAdmin(opts: TransferAdminParams): Promise<UnsignedEVMTx> {
+    return this.#transferAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new TokenAdminRegistry administrator, signing + submitting with `opts.wallet`
+   * (the current registry admin). Two-step: `newAdmin` must separately call `acceptAdmin`.
+   * This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
+   * (see {@link transferOwnership}); do not confuse the two.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
+   * token's current registry administrator (including a not-yet-accepted registration), or if an
+   * explicit `opts.sender` does not match the wallet's address
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must sign as the token's current registry administrator; `sender` defaults to its
+   * // address, so pass it only for offline builds via generateUnsignedTransferAdmin.
+   * const { hash } = await cct.transferAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   address: '0xTokenAdminRegistry...',
+   *   wallet,
+   * })
+   * ```
+   */
+  transferAdmin(opts: EVMExecuteParams<TransferAdminParams>): Promise<TransactionResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `acceptAdminRole` tx (for multisig / offline signing). Second half of
+   * the two-step admin handshake: a registry module's `registerAdmin` (fresh registration) or
+   * the current admin's `transferAdmin` (hand-off) proposes `opts.sender` as
+   * `pendingAdministrator`; `acceptAdmin` then confirms it on-chain before encoding, after which
+   * {@link setPool} becomes callable by the new administrator.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
+   *   pending administrator
+   * @example
+   * ```typescript
+   * // `sender` must be the pending administrator proposed by registerAdmin/transferAdmin
+   * const unsigned = await cct.generateUnsignedAcceptAdmin({
+   *   tokenAddress: '0xToken...',
+   *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
+   *   sender: '0xPendingAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptAdmin(opts: AcceptAdminParams): Promise<UnsignedEVMTx> {
+    return this.#acceptAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a pending TokenAdminRegistry administrator role, signing + submitting with
+   * `opts.wallet` (the pending administrator). Completes the `registerAdmin`/`transferAdmin` →
+   * `acceptAdmin` handshake, after which {@link setPool} becomes callable.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
+   *   pending administrator
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * // `wallet` must sign as the pending administrator
+   * const { hash } = await cct.acceptAdmin({
+   *   tokenAddress: '0xToken...',
+   *   address: '0xTokenAdminRegistry...',
+   *   wallet,
+   * })
+   * ```
+   */
+  acceptAdmin(opts: EVMExecuteParams<AcceptAdminParams>): Promise<TransactionResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a token's TokenAdminRegistry entry: its `administrator`, any `pendingAdministrator`,
+   * and its registered `tokenPool`.
+   * @remarks Deliberately diverges from `cct.chain.getRegistryTokenConfig()`, which throws when
+   * `administrator` is the zero address — exactly the post-`registerAdmin`, pre-`acceptAdmin`
+   * state. This op reports `{ administrator: ZeroAddress, pendingAdministrator }` faithfully
+   * instead, so a pending registration is observable; see
+   * {@link GetTokenAdminRegistry} for the full rationale. `pendingAdministrator` and `tokenPool`
+   * are still omitted when zero.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const config = await cct.getTokenAdminRegistry({
+   *   address: '0xTokenAdminRegistry...', // or a Router/OnRamp/OffRamp/pool to resolve it from
+   *   tokenAddress: '0xToken...',
+   * })
+   * if (config.administrator === ZeroAddress) {
+   *   console.log('pending acceptance by', config.pendingAdministrator)
+   * }
+   * ```
+   */
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
+  }
+
+  /**
+   * Lists every token configured in the TokenAdminRegistry resolved from `address`.
+   * @remarks The registry paginates via `getAllConfiguredTokens` — `opts.page` sets the batch size per call; omit it to read the
+   * whole registry in one round trip per 1000 tokens.
+   * @throws {@link CCTParamsInvalidError} if `address` is not a valid address, or `page` is given
+   * and is not a positive integer
+   * @example
+   * ```typescript
+   * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
+   * ```
+   */
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<GetSupportedTokensResult> {
+    return this.#getSupportedTokens.query(this.chain, opts)
   }
 
   /**
@@ -441,11 +595,21 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export * from '../errors.ts'
+export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
 export type {
   RegisterAdminMethod,
   RegisterAdminParams,
 } from './token-admin-registry/operations/register-admin.ts'
+export type {
+  GetTokenAdminRegistryParams,
+  GetTokenAdminRegistryResult,
+} from './token-admin-registry/operations/get-token-admin-registry.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
+export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
+export type {
+  GetSupportedTokensParams,
+  GetSupportedTokensResult,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
   DeployTokenPoolParams,
