@@ -80,6 +80,8 @@ import {
   type ExecuteRemoveFromAllowlistResult,
   type ExecuteSetChainRateLimitParams,
   type ExecuteSetChainRateLimitResult,
+  type ExecuteSetRateLimitAdminParams,
+  type ExecuteSetRateLimitAdminResult,
   type GenerateConfigureAllowlistParams,
   type GenerateConfigureAllowlistResult,
   type GenerateCreateTokenMultisigParams,
@@ -96,6 +98,8 @@ import {
   type GenerateRemoveFromAllowlistResult,
   type GenerateSetChainRateLimitParams,
   type GenerateSetChainRateLimitResult,
+  type GenerateSetRateLimitAdminParams,
+  type GenerateSetRateLimitAdminResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
@@ -109,6 +113,7 @@ import {
   InitChainRemoteConfig,
   RemoveFromAllowlist,
   SetChainRateLimit,
+  SetRateLimitAdmin,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -137,6 +142,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
   readonly #setChainRateLimit = new SetChainRateLimit()
+  readonly #setRateLimitAdmin = new SetRateLimitAdmin()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -650,6 +656,69 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteDeleteChainRemoteConfigParams,
   ): Promise<ExecuteDeleteChainRemoteConfigResult> {
     return this.#deleteChainRemoteConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that assigns the rate-limit admin for an initialized Solana
+   * token pool. Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority`
+   * defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner. This assignment takes
+   * effect immediately; unlike ownership transfer, it has no acceptance step. The new rate-limit
+   * admin may configure chain rate limits but cannot change this role.
+   *
+   * @see {@link setRateLimitAdmin}
+   * @see {@link generateUnsignedSetChainRateLimit}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetRateLimitAdmin({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newRateLimitAdmin,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetRateLimitAdmin(
+    opts: GenerateSetRateLimitAdminParams,
+  ): Promise<GenerateSetRateLimitAdminResult> {
+    return this.#setRateLimitAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Assigns the rate-limit admin for an initialized Solana token pool with the pool owner wallet.
+   *
+   * @remarks This assignment takes effect immediately; unlike ownership transfer, it has no
+   * acceptance step. The new rate-limit admin may configure chain rate limits but cannot change
+   * this role.
+   *
+   * @see {@link generateUnsignedSetRateLimitAdmin}
+   * @see {@link setChainRateLimit}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the pool does not exist, the wallet is not the pool owner,
+   * or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setRateLimitAdmin({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newRateLimitAdmin,
+   *   wallet,
+   * })
+   * ```
+   */
+  setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
+    return this.#setRateLimitAdmin.execute(this.chain, opts)
   }
 
   /**
