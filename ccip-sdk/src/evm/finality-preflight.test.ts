@@ -232,7 +232,34 @@ describe('EVMChain.estimateReceiveExecution — token-only finality skip', () =>
 })
 
 // ============================================================================
-// 3) Best-effort: a non-finality resolver failure (v1 lane / transient RPC) is
+// 3) The estimate itself: token-only transfers cost no execution gas
+// ============================================================================
+describe('EVMChain.estimateReceiveExecution — token-only gas limit', () => {
+  beforeEach(() => mock.restoreAll())
+  after(() => mock.restoreAll())
+
+  const offRamp = getAddress(hexlify(randomBytes(20)))
+
+  it('token-only => 0, with no eth_estimateGas at all', async () => {
+    // the OffRamp never calls ccipReceive, so estimating it only prices the calldata of a call
+    // that never happens — which the caller pays for if it goes back out as extraArgs.gasLimit
+    const { chain, provider } = makeChain(ALLOWS_DEPTH_1)
+    assert.equal(await chain.estimateReceiveExecution({ offRamp, message: baseMessage(TT, 1) }), 0)
+    assert.equal(provider.send.mock.callCount(), 0)
+  })
+
+  it('data-only and PTT still estimate', async () => {
+    for (const shape of [DATA_ONLY, PTT]) {
+      const { chain, provider } = makeChain(ALLOWS_DEPTH_1)
+      const gas = await chain.estimateReceiveExecution({ offRamp, message: baseMessage(shape, 1) })
+      assert.ok(gas > 0, `data=${shape.data} => ${gas}`)
+      assert.ok(provider.send.mock.callCount() > 0, `data=${shape.data}`)
+    }
+  })
+})
+
+// ============================================================================
+// 4) Best-effort: a non-finality resolver failure (v1 lane / transient RPC) is
 //    swallowed so the gas estimate still returns; the finality gate still throws.
 // ============================================================================
 describe('EVMChain.estimateReceiveExecution — finality preflight is best-effort', () => {

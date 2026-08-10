@@ -3126,6 +3126,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       }
     }
 
+    // token-only transfers never reach `ccipReceive`, so there is no execution gas to buy:
+    // estimateExecGas would bill the calldata of a call that never happens, and the caller pays
+    // for it when the estimate goes back out as extraArgs.gasLimit
+    if (isTokenOnlyEstimate(opts_.message)) return 0
+
     return estimateExecGas({ provider: this.provider, router: destRouter, ...opts_ })
   }
 }
