@@ -134,7 +134,12 @@ export type ExecuteSetChainRateLimitParams = SolanaExecuteParams<SetChainRateLim
 /** Result of executing Solana token pool rate-limit configuration. */
 export type ExecuteSetChainRateLimitResult = TransactionResult
 
-/** Sets inbound and outbound rate limits for an initialized remote-chain config. */
+/**
+ * Sets inbound and outbound rate limits for an initialized remote-chain config.
+ *
+ * @remarks `authority` must be the pool owner or rate-limit admin. The remote-chain config must
+ * already exist.
+ */
 export class SetChainRateLimit extends SolanaOperation<
   SetChainRateLimitParams,
   UnsignedSolanaTx,
@@ -200,7 +205,7 @@ export class SetChainRateLimit extends SolanaOperation<
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the rate-limit admin wallet. */
+  /** Generate, sign, simulate, send, and confirm with the pool owner or rate-limit admin wallet. */
   override async execute(
     chain: SolanaChain,
     params: ExecuteSetChainRateLimitParams,

@@ -658,8 +658,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin.
-   * Enabled limits require `rate <= capacity`; disabled limits default omitted values to zero and
-   * reject nonzero values.
+   * The remote-chain config must already exist. Enabled limits require `rate <= capacity`;
+   * disabled limits default omitted values to zero and reject nonzero values.
    *
    * @see {@link setChainRateLimit}
    * @see {@link generateUnsignedInitChainRemoteConfig}
@@ -690,8 +690,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Sets inbound and outbound rate limits for an initialized Solana token pool remote-chain config
    * with the pool owner or rate-limit admin wallet.
    *
-   * @remarks Enabled limits require `rate <= capacity`; disabled limits default omitted values to
-   * zero and reject nonzero values.
+   * @remarks The remote-chain config must already exist. Enabled limits require `rate <= capacity`;
+   * disabled limits default omitted values to zero and reject nonzero values.
    *
    * @see {@link generateUnsignedSetChainRateLimit}
    * @see {@link initChainRemoteConfig}
