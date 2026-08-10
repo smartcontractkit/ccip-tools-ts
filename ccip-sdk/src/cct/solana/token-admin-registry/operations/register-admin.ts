@@ -134,8 +134,8 @@ async function buildCcipAdminInstruction(
 export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
   readonly name = 'registerAdmin'
 
-  /** Validates all caller-supplied parameters before RPC. */
-  protected validate(params: GenerateRegisterAdminParams): void {
+  /** Parses all caller-supplied parameters before RPC. */
+  protected override parse(params: GenerateRegisterAdminParams): GenerateRegisterAdminParams {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'payer', params.payer)
@@ -151,6 +151,7 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
         'must be owner or ccip-admin',
       )
     }
+    return params
   }
 
   /** Builds an unsigned token registration instruction. */
@@ -227,7 +228,7 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
 
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateRegisterAdminParams = { ...rest, payer }
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {

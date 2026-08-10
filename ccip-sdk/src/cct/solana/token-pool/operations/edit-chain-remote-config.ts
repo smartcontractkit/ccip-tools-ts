@@ -87,9 +87,6 @@ export class EditChainRemoteConfig extends SolanaOperation<
 > {
   readonly name = 'editChainRemoteConfig'
 
-  /** Validation runs in {@link parse}. */
-  protected validate(_params: GenerateEditChainRemoteConfigParams): void {}
-
   /** Parses config values and defaults authority to payer without mutating caller params. */
   protected override parse(
     params: GenerateEditChainRemoteConfigParams,

@@ -77,13 +77,14 @@ export class DeployTokenPool extends SolanaOperation<
 > {
   readonly name = 'deployTokenPool'
 
-  /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateDeployTokenPoolParams): void {
+  /** Parses all public keys before any RPC. */
+  protected override parse(params: GenerateDeployTokenPoolParams): GenerateDeployTokenPoolParams {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePoolType(this.name, 'poolType', params.poolType)
     validatePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'authority', params.authority)
     if (params.allowlist !== undefined) validatePublicKeys(this.name, 'allowlist', params.allowlist)
+    return params
   }
 
   /** Builds the unsigned Solana token pool initialize instruction set. */
@@ -151,7 +152,7 @@ export class DeployTokenPool extends SolanaOperation<
 
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateDeployTokenPoolParams = { ...rest, payer }
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {

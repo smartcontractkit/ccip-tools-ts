@@ -69,8 +69,10 @@ export class AppendToLookupTable extends SolanaOperation<
 > {
   readonly name = 'appendToLookupTable'
 
-  /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateAppendToLookupTableParams): void {
+  /** Parses all public keys before any RPC. */
+  protected override parse(
+    params: GenerateAppendToLookupTableParams,
+  ): GenerateAppendToLookupTableParams {
     validatePublicKey(this.name, 'lookupTableAddress', params.lookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'authority', params.authority)
@@ -99,6 +101,7 @@ export class AppendToLookupTable extends SolanaOperation<
         'must provide tokenAddress/poolProgramAddress or additionalAddresses',
       )
     }
+    return params
   }
 
   /** Builds unsigned ALT extend instructions. */
@@ -194,7 +197,7 @@ export class AppendToLookupTable extends SolanaOperation<
 
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateAppendToLookupTableParams = { ...rest, payer }
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (authority) {
