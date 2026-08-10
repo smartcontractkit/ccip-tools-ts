@@ -668,4 +668,58 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.equal(called, false, 'validation fails before TAR discovery')
     })
   })
+  describe('getSupportedTokens', () => {
+    it('resolves the TAR and lists its configured tokens', async () => {
+      const tokens = [TOKEN, POOL]
+      let seenOpts: { page?: number } | undefined
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getSupportedTokens: async (registry: string, opts?: { page?: number }) => {
+            assert.equal(registry, TAR)
+            seenOpts = opts
+            return tokens
+          },
+        }),
+      )
+
+      const result = await cct.getSupportedTokens({ address: ROUTER })
+      assert.deepEqual(result, tokens)
+      assert.deepEqual(seenOpts, { page: undefined })
+    })
+
+    it('forwards `page` to the wrapped chain', async () => {
+      let seenPage: number | undefined
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getSupportedTokens: async (_registry: string, opts?: { page?: number }) => {
+            seenPage = opts?.page
+            return []
+          },
+        }),
+      )
+
+      await cct.getSupportedTokens({ address: ROUTER, page: 25 })
+      assert.equal(seenPage, 25)
+    })
+
+    it('rejects an invalid address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () => cct.getSupportedTokens({ address: 'not-an-address' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'getSupportedTokens' &&
+          err.context.param === 'address',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+  })
 })
