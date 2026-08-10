@@ -103,6 +103,22 @@ const EXPECTED_DATA = new Interface([
 const EXPECTED_TRANSFER = new Interface([
   'function transferOwnership(address to)',
 ]).encodeFunctionData('transferOwnership', [TOKEN])
+const ACCEPT_ADMIN_SELECTOR = id('acceptAdminRole(address)').slice(0, 10)
+const EXPECTED_ACCEPT_ADMIN = new Interface([
+  'function acceptAdminRole(address localToken)',
+]).encodeFunctionData('acceptAdminRole', [TOKEN])
+
+/** Fake provider whose `call` answers `getTokenConfig` with `pendingAdministrator = TOKEN`. */
+function acceptAdminProvider(pendingAdministrator: string) {
+  return {
+    call: () =>
+      Promise.resolve(
+        interfaces.TokenAdminRegistry.encodeFunctionResult('getTokenConfig', [
+          [ZeroAddress, pendingAdministrator, ZeroAddress],
+        ]),
+      ),
+  }
+}
 
 describe('EVMTokenManager (cct/evm)', () => {
   describe('construction', () => {
@@ -464,6 +480,246 @@ describe('EVMTokenManager (cct/evm)', () => {
           err.context.param === 'poolAddress',
       )
       assert.equal(probed, false, 'validation fails before the typeAndVersion probe')
+    })
+  })
+  describe('generateUnsignedAcceptAdmin', () => {
+    it('encodes acceptAdminRole(token) to the discovered TAR when sender is pending', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      const unsigned = await cct.generateUnsignedAcceptAdmin({
+        tokenAddress: TOKEN,
+        address: ROUTER,
+        sender: TOKEN,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TAR)
+      assert.equal(tx.from, TOKEN)
+      assert.ok(
+        tx.data!.startsWith(ACCEPT_ADMIN_SELECTOR),
+        'data starts with acceptAdminRole selector',
+      )
+      assert.equal(tx.data, EXPECTED_ACCEPT_ADMIN)
+    })
+
+    it('rejects an invalid address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () =>
+          cct.generateUnsignedAcceptAdmin({
+            tokenAddress: 'not-an-address',
+            address: ROUTER,
+            sender: TOKEN,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'tokenAddress',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+
+    it('rejects when sender is not the pending administrator', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(POOL) as never }),
+      )
+      await assert.rejects(
+        cct.generateUnsignedAcceptAdmin({
+          tokenAddress: TOKEN,
+          address: ROUTER,
+          sender: TOKEN,
+        }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+
+  describe('acceptAdmin', () => {
+    it('signs and submits, resolving to the confirmed tx hash', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      const result = await cct.acceptAdmin({
+        tokenAddress: TOKEN,
+        address: ROUTER,
+        sender: TOKEN,
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      await assert.rejects(
+        () =>
+          cct.acceptAdmin({
+            tokenAddress: TOKEN,
+            address: ROUTER,
+            sender: TOKEN,
+            wallet: {},
+          }),
+        (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+
+    it('rejects a sender that does not match the executing wallet', async () => {
+      // fakeSigner().getAddress() resolves to TOKEN; a `sender` other than TOKEN must be
+      // rejected rather than silently accepted and broadcast from the mismatched wallet.
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(TOKEN) as never }),
+      )
+      await assert.rejects(
+        () =>
+          cct.acceptAdmin({
+            tokenAddress: TOKEN,
+            address: ROUTER,
+            sender: POOL,
+            wallet: fakeSigner(),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+  describe('getTokenAdminRegistry', () => {
+    const GET_TOKEN_CONFIG_IFACE = new Interface([
+      'function getTokenConfig(address token) view returns (tuple(address administrator, address pendingAdministrator, address tokenPool))',
+    ])
+    const ADMINISTRATOR = '0x' + '77'.repeat(20)
+
+    /**
+     * Chain stub whose provider answers `getTokenConfig` with `administrator`/zeroed others —
+     * but only for a call to `TAR` decoding to `TOKEN`. Mirrors the target/argument assertions in
+     * `token-admin-registry/operations/get-token-admin-registry.test.ts`'s `stubChain`: matching
+     * on the selector alone can't tell a correct read from one with the call target or decoded
+     * token swapped, since both would still reach this branch and get `encoded` back.
+     */
+    function stubTarChain(administrator: string) {
+      const selector = GET_TOKEN_CONFIG_IFACE.getFunction('getTokenConfig')!.selector
+      const encoded = GET_TOKEN_CONFIG_IFACE.encodeFunctionResult('getTokenConfig', [
+        [administrator, ZeroAddress, ZeroAddress],
+      ])
+      return stubChain({
+        provider: {
+          call: async ({ to, data }: { to?: string; data: string }) => {
+            if (data.slice(0, 10) !== selector) return '0x'
+            assert.equal(to, TAR, 'calls the resolved TAR, not `address`')
+            const [token] = GET_TOKEN_CONFIG_IFACE.decodeFunctionData('getTokenConfig', data)
+            assert.equal(token, TOKEN, 'reads the config for `tokenAddress`')
+            return encoded
+          },
+        } as never,
+      })
+    }
+
+    it('reads through the wrapped chain, resolving the TAR from `address`', async () => {
+      const config = await EVMTokenManager.fromChain(
+        stubTarChain(ADMINISTRATOR),
+      ).getTokenAdminRegistry({
+        address: ROUTER,
+        tokenAddress: TOKEN,
+      })
+      assert.deepEqual(config, { administrator: ADMINISTRATOR })
+    })
+
+    it('reports a zero administrator rather than throwing', async () => {
+      const config = await EVMTokenManager.fromChain(
+        stubTarChain(ZeroAddress),
+      ).getTokenAdminRegistry({ address: ROUTER, tokenAddress: TOKEN })
+      assert.equal(config.administrator, ZeroAddress)
+    })
+
+    it('rejects an invalid token address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () => cct.getTokenAdminRegistry({ address: ROUTER, tokenAddress: 'not-an-address' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'getTokenAdminRegistry' &&
+          err.context.param === 'tokenAddress',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+  })
+  describe('getSupportedTokens', () => {
+    it('resolves the TAR and lists its configured tokens', async () => {
+      const tokens = [TOKEN, POOL]
+      let seenOpts: { page?: number } | undefined
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getSupportedTokens: async (registry: string, opts?: { page?: number }) => {
+            assert.equal(registry, TAR)
+            seenOpts = opts
+            return tokens
+          },
+        }),
+      )
+
+      const result = await cct.getSupportedTokens({ address: ROUTER })
+      assert.deepEqual(result, tokens)
+      assert.deepEqual(seenOpts, { page: undefined })
+    })
+
+    it('forwards `page` to the wrapped chain', async () => {
+      let seenPage: number | undefined
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getSupportedTokens: async (_registry: string, opts?: { page?: number }) => {
+            seenPage = opts?.page
+            return []
+          },
+        }),
+      )
+
+      await cct.getSupportedTokens({ address: ROUTER, page: 25 })
+      assert.equal(seenPage, 25)
+    })
+
+    it('rejects an invalid address before any RPC, tagged with the operation', async () => {
+      let called = false
+      const cct = EVMTokenManager.fromChain(
+        stubChain({
+          getTokenAdminRegistryFor: () => {
+            called = true
+            return Promise.resolve(TAR)
+          },
+        }),
+      )
+      await assert.rejects(
+        () => cct.getSupportedTokens({ address: 'not-an-address' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'getSupportedTokens' &&
+          err.context.param === 'address',
+      )
+      assert.equal(called, false, 'validation fails before TAR discovery')
     })
   })
 })
