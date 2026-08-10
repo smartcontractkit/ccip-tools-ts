@@ -64,9 +64,6 @@ export class ConfigureAllowlist extends SolanaOperation<
 > {
   readonly name = 'configureAllowlist'
 
-  /** {@link parse} validates and normalizes all parameters. */
-  protected validate(_params: GenerateConfigureAllowlistParams): void {}
-
   /** Parses public keys and defaults authority to payer without mutating caller params. */
   protected override parse(
     params: GenerateConfigureAllowlistParams,

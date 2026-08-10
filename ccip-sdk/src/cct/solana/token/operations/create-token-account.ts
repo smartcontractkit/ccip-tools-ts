@@ -42,11 +42,14 @@ export class CreateTokenAccount extends SolanaOperation<
 > {
   readonly name = 'createTokenAccount'
 
-  /** Validates create-token-account parameters. */
-  protected validate(params: GenerateCreateTokenAccountParams): void {
+  /** Parses create-token-account parameters. */
+  protected override parse(
+    params: GenerateCreateTokenAccountParams,
+  ): GenerateCreateTokenAccountParams {
     validatePublicKey(this.name, 'payer', params.payer)
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'ownerAddress', params.ownerAddress)
+    return params
   }
 
   /** Builds an unsigned idempotent associated token account creation transaction. */

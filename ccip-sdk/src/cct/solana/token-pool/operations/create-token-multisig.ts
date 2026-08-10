@@ -133,8 +133,10 @@ export class CreateTokenMultisig extends SolanaOperation<
 > {
   readonly name = 'createTokenMultisig'
 
-  /** Validates public keys, threshold, and optional seed before mint/account RPCs. */
-  protected validate(params: GenerateCreateTokenMultisigParams): void {
+  /** Parses public keys, threshold, and optional seed before mint/account RPCs. */
+  protected override parse(
+    params: GenerateCreateTokenMultisigParams,
+  ): GenerateCreateTokenMultisigParams {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePoolType(this.name, 'poolType', params.poolType)
     validatePublicKey(this.name, 'payer', params.payer)
@@ -143,6 +145,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     }
     validateInteger(this.name, 'threshold', params.threshold, 1, SOLANA_MULTISIG_MAX_SIGNERS)
     if (params.seed !== undefined) validateNonEmptyString(this.name, 'seed', params.seed)
+    return params
   }
 
   /** Builds create-with-seed and initialize-multisig instructions. */
@@ -213,7 +216,7 @@ export class CreateTokenMultisig extends SolanaOperation<
       ...rest,
       payer: wallet.publicKey.toBase58(),
     }
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     const tokenMint = new PublicKey(generateParams.tokenAddress)
     const mintAccount = await resolveTokenMint(chain.connection, tokenMint)

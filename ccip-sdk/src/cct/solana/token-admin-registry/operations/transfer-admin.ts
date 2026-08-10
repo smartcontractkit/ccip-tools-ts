@@ -53,13 +53,14 @@ export type ExecuteTransferAdminResult = TransactionResult
 export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
   readonly name = 'transferAdmin'
 
-  /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateTransferAdminParams): void {
+  /** Parses all public keys before any RPC. */
+  protected override parse(params: GenerateTransferAdminParams): GenerateTransferAdminParams {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'newAdmin', params.newAdmin)
     validatePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'authority', params.authority)
+    return params
   }
 
   /** Builds the unsigned instruction after confirming the caller is the current admin. */
@@ -111,7 +112,7 @@ export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
 
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateTransferAdminParams = { ...rest, payer }
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

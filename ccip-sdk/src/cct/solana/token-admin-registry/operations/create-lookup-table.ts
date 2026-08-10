@@ -67,17 +67,20 @@ export class CreateLookupTable extends SolanaOperation<
 > {
   readonly name = 'createLookupTable'
 
-  /** Validates params before `buildUnsigned()` performs any RPC. */
-  protected validate(params: GenerateCreateLookupTableParams): void {
+  /** Parses params before `buildUnsigned()` performs any RPC. */
+  protected override parse(
+    params: GenerateCreateLookupTableParams,
+  ): GenerateCreateLookupTableParams {
     validatePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'authority', params.authority)
-    if (params.mode === 'createEmpty') return
+    if (params.mode === 'createEmpty') return params
 
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     resolvePoolProgram(this.name, params)
     for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
       validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
     }
+    return params
   }
 
   /** Builds unsigned ALT create instructions, optionally with extend instructions. */
@@ -165,7 +168,7 @@ export class CreateLookupTable extends SolanaOperation<
     const payer = wallet.publicKey.toBase58()
     const generateParams: GenerateCreateLookupTableParams = { ...rest, payer }
 
-    this.validate(generateParams)
+    this.parse(generateParams)
 
     const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
     if (params.mode !== 'createEmpty' && authority) {

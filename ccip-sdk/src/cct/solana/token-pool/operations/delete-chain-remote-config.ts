@@ -65,9 +65,6 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
 > {
   readonly name = 'deleteChainRemoteConfig'
 
-  /** Validation runs in {@link parse}. */
-  protected validate(_params: GenerateDeleteChainRemoteConfigParams): void {}
-
   /** Parses addresses and defaults authority to payer without mutating caller params. */
   protected override parse(
     params: GenerateDeleteChainRemoteConfigParams,

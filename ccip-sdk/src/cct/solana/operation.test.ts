@@ -14,7 +14,7 @@ class TestOperation extends SolanaOperation<{ value: string }> {
   captured?: string
   validated?: string
 
-  protected validate(params: { payer: string }): void {
+  protected override validate(params: { payer: string }): void {
     this.validated = params.payer
   }
 
@@ -36,7 +36,7 @@ class ParsedTestOperation extends SolanaOperation<
   readonly lifecycle: string[] = []
   captured?: { payer: string; value: number }
 
-  protected validate(params: { payer: string; value: string }): void {
+  protected override validate(params: { payer: string; value: string }): void {
     this.lifecycle.push(`validate:${params.value}`)
   }
 

@@ -296,11 +296,12 @@ function validateMetaplexParams(operation: string, params: GenerateDeployTokenPa
 export class DeployToken extends SolanaOperation<DeployTokenParams, GenerateDeployTokenResult> {
   readonly name = 'deployToken'
 
-  /** Validates mint and metadata params before any RPC. */
-  protected validate(params: GenerateDeployTokenParams): void {
+  /** Parses mint and metadata params before any RPC. */
+  protected override parse(params: GenerateDeployTokenParams): GenerateDeployTokenParams {
     validateBaseParams(this.name, params)
     validatePreMintParams(this.name, params)
     validateMetaplexParams(this.name, params)
+    return params
   }
 
   /** Builds the unsigned Solana mint creation instruction set. */

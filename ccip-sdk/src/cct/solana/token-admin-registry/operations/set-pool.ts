@@ -65,14 +65,15 @@ export type ExecuteSetPoolResult = TransactionResult
 export class SetPool extends SolanaOperation<SetPoolParams> {
   readonly name = 'setPool'
 
-  /** Validates all public keys before any RPC. */
-  protected validate(params: GenerateSetPoolParams): void {
+  /** Parses all public keys before any RPC. */
+  protected override parse(params: GenerateSetPoolParams): GenerateSetPoolParams {
     validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     validatePublicKey(this.name, 'address', params.address)
     validatePublicKey(this.name, 'poolLookupTableAddress', params.poolLookupTableAddress)
     validatePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'authority', params.authority)
     validateWritableIndexes(this.name, 'writableIndexes', params.writableIndexes)
+    return params
   }
 
   /** Builds the unsigned Solana `setPool` instruction set. */
