@@ -339,7 +339,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
    * ```
    */
-  getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<GetSupportedTokensResult> {
     return this.#getSupportedTokens.query(this.chain, opts)
   }
 
