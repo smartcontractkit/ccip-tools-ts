@@ -26,6 +26,16 @@ import {
   AcceptAdmin,
 } from './token-admin-registry/operations/accept-admin.ts'
 import {
+  type GetSupportedTokensParams,
+  type GetSupportedTokensResult,
+  GetSupportedTokens,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
+import {
+  type GetTokenAdminRegistryParams,
+  type GetTokenAdminRegistryResult,
+  GetTokenAdminRegistry,
+} from './token-admin-registry/operations/get-token-admin-registry.ts'
+import {
   type RegisterAdminParams,
   RegisterAdmin,
 } from './token-admin-registry/operations/register-admin.ts'
@@ -59,6 +69,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
   readonly #acceptAdmin = new AcceptAdmin()
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #getSupportedTokens = new GetSupportedTokens()
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
@@ -289,6 +301,46 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   acceptAdmin(opts: EVMExecuteParams<AcceptAdminParams>): Promise<TransactionResult> {
     return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a token's TokenAdminRegistry entry: its `administrator`, any `pendingAdministrator`,
+   * and its registered `tokenPool`.
+   * @remarks Deliberately diverges from `cct.chain.getRegistryTokenConfig()`, which throws when
+   * `administrator` is the zero address — exactly the post-`registerAdmin`, pre-`acceptAdmin`
+   * state. This op reports `{ administrator: ZeroAddress, pendingAdministrator }` faithfully
+   * instead, so a pending registration is observable; see
+   * {@link GetTokenAdminRegistry} for the full rationale. `pendingAdministrator` and `tokenPool`
+   * are still omitted when zero.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const config = await cct.getTokenAdminRegistry({
+   *   address: '0xTokenAdminRegistry...', // or a Router/OnRamp/OffRamp/pool to resolve it from
+   *   tokenAddress: '0xToken...',
+   * })
+   * if (config.administrator === ZeroAddress) {
+   *   console.log('pending acceptance by', config.pendingAdministrator)
+   * }
+   * ```
+   */
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
+  }
+
+  /**
+   * Lists every token configured in the TokenAdminRegistry resolved from `address`.
+   * @remarks The registry paginates via `getAllConfiguredTokens` — `opts.page` sets the batch size per call; omit it to read the
+   * whole registry in one round trip per 1000 tokens.
+   * @throws {@link CCTParamsInvalidError} if `address` is not a valid address, or `page` is given
+   * and is not a positive integer
+   * @example
+   * ```typescript
+   * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
+   * ```
+   */
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<GetSupportedTokensResult> {
+    return this.#getSupportedTokens.query(this.chain, opts)
   }
 
   /**
@@ -541,8 +593,16 @@ export type {
   RegisterAdminMethod,
   RegisterAdminParams,
 } from './token-admin-registry/operations/register-admin.ts'
+export type {
+  GetTokenAdminRegistryParams,
+  GetTokenAdminRegistryResult,
+} from './token-admin-registry/operations/get-token-admin-registry.ts'
 export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
 export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
+export type {
+  GetSupportedTokensParams,
+  GetSupportedTokensResult,
+} from './token-admin-registry/operations/get-supported-tokens.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type {
   DeployTokenPoolParams,
