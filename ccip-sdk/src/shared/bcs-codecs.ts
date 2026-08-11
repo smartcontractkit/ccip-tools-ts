@@ -55,10 +55,10 @@ export const BcsSVMExtraArgsV1Codec = bcs.struct('SVMExtraArgsV1', {
  * Used for Sui → Sui messages.
  */
 export const BcsSuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {
-  gasLimit: bcs.u64(),
+  gasLimit: bcs.u128(),
   allowOutOfOrderExecution: bcs.bool(),
-  tokenReceiver: bcs.vector(bcs.u8()),
-  receiverObjectIds: bcs.vector(bcs.vector(bcs.u8())),
+  tokenReceiver: bcs.fixedArray(32, bcs.u8()),
+  receiverObjectIds: bcs.vector(bcs.fixedArray(32, bcs.u8())),
 })
 
 /**
@@ -150,7 +150,7 @@ export function decodeMoveExtraArgs(
       // BCS-encoded SuiExtraArgsV1 from Move (Sui) source.
       // EVM ABI-encoded SuiExtraArgsV1 also shares this tag but has a much
       // larger payload (≥128 bytes: 4×32-byte ABI words minimum). BCS
-      // SuiExtraArgsV1 with empty receiverObjectIds is 49 bytes (8+1+4+32+4).
+      // SuiExtraArgsV1 with empty receiverObjectIds is 57 bytes (16+1+32+4).
       // Reject payloads that are clearly ABI-sized so the EVM decoder handles them.
       const suiPayload = getBytes(dataSlice(data, 4))
       if (suiPayload.length >= 128) return undefined
