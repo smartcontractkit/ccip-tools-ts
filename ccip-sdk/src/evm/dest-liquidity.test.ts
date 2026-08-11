@@ -890,6 +890,32 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     assert.equal(decoded.sourcePoolAddress, SRC_POOL_BYTES)
   })
 
+  it('the generic layer rescales for its own comparisons, never for the simulation', async () => {
+    // a 2.0.0 pool debits its bucket in local units, so 1000n at 6 source decimals is compared
+    // as 1e15 — over this bucket, deferred, then discarded when the sim passes
+    const { chain, provider } = makeChain({
+      inboundRateLimiterState: { tokens: 10n ** 14n, capacity: 10n ** 18n, rate: 1n },
+    })
+    await chain.checkExecute({
+      offRamp: OFFRAMP,
+      message: {
+        ...MESSAGE,
+        tokenAmounts: [
+          {
+            sourcePoolAddress: SRC_POOL_BYTES,
+            destTokenAddress: TOKEN,
+            amount: 1000n,
+            extraData: abi.encode(['uint256'], [6n]), // source 6 decimals, dest mock is 18
+          },
+        ],
+      },
+    })
+    const simCall = provider.calls.find((c) => c.data?.startsWith(ROM_V2_SEL))
+    assert.ok(simCall, 'the releaseOrMint simulation ran')
+    const [decoded] = pool.decodeFunctionData(ROM_V2_FRAG, simCall.data!)
+    assert.equal(decoded.sourceDenominatedAmount, 1000n) // not 1000 * 10**12
+  })
+
   // ==========================================================================
   // attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x)
   // ==========================================================================
@@ -998,9 +1024,9 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     )
   })
 
-  it('generic rate-limit verdict defers to the simulation (amount denominations differ)', async () => {
-    // the check payload carries SOURCE-denominated amounts while the base layer's bucket is in
-    // dest units — the sim (which consumes the rate limit with correct local amounts) decides
+  it('generic rate-limit verdict defers to the simulation', async () => {
+    // the sim consumes the pool's own rate limit with correctly-converted local amounts, so it
+    // decides; the generic read is only a fallback
     const { chain, provider } = makeChain({
       inboundRateLimiterState: { tokens: 10n, capacity: 100n, rate: 1n }, // < amount 1000n
     })
