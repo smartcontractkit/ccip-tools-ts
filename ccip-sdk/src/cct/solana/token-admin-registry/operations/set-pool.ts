@@ -16,11 +16,7 @@ import {
   deriveRouterConfigPda,
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
-import {
-  validateOptionalPublicKey,
-  validatePublicKey,
-  validateWritableIndexes,
-} from '../../validate.ts'
+import { parsePublicKey, validateWritableIndexes } from '../../validate.ts'
 
 /** Standard BurnMint/LockRelease pool ALT writable positions. */
 export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
@@ -52,6 +48,15 @@ type SetPoolParams = {
 /** Parameters for unsigned Solana TokenAdminRegistry `setPool` generation. */
 export type GenerateSetPoolParams = SolanaGenerateParams<SetPoolParams>
 
+type ParsedSetPoolParams = {
+  tokenMint: PublicKey
+  address: PublicKey
+  lookupTable: PublicKey
+  payer: PublicKey
+  authority: PublicKey
+  writableIndexes: number[]
+}
+
 /** Unsigned Solana TokenAdminRegistry `setPool` result. */
 export type GenerateSetPoolResult = UnsignedSolanaTx
 
@@ -62,39 +67,44 @@ export type ExecuteSetPoolParams = SolanaExecuteParams<SetPoolParams>
 export type ExecuteSetPoolResult = TransactionResult
 
 /** Solana TokenAdminRegistry `setPool` operation. */
-export class SetPool extends SolanaOperation<SetPoolParams> {
+export class SetPool extends SolanaOperation<SetPoolParams, UnsignedSolanaTx, ParsedSetPoolParams> {
   readonly name = 'setPool'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(params: GenerateSetPoolParams): GenerateSetPoolParams {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'address', params.address)
-    validatePublicKey(this.name, 'poolLookupTableAddress', params.poolLookupTableAddress)
-    validatePublicKey(this.name, 'payer', params.payer)
-    validateOptionalPublicKey(this.name, 'authority', params.authority)
+  protected override parse(params: GenerateSetPoolParams): ParsedSetPoolParams {
     validateWritableIndexes(this.name, 'writableIndexes', params.writableIndexes)
-    return params
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    return {
+      tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      address: parsePublicKey(this.name, 'address', params.address),
+      lookupTable: parsePublicKey(
+        this.name,
+        'poolLookupTableAddress',
+        params.poolLookupTableAddress,
+      ),
+      payer,
+      authority:
+        params.authority === undefined
+          ? payer
+          : parsePublicKey(this.name, 'authority', params.authority),
+      writableIndexes: params.writableIndexes ?? [...DEFAULT_WRITABLE_INDEXES],
+    }
   }
 
   /** Builds the unsigned Solana `setPool` instruction set. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateSetPoolParams,
+    opts: ParsedSetPoolParams,
   ): Promise<UnsignedSolanaTx> {
-    const routerAddress = await chain.getTokenAdminRegistryFor(opts.address)
-    const router = new PublicKey(routerAddress)
-    const tokenMint = new PublicKey(opts.tokenAddress)
-    const payer = new PublicKey(opts.payer)
-    const authority = new PublicKey(opts.authority ?? opts.payer)
-    const lookupTable = new PublicKey(opts.poolLookupTableAddress)
+    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
+    const { tokenMint, payer, authority, lookupTable } = opts
 
     const routerProgram = createRouterProgram(chain, router, payer)
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
 
-    const writableIndexes = opts.writableIndexes ?? [...DEFAULT_WRITABLE_INDEXES]
     const instruction = await routerProgram.methods
-      .setPool(Buffer.from(writableIndexes))
+      .setPool(Buffer.from(opts.writableIndexes))
       .accounts({
         config,
         tokenAdminRegistry,
