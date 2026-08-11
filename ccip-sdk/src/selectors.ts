@@ -1244,6 +1244,13 @@ const SELECTORS: Selectors = {
     selector: 3314641565992046393n,
     name: 'mova-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
+    family: 'EVM',
+  },
+  '61901': {
+    selector: 4215185756725900654n,
+    name: 'mova-mainnet-2',
+    network_type: 'MAINNET',
     family: 'EVM',
   },
   '68414': {

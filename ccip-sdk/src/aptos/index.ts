@@ -374,10 +374,12 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(address: string) {
-    // requires address with `::<module>` suffix
+    // needs a `::<module>` suffix; a bare package address defaults to `::router`, like the
+    // router entrypoints in send.ts do — every CCIP module shares the package's address
+    const module = address.includes('::') ? address : `${address}::router`
     const [typeAndVersion] = await this.provider.view<[string]>({
       payload: {
-        function: `${address}::type_and_version` as `${string}::${string}::type_and_version`,
+        function: `${module}::type_and_version` as `${string}::${string}::type_and_version`,
       },
     })
     return parseTypeAndVersion(typeAndVersion)
