@@ -41,6 +41,21 @@ parsed.request.lane.sourceChainSelector
 If you're not importing the SDK, [`lossless-json`](https://www.npmjs.com/package/lossless-json)
 solves the same problem.
 
+To write data back out, use `jsonStringify` from the same package. Plain `JSON.stringify` throws
+on the `bigint` values `jsonParse` returns:
+
+```typescript
+import { jsonParse, jsonStringify } from '@chainlink/ccip-sdk'
+
+const parsed = jsonParse<ShowOutput>(stdout)
+
+JSON.stringify(parsed) // TypeError: Do not know how to serialize a BigInt
+jsonStringify(parsed) // works, full precision preserved
+```
+
+Use the two together, or neither. Fields read this way are `bigint`, so compare them against a
+`bigint` literal (`11n`), not a `number` literal (`11`).
+
 ## jq
 
 jq 1.7 and later keep large integers as literal text through passthrough and field selection. Any
