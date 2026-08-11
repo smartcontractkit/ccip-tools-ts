@@ -50,15 +50,15 @@ export function encodeSolanaExtraArgs(args: ExtraArgs): string {
  * Encodes `SuiExtraArgsV1` in Borsh format for Solana sources targeting Sui
  * destinations.
  *
- * Layout: 4-byte tag + Borsh `{gasLimit: u64 LE, allowOutOfOrderExecution: bool, tokenReceiver: [u8;32], receiverObjectIds: Vec<[u8;32]>}`.
+ * Layout: 4-byte tag + Borsh `{gasLimit: u128 LE, allowOutOfOrderExecution: bool, tokenReceiver: [u8;32], receiverObjectIds: Vec<[u8;32]>}`.
  *
- * Borsh and BCS share the same wire format for these basic types, so this is
- * byte-identical to the BCS encoding on Sui's on-chain `encode_sui_extra_args_v1`.
+ * Note: Borsh uses 4-byte LE for vec lengths, while BCS (Sui) uses ULEB128.
+ * The two encodings are NOT byte-identical when receiverObjectIds is non-empty.
  */
 export function encodeSolanaSuiExtraArgsV1(args: SuiExtraArgsV1): string {
-  const gasLimitLe = toLeArray(args.gasLimit, 8)
+  const gasLimitLe = toLeArray(args.gasLimit, 16) // u128 LE
   const allowOOOE = args.allowOutOfOrderExecution ? '0x01' : '0x00'
-  const tokenReceiver = getAddressBytes(args.tokenReceiver) // 32 bytes
+  const tokenReceiver = getAddressBytes(args.tokenReceiver) // 32 bytes (fixed array)
   const receiverObjectIdsCount = toLeArray(args.receiverObjectIds.length, 4)
   const receiverObjectIds = args.receiverObjectIds.map((id) => getAddressBytes(id)) // each 32 bytes
   return concat([
@@ -191,7 +191,7 @@ export function decodeSolanaGenericExtraArgsV3(
  * Decodes Borsh-encoded `SuiExtraArgsV1` from Solana sources targeting Sui dest.
  *
  * Borsh layout after 4-byte tag:
- * `gasLimit: u64 LE` + `bool` + `tokenReceiver: [u8;32]` +
+ * `gasLimit: u128 LE` (16 bytes) + `bool` + `tokenReceiver: [u8;32]` +
  * `receiverObjectIds: Vec<[u8;32]>` (u32 LE count + N×32 bytes).
  *
  * @param data - Full extraArgs bytes including the 4-byte tag.
@@ -203,8 +203,11 @@ export function decodeSolanaSuiExtraArgsV1(
 ): SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' } {
   const buf = Buffer.from(data)
   let offset = 4 // skip 4-byte tag
-  const gasLimit = BigInt(buf.readUInt32LE(offset)) | (BigInt(buf.readUInt32LE(offset + 4)) << 32n)
-  offset += 8
+  // u128 LE: read as two u64s (low 8 bytes + high 8 bytes)
+  const gasLimitLow = BigInt(buf.readBigUInt64LE(offset))
+  const gasLimitHigh = BigInt(buf.readBigUInt64LE(offset + 8))
+  const gasLimit = gasLimitLow | (gasLimitHigh << 64n)
+  offset += 16
   const allowOutOfOrderExecution = buf[offset] === 1
   offset += 1
   const tokenReceiver = buf.subarray(offset, offset + 32)
@@ -220,7 +223,7 @@ export function decodeSolanaSuiExtraArgsV1(
     _tag: 'SuiExtraArgsV1',
     gasLimit,
     allowOutOfOrderExecution,
-    tokenReceiver: decodeAddress(tokenReceiver, ChainFamily.Sui),
-    receiverObjectIds: receiverObjectIds.map((id) => decodeAddress(id, ChainFamily.Sui)),
+    tokenReceiver: hexlify(tokenReceiver),
+    receiverObjectIds: receiverObjectIds.map((id) => hexlify(id)),
   }
 }
