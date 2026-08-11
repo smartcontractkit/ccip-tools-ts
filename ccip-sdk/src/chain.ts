@@ -68,6 +68,7 @@ import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
   isVersionBelow,
+  parseTypeAndVersion,
   scaleDecimals,
   util,
   withRetry,
@@ -1408,7 +1409,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // `ta.amount` is source-denominated whenever `extraData` declares the source decimals.
       // Convert for the comparisons below, but never touch `ta.amount`: EVMChain's override
       // forwards it to releaseOrMint as sourceDenominatedAmount.
-      const isLockRelease = Boolean(typeAndVersion?.includes('LockRelease'))
+      // `typeAndVersion` is the raw string from getTokenPoolConfig and may be kebab-case
+      // (e.g. Solana's `foo-lock-release 1.5.0`); normalize via parseTypeAndVersion first.
+      const [poolType] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
+      const isLockRelease = Boolean(poolType?.includes('LockRelease'))
       const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
       const tokenInfo =
         sourceDecimals != null || isLockRelease ? await this.getTokenInfo(token) : undefined
