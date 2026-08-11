@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, PublicKey } from '@solana/web3.js'
 
 import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
 import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
@@ -117,8 +117,8 @@ export type ExecuteApplyChainUpdatesResult = TransactionResult
  * This preserves EVM `applyChainUpdates` ordering: all removals run first, then each added chain
  * is initialized, configured with remote pools, and assigned both rate-limit configs (including
  * disabled configs). EVM-style replacement is therefore supported by listing a selector in both
- * arrays; adding an existing selector without removing it fails. Solana requires
- * `remoteTokenDecimals` and has native address-size limits in addition to the EVM fields.
+ * arrays; adding an existing selector without removing it fails. Solana additionally requires
+ * `remoteTokenDecimals`.
  */
 export class ApplyChainUpdates extends SolanaOperation<
   ApplyChainUpdatesParams,
@@ -189,7 +189,7 @@ export class ApplyChainUpdates extends SolanaOperation<
         ? { poolProgramAddress: params.poolProgramAddress }
         : { poolType: params.poolType }),
     }
-    const instructions = []
+    const instructions: TransactionInstruction[] = []
 
     for (const remoteChainSelector of params.remoteChainSelectorsToRemove) {
       const tx = await new DeleteChainRemoteConfig().generate(chain, {
@@ -211,12 +211,14 @@ export class ApplyChainUpdates extends SolanaOperation<
     params: ExecuteApplyChainUpdatesParams,
   ): Promise<ExecuteApplyChainUpdatesResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+
     validateAuthorityMatchesWallet(
       this.name,
       new PublicKey(parsed.authority),
       wallet.publicKey,
       'applyChainUpdates requires authority to be the executing wallet. Use generateUnsignedApplyChainUpdates for externally signed transactions.',
     )
+
     return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
   }
 }
