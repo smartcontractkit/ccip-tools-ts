@@ -17,7 +17,7 @@ import {
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
-  parseHexBytes,
+  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
@@ -69,18 +69,11 @@ function validateRemotePoolAddresses(operation: string, updates: unknown[]): voi
 
     const pools = new Set<string>()
     for (const [j, address] of remotePoolAddresses.entries()) {
-      const parsed = parseHexBytes(
+      const parsed = parseNonEmptyHexBytes(
         operation,
         `chainsToAdd[${i}].remotePoolAddresses[${j}]`,
         address,
       )
-      if (!parsed.length) {
-        throw new CCTParamsInvalidError(
-          operation,
-          `chainsToAdd[${i}].remotePoolAddresses[${j}]`,
-          'must not be empty',
-        )
-      }
       if (pools.has(parsed.toString('hex'))) {
         throw new CCTParamsInvalidError(
           operation,

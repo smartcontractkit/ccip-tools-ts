@@ -1,9 +1,12 @@
-import type { PublicKey } from '@solana/web3.js'
+import type { Buffer } from 'buffer'
+
+import { type PublicKey, SystemProgram } from '@solana/web3.js'
 import BN from 'bn.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -19,56 +22,70 @@ import {
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
+  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
 
-type DeleteChainRemoteConfigParams = PoolProgramRef & {
+/** Parameters shared by Solana remote pool address appending generation and execution. */
+type AppendRemotePoolAddressesParams = PoolProgramRef & {
   /** Token mint address managed by the local pool. */
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
+  /** Non-empty array of non-empty hex-encoded remote pool addresses, optionally `0x`-prefixed. */
+  remotePoolAddresses: string[]
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
 
-type ParsedDeleteChainRemoteConfigParams = {
+type ParsedAppendRemotePoolAddressesParams = {
   tokenAddress: PublicKey
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
+  remotePoolAddresses: Buffer[]
 }
 
-/** Parameters for unsigned Solana token pool remote configuration deletion. */
-export type GenerateDeleteChainRemoteConfigParams =
-  SolanaGenerateParams<DeleteChainRemoteConfigParams>
+/** Parameters for unsigned Solana remote pool address appending. */
+export type GenerateAppendRemotePoolAddressesParams =
+  SolanaGenerateParams<AppendRemotePoolAddressesParams>
 
-/** Unsigned Solana token pool remote configuration deletion result. */
-export type GenerateDeleteChainRemoteConfigResult = UnsignedSolanaTx
+/** Unsigned Solana remote pool address appending result. */
+export type GenerateAppendRemotePoolAddressesResult = UnsignedSolanaTx
 
-/** Parameters for executing Solana token pool remote configuration deletion. */
-export type ExecuteDeleteChainRemoteConfigParams =
-  SolanaExecuteParams<DeleteChainRemoteConfigParams>
+/** Parameters for executing Solana remote pool address appending. */
+export type ExecuteAppendRemotePoolAddressesParams =
+  SolanaExecuteParams<AppendRemotePoolAddressesParams>
 
-/** Result of executing Solana token pool remote configuration deletion. */
-export type ExecuteDeleteChainRemoteConfigResult = TransactionResult
+/** Result of executing Solana remote pool address appending. */
+export type ExecuteAppendRemotePoolAddressesResult = TransactionResult
 
-/** Deletes an initialized remote-chain config. */
-export class DeleteChainRemoteConfig extends SolanaOperation<
-  DeleteChainRemoteConfigParams,
+/**
+ * Appends remote pool addresses to an initialized remote-chain config.
+ *
+ * @remarks Existing addresses are retained. The pool rejects addresses already present, including
+ * duplicates in this request.
+ */
+export class AppendRemotePoolAddresses extends SolanaOperation<
+  AppendRemotePoolAddressesParams,
   UnsignedSolanaTx,
-  ParsedDeleteChainRemoteConfigParams
+  ParsedAppendRemotePoolAddressesParams
 > {
-  readonly name = 'deleteChainRemoteConfig'
+  readonly name = 'appendRemotePoolAddresses'
 
   /** Parses addresses and defaults authority to payer without mutating caller params. */
   protected override parse(
-    params: GenerateDeleteChainRemoteConfigParams,
-  ): ParsedDeleteChainRemoteConfigParams {
+    params: GenerateAppendRemotePoolAddressesParams,
+  ): ParsedAppendRemotePoolAddressesParams {
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
+
+    if (!Array.isArray(params.remotePoolAddresses) || params.remotePoolAddresses.length === 0) {
+      throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be a non-empty array')
+    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -80,17 +97,24 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
       remoteChainSelector: params.remoteChainSelector,
+      remotePoolAddresses: params.remotePoolAddresses.map((address, i) =>
+        parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
+      ),
     }
   }
 
-  /** Builds the unsigned Solana `deleteChainConfig` instruction. */
+  /** Builds the unsigned Solana `appendRemotePoolAddresses` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedDeleteChainRemoteConfigParams,
+    opts: ParsedAppendRemotePoolAddressesParams,
   ): Promise<UnsignedSolanaTx> {
     const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
     const instruction = await program.methods
-      .deleteChainConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress)
+      .appendRemotePoolAddresses(
+        new BN(opts.remoteChainSelector.toString()),
+        opts.tokenAddress,
+        opts.remotePoolAddresses.map((address) => ({ address })),
+      )
       .accountsStrict({
         state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
         chainConfig: deriveTokenPoolChainConfigPda(
@@ -99,20 +123,22 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
           opts.tokenAddress,
         ),
         authority: opts.authority,
+        systemProgram: SystemProgram.programId,
       })
       .instruction()
 
     chain.logger.debug(
       `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, remoteChainSelector = ${opts.remoteChainSelector}`,
     )
+
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
 
   /** Generate, sign, simulate, send, and confirm with the pool owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteDeleteChainRemoteConfigParams,
-  ): Promise<ExecuteDeleteChainRemoteConfigResult> {
+    params: ExecuteAppendRemotePoolAddressesParams,
+  ): Promise<ExecuteAppendRemotePoolAddressesResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
@@ -120,7 +146,7 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'deleteChainRemoteConfig requires authority to be the executing wallet. Use generateUnsignedDeleteChainRemoteConfig for externally signed transactions.',
+        'appendRemotePoolAddresses requires authority to be the executing wallet. Use generateUnsignedAppendRemotePoolAddresses for externally signed transactions.',
       )
     }
 
