@@ -2627,15 +2627,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     try {
       await super.checkExecute(opts)
     } catch (err) {
-      // The generic layer's amount comparisons can be denomination-inconsistent here: the check
-      // payload carries SOURCE-denominated amounts (paired with the pool's sourcePoolData),
-      // while rate-limit buckets and pool balances are in dest-token units; the LockRelease
-      // heuristic additionally reads the wrong holder for *AndProxy pools (liquidity lives on
-      // the previousPool). The releaseOrMint simulation below is the accurate oracle for both
-      // (the pool consumes its inbound rate limit and releases with correctly-converted local
-      // amounts) — so when it can run, DEFER these two verdicts to it; they are re-raised if the
-      // simulation cannot deliver a verdict for that token. Kept immediately when no simulation
-      // is possible (no receiver).
+      // The generic layer's LockRelease heuristic reads the wrong holder for *AndProxy pools
+      // (liquidity lives on the previousPool), and it only reads the standard inbound bucket —
+      // 2.0 pools debit a separate one on fast-finality transfers.
+      // The releaseOrMint simulation below is the accurate oracle for both (the pool consumes
+      // its own inbound rate limit and releases correctly-converted local amounts) — so when it
+      // can run, DEFER these two verdicts to it; they are re-raised if the simulation cannot
+      // deliver a verdict for that token. Kept immediately when no simulation is possible.
       if (
         (err instanceof CCIPInsufficientBalanceError ||
           err instanceof CCIPRateLimitExceededError) &&

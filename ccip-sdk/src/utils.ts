@@ -287,6 +287,40 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
 }
 
 /**
+ * Reads the source decimals a source pool declares in its `destPoolData`/`extraData`.
+ * Deliberately narrower than `TokenPool._parseRemoteDecimals`, which reverts on a non-empty
+ * non-32-byte payload and accepts any `uint8`: pools that override it (USDC/CCTP, Lombard) put
+ * their own payloads here, so only a 32-byte word in the plausible `0..36` range is read as a
+ * declaration.
+ * @param extraData - The transfer's `extraData`/`destPoolData`.
+ * @returns Declared source decimals, or `undefined` when the amount is already in local decimals.
+ */
+export function getSourceDecimalsFromExtraData(extraData?: string): number | undefined {
+  if (!extraData) return undefined
+  try {
+    const bytes = getDataBytes(extraData)
+    if (bytes.length !== 32) return undefined
+    const decimals = toBigInt(bytes)
+    // 0 is a legal declaration — 0-decimal tokens exist
+    return 0n <= decimals && decimals <= 36n ? Number(decimals) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Rescales `amount` from one token's decimals to another's, truncating like the pools do.
+ * @param amount - Amount in `fromDecimals` units.
+ * @param fromDecimals - Decimals `amount` is denominated in.
+ * @param toDecimals - Decimals to convert to.
+ * @returns `amount` in `toDecimals` units.
+ */
+export function scaleDecimals(amount: bigint, fromDecimals: number, toDecimals: number): bigint {
+  if (fromDecimals === toDecimals) return amount
+  return (amount * BigInt(10) ** BigInt(toDecimals)) / BigInt(10) ** BigInt(fromDecimals)
+}
+
+/**
  * Converts bytes to a Node.js Buffer.
  * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
  * @returns Node.js Buffer.
