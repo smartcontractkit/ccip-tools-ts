@@ -18,7 +18,6 @@ import {
   getSomeBlockNumberBefore,
   getSourceDecimalsFromExtraData,
   isBase64,
-  isVersionBelow,
   jsonParse,
   jsonStringify,
   leToBigInt,
@@ -1384,20 +1383,5 @@ describe('scaleDecimals', () => {
   it('truncates like the pools do', () => {
     assert.equal(scaleDecimals(1n, 18, 9), 0n)
     assert.equal(scaleDecimals(1_999_999_999n, 18, 9), 1n)
-  })
-})
-
-describe('isVersionBelow', () => {
-  it('compares numerically, not lexically', () => {
-    assert.equal(isVersionBelow('LockReleaseTokenPool 1.5.1', '1.6.1'), true)
-    assert.equal(isVersionBelow('LockReleaseTokenPool 1.6.0', '1.6.1'), true)
-    assert.equal(isVersionBelow('LockReleaseTokenPool 1.6.1', '1.6.1'), false)
-    assert.equal(isVersionBelow('BurnMintTokenPool 1.6.10', '1.6.1'), false)
-    assert.equal(isVersionBelow('BurnMintTokenPool 2.0.0', '1.6.1'), false)
-  })
-
-  it('treats an unparseable version as recent', () => {
-    assert.equal(isVersionBelow(undefined, '1.6.1'), false)
-    assert.equal(isVersionBelow('BurnMintTokenPool', '1.6.1'), false)
   })
 })

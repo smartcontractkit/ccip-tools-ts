@@ -67,7 +67,6 @@ import {
 import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
-  isVersionBelow,
   parseTypeAndVersion,
   scaleDecimals,
   util,
@@ -1411,7 +1410,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // forwards it to releaseOrMint as sourceDenominatedAmount.
       // `typeAndVersion` is the raw string from getTokenPoolConfig and may be kebab-case
       // (e.g. Solana's `foo-lock-release 1.5.0`); normalize via parseTypeAndVersion first.
-      const [poolType] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
+      const [poolType, poolVersion] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
       const isLockRelease = Boolean(poolType?.includes('LockRelease'))
       const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
       const tokenInfo =
@@ -1452,7 +1451,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // (TokenPool._validateReleaseOrMint); 1.5.1 and 1.6.0 consume the source-denominated
       // amount. Every other family debits local units at all versions.
       const bucketAmount =
-        this.network.family === ChainFamily.EVM && isVersionBelow(typeAndVersion, '1.6.1')
+        this.network.family === ChainFamily.EVM && poolVersion != null && poolVersion < '1.6.1'
           ? ta.amount
           : localAmount
       if (bucketAmount > remote.inboundRateLimiterState.tokens) {

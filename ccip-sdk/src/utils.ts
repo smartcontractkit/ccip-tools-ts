@@ -321,23 +321,6 @@ export function scaleDecimals(amount: bigint, fromDecimals: number, toDecimals: 
 }
 
 /**
- * Whether a `typeAndVersion` string's version is below `minVersion`.
- * @param typeAndVersion - E.g. `'LockReleaseTokenPool 1.6.0'`; an unparseable one reads as not-below.
- * @param minVersion - Exclusive lower bound, e.g. `'1.6.1'`.
- * @returns True only when the parsed version is strictly below `minVersion`.
- */
-export function isVersionBelow(typeAndVersion: string | undefined, minVersion: string): boolean {
-  const found = typeAndVersion?.match(/(\d+)\.(\d+)\.(\d+)/)
-  if (!found) return false
-  const bounds = minVersion.split('.')
-  for (const [i, bound] of bounds.entries()) {
-    const part = Number(found[i + 1])
-    if (part !== Number(bound)) return part < Number(bound)
-  }
-  return false
-}
-
-/**
  * Converts bytes to a Node.js Buffer.
  * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
  * @returns Node.js Buffer.
