@@ -618,10 +618,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * token pool remote-chain config. Pass canonical `poolType` or a compatible
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
-   * @remarks `remotePoolAddresses` must be non-empty. Existing addresses are retained. On-chain
-   * execution rejects addresses already present, including duplicates in this request. To clear all
-   * pools, use `generateUnsignedEditChainRemoteConfig` with `remotePoolAddresses: []`. The
-   * remote-chain config must already exist.
+   * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
+   * are retained. On-chain execution rejects addresses already present. To clear all pools, use
+   * `generateUnsignedEditChainRemoteConfig` with `remotePoolAddresses: []`. The remote-chain config
+   * must already exist.
    *
    * @see {@link appendRemotePoolAddresses}
    * @see {@link generateUnsignedEditChainRemoteConfig}
@@ -651,9 +651,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Appends remote pool addresses to an initialized Solana token pool remote-chain config with the
    * pool owner wallet.
    *
-   * @remarks `remotePoolAddresses` must be non-empty. Existing addresses are retained. The
-   * remote-chain config must already exist; duplicate addresses cause the transaction to fail. To
-   * clear all pools, use `editChainRemoteConfig` with `remotePoolAddresses: []`.
+   * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
+   * are retained. The remote-chain config must already exist; addresses already on-chain cause the
+   * transaction to fail. To clear all pools, use `editChainRemoteConfig` with
+   * `remotePoolAddresses: []`.
    *
    * @see {@link generateUnsignedAppendRemotePoolAddresses}
    * @see {@link editChainRemoteConfig}

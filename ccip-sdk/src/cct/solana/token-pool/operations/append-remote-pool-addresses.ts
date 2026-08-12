@@ -35,7 +35,10 @@ type AppendRemotePoolAddressesParams = PoolProgramRef & {
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
-  /** Non-empty array of non-empty hex-encoded remote pool addresses, optionally `0x`-prefixed. */
+  /**
+   * Non-empty array of non-empty hex-encoded remote pool addresses, optionally `0x`-prefixed.
+   * Stored at native byte length; unlike `remoteTokenAddress`, not left-padded to 32 bytes.
+   */
   remotePoolAddresses: string[]
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
@@ -67,8 +70,9 @@ export type ExecuteAppendRemotePoolAddressesResult = TransactionResult
 /**
  * Appends remote pool addresses to an initialized remote-chain config.
  *
- * @remarks Existing addresses are retained. The pool rejects addresses already present, including
- * duplicates in this request.
+ * @remarks Existing addresses are retained. The remote-chain config must already exist. The pool
+ * rejects addresses already present; duplicate addresses in this request are rejected. To clear
+ * all pools, use `editChainRemoteConfig` with `remotePoolAddresses: []`.
  */
 export class AppendRemotePoolAddresses extends SolanaOperation<
   AppendRemotePoolAddressesParams,
@@ -87,6 +91,23 @@ export class AppendRemotePoolAddresses extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be a non-empty array')
     }
 
+    const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
+      parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
+    )
+    const seen = new Set<string>()
+
+    for (const [i, address] of remotePoolAddresses.entries()) {
+      const hex = address.toString('hex')
+      if (seen.has(hex)) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          `remotePoolAddresses[${i}]`,
+          'must not duplicate a remote pool address',
+        )
+      }
+      seen.add(hex)
+    }
+
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
@@ -97,9 +118,7 @@ export class AppendRemotePoolAddresses extends SolanaOperation<
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
       remoteChainSelector: params.remoteChainSelector,
-      remotePoolAddresses: params.remotePoolAddresses.map((address, i) =>
-        parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
-      ),
+      remotePoolAddresses,
     }
   }
 

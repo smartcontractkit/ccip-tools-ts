@@ -127,6 +127,7 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
         [{ remotePoolAddresses: [] }, 'remotePoolAddresses'],
         [{ remotePoolAddresses: [''] }, 'remotePoolAddresses[0]'],
         [{ remotePoolAddresses: ['0x123'] }, 'remotePoolAddresses[0]'],
+        [{ remotePoolAddresses: ['0xaabbccdd', 'aabbccdd'] }, 'remotePoolAddresses[1]'],
         [{ remotePoolAddresses: '0x12' }, 'remotePoolAddresses'],
       ] as const) {
         await assert.rejects(
