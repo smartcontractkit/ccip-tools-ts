@@ -1,9 +1,12 @@
-import { type TransactionInstruction, AddressLookupTableProgram, PublicKey } from '@solana/web3.js'
+import {
+  type PublicKey,
+  type TransactionInstruction,
+  AddressLookupTableProgram,
+} from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -15,10 +18,9 @@ import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
-  validateOptionalPublicKey,
-  validatePublicKey,
 } from '../../validate.ts'
 
 const MAX_ALT_ADDRESSES = 256
@@ -53,6 +55,15 @@ type AppendToLookupTableParams = {
 /** Parameters for unsigned Solana lookup table append generation. */
 export type GenerateAppendToLookupTableParams = SolanaGenerateParams<AppendToLookupTableParams>
 
+type ParsedAppendToLookupTableParams = {
+  payer: PublicKey
+  authority: PublicKey
+  lookupTableAddress: PublicKey
+  additionalAddresses: PublicKey[]
+  tokenMint?: PublicKey
+  poolProgram?: PublicKey
+}
+
 /** Unsigned append lookup table result. */
 export type GenerateAppendToLookupTableResult = UnsignedSolanaTx
 
@@ -65,17 +76,25 @@ export type ExecuteAppendToLookupTableResult = TransactionResult
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
   AppendToLookupTableParams,
-  GenerateAppendToLookupTableResult
+  GenerateAppendToLookupTableResult,
+  ParsedAppendToLookupTableParams
 > {
   readonly name = 'appendToLookupTable'
 
   /** Parses all public keys before any RPC. */
   protected override parse(
     params: GenerateAppendToLookupTableParams,
-  ): GenerateAppendToLookupTableParams {
-    validatePublicKey(this.name, 'lookupTableAddress', params.lookupTableAddress)
-    validatePublicKey(this.name, 'payer', params.payer)
-    validateOptionalPublicKey(this.name, 'authority', params.authority)
+  ): ParsedAppendToLookupTableParams {
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    const authority =
+      params.authority === undefined
+        ? payer
+        : parsePublicKey(this.name, 'authority', params.authority)
+    const lookupTableAddress = parsePublicKey(
+      this.name,
+      'lookupTableAddress',
+      params.lookupTableAddress,
+    )
 
     const hasTokenAddress = params.tokenAddress !== undefined
     const hasPoolProgramAddress = params.poolProgramAddress !== undefined
@@ -87,11 +106,14 @@ export class AppendToLookupTable extends SolanaOperation<
         'tokenAddress and exactly one of poolType or poolProgramAddress must be provided together',
       )
     }
-    validateOptionalPublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    if (hasPoolProgram) resolvePoolProgram(this.name, params)
-    for (const [i, address] of (params.additionalAddresses ?? []).entries()) {
-      validatePublicKey(this.name, `additionalAddresses[${i}]`, address)
-    }
+    const tokenMint =
+      params.tokenAddress === undefined
+        ? undefined
+        : parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    const poolProgram = hasPoolProgram ? resolvePoolProgram(this.name, params) : undefined
+    const additionalAddresses = (params.additionalAddresses ?? []).map((address, i) =>
+      parsePublicKey(this.name, `additionalAddresses[${i}]`, address),
+    )
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (params.tokenAddress === undefined && !params.additionalAddresses?.length) {
@@ -101,19 +123,22 @@ export class AppendToLookupTable extends SolanaOperation<
         'must provide tokenAddress/poolProgramAddress or additionalAddresses',
       )
     }
-    return params
+    return {
+      payer,
+      authority,
+      lookupTableAddress,
+      additionalAddresses,
+      ...(tokenMint !== undefined && { tokenMint }),
+      ...(poolProgram !== undefined && { poolProgram }),
+    }
   }
 
   /** Builds unsigned ALT extend instructions. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateAppendToLookupTableParams,
+    opts: ParsedAppendToLookupTableParams,
   ): Promise<GenerateAppendToLookupTableResult> {
-    const payer = new PublicKey(opts.payer)
-    const authority = new PublicKey(opts.authority ?? opts.payer)
-    const lookupTableAddress = new PublicKey(opts.lookupTableAddress)
-    const poolProgram =
-      opts.tokenAddress !== undefined ? resolvePoolProgram(this.name, opts) : undefined
+    const { payer, authority, lookupTableAddress, poolProgram } = opts
     const lookupTable = await chain.connection.getAddressLookupTable(lookupTableAddress)
 
     if (!lookupTable.value) {
@@ -132,10 +157,10 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
 
-    const addresses = [...(opts.additionalAddresses ?? []).map((a) => new PublicKey(a))]
+    const addresses = [...opts.additionalAddresses]
 
-    if (opts.tokenAddress !== undefined && poolProgram) {
-      const tokenMint = new PublicKey(opts.tokenAddress)
+    if (opts.tokenMint && poolProgram) {
+      const { tokenMint } = opts
       const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
         lookupTableAddress,
         tokenMint,
@@ -192,24 +217,18 @@ export class AppendToLookupTable extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteAppendToLookupTableParams,
   ): Promise<ExecuteAppendToLookupTableResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
-    const payer = wallet.publicKey.toBase58()
-    const generateParams: GenerateAppendToLookupTableParams = { ...rest, payer }
-    this.parse(generateParams)
-
-    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
-    if (authority) {
+    if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,
-        authority,
+        parsed.authority,
         wallet.publicKey,
         'appendToLookupTable requires authority to be the executing wallet. Use generateUnsignedAppendToLookupTable for vault-owned ALTs and have the vault sign/execute it.',
       )
     }
 
-    const tx = await this.buildUnsigned(chain, generateParams)
+    const tx = await this.buildUnsigned(chain, parsed)
     return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }

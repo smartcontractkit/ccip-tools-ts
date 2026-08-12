@@ -2,10 +2,9 @@ import { MULTISIG_SIZE, createInitializeMultisigInstruction, unpackMint } from '
 import { PublicKey, SystemProgram } from '@solana/web3.js'
 import { concat, hexlify, randomBytes, sha256, toUtf8Bytes } from 'ethers'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
@@ -21,12 +20,11 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parsePublicKey,
   validateAuthorityMatchesWallet,
   validateInteger,
   validateNonEmptyString,
   validatePoolType,
-  validatePublicKey,
-  validatePublicKeys,
 } from '../../validate.ts'
 
 export const SOLANA_MULTISIG_MAX_SIGNERS = 11
@@ -51,6 +49,15 @@ type CreateTokenMultisigParams = {
 
 /** Parameters for unsigned Solana token multisig generation. */
 export type GenerateCreateTokenMultisigParams = SolanaGenerateParams<CreateTokenMultisigParams>
+
+type ParsedCreateTokenMultisigParams = {
+  tokenMint: PublicKey
+  poolProgram: PublicKey
+  payer: PublicKey
+  threshold: number
+  additionalSigners: PublicKey[]
+  seed?: string
+}
 
 /** Unsigned token multisig transaction plus the created multisig address. */
 export type GenerateCreateTokenMultisigResult = UnsignedSolanaTx & { multisigAddress: string }
@@ -129,34 +136,41 @@ function getMintAuthority(
  */
 export class CreateTokenMultisig extends SolanaOperation<
   CreateTokenMultisigParams,
-  GenerateCreateTokenMultisigResult
+  GenerateCreateTokenMultisigResult,
+  ParsedCreateTokenMultisigParams
 > {
   readonly name = 'createTokenMultisig'
 
   /** Parses public keys, threshold, and optional seed before mint/account RPCs. */
   protected override parse(
     params: GenerateCreateTokenMultisigParams,
-  ): GenerateCreateTokenMultisigParams {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
+  ): ParsedCreateTokenMultisigParams {
     validatePoolType(this.name, 'poolType', params.poolType)
-    validatePublicKey(this.name, 'payer', params.payer)
-    if (params.additionalSigners !== undefined) {
-      validatePublicKeys(this.name, 'additionalSigners', params.additionalSigners)
+    if (params.additionalSigners !== undefined && !Array.isArray(params.additionalSigners)) {
+      throw new CCTParamsInvalidError(this.name, 'additionalSigners', 'must be an array')
     }
     validateInteger(this.name, 'threshold', params.threshold, 1, SOLANA_MULTISIG_MAX_SIGNERS)
     if (params.seed !== undefined) validateNonEmptyString(this.name, 'seed', params.seed)
-    return params
+
+    return {
+      tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      poolProgram: resolveTokenPoolProgram(params.poolType),
+      payer: parsePublicKey(this.name, 'payer', params.payer),
+      threshold: params.threshold,
+      additionalSigners: (params.additionalSigners ?? []).map((signer, i) =>
+        parsePublicKey(this.name, `additionalSigners[${i}]`, signer),
+      ),
+      ...(params.seed !== undefined && { seed: params.seed }),
+    }
   }
 
   /** Builds create-with-seed and initialize-multisig instructions. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateCreateTokenMultisigParams,
+    opts: ParsedCreateTokenMultisigParams,
     mintContext?: { account: MintAccount; authority: PublicKey },
   ): Promise<GenerateCreateTokenMultisigResult> {
-    const payer = new PublicKey(opts.payer)
-    const tokenMint = new PublicKey(opts.tokenAddress)
-    const poolProgram = resolveTokenPoolProgram(opts.poolType)
+    const { payer, tokenMint, poolProgram } = opts
     const mintAccount =
       mintContext?.account ?? (await resolveTokenMint(chain.connection, tokenMint))
 
@@ -165,10 +179,9 @@ export class CreateTokenMultisig extends SolanaOperation<
       mintContext?.authority ?? getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
 
     const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)
-    const nonPoolSigners = dedupePublicKeys([
-      authority,
-      ...(opts.additionalSigners ?? []).map((signer) => new PublicKey(signer)),
-    ]).filter((signer) => !signer.equals(poolSigner))
+    const nonPoolSigners = dedupePublicKeys([authority, ...opts.additionalSigners]).filter(
+      (signer) => !signer.equals(poolSigner),
+    )
 
     const signers = [...Array.from({ length: opts.threshold }, () => poolSigner), ...nonPoolSigners]
     validatePoolMultisigConfig(this.name, signers, poolSigner, opts.threshold)
@@ -209,20 +222,11 @@ export class CreateTokenMultisig extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteCreateTokenMultisigParams,
   ): Promise<ExecuteCreateTokenMultisigResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    const generateParams: GenerateCreateTokenMultisigParams = {
-      ...rest,
-      payer: wallet.publicKey.toBase58(),
-    }
-    this.parse(generateParams)
-
-    const tokenMint = new PublicKey(generateParams.tokenAddress)
-    const mintAccount = await resolveTokenMint(chain.connection, tokenMint)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const mintAccount = await resolveTokenMint(chain.connection, parsed.tokenMint)
 
     const tokenProgram = mintAccount.owner
-    const mintAuthority = getMintAuthority(this.name, tokenMint, mintAccount, tokenProgram)
+    const mintAuthority = getMintAuthority(this.name, parsed.tokenMint, mintAccount, tokenProgram)
     validateAuthorityMatchesWallet(
       this.name,
       mintAuthority,
@@ -230,7 +234,7 @@ export class CreateTokenMultisig extends SolanaOperation<
       'createTokenMultisig requires the executing wallet to be the mint authority. Use generateUnsignedCreateTokenMultisig for vault-owned mints and have the vault sign/execute it.',
     )
 
-    const tx = await this.buildUnsigned(chain, generateParams, {
+    const tx = await this.buildUnsigned(chain, parsed, {
       account: mintAccount,
       authority: mintAuthority,
     })

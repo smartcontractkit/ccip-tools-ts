@@ -9,10 +9,9 @@ import {
 } from '@solana/spl-token'
 import { type TransactionInstruction, PublicKey, SystemProgram } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -156,6 +155,8 @@ type DeployTokenConfig = {
   seed: string
 }
 
+type ParsedDeployTokenParams = GenerateDeployTokenParams & { config: DeployTokenConfig }
+
 function resolveDeployTokenConfig(params: GenerateDeployTokenParams): DeployTokenConfig {
   const payer = new PublicKey(params.payer)
   return {
@@ -293,23 +294,27 @@ function validateMetaplexParams(operation: string, params: GenerateDeployTokenPa
 }
 
 /** Creates a Solana SPL mint, optionally with Metaplex metadata and initial supply. */
-export class DeployToken extends SolanaOperation<DeployTokenParams, GenerateDeployTokenResult> {
+export class DeployToken extends SolanaOperation<
+  DeployTokenParams,
+  GenerateDeployTokenResult,
+  ParsedDeployTokenParams
+> {
   readonly name = 'deployToken'
 
   /** Parses mint and metadata params before any RPC. */
-  protected override parse(params: GenerateDeployTokenParams): GenerateDeployTokenParams {
+  protected override parse(params: GenerateDeployTokenParams): ParsedDeployTokenParams {
     validateBaseParams(this.name, params)
     validatePreMintParams(this.name, params)
     validateMetaplexParams(this.name, params)
-    return params
+    return { ...params, config: resolveDeployTokenConfig(params) }
   }
 
   /** Builds the unsigned Solana mint creation instruction set. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    params: GenerateDeployTokenParams,
+    params: ParsedDeployTokenParams,
   ): Promise<GenerateDeployTokenResult> {
-    const config = resolveDeployTokenConfig(params)
+    const { config } = params
     const mint = await PublicKey.createWithSeed(config.payer, config.seed, config.tokenProgram)
     const lamports = await chain.connection.getMinimumBalanceForRentExemption(getMintLen([]))
     const instructions = createMintInstructions(mint, lamports, params.decimals, config)
@@ -351,11 +356,9 @@ export class DeployToken extends SolanaOperation<DeployTokenParams, GenerateDepl
     chain: SolanaChain,
     params: ExecuteDeployTokenParams,
   ): Promise<ExecuteDeployTokenResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const externalSigner = getExternalMintAuthoritySigner(parsed, parsed.payer)
 
-    const payer = wallet.publicKey.toBase58()
-    const externalSigner = getExternalMintAuthoritySigner(rest, payer)
     if (externalSigner) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -364,7 +367,7 @@ export class DeployToken extends SolanaOperation<DeployTokenParams, GenerateDepl
       )
     }
 
-    const tx = await this.generate(chain, { ...rest, payer })
+    const tx = await this.buildUnsigned(chain, parsed)
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
     return {
       ...hash,

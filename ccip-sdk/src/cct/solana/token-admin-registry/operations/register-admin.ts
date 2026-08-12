@@ -1,10 +1,9 @@
 import { unpackMint } from '@solana/spl-token'
 import { type TransactionInstruction, PublicKey } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
@@ -19,11 +18,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import {
-  validateAuthorityMatchesWallet,
-  validateOptionalPublicKey,
-  validatePublicKey,
-} from '../../validate.ts'
+import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 
 /** Authorization paths used to register a token in the TokenAdminRegistry. */
 const REGISTER_ADMIN_METHODS = {
@@ -56,6 +51,15 @@ type RegisterAdminParams = {
 
 /** Parameters for unsigned Solana token registration generation. */
 export type GenerateRegisterAdminParams = SolanaGenerateParams<RegisterAdminParams>
+
+type ParsedRegisterAdminParams = {
+  tokenMint: PublicKey
+  address: PublicKey
+  payer: PublicKey
+  authority: PublicKey
+  administrator?: PublicKey
+  method: RegisterAdminMethod
+}
 
 /** Unsigned Solana token registration result. */
 export type GenerateRegisterAdminResult = UnsignedSolanaTx
@@ -131,16 +135,15 @@ async function buildCcipAdminInstruction(
 }
 
 /** Registers a token through either its mint authority or the Router CCIP admin. */
-export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
+export class RegisterAdmin extends SolanaOperation<
+  RegisterAdminParams,
+  UnsignedSolanaTx,
+  ParsedRegisterAdminParams
+> {
   readonly name = 'registerAdmin'
 
   /** Parses all caller-supplied parameters before RPC. */
-  protected override parse(params: GenerateRegisterAdminParams): GenerateRegisterAdminParams {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'address', params.address)
-    validatePublicKey(this.name, 'payer', params.payer)
-    validateOptionalPublicKey(this.name, 'administrator', params.administrator)
-    validateOptionalPublicKey(this.name, 'authority', params.authority)
+  protected override parse(params: GenerateRegisterAdminParams): ParsedRegisterAdminParams {
     if (
       params.registrationMethod !== undefined &&
       !Object.values(REGISTER_ADMIN_METHODS).includes(params.registrationMethod)
@@ -151,25 +154,33 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
         'must be owner or ccip-admin',
       )
     }
-    return params
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    return {
+      tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      address: parsePublicKey(this.name, 'address', params.address),
+      payer,
+      authority:
+        params.authority === undefined
+          ? payer
+          : parsePublicKey(this.name, 'authority', params.authority),
+      ...(params.administrator !== undefined && {
+        administrator: parsePublicKey(this.name, 'administrator', params.administrator),
+      }),
+      method: params.registrationMethod ?? REGISTER_ADMIN_METHODS.OWNER,
+    }
   }
 
   /** Builds an unsigned token registration instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateRegisterAdminParams,
+    opts: ParsedRegisterAdminParams,
   ): Promise<UnsignedSolanaTx> {
-    const routerAddress = await chain.getTokenAdminRegistryFor(opts.address)
-    const router = new PublicKey(routerAddress)
-    const tokenMint = new PublicKey(opts.tokenAddress)
-    const payer = new PublicKey(opts.payer)
-    const authority = new PublicKey(opts.authority ?? opts.payer)
+    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
+    const { tokenMint, payer, authority, method } = opts
 
     const mintAccount = await resolveTokenMint(chain.connection, tokenMint)
     const { mintAuthority } = unpackMint(tokenMint, mintAccount, mintAccount.owner)
-    const administrator =
-      opts.administrator !== undefined ? new PublicKey(opts.administrator) : mintAuthority
-    const method = opts.registrationMethod ?? REGISTER_ADMIN_METHODS.OWNER
+    const administrator = opts.administrator ?? mintAuthority
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
     if (await chain.connection.getAccountInfo(tokenAdminRegistry)) {
@@ -223,24 +234,18 @@ export class RegisterAdmin extends SolanaOperation<RegisterAdminParams> {
     chain: SolanaChain,
     params: ExecuteRegisterAdminParams,
   ): Promise<ExecuteRegisterAdminResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
-    const payer = wallet.publicKey.toBase58()
-    const generateParams: GenerateRegisterAdminParams = { ...rest, payer }
-    this.parse(generateParams)
-
-    const authority = params.authority !== undefined ? new PublicKey(params.authority) : undefined
-    if (authority) {
+    if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,
-        authority,
+        parsed.authority,
         wallet.publicKey,
         'registerAdmin requires authority to be the executing wallet. Use generateUnsignedRegisterAdmin for externally signed transactions.',
       )
     }
 
-    const tx = await this.buildUnsigned(chain, generateParams)
+    const tx = await this.buildUnsigned(chain, parsed)
     return submit(chain, wallet, tx, this.name, computeUnits)
   }
 }
