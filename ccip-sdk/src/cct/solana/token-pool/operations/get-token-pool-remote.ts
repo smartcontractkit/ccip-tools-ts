@@ -16,7 +16,7 @@ import { U64_MAX, parsePublicKey, resolvePoolProgram, validateBigInt } from '../
 export type GetTokenPoolRemoteParams = PoolProgramRef & {
   /** Token mint address managed by the local pool. */
   tokenAddress: string
-  /** CCIP selector of the remote chain (`u64`). */
+  /** CCIP selector of the destination chain whose config to read (`u64`). */
   remoteChainSelector: bigint
 }
 
@@ -71,7 +71,7 @@ function serializeRateLimit({
   }
 }
 
-/** Reads a remote-chain configuration of a Solana token pool. */
+/** Reads the derived ChainConfig account for one Solana token pool remote chain. */
 export class GetTokenPoolRemote extends SolanaQuery<
   GetTokenPoolRemoteParams,
   GetTokenPoolRemoteResult,
