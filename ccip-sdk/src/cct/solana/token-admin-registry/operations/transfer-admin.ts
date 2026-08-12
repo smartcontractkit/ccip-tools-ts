@@ -1,9 +1,8 @@
 import { PublicKey } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -17,11 +16,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
-import {
-  validateAuthorityMatchesWallet,
-  validateOptionalPublicKey,
-  validatePublicKey,
-} from '../../validate.ts'
+import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 
 /** Parameters shared by Solana TokenAdminRegistry `transferAdmin` generation and execution. */
 type TransferAdminParams = {
@@ -40,6 +35,14 @@ type TransferAdminParams = {
 /** Parameters for unsigned Solana TokenAdminRegistry `transferAdmin` generation. */
 export type GenerateTransferAdminParams = SolanaGenerateParams<TransferAdminParams>
 
+type ParsedTransferAdminParams = {
+  tokenMint: PublicKey
+  address: PublicKey
+  newAdmin: PublicKey
+  payer: PublicKey
+  authority: PublicKey
+}
+
 /** Unsigned Solana TokenAdminRegistry `transferAdmin` result. */
 export type GenerateTransferAdminResult = UnsignedSolanaTx
 
@@ -50,29 +53,35 @@ export type ExecuteTransferAdminParams = SolanaExecuteParams<TransferAdminParams
 export type ExecuteTransferAdminResult = TransactionResult
 
 /** Transfers a TokenAdminRegistry administrator role. The proposed admin must accept separately. */
-export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
+export class TransferAdmin extends SolanaOperation<
+  TransferAdminParams,
+  UnsignedSolanaTx,
+  ParsedTransferAdminParams
+> {
   readonly name = 'transferAdmin'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(params: GenerateTransferAdminParams): GenerateTransferAdminParams {
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'address', params.address)
-    validatePublicKey(this.name, 'newAdmin', params.newAdmin)
-    validatePublicKey(this.name, 'payer', params.payer)
-    validateOptionalPublicKey(this.name, 'authority', params.authority)
-    return params
+  protected override parse(params: GenerateTransferAdminParams): ParsedTransferAdminParams {
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    return {
+      tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      address: parsePublicKey(this.name, 'address', params.address),
+      newAdmin: parsePublicKey(this.name, 'newAdmin', params.newAdmin),
+      payer,
+      authority:
+        params.authority === undefined
+          ? payer
+          : parsePublicKey(this.name, 'authority', params.authority),
+    }
   }
 
   /** Builds the unsigned instruction after confirming the caller is the current admin. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: GenerateTransferAdminParams,
+    opts: ParsedTransferAdminParams,
   ): Promise<UnsignedSolanaTx> {
-    const tokenMint = new PublicKey(opts.tokenAddress)
-    const payer = new PublicKey(opts.payer)
-    const authority = new PublicKey(opts.authority ?? opts.payer)
-    const newAdmin = new PublicKey(opts.newAdmin)
-    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address))
+    const { tokenMint, payer, authority, newAdmin } = opts
+    const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
     const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
 
     if (!new PublicKey(tokenConfig.administrator).equals(authority)) {
@@ -107,28 +116,17 @@ export class TransferAdmin extends SolanaOperation<TransferAdminParams> {
     chain: SolanaChain,
     params: ExecuteTransferAdminParams,
   ): Promise<ExecuteTransferAdminResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    const payer = wallet.publicKey.toBase58()
-    const generateParams: GenerateTransferAdminParams = { ...rest, payer }
-    this.parse(generateParams)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
         this.name,
-        new PublicKey(params.authority),
+        parsed.authority,
         wallet.publicKey,
         'transferAdmin requires authority to be the executing wallet. Use generateUnsignedTransferAdmin for externally signed transactions.',
       )
     }
 
-    return submit(
-      chain,
-      wallet,
-      await this.buildUnsigned(chain, generateParams),
-      this.name,
-      computeUnits,
-    )
+    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
   }
 }

@@ -20,7 +20,6 @@ export type SolanaExecuteParams<P extends object> = P & {
   computeUnits?: number
 }
 
-// TODO: migrate remaining Solana operations to parse normalized params.
 /**
  * Solana CCT write base. Subclasses supply {@link parse} and {@link buildUnsigned}.
  *

@@ -1,10 +1,9 @@
 import { createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
-import { PublicKey } from '@solana/web3.js'
+import type { PublicKey } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { resolveATA } from '../../../../solana/utils.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -13,7 +12,7 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
-import { validatePublicKey } from '../../validate.ts'
+import { parsePublicKey } from '../../validate.ts'
 
 /** Parameters for deriving and creating a Solana associated token account. */
 type CreateTokenAccountParams = {
@@ -25,6 +24,12 @@ type CreateTokenAccountParams = {
 
 /** Parameters for unsigned Solana associated token account creation. */
 export type GenerateCreateTokenAccountParams = SolanaGenerateParams<CreateTokenAccountParams>
+
+type ParsedCreateTokenAccountParams = {
+  payer: PublicKey
+  tokenAddress: PublicKey
+  ownerAddress: PublicKey
+}
 
 /** Unsigned associated token account creation tx plus the derived token account address. */
 export type GenerateCreateTokenAccountResult = UnsignedSolanaTx & { tokenAccountAddress: string }
@@ -38,28 +43,28 @@ export type ExecuteCreateTokenAccountResult = TransactionResult & { tokenAccount
 /** Creates an Associated Token Account for any wallet or PDA owner. */
 export class CreateTokenAccount extends SolanaOperation<
   CreateTokenAccountParams,
-  GenerateCreateTokenAccountResult
+  GenerateCreateTokenAccountResult,
+  ParsedCreateTokenAccountParams
 > {
   readonly name = 'createTokenAccount'
 
   /** Parses create-token-account parameters. */
   protected override parse(
     params: GenerateCreateTokenAccountParams,
-  ): GenerateCreateTokenAccountParams {
-    validatePublicKey(this.name, 'payer', params.payer)
-    validatePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    validatePublicKey(this.name, 'ownerAddress', params.ownerAddress)
-    return params
+  ): ParsedCreateTokenAccountParams {
+    return {
+      payer: parsePublicKey(this.name, 'payer', params.payer),
+      tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
+      ownerAddress: parsePublicKey(this.name, 'ownerAddress', params.ownerAddress),
+    }
   }
 
   /** Builds an unsigned idempotent associated token account creation transaction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    params: GenerateCreateTokenAccountParams,
+    params: ParsedCreateTokenAccountParams,
   ): Promise<GenerateCreateTokenAccountResult> {
-    const payer = new PublicKey(params.payer)
-    const mint = new PublicKey(params.tokenAddress)
-    const owner = new PublicKey(params.ownerAddress)
+    const { payer, tokenAddress: mint, ownerAddress: owner } = params
     const { ata: tokenAccount, tokenProgram } = await resolveATA(chain.connection, mint, owner)
 
     chain.logger.debug(
@@ -87,11 +92,11 @@ export class CreateTokenAccount extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
-    const tx = await this.generate(chain, { ...rest, payer: wallet.publicKey.toBase58() })
+    const tx = await this.buildUnsigned(chain, parsed)
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)
+
     return { ...hash, tokenAccountAddress: tx.tokenAccountAddress }
   }
 }
