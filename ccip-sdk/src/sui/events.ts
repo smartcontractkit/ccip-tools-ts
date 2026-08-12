@@ -33,6 +33,8 @@ type EventNode<T = unknown> = {
     address: string
   }
   timestamp: string
+  /** Raw Move event type (`pkg::module::EventName`); lets callers derive the topic per event. */
+  type: string
   contents?: {
     json: T
   }
@@ -148,6 +150,7 @@ function toEventNode<T>(event: SuiEvent, meta: TxMeta): EventNode<T> {
     sequenceNumber: event.id.eventSeq,
     sender: { address: event.sender },
     timestamp: new Date(meta.timestampMs || Number(event.timestampMs ?? 0)).toISOString(),
+    type: event.type,
     contents: { json: event.parsedJson as T },
     transaction: {
       digest: event.id.txDigest,
@@ -166,11 +169,18 @@ function toEventNode<T>(event: SuiEvent, meta: TxMeta): EventNode<T> {
  * `queryEvents` descending from the tip until it reaches events older than the
  * batch start, resolving checkpoints per tx digest (cached), then yields the
  * collected range in ascending order.
+ *
+ * Unlike Aptos event handles, Sui checkpoints are a single global clock shared
+ * by every Move event type — there's no per-type sequence-number space to
+ * track independently. So all `types` share ONE checkpoint cursor/window;
+ * each type just runs its own `queryEvents` pagination pass (with its own
+ * early-exit once it walks past the window) into the SAME `collected` array,
+ * which is then merge-sorted once before yielding for the round.
  */
 async function* fetchEventsForward<T>(
   ctx: { client: SuiJsonRpcClient },
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
-  type: string,
+  types: string[],
   limit = 50,
 ): AsyncGenerator<EventNode<T>> {
   const DEFAULT_POLL_INTERVAL = 5e3
@@ -213,7 +223,7 @@ async function* fetchEventsForward<T>(
     }
   }
 
-  const filter: SuiEventFilter = { MoveEventType: type }
+  const filters: SuiEventFilter[] = types.map((type) => ({ MoveEventType: type }))
   const txMetas = new Map<string, TxMeta>()
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
@@ -238,43 +248,60 @@ async function* fetchEventsForward<T>(
     // Fetch events for this checkpoint range
     if (currentCheckpoint <= batchEndCheckpoint) {
       const collected: EventNode<T>[] = []
-      let cursor: EventId | null | undefined = undefined
-      let done = false
 
-      while (!done) {
-        const page = await withLookupRetry(() =>
-          ctx.client.queryEvents({
-            query: filter,
-            cursor,
-            limit,
-            order: 'descending',
-          }),
-        )
-        if (!page.data.length) break
+      // Each type runs its own descending-paginated query with its own cursor
+      // and early-exit (`done`) — a quiet type walking past the window must
+      // not affect a busier type's pagination — but every type accumulates
+      // into the SAME collected array so the whole round merges into one
+      // ascending stream below.
+      for (const filter of filters) {
+        let cursor: EventId | null | undefined = undefined
+        let done = false
 
-        await resolveTxMetas(ctx.client, page.data, txMetas)
+        while (!done) {
+          const page = await withLookupRetry(() =>
+            ctx.client.queryEvents({
+              query: filter,
+              cursor,
+              limit,
+              order: 'descending',
+            }),
+          )
+          if (!page.data.length) break
 
-        for (const event of page.data) {
-          const meta = txMetas.get(event.id.txDigest)!
-          // descending order: once we pass the start of the range, so does everything after
-          if (meta.checkpoint < currentCheckpoint) {
-            done = true
-            break
+          await resolveTxMetas(ctx.client, page.data, txMetas)
+
+          for (const event of page.data) {
+            const meta = txMetas.get(event.id.txDigest)!
+            // descending order: once we pass the start of the range, so does everything after
+            if (meta.checkpoint < currentCheckpoint) {
+              done = true
+              break
+            }
+            if (meta.checkpoint > batchEndCheckpoint) continue
+            // Filter by startTime if provided
+            if (opts.startTime != null && meta.timestampMs / 1000 < Number(opts.startTime)) continue
+            collected.push(toEventNode<T>(event, meta))
           }
-          if (meta.checkpoint > batchEndCheckpoint) continue
-          // Filter by startTime if provided
-          if (opts.startTime != null && meta.timestampMs / 1000 < Number(opts.startTime)) continue
-          collected.push(toEventNode<T>(event, meta))
+
+          if (!page.hasNextPage) break
+          cursor = page.nextCursor
         }
-
-        if (!page.hasNextPage) break
-        cursor = page.nextCursor
       }
 
-      // collected is in descending order; yield ascending
-      for (let i = collected.length - 1; i >= 0; i--) {
-        yield collected[i]!
-      }
+      // collected now interleaves every type, each internally descending —
+      // sort ascending by (checkpoint, txDigest, eventSeq) so the merged
+      // output stays globally ascending instead of one-type-then-the-next
+      // (the caller advances a per-address block watermark and assumes a
+      // block is never split across returns).
+      collected.sort(
+        (a, b) =>
+          a.transaction!.effects.checkpoint.sequenceNumber -
+            b.transaction!.effects.checkpoint.sequenceNumber ||
+          a.transaction!.digest.localeCompare(b.transaction!.digest) ||
+          Number(a.sequenceNumber) - Number(b.sequenceNumber),
+      )
+      for (const node of collected) yield node
 
       currentCheckpoint = batchEndCheckpoint + 1
     }
@@ -307,16 +334,18 @@ export async function* streamSuiLogs<T>(
   ctx: { client: SuiJsonRpcClient },
   opts: LeanNumbers<LogFilter>,
 ): AsyncGenerator<EventNode<T>> {
-  if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')
-    throw new CCIPTopicsInvalidError(opts.topics!)
+  if (!opts.topics?.length) throw new CCIPTopicsInvalidError(opts.topics!)
 
-  // Construct full Sui event type: package_id::module_name::EventName
+  // Construct one full Sui event type filter per topic: package_id::module_name::EventName
   // opts.address is in format: package_id::module_name
-  // opts.topics[0] is the EventName
-  const eventType = `${opts.address}::${opts.topics[0]}`
+  // each topic is an EventName
+  const types = opts.topics.map((topic) => {
+    if (typeof topic !== 'string') throw new CCIPTopicsInvalidError(opts.topics!)
+    return `${opts.address}::${topic}`
+  })
 
   const hasStart = opts.startBlock != null || opts.startTime != null
   if (!hasStart) throw new CCIPLogsRequiresStartError()
 
-  yield* fetchEventsForward<T>(ctx, opts, eventType)
+  yield* fetchEventsForward<T>(ctx, opts, types)
 }

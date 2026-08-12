@@ -118,6 +118,7 @@ import {
   getDataBytes,
   leToBigInt,
   parseTypeAndVersion,
+  passesTypeAndVersion,
   toLeArray,
   util,
 } from '../utils.ts'
@@ -532,6 +533,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
             ))
         )
           continue
+        if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
         yield log
       }
     }

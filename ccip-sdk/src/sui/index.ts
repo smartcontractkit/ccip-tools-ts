@@ -29,7 +29,6 @@ import {
   CCIPLogDataInvalidError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
-  CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
@@ -58,6 +57,7 @@ import {
   decodeOnRampAddress,
   getDataBytes,
   parseTypeAndVersion,
+  passesTypeAndVersion,
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
@@ -237,7 +237,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /**
    * {@inheritDoc Chain.getLogs}
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
-   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
+   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid (thrown by {@link streamSuiLogs})
    */
   async *getLogs(opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean }) {
     if (opts.watch) {
@@ -251,16 +251,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
 
-    // Extract the event type from topics
-    if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string') {
-      throw new CCIPTopicsInvalidError(opts.topics!)
-    }
-    const topic = opts.topics[0]
-
+    // Topic validation (and building the per-topic MoveEventType filters) is
+    // delegated to streamSuiLogs, which now accepts N topics merged into one
+    // ascending stream.
     for await (const event of streamSuiLogs<Record<string, unknown>>(this, opts)) {
       const eventData = event.contents?.json
       const blockTimestamp = new Date(event.timestamp).getTime() / 1000
       if (!eventData) continue
+      // Derive the topic from THIS event's own Move type, not the caller's
+      // filter list: with several topics merged into one stream, only the
+      // event's own type tells us which one it actually is.
+      const topic = event.type.slice(event.type.lastIndexOf('::') + 2)
+      if (!(await passesTypeAndVersion(this, opts.address, opts.typeAndVersions))) continue
       yield {
         address: opts.address,
         transactionHash: event.transaction!.digest,

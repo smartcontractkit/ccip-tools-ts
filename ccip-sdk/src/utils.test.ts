@@ -6,7 +6,7 @@ import { dataLength } from 'ethers'
 
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
-import { ChainFamily } from './index.ts'
+import { type Logger, ChainFamily } from './index.ts'
 import { networkInfo } from './networks.ts'
 import {
   blockRangeGenerator,
@@ -22,6 +22,7 @@ import {
   jsonStringify,
   leToBigInt,
   parseTypeAndVersion,
+  passesTypeAndVersion,
   scaleDecimals,
   sleep,
   snakeToCamel,
@@ -1006,6 +1007,85 @@ describe('parseTypeAndVersion', () => {
     const result = parseTypeAndVersion('Router  v1.0.0')
     assert.equal(result[0], 'Router')
     assert.equal(result[1], '1.0.0')
+  })
+})
+
+describe('passesTypeAndVersion', () => {
+  const RAW = 'EVM2EVMOnRamp 1.6.0'
+  const PARSED: Awaited<ReturnType<typeof parseTypeAndVersion>> = ['OnRamp', '1.6.0', RAW]
+
+  function makeChain(
+    result: Awaited<ReturnType<typeof parseTypeAndVersion>> | Error,
+    logger?: Pick<Logger, 'debug'>,
+  ) {
+    return {
+      logger,
+      typeAndVersion: mock.fn(async (_address: string) => {
+        if (result instanceof Error) throw result
+        return result
+      }),
+    }
+  }
+
+  it('matches a string pattern equal to the bare type', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', ['OnRamp']), true)
+  })
+
+  it('matches a string pattern equal to the raw typeAndVersion string', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', [RAW]), true)
+  })
+
+  it('matches a string pattern equal to `${type} ${version}`', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', ['OnRamp 1.6.0']), true)
+  })
+
+  it('does not match an unrelated string pattern', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', ['OffRamp']), false)
+  })
+
+  it('matches a RegExp tested against the raw typeAndVersion string', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', [/^EVM2EVMOnRamp\b/]), true)
+  })
+
+  it('matches a RegExp tested against `${type} ${version}`', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', [/^OnRamp 1\.6\.0$/]), true)
+  })
+
+  it('does not match a RegExp only satisfied by the bare type', async () => {
+    // /^OnRamp$/ matches neither the raw string ("EVM2EVMOnRamp 1.6.0") nor "OnRamp 1.6.0" —
+    // a RegExp is deliberately never tested against the bare `type` alone.
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', [/^OnRamp$/]), false)
+  })
+
+  it('resolves false (without throwing) when typeAndVersion rejects', async () => {
+    const debugCalls: unknown[][] = []
+    const logger = { debug: (...args: unknown[]) => debugCalls.push(args) }
+    const chain = makeChain(new Error('no typeAndVersion() on this contract'), logger)
+    await assert.doesNotReject(async () => {
+      const result = await passesTypeAndVersion(chain, '0xabc', ['OnRamp'])
+      assert.equal(result, false)
+    })
+    assert.equal(debugCalls.length, 1)
+    assert.equal(debugCalls[0]![1], '0xabc')
+  })
+
+  it('resolves true and never calls typeAndVersion when typeAndVersions is undefined', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', undefined), true)
+    assert.equal(chain.typeAndVersion.mock.calls.length, 0)
+  })
+
+  it('resolves true and never calls typeAndVersion when typeAndVersions is empty', async () => {
+    const chain = makeChain(PARSED)
+    assert.equal(await passesTypeAndVersion(chain, '0xabc', []), true)
+    assert.equal(chain.typeAndVersion.mock.calls.length, 0)
   })
 })
 

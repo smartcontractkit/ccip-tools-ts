@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { beforeEach, describe, it } from 'node:test'
+import { beforeEach, describe, it, mock } from 'node:test'
 
 import type { JsonRpcApiProvider, Log } from 'ethers'
 
@@ -999,4 +999,90 @@ describe('getEvmLogs — watch invariants', () => {
       assert.equal(calls.length, 0, 'expected no getLogs before the finality guard threw')
     },
   )
+})
+
+describe('getEvmLogs — typeAndVersions filter', () => {
+  const ONRAMP_ADDR = '0x0000000000000000000000000000000000000a'
+  const OFFRAMP_ADDR = '0x0000000000000000000000000000000000000b'
+
+  /** Overrides a fake log's address (makeLog's cast type doesn't survive a plain spread). */
+  function withAddress(log: Log, address: string): Log {
+    return { ...log, address } as unknown as Log
+  }
+
+  /** Fake provider that returns a fixed set of logs for any (single-chunk) request. */
+  function makeFixedLogsProvider(url: string, logs: Log[]): JsonRpcApiProvider {
+    return {
+      _getConnection: () => ({ url }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 1000
+        return { number: num, timestamp: num * 12 }
+      },
+      getLogs: async () => logs,
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('yields logs whose contract type matches, drops those that do not', async () => {
+    const url = 'https://fake-rpc-tv-a.example.com/rpc'
+    const logs = [
+      withAddress(makeLog(1000, 0), ONRAMP_ADDR),
+      withAddress(makeLog(1000, 1), OFFRAMP_ADDR),
+    ]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (address: string): Promise<[string, string, string]> =>
+      address === ONRAMP_ADDR
+        ? ['OnRamp', '1.6.0', 'EVM2EVMOnRamp 1.6.0']
+        : ['OffRamp', '1.6.0', 'EVM2EVMOffRamp 1.6.0'],
+    )
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, typeAndVersions: ['OnRamp'] },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 1)
+    assert.equal(result[0]!.address, ONRAMP_ADDR)
+    assert.equal(typeAndVersion.mock.calls.length, 2)
+  })
+
+  it('drops a log when typeAndVersion throws, without the error escaping getLogs', async () => {
+    const url = 'https://fake-rpc-tv-b.example.com/rpc'
+    const logs = [withAddress(makeLog(1000, 0), ONRAMP_ADDR)]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (): Promise<[string, string, string]> => {
+      throw new Error('no typeAndVersion() on this contract')
+    })
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, typeAndVersions: ['OnRamp'] },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 0)
+  })
+
+  it('never calls typeAndVersion when the option is absent (zero-cost when unused)', async () => {
+    const url = 'https://fake-rpc-tv-c.example.com/rpc'
+    const logs = [withAddress(makeLog(1000, 0), ONRAMP_ADDR)]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (): Promise<[string, string, string]> => [
+      'OnRamp',
+      '1.6.0',
+      'EVM2EVMOnRamp 1.6.0',
+    ])
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000 },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 1)
+    assert.equal(typeAndVersion.mock.calls.length, 0)
+  })
 })

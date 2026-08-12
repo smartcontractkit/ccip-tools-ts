@@ -1,12 +1,13 @@
 import { type JsonRpcApiProvider, type Log, isHexString } from 'ethers'
-import type { SetFieldType } from 'type-fest'
+import type { SetFieldType, SetRequired } from 'type-fest'
 
-import type { LogFilter } from '../chain.ts'
+import type { Chain, LogFilter } from '../chain.ts'
 import {
   CCIPLogRangeTooLargeError,
   CCIPLogTopicsNotFoundError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
+  CCIPNotImplementedError,
 } from '../errors/index.ts'
 import type { FinalityRequested } from '../extra-args.ts'
 import {
@@ -15,7 +16,7 @@ import {
   parseLogRangeError,
   setEndpointLogRange,
 } from '../fetch.ts'
-import { getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
+import { getSomeBlockNumberBefore, passesTypeAndVersion, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
@@ -192,9 +193,20 @@ export async function* getEvmLogs(
     provider: JsonRpcApiProvider
     getBlockInfo: (block: EVMEndBlockTag) => Promise<{ number: number; timestamp: number }>
     abort?: AbortSignal
+    /** Only needed when `filter.typeAndVersions` is used; omitted in most tests/callers. */
+    typeAndVersion?: Chain['typeAndVersion']
   } & WithLogger,
 ): AsyncIterableIterator<ChainLog> {
   const { provider, logger = console } = ctx
+  // Narrow-typed stand-in so passesTypeAndVersion always has a callable typeAndVersion;
+  // only reached when filter.typeAndVersions is set but ctx.typeAndVersion was not passed.
+  const typeAndVersionChain = ctx.typeAndVersion
+    ? (ctx as SetRequired<typeof ctx, 'typeAndVersion'>)
+    : {
+        logger,
+        typeAndVersion: () =>
+          Promise.reject(new CCIPNotImplementedError('typeAndVersion in this getLogs context')),
+      }
   // Work on a shallow copy: getEvmLogs resolves page/endBlock/startBlock/topics
   // in place, and must not mutate the caller's filter object.
   filter = { ...filter }
@@ -258,6 +270,8 @@ export async function* getEvmLogs(
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
+      if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
+        continue
       yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
     }
   }

@@ -57,7 +57,12 @@ import {
   CCIPVersion,
   ExecutionState,
 } from '../types.ts'
-import { bytesToBuffer, decodeAddress, parseTypeAndVersion } from '../utils.ts'
+import {
+  bytesToBuffer,
+  decodeAddress,
+  parseTypeAndVersion,
+  passesTypeAndVersion,
+} from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
@@ -651,7 +656,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // below serves the watermark-driven poller, which does not watch).
     if (opts.watch) {
       for await (const tx of streamTransactionsForAddress(opts_, this)) {
-        for (const log of tx.logs) if (matches(log)) yield log
+        for (const log of tx.logs) {
+          if (!matches(log)) continue
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
       }
       return
     }
@@ -717,7 +726,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         break
       }
       // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
-      if (curBlock !== undefined && block !== curBlock) yield* drain()
+      if (curBlock !== undefined && block !== curBlock) {
+        for (const log of drain()) {
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
+      }
       curBlock = block
       if (block > cutoff) {
         // Reached the unsealed region (prior block already drained). Stop.
@@ -728,7 +742,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (raw) prevLt = raw.lt
     }
     // Exhausted within the sealed cutoff (no gap): the last block is complete.
-    yield* drain()
+    for (const log of drain()) {
+      if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+      yield log
+    }
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

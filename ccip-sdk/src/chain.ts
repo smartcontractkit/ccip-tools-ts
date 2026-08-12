@@ -299,6 +299,18 @@ export type LogFilter = {
   topics?: (string | string[] | null)[]
   /** Page size for pagination. */
   page?: number
+  /**
+   * Restrict logs to contracts whose {@link Chain.typeAndVersion} matches any of these.
+   *
+   * Useful when filtering by topic alone (no `address`) would otherwise match logs from
+   * many unrelated contract types — e.g. `ConfigSet` is emitted by OnRamp, OffRamp,
+   * CommitStore, FeeQuoter, TokenPool, and PriceRegistry alike. Pass e.g. `['OnRamp']` to
+   * keep only on-ramps.
+   *
+   * See {@link passesTypeAndVersion} for the exact matching rule. `undefined`/empty means
+   * no restriction (default), and costs nothing — `typeAndVersion` is never called.
+   */
+  typeAndVersions?: readonly (string | RegExp)[]
 }
 
 /**

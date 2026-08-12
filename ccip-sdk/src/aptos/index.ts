@@ -174,6 +174,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     this.provider = provider
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
       maxSize: 100,
       maxArgs: 1,
       expires: 60e3, // 1min
