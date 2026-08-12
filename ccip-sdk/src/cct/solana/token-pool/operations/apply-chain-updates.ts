@@ -171,7 +171,8 @@ export type ExecuteApplyChainUpdatesResult = { hashes: string[] }
  * configured with remote pools, and assigned both rate-limit configs. EVM-style replacement is
  * supported by listing a selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`;
  * adding an existing selector without removing it fails. Updates are packed into one or more
- * transactions without splitting a chain update.
+ * transactions, keeping each chain's initialization, configuration, and rate-limit instructions
+ * together.
  */
 export class ApplyChainUpdates extends SolanaOperation<
   ApplyChainUpdatesParams,
