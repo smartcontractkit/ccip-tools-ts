@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey } from '@solana/web3.js'
 
+import { CCIPError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -208,7 +209,9 @@ describe('ApplyChainUpdates (cct/solana)', () => {
             ],
           }),
         (err: unknown) =>
-          err instanceof CCTParamsInvalidError && err.context.param === 'chainsToAdd',
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'chainsToAdd' &&
+          err.message.includes('chain selector 0x3 (30 remote pool addresses)'),
       )
     })
 
@@ -355,7 +358,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         wallet: WALLET,
       })
 
-      assert.deepEqual(result, { hashes: [HASH] })
+      assert.deepEqual(result, { hashes: [HASH], chainSelectors: [[`0x${SELECTOR.toString(16)}`]] })
     })
 
     it('submits every safely packed batch and returns all hashes', async () => {
@@ -367,7 +370,37 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         wallet: WALLET,
       })
 
-      assert.deepEqual(result, { hashes: [HASH, HASH] })
+      assert.deepEqual(result, { hashes: [HASH, HASH], chainSelectors: [['0x3', '0x4'], ['0x5']] })
+    })
+
+    it('attaches committed hashes when a later batch fails', async () => {
+      let simulations = 0
+      const failedChain = submitChain()
+      failedChain.connection.simulateTransaction = (async () => {
+        simulations++
+        return {
+          value: { err: simulations >= 2 ? { custom: 1 } : null, logs: [], unitsConsumed: 1 },
+        }
+      }) as never
+
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(failedChain).applyChainUpdates({
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            remoteChainSelectorsToRemove: [],
+            chainsToAdd: batchChains(),
+            wallet: WALLET,
+          }),
+        (error: unknown) =>
+          CCIPError.isCCIPError(error) &&
+          error.context.committedHashes instanceof Array &&
+          error.context.committedHashes[0] === HASH &&
+          error.context.committedChainSelectors instanceof Array &&
+          error.context.committedChainSelectors[0]?.join() === '0x3,0x4' &&
+          error.context.failedBatchIndex === 1 &&
+          error.context.totalBatches === 2,
+      )
     })
 
     it('rejects a non-wallet authority for signed configuration', async () => {

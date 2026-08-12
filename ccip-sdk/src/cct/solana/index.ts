@@ -531,8 +531,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `chainsToAdd` parameters as EVM `applyChainUpdates`.
    *
    * @remarks Removals run before additions. Each added chain is initialized, configured, and
-   * rate-limited as one transaction group; groups are packed into as many transactions as needed.
-   * To replace a chain, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`.
+   * rate-limited as one transaction group; returns one or more packed transactions. To replace a
+   * chain, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`.
    * Solana requires `remoteTokenDecimals`. `authority` must be the pool owner and defaults to `payer`.
    *
    * @see {@link applyChainUpdates}
@@ -542,7 +542,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedApplyChainUpdates({
+   * const unsignedTxs = await cct.generateUnsignedApplyChainUpdates({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelectorsToRemove: [oldSelector],
@@ -557,6 +557,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer,
    *   authority,
    * })
+   *
+   * for (const unsignedTx of unsignedTxs) {
+   *   // Sign and submit each transaction in order.
+   * }
    * ```
    */
   generateUnsignedApplyChainUpdates(

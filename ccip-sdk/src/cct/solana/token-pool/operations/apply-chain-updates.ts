@@ -10,10 +10,12 @@ import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
 import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
 import { InitChainRemoteConfig } from './init-chain-remote-config.ts'
 import { type RateLimitConfig, SetChainRateLimit } from './set-chain-rate-limit.ts'
+import { CCIPError, CCIPMethodUnsupportedError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -29,6 +31,17 @@ import {
 } from '../../validate.ts'
 
 const MAX_TRANSACTION_SIZE = 1232
+
+type InstructionGroup = {
+  instructions: TransactionInstruction[]
+  remoteChainSelector?: bigint
+  remotePoolCount?: number
+}
+
+type PackedInstructionGroup = {
+  transaction: UnsignedSolanaTx
+  chainSelectors: string[]
+}
 
 /** A remote-chain configuration to add, matching the EVM `ChainUpdate` fields plus Solana decimals. */
 type ChainUpdate = {
@@ -105,6 +118,7 @@ function validateRemotePoolAddresses(operation: string, updates: unknown[]): voi
   }
 }
 
+/** Serializes a conservative v0 transaction, including compute-budget overhead, to check its size. */
 function fitsInTransaction(payer: PublicKey, instructions: TransactionInstruction[]): boolean {
   try {
     const transaction = new VersionedTransaction(
@@ -126,28 +140,49 @@ function fitsInTransaction(payer: PublicKey, instructions: TransactionInstructio
 
 /** Packs ordered instruction groups without splitting a remote-chain update across transactions. */
 function packInstructionGroups(
+  operation: string,
   payer: PublicKey,
-  groups: TransactionInstruction[][],
-): UnsignedSolanaTx[] {
-  const batches: UnsignedSolanaTx[] = []
+  groups: InstructionGroup[],
+): PackedInstructionGroup[] {
+  const batches: PackedInstructionGroup[] = []
   let instructions: TransactionInstruction[] = []
+  let chainSelectors: string[] = []
 
   for (const group of groups) {
-    if (!fitsInTransaction(payer, group)) {
+    if (!fitsInTransaction(payer, group.instructions)) {
+      const detail =
+        group.remoteChainSelector === undefined
+          ? 'a delete'
+          : `chain selector 0x${group.remoteChainSelector.toString(16)} (${group.remotePoolCount} remote pool addresses)`
       throw new CCTParamsInvalidError(
-        'applyChainUpdates',
+        operation,
         'chainsToAdd',
-        `one update exceeds Solana's ${MAX_TRANSACTION_SIZE}-byte transaction limit`,
+        `${detail} exceeds Solana's ${MAX_TRANSACTION_SIZE}-byte transaction limit`,
       )
     }
-    if (instructions.length && !fitsInTransaction(payer, [...instructions, ...group])) {
-      batches.push({ family: ChainFamily.Solana, instructions, mainIndex: 0 })
+    if (
+      instructions.length &&
+      !fitsInTransaction(payer, [...instructions, ...group.instructions])
+    ) {
+      batches.push({
+        transaction: { family: ChainFamily.Solana, instructions, mainIndex: 0 },
+        chainSelectors,
+      })
       instructions = []
+      chainSelectors = []
     }
-    instructions.push(...group)
+    instructions.push(...group.instructions)
+    if (group.remoteChainSelector !== undefined) {
+      chainSelectors.push(`0x${group.remoteChainSelector.toString(16)}`)
+    }
   }
 
-  if (instructions.length) batches.push({ family: ChainFamily.Solana, instructions, mainIndex: 0 })
+  if (instructions.length) {
+    batches.push({
+      transaction: { family: ChainFamily.Solana, instructions, mainIndex: 0 },
+      chainSelectors,
+    })
+  }
   return batches
 }
 
@@ -161,7 +196,7 @@ export type GenerateApplyChainUpdatesResult = UnsignedSolanaTx[]
 export type ExecuteApplyChainUpdatesParams = SolanaExecuteParams<ApplyChainUpdatesParams>
 
 /** All confirmed transaction hashes for Solana token pool chain updates. */
-export type ExecuteApplyChainUpdatesResult = { hashes: string[] }
+export type ExecuteApplyChainUpdatesResult = { hashes: string[]; chainSelectors: string[][] }
 
 /**
  * Applies the EVM `applyChainUpdates` equivalent as Solana instructions.
@@ -172,7 +207,7 @@ export type ExecuteApplyChainUpdatesResult = { hashes: string[] }
  * supported by listing a selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`;
  * adding an existing selector without removing it fails. Updates are packed into one or more
  * transactions, keeping each chain's initialization, configuration, and rate-limit instructions
- * together.
+ * together. Batches are submitted sequentially; a later failure leaves earlier batches committed.
  */
 export class ApplyChainUpdates extends SolanaOperation<
   ApplyChainUpdatesParams,
@@ -196,7 +231,7 @@ export class ApplyChainUpdates extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'chainsToAdd',
-        'or remoteChainSelectorsToRemove must not be empty',
+        'at least one of chainsToAdd or remoteChainSelectorsToRemove must be non-empty',
       )
     }
     validateRemotePoolAddresses(this.name, params.chainsToAdd)
@@ -238,7 +273,7 @@ export class ApplyChainUpdates extends SolanaOperation<
   private async buildInstructionGroups(
     chain: SolanaChain,
     params: ParsedApplyChainUpdatesParams,
-  ): Promise<TransactionInstruction[][]> {
+  ): Promise<InstructionGroup[]> {
     const pool: PoolInstructionParams = {
       tokenAddress: params.tokenAddress,
       payer: params.payer,
@@ -247,17 +282,21 @@ export class ApplyChainUpdates extends SolanaOperation<
         ? { poolProgramAddress: params.poolProgramAddress }
         : { poolType: params.poolType }),
     }
-    const groups: TransactionInstruction[][] = []
+    const groups: InstructionGroup[] = []
 
     for (const remoteChainSelector of params.remoteChainSelectorsToRemove) {
       const tx = await new DeleteChainRemoteConfig().generate(chain, {
         ...pool,
         remoteChainSelector,
       })
-      groups.push(tx.instructions)
+      groups.push({ instructions: tx.instructions })
     }
     for (const update of params.chainsToAdd) {
-      groups.push(await this.buildAddInstructions(chain, pool, update))
+      groups.push({
+        instructions: await this.buildAddInstructions(chain, pool, update),
+        remoteChainSelector: update.remoteChainSelector,
+        remotePoolCount: update.remotePoolAddresses.length,
+      })
     }
     return groups
   }
@@ -269,9 +308,22 @@ export class ApplyChainUpdates extends SolanaOperation<
   ): Promise<UnsignedSolanaTx> {
     return {
       family: ChainFamily.Solana,
-      instructions: (await this.buildInstructionGroups(chain, params)).flat(),
+      instructions: (await this.buildInstructionGroups(chain, params)).flatMap(
+        (group) => group.instructions,
+      ),
       mainIndex: 0,
     }
+  }
+
+  /**
+   * Unsupported because this operation may require multiple transactions.
+   * @see {@link generateBatch}.
+   */
+  override generate(
+    _chain: SolanaChain,
+    _params: GenerateApplyChainUpdatesParams,
+  ): Promise<UnsignedSolanaTx> {
+    throw new CCIPMethodUnsupportedError('ApplyChainUpdates', 'generate; use generateBatch')
   }
 
   /** Builds one or more ordered transactions without splitting a per-chain update group. */
@@ -281,9 +333,21 @@ export class ApplyChainUpdates extends SolanaOperation<
   ): Promise<GenerateApplyChainUpdatesResult> {
     const parsed = this.prepare(params)
     return packInstructionGroups(
+      this.name,
       new PublicKey(parsed.payer),
       await this.buildInstructionGroups(chain, parsed),
-    )
+    ).map(({ transaction }) => transaction)
+  }
+
+  /**
+   * Unsupported because this operation may require multiple transactions.
+   * @see {@link executeBatch}.
+   */
+  override execute(
+    _chain: SolanaChain,
+    _params: ExecuteApplyChainUpdatesParams,
+  ): Promise<TransactionResult> {
+    throw new CCIPMethodUnsupportedError('ApplyChainUpdates', 'execute; use executeBatch')
   }
 
   /** Signs, submits, and confirms each packed transaction, returning every transaction hash. */
@@ -300,16 +364,30 @@ export class ApplyChainUpdates extends SolanaOperation<
     )
 
     const batches = packInstructionGroups(
+      this.name,
       wallet.publicKey,
       await this.buildInstructionGroups(chain, parsed),
     )
     const hashes: string[] = []
+    const chainSelectors: string[][] = []
 
-    for (const batch of batches) {
-      const tx = await submit(chain, wallet, batch, this.name, computeUnits)
-      hashes.push(tx.hash)
+    for (const [failedBatchIndex, batch] of batches.entries()) {
+      try {
+        hashes.push((await submit(chain, wallet, batch.transaction, this.name, computeUnits)).hash)
+        chainSelectors.push(batch.chainSelectors)
+      } catch (error) {
+        if (CCIPError.isCCIPError(error)) {
+          Object.assign(error.context, {
+            committedHashes: hashes,
+            committedChainSelectors: chainSelectors,
+            failedBatchIndex,
+            totalBatches: batches.length,
+          })
+        }
+        throw error
+      }
     }
 
-    return { hashes }
+    return { hashes, chainSelectors }
   }
 }
