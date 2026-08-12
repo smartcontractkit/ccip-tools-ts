@@ -108,6 +108,8 @@ import {
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
+  type GetTokenPoolRemoteParams,
+  type GetTokenPoolRemoteResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
@@ -119,6 +121,7 @@ import {
   DeleteChainRemoteConfig,
   DeployTokenPool,
   EditChainRemoteConfig,
+  GetTokenPoolRemote,
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
@@ -150,6 +153,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig()
   readonly #editChainRemoteConfig = new EditChainRemoteConfig()
+  readonly #getTokenPoolRemote = new GetTokenPoolRemote()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
@@ -1392,6 +1396,31 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
     return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a Solana token pool's configuration for one remote chain.
+   *
+   * Remote token and pool addresses are returned as hex, preserving the on-chain address bytes.
+   * Rate-limit amounts use the local mint's smallest unit.
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is invalid.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the remote-chain config account does not exist.
+   * @throws {@link CCTDataDecodeError} If the remote-chain config account cannot be decoded.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const remote = await cct.getTokenPoolRemote({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   * })
+   * console.log(remote)
+   * ```
+   */
+  getTokenPoolRemote(opts: GetTokenPoolRemoteParams): Promise<GetTokenPoolRemoteResult> {
+    return this.#getTokenPoolRemote.query(this.chain, opts)
   }
 
   /**
