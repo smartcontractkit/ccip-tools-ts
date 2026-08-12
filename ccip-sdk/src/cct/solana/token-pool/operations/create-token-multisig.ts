@@ -146,6 +146,9 @@ export class CreateTokenMultisig extends SolanaOperation<
     params: GenerateCreateTokenMultisigParams,
   ): ParsedCreateTokenMultisigParams {
     validatePoolType(this.name, 'poolType', params.poolType)
+    if (params.additionalSigners !== undefined && !Array.isArray(params.additionalSigners)) {
+      throw new CCTParamsInvalidError(this.name, 'additionalSigners', 'must be an array')
+    }
     validateInteger(this.name, 'threshold', params.threshold, 1, SOLANA_MULTISIG_MAX_SIGNERS)
     if (params.seed !== undefined) validateNonEmptyString(this.name, 'seed', params.seed)
 

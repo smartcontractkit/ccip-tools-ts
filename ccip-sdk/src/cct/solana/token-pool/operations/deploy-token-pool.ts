@@ -3,6 +3,7 @@ import { type PublicKey, SystemProgram } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -82,6 +83,9 @@ export class DeployTokenPool extends SolanaOperation<
   /** Parses all public keys before any RPC. */
   protected override parse(params: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
     validatePoolType(this.name, 'poolType', params.poolType)
+    if (params.allowlist !== undefined && !Array.isArray(params.allowlist)) {
+      throw new CCTParamsInvalidError(this.name, 'allowlist', 'must be an array')
+    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
