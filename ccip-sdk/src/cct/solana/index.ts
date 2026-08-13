@@ -536,16 +536,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds one unsigned transaction that removes remote-chain configs and adds new configs with
+   * Builds ordered unsigned transactions that remove remote-chain configs and add new configs with
    * their remote pools and rate limits. This accepts the same `remoteChainSelectorsToRemove` and
    * `chainsToAdd` parameters as EVM `applyChainUpdates`.
    *
-   * @remarks Solana preserves EVM ordering with separate instructions: all removals run first,
-   * then each addition is initialized, configured with remote pools, and assigned both rate-limit
-   * configs, including disabled ones. A chain in `chainsToAdd` must not already exist; to replace
-   * one, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`. Solana
-   * additionally requires `remoteTokenDecimals`. Pass canonical `poolType` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * @remarks Removals run before additions. Each added chain is initialized, configured, and
+   * rate-limited as one transaction group; returns one or more packed transactions. To replace a
+   * chain, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`.
+   * Solana requires `remoteTokenDecimals`. `authority` must be the pool owner and defaults to `payer`.
    *
    * @see {@link applyChainUpdates}
    *
@@ -554,7 +552,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedApplyChainUpdates({
+   * const unsignedTxs = await cct.generateUnsignedApplyChainUpdates({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelectorsToRemove: [oldSelector],
@@ -569,22 +567,27 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer,
    *   authority,
    * })
+   *
+   * for (const unsignedTx of unsignedTxs) {
+   *   // Sign and submit each transaction in order.
+   * }
    * ```
    */
   generateUnsignedApplyChainUpdates(
     opts: GenerateApplyChainUpdatesParams,
   ): Promise<GenerateApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.generate(this.chain, opts)
+    return this.#applyChainUpdates.generateBatch(this.chain, opts)
   }
 
   /**
    * Applies EVM-equivalent remote-chain configuration changes with the pool owner wallet.
    *
-   * @remarks All removals run before additions. Each addition initializes the chain config, sets
-   * remote pools, and applies both rate-limit configs, including disabled configs. To replace an
-   * existing config, include its selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`.
-   * This is atomic: if any instruction fails, none commit. `wallet` is both the fee payer and
-   * default authority; specify `authority` only when it is the same wallet.
+   * @remarks Removals run before additions. Each added chain is initialized, configured, and
+   * rate-limited as one transaction group. Groups are submitted sequentially and are not atomic;
+   * if a later transaction fails, earlier groups may already be committed. The result contains every
+   * transaction hash. To replace a chain, include its selector in both `remoteChainSelectorsToRemove`
+   * and `chainsToAdd`. `wallet` must be the
+   * pool owner and is the fee payer and default authority.
    *
    * @see {@link generateUnsignedApplyChainUpdates}
    *
@@ -614,7 +617,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * ```
    */
   applyChainUpdates(opts: ExecuteApplyChainUpdatesParams): Promise<ExecuteApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.execute(this.chain, opts)
+    return this.#applyChainUpdates.executeBatch(this.chain, opts)
   }
 
   /**
@@ -622,10 +625,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * token pool remote-chain config. Pass canonical `poolType` or a compatible
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
-   * @remarks `remotePoolAddresses` must be non-empty. Existing addresses are retained. On-chain
-   * execution rejects addresses already present, including duplicates in this request. To clear all
-   * pools, use `generateUnsignedEditChainRemoteConfig` with `remotePoolAddresses: []`. The
-   * remote-chain config must already exist.
+   * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
+   * are retained. On-chain execution rejects addresses already present. To clear all pools, use
+   * `generateUnsignedEditChainRemoteConfig` with `remotePoolAddresses: []`. The remote-chain config
+   * must already exist.
    *
    * @see {@link appendRemotePoolAddresses}
    * @see {@link generateUnsignedEditChainRemoteConfig}
@@ -655,9 +658,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Appends remote pool addresses to an initialized Solana token pool remote-chain config with the
    * pool owner wallet.
    *
-   * @remarks `remotePoolAddresses` must be non-empty. Existing addresses are retained. The
-   * remote-chain config must already exist; duplicate addresses cause the transaction to fail. To
-   * clear all pools, use `editChainRemoteConfig` with `remotePoolAddresses: []`.
+   * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
+   * are retained. The remote-chain config must already exist; addresses already on-chain cause the
+   * transaction to fail. To clear all pools, use `editChainRemoteConfig` with
+   * `remotePoolAddresses: []`.
    *
    * @see {@link generateUnsignedAppendRemotePoolAddresses}
    * @see {@link editChainRemoteConfig}

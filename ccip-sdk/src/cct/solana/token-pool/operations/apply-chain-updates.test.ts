@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey } from '@solana/web3.js'
 
+import { CCIPError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -42,7 +43,18 @@ function submitChain(): SolanaChain {
   } as unknown as SolanaChain
 }
 
-function generate(opts = {}) {
+function batchChains() {
+  return [3n, 4n, 5n].map((remoteChainSelector, i) => ({
+    remoteChainSelector,
+    remoteTokenAddress: `0x${(i + 1).toString(16).padStart(40, '0')}`,
+    remotePoolAddresses: [`0x${(i + 11).toString(16).padStart(40, '0')}`],
+    remoteTokenDecimals: 6 + i,
+    inboundRateLimiterConfig: { enabled: false as const },
+    outboundRateLimiterConfig: { enabled: true as const, capacity: 100n, rate: 10n },
+  }))
+}
+
+function generateBatches(opts = {}) {
   return SolanaTokenManager.fromChain(chain()).generateUnsignedApplyChainUpdates({
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
@@ -61,6 +73,11 @@ function generate(opts = {}) {
     ],
     ...opts,
   })
+}
+
+async function generate(opts = {}) {
+  const [unsigned] = await generateBatches(opts)
+  return unsigned!
 }
 
 describe('ApplyChainUpdates (cct/solana)', () => {
@@ -82,6 +99,119 @@ describe('ApplyChainUpdates (cct/solana)', () => {
           'editChainRemoteConfig',
           'setChainRateLimit',
         ],
+      )
+    })
+
+    it('builds delete, then per-chain init, edit, and rate-limit instructions for multiple chains', async () => {
+      const batches = await generateBatches({
+        remoteChainSelectorsToRemove: [1n, 2n],
+        chainsToAdd: [
+          {
+            remoteChainSelector: 3n,
+            remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+            remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+            remoteTokenDecimals: 18,
+            inboundRateLimiterConfig: { enabled: false },
+            outboundRateLimiterConfig: { enabled: true, capacity: 100n, rate: 10n },
+          },
+          {
+            remoteChainSelector: 4n,
+            remoteTokenAddress: '0xaabbccddeeff00112233445566778899aabbccdd',
+            remotePoolAddresses: [],
+            remoteTokenDecimals: 6,
+            inboundRateLimiterConfig: { enabled: true, capacity: 200n, rate: 20n },
+            outboundRateLimiterConfig: { enabled: false },
+          },
+          {
+            remoteChainSelector: 5n,
+            remoteTokenAddress: '0x11223344556677889900aabbccddeeff00112233',
+            remotePoolAddresses: ['0x1234', '0xabcd'],
+            remoteTokenDecimals: 8,
+            inboundRateLimiterConfig: { enabled: true, capacity: 5_000n, rate: 50n },
+            outboundRateLimiterConfig: { enabled: false },
+          },
+        ],
+      })
+
+      assert.deepEqual(
+        batches.flatMap((batch) =>
+          batch.instructions.map(
+            (instruction) => tokenPoolCoder.instruction.decode(instruction.data)!.name,
+          ),
+        ),
+        [
+          'deleteChainConfig',
+          'deleteChainConfig',
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+        ],
+      )
+    })
+
+    it('packs large updates without splitting a chain instruction group', async () => {
+      const batches = await SolanaTokenManager.fromChain(chain()).generateUnsignedApplyChainUpdates(
+        {
+          tokenAddress: TOKEN,
+          poolType: 'burn-mint',
+          payer: PAYER,
+          authority: AUTHORITY,
+          remoteChainSelectorsToRemove: [],
+          chainsToAdd: batchChains(),
+        },
+      )
+
+      assert.equal(batches.length, 2)
+      assert.deepEqual(
+        batches.flatMap((batch) =>
+          batch.instructions.map(
+            (instruction) => tokenPoolCoder.instruction.decode(instruction.data)!.name,
+          ),
+        ),
+        [
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+          'initChainRemoteConfig',
+          'editChainRemoteConfig',
+          'setChainRateLimit',
+        ],
+      )
+      assert.ok(batches.every((batch) => batch.instructions.length % 3 === 0))
+    })
+
+    it('rejects a chain update that cannot fit one transaction', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(chain()).generateUnsignedApplyChainUpdates({
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            payer: PAYER,
+            authority: AUTHORITY,
+            remoteChainSelectorsToRemove: [],
+            chainsToAdd: [
+              {
+                ...batchChains()[0]!,
+                remotePoolAddresses: Array.from(
+                  { length: 30 },
+                  (_, i) => `0x${(i + 1).toString(16).padStart(40, '0')}`,
+                ),
+              },
+            ],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'chainsToAdd' &&
+          err.message.includes('chain selector 0x3 (30 remote pool addresses)'),
       )
     })
 
@@ -123,6 +253,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         [{ remoteChainSelectorsToRemove: null }, 'remoteChainSelectorsToRemove'],
         [{ remoteChainSelectorsToRemove: [-1n] }, 'remoteChainSelector'],
         [{ chainsToAdd: null }, 'chainsToAdd'],
+        [{ chainsToAdd: [], remoteChainSelectorsToRemove: [] }, 'chainsToAdd'],
         [{ chainsToAdd: [null] }, 'chainsToAdd[0]'],
         [
           {
@@ -209,7 +340,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
   })
 
   describe('execute', () => {
-    it('signs, submits, and returns the tx hash', async () => {
+    it('signs, submits, and returns all tx hashes', async () => {
       const result = await SolanaTokenManager.fromChain(submitChain()).applyChainUpdates({
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
@@ -227,7 +358,49 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         wallet: WALLET,
       })
 
-      assert.deepEqual(result, { hash: HASH })
+      assert.deepEqual(result, { hashes: [HASH], chainSelectors: [[`0x${SELECTOR.toString(16)}`]] })
+    })
+
+    it('submits every safely packed batch and returns all hashes', async () => {
+      const result = await SolanaTokenManager.fromChain(submitChain()).applyChainUpdates({
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        remoteChainSelectorsToRemove: [],
+        chainsToAdd: batchChains(),
+        wallet: WALLET,
+      })
+
+      assert.deepEqual(result, { hashes: [HASH, HASH], chainSelectors: [['0x3', '0x4'], ['0x5']] })
+    })
+
+    it('attaches committed hashes when a later batch fails', async () => {
+      let simulations = 0
+      const failedChain = submitChain()
+      failedChain.connection.simulateTransaction = (async () => {
+        simulations++
+        return {
+          value: { err: simulations >= 2 ? { custom: 1 } : null, logs: [], unitsConsumed: 1 },
+        }
+      }) as never
+
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(failedChain).applyChainUpdates({
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            remoteChainSelectorsToRemove: [],
+            chainsToAdd: batchChains(),
+            wallet: WALLET,
+          }),
+        (error: unknown) =>
+          CCIPError.isCCIPError(error) &&
+          error.context.committedHashes instanceof Array &&
+          error.context.committedHashes[0] === HASH &&
+          error.context.committedChainSelectors instanceof Array &&
+          error.context.committedChainSelectors[0]?.join() === '0x3,0x4' &&
+          error.context.failedBatchIndex === 1 &&
+          error.context.totalBatches === 2,
+      )
     })
 
     it('rejects a non-wallet authority for signed configuration', async () => {
@@ -237,7 +410,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,
-            remoteChainSelectorsToRemove: [],
+            remoteChainSelectorsToRemove: [SELECTOR],
             chainsToAdd: [],
             wallet: WALLET,
           }),
