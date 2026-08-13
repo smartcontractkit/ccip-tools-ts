@@ -272,7 +272,7 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
   const TON_ONRAMP = 'EQA-CUZI_USus4w0_Erf-wTj5uhaAR7XldEimU0w0WAJGGod'
   const EVM_ONRAMP_TON = '0xa36871bde0f98b84066405462e4a9709fb71c905'
 
-  it('should show lane config TON -> Sepolia (v1.6)', { timeout: 120000 }, async () => {
+  it('should show lane config TON -> Sepolia (v1.6)', { timeout: 300000 }, async () => {
     const args = buildLaneArgs(
       'ton-testnet',
       'ethereum-testnet-sepolia',
@@ -280,7 +280,7 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 300000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 

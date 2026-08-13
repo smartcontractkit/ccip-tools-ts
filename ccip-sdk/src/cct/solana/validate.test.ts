@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js'
 
 import {
   parseHexBytes,
+  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateBigInt,
@@ -35,6 +36,15 @@ describe('Validate (cct/solana)', () => {
         err.context.reason === 'must be a hex string of at most 2 bytes',
     )
     assert.throws(() => parseHexBytes('op', 'address', null), CCTParamsInvalidError)
+  })
+
+  it('rejects empty hex bytes when required', () => {
+    assert.deepEqual(parseNonEmptyHexBytes('op', 'address', '0x01'), Buffer.from([1]))
+    assert.throws(
+      () => parseNonEmptyHexBytes('op', 'address', ''),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.reason === 'must not be empty',
+    )
   })
 
   it('accepts valid public keys', () => {

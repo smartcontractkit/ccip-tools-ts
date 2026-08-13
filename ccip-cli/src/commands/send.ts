@@ -23,6 +23,7 @@ import {
   type ChainStatic,
   type MessageInput,
   CCIPArgumentInvalidError,
+  CCIPDestSimulationUnavailableError,
   CCIPInsufficientBalanceError,
   CCIPMethodUnsupportedError,
   CCIPTokenNotFoundError,
@@ -30,6 +31,7 @@ import {
   decodeAddress,
   estimateReceiveExecution,
   getDataBytes,
+  getRequiredCCVs,
   jsonParse,
   jsonStringify,
   networkInfo,
@@ -143,6 +145,12 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Print gas estimate and exit',
         implies: 'estimate-gas-limit',
+      },
+      'only-ccvs': {
+        type: 'boolean',
+        describe:
+          'Print the destination-required CCV set (requiredCCVs/optionalCCVs/threshold) and exit. ' +
+          'A disallowed finality surfaces as an error.',
       },
       'approve-max': {
         type: 'boolean',
@@ -316,6 +324,32 @@ async function sendMessage(
     ...parseExtraArgs(argv.extra),
   }
 
+  if (argv.onlyCcvs) {
+    // --only-ccvs: read the destination-required CCV set (and finality verdict) and exit; no send.
+    const dest = await getChain(destNetwork.chainSelector)
+    if (!walletAddress) {
+      try {
+        ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
+      } catch {
+        // sender is optional here; omitting it yields the lane-default (not sender-scoped) CCV view
+      }
+    }
+    const ccvs = await getRequiredCCVs({
+      source,
+      dest,
+      routerOrRamp: router,
+      message: { sender: walletAddress, receiver, data, tokenAmounts, ...extraArgs },
+    })
+    if (argv.format === Format.json) {
+      output.write(jsonStringify(ccvs, 2))
+    } else {
+      output.write('requiredCCVs      :', ccvs.requiredCCVs)
+      output.write('optionalCCVs      :', ccvs.optionalCCVs)
+      output.write('optionalThreshold :', ccvs.optionalThreshold)
+    }
+    return
+  }
+
   if (argv.estimateGasLimit == null || argv.estimateGasLimit > -100)
     try {
       const dest = await getChain(destNetwork.chainSelector)
@@ -378,9 +412,21 @@ async function sendMessage(
     } catch (err) {
       // if user requested estimation explicitly, surface any error
       if (argv.estimateGasLimit != null || argv.onlyEstimate) throw err
-      // otherwise, surface anything other than unimplemented error (e.g. CCIPRateLimitExceededError)
-      if (!(err instanceof CCIPMethodUnsupportedError)) throw err
-      logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
+      if (err instanceof CCIPMethodUnsupportedError) {
+        logger.debug('estimateReceiveExecution not supported for', destNetwork.name, '—', err)
+      } else if (err instanceof CCIPDestSimulationUnavailableError) {
+        // inconclusive, not a verdict (dest RPC unreachable, or an attestation-consuming pool
+        // that fundamentally can't be checked pre-send) — by default warn and continue with
+        // default gasLimit; pass --estimate-gas-limit/--only-estimate to make it fatal
+        logger.warn(
+          'Destination preflight could not be performed — continuing without it:',
+          err.message,
+        )
+      } else {
+        // definitive verdicts (e.g. CCIPDestExecutionRevertError, CCIPRateLimitExceededError)
+        // always block the send
+        throw err
+      }
     }
 
   let feeToken, feeTokenInfo

@@ -139,6 +139,7 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
         [{ remoteChainSelector: -1n }, 'remoteChainSelector'],
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
         [{ remoteTokenAddress: '0x123' }, 'remoteTokenAddress'],
+        [{ remotePoolAddresses: [''] }, 'remotePoolAddresses[0]'],
         [{ remotePoolAddresses: ['0x123'] }, 'remotePoolAddresses[0]'],
         [{ remotePoolAddresses: '0x12' }, 'remotePoolAddresses'],
         [{ remoteTokenDecimals: 256 }, 'remoteTokenDecimals'],

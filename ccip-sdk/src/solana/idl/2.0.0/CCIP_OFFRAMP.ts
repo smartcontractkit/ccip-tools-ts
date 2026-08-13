@@ -13,7 +13,22 @@
 export type CcipOfframpV2 = {
   version: '2.0.0'
   name: 'ccip_offramp'
-  instructions: []
+  instructions: [
+    {
+      name: 'getCcvsForMsg'
+      docs: [
+        'Off-chain helper that predicts the CCV set an executor should supply to `execute_v2`.',
+        'Non-authoritative: `execute_v2` recomputes and enforces the real set on-chain.',
+      ]
+      accounts: [
+        { name: 'config'; isMut: false; isSigner: false },
+        { name: 'referenceAddress'; isMut: false; isSigner: false },
+        { name: 'sourceChain'; isMut: false; isSigner: false },
+      ]
+      args: [{ name: 'params'; type: { defined: 'GetCcvsForMsgParams' } }]
+      returns: { defined: 'GetCcvsForMsgResponse' }
+    },
+  ]
   accounts: [
     {
       name: 'sourceChain'
@@ -21,6 +36,7 @@ export type CcipOfframpV2 = {
         kind: 'struct'
         fields: [
           { name: 'version'; type: 'u8' },
+          { name: 'bump'; type: 'u8' },
           { name: 'chainSelector'; type: 'u64' },
           { name: 'config'; type: { defined: 'SourceChainConfig' } },
         ]
@@ -84,13 +100,82 @@ export type CcipOfframpV2 = {
         fields: [{ name: 'bytes'; type: { array: ['u8', 64] } }, { name: 'len'; type: 'u32' }]
       }
     },
+    {
+      name: 'GetCcvsForMsgParams'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'tokenTransfer'; type: { option: { defined: 'TokenTransferV1' } } },
+          { name: 'messageReceiver'; type: 'publicKey' },
+          { name: 'sender'; type: 'bytes' },
+          { name: 'resolutionMetadata'; type: 'bytes' },
+          { name: 'remoteChainSelector'; type: 'u64' },
+          { name: 'requestedFinality'; type: { defined: 'FinalityConfig' } },
+        ]
+      }
+    },
+    {
+      name: 'GetCcvsForMsgResponse'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'requiredCcvs'; type: { vec: 'publicKey' } },
+          { name: 'optionalCcvs'; type: { vec: 'publicKey' } },
+          { name: 'optionalThreshold'; type: 'u8' },
+        ]
+      }
+    },
+    {
+      name: 'TokenTransferV1'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'version'; type: 'u8' },
+          { name: 'amount'; type: { defined: 'ProtocolAmount' } },
+          { name: 'sourcePoolAddress'; type: 'bytes' },
+          { name: 'sourceTokenAddress'; type: 'bytes' },
+          { name: 'destTokenAddress'; type: 'bytes' },
+          { name: 'tokenReceiver'; type: 'bytes' },
+          { name: 'extraData'; type: 'bytes' },
+        ]
+      }
+    },
+    {
+      name: 'ProtocolAmount'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'beBytes'; type: { array: ['u8', 32] } }]
+      }
+    },
+    {
+      name: 'FinalityConfig'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'flags'; type: 'u16' }, { name: 'blockDepth'; type: 'u16' }]
+      }
+    },
   ]
 }
 
 export const IDL: CcipOfframpV2 = {
   version: '2.0.0',
   name: 'ccip_offramp',
-  instructions: [],
+  instructions: [
+    {
+      name: 'getCcvsForMsg',
+      docs: [
+        'Off-chain helper that predicts the CCV set an executor should supply to `execute_v2`.',
+        'Non-authoritative: `execute_v2` recomputes and enforces the real set on-chain.',
+      ],
+      accounts: [
+        { name: 'config', isMut: false, isSigner: false },
+        { name: 'referenceAddress', isMut: false, isSigner: false },
+        { name: 'sourceChain', isMut: false, isSigner: false },
+      ],
+      args: [{ name: 'params', type: { defined: 'GetCcvsForMsgParams' } }],
+      returns: { defined: 'GetCcvsForMsgResponse' },
+    },
+  ],
   accounts: [
     {
       name: 'sourceChain',
@@ -98,6 +183,7 @@ export const IDL: CcipOfframpV2 = {
         kind: 'struct',
         fields: [
           { name: 'version', type: 'u8' },
+          { name: 'bump', type: 'u8' },
           { name: 'chainSelector', type: 'u64' },
           { name: 'config', type: { defined: 'SourceChainConfig' } },
         ],
@@ -161,6 +247,63 @@ export const IDL: CcipOfframpV2 = {
         fields: [
           { name: 'bytes', type: { array: ['u8', 64] } },
           { name: 'len', type: 'u32' },
+        ],
+      },
+    },
+    {
+      name: 'GetCcvsForMsgParams',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'tokenTransfer', type: { option: { defined: 'TokenTransferV1' } } },
+          { name: 'messageReceiver', type: 'publicKey' },
+          { name: 'sender', type: 'bytes' },
+          { name: 'resolutionMetadata', type: 'bytes' },
+          { name: 'remoteChainSelector', type: 'u64' },
+          { name: 'requestedFinality', type: { defined: 'FinalityConfig' } },
+        ],
+      },
+    },
+    {
+      name: 'GetCcvsForMsgResponse',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'requiredCcvs', type: { vec: 'publicKey' } },
+          { name: 'optionalCcvs', type: { vec: 'publicKey' } },
+          { name: 'optionalThreshold', type: 'u8' },
+        ],
+      },
+    },
+    {
+      name: 'TokenTransferV1',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'version', type: 'u8' },
+          { name: 'amount', type: { defined: 'ProtocolAmount' } },
+          { name: 'sourcePoolAddress', type: 'bytes' },
+          { name: 'sourceTokenAddress', type: 'bytes' },
+          { name: 'destTokenAddress', type: 'bytes' },
+          { name: 'tokenReceiver', type: 'bytes' },
+          { name: 'extraData', type: 'bytes' },
+        ],
+      },
+    },
+    {
+      name: 'ProtocolAmount',
+      type: {
+        kind: 'struct',
+        fields: [{ name: 'beBytes', type: { array: ['u8', 32] } }],
+      },
+    },
+    {
+      name: 'FinalityConfig',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'flags', type: 'u16' },
+          { name: 'blockDepth', type: 'u16' },
         ],
       },
     },
