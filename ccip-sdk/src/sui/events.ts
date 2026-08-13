@@ -1,15 +1,15 @@
-import type { GraphQLQueryResult, SuiGraphQLClient } from '@mysten/sui/graphql'
-import type { SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import type { EventId, SuiEvent, SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
 import {
-  CCIPDataFormatUnsupportedError,
+  CCIPBlockBeforeTimestampNotFoundError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
 import type { LeanNumbers } from '../types.ts'
-import { signalToPromise } from '../utils.ts'
+import { getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
 
 type MerkleRoot = {
   max_seq_nr: string
@@ -25,40 +25,6 @@ type MerkleRoot = {
 export type CommitEvent = {
   blessed_merkle_roots: MerkleRoot[]
   unblessed_merkle_roots: MerkleRoot[]
-}
-
-async function getCheckpointRightBefore(
-  client: SuiJsonRpcClient,
-  startTime: number,
-): Promise<number | undefined> {
-  const filter: SuiEventFilter = {
-    TimeRange: {
-      startTime: '0',
-      endTime: (startTime * 1000).toString(),
-    },
-  }
-
-  // Get first event (ascending order)
-  const firstEvents = await client.queryEvents({
-    query: filter,
-    limit: 1,
-    order: 'descending',
-  })
-
-  if (!firstEvents.data.length) return
-
-  const tx = await client.getTransactionBlock({
-    digest: firstEvents.data[0]!.id.txDigest,
-  })
-  if (tx.checkpoint) return Number(tx.checkpoint)
-}
-
-type LatestCheckpointResponse = {
-  checkpoints: {
-    nodes: Array<{
-      sequenceNumber: string
-    }>
-  }
 }
 
 type EventNode<T = unknown> = {
@@ -80,44 +46,129 @@ type EventNode<T = unknown> = {
   }
 }
 
-type EventsQueryResponse<T = unknown> = {
-  events: {
-    nodes: EventNode<T>[]
-    pageInfo: {
-      hasNextPage: boolean
-      endCursor: string | null
-    }
-  }
-}
+/** Checkpoint metadata (number + timestamp) of a transaction, cached per tx digest. */
+type TxMeta = { checkpoint: number; timestampMs: number }
+
+/** Max digests per `multiGetTransactionBlocks` call. */
+const MULTI_GET_CHUNK = 50
 
 /**
- * Gets the latest checkpoint from the Sui GraphQL client.
+ * Load-balanced RPC proxies may route lookups to a backend whose store hasn't
+ * caught up (or is partially synced): event cursor lookups answer -32603
+ * "Could not find the referenced transaction ...", object reads come back
+ * empty/missing (state pointers, pool objects, metadata). These are
+ * transient: another attempt usually lands on a synced backend. Retry only
+ * those, with small backoff.
  */
-async function getLatestCheckpoint(graphqlClient: SuiGraphQLClient): Promise<number> {
-  const query = `
-    query GetLatestCheckpoint {
-      checkpoints(last: 1) {
-        nodes {
-          sequenceNumber
-        }
-      }
+const TRANSIENT_LOOKUP_ERROR =
+  /could not find the referenced transaction|No CCIP ObjectRef Pointer found|Invalid token pool type|Error loading Sui token metadata|not a CoinMetadata object or coin type/i
+
+/** Retries RPC lookups which may transiently fail on unsynced proxy backends. */
+export async function withLookupRetry<T>(op: () => Promise<T>, retries = 4): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await op()
+    } catch (err) {
+      lastErr = err
+      if (!(err instanceof Error) || !TRANSIENT_LOOKUP_ERROR.test(err.message)) throw err
+      await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt))
     }
-  `
-  const result = await graphqlClient.query<LatestCheckpointResponse>({
-    query,
-    variables: {},
-  })
-  if (!result.data) {
-    throw new CCIPDataFormatUnsupportedError('Failed to fetch latest checkpoint')
   }
-  return parseInt(result.data.checkpoints.nodes[0]!.sequenceNumber)
+  throw lastErr
+}
+
+/** Cap on the tx-meta cache, so long-running watch streams don't grow it unboundedly. */
+const TX_META_CACHE_MAX = 10_000
+
+/**
+ * Gets the latest checkpoint sequence number from the JSON-RPC endpoint.
+ */
+async function getLatestCheckpoint(client: SuiJsonRpcClient): Promise<number> {
+  return Number(await client.getLatestCheckpointSequenceNumber())
+}
+
+async function getCheckpointTimestamp(client: SuiJsonRpcClient, seq: number): Promise<number> {
+  const checkpoint = await client.getCheckpoint({ id: String(seq) })
+  return Number(checkpoint.timestampMs) / 1000
 }
 
 /**
- * Fetches events in forward direction (ascending checkpoint order).
+ * Finds a checkpoint sequence number right before `startTime` (in seconds), by
+ * binary-searching checkpoint timestamps over JSON-RPC.
+ */
+async function getCheckpointRightBefore(
+  client: SuiJsonRpcClient,
+  startTime: number,
+): Promise<number | undefined> {
+  const latest = await getLatestCheckpoint(client)
+  try {
+    // checkpoints are sub-second apart, so a precision of 8 stays within a few
+    // seconds before the target
+    return await getSomeBlockNumberBefore(
+      (seq) => getCheckpointTimestamp(client, seq),
+      latest,
+      startTime,
+      { precision: 8 },
+    )
+  } catch (err) {
+    if (err instanceof CCIPBlockBeforeTimestampNotFoundError) return
+    throw err
+  }
+}
+
+/**
+ * Resolves checkpoint number and timestamp for every tx digest in `events`,
+ * caching per digest and batching lookups with `multiGetTransactionBlocks`.
+ */
+async function resolveTxMetas(
+  client: SuiJsonRpcClient,
+  events: SuiEvent[],
+  cache: Map<string, TxMeta>,
+): Promise<void> {
+  if (cache.size > TX_META_CACHE_MAX) cache.clear()
+  const missing = [...new Set(events.map((e) => e.id.txDigest).filter((d) => !cache.has(d)))]
+  for (let i = 0; i < missing.length; i += MULTI_GET_CHUNK) {
+    const txs = await withLookupRetry(() =>
+      client.multiGetTransactionBlocks({
+        digests: missing.slice(i, i + MULTI_GET_CHUNK),
+      }),
+    )
+    for (const tx of txs) {
+      cache.set(tx.digest, {
+        checkpoint: Number(tx.checkpoint ?? 0),
+        timestampMs: Number(tx.timestampMs ?? 0),
+      })
+    }
+  }
+}
+
+function toEventNode<T>(event: SuiEvent, meta: TxMeta): EventNode<T> {
+  return {
+    sequenceNumber: event.id.eventSeq,
+    sender: { address: event.sender },
+    timestamp: new Date(meta.timestampMs || Number(event.timestampMs ?? 0)).toISOString(),
+    contents: { json: event.parsedJson as T },
+    transaction: {
+      digest: event.id.txDigest,
+      effects: {
+        checkpoint: { sequenceNumber: meta.checkpoint },
+      },
+    },
+  }
+}
+
+/**
+ * Fetches events in forward direction (ascending checkpoint order), using only
+ * the JSON-RPC API (`queryEvents` + `multiGetTransactionBlocks`).
+ *
+ * Since JSON-RPC can't filter events by checkpoint range, each batch paginates
+ * `queryEvents` descending from the tip until it reaches events older than the
+ * batch start, resolving checkpoints per tx digest (cached), then yields the
+ * collected range in ascending order.
  */
 async function* fetchEventsForward<T>(
-  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
+  ctx: { client: SuiJsonRpcClient },
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   type: string,
   limit = 50,
@@ -135,8 +186,6 @@ async function* fetchEventsForward<T>(
   let startCheckpoint: number | undefined
   if (opts.startBlock != null) startCheckpoint = Number(opts.startBlock)
   if (opts.startTime != null) {
-    // Use getTransactionDigestsInTimeRange to find the checkpoint for startTime
-    // Use a small time window to find transactions near startTime
     const startCheckpoint_ = await getCheckpointRightBefore(ctx.client, Number(opts.startTime))
     if (startCheckpoint_ != null) {
       if (startCheckpoint != null) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
@@ -145,17 +194,27 @@ async function* fetchEventsForward<T>(
   }
   if (startCheckpoint == null) throw new CCIPLogsRequiresStartError()
 
+  // Latest checkpoint is cached for a poll interval, so watch iterations and
+  // negative endBlock resolutions don't hammer the endpoint
+  const getLatest = memoize(() => getLatestCheckpoint(ctx.client), {
+    async: true,
+    maxArgs: 0,
+    expires: opts.pollInterval || DEFAULT_POLL_INTERVAL,
+  })
+
   // Determine ending checkpoint
   let endCheckpoint: number | undefined
   if (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') {
     if (Number(opts.endBlock) < 0) {
       // Negative means relative to latest
-      endCheckpoint = (await getLatestCheckpoint(ctx.graphqlClient)) + Number(opts.endBlock)
+      endCheckpoint = (await getLatest()) + Number(opts.endBlock)
     } else {
       endCheckpoint = Number(opts.endBlock)
     }
   }
 
+  const filter: SuiEventFilter = { MoveEventType: type }
+  const txMetas = new Map<string, TxMeta>()
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
 
@@ -170,7 +229,7 @@ async function* fetchEventsForward<T>(
     if (endCheckpoint !== undefined && !opts.watch) {
       batchEndCheckpoint = endCheckpoint
     } else {
-      batchEndCheckpoint = await getLatestCheckpoint(ctx.graphqlClient)
+      batchEndCheckpoint = await getLatest()
       if (endCheckpoint !== undefined) {
         batchEndCheckpoint = Math.min(batchEndCheckpoint, endCheckpoint)
       }
@@ -178,92 +237,43 @@ async function* fetchEventsForward<T>(
 
     // Fetch events for this checkpoint range
     if (currentCheckpoint <= batchEndCheckpoint) {
-      let cursor: string | undefined = undefined
-      let hasNextPage = true
+      const collected: EventNode<T>[] = []
+      let cursor: EventId | null | undefined = undefined
+      let done = false
 
-      while (hasNextPage) {
-        const query = `
-          query FetchEvents($type: String!, $after: String, $afterCheckpoint: UInt53!, $beforeCheckpoint: UInt53!) {
-            events(
-              filter: {
-                type: $type
-                afterCheckpoint: $afterCheckpoint
-                beforeCheckpoint: $beforeCheckpoint
-              }
-              after: $after
-              first: ${limit}
-            ) {
-              nodes {
-                sequenceNumber
-                sender {
-                  address
-                }
-                timestamp
-                contents {
-                  json
-                }
-                transaction {
-                  effects {
-                    checkpoint {
-                      sequenceNumber
-                    }
-                  }
-                  digest
-                }
-              }
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
-            }
+      while (!done) {
+        const page = await withLookupRetry(() =>
+          ctx.client.queryEvents({
+            query: filter,
+            cursor,
+            limit,
+            order: 'descending',
+          }),
+        )
+        if (!page.data.length) break
+
+        await resolveTxMetas(ctx.client, page.data, txMetas)
+
+        for (const event of page.data) {
+          const meta = txMetas.get(event.id.txDigest)!
+          // descending order: once we pass the start of the range, so does everything after
+          if (meta.checkpoint < currentCheckpoint) {
+            done = true
+            break
           }
-        `
-
-        const result: GraphQLQueryResult<EventsQueryResponse<T>> = await ctx.graphqlClient.query<
-          EventsQueryResponse<T>
-        >({
-          query,
-          variables: {
-            type,
-            after: cursor,
-            afterCheckpoint: currentCheckpoint,
-            beforeCheckpoint: batchEndCheckpoint + 1, // beforeCheckpoint is exclusive
-          },
-        })
-
-        if (result.errors) {
-          throw new CCIPDataFormatUnsupportedError(
-            `GraphQL errors: ${JSON.stringify(result.errors, null, 2)}`,
-          )
+          if (meta.checkpoint > batchEndCheckpoint) continue
+          // Filter by startTime if provided
+          if (opts.startTime != null && meta.timestampMs / 1000 < Number(opts.startTime)) continue
+          collected.push(toEventNode<T>(event, meta))
         }
 
-        if (!result.data) {
-          throw new CCIPDataFormatUnsupportedError('No data returned from GraphQL query')
-        }
+        if (!page.hasNextPage) break
+        cursor = page.nextCursor
+      }
 
-        const { nodes, pageInfo } = result.data.events
-
-        for (const node of nodes) {
-          // Filter by startTime if provided (timestamp is in ISO format)
-          if (opts.startTime != null) {
-            const eventTime = new Date(node.timestamp).getTime() / 1000 // Convert to seconds
-            if (eventTime < Number(opts.startTime)) continue
-          }
-
-          // Check endBlock constraint
-          if (endCheckpoint !== undefined && node.transaction) {
-            const checkpoint = node.transaction.effects.checkpoint.sequenceNumber
-            if (checkpoint > endCheckpoint) {
-              catchedUp = true
-              break
-            }
-          }
-
-          yield node
-        }
-
-        hasNextPage = pageInfo.hasNextPage && !catchedUp
-        cursor = pageInfo.endCursor ?? undefined
+      // collected is in descending order; yield ascending
+      for (let i = collected.length - 1; i >= 0; i--) {
+        yield collected[i]!
       }
 
       currentCheckpoint = batchEndCheckpoint + 1
@@ -289,12 +299,12 @@ async function* fetchEventsForward<T>(
 
 /**
  * Streams logs from the Sui blockchain based on filter options.
- * @param ctx - Context containing Sui client and grraphqlClient instances.
+ * @param ctx - Context containing the Sui JSON-RPC client.
  * @param opts - Log filter options.
  * @returns Async generator of log entries.
  */
 export async function* streamSuiLogs<T>(
-  ctx: { client: SuiJsonRpcClient; graphqlClient: SuiGraphQLClient },
+  ctx: { client: SuiJsonRpcClient },
   opts: LeanNumbers<LogFilter>,
 ): AsyncGenerator<EventNode<T>> {
   if (opts.topics?.length !== 1 || typeof opts.topics[0] !== 'string')

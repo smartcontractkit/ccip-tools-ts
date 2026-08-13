@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-cli",
-  "version": "1.10.3",
+  "version": "1.11.1",
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -42,30 +42,30 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@types/node": "26.0.1",
+    "@types/node": "26.1.1",
     "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
-    "tsx": "4.22.4",
+    "tsx": "4.23.1",
     "typescript": "6.0.3"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^6.3.1",
-    "@chainlink/ccip-sdk": "^1.10.3",
+    "@chainlink/ccip-sdk": "^1.11.1",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
     "@inquirer/prompts": "8.5.2",
     "@ledgerhq/hw-app-aptos": "6.37.0",
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
-    "@mysten/sui": "^2.20.1",
+    "@mysten/sui": "^2.22.0",
     "@solana/web3.js": "^1.98.4",
     "@ton-community/ton-ledger": "^7.3.0",
     "@ton/crypto": "^3.3.0",
     "@ton/ton": "^16.3.0",
     "bs58": "^6.0.0",
     "ethers": "6.17.0",
-    "type-fest": "^5.7.0",
+    "type-fest": "^5.8.0",
     "update-notifier": "^7.3.1",
-    "yargs": "18.0.0"
+    "yargs": "18.1.0"
   }
 }

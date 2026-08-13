@@ -48,6 +48,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Upgrade to a supported lane version. Check version compatibility: https://docs.chain.link/ccip/directory',
   LANE_NOT_FOUND:
     'This lane may not exist or is not yet supported by CCIP. Check the CCIP Directory for supported lanes: https://docs.chain.link/ccip/directory',
+  LANE_LATENCY_INSUFFICIENT_DATA:
+    'The lane exists but has too little history for this estimate. If a source token was requested, retry without it to get the lane-wide latency.',
 
   COMMIT_NOT_FOUND: 'Wait for the commit report. DON commit typically takes a few minutes.',
   MERKLE_ROOT_MISMATCH:
@@ -128,6 +130,13 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   FINALITY_NOT_ALLOWED:
     "The receiver contract does not accept the requested finality. Check the receiver's getCCVsAndFinalityConfig() for the allowed depth or safe flag.",
+
+  DEST_EXECUTION_REVERT:
+    'The destination pool releaseOrMint reverts, so the message would not execute on the destination. Parse context.revert (the raw encoded revert) with EVMChain.parse to find the cause, resolve it, then retry.',
+  DEST_SIMULATION_UNAVAILABLE:
+    'The destination releaseOrMint simulation could not be performed, so executability is undetermined. On a transport error, retry (optionally with a different destination RPC); for attestation-consuming pools the check only becomes possible post-send.',
+  SOURCE_POOL_REVERT:
+    'The source pool lockOrBurn reverts, so ccipSend would revert with the same cause. Parse context.revert (the raw encoded revert) with EVMChain.parse to find the cause (allowlist, outbound rate limit, finality gate), resolve it, then retry.',
 
   USDC_ATTESTATION_FAILED: 'USDC attestation not ready. Wait and retry (10-30 min typical).',
   LBTC_ATTESTATION_ERROR: 'LBTC attestation fetch failed. Wait and retry.',

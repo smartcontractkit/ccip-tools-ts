@@ -9,8 +9,8 @@ import { decodeMessageV1 } from '../messages.ts'
 
 describe('encode/parseSourceTokenData', () => {
   const decoded: SourceTokenData = {
-    sourcePoolAddress: '0x0000000000000000000000006987756a2fc8e4f3f0a5e026cb200cc2b5221b1f',
-    destTokenAddress: '0x000000000000000000000000cc44ff0e5a1fc9a6f3224ef0f47f0c03b3f8eaee',
+    sourcePoolAddress: '0x6987756A2fC8E4f3f0a5e026CB200Cc2B5221B1F',
+    destTokenAddress: '0xCC44Ff0E5a1fc9a6F3224ef0F47f0c03B3f8EaEE',
     extraData: '0xd8e78c2c6144d59c308cee0365b6d223a9cea73dd7a46e990505271b4abb47b4',
     destGasAmount: 1515322476n,
   }

@@ -9,7 +9,11 @@ export const RPCS = [
   process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co',
   process.env['RPC_AVAX'] || 'https://api.avax-test.network/ext/bc/C/rpc',
   process.env['RPC_APTOS'] || 'testnet',
+  // raced: first endpoint to resolve wins, so a throttled one doesn't stall
+  // the suite; onfinality keeps the longest tx history but 429s hardest
   process.env['RPC_SOLANA'] || 'https://solana-devnet.api.onfinality.io/public',
+  process.env['RPC_SOLANA_2'] || 'https://devnet.rpcpool.com',
+  process.env['RPC_SOLANA_3'] || 'https://api.devnet.solana.com',
   process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
 ]
 

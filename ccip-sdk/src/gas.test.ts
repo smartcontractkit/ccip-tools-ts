@@ -531,7 +531,7 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
 
     const result = await chain.estimateReceiveExecution({ messageId })
 
-    assert.equal(result, 23700)
+    assert.equal(result, 0) // empty data + no receive gas: the OffRamp never calls the receiver
     assert.equal(chain.apiClient.getExecutionInput.mock.calls.length, 1)
   })
 
@@ -566,7 +566,9 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
         sender,
         receiver,
         sourceChainSelector: 16015286601757825753n,
-        data: '0x',
+        // non-empty data keeps the receiver in play; a token-only message short-circuits to 0
+        // before any estimate, so it could not exercise the state override this test asserts
+        data: '0xdeadbeef',
         tokenAmounts: [
           {
             destTokenAddress,

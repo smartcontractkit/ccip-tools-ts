@@ -843,7 +843,7 @@ describe('CCIPAPIClient', () => {
       // tokenAmounts is on message with SourceTokenData fields
       const msg = result.message as unknown as {
         tokenAmounts: {
-          token: string
+          sourceTokenAddress: string
           amount: bigint
           sourcePoolAddress: string
           destTokenAddress: string
@@ -853,7 +853,10 @@ describe('CCIPAPIClient', () => {
       }
       assert.equal(msg.tokenAmounts.length, 2)
       // First token with all fields populated
-      assert.equal(msg.tokenAmounts[0]!.token, response.tokenAmounts[0]!.sourceTokenAddress)
+      assert.equal(
+        msg.tokenAmounts[0]!.sourceTokenAddress,
+        response.tokenAmounts[0]!.sourceTokenAddress,
+      )
       assert.equal(msg.tokenAmounts[0]!.amount, 1000000000000000000n)
       assert.equal(
         msg.tokenAmounts[0]!.sourcePoolAddress,
@@ -866,7 +869,10 @@ describe('CCIPAPIClient', () => {
       assert.equal(msg.tokenAmounts[0]!.extraData, '0xabcd')
       assert.equal(msg.tokenAmounts[0]!.destGasAmount, 50000n)
       // Second token with optional fields missing (uses defaults)
-      assert.equal(msg.tokenAmounts[1]!.token, response.tokenAmounts[1]!.sourceTokenAddress)
+      assert.equal(
+        msg.tokenAmounts[1]!.sourceTokenAddress,
+        response.tokenAmounts[1]!.sourceTokenAddress,
+      )
       assert.equal(msg.tokenAmounts[1]!.amount, 2500000n)
     })
 
@@ -887,7 +893,9 @@ describe('CCIPAPIClient', () => {
       )
 
       // tokenAmounts is on message
-      const msg = result.message as { tokenAmounts: readonly { token: string; amount: bigint }[] }
+      const msg = result.message as {
+        tokenAmounts: readonly { sourceTokenAddress: string; amount: bigint }[]
+      }
       assert.equal(msg.tokenAmounts.length, 0)
     })
 

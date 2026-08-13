@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.10.3",
+  "version": "1.11.1",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -29,42 +29,65 @@
   "devDependencies": {
     "@chainlink/contracts-ccip": "2.0.0",
     "@eslint/js": "^10.0.1",
-    "@types/node": "26.0.1",
-    "c8": "^11.0.0",
-    "eslint": "^10.6.0",
+    "@types/node": "26.1.1",
+    "brace-expansion": "5.0.9",
+    "c8": "^12.0.0",
+    "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import-x": "^4.17.1",
-    "eslint-plugin-jsdoc": "^63.0.10",
+    "eslint-plugin-jsdoc": "^63.2.0",
     "eslint-plugin-prettier": "^5.5.6",
     "eslint-plugin-tsdoc": "^0.5.2",
     "glob": "13.0.6",
-    "prettier": "3.9.3",
+    "prettier": "3.9.6",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.62.0",
+    "typescript-eslint": "8.65.0",
     "yaml": "2.9.0"
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "^1.18.1",
-    "tar": "^7.5.16",
-    "elliptic": "6.6.1",
+    "axios": "1.18.1",
+    "tar": "7.5.22",
     "js-yaml": "^4.3.0",
-    "gray-matter": {
-      "js-yaml": "^3.15.0"
+    "@apidevtools/json-schema-ref-parser": {
+      "js-yaml": "5.2.3"
     },
-    "postcss": "^8.5.15",
-    "lodash": "^4.18.1",
+    "@redocly/openapi-core": {
+      "js-yaml": "5.2.3"
+    },
+    "postcss": "8.5.23",
+    "lodash": "4.18.1",
     "uuid": "^11.1.1",
     "yaml@1": "^1.10.3",
     "serialize-javascript": "^7.0.5",
-    "mermaid": "^11.15.0",
-    "webpack-dev-server": "^5.2.4",
-    "ws": "8.21.0",
-    "form-data": "^4.0.6",
-    "undici": "^7.28.0",
-    "launch-editor": "^2.14.1",
-    "shell-quote": "^1.8.4",
+    "mermaid": "11.16.1",
+    "ws": "8.21.1",
+    "undici": "8.9.0",
     "joi": "^18.2.1",
-    "qs": "^6.15.2"
+    "fast-uri": "3.1.5",
+    "brace-expansion": "5.0.9",
+    "serve-handler": {
+      "brace-expansion": "1.1.18"
+    },
+    "shelljs": {
+      "glob": {
+        "minimatch": {
+          "brace-expansion": "1.1.18"
+        }
+      }
+    }
+  },
+  "allowScripts": {
+    "@trufflesuite/bigint-buffer@1.1.10": true,
+    "bufferutil@4.1.0": true,
+    "core-js@3.50.0": true,
+    "esbuild@0.28.2": true,
+    "keccak@3.0.4": true,
+    "node-hid@2.1.2": true,
+    "postman-code-generators@2.1.1": true,
+    "unrs-resolver@1.12.2": true,
+    "usb@2.9.0": true,
+    "utf-8-validate@6.0.6": true,
+    "@parcel/watcher@2.6.0": true
   }
 }

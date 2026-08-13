@@ -141,7 +141,10 @@ ccip-cli send --<TAB>  # lists all send options
 - `-v`: Verbose/debug output
 - `--format=pretty` (default): Human-readable tabular output
 - `--format=log`: Basic console logging, may show some more details (e.g. token addresses)
-- `--format=json`: Machine-readable JSON
+- `--format=json`: Machine-readable JSON. Large integers (`chainSelector`, amounts, fees) are
+  plain JSON numbers and lose precision in JavaScript's `JSON.parse`. Use `jsonParse` from
+  `@chainlink/ccip-sdk`, or see
+  [Reading JSON Output](https://docs.chain.link/ccip/tools/cli/guides/reading-json-output).
 - `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
 - `--api=<url>`: Use a custom CCIP API URL instead of the default `api.ccip.chain.link`
 
