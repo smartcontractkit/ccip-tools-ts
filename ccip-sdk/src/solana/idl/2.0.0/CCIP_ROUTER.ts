@@ -11,11 +11,11 @@
  * Anchor 0.29 IDL format. `UsdCents`/`CrossChainGas` are `u32` newtypes in the
  * upstream v2 IDL, inlined here as `u32` (identical borsh layout).
  *
- * NOTE: the upstream v2 IDL also has a trailing `baseExecutionGasCost` (CrossChainGas)
- * field on `DestChainConfigCcipV2`, but the currently-deployed devnet `-dev` accounts
- * don't carry it. We stop at `tokenTransferNetworkFee` so decoding matches on-chain
- * data — borsh ignores trailing bytes, so this stays forward-compatible if/when the
- * deployed accounts grow the extra field.
+ * As of the latest devnet redeploy, `DestChainConfigCcipV2` carries the full upstream
+ * layout: `addressBytesLength` (after `laneCodeVersion`) and the trailing
+ * `baseExecutionGasCost` (CrossChainGas) + `maxFeePerMessage` (UsdCents) fields.
+ * Borsh does NOT skip trailing bytes on a too-short layout (it errors on offset
+ * overflow), so the IDL must match the on-chain account exactly.
  */
 export type CcipRouterV2 = {
   version: '2.0.0'
@@ -90,17 +90,16 @@ export type CcipRouterV2 = {
     },
     {
       name: 'Receipt'
-      docs: ['CCIP 2.0 fee/gas receipt for a single entity.']
+      docs: [
+        'CCIP 2.0 fee/gas receipt for a single entity (verifier, token pool, executor, network).',
+      ]
       type: {
         kind: 'struct'
         fields: [
           { name: 'issuer'; type: 'publicKey' },
           { name: 'destGasLimit'; type: 'u32' },
           { name: 'destBytesOverhead'; type: 'u32' },
-          { name: 'feeTokenAmount'; type: { defined: 'ProtocolAmount' } },
-          { name: 'fee'; type: 'u32' },
-          { name: 'tokenFeeBps'; type: 'u16' },
-          { name: 'isEnabled'; type: 'bool' },
+          { name: 'feeTokenAmount'; type: 'u64' },
           { name: 'extraArgs'; type: 'bytes' },
         ]
       }
@@ -110,8 +109,8 @@ export type CcipRouterV2 = {
       type: {
         kind: 'struct'
         fields: [
-          { name: 'sequenceNumber'; type: 'u64' },
-          { name: 'sequenceNumberToRestore'; type: 'u64' },
+          { name: 'messageNumber'; type: 'u64' },
+          { name: 'messageNumberToRestore'; type: 'u64' },
           { name: 'restoreOnAction'; type: { defined: 'RestoreOnAction' } },
         ]
       }
@@ -122,6 +121,7 @@ export type CcipRouterV2 = {
         kind: 'struct'
         fields: [
           { name: 'laneCodeVersion'; type: { defined: 'CodeVersion' } },
+          { name: 'addressBytesLength'; type: 'u8' },
           { name: 'allowedSenders'; type: { vec: 'publicKey' } },
           { name: 'allowListEnabled'; type: 'bool' },
           { name: 'defaultCcvs'; type: { vec: 'publicKey' } },
@@ -130,6 +130,8 @@ export type CcipRouterV2 = {
           { name: 'offramp'; type: 'bytes' },
           { name: 'messageNetworkFee'; type: 'u32' },
           { name: 'tokenTransferNetworkFee'; type: 'u32' },
+          { name: 'baseExecutionGasCost'; type: 'u32' },
+          { name: 'maxFeePerMessage'; type: 'u32' },
         ]
       }
     },
@@ -217,17 +219,16 @@ export const IDL: CcipRouterV2 = {
     },
     {
       name: 'Receipt',
-      docs: ['CCIP 2.0 fee/gas receipt for a single entity.'],
+      docs: [
+        'CCIP 2.0 fee/gas receipt for a single entity (verifier, token pool, executor, network).',
+      ],
       type: {
         kind: 'struct',
         fields: [
           { name: 'issuer', type: 'publicKey' },
           { name: 'destGasLimit', type: 'u32' },
           { name: 'destBytesOverhead', type: 'u32' },
-          { name: 'feeTokenAmount', type: { defined: 'ProtocolAmount' } },
-          { name: 'fee', type: 'u32' },
-          { name: 'tokenFeeBps', type: 'u16' },
-          { name: 'isEnabled', type: 'bool' },
+          { name: 'feeTokenAmount', type: 'u64' },
           { name: 'extraArgs', type: 'bytes' },
         ],
       },
@@ -237,8 +238,8 @@ export const IDL: CcipRouterV2 = {
       type: {
         kind: 'struct',
         fields: [
-          { name: 'sequenceNumber', type: 'u64' },
-          { name: 'sequenceNumberToRestore', type: 'u64' },
+          { name: 'messageNumber', type: 'u64' },
+          { name: 'messageNumberToRestore', type: 'u64' },
           { name: 'restoreOnAction', type: { defined: 'RestoreOnAction' } },
         ],
       },
@@ -249,6 +250,7 @@ export const IDL: CcipRouterV2 = {
         kind: 'struct',
         fields: [
           { name: 'laneCodeVersion', type: { defined: 'CodeVersion' } },
+          { name: 'addressBytesLength', type: 'u8' },
           { name: 'allowedSenders', type: { vec: 'publicKey' } },
           { name: 'allowListEnabled', type: 'bool' },
           { name: 'defaultCcvs', type: { vec: 'publicKey' } },
@@ -257,6 +259,8 @@ export const IDL: CcipRouterV2 = {
           { name: 'offramp', type: 'bytes' },
           { name: 'messageNetworkFee', type: 'u32' },
           { name: 'tokenTransferNetworkFee', type: 'u32' },
+          { name: 'baseExecutionGasCost', type: 'u32' },
+          { name: 'maxFeePerMessage', type: 'u32' },
         ],
       },
     },

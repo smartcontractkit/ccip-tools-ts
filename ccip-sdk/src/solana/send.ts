@@ -11,7 +11,7 @@ import {
 } from '@solana/web3.js'
 import BN from 'bn.js'
 
-import { SolanaChain } from './index.ts'
+import { encodeSolanaExtraArgs } from './extra-args.ts'
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import {
@@ -43,7 +43,7 @@ function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>[
       }
     }),
     feeToken: feeTokenPubkey,
-    extraArgs: bytesToBuffer(SolanaChain.encodeExtraArgs(message.extraArgs)),
+    extraArgs: bytesToBuffer(encodeSolanaExtraArgs(message.extraArgs)),
   }
 
   return svmMessage

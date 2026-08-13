@@ -11,6 +11,9 @@
  *
  * # Use custom API URL
  * ccip-cli lane-latency sepolia fuji --api https://custom-api.example.com
+ *
+ * # Latency for one token rather than the lane as a whole
+ * ccip-cli lane-latency 1 42161 --source-token 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
  * ```
  *
  * @packageDocumentation
@@ -54,6 +57,10 @@ export const builder = (yargs: Argv) =>
       type: 'number',
       describe: 'Number of block confirmations to use for latency calculation',
     })
+    .option('source-token', {
+      type: 'string',
+      describe: "Source token address, to estimate from that token's history alone",
+    })
 
 /**
  * Handler for the lane-latency command.
@@ -92,6 +99,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
     sourceNetwork.chainSelector,
     destNetwork.chainSelector,
     argv.blockConfirmations,
+    argv.sourceToken ? { sourceTokenAddress: argv.sourceToken } : undefined,
   )
 
   switch (argv.format) {
@@ -105,6 +113,7 @@ export async function getLaneLatencyCmd(ctx: Ctx, argv: Parameters<typeof handle
       prettyTable.call(ctx, {
         Source: `${sourceNetwork.name} [${sourceNetwork.chainSelector}]`,
         Destination: `${destNetwork.name} [${destNetwork.chainSelector}]`,
+        ...(argv.sourceToken ? { 'Source Token': argv.sourceToken } : {}),
         'Estimated Delivery': `~${formatDuration(result.totalMs / 1000)}`,
         'Latency (ms)': result.totalMs.toLocaleString(),
       })

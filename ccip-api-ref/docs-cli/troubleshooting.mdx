@@ -391,6 +391,9 @@ Redirect stderr:
 ccip-cli show 0x... --format json 2>/dev/null | jq '.'
 ```
 
+If parsing succeeds but a `chainSelector`, amount, or fee looks wrong, see
+[Reading JSON Output](./guides/reading-json-output.mdx).
+
 ### Interactive features not working
 
 Non-TTY environment (scripts, CI).

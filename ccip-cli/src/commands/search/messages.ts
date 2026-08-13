@@ -18,6 +18,12 @@
  * # Find stuck messages ready for manual execution
  * ccip-cli search messages --manual-exec-only --limit 10
  *
+ * # Free-text search by any identifier (here, a source pool address)
+ * ccip-cli search messages -q 0x20B79D39Bd44dEee4F89B1e9d0e3b945fde06491
+ *
+ * # Resume from a previous run's cursor
+ * ccip-cli search messages --sender 0x9d08... --limit 100 --cursor "$CURSOR"
+ *
  * # Positional sender shorthand
  * ccip-cli search messages 0x9d087fC03ae39b088326b67fA3C788236645b717
  * ```
@@ -44,6 +50,8 @@ export const describe = 'Search CCIP messages'
 
 const MENU_QUIT = -1 as const
 const LARGE_RESULT_THRESHOLD = 1_000
+/** Largest page the API will serve; see the `limit` parameter on GET /v2/messages. */
+const MAX_PAGE_SIZE = 1_000
 
 /**
  * Yargs builder for the search messages subcommand.
@@ -77,6 +85,14 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         default: false,
         describe: 'Only messages ready for manual execution',
+      },
+      q: {
+        type: 'string',
+        describe: 'Free-text match on addresses, hashes and IDs (comma-separate; all must match)',
+      },
+      cursor: {
+        type: 'string',
+        describe: 'Resume from a cursor printed by an earlier run (filters must match that run)',
       },
       limit: {
         type: 'number',
@@ -120,6 +136,7 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
   if (argv.dest) filters.destChainSelector = networkInfo(argv.dest).chainSelector
   if (argv.sourceToken) filters.sourceTokenAddress = argv.sourceToken
   if (argv.manualExecOnly) filters.readyForManualExecOnly = true
+  if (argv.q) filters.q = argv.q
 
   // Collect results up to limit (0 means unlimited)
   let requestedLimit = argv.limit
@@ -127,20 +144,42 @@ export async function searchMessages(ctx: Ctx, argv: Parameters<typeof handler>[
     logger.warn(`Invalid --limit ${requestedLimit}, using default (20).`)
     requestedLimit = 20
   }
-  const limit = requestedLimit === 0 ? Infinity : requestedLimit
+  // 0 means unlimited. Anything else non-positive can only come from a programmatic caller that
+  // omitted the option, since yargs always supplies the default; treat that as unlimited too.
+  const limit = requestedLimit > 0 ? requestedLimit : Infinity
 
   const ac = new AbortController()
   ctx.abort.addEventListener('abort', () => ac.abort(), { once: true })
 
+  // Page-by-page instead of searchAllMessages: --cursor resumes from a cursor, and the last one
+  // must survive the loop. Pages are requested at the size still needed, so normally a page is
+  // consumed whole; the slice enforces --limit anyway rather than trusting the server to.
   let warned = false
   const results: MessageSearchResult[] = []
-  for await (const msg of apiClient.searchAllMessages(filters, { signal: ac.signal })) {
-    results.push(msg)
-    if (!warned && results.length === LARGE_RESULT_THRESHOLD && limit > LARGE_RESULT_THRESHOLD) {
+  let cursor = argv.cursor
+  while (results.length < limit) {
+    const remaining = limit - results.length
+    const page = await apiClient.searchMessages(filters, {
+      cursor,
+      limit: Number.isFinite(remaining) ? Math.min(remaining, MAX_PAGE_SIZE) : undefined,
+      signal: ac.signal,
+    })
+    const taken = page.data.slice(0, remaining)
+    results.push(...taken)
+    if (!warned && results.length >= LARGE_RESULT_THRESHOLD && limit > LARGE_RESULT_THRESHOLD) {
       logger.warn(`${results.length} results fetched so far, still paginating...`)
       warned = true
     }
-    if (results.length >= limit) break
+    // Dropping part of a page invalidates the cursor: it points past rows we never printed, so
+    // resuming from it would skip them.
+    cursor = page.hasNextPage && taken.length === page.data.length ? page.cursor : undefined
+    if (!cursor) break
+  }
+
+  // stderr, so --format json keeps stdout clean. Before the empty-result return: a page can come
+  // back empty with more still available.
+  if (cursor) {
+    logger.info(`More results available. Resume with --cursor ${cursor}`)
   }
 
   if (!results.length) {

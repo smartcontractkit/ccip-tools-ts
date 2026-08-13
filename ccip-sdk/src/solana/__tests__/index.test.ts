@@ -531,7 +531,8 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const encoded = SolanaChain.encodeExtraArgs(args)
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
-    assert.equal(decoded?.gasLimit, 1n)
+    assert.equal(decoded?._tag, 'EVMExtraArgsV2')
+    assert.equal(decoded.gasLimit, 1n)
   })
 
   it('should encode empty args object by using defaults', () => {
@@ -544,6 +545,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     const decoded = SolanaChain.decodeExtraArgs(encoded)
 
     assert.ok(decoded)
+    assert.equal(decoded._tag, 'EVMExtraArgsV2')
     assert.equal(decoded.gasLimit, 200000n)
   })
 
@@ -590,6 +592,7 @@ describe('SolanaChain.encodeExtraArgs', () => {
     // Verify it can be decoded
     const decoded = SolanaChain.decodeExtraArgs(encoded)
     assert.ok(decoded)
+    assert.equal(decoded._tag, 'EVMExtraArgsV2')
     assert.equal(decoded.gasLimit, gasLimit)
     assert.equal(decoded.allowOutOfOrderExecution, allowOutOfOrder)
   })
@@ -677,5 +680,92 @@ describe('SolanaChain getRegistryTokenConfig', () => {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
     })
+  })
+})
+
+describe('SolanaChain getExecutionReceipts', () => {
+  let solanaChain: SolanaChain
+
+  beforeEach(() => {
+    mock.restoreAll()
+    mockGetAccountInfo.mock.mockImplementation(async () => null)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
+    mockGetGenesisHash.mock.mockImplementation(async () => 'test-genesis-hash')
+    mockGetSignaturesForAddress.mock.mockImplementation(async () => [])
+    solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
+  })
+
+  const offRamp = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
+  const messageId = '0x10879f2e3dc803ec144d0c428ae99953305cca6dbe51512a1e76e71715ebf555'
+
+  it('narrows v2 scans to the message_exec_state PDA when a messageId is given', async () => {
+    solanaChain.typeAndVersion = async () =>
+      ['CCIP 2.0.0', '2.0.0', 'CCIP 2.0.0'] as Awaited<ReturnType<SolanaChain['typeAndVersion']>>
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('message_exec_state'), Buffer.from(messageId.slice(2), 'hex')],
+      new PublicKey(offRamp),
+    )
+
+    const execs = []
+    for await (const exec of solanaChain.getExecutionReceipts({
+      offRamp,
+      messageId,
+      sourceChainSelector: 16015286601757825000n,
+      startTime: 1,
+    })) {
+      execs.push(exec)
+    }
+
+    assert.equal(execs.length, 0)
+    const addresses = mockGetSignaturesForAddress.mock.calls.map((c) =>
+      ((c.arguments as unknown[])[0] as PublicKey).toBase58(),
+    )
+    assert.ok(addresses.length >= 1, 'getSignaturesForAddress should have been called')
+    assert.ok(
+      addresses.every((a) => a === pda.toBase58()),
+      `expected all scans against the message_exec_state PDA ${pda.toBase58()}, got ${addresses.join(',')}`,
+    )
+    assert.ok(!addresses.includes(offRamp)) // never a broad offRamp sweep
+  })
+
+  it('keeps scanning the offRamp address when no messageId is given', async () => {
+    solanaChain.typeAndVersion = async () =>
+      ['CCIP 2.0.0', '2.0.0', 'CCIP 2.0.0'] as Awaited<ReturnType<SolanaChain['typeAndVersion']>>
+
+    const execs = []
+    for await (const exec of solanaChain.getExecutionReceipts({
+      offRamp,
+      sourceChainSelector: 16015286601757825000n,
+      startTime: 1,
+    })) {
+      execs.push(exec)
+    }
+
+    assert.equal(execs.length, 0)
+    const addresses = mockGetSignaturesForAddress.mock.calls.map((c) =>
+      ((c.arguments as unknown[])[0] as PublicKey).toBase58(),
+    )
+    assert.ok(addresses.includes(offRamp))
+  })
+
+  it('keeps scanning the offRamp address on v1 offramps even with a messageId', async () => {
+    solanaChain.typeAndVersion = async () =>
+      ['CCIP 1.6.0', '1.6.0', 'CCIP 1.6.0'] as Awaited<ReturnType<SolanaChain['typeAndVersion']>>
+
+    const execs = []
+    for await (const exec of solanaChain.getExecutionReceipts({
+      offRamp,
+      messageId,
+      sourceChainSelector: 16015286601757825000n,
+      startTime: 1,
+    })) {
+      execs.push(exec)
+    }
+
+    assert.equal(execs.length, 0)
+    const addresses = mockGetSignaturesForAddress.mock.calls.map((c) =>
+      ((c.arguments as unknown[])[0] as PublicKey).toBase58(),
+    )
+    assert.ok(addresses.includes(offRamp))
   })
 })

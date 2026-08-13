@@ -15,6 +15,7 @@ import {
   CCIPTransactionNotFinalizedError,
 } from './errors/index.ts'
 import type { EVMChain } from './evm/index.ts'
+import { parseSourceTokenData } from './evm/messages.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
 import { supportedChains } from './supported-chains.ts'
@@ -115,6 +116,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
       token?: string
       sourceTokenAddress?: string
     }[]
+    sourceTokenData?: string[]
     feeToken?: string
     feeTokenAmount?: bigint
     fees?: {
@@ -146,20 +148,26 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
     data_.tokenAmounts = data_.tokenTransfer
     delete data_.tokenTransfer
   }
-  for (const ta of data_.tokenAmounts) {
-    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
-    if (!ta.token && ta.sourceTokenAddress) ta.token = ta.sourceTokenAddress
-    if (ta.destGasAmount != null || !ta.destExecData) continue
-    switch (sourceFamily) {
-      // EVM & Solana encode destExecData as big-endian
-      case ChainFamily.EVM:
-      case ChainFamily.Solana:
-        ta.destGasAmount = toBigInt(getDataBytes(ta.destExecData))
-        break
-      // Aptos & Sui, as little-endian
-      default:
-        ta.destGasAmount = leToBigInt(getDataBytes(ta.destExecData))
+  for (const [i, ta] of data_.tokenAmounts.entries()) {
+    if (ta.token && data_.sourceTokenData?.[i]) {
+      try {
+        Object.assign(ta, parseSourceTokenData(data_.sourceTokenData[i]))
+      } catch {
+        // pass
+      }
     }
+    if (ta.token && !ta.sourceTokenAddress) ta.sourceTokenAddress = ta.token
+    if (ta.destGasAmount == null && ta.destExecData)
+      switch (sourceFamily) {
+        // Aptos & Sui, as little-endian
+        case ChainFamily.Aptos:
+        case ChainFamily.Sui:
+          ta.destGasAmount = leToBigInt(getDataBytes(ta.destExecData))
+          break
+        // EVM & Solana encode destExecData as big-endian
+        default:
+          ta.destGasAmount = toBigInt(getDataBytes(ta.destExecData))
+      }
   }
 
   if (data_.extraArgs && typeof data_.extraArgs === 'string') {

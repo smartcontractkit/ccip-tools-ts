@@ -49,7 +49,7 @@ function erc7201(namespace: string): bigint {
  * Finds suitable token balance slot by simulating a fake transfer between 2 non-existent accounts,
  * with state overrides for the holders' balance, which reverts if override slot is wrong
  */
-const findBalancesSlot = memoize(
+export const findBalancesSlot = memoize(
   async function findBalancesSlot_(
     token: string,
     provider: JsonRpcApiProvider,

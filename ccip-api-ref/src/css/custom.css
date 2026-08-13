@@ -129,8 +129,20 @@
 
 /* === NAVBAR STYLING (consistent with main docs) === */
 .navbar {
-  backdrop-filter: blur(20px);
   box-shadow: 0px 4px 12px 0px rgba(0, 0, 0, 0.06);
+}
+
+/* Apply blur to .navbar__inner, NOT .navbar — backdrop-filter creates a
+   containing block for position:fixed children, which would trap the mobile
+   navbar-sidebar in the 64px navbar height instead of the full viewport. */
+.navbar__inner {
+  backdrop-filter: blur(20px);
+}
+
+/* Mobile hamburger sidebar: stack above page content (navbar is z-index 200) */
+.navbar-sidebar,
+.navbar-sidebar__backdrop {
+  z-index: var(--ifm-z-index-overlay, 400);
 }
 
 /* === FOOTER STYLING (must match main docs) === */

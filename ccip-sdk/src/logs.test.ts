@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
 import type { Aptos } from '@aptos-labs/ts-sdk'
-import type { SuiGraphQLClient } from '@mysten/sui/graphql'
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import type { Connection } from '@solana/web3.js'
 import type { TonClient } from '@ton/ton'
@@ -96,7 +95,7 @@ describe('logs start position validation', () => {
       () =>
         consume(
           streamSuiLogs(
-            { client: {} as SuiJsonRpcClient, graphqlClient: {} as SuiGraphQLClient },
+            { client: {} as SuiJsonRpcClient },
             { address: '0x1::ccip', topics: ['Foo'] },
           ),
         ),

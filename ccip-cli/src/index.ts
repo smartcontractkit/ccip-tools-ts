@@ -2,9 +2,12 @@
 
 // Redirect console.log/debug/info to stderr before any imports. Third-party libraries (notably
 // ethers.js v6) use bare console.log for retry/diagnostic messages, which would pollute stdout
-// and break JSON.parse(stdout) for agents. Our own code uses ctx.output (stdout) and ctx.logger (stderr).
-// Using `new Console(process.stderr)` preserves Node's exact formatting (util.format, util.inspect,
-// format specifiers like %s/%d, color support, etc.) — only the destination stream changes.
+// and break JSON.parse(stdout) for agents. Our own code uses ctx.output (stdout) and ctx.logger
+// (stderr). Using `new Console(process.stderr)` preserves Node's exact formatting (util.format,
+// util.inspect, format specifiers like %s/%d, color support, etc.) — only the destination stream
+// changes. Agents should still parse stdout with `jsonParse` from `@chainlink/ccip-sdk`, not raw
+// `JSON.parse` — --format=json emits large integers (chainSelector, amounts, fees) as plain JSON
+// numbers, which loses precision above 2^53 in plain `JSON.parse` (see --format's --help text).
 
 const stderrConsole = new console.Console(process.stderr)
 console.log = stderrConsole.log.bind(stderrConsole)
@@ -28,7 +31,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.10.3-cd27410'
+const VERSION = '1.11.1-cb8efe1'
 // generate:end
 
 const require = createRequire(import.meta.url)
@@ -78,7 +81,9 @@ const globalOpts = {
   },
   format: {
     alias: 'f',
-    describe: "Output to console format: pretty tables, node's console.log or JSON",
+    describe:
+      "Output to console format: pretty tables, node's console.log or JSON " +
+      '(large ints are plain JSON numbers; parse with jsonParse from @chainlink/ccip-sdk, not JSON.parse)',
     choices: Object.values(Format),
     default: Format.pretty,
   },

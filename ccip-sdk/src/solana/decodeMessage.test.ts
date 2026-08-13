@@ -69,9 +69,10 @@ describe('SolanaChain.decodeMessage', () => {
   })
 
   it('should correctly decode CCIPMessageSentV2 event from Anchor emit_cpi log', () => {
-    // Solana devnet tx 5fLVsRpENWE5qmqhAdY8g88K26C9DZ7qiKRMhZiBxSuZSKyGBJj2EyqUF1b1DaPNPZbLxfP3ufFCYFK7EVcU1Hz
+    // Solana devnet tx 5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5
+    // (post-redeploy ccip-router 2.0.0-dev; Receipt layout = issuer/destGasLimit/destBytesOverhead/feeTokenAmount u64/extraArgs)
     const eventData =
-      'cCBd+B1cY7zZGtnJT7pB3uZGotRqLm/c9xg6PJjoT9mpXSrryUabGzrEiqt+4olhMGeycMgc0h8bNxUN118K9G6tLq/0BbOQzXDl330n6LEGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvwAAAAHj7MfilOM3395Buk/J2RrZAAAAAAAAAHMAAw1AAAMNQAAAAAE7Ip8dm6pP5VWV4qg3Vq/oZR7HQXfcc1A2/Z9AGHO78yCslyn8KiIBZmHvz1BxsB5wpU/64/gE/oBCKg1cS4mTahTrpdeUWUhOVDvRVgemIezimynKmSDmRqLUai5v3PcYOjyY6E/ZqV0q68lGmxs6xIqrfuKJYRQ6peuxDceXysgoUk5ZozPQo3FEPQAAAAAACNwVkvE4+3fsAwAAAKqlPRgFCiGIwesKlHnQJT0Y/VrpdrPglfSNUVoRtM+4QA0DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAz2kwNcN2B3jaUdwjudF2za6/qwnfyFcED6Twh69td14AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAACslyn8KiIBZmHvz1BxsB5wpU/64/gE/oBCKg1cS4mTagAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAEAAAAEAAAA6aBaIA=='
+      'cCBd+B1cY7zZGtnJT7pB3uZGotRqLm/c9xg6PJjoT9mpXSrryUabGzrEiqt+4olhcGkY56m2LYWScz9/eQxSAoVmGn3dD76qYwFmDI0ypyIGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvwAAAAHj7MfilOM3395Buk/J2RrZAAAAAAAAEPwABqx4AAMNQAAAAAElSv9BQzl6WTDpPL90+mSQGyL+7o9WzlSZ6mNi5y9tXCCslyrDMMg7v+aUvMZVBAFGoXfs0FFUymjBxf/yEjwucBTrpdeUWUhOVDvRVgemIezimynKmSDmRqLUai5v3PcYOjyY6E/ZqV0q68lGmxs6xIqrfuKJYRQ6peuxDceXysgoUk5ZozPQo3FEPQAAAAAACOrC4Rr6+EfbAwAAAKqz/f8Y7X6B6P7jOtu2w5Dyzp9QA9Lt7tXp/NLDS9b8+CQBAEYCAAAAAAAAAAAAAAAAAADPabR6arpsQlBZ3Ze5iXZQu2nvnkiKNg8/zFv4fuYbhDBXBQC/AAAAagQBAAAAAAAAAAAArJcqwzDIO7/mlLzGVQQBRqF37NBRVMpowcX/8hI8LnAAAAAAAAAAACosCgAAAAAAAAAAAAEAAAAEAAAA6aBaIA=='
 
     const message = SolanaChain.decodeMessage({ data: eventData }) as CCIPMessage<
       typeof CCIPVersion.V1_6
@@ -80,17 +81,17 @@ describe('SolanaChain.decodeMessage', () => {
     assert.ok(message, 'should decode v2 event')
     assert.equal(
       message.messageId,
-      '0x3067b270c81cd21f1b37150dd75f0af46ead2eaff405b390cd70e5df7d27e8b1',
+      '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722',
     )
     assert.equal(message.sourceChainSelector, 16423721717087811551n)
     assert.equal(message.destChainSelector, 16015286601757825753n)
-    assert.equal(message.sequenceNumber, 115n)
+    assert.equal(message.sequenceNumber, 4348n)
     assert.equal(message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
     assert.equal(message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
-    assert.equal(message.data, '0xdc1592f138fb77ec')
+    assert.equal(message.data, '0xeac2e11afaf847db')
     assert.equal(message.tokenAmounts.length, 0)
     assert.equal(message.feeToken, 'So11111111111111111111111111111111111111112')
-    assert.equal(message.feeTokenAmount, 0n)
+    assert.equal(message.feeTokenAmount, 733332n)
   })
 
   it('should correctly decode ExecutionStateChangedV2 event from Solana OffRamp emit_cpi log', () => {

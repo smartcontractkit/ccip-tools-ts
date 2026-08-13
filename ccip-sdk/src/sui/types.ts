@@ -19,10 +19,10 @@ export type UnsignedSuiTx = {
 }
 
 export const SuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {
-  gasLimit: bcs.u64(),
+  gasLimit: bcs.u128(),
   allowOutOfOrderExecution: bcs.bool(),
-  tokenReceiver: bcs.vector(bcs.u8()),
-  receiverObjectIds: bcs.vector(bcs.vector(bcs.u8())),
+  tokenReceiver: bcs.fixedArray(32, bcs.u8()),
+  receiverObjectIds: bcs.vector(bcs.fixedArray(32, bcs.u8())),
 })
 
 /** Token amount data structure for Sui CCIP messages. */
@@ -41,8 +41,12 @@ export type SuiTokenAmount = {
  * @returns Encoded bytes with tag prefix.
  */
 export function encodeSuiExtraArgsV1(args: SuiExtraArgsV1): string {
-  const tokenReceiver = getAddressBytes(args.tokenReceiver)
-  const receiverObjectIds = args.receiverObjectIds.map((id) => getDataBytes(id))
+  const tokenReceiver = Array.from(getAddressBytes(args.tokenReceiver)) as number[] & {
+    length: 32
+  }
+  const receiverObjectIds = args.receiverObjectIds.map(
+    (id) => Array.from(getDataBytes(id)) as number[] & { length: 32 },
+  )
   const bcsData = SuiExtraArgsV1Codec.serialize({ ...args, tokenReceiver, receiverObjectIds })
   return concat([SuiExtraArgsV1Tag, bcsData.toBytes()])
 }

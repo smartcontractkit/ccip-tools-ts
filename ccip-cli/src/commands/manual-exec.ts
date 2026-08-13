@@ -23,6 +23,7 @@ import {
   type CCIPRequest,
   type Chain,
   CCIPAPIClient,
+  CCIPDestSimulationUnavailableError,
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
@@ -227,13 +228,34 @@ async function manualExec(
       request,
     })
 
+    let estimated: number | undefined
     if (argv.estimateGasLimit != null) {
-      const estimated = await estimateReceiveExecution({
-        source,
-        dest,
-        routerOrRamp: offRamp,
-        message: request.message,
+      // post-send the real attestations/proofs exist — fetch them so the destination preflight
+      // can simulate attestation-consuming pools (USDC/CCTP, Lombard) with the actual data
+      const offchainTokenData = await source.getOffchainTokenData(request).catch((err: unknown) => {
+        logger.debug('could not fetch offchainTokenData for estimation:', err)
+        return undefined
       })
+      try {
+        estimated = await estimateReceiveExecution({
+          source,
+          dest,
+          routerOrRamp: offRamp,
+          message: { ...request.message, offchainTokenData },
+        })
+      } catch (err) {
+        // inconclusive (dest RPC unreachable, or attestation not yet available): the estimate is
+        // a sub-step of manual execution — warn and proceed with the original gasLimit, unless
+        // the estimate itself is the deliverable (--only-estimate)
+        if (!argv.onlyEstimate && err instanceof CCIPDestSimulationUnavailableError) {
+          logger.warn(
+            'Destination preflight could not be performed — proceeding with original gasLimit:',
+            err.message,
+          )
+        } else throw err
+      }
+    }
+    if (estimated != null && argv.estimateGasLimit != null) {
       const withBuffer = estimated + Math.ceil((estimated * argv.estimateGasLimit) / 100)
       const origLimit = Number(
         'ccipReceiveGasLimit' in request.message

@@ -11,7 +11,7 @@ import {
   isHexString,
 } from 'ethers'
 
-import { defaultAbiCoder, interfaces } from './const.ts'
+import { defaultAbiCoder, getPoolErrorInterfaces, interfaces } from './const.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { ChainFamily } from '../networks.ts'
@@ -102,6 +102,24 @@ export function parseWithFragment(
       }
     } catch (_) {
       // test all abis
+    }
+  }
+  if (!res) {
+    // fall through to the error-only interfaces of the specialized pool contracts (lazily built;
+    // they carry no functions/events, only revert-decoding coverage)
+    for (const [name, iface] of Object.entries(getPoolErrorInterfaces())) {
+      try {
+        const error = iface.getError(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
+        if (error) {
+          if (!data && isHexString(selector) && dataLength(selector) > 4) {
+            ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
+          }
+          res = [error, name] as const
+          break
+        }
+      } catch (_) {
+        // test all error-only abis
+      }
     }
   }
   if (res && data) {

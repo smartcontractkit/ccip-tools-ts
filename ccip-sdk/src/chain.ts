@@ -1,4 +1,4 @@
-import { type BytesLike, dataLength, hexlify, isBytesLike, keccak256 } from 'ethers'
+import { type BytesLike, dataLength, formatUnits, hexlify, isBytesLike, keccak256 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
@@ -14,6 +14,7 @@ import {
   CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
+  CCIPTokenDecimalsInsufficientError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -28,10 +29,10 @@ import type {
   SVMExtraArgsV1,
   SuiExtraArgsV1,
 } from './extra-args.ts'
-import type { EstimateMessageInput } from './gas.ts'
+import type { EstimateMessageInput, GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1 } from './messages.ts'
-import { type ChainFamily, type NetworkInfo, type NetworkType, networkInfo } from './networks.ts'
+import { type NetworkInfo, type NetworkType, ChainFamily, networkInfo } from './networks.ts'
 import { getOffchainTokenData } from './offchain.ts'
 import {
   getMessagesInBatch,
@@ -63,7 +64,14 @@ import {
   CCIPVersion,
   ExecutionState,
 } from './types.ts'
-import { getDataBytes, util, withRetry } from './utils.ts'
+import {
+  getDataBytes,
+  getSourceDecimalsFromExtraData,
+  parseTypeAndVersion,
+  scaleDecimals,
+  util,
+  withRetry,
+} from './utils.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -1371,6 +1379,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param opts - Execution options
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @throws {@link CCIPInsufficientBalanceError} if a LockRelease pool (or its lockbox) lacks liquidity
    * @returns true if all token transfers are supported and within the rate limit
    * @internal
    */
@@ -1379,40 +1388,81 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     message,
   }: {
     offRamp: string
-    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'>
+    message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'> &
+      Partial<
+        Pick<
+          EstimateMessageInput,
+          'receiver' | 'sender' | 'offchainTokenData' | 'tokenReceiver' | 'onRampAddress'
+        >
+      >
   }): Promise<true> {
     let registry
     for (const ta of message.tokenAmounts ?? []) {
-      const amount = ta.amount
       const token = 'destTokenAddress' in ta ? ta.destTokenAddress : ta.token
       // Native value transfers aren't pool-managed — skip the token-pool preflight.
       if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
-      // if a LockReleaseTokenPool, also check it has enough liquidity
-      if (typeAndVersion?.includes('LockRelease')) {
-        const [balance, { symbol }] = await Promise.all([
-          this.getBalance({ holder: lockBox || tokenPool!, token }),
-          this.getTokenInfo(token),
-        ])
-        if (balance < amount) {
-          throw new CCIPInsufficientBalanceError(balance.toString(), amount.toString(), symbol, {
-            context: { tokenPool, token, typeAndVersion, network: this.network.name },
-          })
+
+      // `ta.amount` is source-denominated whenever `extraData` declares the source decimals.
+      // Convert for the comparisons below, but never touch `ta.amount`: EVMChain's override
+      // forwards it to releaseOrMint as sourceDenominatedAmount.
+      // `typeAndVersion` is the raw string from getTokenPoolConfig and may be kebab-case
+      // (e.g. Solana's `foo-lock-release 1.5.0`); normalize via parseTypeAndVersion first.
+      const [poolType, poolVersion] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
+      const isLockRelease = Boolean(poolType?.includes('LockRelease'))
+      const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
+      const tokenInfo =
+        sourceDecimals != null || isLockRelease ? await this.getTokenInfo(token) : undefined
+      let localAmount = ta.amount
+      let scaled
+      if (sourceDecimals != null) {
+        localAmount = scaleDecimals(ta.amount, sourceDecimals, tokenInfo!.decimals)
+        scaled = { sourceAmount: ta.amount, sourceDecimals, destDecimals: tokenInfo!.decimals }
+        // the dest token cannot represent the transfer at all — the pool would release nothing
+        if (localAmount === 0n && ta.amount > 0n)
+          throw new CCIPTokenDecimalsInsufficientError(
+            token,
+            tokenInfo!.decimals,
+            this.network.name,
+            formatUnits(ta.amount, sourceDecimals),
+          )
+      }
+
+      // pool balances are in local units in every pool version
+      if (isLockRelease) {
+        const balance = await this.getBalance({ holder: lockBox || tokenPool!, token })
+        if (balance < localAmount) {
+          throw new CCIPInsufficientBalanceError(
+            balance.toString(),
+            localAmount.toString(),
+            tokenInfo!.symbol,
+            {
+              context: { tokenPool, token, typeAndVersion, network: this.network.name, ...scaled },
+            },
+          )
         }
       }
 
       const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
       if (!remote.inboundRateLimiterState) continue
-      if (amount > remote.inboundRateLimiterState.tokens) {
+      // EVM pools debit the inbound bucket in local units only from 1.6.1
+      // (TokenPool._validateReleaseOrMint); 1.5.1 and 1.6.0 consume the source-denominated
+      // amount. Every other family debits local units at all versions.
+      const bucketAmount =
+        this.network.family === ChainFamily.EVM && poolVersion != null && poolVersion < '1.6.1'
+          ? ta.amount
+          : localAmount
+      if (bucketAmount > remote.inboundRateLimiterState.tokens) {
         throw new CCIPRateLimitExceededError('INBOUND', remote.inboundRateLimiterState, {
           token,
-          amount,
+          amount: bucketAmount,
           tokenPool: tokenPool!,
           registry,
           sourceChainSelector: message.sourceChainSelector,
           destChainSelector: this.network.chainSelector,
+          ...(bucketAmount === localAmount ? scaled : undefined),
         })
       }
     }
@@ -1703,6 +1753,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *   - `totalMs` - Estimated delivery time in milliseconds
    *
    * @throws {@link CCIPApiClientNotAvailableError} if apiClient was disabled (set to `null`)
+   * @throws {@link CCIPLaneLatencyInsufficientDataError} if the API has too little history for the lane
    * @throws {@link CCIPHttpError} if API request fails (network error, 4xx, 5xx status)
    *
    * @remarks
@@ -2276,6 +2327,50 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Simulate the source pool's `lockOrBurn` for a prospective token transfer and return the
+   * pool-reported `destTokenAddress`, `destPoolData` (the value the destination pool's
+   * `releaseOrMint` consumes as `sourcePoolData`) and `destTokenAmount` (the post-fee amount the
+   * OnRamp writes into the emitted message), plus the resolved source pool address.
+   *
+   * Optional; currently implemented for EVM chains. Used by `estimateReceiveExecution` to feed
+   * the destination-liquidity simulation the same source pool data a real transfer would carry.
+   *
+   * @param opts - lane (`onRamp`, `destChainSelector`), `token` and `amount` (source decimals),
+   *   and optionally `originalSender`, `receiver`, `tokenReceiver`, `tokenArgs`, and the
+   *   requested `finality`
+   * @returns resolved `sourcePoolAddress`, `destTokenAddress` + `destPoolData` as returned by
+   *   the pool, and the post-fee `destTokenAmount`
+   */
+  simulateLockOrBurn?(opts: {
+    /** OnRamp registered on the source Router for the destination chain */
+    onRamp: string
+    /** Destination chain selector */
+    destChainSelector: bigint
+    /** Source token address */
+    token: string
+    /** Amount in the source token's decimals */
+    amount: bigint
+    /** Sender of the prospective message */
+    originalSender?: string
+    /** Receiver on the destination chain */
+    receiver?: string
+    /**
+     * Token receiver on the destination chain (v3 extraArgs); when set, takes precedence over
+     * `receiver` as the pool's `lockOrBurnIn.receiver`, mirroring the OnRamp
+     */
+    tokenReceiver?: string
+    /** Message-level `GenericExtraArgsV3.tokenArgs`, passed through to IPoolV2 pools */
+    tokenArgs?: string
+    /** Requested finality (v2 pools take it as the 2nd `lockOrBurn` argument) */
+    finality?: FinalityRequested
+  }): Promise<{
+    sourcePoolAddress: string
+    destTokenAddress: string
+    destPoolData: string
+    destTokenAmount: bigint
+  }>
+
+  /**
    * Estimate `ccipReceive` execution cost (gas, computeUnits) for this destination chain.
    *
    * @param opts - Either:
@@ -2295,6 +2390,20 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         }
       | { messageId: string },
   ): Promise<number>
+
+  /**
+   * Resolve the CCV set the destination OffRamp will require for a candidate message, and whether its
+   * finality is accepted (a rejection throws `CCIPFinalityNotAllowedError`). A read via the
+   * `getCCVsForMessage` resolver; EVM destinations only. The set is informative and sender-scoped.
+   *
+   * @param opts - Destination OffRamp (v2.0) address and the candidate message
+   *   ({@link GetRequiredCCVsMessage}).
+   * @returns `{ requiredCCVs, optionalCCVs, optionalThreshold }`.
+   */
+  getRequiredCCVs?(opts: {
+    offRamp: string
+    message: GetRequiredCCVsMessage
+  }): Promise<GetRequiredCCVsResult>
 }
 
 /**

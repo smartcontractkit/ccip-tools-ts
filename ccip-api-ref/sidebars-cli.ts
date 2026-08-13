@@ -41,6 +41,11 @@ const sidebars: SidebarsConfig = {
           id: 'guides/debugging-workflow',
           label: 'Debugging Failed Messages',
         },
+        {
+          type: 'doc',
+          id: 'guides/reading-json-output',
+          label: 'Reading JSON Output',
+        },
       ],
     },
     {

@@ -43,7 +43,10 @@ This command requires API access. It fails if `--no-api` is set.
 | `--receiver`         |       | string  | -       | Filter by receiver address                      |
 | `--source`           | `-s`  | string  | -       | Source chain (name, chainId, or selector)       |
 | `--dest`             | `-d`  | string  | -       | Destination chain (name, chainId, or selector)  |
+| `--source-token`     |       | string  | -       | Filter by source token address                  |
 | `--manual-exec-only` |       | boolean | `false` | Only return messages ready for manual execution |
+| `-q`                 |       | string  | -       | Free-text match on addresses, hashes, messageId |
+| `--cursor`           |       | string  | -       | Resume from a cursor printed by an earlier run  |
 | `--limit`            |       | number  | `20`    | Max results to return. `0` = unlimited.         |
 
 See [Configuration](/cli/configuration) for global options (`--format`, `--api`, etc.).
@@ -81,6 +84,43 @@ Combine with other filters to narrow the results:
 ```bash
 ccip-cli search messages --sender 0x9d08... --manual-exec-only --limit 5
 ```
+
+### Search by free text
+
+```bash
+ccip-cli search messages -q 0x20B79D39Bd44dEee4F89B1e9d0e3b945fde06491
+```
+
+`-q` matches source and destination token address, source pool address, transaction hashes, messageId, sender, and receiver. Because it spans fields, a hit may match in a role you did not intend; check the field you care about on each result.
+
+Comma-separate terms to require all of them:
+
+```bash
+ccip-cli search messages -q 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b,0x20B79D39Bd44dEee4F89B1e9d0e3b945fde06491
+```
+
+Named filters are AND-ed with `-q`:
+
+```bash
+ccip-cli search messages -q 0x20B79D39... --source ethereum-mainnet --limit 50
+```
+
+### Resume a search across runs
+
+When results are capped by `--limit` and more are available, the CLI prints a cursor to stderr:
+
+```bash
+ccip-cli search messages --source ethereum-mainnet --limit 100 --format json > page1.json
+# stderr: More results available. Resume with --cursor 46zwbZnajt8FKiqha7om...
+```
+
+Pass it back to continue from where the previous run stopped:
+
+```bash
+ccip-cli search messages --source ethereum-mainnet --limit 100 --cursor "$CURSOR" --format json > page2.json
+```
+
+The cursor encodes the filters it was issued for. Filters may be repeated or omitted, but must not contradict the cursor.
 
 ### Retrieve all matching messages
 
@@ -139,8 +179,8 @@ With `--format log`, each result is printed as a raw JavaScript object. The inte
 
 1. Validates that API access is enabled (fails with an error if `--no-api` is set)
 2. Resolves `--source` and `--dest` to chain selectors via `networkInfo()`
-3. Paginates through the API using `searchAllMessages` until `--limit` is reached
-4. Displays results in the requested format
+3. Paginates through the API a page at a time, starting from `--cursor` if given, requesting only as many results as `--limit` still needs, until the limit is reached or the results are exhausted
+4. Displays results in the requested format, printing a resume cursor to stderr if more remain
 5. In TTY mode (except JSON format), presents an interactive menu to inspect individual messages via `getMessageById`
 
 ## See Also
