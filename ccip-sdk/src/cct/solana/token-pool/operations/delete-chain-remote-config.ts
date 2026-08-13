@@ -18,13 +18,12 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  U64_MAX,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
-
-const U64_MAX = 0xffff_ffff_ffff_ffffn
 
 type DeleteChainRemoteConfigParams = PoolProgramRef & {
   /** Token mint address managed by the local pool. */

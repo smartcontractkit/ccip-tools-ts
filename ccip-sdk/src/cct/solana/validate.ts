@@ -12,6 +12,9 @@ import {
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
 
+/** Largest value representable by an unsigned 64-bit integer. */
+export const U64_MAX = 0xffff_ffff_ffff_ffffn
+
 /**
  * Parses `value` as a Solana public key.
  * @throws CCTParamsInvalidError if `value` is not a valid Solana public key string.
@@ -227,4 +230,19 @@ export function parseHexBytes(
     throw new CCTParamsInvalidError(operation, param, `must be a hex string${size}`)
   }
   return Buffer.from(hex, 'hex')
+}
+
+/**
+ * Parses a non-empty optionally `0x`-prefixed hex string into bytes.
+ * @throws CCTParamsInvalidError if `value` is not valid non-empty hex or exceeds the requested size.
+ */
+export function parseNonEmptyHexBytes(
+  operation: string,
+  param: string,
+  value: unknown,
+  maxBytes?: number,
+): Buffer {
+  const bytes = parseHexBytes(operation, param, value, maxBytes)
+  if (!bytes.length) throw new CCTParamsInvalidError(operation, param, 'must not be empty')
+  return bytes
 }

@@ -21,6 +21,7 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  U64_MAX,
   parseHexBytes,
   parsePublicKey,
   resolvePoolProgram,
@@ -28,8 +29,6 @@ import {
   validateBigInt,
   validateInteger,
 } from '../../validate.ts'
-
-const U64_MAX = 0xffff_ffff_ffff_ffffn
 
 /** Parameters shared by Solana token pool remote-config initialization generation and execution. */
 type InitChainRemoteConfigParams = PoolProgramRef & {
