@@ -21,15 +21,15 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  U64_MAX,
   parseHexBytes,
+  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateInteger,
 } from '../../validate.ts'
-
-const U64_MAX = 0xffff_ffff_ffff_ffffn
 
 /** Parameters shared by Solana token pool remote-config editing generation and execution. */
 type EditChainRemoteConfigParams = PoolProgramRef & {
@@ -105,7 +105,7 @@ export class EditChainRemoteConfig extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be an array')
     }
     const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
-      parseHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
+      parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
     )
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
