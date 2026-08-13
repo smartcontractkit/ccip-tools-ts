@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type IdlTypes, Program } from '@coral-xyz/anchor'
+import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPError } from '../../../errors/index.ts'
@@ -52,13 +52,6 @@ type TokenPoolStateDecodeContext = {
   accountOwner: string
 }
 
-type TokenPoolChainConfigDecodeContext = {
-  chainConfig: string
-  mint: string
-  poolProgram: string
-  accountOwner: string
-}
-
 /**
  * Resolves a canonical token pool program type to its address.
  *
@@ -92,28 +85,6 @@ export function decodeTokenPoolState(
     )
   } catch (cause) {
     throw new CCTDataDecodeError(context.tokenPool, {
-      cause: cause instanceof Error ? cause : CCIPError.from(cause),
-      context: {
-        mint: context.mint,
-        poolProgram: context.poolProgram,
-        accountOwner: context.accountOwner,
-      },
-    })
-  }
-}
-
-/** Decodes a canonical token pool remote-chain config account. */
-export function decodeTokenPoolChainConfig(
-  data: Buffer,
-  context: TokenPoolChainConfigDecodeContext,
-): { base: IdlTypes<typeof TOKEN_POOL_IDL>['BaseChain'] } {
-  try {
-    return tokenPoolCoder.accounts.decode<{ base: IdlTypes<typeof TOKEN_POOL_IDL>['BaseChain'] }>(
-      'chainConfig',
-      data,
-    )
-  } catch (cause) {
-    throw new CCTDataDecodeError(context.chainConfig, {
       cause: cause instanceof Error ? cause : CCIPError.from(cause),
       context: {
         mint: context.mint,

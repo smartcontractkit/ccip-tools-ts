@@ -108,8 +108,8 @@ import {
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
-  type GetTokenPoolRemoteParams,
-  type GetTokenPoolRemoteResult,
+  type GetTokenPoolRemotesParams,
+  type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
@@ -121,7 +121,7 @@ import {
   DeleteChainRemoteConfig,
   DeployTokenPool,
   EditChainRemoteConfig,
-  GetTokenPoolRemote,
+  GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
@@ -153,7 +153,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig()
   readonly #editChainRemoteConfig = new EditChainRemoteConfig()
-  readonly #getTokenPoolRemote = new GetTokenPoolRemote()
+  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
@@ -1403,28 +1403,29 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a Solana token pool's configuration for one remote chain.
+   * Reads all, or one selected, Solana token pool remote-chain configurations.
    *
-   * Remote token and pool addresses are returned as hex, preserving the on-chain address bytes.
-   * Rate-limit amounts use the local mint's smallest unit.
+   * @remarks Results are keyed by remote network name. Omit `remoteChainSelector` to scan all
+   * configured remotes; provide it to query one. Rate-limit amounts use the local mint's smallest
+   * unit.
    *
    * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is invalid.
-   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the remote-chain config account does not exist.
-   * @throws {@link CCTDataDecodeError} If the remote-chain config account cannot be decoded.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the selected remote-chain config does not exist.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const remote = await cct.getTokenPoolRemote({
+   * const remotes = await cct.getTokenPoolRemotes({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    * })
-   * console.log(remote)
+   * console.log(remotes)
    * ```
    */
-  getTokenPoolRemote(opts: GetTokenPoolRemoteParams): Promise<GetTokenPoolRemoteResult> {
-    return this.#getTokenPoolRemote.query(this.chain, opts)
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts)
   }
 
   /**
