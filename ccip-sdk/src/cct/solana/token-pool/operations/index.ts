@@ -1,3 +1,5 @@
+export * from './append-remote-pool-addresses.ts'
+export * from './apply-chain-updates.ts'
 export * from './configure-allowlist.ts'
 export * from './create-token-multisig.ts'
 export * from './deploy-token-pool.ts'

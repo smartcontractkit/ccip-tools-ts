@@ -18,7 +18,6 @@ const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const SELECTOR = 5009297550715157269n
-const REMOTE_TOKEN = '0x1234567890abcdef1234567890abcdef12345678'
 const REMOTE_POOLS = ['0x1234567890abcdef1234567890abcdef12345678', '0xaabbccdd']
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
@@ -49,22 +48,20 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedEditChainRemoteConfig({
+  return SolanaTokenManager.fromChain(chain()).generateUnsignedAppendRemotePoolAddresses({
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     remoteChainSelector: SELECTOR,
-    remoteTokenAddress: REMOTE_TOKEN,
     remotePoolAddresses: REMOTE_POOLS,
-    remoteTokenDecimals: 18,
     ...opts,
   })
 }
 
-describe('EditChainRemoteConfig (cct/solana)', () => {
+describe('AppendRemotePoolAddresses (cct/solana)', () => {
   describe('generate', () => {
-    it('builds a padded remote-token config with remote pools', async () => {
+    it('builds the append-remote-pool-addresses instruction', async () => {
       const unsigned = await generate()
       const [instruction] = unsigned.instructions
       const poolProgram = resolveTokenPoolProgram('burn-mint')
@@ -99,29 +96,18 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
         ],
       )
       assert.ok(decoded)
-      assert.equal(decoded.name, 'editChainRemoteConfig')
+      assert.equal(decoded.name, 'appendRemotePoolAddresses')
       const data = decoded.data as {
         remoteChainSelector: { toString(): string }
-        cfg: {
-          tokenAddress: { address: Buffer }
-          poolAddresses: { address: Buffer }[]
-          decimals: number
-        }
+        mint: PublicKey
+        addresses: { address: Buffer }[]
       }
       assert.equal(data.remoteChainSelector.toString(), SELECTOR.toString())
+      assert.equal(data.mint.toBase58(), TOKEN)
       assert.deepEqual(
-        data.cfg.tokenAddress.address,
-        Buffer.from(REMOTE_TOKEN.slice(2).padStart(64, '0'), 'hex'),
-      )
-      assert.deepEqual(
-        data.cfg.poolAddresses.map(({ address }) => address),
+        data.addresses.map(({ address }) => address),
         REMOTE_POOLS.map((address) => Buffer.from(address.slice(2), 'hex')),
       )
-      assert.equal(data.cfg.decimals, 18)
-    })
-
-    it('supports a zero remote-chain selector', async () => {
-      await assert.doesNotReject(() => generate({ remoteChainSelector: 0n }))
     })
 
     it('uses a compatible custom pool program', async () => {
@@ -133,16 +119,16 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
   })
 
   describe('validation', () => {
-    it('rejects invalid remote configuration values', async () => {
+    it('rejects invalid remote pool addresses', async () => {
       for (const [opts, param] of [
         [{ remoteChainSelector: 1 }, 'remoteChainSelector'],
         [{ remoteChainSelector: -1n }, 'remoteChainSelector'],
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
-        [{ remoteTokenAddress: '0x123' }, 'remoteTokenAddress'],
+        [{ remotePoolAddresses: [] }, 'remotePoolAddresses'],
         [{ remotePoolAddresses: [''] }, 'remotePoolAddresses[0]'],
         [{ remotePoolAddresses: ['0x123'] }, 'remotePoolAddresses[0]'],
+        [{ remotePoolAddresses: ['0xaabbccdd', 'aabbccdd'] }, 'remotePoolAddresses[1]'],
         [{ remotePoolAddresses: '0x12' }, 'remotePoolAddresses'],
-        [{ remoteTokenDecimals: 256 }, 'remoteTokenDecimals'],
       ] as const) {
         await assert.rejects(
           () => generate(opts),
@@ -154,35 +140,31 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).editChainRemoteConfig({
+      const result = await SolanaTokenManager.fromChain(submitChain()).appendRemotePoolAddresses({
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
-        remoteTokenAddress: REMOTE_TOKEN,
         remotePoolAddresses: REMOTE_POOLS,
-        remoteTokenDecimals: 18,
         wallet: WALLET,
       })
 
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('rejects a non-wallet authority for signed editing', async () => {
+    it('rejects a non-wallet authority for signed appending', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).editChainRemoteConfig({
+          SolanaTokenManager.fromChain(chain()).appendRemotePoolAddresses({
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,
             remoteChainSelector: SELECTOR,
-            remoteTokenAddress: REMOTE_TOKEN,
             remotePoolAddresses: REMOTE_POOLS,
-            remoteTokenDecimals: 18,
             wallet: WALLET,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'editChainRemoteConfig' &&
+          err.context.operation === 'appendRemotePoolAddresses' &&
           err.context.param === 'authority',
       )
     })

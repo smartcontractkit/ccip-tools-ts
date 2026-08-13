@@ -19,13 +19,12 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  U64_MAX,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
-
-const U64_MAX = 0xffff_ffff_ffff_ffffn
 
 /**
  * Configuration for one direction of a token pool rate limiter.
