@@ -3,16 +3,18 @@ import type {
   AbiParametersToPrimitiveTypes,
   ExtractAbiEvent,
 } from 'abitype'
-import type { Addressable, Result } from 'ethers'
+import type { Addressable } from 'ethers'
 import type { Simplify } from 'type-fest'
 
 import type { EVMExtraArgsV2 } from '../extra-args.ts'
+import type { MessageV1 } from '../messages.ts'
 import type { CCIPVersion, MergeArrayElements } from '../types.ts'
+import { decodeAddress } from '../utils.ts'
 import type EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import type OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import type OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import { defaultAbiCoder } from './const.ts'
-import type { MessageV1 } from '../messages.ts'
+import { resultToObject } from './types.ts'
 
 /** Utility type that cleans up address types to just `string`. */
 export type CleanAddressable<T> = T extends string | Addressable
@@ -107,5 +109,8 @@ export type SourceTokenData = {
  */
 export function parseSourceTokenData(data: string): SourceTokenData {
   const decoded = defaultAbiCoder.decode([SourceTokenData], data)
-  return (decoded[0] as Result).toObject() as SourceTokenData
+  const obj = resultToObject(decoded[0] as SourceTokenData)
+  if (obj.destTokenAddress) obj.destTokenAddress = decodeAddress(obj.destTokenAddress)
+  if (obj.sourcePoolAddress) obj.sourcePoolAddress = decodeAddress(obj.sourcePoolAddress)
+  return obj
 }

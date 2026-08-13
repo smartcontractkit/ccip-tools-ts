@@ -475,12 +475,6 @@ export function createRateLimitedFetch(
   opts.maxRetries ??= 15
   const opts_ = opts as RateLimitOpts
 
-  const isRetryableError = (error: unknown): boolean => {
-    if (error instanceof CCIPError && error.isTransient) return true
-    if (error instanceof Error) return !!error.message.match(/\b(429\b|rate.?limit)/i)
-    return false
-  }
-
   // Backoff used when the limiter is NOT pacing (occasional/bursty 429s). Uses
   // FULL JITTER over a 250ms→2s ramp: critical because callers often fire a
   // burst of requests concurrently, so a fixed delay would retry them all in
@@ -490,6 +484,26 @@ export function createRateLimitedFetch(
     Math.floor(Math.random() * Math.min(15_000, 250 * 2 ** attempt))
 
   return async (input, init?) => {
+    const isRetryableError = (error: unknown): boolean => {
+      if (error instanceof CCIPError && error.isTransient) return true
+      if (error instanceof Error) {
+        if (error.message.match(/\b(429\b|rate.?limit)/i)) return true
+        // Slow/volatile RPCs (free-tier TON, public endpoints) abort or time out
+        // mid-request under CI/remote load. Retry those unless the caller
+        // (per-request signal) or ctx already asked to cancel — retrying under a
+        // dead signal would just burn backoff time.
+        if (
+          error.message.match(
+            /\b(abort|timeout|timed out|ETIMEDOUT|ECONNRESET|fetch failed|network error)/i,
+          )
+        ) {
+          if (abort?.aborted || init?.signal?.aborted) return false
+          return true
+        }
+      }
+      return false
+    }
+
     let lastError: Error | null = null
     const method = extractMethod(init)
     const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight)

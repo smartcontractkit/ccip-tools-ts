@@ -185,6 +185,14 @@ export type MessageSearchFilters = {
   sourceTokenAddress?: string
   /** When `true`, return only messages eligible for manual execution (stuck/failed messages) */
   readyForManualExecOnly?: boolean
+  /**
+   * Free-text search over identifiers in the message: source and destination token address,
+   * source pool address, transaction hashes, message ID, sender and receiver. Comma-separate
+   * several terms; all must match. AND-ed with the other filters.
+   *
+   * Matches across fields, so a result may match in a different role than intended.
+   */
+  q?: string
 }
 
 /**
