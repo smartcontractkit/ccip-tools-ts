@@ -108,6 +108,8 @@ import {
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
+  type GetTokenPoolRemotesParams,
+  type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
@@ -119,6 +121,7 @@ import {
   DeleteChainRemoteConfig,
   DeployTokenPool,
   EditChainRemoteConfig,
+  GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
@@ -150,6 +153,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig()
   readonly #editChainRemoteConfig = new EditChainRemoteConfig()
+  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
@@ -1396,6 +1400,32 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
     return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads all, or one selected, Solana token pool remote-chain configurations.
+   *
+   * @remarks Results are keyed by remote network name. Omit `remoteChainSelector` to scan all
+   * configured remotes; provide it to query one. Rate-limit amounts use the local mint's smallest
+   * unit.
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the selected remote-chain config does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const remotes = await cct.getTokenPoolRemotes({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChainSelector: 5009297550715157269n,
+   * })
+   * console.log(remotes)
+   * ```
+   */
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts)
   }
 
   /**
