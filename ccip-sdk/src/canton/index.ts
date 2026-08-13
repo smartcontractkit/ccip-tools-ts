@@ -764,10 +764,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       })
 
       const tokenPoolSend = await this.edsDisclosureProvider.fetchTokenPoolSendDisclosure(
-          tokenPoolAddress,
-          tokenPoolEdsMessage,
-        ),
-        tokenPoolRequiredCCVs = tokenPoolSend.requiredCCVs
+        tokenPoolAddress,
+        tokenPoolEdsMessage,
+      )
+
+      tokenPoolRequiredCCVs = tokenPoolSend.requiredCCVs
       tokenTransferInput = {
         senderInputCids: tokenHoldings.map((holding) => holding.contractId),
         tokenPoolCid: tokenPoolSend.contractId,
@@ -854,10 +855,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       message: {
         receiver: receiverHex,
         payload: payloadHex,
-        tokenTransfer: messageTokenTransfer ? {
-          token: messageTokenTransfer.token,
-          amount: messageTokenTransfer.amount,
-        } : null,
+        tokenTransfer: messageTokenTransfer
+          ? {
+              token: messageTokenTransfer.token,
+              amount: messageTokenTransfer.amount,
+            }
+          : null,
         feeToken: { admin: feeInstrument.admin, id: feeInstrument.id },
         extraArgs: {
           tag: 'V3',
@@ -1065,7 +1068,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const encodedMessageHex = stripHexPrefix(String(encodedMessage))
 
     this.logger.debug('CantonChain.generateUnsignedExecute: fetching global EDS execute data...')
-    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(encodedMessageHex, payer)
+    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
+      encodedMessageHex,
+      payer,
+    )
     // Step 2 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
     // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
     this.logger.debug(
@@ -1083,7 +1089,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           ccvAddress,
           verifierDestAddress: v.destAddress,
         })
-        return this.edsDisclosureProvider.fetchCcvExecuteDisclosure(ccvAddress, encodedMessageHex, payer)
+        return this.edsDisclosureProvider.fetchCcvExecuteDisclosure(
+          ccvAddress,
+          encodedMessageHex,
+          payer,
+        )
       }),
     )
 

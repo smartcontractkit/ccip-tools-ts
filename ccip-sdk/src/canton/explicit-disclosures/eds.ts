@@ -308,7 +308,10 @@ export class EdsDisclosureProvider {
   }
 
   /** Fetch global execute disclosures for an encoded CCIP message. */
-  async fetchExecutionDisclosures(encodedMessage: string, receiver: string): Promise<EdsExecuteResult> {
+  async fetchExecutionDisclosures(
+    encodedMessage: string,
+    receiver: string,
+  ): Promise<EdsExecuteResult> {
     const resp = await post<EdsGlobalExecuteResponse>(
       this.edsBaseUrl,
       '/ccip/v1/global/message/execute',
