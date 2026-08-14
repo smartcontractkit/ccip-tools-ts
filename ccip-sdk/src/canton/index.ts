@@ -721,9 +721,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
       const tokenInstrument = parseCantonInstrumentId(tokenAmount.token)
       const tokenAmountDecimal = formatCantonDecimalAmountUnits(tokenAmount.amount)
+
+      const tokenHoldings = await this.resolveTokenTransferHoldings({
+        party: sender,
+        instrumentId: tokenInstrument,
+        explicitHoldingCids: cantonArgs.tokenTransferHoldingCids,
+        feeTokenHoldingCids,
+        requiredAmount: tokenAmount.amount,
+      })
       messageTokenTransfer = {
         token: { admin: tokenInstrument.admin, id: tokenInstrument.id },
         amount: tokenAmountDecimal,
+        holdingContractIds: tokenHoldings.map((holding) => holding.contractId),
       }
 
       const tokenPoolAddress = await this.edsDisclosureProvider.lookupTokenPool(
@@ -747,25 +756,17 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
       const tokenPoolEdsMessage = buildEdsMessage({
         destChainSelector,
+        senderParty: sender,
         receiverHex,
         payloadHex,
         feeInstrument,
         tokenTransfer: messageTokenTransfer,
       })
 
-      const [tokenHoldings, tokenPoolSend] = await Promise.all([
-        this.resolveTokenTransferHoldings({
-          party: sender,
-          instrumentId: tokenInstrument,
-          explicitHoldingCids: cantonArgs.tokenTransferHoldingCids,
-          feeTokenHoldingCids,
-          requiredAmount: tokenAmount.amount,
-        }),
-        this.edsDisclosureProvider.fetchTokenPoolSendDisclosure(
-          tokenPoolAddress,
-          tokenPoolEdsMessage,
-        ),
-      ])
+      const tokenPoolSend = await this.edsDisclosureProvider.fetchTokenPoolSendDisclosure(
+        tokenPoolAddress,
+        tokenPoolEdsMessage,
+      )
 
       tokenPoolRequiredCCVs = tokenPoolSend.requiredCCVs
       tokenTransferInput = {
@@ -781,6 +782,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const edsMessage = buildEdsMessage({
       destChainSelector,
+      senderParty: sender,
       receiverHex,
       payloadHex,
       feeInstrument,
@@ -853,7 +855,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       message: {
         receiver: receiverHex,
         payload: payloadHex,
-        tokenTransfer: messageTokenTransfer,
+        tokenTransfer: messageTokenTransfer
+          ? {
+              token: messageTokenTransfer.token,
+              amount: messageTokenTransfer.amount,
+            }
+          : null,
         feeToken: { admin: feeInstrument.admin, id: feeInstrument.id },
         extraArgs: {
           tag: 'V3',
@@ -1061,7 +1068,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const encodedMessageHex = stripHexPrefix(String(encodedMessage))
 
     this.logger.debug('CantonChain.generateUnsignedExecute: fetching global EDS execute data...')
-    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(encodedMessageHex)
+    const edsResult = await this.edsDisclosureProvider.fetchExecutionDisclosures(
+      encodedMessageHex,
+      payer,
+    )
     // Step 2 — Fetch same-party disclosures (PerPartyRouter + CCIPReceiver)
     // TODO: This should include receiverCid when provided. We need to figure out how to get that from the input or opts.
     this.logger.debug(
@@ -1079,7 +1089,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           ccvAddress,
           verifierDestAddress: v.destAddress,
         })
-        return this.edsDisclosureProvider.fetchCcvExecuteDisclosure(ccvAddress, encodedMessageHex)
+        return this.edsDisclosureProvider.fetchCcvExecuteDisclosure(
+          ccvAddress,
+          encodedMessageHex,
+          payer,
+        )
       }),
     )
 
@@ -1101,6 +1115,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       const tokenPoolExecute = await this.edsDisclosureProvider.fetchTokenPoolExecuteDisclosure(
         edsResult.tokenPool,
         encodedMessageHex,
+        payer,
       )
       assertRequiredCcvsCovered(
         tokenPoolExecute.requiredCCVs,
@@ -2361,12 +2376,14 @@ function formatInstrumentId(instrumentId: CantonInstrumentId): string {
 
 function buildEdsMessage({
   destChainSelector,
+  senderParty,
   receiverHex,
   payloadHex,
   feeInstrument,
   tokenTransfer,
 }: {
   destChainSelector: bigint
+  senderParty: string
   receiverHex: string
   payloadHex: string
   feeInstrument: CantonInstrumentId
@@ -2374,6 +2391,7 @@ function buildEdsMessage({
 }): EdsMessage {
   return {
     destinationChainSelector: destChainSelector.toString(),
+    sender: senderParty,
     receiver: receiverHex,
     payload: payloadHex,
     tokenTransfer: tokenTransfer as EdsMessage['tokenTransfer'],
