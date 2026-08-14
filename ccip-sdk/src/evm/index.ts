@@ -2304,51 +2304,71 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
                 fastOutbound?: RateLimiterBucket
                 fastInbound?: RateLimiterBucket
               }> => {
-                const mechanism = Number(await proxy.getLockOrBurnMechanism(chain.chainSelector))
-                let poolAddr
-                switch (mechanism) {
-                  case 1 /* CCTP_V1 */: {
-                    poolAddr = cctpPools['cctpV1Pool']
-                    const contract = new Contract(
-                      poolAddr,
-                      interfaces.TokenPool_v1_6,
-                      this.provider,
-                    ) as unknown as TypedContract<typeof TokenPool_ABI>
-                    return Promise.all([
-                      contract.getCurrentOutboundRateLimiterState(chain.chainSelector),
-                      contract.getCurrentInboundRateLimiterState(chain.chainSelector),
-                    ] as const).then(([outbound, inbound]) => ({ outbound, inbound }))
-                  }
-                  case 3 /* LOCK_RELEASE (v1) */:
-                    poolAddr ??= cctpPools['siloedLockReleasePool']
-                  // fall through
-                  case 2 /* CCTP_V2 */:
-                    poolAddr ??= cctpPools['cctpV2Pool']
-                  // fall through
-                  case 4 /* CCV */: {
-                    poolAddr ??= cctpPools['cctpV2PoolWithCCV']
-                    const contract = new Contract(
-                      poolAddr,
-                      interfaces.TokenPool_v2_0,
-                      this.provider,
-                    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+                const pools = [
+                  undefined,
+                  'cctpV1Pool',
+                  'cctpV2Pool',
+                  'siloedLockReleasePool',
+                  'cctpV2PoolWithCCV',
+                ] as const
+                const mechanism =
+                  pools[Number(await proxy.getLockOrBurnMechanism(chain.chainSelector))]
+                if (!mechanism || !cctpPools[mechanism] || cctpPools[mechanism] === ZeroAddress)
+                  throw new CCIPTokenPoolChainConfigNotFoundError(
+                    tokenPool,
+                    previousPool!,
+                    chain.name,
+                  )
+                const poolAddr = cctpPools[mechanism]
+                const [, version, typeAndVersion] = await this.typeAndVersion(poolAddr)
+                if (version < CCIPVersion.V2_0) {
+                  const contract = new Contract(
+                    poolAddr,
+                    interfaces.TokenPool_v1_6,
+                    this.provider,
+                  ) as unknown as TypedContract<typeof TokenPool_ABI>
+                  return Promise.all([
+                    contract.getCurrentOutboundRateLimiterState(chain.chainSelector),
+                    contract.getCurrentInboundRateLimiterState(chain.chainSelector),
+                    contract.getRouter(),
+                  ] as const).then(([outbound, inbound, router]) => ({
+                    outbound,
+                    inbound,
+                    // populate some more useful fields from previousPool
+                    tokenPool: poolAddr,
+                    typeAndVersion,
+                    router,
+                  }))
+                } else {
+                  const contract = new Contract(
+                    poolAddr,
+                    interfaces.TokenPool_v2_0,
+                    this.provider,
+                  ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
 
-                    return Promise.all([
-                      contract.getCurrentRateLimiterState(chain.chainSelector, false),
-                      contract.getCurrentRateLimiterState(chain.chainSelector, true),
-                    ] as const).then(([[outbound, inbound], [fastOutbound, fastInbound]]) => ({
+                  const filterDynamicConfig = (dynamicConfig: { router: string }) => {
+                    return Object.fromEntries(
+                      Object.entries(resultToObject(dynamicConfig)).filter(
+                        ([_, v]) => v && v !== ZeroAddress,
+                      ),
+                    )
+                  }
+                  return Promise.all([
+                    contract.getCurrentRateLimiterState(chain.chainSelector, false),
+                    contract.getCurrentRateLimiterState(chain.chainSelector, true),
+                    contract.getDynamicConfig(),
+                  ] as const).then(
+                    ([[outbound, inbound], [fastOutbound, fastInbound], dynamicConfig]) => ({
                       outbound,
                       inbound,
                       fastOutbound,
                       fastInbound,
-                    }))
-                  }
-                  default:
-                    throw new CCIPTokenPoolChainConfigNotFoundError(
-                      tokenPool,
-                      previousPool!,
-                      chain.name,
-                    )
+                      // populate some more useful fields from previousPool
+                      tokenPool: poolAddr,
+                      typeAndVersion,
+                      ...filterDynamicConfig(dynamicConfig as unknown as { router: string }),
+                    }),
+                  )
                 }
               },
             ),
@@ -2371,28 +2391,27 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
 
     return Promise.all([supportedChains, remotePools, remoteTokens, remoteRateLimits]).then(
-      ([supportedChains, remotePools, remoteTokens, remoteRateLimits]) =>
+      ([supportedChains, remotePoolss, remoteTokens, remoteRateLimits]) =>
         Object.fromEntries(
-          supportedChains.map(
-            (chain, i) =>
-              [
-                chain.name,
-                {
-                  remoteToken: remoteTokens[i]!,
-                  remotePools: remotePools[i]!,
-                  outboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]!.outbound),
-                  inboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]!.inbound),
-                  ...(remoteRateLimits[i]!.fastOutbound != null && {
-                    fastOutboundRateLimiterState: toRateLimiterState(
-                      remoteRateLimits[i]!.fastOutbound,
-                    ),
-                    fastInboundRateLimiterState: toRateLimiterState(
-                      remoteRateLimits[i]!.fastInbound!,
-                    ),
-                  }),
-                },
-              ] as const,
-          ),
+          supportedChains.map((chain, i) => {
+            const remoteToken = remoteTokens[i]!,
+              remotePools = remotePoolss[i]!
+            const { outbound, inbound, fastOutbound, fastInbound, ...rest } = remoteRateLimits[i]!
+            return [
+              chain.name,
+              {
+                remoteToken,
+                remotePools,
+                outboundRateLimiterState: toRateLimiterState(outbound),
+                inboundRateLimiterState: toRateLimiterState(inbound),
+                ...(fastOutbound != null && {
+                  fastOutboundRateLimiterState: toRateLimiterState(fastOutbound),
+                  fastInboundRateLimiterState: toRateLimiterState(fastInbound!),
+                }),
+                ...rest,
+              },
+            ] as const
+          }),
         ),
     )
   }
