@@ -332,7 +332,7 @@ export async function* getEvmLogs(
   // is just the number), so pass undefined and keep plain numeric chunking.
   const endIsDynamic = typeof endTag === 'string' || Number(endTag) < 0
   const { number: endBlock } = (await provider.getBlock(endTag))!
-  filter.startBlock ??= await getSomeBlockNumberBefore(
+  filter.startBlock ??= await getBlockNumberAtOrAfter(
     async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
     Number(filter.startTime!),

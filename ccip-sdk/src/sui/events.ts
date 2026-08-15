@@ -3,13 +3,12 @@ import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
 import {
-  CCIPBlockBeforeTimestampNotFoundError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import type { LeanNumbers } from '../types.ts'
-import { getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
+import type { LeanNumbers, Logger, WithLogger } from '../types.ts'
+import { getBlockNumberAtOrAfter, signalToPromise } from '../utils.ts'
 
 type MerkleRoot = {
   max_seq_nr: string
@@ -96,27 +95,22 @@ async function getCheckpointTimestamp(client: SuiJsonRpcClient, seq: number): Pr
 }
 
 /**
- * Finds a checkpoint sequence number right before `startTime` (in seconds), by
- * binary-searching checkpoint timestamps over JSON-RPC.
+ * Finds the first checkpoint at or after `startTime` (in seconds), by searching
+ * checkpoint timestamps over JSON-RPC.
+ *
+ * `logger` must be forwarded: getBlockNumberAtOrAfter defaults it to `console`, so
+ * omitting it sends this search's per-probe debug lines straight to stdout,
+ * bypassing whatever logger the caller configured.
  */
-async function getCheckpointRightBefore(
+async function getCheckpointAtOrAfter(
   client: SuiJsonRpcClient,
   startTime: number,
-): Promise<number | undefined> {
+  logger?: Logger,
+): Promise<number> {
   const latest = await getLatestCheckpoint(client)
-  try {
-    // checkpoints are sub-second apart, so a precision of 8 stays within a few
-    // seconds before the target
-    return await getSomeBlockNumberBefore(
-      (seq) => getCheckpointTimestamp(client, seq),
-      latest,
-      startTime,
-      { precision: 8 },
-    )
-  } catch (err) {
-    if (err instanceof CCIPBlockBeforeTimestampNotFoundError) return
-    throw err
-  }
+  return getBlockNumberAtOrAfter((seq) => getCheckpointTimestamp(client, seq), latest, startTime, {
+    logger,
+  })
 }
 
 /**
@@ -178,7 +172,7 @@ function toEventNode<T>(event: SuiEvent, meta: TxMeta): EventNode<T> {
  * which is then merge-sorted once before yielding for the round.
  */
 async function* fetchEventsForward<T>(
-  ctx: { client: SuiJsonRpcClient },
+  ctx: { client: SuiJsonRpcClient } & WithLogger,
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   types: string[],
   limit = 50,
@@ -196,11 +190,13 @@ async function* fetchEventsForward<T>(
   let startCheckpoint: number | undefined
   if (opts.startBlock != null) startCheckpoint = Number(opts.startBlock)
   if (opts.startTime != null) {
-    const startCheckpoint_ = await getCheckpointRightBefore(ctx.client, Number(opts.startTime))
-    if (startCheckpoint_ != null) {
-      if (startCheckpoint != null) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
-      else startCheckpoint = startCheckpoint_
-    }
+    const startCheckpoint_ = await getCheckpointAtOrAfter(
+      ctx.client,
+      Number(opts.startTime),
+      ctx.logger,
+    )
+    if (startCheckpoint != null) startCheckpoint = Math.max(startCheckpoint, startCheckpoint_)
+    else startCheckpoint = startCheckpoint_
   }
   if (startCheckpoint == null) throw new CCIPLogsRequiresStartError()
 

@@ -112,7 +112,7 @@ import {
   encodeAddressToAny,
   getAddressBytes,
   getDataBytes,
-  getSomeBlockNumberBefore,
+  getBlockNumberAtOrAfter,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -1467,7 +1467,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let blockTag: number | undefined
     if (opts.timestamp != null) {
       const { number: latestBlock } = (await this.provider.getBlock('latest'))!
-      blockTag = await getSomeBlockNumberBefore(
+      blockTag = await getBlockNumberAtOrAfter(
         async (block: number) => (await this.provider.getBlock(block))!.timestamp,
         latestBlock,
         opts.timestamp,

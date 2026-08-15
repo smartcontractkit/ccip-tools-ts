@@ -14,8 +14,8 @@ import {
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
+  getBlockNumberAtOrAfter,
   getDataBytes,
-  getSomeBlockNumberBefore,
   getSourceDecimalsFromExtraData,
   isBase64,
   jsonParse,
@@ -30,40 +30,82 @@ import {
   withRetry,
 } from './utils.ts'
 
-describe('getSomeBlockNumberBefore', () => {
-  it('should return a block number before the given timestamp', async () => {
+describe('getBlockNumberAtOrAfter', () => {
+  /** Regular chain: ts(n) = base + n*blockTime. */
+  const regular = (base: number, blockTime: number) =>
+    mock.fn(async (num: number) => base + num * blockTime)
+
+  it('returns the EXACT first block at or after the timestamp', async () => {
+    const base = 1_700_000_000
+    const getBlockTimestamp = regular(base, 12)
+
+    // Target lands exactly on block 9500 -> that block itself is the answer.
+    assert.equal(await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 9_500 * 12), 9_500)
+    // One second later the boundary moves to the next block.
+    assert.equal(
+      await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 9_500 * 12 + 1),
+      9_501,
+    )
+  })
+
+  it('is exact even with irregular block times, and still converges quickly', async () => {
     const avgBlockTime = 12
     const rand = Math.random() * (avgBlockTime - 1) + 1 // [1, 12[
     const now = Math.trunc(Date.now() / 1e3)
-    const getBlockTimestamp = mock.fn(
-      async (num) =>
-        now -
-        (15000 - num) * avgBlockTime -
-        Math.trunc(rand ** (num % avgBlockTime) % avgBlockTime),
-    )
+    const ts = (num: number) =>
+      now - (15000 - num) * avgBlockTime - Math.trunc(rand ** (num % avgBlockTime) % avgBlockTime)
+    const getBlockTimestamp = mock.fn(async (num: number) => ts(num))
 
-    const targetTs = now - avgBlockTime * 14200
-    const blockNumber = await getSomeBlockNumberBefore(getBlockTimestamp, 15000, targetTs)
-    assert.ok(blockNumber <= 800)
-    assert.ok(blockNumber >= 790)
+    const targetTs = ts(800)
+    const blockNumber = await getBlockNumberAtOrAfter(getBlockTimestamp, 15000, targetTs)
+
+    // Asserted against the oracle rather than a tolerance window: the result must
+    // reach the target and its predecessor must not.
+    assert.ok(ts(blockNumber) >= targetTs, 'result must be at or after the target')
+    assert.ok(ts(blockNumber - 1) < targetTs, 'the block before it must be strictly before')
+    assert.ok(
+      getBlockTimestamp.mock.calls.length < 40,
+      `expected interpolation to converge, got ${getBlockTimestamp.mock.calls.length} calls`,
+    )
   })
 
-  it('should use the recent block timestamp instead of wall-clock time', async () => {
-    const baseTimestamp = 1_700_000_000
-    const getBlockTimestamp = mock.fn(async (num) => baseTimestamp + num * 12)
+  it('returns the LOWEST block when several share the boundary timestamp', async () => {
+    // Blocks 500..510 all carry the same timestamp; nothing at the boundary may be
+    // skipped, so the first of them is the answer.
+    const base = 1_700_000_000
+    const getBlockTimestamp = mock.fn(async (num: number) =>
+      num < 500 ? base + num : num <= 510 ? base + 500 : base + 500 + (num - 510),
+    )
 
-    const blockNumber = await getSomeBlockNumberBefore(
-      getBlockTimestamp,
+    assert.equal(await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 500), 500)
+  })
+
+  it('returns block 1 when the target predates the chain', async () => {
+    const base = 1_700_000_000
+    const getBlockTimestamp = regular(base, 12)
+    // Previously threw CCIPBlockBeforeTimestampNotFoundError: unanswerable for "a
+    // block BEFORE t", but perfectly answerable for "the first block at/after t".
+    assert.equal(await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base - 10_000), 1)
+  })
+
+  it('returns the tip when the target is at or beyond it', async () => {
+    const base = 1_700_000_000
+    const getBlockTimestamp = regular(base, 12)
+    assert.equal(
+      await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 10_000 * 12),
       10_000,
-      baseTimestamp + 9_500 * 12,
     )
+    assert.equal(
+      await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 99_999_999),
+      10_000,
+    )
+  })
 
-    assert.ok(blockNumber <= 9500)
-    assert.ok(blockNumber >= 9490)
-    assert.ok(
-      getBlockTimestamp.mock.calls.length < 20,
-      `expected interpolation to converge quickly, got ${getBlockTimestamp.mock.calls.length} calls`,
-    )
+  it('uses the recent block timestamp, not wall-clock time', async () => {
+    // base is far in the past; a wall-clock-anchored search would run off the end.
+    const base = 1_600_000_000
+    const getBlockTimestamp = regular(base, 12)
+    assert.equal(await getBlockNumberAtOrAfter(getBlockTimestamp, 10_000, base + 9_500 * 12), 9_500)
   })
 })
 
