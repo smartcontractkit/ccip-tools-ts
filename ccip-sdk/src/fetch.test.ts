@@ -7,10 +7,13 @@ import {
   endpointKey,
   fetchProfileForUrl,
   getEndpointLogRange,
+  getEndpointTopicLimit,
   parseLogRangeError,
   parseRateLimitHeaders,
   parseRetryAfter,
+  parseTopicLimitError,
   setEndpointLogRange,
+  setEndpointTopicLimit,
 } from './fetch.ts'
 
 function withMockedPerformanceNow<T>(now: number, fn: () => T): T {
@@ -915,5 +918,71 @@ describe('createAxiosFetchAdapter', () => {
     const adapter2 = createAxiosFetchAdapter(globalThis.fetch)
     assert.equal(typeof adapter1, 'function')
     assert.equal(typeof adapter2, 'function')
+  })
+})
+
+describe('parseTopicLimitError', () => {
+  it('recognises common phrasings and extracts the cap when stated', () => {
+    for (const [msg, want] of [
+      ['too many topics in filter', undefined],
+      ['requested too many topics', undefined],
+      ['eth_getLogs is limited to 5 topics', 5],
+      ['limited to a maximum of 4 topics', 4],
+      ['maximum number of topics is 5', 5],
+      ['max topics: 3', 3],
+      ['topics limit exceeded', undefined],
+    ] as const) {
+      const info = parseTopicLimitError({ code: -32602, message: msg })
+      assert.notEqual(info, null, `should match: ${msg}`)
+      assert.equal(info?.maxTopics, want, `cap for: ${msg}`)
+    }
+  })
+
+  it('does NOT match a block-range error', () => {
+    // Confusing the two would shrink the wrong dimension forever: a range error
+    // would teach a bogus topic cap and split every filter for no reason.
+    for (const msg of [
+      'query returned more than 10000 results',
+      'block range too large (maximum 2000)',
+      'up to a 10000 block range',
+      'Exceeded maximum block range: 1000',
+    ]) {
+      assert.equal(parseTopicLimitError({ code: -32005, message: msg }), null, msg)
+      assert.notEqual(parseLogRangeError({ code: -32005, message: msg }), null, msg)
+    }
+  })
+
+  it('returns null for unrelated errors and nullish input', () => {
+    assert.equal(parseTopicLimitError(null), null)
+    assert.equal(parseTopicLimitError(undefined), null)
+    assert.equal(parseTopicLimitError(new Error('execution reverted')), null)
+    assert.equal(parseTopicLimitError({ code: -32000, message: 'header not found' }), null)
+  })
+
+  it('finds the message nested in a JSON-RPC error body', () => {
+    const info = parseTopicLimitError({
+      code: 'SERVER_ERROR',
+      info: { error: { code: -32602, message: 'eth_getLogs is limited to 5 topics' } },
+    })
+    assert.deepEqual(info, { maxTopics: 5 })
+  })
+})
+
+describe('endpoint topic limit', () => {
+  it('stores and reads back per endpoint, keyed like the log range', () => {
+    const a = 'https://topiclimit-a.example/rpc'
+    const b = 'https://topiclimit-b.example/rpc'
+    assert.equal(getEndpointTopicLimit(a), undefined)
+
+    setEndpointTopicLimit(a, 5, 'error')
+    assert.equal(getEndpointTopicLimit(a), 5)
+    // A cap learned for one provider must not leak to another: the whole point of
+    // storing it per endpoint is that a round-robin spans several providers.
+    assert.equal(getEndpointTopicLimit(b), undefined)
+
+    // Independent of the log-range slot on the same endpoint.
+    setEndpointLogRange(a, 1000, 'error')
+    assert.equal(getEndpointTopicLimit(a), 5)
+    assert.equal(getEndpointLogRange(a), 1000)
   })
 })

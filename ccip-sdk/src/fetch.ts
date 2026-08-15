@@ -199,6 +199,8 @@ interface EndpointState {
   /** True once we've seen method-scoped rate headers; routes by JSON-RPC method. */
   methodScoped: boolean
   logRange?: { maxRange: number; source: 'error' | 'success' }
+  /** Learned cap on how many entries one eth_getLogs topic position may hold. */
+  topicLimit?: { maxTopics: number; source: 'error' | 'success' }
 }
 
 /** Module-global registry keyed by origin + pathname (query/hash stripped). */
@@ -435,6 +437,41 @@ export function setEndpointLogRange(
   source: 'error' | 'success',
 ): void {
   getOrCreateEndpoint(input).logRange = { maxRange, source }
+}
+
+/**
+ * Returns the learned cap on entries per eth_getLogs topic position, if set.
+ *
+ * Some providers (Avalanche's public RPC among them) reject a filter whose topic
+ * OR-set is larger than a fixed number. The cap varies by provider, so like
+ * {@link getEndpointLogRange} it is learned and stored per endpoint rather than
+ * assumed globally — the same URL-keyed registry, so a round-robin across several
+ * providers doesn't apply one provider's cap to another.
+ *
+ * @param input - Fetch input (string, URL, or Request).
+ * @returns Max topics per position, or undefined if not learned.
+ */
+export function getEndpointTopicLimit(input: Parameters<typeof fetch>[0]): number | undefined {
+  return endpointRegistry.get(endpointKey(input))?.topicLimit?.maxTopics
+}
+
+/**
+ * Sets the learned eth_getLogs topic-count cap for an endpoint.
+ *
+ * Exported so a caller who already KNOWS an endpoint is capped can seed it and skip
+ * the discovery round-trip — worth doing, because discovery costs one failed request
+ * and depends on matching the provider's error text (see {@link parseTopicLimitError}).
+ *
+ * @param input - Fetch input (string, URL, or Request).
+ * @param maxTopics - The learned cap on entries in one topic position.
+ * @param source - Whether learned from an error or a success.
+ */
+export function setEndpointTopicLimit(
+  input: Parameters<typeof fetch>[0],
+  maxTopics: number,
+  source: 'error' | 'success',
+): void {
+  getOrCreateEndpoint(input).topicLimit = { maxTopics, source }
 }
 
 /** Buffer in ms added after a rate-limit reset before sending next request. */
@@ -696,17 +733,20 @@ export interface LogRangeErrorInfo {
 }
 
 /**
- * Parses RPC errors for "getLogs block range too large" messages.
- *
- * Covers Alchemy, Infura, QuickNode, and generic EVM provider patterns.
- * Also checks JSON-RPC error code -32005.
+ * Walks an arbitrary caught error and collects the strings that came from an actual
+ * `message` field, plus the sentinels the range parser keys off. Shared by
+ * {@link parseLogRangeError} and {@link parseTopicLimitError} so both see the same
+ * (carefully tuned) view of a provider error — the traversal rules below are subtle
+ * enough that two copies would drift.
  *
  * @param err - The caught error (any shape).
- * @returns Non-null LogRangeErrorInfo if the error is a range error, null otherwise.
+ * @returns Collected `message` strings and the range/size sentinels.
  */
-export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
-  if (err == null) return null
-
+function collectErrorMessages(err: unknown): {
+  messageTexts: string[]
+  isRangeCode: boolean
+  isHttp413: boolean
+} {
   // messageTexts: strings from actual `message` keys — the only ones tested against patterns.
   // Sentinels: independent signals (code -32005, HTTP 413) collected separately.
   const messageTexts: string[] = []
@@ -766,6 +806,21 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     }
   }
   extractMessages(err)
+  return { messageTexts, isRangeCode, isHttp413 }
+}
+
+/**
+ * Parses RPC errors for "getLogs block range too large" messages.
+ *
+ * Covers Alchemy, Infura, QuickNode, and generic EVM provider patterns.
+ * Also checks JSON-RPC error code -32005.
+ *
+ * @param err - The caught error (any shape).
+ * @returns Non-null LogRangeErrorInfo if the error is a range error, null otherwise.
+ */
+export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
+  if (err == null) return null
+  const { messageTexts, isRangeCode, isHttp413 } = collectErrorMessages(err)
 
   // Range-error patterns (case-insensitive). First capture group = limit number when present.
   const RANGE_ERROR_PATTERNS = [
@@ -804,7 +859,6 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
   // Alchemy suggested range: [0x..., 0x...]
   const ALCHEMY_SUGGESTED_RANGE = /\[(0x[0-9a-f]+),\s*(0x[0-9a-f]+)\]/i
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by extractMessages closure above
   let isRangeError = isRangeCode || isHttp413
   let maxRange: number | undefined
   let suggestedRange: [number, number] | undefined
@@ -847,5 +901,77 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
   const info: LogRangeErrorInfo = {}
   if (maxRange !== undefined) info.maxRange = maxRange
   if (suggestedRange !== undefined) info.suggestedRange = suggestedRange
+  return info
+}
+
+/** Topic-cap info from a getLogs "too many topics" error. */
+export interface TopicLimitErrorInfo {
+  /** Maximum entries allowed in one topic position, if extractable from the message. */
+  maxTopics?: number
+}
+
+/**
+ * Parses RPC errors for "too many topics in eth_getLogs filter" messages.
+ *
+ * Some providers cap how many values one topic position may OR together —
+ * Avalanche's public RPC is the known case. The cap is per provider, so a match
+ * teaches {@link setEndpointTopicLimit} for that endpoint only.
+ *
+ * Deliberately conservative: it must NOT match a block-range error (that is
+ * {@link parseLogRangeError}'s job, and mistaking one for the other would shrink the
+ * wrong dimension forever). Every pattern therefore requires the word "topic".
+ *
+ * A message we fail to recognise simply means no cap is learned and the filter is
+ * sent whole, i.e. exactly today's behaviour — never a silently wrong result. Callers
+ * that already know an endpoint's cap can bypass detection with
+ * {@link setEndpointTopicLimit}.
+ *
+ * @param err - The caught error (any shape).
+ * @returns Non-null TopicLimitErrorInfo if the error is a topic-count error, else null.
+ */
+export function parseTopicLimitError(err: unknown): TopicLimitErrorInfo | null {
+  if (err == null) return null
+  const { messageTexts } = collectErrorMessages(err)
+
+  // All require "topic" so a range error can never land here. First capture group
+  // is the cap where the provider states it.
+  const TOPIC_LIMIT_PATTERNS = [
+    // "too many topics", "too many topics in filter", "requested too many topics"
+    /too many topics/i,
+    // "eth_getLogs is limited to 5 topics", "limited to a maximum of 5 topics"
+    /limited to (?:a maximum of )?(\d+) topics?/i,
+    // "maximum 5 topics", "max topics: 5", "maximum number of topics is 5"
+    /\bmax(?:imum)?\b[^.]{0,40}?\btopics?\b[^0-9]{0,20}(\d+)/i,
+    // "exceeds the maximum topics", "topics limit exceeded"
+    /\btopics?\b[^.]{0,20}\blimit\b/i,
+    /\blimit\b[^.]{0,20}\btopics?\b/i,
+  ]
+  const TOPIC_COUNT_RE = /(\d+)\s*topics?\b/i
+
+  let isTopicError = false
+  let maxTopics: number | undefined
+
+  for (const msg of messageTexts) {
+    for (const re of TOPIC_LIMIT_PATTERNS) {
+      const m = re.exec(msg)
+      if (!m) continue
+      isTopicError = true
+      const n = Number(m[1])
+      if (!isNaN(n) && n > 0 && (maxTopics === undefined || n < maxTopics)) maxTopics = n
+    }
+    // Fall back to any "<N> topics" phrasing in a message already known to be about
+    // a topic limit (e.g. "too many topics: max 5 topics allowed").
+    if (isTopicError && maxTopics === undefined) {
+      const m = TOPIC_COUNT_RE.exec(msg)
+      if (m) {
+        const n = Number(m[1])
+        if (!isNaN(n) && n > 0) maxTopics = n
+      }
+    }
+  }
+
+  if (!isTopicError) return null
+  const info: TopicLimitErrorInfo = {}
+  if (maxTopics !== undefined) info.maxTopics = maxTopics
   return info
 }

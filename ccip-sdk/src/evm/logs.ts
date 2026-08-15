@@ -13,10 +13,13 @@ import type { FinalityRequested } from '../extra-args.ts'
 import {
   type LogRangeErrorInfo,
   getEndpointLogRange,
+  getEndpointTopicLimit,
   parseLogRangeError,
+  parseTopicLimitError,
   setEndpointLogRange,
+  setEndpointTopicLimit,
 } from '../fetch.ts'
-import { getSomeBlockNumberBefore, passesTypeAndVersion, signalToPromise } from '../utils.ts'
+import { getBlockNumberAtOrAfter, passesTypeAndVersion, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
@@ -89,6 +92,79 @@ function shrinkPage(info: LogRangeErrorInfo, span: number): number {
 }
 
 /**
+ * Floor for a learned topic cap. A provider claiming it accepts fewer than this is
+ * either misparsed or unusable for CCIP — the smallest useful filter is one event
+ * name, and a single name can already expand to several topic0s.
+ */
+const MIN_TOPIC_LIMIT = 2
+
+/**
+ * Runs one eth_getLogs, splitting the position-0 topic OR-set when the endpoint caps
+ * how many values it accepts there (Avalanche's public RPC being the known case).
+ *
+ * Sub-queries cover the SAME block range over disjoint topic subsets, so the union is
+ * exactly what one unsplit call would have returned and no dedup is needed — unlike
+ * the Aptos multi-handle merge, which reconciles independent cursors. Results are
+ * re-sorted by (blockNumber, index) because the caller relies on ascending order.
+ *
+ * Splitting only happens once a cap is known: with none learned the filter goes out
+ * whole, exactly as before, so uncapped endpoints keep paying a single request. A cap
+ * is learned from the provider's own error (see parseTopicLimitError), and the failing
+ * call is then retried split — the caller sees a slower first call, not a failure.
+ */
+async function getLogsWithinTopicLimit(
+  provider: JsonRpcApiProvider,
+  filter: BaseFilter & { fromBlock: number; toBlock: number | EVMEndBlockTag | bigint },
+  url: string | undefined,
+  logger: Logger,
+): Promise<Log[]> {
+  // Only position 0 is ever an OR-set here (getEvmLogs collapses every requested
+  // event into it), so nothing else can trip a cap.
+  const topics0 = filter.topics?.[0]
+  const canSplit = Array.isArray(topics0) && topics0.length > 1
+
+  const runSplit = async (limit: number): Promise<Log[]> => {
+    const all = topics0 as string[]
+    const chunks: string[][] = []
+    for (let i = 0; i < all.length; i += limit) chunks.push(all.slice(i, i + limit))
+    logger.debug(
+      `evm getLogs: splitting ${all.length} topics into ${chunks.length} calls (limit=${limit})`,
+      { url },
+    )
+    const results = await Promise.all(
+      chunks.map((chunk) => provider.getLogs({ ...filter, topics: [chunk] })),
+    )
+    return results.flat().sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index)
+  }
+
+  const known = url !== undefined ? getEndpointTopicLimit(url) : undefined
+  if (canSplit && known !== undefined && topics0.length > known) return runSplit(known)
+
+  try {
+    return await provider.getLogs(filter)
+  } catch (err) {
+    const info = parseTopicLimitError(err)
+    // Not a topic-cap error, or nothing to split: let the caller's range handling
+    // (and ultimately the activity's retry) deal with it.
+    if (info === null || !canSplit) throw err
+
+    // Trust a stated cap; otherwise halve until the provider stops complaining.
+    const limit = Math.max(
+      MIN_TOPIC_LIMIT,
+      info.maxTopics ?? Math.floor((known ?? topics0.length) / 2),
+    )
+    if (limit >= topics0.length) throw err // can't subdivide further
+
+    logger.warn(
+      `evm getLogs: endpoint caps topics per call, splitting ${topics0.length} into groups of ${limit}`,
+      { url, err },
+    )
+    if (url !== undefined) setEndpointTopicLimit(url, limit, 'error')
+    return runSplit(limit)
+  }
+}
+
+/**
  * Streams raw logs over `[fromBlock, toBlock]`, paginating by `pageBox.value`
  * and adaptively shrinking the page (down to {@link MIN_LOG_RANGE}) whenever the
  * RPC rejects a chunk as too wide. The learned page is propagated through
@@ -145,7 +221,7 @@ async function* streamLogs(
     const filter_ = { fromBlock: cursor, toBlock: toFilter, ...baseFilter }
     logger.debug('evm getLogs:', filter_)
     try {
-      yield* await provider.getLogs(filter_)
+      yield* await getLogsWithinTopicLimit(provider, filter_, url, logger)
       cursor = chunkTo + 1 // advance only after a chunk succeeds
     } catch (err) {
       // An invalid/inverted range (-32602) — e.g. a round-robin proxy landed on a
@@ -225,7 +301,12 @@ export async function* getEvmLogs(
   ) {
     const topics = new Set(
       filter.topics
-        .filter(isHexString)
+        // NB the arrow is load-bearing: passing `isHexString` directly hands it the
+        // array INDEX as its second `length` argument, so every raw topic0 was
+        // dropped (or, if the caller passed only raw topics, the whole filter was
+        // rejected as "no matching topics"). 32 is the correct length anyway — a
+        // topic is always 32 bytes.
+        .filter((t) => isHexString(t, 32))
         .concat(Object.keys(getAllFragmentsMatchingEvents(filter.topics)) as `0x${string}`[])
         .flat(),
     )
