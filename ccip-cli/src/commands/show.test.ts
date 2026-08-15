@@ -332,10 +332,10 @@ describe('e2e command show EVM', () => {
     'should show EVM to Solana v2 OffRamp execution without verifications',
     { timeout: 30000 },
     async () => {
-      const TX_HASH = '0x8be479716729ff555e5ee7a1826af3bf571be820ab3080348f83b28a753cc472'
-      const MESSAGE_ID = '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826'
+      const TX_HASH = '0x94721bc1e04f7c5f6bfad4e479092aaf71efefccaa0babade4c4e7b5b3b24a41'
+      const MESSAGE_ID = '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f'
       const ONRAMP = '0x99F6Faf45CcfA166781DED7d9A4D9C548F2aA344'
-      const OFFRAMP = 'offEFR9DhTdnPR43oBmnGJmoj13Y3n7sR93Vbph77TK'
+      const OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
 
       const result = await spawnCLI(buildShowArgs(TX_HASH), 30000)
 
@@ -344,8 +344,8 @@ describe('e2e command show EVM', () => {
       assert.match(output, /name.*ethereum-testnet-sepolia.*solana-devnet/i)
       assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
       assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, /sequenceNumber.*149/)
-      assert.match(output, /data.*multi-verifier test/)
+      assert.match(output, /sequenceNumber.*526/)
+      assert.match(output, /data.*0x\b/)
       assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
       assert.match(result.stderr + output, /Verifications unavailable/i)
       assert.match(output, /Receipts.*dest/i)
@@ -353,7 +353,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E/i,
+        /transactionHash.*4qeWX8ELjDt57JLDuDsSW3jYzP915R7wyXLWMshPZJkiDVxt1HAv2DTqmNow64Nxns8PSgrX1vLTYHWTabjFztDM/i,
       )
     },
   )
