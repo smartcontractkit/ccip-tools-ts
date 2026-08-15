@@ -284,3 +284,142 @@ void describe('streamAptosLogs multi-topic', () => {
     assert.equal(logs[logs.length - 1]!.blockNumber, 5000)
   })
 })
+
+/**
+ * Fake client answering `status` (not 200) for any handle whose suffix is in
+ * `failing`, and serving canned batches for the rest. Proves a caller can pass the
+ * handles for BOTH ramp sides and let each address answer only for the ones it
+ * actually declares.
+ */
+function makeProviderWithFailingHandles(
+  eventsByHandleSuffix: Record<string, FakeAptosEvent[]>,
+  failing: Record<string, number>,
+  onFailingRequest?: () => void,
+): Aptos {
+  const ok = makeFakeClient(eventsByHandleSuffix)
+  const client: Client = {
+    async provider<Req, Res>(req: ClientRequest<Req>) {
+      const url = decodeURIComponent(req.url)
+      for (const [suffix, status] of Object.entries(failing)) {
+        if (url.includes(suffix)) {
+          onFailingRequest?.()
+          return {
+            status,
+            statusText: status === 404 ? 'Not Found' : 'Internal Server Error',
+            data: { message: 'handle not found' } as unknown as Res,
+            headers: {},
+            config: req,
+            request: null,
+            response: null,
+          }
+        }
+      }
+      return ok.provider<Req, Res>(req)
+    },
+  }
+  const config = new AptosConfig({
+    network: Network.MAINNET,
+    fullnode: 'https://fake.aptos.internal',
+    client,
+  })
+  return {
+    config,
+    view: mock.fn(async () => ['0xstate']),
+    getTransactionByVersion: mock.fn(async ({ ledgerVersion }: { ledgerVersion: number }) => ({
+      type: 'user_transaction',
+      hash: `0xhash${ledgerVersion}`,
+      timestamp: `${ledgerVersion}000000`,
+    })),
+  } as unknown as Aptos
+}
+
+const oneOnRampEvent = {
+  ccip_message_sent_events: [
+    {
+      version: '100',
+      sequence_number: '0',
+      type: `${ADDRESS}::on_ramp::CCIPMessageSent`,
+      data: { i: 'A0' },
+    },
+  ],
+}
+
+void describe('streamAptosLogs missing handles', () => {
+  void it('skips a handle the address does not declare (404) and still streams the others', async () => {
+    // An on-ramp address has no OffRampState handle: the node 404s for it.
+    const provider = makeProviderWithFailingHandles(oneOnRampEvent, {
+      commit_report_accepted_events: 404,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent', 'CommitReportAccepted'],
+          startBlock: 0,
+          versionAsHash: true,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100],
+      'the surviving handle must still stream; a 404 on a sibling handle must not fail the scan',
+    )
+  })
+
+  void it('remembers a 404 handle and does not re-request it on later polls', async () => {
+    let failingRequests = 0
+    const provider = makeProviderWithFailingHandles(
+      oneOnRampEvent,
+      { commit_report_accepted_events: 404 },
+      () => failingRequests++,
+    )
+    const opts = {
+      address: ADDRESS,
+      topics: ['CCIPMessageSent', 'CommitReportAccepted'],
+      startBlock: 0,
+      versionAsHash: true,
+    }
+
+    await collect(streamAptosLogs({ provider }, opts))
+    assert.equal(failingRequests, 1, 'first poll must discover the absent handle')
+
+    // Each poll is a fresh streamAptosLogs call with fresh per-handle state, so
+    // without a cache spanning calls this would 404 again, once per poll forever.
+    await collect(streamAptosLogs({ provider }, opts))
+    await collect(streamAptosLogs({ provider }, opts))
+    assert.equal(failingRequests, 1, 'later polls must skip the known-absent handle entirely')
+
+    // …and the handle that DOES exist keeps streaming throughout.
+    const logs = await collect(streamAptosLogs({ provider }, opts))
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100],
+    )
+  })
+
+  void it('propagates a non-404 failure rather than silently yielding nothing', async () => {
+    // A transient RPC failure must NOT be mistaken for "no such handle" —
+    // swallowing it would look identical to "nothing happened on chain".
+    const provider = makeProviderWithFailingHandles(oneOnRampEvent, {
+      commit_report_accepted_events: 500,
+    })
+
+    await assert.rejects(
+      collect(
+        streamAptosLogs(
+          { provider },
+          {
+            address: ADDRESS,
+            topics: ['CCIPMessageSent', 'CommitReportAccepted'],
+            startBlock: 0,
+            versionAsHash: true,
+          },
+        ),
+      ),
+    )
+  })
+})

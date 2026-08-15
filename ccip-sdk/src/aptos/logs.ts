@@ -2,6 +2,7 @@ import {
   type Aptos,
   type Event as AptosEvent,
   type UserTransactionResponse,
+  AptosApiError,
   TransactionResponseType,
   getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
@@ -104,6 +105,22 @@ async function binarySearchFirst(
  * no history (rather than polling a handle that may never emit, even in watch
  * mode) — now scoped to just that one handle instead of the whole stream.
  */
+/**
+ * `<address>::<Struct/field>` handles the node has answered 404 for, i.e. event
+ * handles the resource at that address simply doesn't declare. Polling a mixed
+ * topic set (say both ramp sides' handles) hits these on EVERY address that owns
+ * only the other side's, so without this each poll would re-issue — and re-404 —
+ * one request per absent handle, forever.
+ *
+ * Keyed by the Aptos provider, which scopes it per network and, since a `WeakMap`
+ * holds the key weakly, lets the whole entry go when the chain object does. Callers
+ * that periodically rebuild their chains (the CCIP-o11y worker reloads every 10
+ * minutes) therefore get a natural TTL: a handle that only appears later — after a
+ * contract upgrade — is rediscovered on the next rebuild rather than being written
+ * off for the life of the process.
+ */
+const missingHandles = new WeakMap<Aptos, Set<string>>()
+
 async function initHandleState(
   { provider }: { provider: Aptos },
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
@@ -126,7 +143,33 @@ async function initHandleState(
     { maxArgs: 1, maxSize: 100, async: true },
   )
 
-  const initialBatch = await fetchBatch()
+  // A caller may pass the handles for BOTH ramp sides and let each address answer
+  // for the ones it actually owns — an on-ramp has no OffRampState/* handle and
+  // vice-versa, and the node 404s for a handle the resource doesn't declare. Treat
+  // that as "this address has no such handle", exactly like an existing-but-empty
+  // one, so a mixed topic set doesn't fail the whole scan.
+  //
+  // The 404 is then remembered, so subsequent polls skip the request entirely
+  // instead of re-404ing once per handle per poll forever (see missingHandles).
+  //
+  // Deliberately narrow: only a 404 is swallowed. Any other failure (a transient RPC
+  // error above all) still propagates, because silently returning no logs there
+  // would be indistinguishable from "nothing happened on chain" — and is NOT
+  // remembered, so a recovered RPC is picked straight back up.
+  const handleKey = `${opts.address}::${eventHandlerField}`
+  if (missingHandles.get(provider)?.has(handleKey)) return undefined
+  let initialBatch: ResEvent[]
+  try {
+    initialBatch = await fetchBatch()
+  } catch (err) {
+    if (err instanceof AptosApiError && err.status === 404) {
+      let known = missingHandles.get(provider)
+      if (!known) missingHandles.set(provider, (known = new Set()))
+      known.add(handleKey)
+      return undefined
+    }
+    throw err
+  }
   if (!initialBatch.length) return undefined
   const end = +initialBatch[initialBatch.length - 1]!.sequence_number
 
