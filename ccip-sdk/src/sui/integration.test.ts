@@ -32,6 +32,7 @@ const CCIP = '0x5ef4b483da6644c84aa78eae4f51a9bfb1fb4554d5134ac98892e931fcbdd6bf
 const OFFRAMP = '0x01a0a22b2abacbd48e9a026c1661189a8ec5ce4942cba07017b63eaad0a205a4::offramp'
 
 const FUJI_ONRAMP = '0xA5D5B0B844c8f11B61F28AC98BBA84dEA9b80953'
+const FUJI_ROUTER = '0xF694E193200268f9a4868e4Aa017A0118C9a8177'
 const FUJI_OFFRAMP = '0x3F1f176e347235858DD6Db905DDBA09Eaf25478a'
 const ARB_SEP_ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
 
@@ -138,11 +139,74 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
     // sui has no usable router contract: the ccip state object is the
     // deployment's router handle, reported for both of its ramps
     assert.equal(config.router, CCIP)
-    // fee_quoter is discovered through the ccip package glue
-    assert.equal(config.feeQuoter, `${CCIP.split('::')[0]}::fee_quoter`)
+    assert.equal(config.chainSelector, SUI_SELECTOR)
+    assert.equal(config.destChainSelector, FUJI_SELECTOR)
+    // rmn_remote/nonce_manager/token_admin_registry/fee_quoter are modules of the
+    // ccip package, which is what the ramps report as their static config (@ccip)
+    const ccipPkg = CCIP.split('::')[0]
+    assert.equal(config.feeQuoter, `${ccipPkg}::fee_quoter`)
+    assert.equal(config.rmnRemote, `${ccipPkg}::rmn_remote`)
+    assert.equal(config.nonceManager, `${ccipPkg}::nonce_manager`)
+    assert.equal(config.tokenAdminRegistry, `${ccipPkg}::token_admin_registry`)
+    assert.match(config.feeAggregator, /^0x[0-9a-f]{64}$/)
+    assert.match(config.allowlistAdmin, /^0x[0-9a-f]{64}$/)
+    assert.match(config.owner, /^0x[0-9a-f]{64}$/)
+    assert.equal(config.allowlistEnabled, false)
+    assert.deepEqual(config.allowedSenders, [])
+    // the onramp's per-dest router is the *remote* chain's router
+    assert.equal(config.destRouter, FUJI_ROUTER)
+    assert.equal(config.expectedNextSequenceNumber, config.sequenceNumber + 1n)
+
+    // fee quoter static config + its config for this destination chain
+    const { feeQuoterConfig } = config
+    assert.ok(feeQuoterConfig)
+    assert.equal(feeQuoterConfig.isEnabled, true)
+    assert.ok(feeQuoterConfig.maxFeeJuelsPerMsg > 0n)
+    assert.match(feeQuoterConfig.linkToken, /^0x[0-9a-f]{64}$/)
+    assert.ok(feeQuoterConfig.feeTokens.includes(feeQuoterConfig.linkToken))
+    // EVM family selector, hexlified from the on-chain byte vector
+    assert.equal(feeQuoterConfig.chainFamilySelector, '0x2812d52c')
+    assert.ok(feeQuoterConfig.maxPerMsgGasLimit > 0n)
+    assert.ok(feeQuoterConfig.gasMultiplierWeiPerEth >= 10n ** 18n)
+    assert.equal(typeof feeQuoterConfig.maxDataBytes, 'number')
+    assert.equal(typeof feeQuoterConfig.enforceOutOfOrder, 'boolean')
 
     const registry = await chain.getTokenAdminRegistryFor(ONRAMP)
-    assert.equal(registry, `${CCIP.split('::')[0]}::token_admin_registry`)
+    assert.equal(registry, `${ccipPkg}::token_admin_registry`)
+  })
+
+  it('reports the offramp static, dynamic and per-source config', async () => {
+    const config = await chain.getOffRampConfig(OFFRAMP, FUJI_SELECTOR)
+    const ccipPkg = CCIP.split('::')[0]
+    assert.equal(config.router, CCIP)
+    assert.equal(config.chainSelector, SUI_SELECTOR)
+    assert.equal(config.sourceChainSelector, FUJI_SELECTOR)
+    assert.equal(config.feeQuoter, `${ccipPkg}::fee_quoter`)
+    assert.equal(config.rmnRemote, `${ccipPkg}::rmn_remote`)
+    assert.equal(config.nonceManager, `${ccipPkg}::nonce_manager`)
+    assert.equal(config.tokenAdminRegistry, `${ccipPkg}::token_admin_registry`)
+    assert.ok(config.permissionlessExecutionThresholdSeconds > 0)
+    assert.ok(config.latestPriceSequenceNumber > 0n)
+    assert.match(config.owner, /^0x[0-9a-f]{64}$/)
+    assert.equal(config.isEnabled, true)
+    assert.ok(config.minSeqNr > 0n)
+    assert.equal(typeof config.isRmnVerificationDisabled, 'boolean')
+    assert.deepEqual(config.onRamps, [FUJI_ONRAMP])
+
+    // Sui has no RMNProxy, so there is no `getARM()` to unwrap into a separate
+    // `rmn` address as on EVM: `ccip::rmn_remote` is itself the RMN. Its state is
+    // reported instead — unconfigured on this deployment, matching
+    // isRmnVerificationDisabled above
+    const { rmnRemoteConfig } = config
+    assert.ok(rmnRemoteConfig)
+    assert.equal(typeof rmnRemoteConfig.version, 'number')
+    assert.equal(typeof rmnRemoteConfig.fSign, 'bigint')
+    assert.ok(Array.isArray(rmnRemoteConfig.signers))
+    assert.ok(Array.isArray(rmnRemoteConfig.cursedSubjects))
+    assert.equal(rmnRemoteConfig.isCursedGlobal, false)
+
+    // an unconfigured source chain is reported as unsupported, not as zeroes
+    await assert.rejects(() => chain.getOffRampConfig(OFFRAMP, 1n), /Unsupported source chain: 1/)
   })
 
   it('accepts the ccip state object as the router handle for both ramps', async () => {

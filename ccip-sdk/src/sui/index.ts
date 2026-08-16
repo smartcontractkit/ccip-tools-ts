@@ -27,10 +27,12 @@ import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { getSuiLeafHasher } from './hasher.ts'
 import {
   deriveObjectID,
+  getDynamicFieldIds,
   getLatestPackageId,
   getObjectFields,
   getObjectRef,
   getTableEntryFields,
+  parseSuiNumbers,
 } from './objects.ts'
 import {
   CCIPArgumentInvalidError,
@@ -41,12 +43,13 @@ import {
   CCIPLogDataInvalidError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
+  CCIPSourceChainUnsupportedError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
-import { decodeMessage } from '../requests.ts'
+import { decodeMessage, normalizeDeep } from '../requests.ts'
 import { decodeMoveExtraArgs, encodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type {
@@ -73,10 +76,23 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
-import type { CCIPMessage_V1_6_Sui, SuiOnRampStateFields, UnsignedSuiTx } from './types.ts'
+import type {
+  CCIPMessage_V1_6_Sui,
+  SuiFeeQuoterConfig,
+  SuiOffRampSourceChainConfigFields,
+  SuiOffRampStateFields,
+  SuiOnRampDestChainConfigFields,
+  SuiOnRampStateFields,
+  SuiRmnRemoteConfig,
+  SuiRmnRemoteStateFields,
+  UnsignedSuiTx,
+} from './types.ts'
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
+
+/** `ccip::rmn_remote`'s GLOBAL_CURSE_SUBJECT; cursing it curses every lane. */
+const GLOBAL_CURSE_SUBJECT = '0x01000000000000000000000000000001'
 
 /**
  * Sui chain implementation supporting Sui networks.
@@ -318,26 +334,143 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     return parseTypeAndVersion(res)
   }
 
+  /**
+   * The ccip package modules which the ramps report as their static/dynamic
+   * config. On Sui these are not separate contracts: `create_static_config` and
+   * `create_dynamic_config` in the ramps hardcode `@ccip` for all of them, since
+   * each is a module of (and its state a dynamic field of) the ccip package.
+   */
+  private ccipModules(ccip: string) {
+    const pkg = ccip.split('::')[0]
+    return {
+      feeQuoter: `${pkg}::fee_quoter`,
+      rmnRemote: `${pkg}::rmn_remote`,
+      nonceManager: `${pkg}::nonce_manager`,
+      tokenAdminRegistry: `${pkg}::token_admin_registry`,
+    }
+  }
+
+  /**
+   * Reads the state of a module of the ccip package. Each is held as a dynamic
+   * object field of the deployment's CCIPObjectRef, keyed by its type.
+   *
+   * @param ccip - ccip state object address
+   * @param type - `::<module>::<StateStruct>` suffix of the state's type
+   * @returns the state object's fields, or undefined if that module has no state
+   */
+  private async getCcipModuleState(ccip: string, type: string) {
+    const ccipObjectRef = await getObjectRef(ccip, this.client)
+    const fields = await getDynamicFieldIds(ccipObjectRef, this.client)
+    const stateId = Object.entries(fields).find(([objectType]) => objectType.endsWith(type))?.[1]
+    if (!stateId) return
+    return getObjectFields(stateId, this.client)
+  }
+
+  /**
+   * Reads the deployment's RMN state.
+   *
+   * Sui has no RMNProxy, so unlike EVM there is no `getARM()` to unwrap into a
+   * separate `rmn` address — `ccip::rmn_remote` is itself the RMN. What EVM
+   * reaches through that indirection is reported here instead: the versioned
+   * config and the curse state.
+   */
+  private async getRmnRemoteConfig(ccip: string): Promise<SuiRmnRemoteConfig | undefined> {
+    const state = (await this.getCcipModuleState(
+      ccip,
+      '::rmn_remote::RMNRemoteState',
+    )) as unknown as SuiRmnRemoteStateFields | undefined
+    if (!state) return
+    const cursedSubjects = state.cursed_subjects.fields.contents
+      .filter((entry) => entry.fields.value)
+      .map((entry) => hexlify(getDataBytes(entry.fields.key)))
+    return {
+      version: state.config_count,
+      rmnHomeContractConfigDigest: hexlify(
+        getDataBytes(state.config.fields.rmn_home_contract_config_digest),
+      ),
+      fSign: BigInt(state.config.fields.f_sign),
+      signers: state.config.fields.signers.map(({ fields }) => ({
+        onchainPublicKey: hexlify(getDataBytes(fields.onchain_public_key)),
+        nodeIndex: BigInt(fields.node_index),
+      })),
+      cursedSubjects,
+      isCursedGlobal: cursedSubjects.includes(GLOBAL_CURSE_SUBJECT),
+    }
+  }
+
+  /**
+   * Reads the fee quoter's static config plus its config for one destination
+   * chain. Its `Table` fields hold prices and per-token overrides and are not
+   * inlined in the object's JSON, so only the flat config fields come back here.
+   */
+  private async getFeeQuoterConfig(
+    ccip: string,
+    destChainSelector: bigint,
+  ): Promise<SuiFeeQuoterConfig | undefined> {
+    const state = await this.getCcipModuleState(ccip, '::fee_quoter::FeeQuoterState')
+    if (!state) return
+    const table = (state['dest_chain_configs'] as { fields: { id: { id: string } } }).fields.id.id
+    const destChainConfig = await getTableEntryFields(table, destChainSelector, this.client)
+    if (!destChainConfig) return
+    // both structs are flat, so camelCasing their keys and widening the u64/u256
+    // decimal strings to bigints yields exactly SuiFeeQuoterConfig
+    return normalizeDeep(
+      parseSuiNumbers({
+        max_fee_juels_per_msg: state['max_fee_juels_per_msg'],
+        link_token: state['link_token'],
+        token_price_staleness_threshold: state['token_price_staleness_threshold'],
+        fee_tokens: state['fee_tokens'],
+        ...destChainConfig,
+      }),
+    ) as unknown as SuiFeeQuoterConfig
+  }
+
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
     // accept the deployment's router handle (ccip state object) as well as the
     // onramp itself, so a router address round-trips through this API
     onRamp = await this.getOnRampForRouter(onRamp, destChainSelector)
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
-
-    // fee_quoter lives in the ccip package (reachable from any ramp via
-    // get_ccip_package_id); report it by its original package id
     const ccip = await getCcipStateAddress(onRamp, this.client)
-    const feeQuoter = `${ccip.split('::')[0]}::fee_quoter`
 
+    const state = (await getObjectFields(
+      await getObjectRef(onRamp, this.client),
+      this.client,
+    )) as unknown as SuiOnRampStateFields
+    const destChainConfig = (await getTableEntryFields(
+      state.dest_chain_configs.fields.id.id,
+      destChainSelector,
+      this.client,
+    )) as SuiOnRampDestChainConfigFields | undefined
+    if (!destChainConfig)
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `OnRamp ${onRamp} has no config for dest chain ${destChainSelector}`,
+        { context: { onRamp, destChainSelector: String(destChainSelector) } },
+      )
+
+    const sequenceNumber = BigInt(destChainConfig.sequence_number)
     return {
+      chainSelector: BigInt(state.chain_selector),
       // Sui has no usable router contract (`ccip_router::RouterState` is left
       // unconfigured), so the ccip state object is the deployment's router
       // handle: the same address for both ramps, and accepted by every
       // router-taking API here
       router: ccip,
+      ...this.ccipModules(ccip),
+      feeAggregator: state.fee_aggregator,
+      allowlistAdmin: state.allowlist_admin,
+      owner: state.ownable_state.fields.owner,
       destChainSelector,
-      feeQuoter,
+      allowlistEnabled: destChainConfig.allowlist_enabled,
+      allowedSenders: destChainConfig.allowed_senders,
+      // the onramp's per-dest `router` is the *remote* chain's router, not a
+      // local one; keep it under a distinct name so `router` stays this chain's
+      destRouter: decodeAddress(destChainConfig.router, networkInfo(destChainSelector).family),
+      sequenceNumber,
+      expectedNextSequenceNumber: sequenceNumber + 1n,
+      feeQuoterConfig: await this.getFeeQuoterConfig(ccip, destChainSelector),
+      rmnRemoteConfig: await this.getRmnRemoteConfig(ccip),
       typeAndVersion,
     }
   }
@@ -345,73 +478,41 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.getOffRampConfig} */
   async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
     const [, , typeAndVersion] = await this.typeAndVersion(offRamp)
-    const latestOffRamp = await getLatestPackageId(offRamp, this.client)
-    const functionName = 'get_source_chain_config'
-    const target = latestOffRamp.includes('::')
-      ? `${latestOffRamp}::${functionName}`
-      : `${latestOffRamp}::offramp::${functionName}`
+    const ccip = await getCcipStateAddress(offRamp, this.client)
 
-    const ccip = await getCcipStateAddress(latestOffRamp, this.client)
-    // state pointers live on the original packages; view calls target latest
-    const offrampStateObject = await getObjectRef(offRamp, this.client)
-    const ccipObjectRef = await getObjectRef(ccip, this.client)
-    const tx = new Transaction()
-    tx.moveCall({
-      target,
-      arguments: [
-        tx.object(ccipObjectRef),
-        tx.object(offrampStateObject),
-        tx.pure.u64(sourceChainSelector),
-      ],
-    })
+    const state = (await getObjectFields(
+      await getObjectRef(offRamp, this.client),
+      this.client,
+    )) as unknown as SuiOffRampStateFields
+    // `source_chain_configs` is a VecMap, so every entry is inlined in the object
+    const sourceChainConfig = state.source_chain_configs.fields.contents.find(
+      (entry) => entry.fields.key === sourceChainSelector.toString(),
+    )?.fields.value.fields as SuiOffRampSourceChainConfigFields | undefined
+    if (!sourceChainConfig)
+      throw new CCIPSourceChainUnsupportedError(sourceChainSelector, {
+        context: { network: this.network.name, offRamp },
+      })
 
-    const result = await this.client.devInspectTransactionBlock({
-      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      transactionBlock: tx,
-    })
-
-    if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
-      throw new CCIPDataFormatUnsupportedError(
-        `Failed to call ${target}: ${result.effects.status.error || 'No return value'}`,
-      )
-    }
-
-    const [data] = result.results[0].returnValues[0]
-    const configBytes = new Uint8Array(data)
-    let offset = 0
-
-    const routerBytes = configBytes.slice(offset, offset + 32)
-    offset += 32
-    // Sui offramp hardcodes `router: @ccip` (placeholder — no router contract);
-    // expose it in our canonical ccip form (`pkg::state_object`) when it matches
-    const routerHex = normalizeSuiAddress(hexlify(routerBytes))
-    const router = routerHex === ccip.split('::')[0] ? ccip : routerHex
-
-    const isEnabled = configBytes[offset]! !== 0
-    offset += 1
-
-    const minSeqNrBytes = configBytes.slice(offset, offset + 8)
-    offset += 8
-    const minSeqNr = new DataView(minSeqNrBytes.buffer, minSeqNrBytes.byteOffset).getBigUint64(
-      0,
-      true,
-    )
-
-    const isRmnVerificationDisabled = configBytes[offset]! !== 0
-    offset += 1
-
-    const onRampLength = configBytes[offset]!
-    offset += 1
-    const onRampBytes = configBytes.slice(offset, offset + onRampLength)
-    const onRamp = decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
-
+    // the offramp hardcodes `router: @ccip`; report it in our canonical ccip form
+    const routerHex = normalizeSuiAddress(sourceChainConfig.router)
     return {
-      router,
+      chainSelector: BigInt(state.chain_selector),
+      router: routerHex === ccip.split('::')[0] ? ccip : routerHex,
+      ...this.ccipModules(ccip),
+      permissionlessExecutionThresholdSeconds: state.permissionless_execution_threshold_seconds,
+      latestPriceSequenceNumber: BigInt(state.latest_price_sequence_number),
+      owner: state.ownable_state.fields.owner,
       sourceChainSelector,
-      onRamps: [onRamp],
-      isEnabled,
-      minSeqNr,
-      isRmnVerificationDisabled,
+      isEnabled: sourceChainConfig.is_enabled,
+      minSeqNr: BigInt(sourceChainConfig.min_seq_nr),
+      isRmnVerificationDisabled: sourceChainConfig.is_rmn_verification_disabled,
+      rmnRemoteConfig: await this.getRmnRemoteConfig(ccip),
+      onRamps: [
+        decodeAddress(
+          getDataBytes(sourceChainConfig.on_ramp),
+          networkInfo(sourceChainSelector).family,
+        ),
+      ],
       typeAndVersion,
     }
   }
