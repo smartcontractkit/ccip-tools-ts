@@ -167,15 +167,7 @@ export const discoverOffRamp = memoize(
         )
         continue
       }
-      for (let destOnRamp of destOnRamps) {
-        // The source chain's offramp config stores onRamp addresses in the
-        // source chain's format (e.g. raw Sui package ID without `::onramp`).
-        // Normalize to the dest chain's format before using it there.
-        try {
-          destOnRamp = decodeOnRampAddress(destOnRamp, dest.network.family)
-        } catch {
-          // keep as-is if normalization fails
-        }
+      for (const destOnRamp of destOnRamps) {
         let destOffRamps
         try {
           const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
@@ -203,53 +195,17 @@ export const discoverOffRamp = memoize(
             continue
           }
           for (const offRampsOnRamp of offRampsOnRamps) {
-            logger.debug(
-              'discoverOffRamp: found, from',
-              {
-                sourceOnRamp: onRamp,
-                sourceRouter,
-                sourceOffRamps,
-                destOnRamp,
-                destOffRamps,
-                offRampsOnRamp,
-              },
-              '=',
+            logger.debug('discoverOffRamp: checking dest offRamp', {
+              sourceOnRamp: onRamp,
+              sourceRouter,
+              sourceOffRamps,
+              destOnRamp,
+              destOffRamps,
               offRamp,
-            )
-            for (const offRamp of destOffRamps) {
-              const offRampsOnRamps = await dest.getOnRampsForOffRamp(
-                offRamp,
-                source.network.chainSelector,
-              )
-              for (const offRampsOnRamp of offRampsOnRamps) {
-                logger.debug(
-                  'discoverOffRamp: found, from',
-                  {
-                    sourceOnRamp: onRamp,
-                    sourceRouter,
-                    sourceOffRamps,
-                    destOnRamp,
-                    destOffRamps,
-                    offRampsOnRamps,
-                  },
-                  '=',
-                  offRamp,
-                )
-                if (offRampsOnRamp === onRamp) {
-                  return offRamp
-                }
-                // Normalize both sides: the source onRamp was normalized with
-                // decodeOnRampAddress (adds `::onramp` for Sui/Aptos), but the
-                // offRamp's registered onRamp may be the raw package address
-                // without the module suffix. Compare normalized forms.
-                try {
-                  if (decodeOnRampAddress(offRampsOnRamp, source.network.family) === onRamp) {
-                    return offRamp
-                  }
-                } catch {
-                  // decodeOnRampAddress may throw on invalid address; skip
-                }
-              }
+              offRampsOnRamp,
+            })
+            if (offRampsOnRamp === onRamp) {
+              return offRamp
             }
           }
         }

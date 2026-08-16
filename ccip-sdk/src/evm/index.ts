@@ -111,8 +111,8 @@ import {
   decodeOnRampAddress,
   encodeAddressToAny,
   getAddressBytes,
-  getDataBytes,
   getBlockNumberAtOrAfter,
+  getDataBytes,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -1126,7 +1126,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
-        const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
+        const onRamps = []
+        for (const onRamp of sourceChainConfig.onRamps) {
+          try {
+            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily))
+          } catch {
+            // ignore
+          }
+        }
         return {
           ...staticConfig,
           ...(await getRmn(staticConfig.rmnRemote)),
