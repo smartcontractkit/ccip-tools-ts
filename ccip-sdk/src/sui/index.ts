@@ -16,10 +16,22 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
-import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
+import {
+  getCcipStateAddress,
+  getOffRampsForCcip,
+  getOffRampsFromRampOwner,
+  getOnRampsForCcip,
+  resolveCcipStateAddress,
+} from './discovery.ts'
 import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { getSuiLeafHasher } from './hasher.ts'
-import { deriveObjectID, getLatestPackageId, getObjectRef } from './objects.ts'
+import {
+  deriveObjectID,
+  getLatestPackageId,
+  getObjectFields,
+  getObjectRef,
+  getTableEntryFields,
+} from './objects.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPDataFormatUnsupportedError,
@@ -61,7 +73,7 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
-import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+import type { CCIPMessage_V1_6_Sui, SuiOnRampStateFields, UnsignedSuiTx } from './types.ts'
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -308,6 +320,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+    // accept the deployment's router handle (ccip state object) as well as the
+    // onramp itself, so a router address round-trips through this API
+    onRamp = await this.getOnRampForRouter(onRamp, destChainSelector)
     const [, , typeAndVersion] = await this.typeAndVersion(onRamp)
 
     // fee_quoter lives in the ccip package (reachable from any ramp via
@@ -316,9 +331,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const feeQuoter = `${ccip.split('::')[0]}::fee_quoter`
 
     return {
-      // source-side router: Sui has no router contract; the onramp package itself
-      // plays that role (consistent with getOnRampForRouter)
-      router: onRamp,
+      // Sui has no usable router contract (`ccip_router::RouterState` is left
+      // unconfigured), so the ccip state object is the deployment's router
+      // handle: the same address for both ramps, and accepted by every
+      // router-taking API here
+      router: ccip,
       destChainSelector,
       feeQuoter,
       typeAndVersion,
@@ -407,16 +424,64 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc Chain.getOffRampsForRouter} */
   async getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    router = await getLatestPackageId(router, this.client)
-    const ccip = await getCcipStateAddress(router, this.client)
-    const offramp = await getOffRampForCcip(ccip, this.client)
-    return [offramp]
+    // Sui has no usable on-chain offramp registry: `ccip_router::RouterState`
+    // only maps dest chain selectors to onramp packages (and is left
+    // unconfigured), and neither ramp's state references the other. The ccip
+    // package is the shared anchor — both ramps of a deployment report it from
+    // `get_ccip_package_id` — so offramps are discovered from it, and the caller
+    // matches the candidate whose source chain config lists the expected onramp.
+    const ccip = await resolveCcipStateAddress(router, this.client)
+    try {
+      return await getOffRampsForCcip(ccip, this.client)
+    } catch (err) {
+      // Last resort for a deployment with no CCIP activity and pruned history:
+      // pre-MCMS ramps are Ownable-owned by the deployer, which also holds the
+      // offramp's OwnerCap. Needs a ramp to anchor ownership on, so it only
+      // applies when the caller passed one rather than the router handle.
+      if (/::(on|off)ramp$/.test(router)) {
+        const latest = await getLatestPackageId(router, this.client)
+        const offramps = await getOffRampsFromRampOwner(latest, this.client).catch(() => [])
+        if (offramps.length) return offramps
+      }
+      throw err
+    }
   }
 
-  /** {@inheritDoc Chain.getOnRampForRouter} */
-  getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
-    // For Sui, the router is the onramp package address
-    return Promise.resolve(router)
+  /**
+   * {@inheritDoc Chain.getOnRampForRouter}
+   * @throws {@link CCIPError} if no onramp of the deployment serves destChainSelector
+   */
+  async getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string> {
+    // accepts the deployment's router handle (its ccip state object) or the
+    // onramp itself; an onramp is returned unchanged
+    if (router.endsWith('::onramp')) return router
+    const ccip = await resolveCcipStateAddress(router, this.client)
+    // a package which resolves to itself is the ccip package, not a ramp
+    if (ccip.split('::')[0] !== router.split('::')[0]) return `${router.split('::')[0]}::onramp`
+
+    const onRamps = await getOnRampsForCcip(ccip, this.client)
+    if (onRamps.length === 1) return onRamps[0]!
+    for (const onRamp of onRamps) {
+      if (await this.isDestChainConfigured(onRamp, destChainSelector)) return onRamp
+    }
+    throw new CCIPError(
+      CCIPErrorCode.UNKNOWN,
+      `No onramp of ccip ${ccip} is configured for dest chain ${destChainSelector}`,
+      { context: { router, onRamps } },
+    )
+  }
+
+  /** Whether an onramp has a dest chain config for `destChainSelector`. */
+  private async isDestChainConfigured(onRamp: string, destChainSelector: bigint) {
+    const state = (await getObjectFields(
+      await getObjectRef(onRamp, this.client),
+      this.client,
+    )) as unknown as SuiOnRampStateFields
+    return !!(await getTableEntryFields(
+      state.dest_chain_configs.fields.id.id,
+      destChainSelector,
+      this.client,
+    ))
   }
 
   /**
@@ -625,12 +690,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * Gets the token admin registry for a ramp of this CCIP deployment.
    * The token admin registry is a module of the ccip package, reachable from
    * any ramp of the deployment through `get_ccip_package_id`.
-   * @param address - Ramp (onramp/offramp/router) package address.
+   * @param address - Ramp (onramp/offramp) or router (ccip state object) address.
    * @param _destChainSelector - Unused on Sui (registry is global to the deployment).
    * @returns Token admin registry address in `package::module` form.
    */
   async getTokenAdminRegistryFor(address: string, _destChainSelector?: bigint): Promise<string> {
-    const ccip = await getCcipStateAddress(address, this.client)
+    const ccip = await resolveCcipStateAddress(address, this.client)
     return `${ccip.split('::')[0]}::token_admin_registry`
   }
 

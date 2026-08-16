@@ -86,7 +86,13 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       logger.debug('Resolved OnRamp from Router:', onRamp)
     }
   } catch (_) {
-    // treat as OnRamp
+    // Router handles which don't answer `typeAndVersion` (a Sui ccip state
+    // object, a bare Aptos/Sui package address) can still resolve through the
+    // router API; otherwise treat the address as an OnRamp.
+    onRamp = await source
+      .getOnRampForRouter(argv.router, destNetwork.chainSelector)
+      .catch(() => argv.router)
+    if (onRamp !== argv.router) logger.debug('Resolved OnRamp from Router:', onRamp)
   }
 
   const onRampConfig = await source.getOnRampConfig(onRamp, destNetwork.chainSelector)

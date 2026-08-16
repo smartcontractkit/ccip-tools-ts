@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { before, describe, it } from 'node:test'
 
-import { getCcipStateAddress, getOffRampForCcip } from './discovery.ts'
+import {
+  findOffRampPackagesByCcipActivity,
+  getCcipStateAddress,
+  getOffRampForCcip,
+} from './discovery.ts'
 import { SuiChain } from './index.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
@@ -131,13 +135,40 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
     assert.ok(typeAndVersion.startsWith('OnRamp 1.6'))
 
     const config = await chain.getOnRampConfig(ONRAMP, FUJI_SELECTOR)
-    // sui has no router contract: the onramp package itself is the router
-    assert.equal(config.router, ONRAMP)
+    // sui has no usable router contract: the ccip state object is the
+    // deployment's router handle, reported for both of its ramps
+    assert.equal(config.router, CCIP)
     // fee_quoter is discovered through the ccip package glue
     assert.equal(config.feeQuoter, `${CCIP.split('::')[0]}::fee_quoter`)
 
     const registry = await chain.getTokenAdminRegistryFor(ONRAMP)
     assert.equal(registry, `${CCIP.split('::')[0]}::token_admin_registry`)
+  })
+
+  it('accepts the ccip state object as the router handle for both ramps', async () => {
+    // the router reported for either ramp round-trips through every
+    // router-taking API, in bare-package or `::state_object` form
+    for (const router of [CCIP, CCIP.split('::')[0]!]) {
+      assert.equal(await chain.getOnRampForRouter(router, FUJI_SELECTOR), ONRAMP)
+      assert.deepEqual(await chain.getOffRampsForRouter(router, FUJI_SELECTOR), [OFFRAMP])
+      assert.equal(
+        await chain.getTokenAdminRegistryFor(router),
+        `${CCIP.split('::')[0]}::token_admin_registry`,
+      )
+      // getOnRampConfig resolves it too, and reports it back unchanged
+      assert.equal((await chain.getOnRampConfig(router, FUJI_SELECTOR)).router, CCIP)
+    }
+    // ramps are accepted as-is, with or without their module suffix
+    for (const ramp of [ONRAMP, ONRAMP.split('::')[0]!]) {
+      assert.equal(await chain.getOnRampForRouter(ramp, FUJI_SELECTOR), ONRAMP)
+    }
+  })
+
+  it('discovers the offramp from ccip activity, without ownership or publish history', async () => {
+    // transactions taking the deployment's CCIPObjectRef as an input object name
+    // the offramp in their events and PTB calls
+    const offramps = await findOffRampPackagesByCcipActivity(CCIP, chain.client)
+    assert.deepEqual(offramps, [OFFRAMP])
   })
 
   it('discovers the offramp through the ccip package (pruned-history fallback)', async () => {

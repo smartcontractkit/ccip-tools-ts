@@ -106,6 +106,92 @@ async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise
 }
 
 /**
+ * Maps an object's dynamic (object) field types to their object ids.
+ *
+ * Memoized: the CCIPObjectRef's field set is the ccip package's module states,
+ * which only changes when a module is initialized, and callers look several up
+ * per config read.
+ *
+ * @param parentId - object holding the dynamic fields
+ * @param client - sui client
+ * @returns type string of each dynamic field, to its object id
+ */
+export const getDynamicFieldIds = memoize(
+  async (parentId: string, client: SuiJsonRpcClient): Promise<Record<string, string>> => {
+    const fields = await withLookupRetry(() => client.getDynamicFields({ parentId }))
+    return Object.fromEntries(fields.data.map((field) => [field.objectType, field.objectId]))
+  },
+  { maxArgs: 1, async: true, expires: 300e3 },
+)
+
+/**
+ * Reads a Move object's `content.fields`.
+ *
+ * Config structs are read straight off the state objects rather than through
+ * `devInspect` view calls: one request returns every field of the struct (and, for
+ * `VecMap` fields, every entry) as JSON, with no BCS layout to track.
+ *
+ * @param id - object id
+ * @param client - sui client
+ * @returns the object's fields
+ * @throws {@link CCIPDataFormatUnsupportedError} if the object is missing or is not a Move object
+ */
+export async function getObjectFields(
+  id: string,
+  client: SuiJsonRpcClient,
+): Promise<Record<string, unknown>> {
+  const obj = await withLookupRetry(() => client.getObject({ id, options: { showContent: true } }))
+  const content = obj.data?.content
+  if (content?.dataType !== 'moveObject')
+    throw new CCIPDataFormatUnsupportedError(`Not a Move object: ${id}`, {
+      context: { id, error: obj.error },
+    })
+  return content.fields as Record<string, unknown>
+}
+
+/**
+ * Reads the value fields of a `Table<u64, T>` entry.
+ *
+ * @param table - the table's `id.id`, as found on the struct holding it
+ * @param key - entry key
+ * @param client - sui client
+ * @returns the entry's value fields, or undefined when the table has no such key
+ */
+export async function getTableEntryFields(
+  table: string,
+  key: bigint,
+  client: SuiJsonRpcClient,
+): Promise<Record<string, unknown> | undefined> {
+  const entry = await client
+    .getDynamicFieldObject({ parentId: table, name: { type: 'u64', value: key.toString() } })
+    .catch(() => null)
+  const content = entry?.data?.content
+  if (content?.dataType !== 'moveObject') return
+  const value = (content.fields as { value?: { fields?: Record<string, unknown> } }).value
+  return value?.fields
+}
+
+/**
+ * Turns decimal-string leaves into bigints, recursively.
+ *
+ * Sui's JSON-RPC renders `u64`/`u128`/`u256` as decimal strings (smaller widths
+ * come through as numbers); the rest of the SDK expects bigints for those. Hex
+ * strings (addresses) and byte vectors are left alone for `normalizeDeep`.
+ *
+ * @param value - decoded JSON value
+ * @returns the same shape with decimal strings replaced by bigints
+ */
+export function parseSuiNumbers<T>(value: T): T {
+  if (typeof value === 'string') return (/^\d+$/.test(value) ? BigInt(value) : value) as T
+  if (Array.isArray(value)) return value.map(parseSuiNumbers) as T
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, parseSuiNumbers(v)]),
+    ) as unknown as T
+  return value
+}
+
+/**
  * Finds the StatePointer object owned by a package.
  * The StatePointer contains a reference to the parent object used for derivation.
  */
