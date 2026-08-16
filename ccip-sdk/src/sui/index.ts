@@ -1,5 +1,5 @@
 import { bcs } from '@mysten/sui/bcs'
-import type { Keypair } from '@mysten/sui/cryptography'
+import { Signer } from '@mysten/sui/cryptography'
 import { JsonRpcHTTPTransport, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
@@ -39,11 +39,14 @@ import {
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPErrorCode,
+  CCIPExecTxRevertedError,
   CCIPExecutionReportChainMismatchError,
+  CCIPInsufficientBalanceError,
   CCIPLogDataInvalidError,
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
+  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
@@ -65,11 +68,13 @@ import type {
   ExecutionState,
   Lane,
   LeanNumbers,
+  MessageInput,
   WithLogger,
 } from '../types.ts'
 import {
   decodeAddress,
   decodeOnRampAddress,
+  getAddressBytes,
   getDataBytes,
   parseTypeAndVersion,
   passesTypeAndVersion,
@@ -93,6 +98,8 @@ const DEFAULT_GAS_LIMIT = 1000000n
 
 /** `ccip::rmn_remote`'s GLOBAL_CURSE_SUBJECT; cursing it curses every lane. */
 const GLOBAL_CURSE_SUBJECT = '0x01000000000000000000000000000001'
+/** SUI's native coin type; the default fee token when `message.feeToken` is unset. */
+const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
 
 /**
  * Sui chain implementation supporting Sui networks.
@@ -310,6 +317,33 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async typeAndVersion(address: string) {
     // requires address to have `::<module>` suffix
     address = await getLatestPackageId(address, this.client)
+
+    // A ccip state object (`<pkg>::state_object`, or a bare ccip package) is the
+    // deployment's router handle and has no `type_and_version` of its own:
+    // report a synthetic `StateObjectRouter` type carrying the fee quoter's
+    // version, so router-resolving callers can recognize it.
+    const pkg = normalizeSuiAddress(address.split('::')[0]!)
+    const ccip = await resolveCcipStateAddress(address, this.client).catch(() => undefined)
+    if (ccip?.split('::')[0] === pkg) {
+      const tx = new Transaction()
+      tx.moveCall({ target: `${pkg}::fee_quoter::type_and_version`, arguments: [] })
+      const result = await this.client.devInspectTransactionBlock({
+        sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        transactionBlock: tx,
+      })
+      if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+        throw new CCIPError(
+          CCIPErrorCode.UNKNOWN,
+          `Failed to call ${pkg}::fee_quoter::type_and_version: ${
+            result.effects.status.error || 'No return value'
+          }`,
+        )
+      }
+      const [data] = result.results[0].returnValues[0]
+      const [, version] = parseTypeAndVersion(bcs.String.parse(getDataBytes(data)))
+      return parseTypeAndVersion(`StateObjectRouter v${version}`)
+    }
+
     const target = `${address}::type_and_version`
 
     // Use the Transaction builder to create a move call
@@ -466,12 +500,25 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       allowedSenders: destChainConfig.allowed_senders,
       // the onramp's per-dest `router` is the *remote* chain's router, not a
       // local one; keep it under a distinct name so `router` stays this chain's
-      destRouter: decodeAddress(destChainConfig.router, networkInfo(destChainSelector).family),
+      destRouter: this.decodeDestRouter(destChainConfig.router, destChainSelector),
       sequenceNumber,
       expectedNextSequenceNumber: sequenceNumber + 1n,
       feeQuoterConfig: await this.getFeeQuoterConfig(ccip, destChainSelector),
       rmnRemoteConfig: await this.getRmnRemoteConfig(ccip),
       typeAndVersion,
+    }
+  }
+
+  /**
+   * Decodes a per-dest configured `router` as a dest-family address, falling
+   * back to the raw Move address when it isn't in the dest chain's format (e.g.
+   * a Sui-side package used as the router handle for the lane).
+   */
+  private decodeDestRouter(router: string, destChainSelector: bigint): string {
+    try {
+      return decodeAddress(router, networkInfo(destChainSelector).family)
+    } catch {
+      return normalizeSuiAddress(router)
     }
   }
 
@@ -562,8 +609,20 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const onRamps = await getOnRampsForCcip(ccip, this.client)
     if (onRamps.length === 1) return onRamps[0]!
+    const configured: string[] = []
     for (const onRamp of onRamps) {
-      if (await this.isDestChainConfigured(onRamp, destChainSelector)) return onRamp
+      if (await this.isDestChainConfigured(onRamp, destChainSelector)) configured.push(onRamp)
+    }
+    if (configured.length) {
+      // Prefer the onramp whose own package is current: a retired upgrade lineage
+      // answers view calls but its `OnRampState` is defined by the original
+      // package, which the TS SDK cannot include as a transaction input
+      // (`InvalidLinkage` on execution).
+      for (const onRamp of configured) {
+        const latest = await getLatestPackageId(onRamp, this.client)
+        if (latest.split('::')[0] === onRamp.split('::')[0]) return onRamp
+      }
+      return configured[0]!
     }
     throw new CCIPError(
       CCIPErrorCode.UNKNOWN,
@@ -712,6 +771,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc SuiChain.getTokenInfo} */
   private async getTokenInfo_(token: string): Promise<{ symbol: string; decimals: number }> {
+    // Coin type strings (e.g. native "0x2::sui::SUI" or "0xabc::coin::COIN") are
+    // not object IDs; they must be resolved through the coin registry instead.
+    if (token.includes('::')) {
+      if (token.split('::').length < 3) {
+        throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+      }
+      return this.getCoinMetadataInfo(token)
+    }
+
     const normalizedTokenAddress = normalizeSuiAddress(token)
     if (!isValidSuiAddress(normalizedTokenAddress)) {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
@@ -764,6 +832,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
     }
 
+    return this.getCoinMetadataInfo(coinType)
+  }
+
+  /** Fetches `symbol`/`decimals` for a coin type from the on-chain coin registry. */
+  private async getCoinMetadataInfo(coinType: string): Promise<{
+    symbol: string
+    decimals: number
+  }> {
     let metadata
     try {
       metadata = await this.client.getCoinMetadata({ coinType })
@@ -947,8 +1023,43 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getFee'))
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    return withLookupRetry(async () => {
+      const args = await this.buildCcipSendArgs(opts.router, opts.destChainSelector, opts.message)
+
+      const tx = new Transaction()
+      tx.moveCall({
+        target: `${args.latestOnRamp}::get_fee`,
+        typeArguments: [args.coinType],
+        arguments: [
+          tx.object(args.ccipObjectRef),
+          tx.object('0x6'), // Clock
+          tx.pure.u64(opts.destChainSelector),
+          tx.pure.vector('u8', Array.from(args.receiverBytes)),
+          tx.pure.vector('u8', Array.from(args.dataBytes)),
+          tx.pure.vector('address', args.tokenAddresses),
+          tx.pure.vector('u64', args.tokenAmounts),
+          tx.object(args.feeTokenMetadataId),
+          tx.pure.vector('u8', Array.from(args.extraArgsBytes)),
+        ],
+      })
+
+      const result = await this.client.devInspectTransactionBlock({
+        sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        transactionBlock: tx,
+      })
+
+      if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
+        throw new CCIPDataFormatUnsupportedError(
+          `Failed to call ${args.latestOnRamp}::get_fee: ${
+            result.effects.status.error || 'No return value'
+          }`,
+        )
+      }
+
+      const [data] = result.results[0].returnValues[0]
+      return BigInt(bcs.u64().parse(getDataBytes(data)))
+    })
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
@@ -959,8 +1070,246 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+    const wallet = opts.wallet as Signer | undefined
+    if (!(wallet instanceof Signer)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
+
+    const args = await this.buildCcipSendArgs(opts.router, opts.destChainSelector, opts.message)
+
+    // Pick an onchain coin of the fee token to pay the fee with; the onramp
+    // splits the exact fee out of it itself.
+    const coins = await this.client.getCoins({
+      owner: wallet.toSuiAddress(),
+      coinType: args.coinType,
+    })
+    const fee = opts.message.fee
+    const payment =
+      coins.data.find((c) => (fee == null ? true : BigInt(c.balance) >= fee)) ?? coins.data[0]
+    if (!payment) {
+      throw new CCIPInsufficientBalanceError(
+        '0',
+        fee?.toString() ?? '0',
+        args.coinType === SUI_NATIVE_COIN_TYPE ? 'SUI' : args.coinType,
+      )
+    }
+
+    const tx = new Transaction()
+    // create_token_transfer_params produces the (empty) TokenTransferParams hot potato
+    const tokenParams = tx.moveCall({
+      target: `${args.ccipPackage}::onramp_state_helper::create_token_transfer_params`,
+      arguments: [tx.pure.vector('u8', Array.from(args.receiverBytes))],
+    })
+    tx.moveCall({
+      target: `${args.latestOnRamp}::ccip_send`,
+      typeArguments: [args.coinType],
+      arguments: [
+        tx.object(args.ccipObjectRef),
+        tx.object(args.onRampState),
+        tx.object('0x6'), // Clock
+        tx.pure.u64(opts.destChainSelector),
+        tx.pure.vector('u8', Array.from(args.receiverBytes)),
+        tx.pure.vector('u8', Array.from(args.dataBytes)),
+        tokenParams,
+        tx.object(args.feeTokenMetadataId),
+        tx.object(payment.coinObjectId),
+        tx.pure.vector('u8', Array.from(args.extraArgsBytes)),
+      ],
+    })
+
+    let digest: string
+    try {
+      const result = await this.client.signAndExecuteTransaction({
+        signer: wallet,
+        transaction: tx,
+        options: { showEffects: true, showEvents: true },
+      })
+
+      if (result.effects?.status.status !== 'success') {
+        const errorMsg = result.effects?.status.error ?? 'Unknown error'
+        throw new CCIPExecTxRevertedError(result.digest, { context: { error: errorMsg } })
+      }
+      digest = result.digest
+    } catch (e) {
+      if (e instanceof CCIPExecTxRevertedError) throw e
+      throw new CCIPError(
+        CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
+        `Failed to send Sui message: ${(e as Error).message}`,
+      )
+    }
+
+    this.logger.info(`Waiting for Sui transaction ${digest} to be finalized...`)
+    await this.client.waitForTransaction({
+      digest,
+      options: { showEffects: true, showEvents: true },
+    })
+
+    const request = (await this.getMessagesInTx(digest))[0]
+    if (!request) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `No CCIP message found in send transaction ${digest}`,
+      )
+    }
+    return request
+  }
+
+  /**
+   * Resolves the fee token's coin type and its `CoinMetadata` object id for a message.
+   * Native SUI (or the zero address) is used when `message.feeToken` is unset.
+   *
+   * The fee quoter only accepts metadata objects from its own `fee_tokens` list,
+   * so the accepted id is resolved from that list rather than from
+   * `suix_getCoinMetadata` (which now returns the coin registry's `Currency`
+   * object, not a `CoinMetadata`).
+   */
+  private async resolveFeeToken(
+    message: MessageInput,
+    ccip: string,
+  ): Promise<{ coinType: string; metadataId: string }> {
+    const feeToken = message.feeToken
+    const native = feeToken == null || /^0x0+$/.test(feeToken)
+
+    // Explicit metadata object id: pass it through (the onramp validates it on-chain)
+    if (feeToken && !native && !feeToken.includes('::')) {
+      const objectResponse = await this.client.getObject({
+        id: feeToken,
+        options: { showType: true },
+      })
+      const coinType = objectResponse.data?.type?.match(/CoinMetadata<(.+)>$/)?.[1]
+      if (!coinType) {
+        throw new CCIPArgumentInvalidError(
+          'feeToken',
+          `${feeToken} is not a coin type or CoinMetadata object id`,
+        )
+      }
+      return { coinType, metadataId: normalizeSuiAddress(feeToken) }
+    }
+
+    const wantedCoinType = native ? SUI_NATIVE_COIN_TYPE : feeToken
+
+    // Find the accepted CoinMetadata<wantedCoinType> object from the fee quoter's
+    // fee_tokens list; fall back to suix_getCoinMetadata for deployments that
+    // keep the id in the metadata response.
+    const state = await this.getCcipModuleState(ccip, '::fee_quoter::FeeQuoterState')
+    const feeTokens = Array.isArray(state?.['fee_tokens']) ? (state['fee_tokens'] as string[]) : []
+    if (feeTokens.length) {
+      const feeTokenObjects = await Promise.all(
+        feeTokens.map((id) =>
+          this.client
+            .getObject({ id, options: { showType: true } })
+            .then((obj) => [id, obj.data?.type] as const),
+        ),
+      )
+      const match = feeTokenObjects.find(([, type]) =>
+        type?.includes(`CoinMetadata<${wantedCoinType}>`),
+      )?.[0]
+      if (match) return { coinType: wantedCoinType, metadataId: match }
+      throw new CCIPArgumentInvalidError(
+        'feeToken',
+        `${wantedCoinType} is not in the fee quoter's accepted fee tokens`,
+      )
+    }
+
+    const metadata = await this.client.getCoinMetadata({ coinType: wantedCoinType })
+    if (!metadata?.id) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading SUI CoinMetadata')
+    }
+    return { coinType: wantedCoinType, metadataId: metadata.id }
+  }
+
+  /**
+   * Resolves the on-chain objects and encoded arguments shared by `get_fee` and `ccip_send`.
+   */
+  private async buildCcipSendArgs(
+    router: string,
+    destChainSelector: bigint,
+    message: MessageInput,
+  ): Promise<{
+    latestOnRamp: string
+    ccipPackage: string
+    ccipObjectRef: string
+    onRampState: string
+    coinType: string
+    feeTokenMetadataId: string
+    receiverBytes: Uint8Array
+    dataBytes: Uint8Array
+    tokenAddresses: string[]
+    tokenAmounts: bigint[]
+    extraArgsBytes: Uint8Array
+  }> {
+    // Accept the deployment's router handle (ccip state object) or the onramp itself
+    const onRamp = await this.getOnRampForRouter(router, destChainSelector)
+    // View calls must target the latest package (old versions are version-gated),
+    // but state pointers live on the ORIGINAL package: resolve the onramp state
+    // from `onRamp`, and only the call target from `latestOnRamp`
+    const latestOnRamp = await getLatestPackageId(onRamp, this.client)
+    // ccip_send's signature references structs (e.g. OnRampState) defined by the
+    // package's ORIGINAL version; calling the upgraded package would require the
+    // original package as a transaction input, which the TypeScript SDK cannot
+    // emit — the node rejects such calls with InvalidLinkage.
+    if (latestOnRamp.split('::')[0] !== normalizeSuiAddress(onRamp.split('::')[0]!)) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `OnRamp ${onRamp} has been upgraded to ${latestOnRamp.split('::')[0]}; ` +
+          'ccip_send on an upgraded Sui onramp is not supported by the TypeScript SDK ' +
+          '(the original package cannot be included as a transaction input). ' +
+          'Deploy a fresh (non-upgraded) onramp for this lane instead.',
+        { context: { onRamp, latestOnRamp } },
+      )
+    }
+    const ccip = await getCcipStateAddress(latestOnRamp, this.client)
+    const ccipPackage = ccip.split('::')[0]!
+    const [ccipObjectRef, onRampState] = await Promise.all([
+      getObjectRef(ccip, this.client),
+      getObjectRef(onRamp, this.client),
+    ])
+
+    const { coinType, metadataId } = await this.resolveFeeToken(message, ccip)
+
+    if (!message.receiver) throw new CCIPArgumentInvalidError('receiver', String(message.receiver))
+    const receiverBytes = getAddressBytes(getMoveAddress(message.receiver))
+    const dataBytes = getDataBytes(message.data ?? '0x')
+
+    const tokenAddresses: string[] = []
+    const tokenAmounts: bigint[] = []
+    for (const tokenAmount of message.tokenAmounts ?? []) {
+      // token is a coin type (e.g. SUI) or a CoinMetadata object id
+      tokenAddresses.push(
+        tokenAmount.token.includes('::')
+          ? ((await this.client.getCoinMetadata({ coinType: tokenAmount.token }))?.id ??
+              (() => {
+                throw new CCIPArgumentInvalidError('tokenAmounts', tokenAmount.token)
+              })())
+          : normalizeSuiAddress(tokenAmount.token),
+      )
+      tokenAmounts.push(BigInt(tokenAmount.amount))
+    }
+
+    // Encoded on-chain extra args; the encoder picks the destination family's format
+    // from the fields present (EVM V2 gasLimit, Solana computeUnits)
+    const { gasLimit, allowOutOfOrderExecution, computeUnits } =
+      message.extraArgs as MessageInput['extraArgs'] & Partial<EVMExtraArgsV2 & SVMExtraArgsV1>
+    const extraArgsBytes = getDataBytes(
+      SuiChain.encodeExtraArgs({
+        gasLimit: gasLimit ?? 0n,
+        ...(allowOutOfOrderExecution != null && { allowOutOfOrderExecution }),
+        ...(computeUnits != null && { computeUnits }),
+      }),
+    )
+
+    return {
+      latestOnRamp,
+      ccipPackage,
+      ccipObjectRef,
+      onRampState,
+      coinType,
+      feeTokenMetadataId: metadataId,
+      receiverBytes,
+      dataBytes,
+      tokenAddresses,
+      tokenAmounts,
+      extraArgsBytes,
+    }
   }
 
   /**
@@ -997,7 +1346,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       receiverObjectIds?: string[]
     },
   ): Promise<CCIPExecution> {
-    const wallet = opts.wallet as Keypair
+    const wallet = opts.wallet as Signer
 
     if (opts.receiverObjectIds) {
       this.logger.info(

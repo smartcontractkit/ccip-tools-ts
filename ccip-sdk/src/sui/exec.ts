@@ -1,4 +1,4 @@
-import type { Keypair } from '@mysten/sui/cryptography'
+import type { Signer } from '@mysten/sui/cryptography'
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 
@@ -92,14 +92,14 @@ export async function generateUnsignedExecutePTB(
  * Signs and executes a pre-built {@link UnsignedSuiTx} using the provided keypair.
  *
  * @param client - Sui RPC client.
- * @param wallet - Keypair used to sign the transaction.
+ * @param wallet - Signer used to sign the transaction.
  * @param unsignedTx - The unsigned Sui transaction to execute.
  * @param logger - Optional logger.
  * @returns The finalized transaction digest string.
  */
 export async function signAndExecuteSuiTx(
   client: SuiJsonRpcClient,
-  wallet: Keypair,
+  wallet: Signer,
   unsignedTx: UnsignedSuiTx,
   logger?: { info: (...args: unknown[]) => void },
 ): Promise<string> {

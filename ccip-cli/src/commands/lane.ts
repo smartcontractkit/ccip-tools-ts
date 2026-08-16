@@ -75,24 +75,18 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
 
   const source = await getChain(sourceNetwork.name)
 
-  // Resolve router-or-onramp: if typeAndVersion identifies it as a Router, fetch the OnRamp.
-  // typeAndVersion may throw for chains where the address format requires a module suffix
-  // (e.g., bare Aptos package address) — in that case we treat the address as an OnRamp directly.
+  // Resolve router-or-onramp: if typeAndVersion identifies it as a Router (or
+  // a family-specific router handle like Sui's `StateObjectRouter`), fetch the
+  // OnRamp. If typeAndVersion doesn't answer, treat the address as an OnRamp.
   let onRamp = argv.router
   try {
     const [type] = await source.typeAndVersion(argv.router)
-    if (type === 'Router') {
+    if (type.includes('Router')) {
       onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
       logger.debug('Resolved OnRamp from Router:', onRamp)
     }
   } catch (_) {
-    // Router handles which don't answer `typeAndVersion` (a Sui ccip state
-    // object, a bare Aptos/Sui package address) can still resolve through the
-    // router API; otherwise treat the address as an OnRamp.
-    onRamp = await source
-      .getOnRampForRouter(argv.router, destNetwork.chainSelector)
-      .catch(() => argv.router)
-    if (onRamp !== argv.router) logger.debug('Resolved OnRamp from Router:', onRamp)
+    // typeAndVersion unavailable for this address form: treat it as an OnRamp.
   }
 
   const onRampConfig = await source.getOnRampConfig(onRamp, destNetwork.chainSelector)
