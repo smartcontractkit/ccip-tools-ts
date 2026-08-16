@@ -60,6 +60,7 @@ import {
 import {
   bytesToBuffer,
   decodeAddress,
+  decodeOnRampAddress,
   parseTypeAndVersion,
   passesTypeAndVersion,
 } from '../utils.ts'
@@ -917,7 +918,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         const onRampLength = onRampSlice.loadUint(8)
         onRampBytes = onRampSlice.loadBuffer(onRampLength)
       }
-      const onRamp = decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
+      const onRamp = decodeOnRampAddress(onRampBytes, networkInfo(sourceChainSelector).family)
 
       const [{ stack: cfgStack }, [, , typeAndVersion]] = await Promise.all([
         this.provider.runMethod(Address.parse(offRamp), 'config', []),

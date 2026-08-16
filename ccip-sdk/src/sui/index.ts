@@ -555,7 +555,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       isRmnVerificationDisabled: sourceChainConfig.is_rmn_verification_disabled,
       rmnRemoteConfig: await this.getRmnRemoteConfig(ccip),
       onRamps: [
-        decodeAddress(
+        decodeOnRampAddress(
           getDataBytes(sourceChainConfig.on_ramp),
           networkInfo(sourceChainSelector).family,
         ),

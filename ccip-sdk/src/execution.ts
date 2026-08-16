@@ -143,6 +143,9 @@ export const discoverOffRamp = memoize(
 
     // fallback to pairing routers offramps
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
+    // every (destOnRamp, dest offRamp, onRamp it accepts) triplet considered,
+    // reported in the error if none of them accepts our onRamp
+    const examined: { destOnRamp: string; offRamp: string; accepts: string }[] = []
     let sourceOffRamps: string[] = []
     try {
       sourceOffRamps = await source.getOffRampsForRouter(sourceRouter, dest.network.chainSelector)
@@ -204,6 +207,10 @@ export const discoverOffRamp = memoize(
               offRamp,
               offRampsOnRamp,
             })
+            examined.push({ destOnRamp, offRamp, accepts: offRampsOnRamp })
+            // both sides are in their source family's canonical onRamp form:
+            // this one because every getOffRampConfig decodes it with
+            // decodeOnRampAddress, ours because it was normalized above
             if (offRampsOnRamp === onRamp) {
               return offRamp
             }
@@ -211,8 +218,12 @@ export const discoverOffRamp = memoize(
         }
       }
     }
+    // Report which dest offRamps were reachable and which onRamp each accepts:
+    // when a lane is half-wired (the dest's offRamp pairs with a *different*
+    // source onRamp) that pairing is the answer, and it is otherwise only
+    // visible with debug logging on.
     throw new CCIPOffRampNotFoundError(onRamp, dest.network.name, {
-      context: { sourceRouter, sourceOffRamps },
+      context: { sourceRouter, sourceOffRamps, examined },
     })
   },
   {

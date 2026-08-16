@@ -445,7 +445,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [sourceChainSelector],
       },
     })
-    const onRamp = decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
+    const onRamp = decodeOnRampAddress(
+      sourceChainConfig.on_ramp,
+      networkInfo(sourceChainSelector).family,
+    )
     return normalizeDeep(
       {
         sourceChainSelector,
