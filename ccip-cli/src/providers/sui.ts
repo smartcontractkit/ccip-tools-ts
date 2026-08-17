@@ -13,6 +13,7 @@ import {
   type SignatureScheme,
   type SignatureWithBytes,
   Signer,
+  messageWithIntent,
   toSerializedSignature,
 } from '@mysten/sui/cryptography'
 import { Ed25519Keypair, Ed25519PublicKey } from '@mysten/sui/keypairs/ed25519'
@@ -67,14 +68,16 @@ export class SuiLedgerClient {
   async getPublicKey(path: string): Promise<Uint8Array> {
     const response = await this.sendChunks(INS_GET_PUBLIC_KEY, [bip32PathPayload(path)])
     const keySize = response[0]!
-    return response.slice(1, 1 + keySize)
+    return response.subarray(1, 1 + keySize)
   }
 
   /**
-   * Signs a raw serialized Sui transaction on the Ledger device (the device prepends
-   * the intent and hashes internally).
+   * Signs a serialized Sui transaction on the Ledger device. The device
+   * blake2b-hashes exactly the bytes it receives (after its 4-byte length
+   * prefix) and signs the hash, so callers pass the intent message bytes
+   * (`intent prefix || TransactionData`).
    * @param path - BIP32 derivation path.
-   * @param txn - Serialized TransactionData bytes (without intent).
+   * @param txn - Intent-message-encoded transaction bytes to sign.
    * @returns Raw 64-byte Ed25519 signature.
    */
   async signTransaction(path: string, txn: Uint8Array): Promise<Uint8Array> {
@@ -197,36 +200,35 @@ export class SuiLedgerSigner extends Signer {
    * @returns A new SuiLedgerSigner instance.
    */
   static async create(derivationPath: string, logger: Logger = console) {
-    let transport: LedgerTransport | undefined
-    try {
-      transport = await HIDTransport.default.create()
-      const ledger = new SuiLedgerClient(transport)
-      // Retrieves the public key from the device; the device does not need to sign here.
-      const publicKey = await ledger.getPublicKey(derivationPath)
-      const signer = new SuiLedgerSigner(ledger, derivationPath, publicKey)
-      logger.info(
-        'Ledger connected:',
-        signer.toSuiAddress(),
-        ', derivationPath:',
-        signer.derivationPath,
-      )
-      return signer
-    } catch (e) {
-      // Avoid leaving the USB transport open when initialization fails.
-      await transport?.close().catch(() => {})
-      logger.error('Ledger: Could not access ledger. Is it unlocked and Sui app open?')
-      throw e
-    }
+    const transport = await HIDTransport.default.create()
+    const ledger = new SuiLedgerClient(transport)
+    // Retrieves the public key from the device; the device does not need to sign here.
+    const publicKey = await ledger.getPublicKey(derivationPath)
+    const signer = new SuiLedgerSigner(ledger, derivationPath, publicKey)
+    logger.info(
+      'Ledger connected:',
+      signer.toSuiAddress(),
+      ', derivationPath:',
+      signer.derivationPath,
+    )
+    return signer
   }
 
   /**
-   * Signs raw transaction bytes on the Ledger device (the device prepends the
-   * intent and hashes internally), and returns the serialized Sui signature.
+   * Signs raw transaction bytes on the Ledger device, and returns the serialized
+   * Sui signature.
+   *
+   * The device blake2b-hashes exactly the bytes it is given (after the length
+   * prefix) and signs that hash, so the 3-byte `TransactionData` intent prefix
+   * must be prepended here — the signature is then over
+   * `blake2b(intent || transactionBytes)`, which is what the node verifies.
+   * (Same as the official `LedgerSigner` from `@mysten/sui`.)
    * @param bytes - Serialized TransactionData bytes (without intent).
    * @returns Base64 transaction bytes and serialized signature.
    */
   override async signTransaction(bytes: Uint8Array): Promise<SignatureWithBytes> {
-    const signature = await this.ledger.signTransaction(this.derivationPath, bytes)
+    const intentMessage = messageWithIntent('TransactionData', bytes)
+    const signature = await this.ledger.signTransaction(this.derivationPath, intentMessage)
     return {
       bytes: toBase64(bytes),
       signature: toSerializedSignature({
@@ -278,6 +280,22 @@ export async function loadSuiWallet(
     else if (!isNaN(Number(derivationPath))) derivationPath = `m/44'/784'/${derivationPath}'/0'/0'`
     return await SuiLedgerSigner.create(derivationPath, logger)
   }
-  const keyBytes = bytesToBuffer(walletOpt)
+  // bech32 secret keys (`suiprivkey1...`, 33 bytes after decode: flag + seed)
+  const trimmed = walletOpt.trim()
+  if (/^suiprivkey/i.test(trimmed)) {
+    return Ed25519Keypair.fromSecretKey(trimmed)
+  }
+
+  // raw 32-byte secret key seed as hex, with or without 0x prefix
+  let keyBytes: Uint8Array
+  try {
+    keyBytes = bytesToBuffer(walletOpt)
+  } catch (e) {
+    throw new CCIPArgumentInvalidError(
+      'wallet',
+      `expects a raw 32-byte hex secret key, a suiprivkey bech32 string, or 'ledger[:path]' (got: ${walletOpt.slice(0, 12)}...). ${(e as Error).message}`,
+    )
+  }
+
   return Ed25519Keypair.fromSecretKey(keyBytes)
 }

@@ -69,6 +69,34 @@ export const getObjectRef = memoize(
   { maxArgs: 1, expires: 300e3, async: true },
 )
 
+/**
+ * Reads a package's disassembled module sources, keyed by module name.
+ *
+ * The disassembly is the deterministic source of truth for a package's module
+ * list, struct definitions, and - most importantly - its import table with
+ * real dependency package addresses (compiled bytecode only carries compressed
+ * address indices). Used for dependency discovery (e.g. the ccip package a
+ * token pool is registered with) where transaction scanning is undesirable.
+ */
+export const getPackageDisassembly = memoize(
+  async function getPackageDisassembly_(
+    packageId: string,
+    client: SuiJsonRpcClient,
+  ): Promise<Record<string, string>> {
+    const obj = await withLookupRetry(() =>
+      client.getObject({ id: normalizeSuiAddress(packageId), options: { showContent: true } }),
+    )
+    const content = obj.data?.content
+    if (content?.dataType !== 'package') {
+      throw new CCIPDataFormatUnsupportedError(`Not a Move package: ${packageId}`, {
+        context: { id: packageId, error: obj.error },
+      })
+    }
+    return content.disassembled as Record<string, string>
+  },
+  { maxArgs: 1, async: true, expires: 3600e3 },
+)
+
 async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise<string> {
   // addresses may come unpadded (e.g. from Move module metadata); normalize
   const packageId = normalizeSuiAddress(address.split('::')[0]!)
@@ -230,7 +258,7 @@ export async function getReceiverModule(
   ccipPackageId: string,
   ccipObjectRef: string,
   receiverPackageId: string,
-) {
+): Promise<{ moduleName: string; packageId: string } | undefined> {
   const ccipBarePackageId = ccipPackageId.split('::')[0]!
   // Call get_receiver_config from receiver_registry contract
   const tx = new Transaction()
@@ -246,6 +274,11 @@ export async function getReceiverModule(
   })
 
   if (result.error) {
+    // EUnknownReceiver: a plain-address receiver (tokens only, no ccip_receive
+    // callback) retrieves no config — report undefined instead of failing, so
+    // the manual-execution PTB skips the receiver call
+    const unknownReceiver = /get_receiver_config[\s\S]*?},\s*3\)/.test(String(result.error))
+    if (unknownReceiver) return undefined
     throw new CCIPDataFormatUnsupportedError(`Failed to call get_receiver_config: ${result.error}`)
   }
 

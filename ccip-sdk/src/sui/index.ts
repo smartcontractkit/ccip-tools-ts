@@ -13,6 +13,9 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
+  type TokenInfo,
+  type TokenPoolConfig,
+  type TokenPoolRemote,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -20,7 +23,9 @@ import {
   getCcipStateAddress,
   getOffRampsForCcip,
   getOffRampsFromRampOwner,
+  getOnRampForSelectorFromRouterState,
   getOnRampsForCcip,
+  moduleOfPackage,
   resolveCcipStateAddress,
 } from './discovery.ts'
 import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
@@ -31,6 +36,7 @@ import {
   getLatestPackageId,
   getObjectFields,
   getObjectRef,
+  getPackageDisassembly,
   getTableEntryFields,
   parseSuiNumbers,
 } from './objects.ts'
@@ -46,6 +52,7 @@ import {
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
   CCIPSourceChainUnsupportedError,
+  CCIPTokenPoolChainConfigNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
@@ -137,17 +144,117 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       maxArgs: 1,
       maxSize: 100,
     })
+    this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
+    this.getRegistryTokenConfig = memoize(this.getRegistryTokenConfig.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 100,
+      expires: 300e3,
+    })
+    this.getTokenPoolConfig = memoize(this.getTokenPoolConfig.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 300e3,
+    })
+    this.getTokenPoolRemotes = memoize(this.getTokenPoolRemotes.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 100,
+      expires: 60e3,
+    })
+    this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 10,
+    })
+    this.getSupportedTokens = memoize(this.getSupportedTokens.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 10,
+      expires: 300e3,
+    })
+    this.getOnRampForRouter = memoize(this.getOnRampForRouter.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 100,
+      expires: 60e3,
+    })
+    // Token pool state resolution is the shared substrate of several methods
+    // (config, remotes, local token) and reads stable on-chain state
+    this.getTokenPoolStateRef_ = memoize(this.getTokenPoolStateRef_.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 50,
+      expires: 300e3,
+    })
+
+    // Monkey-patched memoized RPC reads (same pattern as EVM/Solana): these
+    // are the object-level lookups every split-out discovery helper shares;
+    // state/config/metadata objects change only on upgrade, so short-TTL
+    // caching collapses the repeated identical reads across call sites.
+    // Balance/coin queries and devInspect are left live.
     this.client.getTransactionBlock = memoize(this.client.getTransactionBlock.bind(this.client), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
-      expires: 5e3,
+      expires: 60e3, // finalized tx contents are immutable
       transformKey: ([args]: Parameters<typeof this.client.getTransactionBlock>) => [
         args.digest,
         args.options?.showEffects,
         args.options?.showInput,
       ],
     })
+    // Partial/mock clients (unit tests) may not carry every method; skip those
+    if (typeof this.client.getObject === 'function')
+      this.client.getObject = memoize(this.client.getObject.bind(this.client), {
+        async: true,
+        maxSize: 500,
+        expires: 30e3,
+        transformKey: ([args]: Parameters<typeof this.client.getObject>) => [
+          args.id,
+          JSON.stringify(args.options ?? null),
+        ],
+      })
+    if (typeof this.client.getOwnedObjects === 'function')
+      this.client.getOwnedObjects = memoize(this.client.getOwnedObjects.bind(this.client), {
+        async: true,
+        maxSize: 200,
+        expires: 30e3,
+        transformKey: ([args]: Parameters<typeof this.client.getOwnedObjects>) => [
+          args.owner,
+          args.cursor,
+          args.limit,
+          JSON.stringify(args.filter ?? null),
+          JSON.stringify(args.options ?? null),
+        ],
+      })
+    if (typeof this.client.getDynamicFields === 'function')
+      this.client.getDynamicFields = memoize(this.client.getDynamicFields.bind(this.client), {
+        async: true,
+        maxSize: 200,
+        expires: 60e3,
+        transformKey: ([args]: Parameters<typeof this.client.getDynamicFields>) => [
+          args.parentId,
+          args.cursor,
+          args.limit,
+        ],
+      })
+    if (typeof this.client.getCoinMetadata === 'function')
+      this.client.getCoinMetadata = memoize(this.client.getCoinMetadata.bind(this.client), {
+        async: true,
+        maxSize: 100, // coin metadata is immutable per coin type
+        transformKey: ([args]: Parameters<typeof this.client.getCoinMetadata>) => [args.coinType],
+      })
   }
 
   /**
@@ -325,8 +432,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const pkg = normalizeSuiAddress(address.split('::')[0]!)
     const ccip = await resolveCcipStateAddress(address, this.client).catch(() => undefined)
     if (ccip?.split('::')[0] === pkg) {
+      // View calls must target the package's latest version: the original
+      // package's functions are version-gated and revert once upgraded.
+      const latestPkg = normalizeSuiAddress(
+        (await getLatestPackageId(ccip, this.client)).split('::')[0]!,
+      )
       const tx = new Transaction()
-      tx.moveCall({ target: `${pkg}::fee_quoter::type_and_version`, arguments: [] })
+      tx.moveCall({ target: `${latestPkg}::fee_quoter::type_and_version`, arguments: [] })
       const result = await this.client.devInspectTransactionBlock({
         sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
         transactionBlock: tx,
@@ -334,7 +446,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       if (result.effects.status.status !== 'success' || !result.results?.[0]?.returnValues?.[0]) {
         throw new CCIPError(
           CCIPErrorCode.UNKNOWN,
-          `Failed to call ${pkg}::fee_quoter::type_and_version: ${
+          `Failed to call ${latestPkg}::fee_quoter::type_and_version: ${
             result.effects.status.error || 'No return value'
           }`,
         )
@@ -555,7 +667,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       isRmnVerificationDisabled: sourceChainConfig.is_rmn_verification_disabled,
       rmnRemoteConfig: await this.getRmnRemoteConfig(ccip),
       onRamps: [
-        decodeOnRampAddress(
+        decodeAddress(
           getDataBytes(sourceChainConfig.on_ramp),
           networkInfo(sourceChainSelector).family,
         ),
@@ -603,9 +715,22 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // accepts the deployment's router handle (its ccip state object) or the
     // onramp itself; an onramp is returned unchanged
     if (router.endsWith('::onramp')) return router
+    const routerPkg = normalizeSuiAddress(router.split('::')[0]!)
+    // A bare onramp package id: serve its own (latest) onramp directly
+    if (!router.includes('::') && (await moduleOfPackage(routerPkg, this.client)) === 'onramp') {
+      return getLatestPackageId(`${routerPkg}::onramp`, this.client)
+    }
+
     const ccip = await resolveCcipStateAddress(router, this.client)
-    // a package which resolves to itself is the ccip package, not a ramp
-    if (ccip.split('::')[0] !== router.split('::')[0]) return `${router.split('::')[0]}::onramp`
+    // Deterministic first: the deployment's RouterState maps the dest chain
+    // selector to its onramp package (current object state only); fall back to
+    // the activity scan when no router maps this lane.
+    const fromRouterState = await getOnRampForSelectorFromRouterState(
+      ccip,
+      destChainSelector,
+      this.client,
+    ).catch(() => undefined)
+    if (fromRouterState) return fromRouterState
 
     const onRamps = await getOnRampsForCcip(ccip, this.client)
     if (onRamps.length === 1) return onRamps[0]!
@@ -655,90 +780,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc SuiChain.getTokenForTokenPool} */
   private async getTokenForTokenPool_(tokenPool: string): Promise<string> {
-    const normalizedTokenPool = normalizeSuiAddress(tokenPool)
+    const { poolStateObjectId, tokenType, poolModule, latestPoolPackage } =
+      await this.getTokenPoolStateRef_(tokenPool)
 
-    // Get objects owned by this package (looking for state pointers)
-    const objects = await this.client.getOwnedObjects({
-      owner: normalizedTokenPool,
-      options: { showType: true, showContent: true },
-    })
-
-    const tpType = objects.data
-      .find((obj) => obj.data?.type?.includes('token_pool::'))
-      ?.data?.type?.split('::')[1]
-
-    const allowedTps = ['managed_token_pool', 'burn_mint_token_pool', 'lock_release_token_pool']
-    if (!tpType || !allowedTps.includes(tpType)) {
-      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid token pool type: ${tpType}`)
-    }
-
-    // Find the state pointer object
-    let stateObjectPointerId: string | undefined
-    for (const obj of objects.data) {
-      const content = obj.data?.content
-      if (content?.dataType !== 'moveObject') continue
-
-      const fields = content.fields as Record<string, unknown>
-      // Look for a pointer field that references the state object
-      stateObjectPointerId = fields[`${tpType}_object_id`] as string
-    }
-
-    if (!stateObjectPointerId) {
-      throw new CCIPError(
-        CCIPErrorCode.UNKNOWN,
-        `No token pool state pointer found for ${tokenPool}`,
-      )
-    }
-
-    const stateNamesPerTP: Record<string, string> = {
-      managed_token_pool: 'ManagedTokenPoolState',
-      burn_mint_token_pool: 'BurnMintTokenPoolState',
-      lock_release_token_pool: 'LockReleaseTokenPoolState',
-    }
-
-    const poolStateObject = deriveObjectID(
-      stateObjectPointerId,
-      new TextEncoder().encode(stateNamesPerTP[tpType]),
-    )
-
-    // Get object info to get the coin type
-    const info = await this.client.getObject({
-      id: poolStateObject,
-      options: { showType: true, showContent: true },
-    })
-
-    const type = info.data?.type
-    if (!type) {
-      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading token pool state object type')
-    }
-
-    // Extract the type parameter T from ManagedTokenPoolState<T>
-    const typeMatch = type.match(/(?:Managed|BurnMint|LockRelease)TokenPoolState<(.+)>$/)
-    if (!typeMatch || !typeMatch[1]) {
-      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid pool state type format: ${type}`)
-    }
-    const tokenType = typeMatch[1]
-
-    // Walk the state's package_ids to the latest pool package for the call
-    // (type strings carry the original package, whose functions are version-gated)
-    const poolContent = info.data?.content
-    const packageIds =
-      poolContent?.dataType === 'moveObject'
-        ? (poolContent.fields as Record<string, unknown>)['package_ids']
-        : undefined
-    const latestPoolPackage =
-      Array.isArray(packageIds) && packageIds.length
-        ? (packageIds[packageIds.length - 1] as string)
-        : type.split('<')[0]!.split('::')[0]!
-    const poolModule = type.split('<')[0]!.split('::')[1]!
-
-    // Call get_token function from managed_token_pool contract with the type parameter
+    // Call get_token function from the token pool contract with the type parameter
     const target = `${latestPoolPackage}::${poolModule}::get_token`
     const tx = new Transaction()
     tx.moveCall({
       target,
       typeArguments: [tokenType],
-      arguments: [tx.object(poolStateObject)],
+      arguments: [tx.object(poolStateObjectId)],
     })
 
     const result = await this.client.devInspectTransactionBlock({
@@ -759,6 +810,133 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const coinMetadataAddress = normalizeSuiAddress(hexlify(coinMetadataBytes))
 
     return coinMetadataAddress
+  }
+
+  /**
+   * Resolves a token pool package to its pool state object and call targets,
+   * deterministically from on-chain package metadata:
+   *
+   * 1. The pool package is assumed to have a single module ending in
+   *    `_token_pool`; its disassembled source is read from the package object.
+   * 2. The module's `*TokenPoolState` struct (from the disassembly) names the
+   *    state object, whose id is derived from the package-owned state pointer
+   *    (`<module>_object_id`, a derived-object parent).
+   * 3. The state object's type names the module and the token coin type.
+   * 4. The disassembly's `use <addr>::<cciimodule>` import names the ccip
+   *    package the pool is registered with (no tx scanning).
+   */
+  private async getTokenPoolStateRef_(tokenPool: string): Promise<{
+    poolStateObjectId: string
+    tokenType: string
+    poolModule: string
+    latestPoolPackage: string
+    ccipPackage: string | undefined
+  }> {
+    const normalizedTokenPool = normalizeSuiAddress(tokenPool)
+
+    // single disassembled module ending in `_token_pool` names the pool module
+    const disassembled = await getPackageDisassembly(normalizedTokenPool, this.client)
+    const poolModules = Object.keys(disassembled).filter((name) => name.endsWith('_token_pool'))
+    if (poolModules.length !== 1) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `Expected a single *_token_pool module in ${tokenPool}, got: ${poolModules.join(', ') || 'none'}`,
+      )
+    }
+    const poolModule = poolModules[0]!
+    const moduleSource = String(disassembled[poolModule])
+
+    // The ccip package the pool is registered with, from its imports: any
+    // ccip module (token_admin_registry, state_object, fee_quoter, ...), with
+    // or without an `as` alias.
+    const CCIP_MODULES =
+      '(?:token_admin_registry|state_object|fee_quoter|onramp_state_helper|offramp_state_helper|' +
+      'nonce_manager|rmn_remote|receiver_registry|eth_abi|publisher_wrapper)'
+    const ccipImport = moduleSource.match(
+      new RegExp(`use\\s+([0-9a-fA-F]{1,64})::${CCIP_MODULES}\\s*(?:as\\s+\\w+)?;`),
+    )
+    const ccipPackage = ccipImport?.[1] ? `0x${ccipImport[1]}` : undefined
+
+    // the state pointer field (`<module>_object_id`) inside the package-owned pointer object
+    const pointerFieldMatch = moduleSource.match(/\b(\w+_object_id)\s*:/)
+    const pointerField = pointerFieldMatch?.[1] ?? `${poolModule}_object_id`
+    const objects = await this.client.getOwnedObjects({
+      owner: normalizedTokenPool,
+      options: { showContent: true },
+    })
+    let stateObjectPointerId: string | undefined
+    for (const obj of objects.data) {
+      const content = obj.data?.content
+      if (content?.dataType !== 'moveObject') continue
+      stateObjectPointerId = (content.fields as Record<string, unknown>)[pointerField] as string
+    }
+    if (!stateObjectPointerId) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `No token pool state pointer found for ${tokenPool}`,
+      )
+    }
+
+    // the `*TokenPoolState` struct(s) from the disassembly; the derived object
+    // resolving to `<pkg>::<module>::<name>` is the pool state
+    const stateNames = [...moduleSource.matchAll(/\bstruct\s+(\w*TokenPoolState)\b/g)].map(
+      (match) => match[1]!,
+    )
+    if (!stateNames.length) {
+      throw new CCIPError(
+        CCIPErrorCode.UNKNOWN,
+        `No *TokenPoolState struct found in ${tokenPool}::${poolModule}`,
+      )
+    }
+
+    let poolStateObjectId: string | undefined
+    let stateType: string | undefined
+    for (const stateName of new Set(stateNames)) {
+      const candidateId = deriveObjectID(stateObjectPointerId, new TextEncoder().encode(stateName))
+      const info = await this.client
+        .getObject({ id: candidateId, options: { showType: true } })
+        .catch(() => null)
+      const type = info?.data?.type
+      if (!type) continue
+      const [typeModule, typeName] = type.split('<')[0]!.split('::').slice(1)
+      if (typeModule === poolModule && typeName === stateName) {
+        poolStateObjectId = candidateId
+        stateType = type
+        break
+      }
+    }
+    if (!poolStateObjectId || !stateType) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error resolving token pool state object')
+    }
+
+    // Extract the type parameter T from XxxTokenPoolState<T>
+    const tokenType = stateType.match(/<(.+)>$/)?.[1]
+    if (!tokenType) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Invalid pool state type format: ${stateType}`)
+    }
+
+    // Walk the state's package_ids to the latest pool package for the call
+    // (type strings carry the original package, whose functions are version-gated)
+    const stateInfo = await this.client.getObject({
+      id: poolStateObjectId,
+      options: { showContent: true },
+    })
+    const stateContent = stateInfo.data?.content
+    const stateFields =
+      stateContent?.dataType === 'moveObject'
+        ? (stateContent.fields as Record<string, unknown>)
+        : {}
+    const packageIds =
+      (stateFields['package_ids'] as unknown[] | undefined) ??
+      ((stateFields['ownable_state'] as { fields?: Record<string, unknown> } | undefined)?.fields?.[
+        'package_ids'
+      ] as unknown[] | undefined)
+    const latestPoolPackage =
+      Array.isArray(packageIds) && packageIds.length
+        ? (packageIds[packageIds.length - 1] as string)
+        : stateType.split('<')[0]!.split('::')[0]!
+
+    return { poolStateObjectId, tokenType, poolModule, latestPoolPackage, ccipPackage }
   }
 
   /**
@@ -858,9 +1036,41 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
   }
 
-  /** {@inheritDoc Chain.getBalance} */
-  async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getBalance'))
+  /**
+   * {@inheritDoc Chain.getBalance}
+   * @throws {@link CCIPArgumentInvalidError} if holder or token is invalid
+   */
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const owner = normalizeSuiAddress(opts.holder)
+    if (!isValidSuiAddress(owner)) {
+      throw new CCIPArgumentInvalidError('holder', String(opts.holder))
+    }
+
+    // Native SUI unless a token is given: coin type strings (
+    // `0x…::module::SYMBOL`) pass through, CoinMetadata ids are resolved to
+    // their coin type first
+    let coinType = SUI_NATIVE_COIN_TYPE
+    if (opts.token && !/^0x0+$/.test(opts.token)) {
+      if (opts.token.includes('::')) {
+        coinType = opts.token
+      } else {
+        const normalized = normalizeSuiAddress(opts.token)
+        if (!isValidSuiAddress(normalized)) {
+          throw new CCIPArgumentInvalidError('token', String(opts.token))
+        }
+        const objectResponse = await this.client.getObject({
+          id: normalized,
+          options: { showType: true },
+        })
+        coinType = objectResponse.data?.type?.match(/CoinMetadata<(.+)>$/)?.[1] ?? ''
+        if (!coinType) {
+          throw new CCIPArgumentInvalidError('token', `${opts.token} is not a CoinMetadata id`)
+        }
+      }
+    }
+
+    const balance = await this.client.getBalance({ owner, coinType })
+    return BigInt(balance.totalBalance)
   }
 
   /**
@@ -1076,21 +1286,37 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const args = await this.buildCcipSendArgs(opts.router, opts.destChainSelector, opts.message)
 
-    // Pick an onchain coin of the fee token to pay the fee with; the onramp
-    // splits the exact fee out of it itself.
-    const coins = await this.client.getCoins({
-      owner: wallet.toSuiAddress(),
-      coinType: args.coinType,
-    })
+    // Pick onchain coins of the fee token to pay the fee with; the onramp
+    // splits the exact fee out of the passed coin itself. When no single coin
+    // covers the fee, the sender's coins are merged inside the PTB and the
+    // merged coin is passed (the remaining balance stays owned by the sender).
+    const coinPages = []
+    let cursor
+    do {
+      const page = await this.client.getCoins({
+        owner: wallet.toSuiAddress(),
+        coinType: args.coinType,
+        ...(cursor ? { cursor } : {}),
+      })
+      coinPages.push(...page.data)
+      cursor = page.hasNextPage ? page.nextCursor : undefined
+    } while (cursor)
+
     const fee = opts.message.fee
-    const payment =
-      coins.data.find((c) => (fee == null ? true : BigInt(c.balance) >= fee)) ?? coins.data[0]
+    const feeSymbol = args.coinType === SUI_NATIVE_COIN_TYPE ? 'SUI' : args.coinType
+    let payment = coinPages.find((c) => (fee == null ? true : BigInt(c.balance) >= fee))
+    const merge = [] as typeof coinPages
     if (!payment) {
-      throw new CCIPInsufficientBalanceError(
-        '0',
-        fee?.toString() ?? '0',
-        args.coinType === SUI_NATIVE_COIN_TYPE ? 'SUI' : args.coinType,
-      )
+      payment = coinPages[0]
+      let total = BigInt(payment?.balance ?? 0)
+      for (const coin of coinPages.slice(1)) {
+        if (total >= (fee ?? 0n)) break
+        merge.push(coin)
+        total += BigInt(coin.balance)
+      }
+      if (!payment || total < (fee ?? 0n)) {
+        throw new CCIPInsufficientBalanceError(total.toString(), fee?.toString() ?? '0', feeSymbol)
+      }
     }
 
     const tx = new Transaction()
@@ -1099,6 +1325,124 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       target: `${args.ccipPackage}::onramp_state_helper::create_token_transfer_params`,
       arguments: [tx.pure.vector('u8', Array.from(args.receiverBytes))],
     })
+    // Merge the fee coins with `coin::join` move calls: `MergeCoins` commands are
+    // rejected by current nodes (`InvalidResultArity` on execution), and `join`
+    // returns nothing — it mutates the primary coin in place, which is
+    // re-referenced by its original input afterwards.
+    const feeCoin = tx.object(payment.coinObjectId)
+    for (const coin of merge) {
+      tx.moveCall({
+        target: '0x2::coin::join',
+        typeArguments: [args.coinType],
+        arguments: [feeCoin, tx.object(coin.coinObjectId)],
+      })
+    }
+
+    // Gas must come from an independent SUI coin: the node rejects a coin that
+    // is both the gas payment and a mutable program input ("cannot appear more
+    // than one in one transaction"), so fee coins are excluded from gas picks.
+    const GAS_BUDGET = 100_000_000n // 0.1 SUI, comfortably above send costs
+    const usedCoinIds = new Set([
+      payment.coinObjectId,
+      ...merge.map(({ coinObjectId }) => coinObjectId),
+    ])
+    let gasCandidates = coinPages
+    if (args.coinType !== SUI_NATIVE_COIN_TYPE) {
+      gasCandidates = []
+      let gasCursor
+      do {
+        const page = await this.client.getCoins({
+          owner: wallet.toSuiAddress(),
+          coinType: SUI_NATIVE_COIN_TYPE,
+          ...(gasCursor ? { cursor: gasCursor } : {}),
+        })
+        gasCandidates.push(...page.data)
+        gasCursor = page.hasNextPage ? page.nextCursor : undefined
+      } while (gasCursor)
+    }
+    const gasCoin = gasCandidates.find(
+      (coin) => !usedCoinIds.has(coin.coinObjectId) && BigInt(coin.balance) >= GAS_BUDGET,
+    )
+    if (!gasCoin) {
+      throw new CCIPError(
+        CCIPErrorCode.INSUFFICIENT_BALANCE,
+        `No independent SUI coin with at least 0.1 SUI available for gas`,
+      )
+    }
+    tx.setGasBudget(GAS_BUDGET)
+    tx.setGasPayment([
+      {
+        objectId: gasCoin.coinObjectId,
+        version: gasCoin.version,
+        digest: gasCoin.digest,
+      },
+    ])
+
+    // Token transfer: the token pool's `lock_or_burn` burns/locks the sender's
+    // coin and fills the hot-potato TokenTransferParams, which `ccip_send` then
+    // consumes to build the message's token amounts.
+    const tokenTransfer = args.tokenTransfers[0]
+    if (tokenTransfer) {
+      const amount = args.tokenAmounts[0]!
+      const tokenCoinPages = []
+      let tokenCursor
+      do {
+        const page = await this.client.getCoins({
+          owner: wallet.toSuiAddress(),
+          coinType: tokenTransfer.coinType,
+          ...(tokenCursor ? { cursor: tokenCursor } : {}),
+        })
+        tokenCoinPages.push(...page.data)
+        tokenCursor = page.hasNextPage ? page.nextCursor : undefined
+      } while (tokenCursor)
+
+      let tokenPayment = tokenCoinPages.find((c) => BigInt(c.balance) >= amount)
+      const tokenMerge = [] as typeof tokenCoinPages
+      if (!tokenPayment) {
+        tokenPayment = tokenCoinPages[0]
+        let total = BigInt(tokenPayment?.balance ?? 0)
+        for (const coin of tokenCoinPages.slice(1)) {
+          if (total >= amount) break
+          tokenMerge.push(coin)
+          total += BigInt(coin.balance)
+        }
+        if (!tokenPayment || total < amount) {
+          throw new CCIPInsufficientBalanceError(
+            total.toString(),
+            amount.toString(),
+            tokenTransfer.coinType,
+          )
+        }
+      }
+
+      // `lock_or_burn` consumes the ENTIRE coin passed to it, so split the
+      // exact transfer amount off first (the remainder stays with the sender).
+      const tokenCoin = tx.object(tokenPayment.coinObjectId)
+      for (const coin of tokenMerge) {
+        tx.moveCall({
+          target: '0x2::coin::join',
+          typeArguments: [tokenTransfer.coinType],
+          arguments: [tokenCoin, tx.object(coin.coinObjectId)],
+        })
+      }
+      const transferCoin = tx.moveCall({
+        target: '0x2::coin::split',
+        typeArguments: [tokenTransfer.coinType],
+        arguments: [tokenCoin, tx.pure.u64(amount)],
+      })
+      tx.moveCall({
+        target: `${tokenTransfer.poolPackage}::${tokenTransfer.poolModule}::lock_or_burn`,
+        typeArguments: [tokenTransfer.coinType],
+        arguments: [
+          tx.object(args.ccipObjectRef),
+          tokenParams,
+          transferCoin,
+          tx.pure.u64(opts.destChainSelector),
+          ...tokenTransfer.lockOrBurnParams.map((id) => tx.object(id)),
+        ],
+      })
+    }
+
     tx.moveCall({
       target: `${args.latestOnRamp}::ccip_send`,
       typeArguments: [args.coinType],
@@ -1111,7 +1455,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         tx.pure.vector('u8', Array.from(args.dataBytes)),
         tokenParams,
         tx.object(args.feeTokenMetadataId),
-        tx.object(payment.coinObjectId),
+        feeCoin,
         tx.pure.vector('u8', Array.from(args.extraArgsBytes)),
       ],
     })
@@ -1235,6 +1579,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     dataBytes: Uint8Array
     tokenAddresses: string[]
     tokenAmounts: bigint[]
+    tokenTransfers: {
+      coinType: string
+      poolPackage: string
+      poolModule: string
+      lockOrBurnParams: string[]
+    }[]
     extraArgsBytes: Uint8Array
   }> {
     // Accept the deployment's router handle (ccip state object) or the onramp itself
@@ -1243,22 +1593,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // but state pointers live on the ORIGINAL package: resolve the onramp state
     // from `onRamp`, and only the call target from `latestOnRamp`
     const latestOnRamp = await getLatestPackageId(onRamp, this.client)
-    // ccip_send's signature references structs (e.g. OnRampState) defined by the
-    // package's ORIGINAL version; calling the upgraded package would require the
-    // original package as a transaction input, which the TypeScript SDK cannot
-    // emit — the node rejects such calls with InvalidLinkage.
-    if (latestOnRamp.split('::')[0] !== normalizeSuiAddress(onRamp.split('::')[0]!)) {
-      throw new CCIPError(
-        CCIPErrorCode.UNKNOWN,
-        `OnRamp ${onRamp} has been upgraded to ${latestOnRamp.split('::')[0]}; ` +
-          'ccip_send on an upgraded Sui onramp is not supported by the TypeScript SDK ' +
-          '(the original package cannot be included as a transaction input). ' +
-          'Deploy a fresh (non-upgraded) onramp for this lane instead.',
-        { context: { onRamp, latestOnRamp } },
-      )
-    }
     const ccip = await getCcipStateAddress(latestOnRamp, this.client)
-    const ccipPackage = ccip.split('::')[0]!
+    // `ccip` names the ORIGINAL ccip package (its state pointers live there), but
+    // the `onramp_state_helper` call must target the package's latest version:
+    // older versions are version-gated and revert.
+    const ccipPackage = normalizeSuiAddress(
+      (await getLatestPackageId(ccip, this.client)).split('::')[0]!,
+    )
     const [ccipObjectRef, onRampState] = await Promise.all([
       getObjectRef(ccip, this.client),
       getObjectRef(onRamp, this.client),
@@ -1269,6 +1610,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     if (!message.receiver) throw new CCIPArgumentInvalidError('receiver', String(message.receiver))
     const receiverBytes = getAddressBytes(getMoveAddress(message.receiver))
     const dataBytes = getDataBytes(message.data ?? '0x')
+
+    if ((message.tokenAmounts?.length ?? 0) > 1) {
+      throw new CCIPArgumentInvalidError(
+        'tokenAmounts',
+        `Sui onramps support at most one token transfer per message (got ${message.tokenAmounts!.length})`,
+      )
+    }
 
     const tokenAddresses: string[] = []
     const tokenAmounts: bigint[] = []
@@ -1285,10 +1633,53 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       tokenAmounts.push(BigInt(tokenAmount.amount))
     }
 
+    // Resolve each transferred token's pool config from the token admin registry;
+    // `lock_or_burn` is called by the pool package, and its object params
+    // (clock, deny list, token state, pool state) are configured per token.
+    const tokenTransfers = []
+    for (const metadataId of tokenAddresses) {
+      const tx = new Transaction()
+      tx.moveCall({
+        target: `${ccipPackage}::token_admin_registry::get_token_config_data`,
+        arguments: [tx.object(ccipObjectRef), tx.pure.address(metadataId)],
+      })
+      const result = await this.client.devInspectTransactionBlock({
+        sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        transactionBlock: tx,
+      })
+      const returnValues = result.results?.[0]?.returnValues
+      if (result.effects.status.status !== 'success' || !returnValues?.length) {
+        throw new CCIPDataFormatUnsupportedError(
+          `Failed to call ${ccipPackage}::token_admin_registry::get_token_config_data for ${metadataId}: ${
+            result.effects.status.error || 'No return value'
+          }`,
+        )
+      }
+      // (pool_package_id, pool_module, token_type, administrator,
+      //  pending_administrator, type_proof, lock_or_burn_params, release_or_mint_params)
+      const [poolPackage, poolModule, tokenType, , , , lockOrBurnParams] = returnValues.map(
+        ([data]) => getDataBytes(data),
+      )
+      // Registry coin types may drop the `0x` prefix off the package address
+      const parsedCoinType = bcs.String.parse(tokenType!)
+      tokenTransfers.push({
+        coinType: parsedCoinType.replace(
+          /^([0-9a-fA-F]{1,64})::/,
+          (_, addr: string) => `0x${addr}::`,
+        ),
+        poolPackage: normalizeSuiAddress(hexlify(poolPackage!)),
+        poolModule: bcs.String.parse(poolModule!),
+        lockOrBurnParams: (
+          bcs.vector(bcs.Address).parse(lockOrBurnParams!) as unknown as Uint8Array[]
+        ).map((id) => normalizeSuiAddress(hexlify(id))),
+      })
+    }
+
     // Encoded on-chain extra args; the encoder picks the destination family's format
     // from the fields present (EVM V2 gasLimit, Solana computeUnits)
-    const { gasLimit, allowOutOfOrderExecution, computeUnits } =
-      message.extraArgs as MessageInput['extraArgs'] & Partial<EVMExtraArgsV2 & SVMExtraArgsV1>
+    const extraArgs = (message.extraArgs ?? {}) as MessageInput['extraArgs'] &
+      Partial<EVMExtraArgsV2 & SVMExtraArgsV1>
+    const { gasLimit, allowOutOfOrderExecution, computeUnits } = extraArgs
     const extraArgsBytes = getDataBytes(
       SuiChain.encodeExtraArgs({
         gasLimit: gasLimit ?? 0n,
@@ -1308,6 +1699,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       dataBytes,
       tokenAddresses,
       tokenAmounts,
+      tokenTransfers,
       extraArgsBytes,
     }
   }
@@ -1378,28 +1770,247 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getSupportedTokens} */
-  async getSupportedTokens(_address: string): Promise<string[]> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getSupportedTokens'))
+  async getSupportedTokens(registry: string): Promise<string[]> {
+    // The token admin registry is a module of the ccip package; its tokens are
+    // the keys of the `token_configs` LinkedTable<address, TokenConfig>.
+    const statePkg = normalizeSuiAddress(registry.split('::')[0]!)
+    const state = await this.getCcipModuleState(
+      `${statePkg}::state_object`,
+      '::token_admin_registry::TokenAdminRegistryState',
+    )
+    const tableId = (state?.['token_configs'] as { fields?: { id?: { id?: string } } } | undefined)
+      ?.fields?.id?.id
+    if (!tableId) return []
+
+    const tokens: string[] = []
+    let cursor: string | null | undefined
+    do {
+      const page = await this.client.getDynamicFields({
+        parentId: tableId,
+        ...(cursor ? { cursor } : {}),
+      })
+      for (const field of page.data) {
+        const name = field.name
+        if (name.type === 'address' && typeof name.value === 'string')
+          tokens.push(normalizeSuiAddress(name.value))
+      }
+      cursor = page.hasNextPage ? page.nextCursor : null
+    } while (cursor)
+    return tokens
   }
 
   /** {@inheritDoc Chain.getRegistryTokenConfig} */
-  async getRegistryTokenConfig(_address: string, _tokenName: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getRegistryTokenConfig'))
+  async getRegistryTokenConfig(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }> {
+    return withLookupRetry(() => this.getRegistryTokenConfig_(registry, token))
+  }
+
+  /** {@inheritDoc SuiChain.getRegistryTokenConfig} */
+  private async getRegistryTokenConfig_(
+    registry: string,
+    token: string,
+  ): Promise<{
+    administrator: string
+    pendingAdministrator?: string
+    tokenPool?: string
+  }> {
+    const ccip = `${normalizeSuiAddress(registry.split('::')[0]!)}::state_object`
+    const latestPkg = normalizeSuiAddress(
+      (await getLatestPackageId(ccip, this.client)).split('::')[0]!,
+    )
+    const ccipObjectRef = await getObjectRef(ccip, this.client)
+    const metadataId = token.includes('::')
+      ? ((await this.client.getCoinMetadata({ coinType: token }))?.id ?? '')
+      : normalizeSuiAddress(token)
+    if (!isValidSuiAddress(metadataId)) {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, `Error loading Sui token metadata: ${token}`)
+    }
+
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${latestPkg}::token_admin_registry::get_token_config`,
+      arguments: [tx.object(ccipObjectRef), tx.pure.address(metadataId)],
+    })
+
+    const result = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tx,
+    })
+
+    const returnValues = result.results?.[0]?.returnValues
+    if (result.effects.status.status !== 'success' || !returnValues?.length) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to call ${latestPkg}::token_admin_registry::get_token_config for ${metadataId}: ${
+          result.effects.status.error || 'No return value'
+        }`,
+      )
+    }
+
+    // (token_pool_package_id, administrator, pending_administrator)
+    const [poolBytes, adminBytes, pendingBytes] = returnValues.map(([data]) =>
+      normalizeSuiAddress(hexlify(new Uint8Array(data))),
+    )
+
+    const res: { administrator: string; pendingAdministrator?: string; tokenPool?: string } = {
+      administrator: adminBytes!,
+    }
+    if (!/^0x0+$/.test(pendingBytes!)) res.pendingAdministrator = pendingBytes
+    if (!/^0x0+$/.test(poolBytes!)) res.tokenPool = poolBytes
+
+    return res
   }
 
   /** {@inheritDoc Chain.getTokenPoolConfig} */
-  async getTokenPoolConfig(_tokenPool: string, _feeOpts?: TokenTransferFeeOpts): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenPoolConfig'))
+  async getTokenPoolConfig(
+    tokenPool: string,
+    _feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig> {
+    return withLookupRetry(() => this.getTokenPoolConfig_(tokenPool))
+  }
+
+  /** {@inheritDoc SuiChain.getTokenPoolConfig} */
+  private async getTokenPoolConfig_(tokenPool: string): Promise<TokenPoolConfig> {
+    const { poolStateObjectId, tokenType, poolModule, latestPoolPackage, ccipPackage } =
+      await this.getTokenPoolStateRef_(tokenPool)
+
+    // Local token: the pool state's `get_token` view returns its CoinMetadata id
+    const tokenTx = new Transaction()
+    tokenTx.moveCall({
+      target: `${latestPoolPackage}::${poolModule}::get_token`,
+      typeArguments: [tokenType],
+      arguments: [tokenTx.object(poolStateObjectId)],
+    })
+    const tokenInspect = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: tokenTx,
+    })
+    if (
+      tokenInspect.effects.status.status !== 'success' ||
+      !tokenInspect.results?.[0]?.returnValues?.[0]
+    ) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Failed to call ${latestPoolPackage}::${poolModule}::get_token: ${
+          tokenInspect.effects.status.error || 'No return value'
+        }`,
+      )
+    }
+    const [tokenData] = tokenInspect.results[0].returnValues[0]
+    const token = normalizeSuiAddress(hexlify(new Uint8Array(tokenData)))
+
+    // typeAndVersion: the pool module's static version string
+    const versionTx = new Transaction()
+    versionTx.moveCall({ target: `${latestPoolPackage}::${poolModule}::type_and_version` })
+    const versionInspect = await this.client.devInspectTransactionBlock({
+      sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      transactionBlock: versionTx,
+    })
+    const typeAndVersion =
+      versionInspect.effects.status.status === 'success' &&
+      versionInspect.results?.[0]?.returnValues?.[0]
+        ? bcs.String.parse(getDataBytes(versionInspect.results[0].returnValues[0][0]))
+        : undefined
+
+    return {
+      token,
+      // the disassembly's `token_admin_registry` import names the ccip package
+      router: ccipPackage ? `${ccipPackage}::state_object` : tokenType,
+      ...(typeAndVersion && { typeAndVersion }),
+    }
   }
 
   /** {@inheritDoc Chain.getTokenPoolRemotes} */
-  async getTokenPoolRemotes(_tokenPool: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getTokenPoolRemotes'))
+  async getTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    return withLookupRetry(() => this.getTokenPoolRemotes_(tokenPool, remoteChainSelector))
+  }
+
+  /** {@inheritDoc SuiChain.getTokenPoolRemotes} */
+  private async getTokenPoolRemotes_(
+    tokenPool: string,
+    remoteChainSelector?: bigint,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    const { poolStateObjectId } = await this.getTokenPoolStateRef_(tokenPool)
+
+    const info = await this.client.getObject({
+      id: poolStateObjectId,
+      options: { showContent: true },
+    })
+    const content = info.data?.content
+    if (content?.dataType !== 'moveObject') {
+      throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading token pool state content')
+    }
+
+    const tokenPoolState = (content.fields as Record<string, unknown>)['token_pool_state'] as
+      { fields?: { remote_chain_configs?: { fields?: { contents?: unknown[] } } } } | undefined
+    const contents = tokenPoolState?.fields?.remote_chain_configs?.fields?.contents ?? []
+
+    const remotes: Record<string, TokenPoolRemote> = {}
+    for (const entry of contents) {
+      const fields = (entry as { fields?: Record<string, unknown> } | null)?.fields
+      if (!fields || fields['key'] == null) continue
+      const selector = BigInt(fields['key'] as string | number | bigint)
+      if (remoteChainSelector !== undefined && selector !== remoteChainSelector) continue
+      const { family } = networkInfo(selector)
+      const value =
+        (fields['value'] as { fields?: Record<string, unknown> } | undefined)?.fields ?? {}
+      // EVM remotes store 32-byte left-padded addresses; other families keep
+      // theirs. Decoding needs the family's chain class registered (import the
+      // SDK root to register all of them).
+      const remoteTokenBytes = getDataBytes((value['remote_token_address'] ?? '0x') as BytesLike)
+      const remoteToken = decodeAddress(remoteTokenBytes, family)
+      remotes[networkInfo(selector).name] = {
+        remoteToken,
+        // On-chain anomaly work-around: some pools (CCIP BnM) carry remote
+        // pools whose bytes don't decode for their lane family; raw hex is
+        // better than failing the whole listing for those.
+        remotePools: ((value['remote_pools'] as unknown[] | undefined) ?? []).map((p) => {
+          try {
+            return decodeAddress(p as BytesLike, family)
+          } catch {
+            return hexlify(getDataBytes(p as never))
+          }
+        }),
+        outboundRateLimiterState: null,
+        inboundRateLimiterState: null,
+      }
+    }
+
+    if (remoteChainSelector !== undefined && !remotes[networkInfo(remoteChainSelector).name]) {
+      throw new CCIPTokenPoolChainConfigNotFoundError(
+        tokenPool,
+        tokenPool,
+        networkInfo(remoteChainSelector).name,
+      )
+    }
+    return remotes
   }
 
   /** {@inheritDoc Chain.getFeeTokens} */
-  async getFeeTokens(_router: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getFeeTokens'))
+  async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+    const ccip = await resolveCcipStateAddress(router, this.client)
+    const state = await this.getCcipModuleState(ccip, '::fee_quoter::FeeQuoterState')
+    const feeTokens = Array.isArray(state?.['fee_tokens']) ? (state['fee_tokens'] as string[]) : []
+    return Object.fromEntries(
+      await Promise.all(
+        feeTokens.map(async (metadataId) => {
+          let info: TokenInfo
+          try {
+            info = await this.getTokenInfo(metadataId)
+          } catch {
+            info = { symbol: 'UNKNOWN', decimals: 0 }
+          }
+          return [metadataId, info] as const
+        }),
+      ),
+    )
   }
 
   /**

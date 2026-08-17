@@ -2,6 +2,8 @@ import type { EventId, SuiEvent, SuiEventFilter, SuiJsonRpcClient } from '@myste
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
+import { CCIPError } from '../errors/CCIPError.ts'
+import { CCIPErrorCode } from '../errors/codes.ts'
 import {
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
@@ -223,6 +225,7 @@ async function* fetchEventsForward<T>(
   const txMetas = new Map<string, TxMeta>()
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
+  let softRounds = 0 // consecutive rounds lost to transient backend lag
 
   while (
     (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
@@ -244,6 +247,7 @@ async function* fetchEventsForward<T>(
     // Fetch events for this checkpoint range
     if (currentCheckpoint <= batchEndCheckpoint) {
       const collected: EventNode<T>[] = []
+      let roundTransientErr: unknown
 
       // Each type runs its own descending-paginated query with its own cursor
       // and early-exit (`done`) — a quiet type walking past the window must
@@ -255,14 +259,29 @@ async function* fetchEventsForward<T>(
         let done = false
 
         while (!done) {
-          const page = await withLookupRetry(() =>
-            ctx.client.queryEvents({
-              query: filter,
-              cursor,
-              limit,
-              order: 'descending',
-            }),
-          )
+          let page
+          try {
+            page = await withLookupRetry(() =>
+              ctx.client.queryEvents({
+                query: filter,
+                cursor,
+                limit,
+                order: 'descending',
+              }),
+            )
+          } catch (err) {
+            // Load-balanced proxy backends whose store hasn't caught up to the
+            // tip yet answer -32603 "Could not find the referenced transaction
+            // events": the range isn't gone, just not visible from this backend
+            // yet. Treat it as an empty-but-retryable round: don't advance the
+            // cursor, wait a poll interval (watch mode keeps polling anyway),
+            // and only surface the error to bounded, non-watching callers.
+            if (err instanceof Error && TRANSIENT_LOOKUP_ERROR.test(err.message)) {
+              roundTransientErr = err
+              break
+            }
+            throw err
+          }
           if (!page.data.length) break
 
           await resolveTxMetas(ctx.client, page.data, txMetas)
@@ -285,26 +304,42 @@ async function* fetchEventsForward<T>(
         }
       }
 
-      // collected now interleaves every type, each internally descending —
-      // sort ascending by (checkpoint, txDigest, eventSeq) so the merged
-      // output stays globally ascending instead of one-type-then-the-next
-      // (the caller advances a per-address block watermark and assumes a
-      // block is never split across returns).
-      collected.sort(
-        (a, b) =>
-          a.transaction!.effects.checkpoint.sequenceNumber -
-            b.transaction!.effects.checkpoint.sequenceNumber ||
-          a.transaction!.digest.localeCompare(b.transaction!.digest) ||
-          Number(a.sequenceNumber) - Number(b.sequenceNumber),
-      )
-      for (const node of collected) yield node
+      if (roundTransientErr && !collected.length) {
+        // nothing readable this round: keep the checkpoint cursor where it is
+        // and retry the round; bounded callers give up eventually, watchers
+        // ride it out across polls
+        softRounds++
+        if (!opts.watch && softRounds >= 4) {
+          throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Event lookups keep failing on this RPC: ', {
+            context: { error: (roundTransientErr as Error).message },
+          })
+        }
+      } else {
+        softRounds = 0
 
-      currentCheckpoint = batchEndCheckpoint + 1
+        // collected now interleaves every type, each internally descending —
+        // sort ascending by (checkpoint, txDigest, eventSeq) so the merged
+        // output stays globally ascending instead of one-type-then-the-next
+        // (the caller advances a per-address block watermark and assumes a
+        // block is never split across returns).
+        collected.sort(
+          (a, b) =>
+            a.transaction!.effects.checkpoint.sequenceNumber -
+              b.transaction!.effects.checkpoint.sequenceNumber ||
+            a.transaction!.digest.localeCompare(b.transaction!.digest) ||
+            Number(a.sequenceNumber) - Number(b.sequenceNumber),
+        )
+        for (const node of collected) yield node
+
+        currentCheckpoint = batchEndCheckpoint + 1
+      }
     }
 
     catchedUp ||= currentCheckpoint > batchEndCheckpoint
 
-    if (opts.watch && catchedUp) {
+    // soft rounds (backend store lag) also need a poll pause when watching,
+    // otherwise the loop would hot-spin a lagging proxy backend
+    if (opts.watch && (catchedUp || softRounds > 0)) {
       let delay$ = AbortSignal.timeout(
         Math.max(
           Math.ceil((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq)),

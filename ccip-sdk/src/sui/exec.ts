@@ -126,9 +126,16 @@ export async function signAndExecuteSuiTx(
     digest = result.digest
   } catch (e) {
     if (e instanceof CCIPExecTxRevertedError) throw e
+    // The node aborts pre-execution with MoveAbort before producing effects;
+    // translate the offramp's well-known gates into actionable messages.
+    const abortCode = (e as Error).message.match(/abort code: (\d+)/)?.[1]
+    const gate =
+      abortCode === '9'
+        ? ' (offramp abort 9: EManualExecutionNotYetEnabled - the commit must age past permissionlessExecutionThresholdSeconds before manual execution)'
+        : ''
     throw new CCIPError(
       CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
-      `Failed to send Sui execute transaction: ${(e as Error).message}`,
+      `Failed to send Sui execute transaction: ${(e as Error).message}${gate}`,
     )
   }
 
