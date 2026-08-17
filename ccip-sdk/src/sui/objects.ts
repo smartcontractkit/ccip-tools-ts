@@ -71,14 +71,22 @@ export const getObjectRef = memoize(
 
 async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise<string> {
   // addresses may come unpadded (e.g. from Move module metadata); normalize
-  const packageId = normalizeSuiAddress(address.split('::')[0]!)
+  const inputPackageId = normalizeSuiAddress(address.split('::')[0]!)
   const suffix = address.split('::').slice(1).join('::')
-  address = suffix ? `${packageId}::${suffix}` : packageId
 
   let stateObjectName
-  if (address.endsWith('::onramp')) stateObjectName = 'OnRampState'
-  else if (address.endsWith('::offramp')) stateObjectName = 'OffRampState'
+  if (suffix === 'onramp') stateObjectName = 'OnRampState'
+  else if (suffix === 'offramp') stateObjectName = 'OffRampState'
   else stateObjectName = 'CCIPObjectRef'
+
+  // The *StatePointer object is transferred to the ORIGINAL package address at
+  // publish time (`type_name::with_original_ids<OTW>()` in the Move contracts).
+  // Its StructType also carries the original id. If the caller passes a LATEST
+  // (upgraded) package id, both the owner filter and the StructType filter
+  // would miss it — resolve to the original first via the Move module metadata,
+  // whose `address` field is always the original package id.
+  const packageId = await resolveOriginalPackageId(inputPackageId, suffix, client)
+  address = suffix ? `${packageId}::${suffix}` : packageId
 
   const fullStatePointerType = `${address}::${stateObjectName}Pointer`
 
@@ -92,7 +100,7 @@ async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise
   if (!pointer?.objectId || pointer.content!.dataType !== 'moveObject')
     throw new CCIPDataFormatUnsupportedError(
       'No CCIP ObjectRef Pointer found for the given packageId',
-      { context: { fullStatePointerType, pointer } },
+      { context: { inputPackageId, originalPackageId: packageId, fullStatePointerType, pointer } },
     )
   // const statePointerObjectId = pointer.objectId
   const parentObjectId = Object.entries(pointer.content!.fields).find(([key]) =>
@@ -103,6 +111,37 @@ async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise
       context: { fullStatePointerType, pointer },
     })
   return deriveObjectID(parentObjectId, toUtf8Bytes(stateObjectName))
+}
+
+/**
+ * Resolves a Sui package id (which may be a LATEST, upgraded version) to its
+ * ORIGINAL published package id. Sui preserves the original id in the
+ * `address` field of every normalized module: on upgrade the package gets a
+ * new object id, but its modules keep referring to the original id in their
+ * type signatures and metadata.
+ *
+ * @param packageId - Normalized package id (32-byte hex, may be latest).
+ * @param moduleHint - Preferred module to consult (e.g. `onramp`); falls back
+ *   to any module when the hint is missing.
+ * @param client - Sui RPC client.
+ * @returns The original package id, normalized. Returns the input unchanged if
+ *   the RPC lookup fails (defensive: state-pointer lookup will then surface the
+ *   real problem with better context).
+ */
+async function resolveOriginalPackageId(
+  packageId: string,
+  moduleHint: string,
+  client: SuiJsonRpcClient,
+): Promise<string> {
+  try {
+    const modules = await client.getNormalizedMoveModulesByPackage({ package: packageId })
+    const preferred = moduleHint && modules[moduleHint] ? modules[moduleHint] : undefined
+    const anyModule = preferred ?? Object.values(modules)[0]
+    if (!anyModule?.address) return packageId
+    return normalizeSuiAddress(anyModule.address)
+  } catch {
+    return packageId
+  }
 }
 
 /**

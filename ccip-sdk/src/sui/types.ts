@@ -1,4 +1,5 @@
 import { bcs } from '@mysten/sui/bcs'
+import type { Keypair } from '@mysten/sui/cryptography'
 import { concat } from 'ethers'
 
 import { type SuiExtraArgsV1, SuiExtraArgsV1Tag } from '../extra-args.ts'
@@ -16,6 +17,21 @@ export type CCIPMessage_V1_6_Sui = CCIPMessage_V1_6 & SuiExtraArgsV1
 export type UnsignedSuiTx = {
   family: typeof ChainFamily.Sui
   transactions: [string]
+}
+
+/**
+ * Type guard for a Sui `Keypair` wallet (from `@mysten/sui/cryptography`).
+ * Checks for the signing surface used by `signAndExecuteSuiTx`.
+ * @param wallet - Value to check.
+ * @returns True if the value can sign Sui transactions.
+ */
+export function isSuiKeypair(wallet: unknown): wallet is Keypair {
+  return (
+    !!wallet &&
+    typeof wallet === 'object' &&
+    typeof (wallet as Keypair).getPublicKey === 'function' &&
+    typeof (wallet as Keypair).signTransaction === 'function'
+  )
 }
 
 export const SuiExtraArgsV1Codec = bcs.struct('SuiExtraArgsV1', {

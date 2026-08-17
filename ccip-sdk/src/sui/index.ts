@@ -3,7 +3,7 @@ import type { Keypair } from '@mysten/sui/cryptography'
 import { JsonRpcHTTPTransport, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
-import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
+import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString, toBigInt } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetOptional } from 'type-fest'
 
@@ -13,6 +13,7 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
+  type TokenInfo,
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
@@ -30,12 +31,13 @@ import {
   CCIPLogsAddressRequiredError,
   CCIPNotImplementedError,
   CCIPTopicsInvalidError,
+  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
-import { decodeMessage } from '../requests.ts'
+import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { decodeMoveExtraArgs, encodeMoveExtraArgs, getMoveAddress } from '../shared/bcs-codecs.ts'
 import { supportedChains } from '../supported-chains.ts'
 import type {
@@ -61,7 +63,8 @@ import {
   util,
 } from '../utils.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
-import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
+import { generateUnsignedCcipSend, getFee, getFeeTokens } from './send.ts'
+import { type CCIPMessage_V1_6_Sui, type UnsignedSuiTx, isSuiKeypair } from './types.ts'
 export type { UnsignedSuiTx }
 
 const DEFAULT_GAS_LIMIT = 1000000n
@@ -544,6 +547,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
   /** {@inheritDoc SuiChain.getTokenInfo} */
   private async getTokenInfo_(token: string): Promise<{ symbol: string; decimals: number }> {
+    // Coin type strings (e.g. "0x2::sui::SUI") must be handled before address
+    // normalization, since normalizeSuiAddress will mangle the :: separators.
+    if (token.includes('::')) {
+      const parts = token.split('::')
+      if (parts.length < 3) {
+        throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
+      }
+      return await this.getCoinMetadata_(token)
+    }
+
     const normalizedTokenAddress = normalizeSuiAddress(token)
     if (!isValidSuiAddress(normalizedTokenAddress)) {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
@@ -568,7 +581,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     let coinType: string
     const objectType = objectResponse.data?.type
 
-    // Check if this is a CoinMetadata object or a coin type string
+    // Check if this is a CoinMetadata object
     if (objectType?.includes('CoinMetadata')) {
       // Read symbol/decimals from the metadata object itself; the node's
       // coin-registry lookup (suix_getCoinMetadata) is unreliable on some
@@ -581,9 +594,6 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         }
       }
       coinType = getCoinFromMetadata(objectType)
-    } else if (token.includes('::')) {
-      // This is a coin type string (e.g., "0xabc::coin::COIN")
-      coinType = token
     } else {
       // This is a package address or unknown format
       throw new CCIPError(
@@ -592,6 +602,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       )
     }
 
+    return await this.getCoinMetadata_(coinType)
+  }
+
+  /**
+   * Looks up coin metadata via suix_getCoinMetadata for a fully-qualified
+   * coin type string (e.g. "0x2::sui::SUI").
+   */
+  private async getCoinMetadata_(coinType: string): Promise<{ symbol: string; decimals: number }> {
     if (coinType.split('::').length < 3) {
       throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Error loading Sui token metadata')
     }
@@ -615,8 +633,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getBalance} */
-  async getBalance(_opts: GetBalanceOpts): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getBalance'))
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    const balance = await this.client.getBalance({
+      owner: opts.holder,
+      coinType: opts.token,
+    })
+    return toBigInt(balance.totalBalance)
   }
 
   /**
@@ -779,20 +801,47 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getFee} */
-  async getFee(_opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getFee'))
+  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+    const { router, destChainSelector, message } = opts
+    const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
+    return getFee(this, router, destChainSelector, populatedMessage)
   }
 
   /** {@inheritDoc Chain.generateUnsignedSendMessage} */
-  override generateUnsignedSendMessage(
-    _opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
-  ): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.generateUnsignedSendMessage'))
+  override async generateUnsignedSendMessage(
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0] & { txGasLimit?: number },
+  ): Promise<UnsignedSuiTx> {
+    const { sender, router, destChainSelector } = opts
+    const populatedMessage = buildMessageForDest(
+      opts.message,
+      networkInfo(destChainSelector).family,
+    )
+    const message = {
+      ...populatedMessage,
+      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
+    }
+    return generateUnsignedCcipSend(this.client, sender, router, destChainSelector, message, {
+      ...(opts.txGasLimit != null ? { gasLimit: opts.txGasLimit } : {}),
+    })
   }
 
-  /** {@inheritDoc Chain.sendMessage} */
-  async sendMessage(_opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.sendMessage'))
+  /**
+   * {@inheritDoc Chain.sendMessage}
+   * @throws {@link CCIPWalletInvalidError} if wallet is not a Sui Keypair
+   * @throws {@link CCIPError} if transaction submission fails
+   */
+  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+    const wallet = opts.wallet
+    if (!isSuiKeypair(wallet)) {
+      throw new CCIPWalletInvalidError(opts.wallet, { className: this.constructor.name })
+    }
+
+    const sender = wallet.getPublicKey().toSuiAddress()
+    const unsignedTx = await this.generateUnsignedSendMessage({ ...opts, sender })
+
+    const digest = await signAndExecuteSuiTx(this.client, wallet, unsignedTx, this.logger)
+
+    return (await this.getMessagesInTx(await this.getTransaction(digest)))[0]!
   }
 
   /**
@@ -881,8 +930,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /** {@inheritDoc Chain.getFeeTokens} */
-  async getFeeTokens(_router: string): Promise<never> {
-    return Promise.reject(new CCIPNotImplementedError('SuiChain.getFeeTokens'))
+  async getFeeTokens(router: string): Promise<Record<string, TokenInfo>> {
+    return getFeeTokens(this, router, (token) => this.getTokenInfo(token))
   }
 
   /**
