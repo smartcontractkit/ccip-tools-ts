@@ -17,11 +17,16 @@ import {
   type ExecuteCreateTokenAccountResult,
   type ExecuteDeployTokenParams,
   type ExecuteDeployTokenResult,
+  type ExecuteTransferAuthorityParams,
+  type ExecuteTransferAuthorityResult,
   type GenerateCreateTokenAccountParams,
   type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
+  type GenerateTransferAuthorityParams,
+  type GenerateTransferAuthorityResult,
   CreateTokenAccount,
+  TransferAuthority,
 } from './token/operations/index.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -144,6 +149,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #transferAuthority = new TransferAuthority()
 
   // Token admin registry operations
   readonly #acceptAdmin = new AcceptAdmin()
@@ -307,6 +313,66 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions for an immediate SPL Token mint and/or freeze authority transfer.
+   *
+   * @remarks
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. Set `newAuthority` to null to permanently revoke the selected
+   * roles; a revoked role cannot be transferred or restored. All selected roles must have the same
+   * current authority. The instructions are atomic: no role changes if any selected transfer fails.
+   * `authority` defaults to `payer`. For an SPL Token multisig authority, provide `multisigSigners`
+   * and collect member signatures externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority,
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
+   */
+  generateUnsignedTransferAuthority(
+    opts: GenerateTransferAuthorityParams,
+  ): Promise<GenerateTransferAuthorityResult> {
+    return this.#transferAuthority.generate(this.chain, opts)
+  }
+
+  /**
+   * Immediately transfers SPL Token mint and/or freeze authority using the executing wallet.
+   *
+   * @remarks
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. Set `newAuthority` to null to permanently revoke the selected
+   * roles; a revoked role cannot be transferred or restored. All selected roles must have the same
+   * current authority. The transaction is atomic: no role changes if any selected transfer fails.
+   * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
+   * {@link generateUnsignedTransferAuthority}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
+   * ```
+   */
+  transferAuthority(opts: ExecuteTransferAuthorityParams): Promise<ExecuteTransferAuthorityResult> {
+    return this.#transferAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -1674,6 +1740,10 @@ export {
 } from './programs/token-pool.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/operations/transfer-authority.ts'
+export { REGISTER_ADMIN_METHODS } from './token-admin-registry/operations/register-admin.ts'
+export type { TokenAuthorityType } from './token/operations/transfer-authority.ts'
+export type { RegisterAdminMethod } from './token-admin-registry/operations/register-admin.ts'
 export type * from './token/operations/index.ts'
 export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
