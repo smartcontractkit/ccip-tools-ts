@@ -64,6 +64,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.setRateLimitAdmin, 'function')
     assert.equal(typeof cct.generateUnsignedTransferPoolOwnership, 'function')
     assert.equal(typeof cct.transferPoolOwnership, 'function')
+    assert.equal(typeof cct.generateUnsignedAcceptPoolOwnership, 'function')
+    assert.equal(typeof cct.acceptPoolOwnership, 'function')
     assert.equal(typeof cct.generateUnsignedEditChainRemoteConfig, 'function')
     assert.equal(typeof cct.editChainRemoteConfig, 'function')
     assert.equal(typeof cct.generateUnsignedRemoveFromAllowlist, 'function')
