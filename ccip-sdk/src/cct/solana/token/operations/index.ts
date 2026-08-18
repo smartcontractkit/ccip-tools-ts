@@ -6,4 +6,5 @@ export type {
   ExecuteTransferAuthorityResult,
   GenerateTransferAuthorityParams,
   GenerateTransferAuthorityResult,
+  TokenAuthorityType,
 } from './transfer-authority.ts'

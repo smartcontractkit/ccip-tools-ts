@@ -1738,12 +1738,10 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
-export type { TransactionResult } from '../operation.ts'
-export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export { TOKEN_AUTHORITY_TYPES } from './token/operations/transfer-authority.ts'
 export { REGISTER_ADMIN_METHODS } from './token-admin-registry/operations/register-admin.ts'
-export type { TokenAuthorityType } from './token/operations/transfer-authority.ts'
-export type { RegisterAdminMethod } from './token-admin-registry/operations/register-admin.ts'
+export type { TransactionResult } from '../operation.ts'
+export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
 export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
