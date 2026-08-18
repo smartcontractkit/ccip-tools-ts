@@ -1320,7 +1320,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    *   2. Decode the hash and call `signer.sign(hashBytes)`.
    *   3. Execute the signed transaction (`/v2/interactive-submission/executeAndWaitForTransaction`).
    */
-  private async submitCommands(
+  async submitCommands(
     commands: JsCommands,
     signer?: TransactionSigner,
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
