@@ -154,7 +154,6 @@ export {
   decodeDamlRecord,
   extractFieldValue,
   extractRecordField,
-  flattenCantonRecord,
 } from './events.ts'
 /**
  * Canton chain implementation supporting Canton Ledger networks.
