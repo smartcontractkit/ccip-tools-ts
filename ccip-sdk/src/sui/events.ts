@@ -2,8 +2,6 @@ import type { EventId, SuiEvent, SuiEventFilter, SuiJsonRpcClient } from '@myste
 import { memoize } from 'micro-memoize'
 
 import type { LogFilter } from '../chain.ts'
-import { CCIPError } from '../errors/CCIPError.ts'
-import { CCIPErrorCode } from '../errors/codes.ts'
 import {
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
@@ -65,6 +63,15 @@ const MULTI_GET_CHUNK = 50
  */
 const TRANSIENT_LOOKUP_ERROR =
   /could not find the referenced transaction|No CCIP ObjectRef Pointer found|Invalid token pool type|Error loading Sui token metadata|not a CoinMetadata object or coin type/i
+
+/**
+ * The deprecated `queryEvents` API is broken chain-wide on current nodes: every
+ * match walk eventually references a transaction whose events the node can no
+ * longer resolve (retention-boundary), even cursor-less. When this is hit, the
+ * stream falls back to walking checkpoints (`getCheckpoints` +
+ * `multiGetTransactionBlocks`), which serves whatever the node still retains.
+ */
+const REFERENCED_TX_EVENTS_ERROR = /could not find the referenced transaction events/i
 
 /** Retries RPC lookups which may transiently fail on unsynced proxy backends. */
 export async function withLookupRetry<T>(op: () => Promise<T>, retries = 4): Promise<T> {
@@ -139,6 +146,70 @@ async function resolveTxMetas(
       })
     }
   }
+}
+
+async function collectByCheckpointWalk<T>(
+  client: SuiJsonRpcClient,
+  types: string[],
+  fromCheckpoint: number,
+  toCheckpoint: number,
+  txMetas: Map<string, TxMeta>,
+): Promise<EventNode<T>[]> {
+  const collected: EventNode<T>[] = []
+  let cursor: string | null | undefined = String(fromCheckpoint)
+  for (;;) {
+    const page = await withLookupRetry(() =>
+      client.getCheckpoints({ cursor, limit: 100, descendingOrder: false }),
+    )
+    const digests: string[] = []
+    let pastWindow = false
+    for (const checkpoint of page.data) {
+      const seq = Number(checkpoint.sequenceNumber)
+      if (seq < fromCheckpoint) continue
+      if (seq > toCheckpoint) {
+        pastWindow = true
+        break
+      }
+      const meta: TxMeta = {
+        checkpoint: seq,
+        timestampMs: Number(checkpoint.timestampMs),
+      }
+      for (const digest of checkpoint.transactions) {
+        txMetas.set(digest, meta)
+        digests.push(digest)
+      }
+    }
+
+    for (let i = 0; i < digests.length; i += MULTI_GET_CHUNK) {
+      const txs = await withLookupRetry(() =>
+        client.multiGetTransactionBlocks({
+          digests: digests.slice(i, i + MULTI_GET_CHUNK),
+          options: { showEvents: true },
+        }),
+      )
+      for (const tx of txs) {
+        const meta = txMetas.get(tx.digest)
+        if (!meta) continue
+        for (const event of tx.events ?? []) {
+          if (!types.includes(event.type)) continue
+          collected.push(toEventNode<T>(event, meta))
+        }
+      }
+    }
+
+    if (pastWindow || !page.hasNextPage) break
+    cursor = page.nextCursor
+  }
+
+  // walk order is ascending; sort for a deterministic merge
+  collected.sort(
+    (a, b) =>
+      a.transaction!.effects.checkpoint.sequenceNumber -
+        b.transaction!.effects.checkpoint.sequenceNumber ||
+      a.transaction!.digest.localeCompare(b.transaction!.digest) ||
+      Number(a.sequenceNumber) - Number(b.sequenceNumber),
+  )
+  return collected
 }
 
 function toEventNode<T>(event: SuiEvent, meta: TxMeta): EventNode<T> {
@@ -226,6 +297,7 @@ async function* fetchEventsForward<T>(
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
   let softRounds = 0 // consecutive rounds lost to transient backend lag
+  let walkMode = false // queryEvents is unusable; walk checkpoints instead
 
   while (
     (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
@@ -249,58 +321,101 @@ async function* fetchEventsForward<T>(
       const collected: EventNode<T>[] = []
       let roundTransientErr: unknown
 
-      // Each type runs its own descending-paginated query with its own cursor
-      // and early-exit (`done`) — a quiet type walking past the window must
-      // not affect a busier type's pagination — but every type accumulates
-      // into the SAME collected array so the whole round merges into one
-      // ascending stream below.
-      for (const filter of filters) {
-        let cursor: EventId | null | undefined = undefined
-        let done = false
+      if (walkMode) {
+        // The node's queryEvents is unusable: walk checkpoints and read each
+        // tx's events, which serves whatever the node still retains
+        collected.push(
+          ...(await collectByCheckpointWalk<T>(
+            ctx.client,
+            types,
+            currentCheckpoint,
+            batchEndCheckpoint,
+            txMetas,
+          )),
+        )
+      } else {
+        // Each type runs its own descending-paginated query with its own cursor
+        // and early-exit (`done`) — a quiet type walking past the window must
+        // not affect a busier type's pagination — but every type accumulates
+        // into the SAME collected array so the whole round merges into one
+        // ascending stream below.
+        for (const filter of filters) {
+          let cursor: EventId | null | undefined = undefined
+          let cursorResets = 0
+          let done = false
 
-        while (!done) {
-          let page
-          try {
-            page = await withLookupRetry(() =>
-              ctx.client.queryEvents({
-                query: filter,
-                cursor,
-                limit,
-                order: 'descending',
-              }),
-            )
-          } catch (err) {
-            // Load-balanced proxy backends whose store hasn't caught up to the
-            // tip yet answer -32603 "Could not find the referenced transaction
-            // events": the range isn't gone, just not visible from this backend
-            // yet. Treat it as an empty-but-retryable round: don't advance the
-            // cursor, wait a poll interval (watch mode keeps polling anyway),
-            // and only surface the error to bounded, non-watching callers.
-            if (err instanceof Error && TRANSIENT_LOOKUP_ERROR.test(err.message)) {
-              roundTransientErr = err
-              break
+          while (!done) {
+            let page
+            try {
+              page = await withLookupRetry(() =>
+                ctx.client.queryEvents({
+                  query: filter,
+                  cursor,
+                  limit,
+                  order: 'descending',
+                }),
+              )
+            } catch (err) {
+              if (err instanceof Error && REFERENCED_TX_EVENTS_ERROR.test(err.message)) {
+                // The retention-boundary failure is permanent for queryEvents
+                // on current nodes: switch the whole stream to the checkpoint
+                // walk and redo this round with it
+                walkMode = true
+                collected.length = 0
+                break
+              }
+              // Load-balanced proxy backends whose store hasn't caught up to
+              // the tip yet answer -32603 "Could not find the referenced
+              // transaction events": the range isn't gone, just not visible
+              // from this backend yet. A cursorless retry often lands on a
+              // synced backend, so give the first page two fresh shots before
+              // treating the round as lost (then don't advance the cursor:
+              // watch mode keeps polling).
+              if (err instanceof Error && TRANSIENT_LOOKUP_ERROR.test(err.message)) {
+                if (cursor != null && cursorResets < 2) {
+                  cursor = undefined
+                  cursorResets++
+                  continue
+                }
+                roundTransientErr = err
+                break
+              }
+              throw err
             }
-            throw err
-          }
-          if (!page.data.length) break
+            if (!page.data.length) break
 
-          await resolveTxMetas(ctx.client, page.data, txMetas)
+            await resolveTxMetas(ctx.client, page.data, txMetas)
 
-          for (const event of page.data) {
-            const meta = txMetas.get(event.id.txDigest)!
-            // descending order: once we pass the start of the range, so does everything after
-            if (meta.checkpoint < currentCheckpoint) {
-              done = true
-              break
+            for (const event of page.data) {
+              const meta = txMetas.get(event.id.txDigest)!
+              // descending order: once we pass the start of the range, so does everything after
+              if (meta.checkpoint < currentCheckpoint) {
+                done = true
+                break
+              }
+              if (meta.checkpoint > batchEndCheckpoint) continue
+              // Filter by startTime if provided
+              if (opts.startTime != null && meta.timestampMs / 1000 < Number(opts.startTime))
+                continue
+              collected.push(toEventNode<T>(event, meta))
             }
-            if (meta.checkpoint > batchEndCheckpoint) continue
-            // Filter by startTime if provided
-            if (opts.startTime != null && meta.timestampMs / 1000 < Number(opts.startTime)) continue
-            collected.push(toEventNode<T>(event, meta))
-          }
 
-          if (!page.hasNextPage) break
-          cursor = page.nextCursor
+            if (!page.hasNextPage) break
+            cursor = page.nextCursor
+          }
+          if (walkMode) break
+        }
+
+        if (walkMode) {
+          collected.push(
+            ...(await collectByCheckpointWalk<T>(
+              ctx.client,
+              types,
+              currentCheckpoint,
+              batchEndCheckpoint,
+              txMetas,
+            )),
+          )
         }
       }
 
@@ -309,10 +424,15 @@ async function* fetchEventsForward<T>(
         // and retry the round; bounded callers give up eventually, watchers
         // ride it out across polls
         softRounds++
-        if (!opts.watch && softRounds >= 4) {
-          throw new CCIPError(CCIPErrorCode.UNKNOWN, 'Event lookups keep failing on this RPC: ', {
-            context: { error: (roundTransientErr as Error).message },
-          })
+        if (!opts.watch && softRounds >= 6) {
+          // Bounded scans end gracefully: the lagging backend just misses the
+          // tail of the range (callers refetch receipts on their own cadence);
+          // throwing would break show/wait flows with proxy lag
+          ctx.logger?.warn(
+            `Sui event lookups kept failing on this RPC after ${softRounds} rounds; ` +
+              `stopping the scan early (${(roundTransientErr as Error).message})`,
+          )
+          return
         }
       } else {
         softRounds = 0

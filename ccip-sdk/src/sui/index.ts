@@ -201,8 +201,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Monkey-patched memoized RPC reads (same pattern as EVM/Solana): these
     // are the object-level lookups every split-out discovery helper shares;
     // state/config/metadata objects change only on upgrade, so short-TTL
-    // caching collapses the repeated identical reads across call sites.
-    // Balance/coin queries and devInspect are left live.
+    // caching collapses the repeated identical reads across call sites
+    // (async memoization does not cache rejections, so transient backend lag
+    // retries cleanly). Balance/coin queries and devInspect are left live.
     this.client.getTransactionBlock = memoize(this.client.getTransactionBlock.bind(this.client), {
       async: true,
       maxArgs: 1,
@@ -767,6 +768,99 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       destChainSelector,
       this.client,
     ))
+  }
+
+  /**
+   * Yields execution receipts for an offramp (Sui override of
+   * Chain.getExecutionReceipts).
+   *
+   * Sui fullnodes can no longer serve event queries over ranges whose txs were
+   * pruned from the event-tx linkage ("Could not find the referenced transaction
+   * events", on every provider tested); the indexer's transaction listing by the
+   * offramp's execution moves is the only queryable event source, and each
+   * listed tx carries its ExecutionStateChanged or SkippedAlreadyExecuted events.
+   */
+  override async *getExecutionReceipts(
+    opts: Parameters<Chain['getExecutionReceipts']>[0],
+  ): AsyncIterableIterator<CCIPExecution> {
+    const { offRamp, messageId, sourceChainSelector, ...hints } = opts
+    // executions target the LATEST offramp package (older versions are
+    // version-gated and revert), so the indexer filter must too
+    const offRampPkg = normalizeSuiAddress(
+      (await getLatestPackageId(offRamp, this.client)).split('::')[0]!,
+    )
+    const startTimeMs = hints.startTime != null ? Number(hints.startTime) * 1000 : 0
+    const startCheckpoint = hints.startBlock != null ? Number(hints.startBlock) : 0
+    const yielded = new Set<string>()
+
+    const execFns = ['init_execute', 'manually_init_execute']
+    for (;;) {
+      let found = 0
+      for (const fn of execFns) {
+        let cursor: string | null | undefined
+        let outOfWindow = false
+        for (;;) {
+          if (outOfWindow) break
+          const res = await withLookupRetry(() =>
+            this.client.queryTransactionBlocks({
+              filter: {
+                MoveFunction: { package: offRampPkg, module: 'offramp', function: fn },
+              },
+              options: { showEvents: true },
+              limit: 50,
+              ...(cursor ? { cursor } : {}),
+            }),
+          )
+          for (const block of res.data) {
+            // indexer lists newest first; below the window everything is older
+            const checkpoint = Number(block.checkpoint ?? 0)
+            if (checkpoint && checkpoint < startCheckpoint) {
+              outOfWindow = true
+              break
+            }
+            const tsMs = Number(block.timestampMs ?? 0)
+            if (tsMs && tsMs < startTimeMs) {
+              outOfWindow = true
+              break
+            }
+            if (yielded.has(block.digest)) continue
+            yielded.add(block.digest)
+
+            for (const [i, event] of (block.events ?? []).entries()) {
+              const eventName = event.type.slice(event.type.lastIndexOf('::') + 2)
+              // SkippedAlreadyExecuted is not an execution: only the state-change
+              // receipts count
+              if (eventName !== 'ExecutionStateChanged') continue
+              const log: ChainLog = {
+                address: offRamp,
+                transactionHash: block.digest,
+                index: i,
+                blockNumber: checkpoint,
+                blockTimestamp: tsMs / 1000,
+                data: event.parsedJson as Record<string, unknown>,
+                topics: [eventName],
+              }
+              const receipt = (this.constructor as ChainStatic).decodeReceipt(log)
+              if (!receipt) continue
+              if (messageId && receipt.messageId && receipt.messageId !== messageId) continue
+              if (
+                sourceChainSelector &&
+                receipt.sourceChainSelector &&
+                receipt.sourceChainSelector !== sourceChainSelector
+              )
+                continue
+              yield { receipt, log }
+              found++
+              if (receipt.state === (2 as ExecutionState)) return
+            }
+          }
+          if (!res.hasNextPage) break
+          cursor = res.nextCursor
+        }
+      }
+      if (!hints.watch) break
+      if (!found) await new Promise((resolve) => setTimeout(resolve, 5000))
+    }
   }
 
   /**
@@ -1753,8 +1847,16 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const digest = await signAndExecuteSuiTx(this.client, wallet, unsignedTx, this.logger)
 
-    // Return the transaction as a ChainTransaction
-    return this.getExecutionReceiptInTx(await this.getTransaction(digest))
+    // Load-balanced proxies may serve the fresh execution from a backend that
+    // hasn't indexed it yet (the tx returns without logs); poll instead of
+    // misreporting a successful on-chain execution as reverted
+    for (let attempt = 0; ; attempt++) {
+      const tx = await this.getTransaction(digest)
+      if (tx.logs.length) return this.getExecutionReceiptInTx(tx)
+      if (attempt >= 5) break
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+    return this.getExecutionReceiptInTx(digest)
   }
 
   /**
