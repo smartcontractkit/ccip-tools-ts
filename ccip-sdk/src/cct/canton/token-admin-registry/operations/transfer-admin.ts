@@ -11,9 +11,9 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
-import { buildTarExercise, resolveTarCid, resolveTokenConfigCid } from '../shared.ts'
+import { buildTarExercise, resolveTarRef, resolveTokenConfigRef } from '../shared.ts'
 
 /** Parameters shared by TAR `transferAdmin` generation and execution. */
 export interface TransferAdminParams {
@@ -29,7 +29,7 @@ export interface TransferAdminParams {
 
 /** Parsed `transferAdmin` params. */
 type ParsedTransferAdminParams = Omit<
-  CantonExecuteParams<TransferAdminParams>,
+  CantonGenerateParams<TransferAdminParams>,
   'instrumentId' | 'tarCid' | 'tokenConfigCid'
 > & {
   instrumentId: { admin: string; id: string }
@@ -38,7 +38,7 @@ type ParsedTransferAdminParams = Omit<
 }
 
 /** Parameters for unsigned TAR `transferAdmin` generation. */
-export type GenerateTransferAdminParams = CantonExecuteParams<TransferAdminParams>
+export type GenerateTransferAdminParams = CantonGenerateParams<TransferAdminParams>
 
 /** Unsigned TAR `transferAdmin` result. */
 export type GenerateTransferAdminResult = UnsignedCantonTx
@@ -76,15 +76,15 @@ export class TransferAdmin extends CantonOperation<TransferAdminParams, ParsedTr
     chain: CantonChain,
     p: ParsedTransferAdminParams,
   ): Promise<JsCommands> {
-    const tarCid = p.tarCid ?? (await resolveTarCid(chain, p.wallet))
-    const tokenConfigCid = p.tokenConfigCid ?? (await resolveTokenConfigCid(chain, p.instrumentId))
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
+    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
 
     return buildTarExercise({
       choice: 'TransferAdminRole',
-      tarCid,
-      tokenConfigCid,
+      tarContract,
+      tokenConfigContract,
       choiceArgument: { instrumentId: p.instrumentId, newAdmin: p.newAdmin },
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-transfer-admin',
     })
   }

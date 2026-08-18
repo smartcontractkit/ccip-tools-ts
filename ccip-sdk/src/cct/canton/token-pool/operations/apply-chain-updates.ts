@@ -12,10 +12,10 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseContractCid } from '../../validate.ts'
-import { buildPoolExercise } from '../shared.ts'
+import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
 export interface ChainUpdate {
@@ -52,7 +52,7 @@ export interface ApplyChainUpdatesParams {
 }
 
 /** Parameters for unsigned `applyChainUpdates` generation. */
-export type GenerateApplyChainUpdatesParams = CantonExecuteParams<ApplyChainUpdatesParams>
+export type GenerateApplyChainUpdatesParams = CantonGenerateParams<ApplyChainUpdatesParams>
 
 /** Unsigned `applyChainUpdates` result. */
 export type GenerateApplyChainUpdatesResult = UnsignedCantonTx
@@ -104,12 +104,14 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
   /** Builds the `ApplyChainUpdates` exercise command against the pool. */
   protected async buildCommands(
     chain: CantonChain,
-    p: CantonExecuteParams<ApplyChainUpdatesParams>,
+    p: CantonGenerateParams<ApplyChainUpdatesParams>,
   ): Promise<JsCommands> {
     const templateId =
       p.poolType === 'burnMint'
         ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
         : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+
+    const poolContract = await resolvePoolRef(chain, p.poolCid, p.poolType, p.sender)
 
     const choiceArgument: Record<string, unknown> = {
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),
@@ -129,9 +131,9 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
     return buildPoolExercise({
       choice: 'ApplyChainUpdates',
       templateId,
-      poolCid: p.poolCid,
+      poolContract,
       choiceArgument,
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-apply-chain-updates',
     })
   }

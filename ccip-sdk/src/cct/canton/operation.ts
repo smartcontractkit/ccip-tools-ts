@@ -2,29 +2,50 @@
  * Canton {@link Operation} lifecycle: validate → parse → build unsigned
  * `JsCommands` → submit via {@link CantonChain.submitCommands}.
  *
- * Canton CCT operations build the same `JsCommands` exercise-choice payloads
- * the core `CantonChain.sendMessage`/`execute` paths already submit, so
- * `execute` reuses {@link CantonChain.submitCommands} (prepare → sign →
- * execute when a `signer` is present, direct submit otherwise) unchanged.
+ * Mirrors the Solana split: {@link CantonGenerateParams} (with an explicit
+ * `sender` party, no wallet) for {@link generate}, and {@link CantonExecuteParams}
+ * (with a `wallet`) for {@link execute}. `execute` derives `sender` from
+ * `wallet.party`, builds the commands, and submits via
+ * {@link CantonChain.submitCommands} (prepare → sign → execute when a `signer`
+ * is present, direct submit otherwise).
  *
  * @packageDocumentation
  */
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { CantonChain } from '../../canton/index.ts'
-import type {
-  CantonWallet,
-  UnsignedCantonTx,
-} from '../../canton/types.ts'
+import { type CantonWallet, isCantonWallet, type UnsignedCantonTx } from '../../canton/types.ts'
 import type { JsCommands } from '../../canton/client/index.ts'
-import type { TransactionResult } from '../operation.ts'
 import { Operation } from '../operation.ts'
 import type { CantonTransactionResult } from './types.ts'
 
-/** Canton execute params: an op's own params plus the signing `wallet`. */
+/**
+ * Canton generate params: an op's own params plus the acting `sender` party.
+ * No wallet — used by {@link CantonOperation.generate} to build unsigned txs.
+ */
+export type CantonGenerateParams<P extends object> = P & {
+  /** Acting party ID (`hint::1220…`), used for `actAs`. */
+  sender: string
+}
+
+/**
+ * Canton execute params: an op's own params plus the signing `wallet`.
+ * `sender` is derived from `wallet.party` by {@link CantonOperation.execute},
+ * so callers omit `sender` on execute (only `wallet` is required).
+ *
+ * Structurally includes `sender?` so the type satisfies the base
+ * `ExecuteParams<CantonGenerateParams<P>>` contract (which requires `sender`).
+ */
 export type CantonExecuteParams<P extends object> = P & {
-  /** Canton wallet identifying the acting party (and optional external signer). */
-  wallet: CantonWallet
+  /**
+   * Canton wallet identifying the acting party (and optional external signer).
+   * Declared `unknown` (matching the base `ExecuteParams` contract) and narrowed
+   * to {@link CantonWallet} inside {@link CantonOperation.execute} via
+   * {@link isCantonWallet}, so this override stays assignable to the base.
+   */
+  wallet: unknown
+  /** Acting party ID — optional on execute; derived from `wallet.party`. */
+  sender?: string
 }
 
 /**
@@ -34,11 +55,14 @@ export type CantonExecuteParams<P extends object> = P & {
  * `generate` returns an {@link UnsignedCantonTx} (a `JsCommands` ready for
  * interactive submission or external signing). `execute` signs and submits via
  * {@link CantonChain.submitCommands} and returns the confirmed `updateId`.
+ *
+ * `buildCommands` receives the parsed generate params (with `sender`), so it
+ * reads `params.sender` for `actAs` — not `params.wallet.party`.
  */
 export abstract class CantonOperation<
   P extends object,
-  Parsed = CantonExecuteParams<P>,
-> extends Operation<CantonChain, CantonExecuteParams<P>, UnsignedCantonTx, CantonTransactionResult> {
+  Parsed = CantonGenerateParams<P>,
+> extends Operation<CantonChain, CantonGenerateParams<P>, UnsignedCantonTx, CantonTransactionResult> {
   /**
    * Optional validation hook required by the shared CCT operation contract.
    *
@@ -46,30 +70,30 @@ export abstract class CantonOperation<
    * operation validation and normalization; override this only when parsing
    * is unnecessary.
    */
-  protected validate(_params: CantonExecuteParams<P>): void {}
+  protected validate(_params: CantonGenerateParams<P>): void {}
 
   /**
    * Normalize params without mutating the caller's input.
    *
    * The default returns params unchanged. Override whenever `Parsed` differs
-   * from `CantonExecuteParams<P>`, e.g. to parse party IDs / instrument IDs
+   * from `CantonGenerateParams<P>`, e.g. to parse party IDs / instrument IDs
    * into validated forms or apply defaults.
    */
-  protected parse(params: CantonExecuteParams<P>): Parsed {
+  protected parse(params: CantonGenerateParams<P>): Parsed {
     return params as Parsed
   }
 
   /** Validates and normalizes params for generation or execution. */
-  protected prepare(params: CantonExecuteParams<P>): Parsed {
+  protected prepare(params: CantonGenerateParams<P>): Parsed {
     this.validate(params)
     return this.parse(params)
   }
 
   /**
    * Build the `JsCommands` exercise-choice payload from validated, parsed
-   * params. Subclasses fetch disclosures via
-   * `chain.acsDisclosureProvider` / `chain.edsDisclosureProvider` and construct
-   * the exercise command(s) + `actAs` + `disclosedContracts`.
+   * params. Subclasses fetch disclosures via `chain.acsDisclosureProvider` /
+   * `chain.edsDisclosureProvider` and construct the exercise command(s) +
+   * `actAs` (from `params.sender`) + `disclosedContracts`.
    */
   protected abstract buildCommands(
     chain: CantonChain,
@@ -79,25 +103,25 @@ export abstract class CantonOperation<
   /** Run {@link prepare} and {@link buildCommands}; no signing. */
   async generate(
     chain: CantonChain,
-    params: CantonExecuteParams<P>,
+    params: CantonGenerateParams<P>,
   ): Promise<UnsignedCantonTx> {
     const commands = await this.buildCommands(chain, this.prepare(params))
     return { family: chain.network.family, commands }
   }
 
   /**
-   * Validates the wallet, builds the commands, and submits via
-   * {@link CantonChain.submitCommands}. Returns the confirmed `updateId` plus
-   * the raw ledger response for result parsing.
+   * Validates the wallet, derives `sender` from `wallet.party`, builds the
+   * commands, and submits via {@link CantonChain.submitCommands}. Returns the
+   * confirmed `updateId` plus the raw ledger response for result parsing.
    */
   async execute(
     chain: CantonChain,
     params: CantonExecuteParams<P>,
   ): Promise<CantonTransactionResult> {
     const { wallet, ...rest } = params
-    if (!wallet?.party) throw new CCIPWalletInvalidError(wallet)
+    if (!isCantonWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
-    const parsed = this.prepare({ ...rest, wallet } as CantonExecuteParams<P>)
+    const parsed = this.prepare({ ...rest, sender: wallet.party } as CantonGenerateParams<P>)
     const commands = await this.buildCommands(chain, parsed)
     const response = await chain.submitCommands(commands, wallet.signer)
 

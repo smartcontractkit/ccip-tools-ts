@@ -14,10 +14,14 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { CantonWallet, UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
-import { buildTarExercise, resolveTarCid, resolveTokenConfigCid } from '../shared.ts'
+import {
+  buildTarExercise,
+  resolveTarRef,
+  resolveTokenConfigRef,
+} from '../shared.ts'
 
 /** Pool registration: the pool owner party + the pool instance ID. */
 export interface PoolRegistration {
@@ -43,14 +47,14 @@ export interface SetPoolParams {
 }
 
 /** Parsed `setPool` params: instrument ID normalized, CIDs validated. */
-type ParsedSetPoolParams = Omit<CantonExecuteParams<SetPoolParams>, 'instrumentId' | 'tarCid' | 'tokenConfigCid'> & {
+type ParsedSetPoolParams = Omit<CantonGenerateParams<SetPoolParams>, 'instrumentId' | 'tarCid' | 'tokenConfigCid'> & {
   instrumentId: { admin: string; id: string }
   tarCid?: string
   tokenConfigCid?: string
 }
 
 /** Parameters for unsigned TAR `setPool` generation. */
-export type GenerateSetPoolParams = CantonExecuteParams<SetPoolParams>
+export type GenerateSetPoolParams = CantonGenerateParams<SetPoolParams>
 
 /** Unsigned TAR `setPool` result. */
 export type GenerateSetPoolResult = UnsignedCantonTx
@@ -94,8 +98,8 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
 
   /** Builds the `SetPool` exercise command against the TAR. */
   protected async buildCommands(chain: CantonChain, p: ParsedSetPoolParams): Promise<JsCommands> {
-    const tarCid = p.tarCid ?? (await resolveTarCid(chain, p.wallet))
-    const tokenConfigCid = p.tokenConfigCid ?? (await resolveTokenConfigCid(chain, p.instrumentId))
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
+    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
 
     const choiceArgument: Record<string, unknown> = {
       instrumentId: p.instrumentId,
@@ -110,10 +114,10 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
 
     return buildTarExercise({
       choice: 'SetPool',
-      tarCid,
-      tokenConfigCid,
+      tarContract,
+      tokenConfigContract,
       choiceArgument,
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-set-pool',
     })
   }

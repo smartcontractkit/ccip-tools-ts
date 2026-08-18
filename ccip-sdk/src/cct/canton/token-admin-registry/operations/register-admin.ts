@@ -13,9 +13,9 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
-import { buildTarExercise, resolveTarCid, resolveTokenConfigCid } from '../shared.ts'
+import { buildTarExercise, resolveTarRef, resolveTokenConfigRef } from '../shared.ts'
 
 /** Parameters shared by TAR `registerAdmin` generation and execution. */
 export interface RegisterAdminParams {
@@ -31,7 +31,7 @@ export interface RegisterAdminParams {
 
 /** Parsed `registerAdmin` params. */
 type ParsedRegisterAdminParams = Omit<
-  CantonExecuteParams<RegisterAdminParams>,
+  CantonGenerateParams<RegisterAdminParams>,
   'instrumentId' | 'tarCid' | 'tokenConfigCid'
 > & {
   instrumentId: { admin: string; id: string }
@@ -40,7 +40,7 @@ type ParsedRegisterAdminParams = Omit<
 }
 
 /** Parameters for unsigned TAR `registerAdmin` generation. */
-export type GenerateRegisterAdminParams = CantonExecuteParams<RegisterAdminParams>
+export type GenerateRegisterAdminParams = CantonGenerateParams<RegisterAdminParams>
 
 /** Unsigned TAR `registerAdmin` result. */
 export type GenerateRegisterAdminResult = UnsignedCantonTx
@@ -78,15 +78,15 @@ export class RegisterAdmin extends CantonOperation<RegisterAdminParams, ParsedRe
     chain: CantonChain,
     p: ParsedRegisterAdminParams,
   ): Promise<JsCommands> {
-    const tarCid = p.tarCid ?? (await resolveTarCid(chain, p.wallet))
-    const tokenConfigCid = p.tokenConfigCid ?? (await resolveTokenConfigCid(chain, p.instrumentId))
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
+    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
 
     return buildTarExercise({
       choice: 'ProposeAdministrator',
-      tarCid,
-      tokenConfigCid,
+      tarContract,
+      tokenConfigContract,
       choiceArgument: { instrumentId: p.instrumentId, newAdmin: p.newAdmin },
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-register-admin',
     })
   }
