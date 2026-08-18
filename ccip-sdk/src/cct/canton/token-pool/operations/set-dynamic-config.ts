@@ -12,9 +12,9 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { parseContractCid, parsePartyId } from '../../validate.ts'
-import { buildPoolExercise } from '../shared.ts'
+import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
 
 /** Parameters shared by `setDynamicConfig` generation and execution. */
 export interface SetDynamicConfigParams {
@@ -27,7 +27,7 @@ export interface SetDynamicConfigParams {
 }
 
 /** Parameters for unsigned `setDynamicConfig` generation. */
-export type GenerateSetDynamicConfigParams = CantonExecuteParams<SetDynamicConfigParams>
+export type GenerateSetDynamicConfigParams = CantonGenerateParams<SetDynamicConfigParams>
 
 /** Unsigned `setDynamicConfig` result. */
 export type GenerateSetDynamicConfigResult = UnsignedCantonTx
@@ -54,22 +54,24 @@ export class SetDynamicConfig extends CantonOperation<SetDynamicConfigParams> {
   /** Builds the `SetDynamicConfig` exercise command against the pool. */
   protected async buildCommands(
     chain: CantonChain,
-    p: CantonExecuteParams<SetDynamicConfigParams>,
+    p: CantonGenerateParams<SetDynamicConfigParams>,
   ): Promise<JsCommands> {
     const templateId =
       p.poolType === 'burnMint'
         ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
         : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
+    const poolContract = await resolvePoolRef(chain, p.poolCid, p.poolType, p.sender)
+
     return buildPoolExercise({
       choice: 'SetDynamicConfig',
       templateId,
-      poolCid: p.poolCid,
+      poolContract,
       choiceArgument: {
         // rateLimitAdmin is optional; omit the key to clear (Daml `None`).
         ...(p.rateLimitAdmin && { rateLimitAdmin: p.rateLimitAdmin }),
       },
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-set-dynamic-config',
     })
   }

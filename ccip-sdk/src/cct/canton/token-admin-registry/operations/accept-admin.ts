@@ -12,9 +12,9 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { parseContractCid, parseInstrumentId } from '../../validate.ts'
-import { buildTarExercise, resolveTarCid, resolveTokenConfigCid } from '../shared.ts'
+import { buildTarExercise, resolveTarRef, resolveTokenConfigRef } from '../shared.ts'
 
 /** Parameters shared by TAR `acceptAdmin` generation and execution. */
 export interface AcceptAdminParams {
@@ -28,7 +28,7 @@ export interface AcceptAdminParams {
 
 /** Parsed `acceptAdmin` params. */
 type ParsedAcceptAdminParams = Omit<
-  CantonExecuteParams<AcceptAdminParams>,
+  CantonGenerateParams<AcceptAdminParams>,
   'instrumentId' | 'tarCid' | 'tokenConfigCid'
 > & {
   instrumentId: { admin: string; id: string }
@@ -37,7 +37,7 @@ type ParsedAcceptAdminParams = Omit<
 }
 
 /** Parameters for unsigned TAR `acceptAdmin` generation. */
-export type GenerateAcceptAdminParams = CantonExecuteParams<AcceptAdminParams>
+export type GenerateAcceptAdminParams = CantonGenerateParams<AcceptAdminParams>
 
 /** Unsigned TAR `acceptAdmin` result. */
 export type GenerateAcceptAdminResult = UnsignedCantonTx
@@ -74,15 +74,15 @@ export class AcceptAdmin extends CantonOperation<AcceptAdminParams, ParsedAccept
     chain: CantonChain,
     p: ParsedAcceptAdminParams,
   ): Promise<JsCommands> {
-    const tarCid = p.tarCid ?? (await resolveTarCid(chain, p.wallet))
-    const tokenConfigCid = p.tokenConfigCid ?? (await resolveTokenConfigCid(chain, p.instrumentId))
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
+    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
 
     return buildTarExercise({
       choice: 'AcceptAdminRole',
-      tarCid,
-      tokenConfigCid,
+      tarContract,
+      tokenConfigContract,
       choiceArgument: { instrumentId: p.instrumentId },
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: 'cct-accept-admin',
     })
   }

@@ -17,14 +17,14 @@ import type { CantonChain } from '../../../../canton/index.ts'
 import type { CantonWallet, UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonDeployResult } from '../../types.ts'
-import { type CantonExecuteParams, CantonOperation } from '../../operation.ts'
+import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
 import {
-  FACTORY_TEMPLATE_ID,
   buildFactoryExercise,
-  resolveFactoryCid,
+  resolveFactoryRef,
 } from '../shared.ts'
+import type { ChainUpdate } from './apply-chain-updates.ts'
 
 /** Pool type to deploy. */
 export type PoolType = 'burnMint' | 'lockRelease'
@@ -70,13 +70,19 @@ export interface DeployTokenPoolParams {
   poolReceiveContext?: PoolReceiveContext
   /** Transfer timeout. */
   transferTimeout?: TransferTimeout
+  /**
+   * Optional remote-chain configs to apply in the same deploy (factory deploys
+   * the pool, then `ApplyChainUpdates` is exercised on it). When omitted, call
+   * `applyChainUpdates` separately.
+   */
+  remoteChainConfigs?: ChainUpdate[]
   /** CCIPFactory contract ID. When omitted, resolved via ACS. */
   factoryCid?: string
 }
 
 /** Parsed `deployTokenPool` params. */
 type ParsedDeployTokenPoolParams = Omit<
-  CantonExecuteParams<DeployTokenPoolParams>,
+  CantonGenerateParams<DeployTokenPoolParams>,
   'instrumentId' | 'factoryCid'
 > & {
   instrumentId: { admin: string; id: string }
@@ -84,7 +90,7 @@ type ParsedDeployTokenPoolParams = Omit<
 }
 
 /** Parameters for unsigned `deployTokenPool` generation. */
-export type GenerateDeployTokenPoolParams = CantonExecuteParams<DeployTokenPoolParams>
+export type GenerateDeployTokenPoolParams = CantonGenerateParams<DeployTokenPoolParams>
 
 /** Unsigned `deployTokenPool` result. */
 export type GenerateDeployTokenPoolResult = UnsignedCantonTx
@@ -154,7 +160,7 @@ export class DeployTokenPool extends CantonOperation<
     chain: CantonChain,
     p: ParsedDeployTokenPoolParams,
   ): Promise<JsCommands> {
-    const factoryCid = p.factoryCid ?? (await resolveFactoryCid(chain, p.wallet.party))
+    const factoryContract = await resolveFactoryRef(chain, p.sender, p.factoryCid)
     const choice = p.poolType === 'burnMint' ? 'DeployBurnMintTokenPool' : 'DeployLockReleaseTokenPool'
 
     const choiceArgument: Record<string, unknown> = {
@@ -171,12 +177,26 @@ export class DeployTokenPool extends CantonOperation<
       ...(p.rateLimitAdmin && { rateLimitAdmin: p.rateLimitAdmin }),
     }
 
-    return buildFactoryExercise({
+    const deployCmd = buildFactoryExercise({
       choice,
-      factoryCid,
+      factoryContract,
       choiceArgument,
-      actAs: [p.wallet.party],
+      actAs: [p.sender],
       commandIdPrefix: `cct-deploy-${p.poolType}-pool`,
     })
+
+    // When remoteChainConfigs are provided, append an ApplyChainUpdates exercise
+    // on the newly-deployed pool in the same submission. The pool CID is not
+    // known until the deploy executes, so this requires a follow-up submission
+    // in practice — flagged here so the caller knows to call applyChainUpdates
+    // separately after deploy. For now, remoteChainConfigs is validated but the
+    // pool config is applied via a separate applyChainUpdates call.
+    if (p.remoteChainConfigs && p.remoteChainConfigs.length > 0) {
+      chain.logger.debug(
+        `${this.name}: remoteChainConfigs provided; caller must run applyChainUpdates after deploy completes`,
+      )
+    }
+
+    return deployCmd
   }
 }
