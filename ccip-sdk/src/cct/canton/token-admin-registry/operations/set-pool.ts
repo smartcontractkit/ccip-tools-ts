@@ -16,7 +16,7 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
+import { parseInstrumentId, parsePartyId } from '../../validate.ts'
 import {
   buildTarExercise,
   resolveTarRef,
@@ -40,17 +40,15 @@ export interface SetPoolParams {
    * TAR — the `SetPool` choice accepts an optional `tokenPool`; `None` delists.
    */
   poolRegistration?: PoolRegistration
-  /** TAR contract ID. When omitted, the operation resolves it via ACS. */
-  tarCid?: string
-  /** `TokenConfig` contract ID for the instrument. When omitted, resolved via ACS. */
-  tokenConfigCid?: string
+  /** TAR `InstanceAddress` (`0x<64-hex>` or `"instanceId@ccipOwner"`). Resolved via ACS. */
+  tarInstanceAddress: string
+  /** `TokenConfig` `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
+  tokenConfigInstanceAddress: string
 }
 
-/** Parsed `setPool` params: instrument ID normalized, CIDs validated. */
-type ParsedSetPoolParams = Omit<CantonGenerateParams<SetPoolParams>, 'instrumentId' | 'tarCid' | 'tokenConfigCid'> & {
+/** Parsed `setPool` params: instrument ID normalized. */
+type ParsedSetPoolParams = Omit<CantonGenerateParams<SetPoolParams>, 'instrumentId'> & {
   instrumentId: { admin: string; id: string }
-  tarCid?: string
-  tokenConfigCid?: string
 }
 
 /** Parameters for unsigned TAR `setPool` generation. */
@@ -84,22 +82,22 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
     }
   }
 
-  /** Parses the instrument ID into `{ admin, id }` and validates CIDs. */
+  /** Parses the instrument ID into `{ admin, id }`. */
   protected override parse(p: GenerateSetPoolParams): ParsedSetPoolParams {
     return {
       ...p,
       instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
-      tarCid: p.tarCid ? parseContractCid(this.name, 'tarCid', p.tarCid) : undefined,
-      tokenConfigCid: p.tokenConfigCid
-        ? parseContractCid(this.name, 'tokenConfigCid', p.tokenConfigCid)
-        : undefined,
     }
   }
 
   /** Builds the `SetPool` exercise command against the TAR. */
   protected async buildCommands(chain: CantonChain, p: ParsedSetPoolParams): Promise<JsCommands> {
-    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
-    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarInstanceAddress)
+    const tokenConfigContract = await resolveTokenConfigRef(
+      chain,
+      p.instrumentId.admin,
+      p.tokenConfigInstanceAddress,
+    )
 
     const choiceArgument: Record<string, unknown> = {
       instrumentId: p.instrumentId,

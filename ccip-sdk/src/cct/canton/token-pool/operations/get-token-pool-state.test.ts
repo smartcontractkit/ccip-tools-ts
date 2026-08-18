@@ -1,7 +1,7 @@
 /**
  * Unit tests for the Canton CCT `getTokenPoolState` read operation.
  *
- * Mocked {@link CantonChain} whose `findActiveContractByCid` returns a
+ * Mocked {@link CantonChain} whose `findActiveContractByInstanceAddress` returns a
  * hand-crafted gRPC-JSON `BurnMintTokenPool` `createArgument`, exercising the
  * scalar decoders (poolOwner/instanceId/decimals/rateLimitAdmin/instrumentId)
  * and the defensive `remoteChainConfigs` Daml-`Map` decoder without a live
@@ -23,6 +23,7 @@ const RATE_LIMIT_ADMIN = 'rladmin::1220d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d
 const INSTRUMENT_ADMIN = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
 const POOL_CID = '#pool-1'
 const POOL_INSTANCE_ID = 'pool-instance-1'
+const POOL_INSTANCE_ADDRESS = '0x' + 'cd'.repeat(32)
 
 const sum = (ctor: string, value: unknown) => ({ Sum: { [ctor]: value } })
 const text = (s: string) => sum('Text', s)
@@ -72,6 +73,7 @@ function poolContract(
     templateId: BURN_MINT_POOL_TEMPLATE_ID,
     createdEventBlob: 'pool-blob',
     synchronizerId: 'canton::global',
+    signatories: [POOL_OWNER],
     createArgument: {
       fields: [
         field('instanceId', text(POOL_INSTANCE_ID)),
@@ -96,11 +98,11 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
   return {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    async findActiveContractByCid(
+    async findActiveContractByInstanceAddress(
       _t: string,
-      contractId: string,
+      instanceAddress: string,
     ): Promise<CantonActiveContract | null> {
-      return contract && contract.contractId === contractId ? contract : null
+      return contract && instanceAddress === POOL_INSTANCE_ADDRESS ? contract : null
     },
   } as unknown as CantonChain
 }
@@ -110,7 +112,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     const manager = CantonTokenManager.fromChain(chainWith(poolContract()))
 
     const result = await manager.getTokenPoolState({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
@@ -129,7 +131,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     )
 
     const result = await manager.getTokenPoolState({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
@@ -162,7 +164,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     )
 
     const result = await manager.getTokenPoolState({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
@@ -183,7 +185,11 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
   it('throws when the pool is not active/visible', async () => {
     const manager = CantonTokenManager.fromChain(chainWith(null))
     await assert.rejects(
-      manager.getTokenPoolState({ poolCid: POOL_CID, poolType: 'burnMint', poolOwner: POOL_OWNER }),
+      manager.getTokenPoolState({
+        poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+        poolType: 'burnMint',
+        poolOwner: POOL_OWNER,
+      }),
       /not active or not visible/,
     )
   })

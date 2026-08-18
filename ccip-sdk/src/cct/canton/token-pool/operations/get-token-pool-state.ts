@@ -17,7 +17,7 @@ import {
   extractRecordField,
 } from '../../../../canton/index.ts'
 import { CantonQuery } from '../../query.ts'
-import { parseContractCid } from '../../validate.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
 
 /** A remote-chain config entry on the pool. */
@@ -48,15 +48,15 @@ export interface GetTokenPoolStateResult {
 
 /** Parsed params for {@link GetTokenPoolState.read}. */
 interface ParsedGetTokenPoolState {
-  poolCid: string
+  poolInstanceAddress: string
   templateId: string
   poolOwner: string
 }
 
 /** Parameters for `getTokenPoolState`. */
 export interface GetTokenPoolStateParams {
-  /** Pool contract ID. */
-  poolCid: string
+  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
+  poolInstanceAddress: string
   /** Pool type (determines the template ID for the ACS query). */
   poolType: 'burnMint' | 'lockRelease'
   /** Pool owner party (for ACS visibility — must be a stakeholder/signatory). */
@@ -71,10 +71,13 @@ export class GetTokenPoolState extends CantonQuery<
 > {
   readonly name = 'getTokenPoolState'
 
-  /** Validates the pool CID, owner, and normalizes the pool type into a template ID. */
+  /** Validates the pool target + owner, and normalizes the pool type into a template ID. */
   protected prepare(p: GetTokenPoolStateParams): ParsedGetTokenPoolState {
+    if (!p.poolInstanceAddress) {
+      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+    }
     return {
-      poolCid: parseContractCid(this.name, 'poolCid', p.poolCid),
+      poolInstanceAddress: p.poolInstanceAddress,
       templateId:
         p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID,
       poolOwner: p.poolOwner,
@@ -82,24 +85,28 @@ export class GetTokenPoolState extends CantonQuery<
   }
 
   /**
-   * Reads the pool contract from the ACS by CID and decodes its `createArgument`.
-   * Throws when the pool is not active or not visible to the querying party.
+   * Reads the pool contract from the ACS by InstanceAddress and decodes its
+   * `createArgument`. Throws when the pool is not active or not visible.
    */
   protected async read(
     chain: CantonChain,
     p: ParsedGetTokenPoolState,
   ): Promise<GetTokenPoolStateResult> {
-    const contract = await chain.findActiveContractByCid(p.templateId, p.poolCid, [p.poolOwner])
+    const contract = await chain.findActiveContractByInstanceAddress(
+      p.templateId,
+      p.poolInstanceAddress,
+      [p.poolOwner],
+    )
     if (!contract) {
       throw new Error(
-        `getTokenPoolState: pool ${p.poolCid} is not active or not visible to ${p.poolOwner}`,
+        `getTokenPoolState: pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
       )
     }
 
     const fields = decodeDamlRecord(contract.createArgument)
     const instrumentId = decodeInstrumentId(fields)
     if (!instrumentId) {
-      throw new Error(`getTokenPoolState: pool ${p.poolCid} has no decodable instrumentId`)
+      throw new Error(`getTokenPoolState: pool ${p.poolInstanceAddress} has no decodable instrumentId`)
     }
 
     return {

@@ -5,8 +5,7 @@
  * @packageDocumentation
  */
 
-import type { CantonActiveContract, CantonChain, CantonInstrumentId } from '../../../canton/index.ts'
-import { decodeDamlRecord, extractRecordField } from '../../../canton/index.ts'
+import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import type { JsCommands } from '../../../canton/client/index.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 
@@ -36,57 +35,56 @@ export function toContractRef(contract: CantonActiveContract): TarContractRef {
 }
 
 /**
- * Resolve a TAR contract reference for an op. When `tarCid` is provided, fetches
- * its disclosure blob by CID; otherwise resolves the active TAR for `sender`
- * (the `ccipOwner`) from the ACS. Throws {@link CCTParamsInvalidError} when the
- * provided CID is not active/visible or no TAR is found for the party.
+ * Resolve a TAR contract reference by its `InstanceAddress` (the canonical
+ * Canton resolution path). `tarInstanceAddress` is either the `0x<64-hex>`
+ * keccak256 hash or the `RawInstanceAddress` `"instanceId@ccipOwner"` form.
+ * The SDK resolves the CID + disclosure blob together via
+ * {@link CantonChain.findActiveContractByInstanceAddress}.
  */
 export async function resolveTarRef(
   chain: CantonChain,
   sender: string,
-  tarCid?: string,
+  tarInstanceAddress: string,
 ): Promise<TarContractRef> {
-  if (tarCid) {
-    const contract = await chain.findActiveContractByCid(TAR_TEMPLATE_ID, tarCid, [sender])
-    if (!contract) {
-      throw new CCTParamsInvalidError(
-        'resolveTarRef',
-        'tarCid',
-        `provided tarCid ${tarCid} is not active or not visible to ${sender}`,
-      )
-    }
-    return toContractRef(contract)
+  const contract = await chain.findActiveContractByInstanceAddress(
+    TAR_TEMPLATE_ID,
+    tarInstanceAddress,
+    [sender],
+  )
+  if (!contract) {
+    throw new CCTParamsInvalidError(
+      'resolveTarRef',
+      'tarInstanceAddress',
+      `TokenAdminRegistry ${tarInstanceAddress} is not active or not visible to ${sender}`,
+    )
   }
-  return toContractRef(await resolveTarContract(chain, sender))
+  return toContractRef(contract)
 }
 
 /**
- * Resolve a TokenConfig contract reference for an op. When `tokenConfigCid` is
- * provided, fetches its disclosure blob by CID; otherwise resolves the active
- * TokenConfig for `instrumentId` from the ACS. Throws {@link CCTParamsInvalidError}
- * when the provided CID is not active/visible or no TokenConfig is found.
+ * Resolve a TokenConfig contract reference by its `InstanceAddress` (the
+ * canonical Canton resolution path). `tokenConfigInstanceAddress` is either the
+ * `0x<64-hex>` keccak256 hash or the `RawInstanceAddress` `"instanceId@admin"`
+ * form.
  */
 export async function resolveTokenConfigRef(
   chain: CantonChain,
-  instrumentId: CantonInstrumentId,
-  tokenConfigCid?: string,
+  adminParty: string,
+  tokenConfigInstanceAddress: string,
 ): Promise<TarContractRef> {
-  if (tokenConfigCid) {
-    const contract = await chain.findActiveContractByCid(
-      TOKEN_CONFIG_TEMPLATE_ID,
-      tokenConfigCid,
-      [instrumentId.admin],
+  const contract = await chain.findActiveContractByInstanceAddress(
+    TOKEN_CONFIG_TEMPLATE_ID,
+    tokenConfigInstanceAddress,
+    [adminParty],
+  )
+  if (!contract) {
+    throw new CCTParamsInvalidError(
+      'resolveTokenConfigRef',
+      'tokenConfigInstanceAddress',
+      `TokenConfig ${tokenConfigInstanceAddress} is not active or not visible to ${adminParty}`,
     )
-    if (!contract) {
-      throw new CCTParamsInvalidError(
-        'resolveTokenConfigRef',
-        'tokenConfigCid',
-        `provided tokenConfigCid ${tokenConfigCid} is not active or not visible`,
-      )
-    }
-    return toContractRef(contract)
   }
-  return toContractRef(await resolveTokenConfigContract(chain, instrumentId))
+  return toContractRef(contract)
 }
 
 /** Inputs to {@link buildTarExercise}. */
@@ -147,63 +145,3 @@ export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
   }
 }
 
-/**
- * Resolve the active `TokenAdminRegistry` contract for the acting party (the
- * CCIP owner / registry owner). Queries the ACS by the `TokenAdminRegistry`
- * template ID and matches on the `ccipOwner` create-argument field equal to
- * `sender`. The TAR is a singleton per `ccipOwner` (signatory).
- *
- * @returns The active TAR contract (CID + disclosure blob), or throws if none.
- */
-export async function resolveTarContract(
-  chain: CantonChain,
-  sender: string,
-): Promise<CantonActiveContract> {
-  const contract = await chain.findActiveContractByTemplate(
-    TAR_TEMPLATE_ID,
-    [sender],
-    (createArgument) => {
-      const fields = decodeDamlRecord(createArgument)
-      return fields['ccipOwner'] === sender
-    },
-  )
-  if (!contract) {
-    throw new CCTParamsInvalidError(
-      'resolveTarContract',
-      'tarCid',
-      `no active TokenAdminRegistry found for ccipOwner ${sender}; pass \`tarCid\` explicitly or ensure the party is a registry owner`,
-    )
-  }
-  return contract
-}
-
-/**
- * Resolve the active `TokenConfig` contract for an instrument. Queries the ACS
- * by the `TokenConfig` template ID and matches on the `instrumentId`
- * create-argument field (a `{ admin, id }` record) equal to the target.
- *
- * @returns The active TokenConfig contract (CID + disclosure blob), or throws if none.
- */
-export async function resolveTokenConfigContract(
-  chain: CantonChain,
-  instrumentId: CantonInstrumentId,
-): Promise<CantonActiveContract> {
-  const contract = await chain.findActiveContractByTemplate(
-    TOKEN_CONFIG_TEMPLATE_ID,
-    [instrumentId.admin],
-    (createArgument) => {
-      const fields = decodeDamlRecord(createArgument)
-      const inst = extractRecordField(fields, 'instrumentId')
-      if (!inst) return false
-      return inst['admin'] === instrumentId.admin && inst['id'] === instrumentId.id
-    },
-  )
-  if (!contract) {
-    throw new CCTParamsInvalidError(
-      'resolveTokenConfigContract',
-      'tokenConfigCid',
-      `no active TokenConfig found for instrument ${instrumentId.admin}::${instrumentId.id}; pass \`tokenConfigCid\` explicitly or ensure the instrument is registered`,
-    )
-  }
-  return contract
-}

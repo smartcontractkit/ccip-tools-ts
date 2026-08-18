@@ -55,6 +55,7 @@ import {
 import {
   damlRequiredCcvsList,
   decodeCantonVerifierDestAddress,
+  hashedRawInstanceAddress,
   missingTokenPoolRequiredCcvs,
   normalizeCantonCcvList,
   receiverRequiredCcvConfigured,
@@ -84,6 +85,7 @@ import {
   decodeDamlRecord,
   extractCantonSentEventFieldsFromLogData,
   extractCreatedContractId,
+  extractFieldValue,
   extractRecordField,
   flattenCantonRecord,
   normalizeCantonEncodedMessage,
@@ -703,6 +705,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           templateId: active.templateId,
           createdEventBlob: active.createdEventBlob,
           synchronizerId: active.synchronizerId,
+          signatories: active.signatories,
           createArgument: active.createArgument,
         }
       }
@@ -767,6 +770,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           templateId: active.templateId,
           createdEventBlob: active.createdEventBlob,
           synchronizerId: active.synchronizerId,
+          signatories: active.signatories,
           createArgument: active.createArgument,
         })
       }
@@ -775,58 +779,61 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Fetch the disclosure blob + synchronizer for a known contract ID.
+   * Resolve an active contract by its Canton `InstanceAddress` — the canonical
+   * resolution mechanism, mirroring Go `FindActiveContractByInstanceAddress`
+   * (`deployment/utils/operations/contract/exercise.go`).
    *
-   * Queries the ACS by `templateId` (same `TemplateFilter` as
-   * {@link findActiveContractByTemplate}) and returns the active contract whose
-   * ledger contract ID equals `contractId`. Used when a caller supplies a bare
-   * CID (e.g. an out-of-band-resolved `tarCid`) and the submission still needs
-   * the matching `createdEventBlob` + `synchronizerId` for prepared/signed
-   * submission.
+   * Queries the ACS by `templateId` (with `IncludeCreatedEventBlob: true`), then
+   * for each active contract reads its `instanceId` create-argument field + sole
+   * signatory, computes `InstanceAddress = keccak256("<instanceId>@<signatory>")`
+   * (via {@link hashedRawInstanceAddress}), and accepts the contract whose
+   * computed address equals `instanceAddress`. Errors when more than one distinct
+   * contract matches (ambiguous), returns `null` when none match.
    *
-   * @returns The matching active contract, or `null` if not found / archived.
+   * This is the preferred resolution path for CCT ops: callers identify a target
+   * pool/factory/TAR by its stable `InstanceAddress` (or `RawInstanceAddress`
+   * `"instanceId@party"`), not a raw contract ID — the SDK resolves the CID +
+   * disclosure blob together, so the caller never handles `createdEventBlob`.
+   *
+   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`).
+   * @param instanceAddress - Target `InstanceAddress` as `0x<64-hex>` (the
+   *   keccak256 hash), OR a `RawInstanceAddress` `"instanceId@party"` (computed
+   *   and compared as a hash when it contains `@`).
+   * @param parties - Parties whose ACS visibility to query (the contract's
+   *   signatory must be among them, or visible to them).
+   * @returns The matching active contract (CID + disclosure blob), or `null`.
    */
-  async findActiveContractByCid(
+  async findActiveContractByInstanceAddress(
     templateId: string,
-    contractId: string,
+    instanceAddress: string,
     parties: string[],
   ): Promise<CantonActiveContract | null> {
-    const queryParties = parties.filter((p) => typeof p === 'string' && p.length > 0)
-    if (queryParties.length === 0) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'CantonChain.findActiveContractByCid: at least one query party is required',
-      )
-    }
-    const { offset } = await this.provider.getLedgerEnd()
-    const partyFilter = {
-      cumulative: [
-        {
-          identifierFilter: {
-            TemplateFilter: { value: { templateId, includeCreatedEventBlob: true } },
-          },
-        },
-      ],
-    }
-    const filtersByParty: Record<string, typeof partyFilter> = {}
-    for (const party of queryParties) filtersByParty[party] = partyFilter
-    const responses = await this.provider.getActiveContracts({
-      activeAtOffset: offset,
-      eventFormat: { filtersByParty, verbose: true },
-    })
-    for (const response of responses) {
-      const active = activeContractFromResponse(response)
-      if (active?.contractId === contractId) {
-        return {
-          contractId: active.contractId,
-          templateId: active.templateId,
-          createdEventBlob: active.createdEventBlob,
-          synchronizerId: active.synchronizerId,
-          createArgument: active.createArgument,
-        }
+    // Accept either the 0x-hex InstanceAddress (keccak256 hash) or the raw
+    // "instanceId@party" form; normalize the raw form to its hash for compare.
+    const target = instanceAddress.includes('@')
+      ? hashedRawInstanceAddress(instanceAddress)
+      : instanceAddress.toLowerCase()
+
+    const contracts = await this.findActiveContractsByTemplate(templateId, parties)
+    let match: CantonActiveContract | null = null
+    for (const contract of contracts) {
+      const fields = decodeDamlRecord(contract.createArgument)
+      const instanceId = extractFieldValue(fields['instanceId'])
+      if (typeof instanceId !== 'string' || !instanceId) continue
+      // Go requires exactly one signatory; the instance address is derived from it.
+      if (contract.signatories.length !== 1) continue
+      const raw = `${instanceId}@${contract.signatories[0]}`
+      const got = hashedRawInstanceAddress(raw)
+      if (got !== target) continue
+      if (match) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress}`,
+        )
       }
+      match = contract
     }
-    return null
+    return match
   }
 
   /**
@@ -2432,6 +2439,7 @@ type ActiveContractDetails = {
   createdEventBlob: string
   synchronizerId: string
   createArgument: unknown
+  signatories: string[]
   interfaceViews?: unknown[]
   disclosedContract: DisclosedContract
 }
@@ -2529,12 +2537,16 @@ function activeContractFromResponse(response: unknown): ActiveContractDetails | 
     typeof createdRecord['createdEventBlob'] === 'string' ? createdRecord['createdEventBlob'] : ''
   const synchronizerId =
     typeof activeRecord['synchronizerId'] === 'string' ? activeRecord['synchronizerId'] : ''
+  const signatories = Array.isArray(createdRecord['signatories'])
+    ? (createdRecord['signatories'] as string[]).filter((s) => typeof s === 'string')
+    : []
 
   return {
     contractId,
     templateId,
     createdEventBlob,
     synchronizerId,
+    signatories,
     createArgument: createdRecord['createArgument'],
     interfaceViews: Array.isArray(createdRecord['interfaceViews'])
       ? (createdRecord['interfaceViews'] as unknown[])

@@ -19,7 +19,7 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonDeployResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { parseContractCid, parseInstrumentId, parsePartyId } from '../../validate.ts'
+import { parseInstrumentId, parsePartyId } from '../../validate.ts'
 import {
   buildFactoryExercise,
   resolveFactoryRef,
@@ -76,17 +76,16 @@ export interface DeployTokenPoolParams {
    * `applyChainUpdates` separately.
    */
   remoteChainConfigs?: ChainUpdate[]
-  /** CCIPFactory contract ID. When omitted, resolved via ACS. */
-  factoryCid?: string
+  /** CCIPFactory `InstanceAddress` (`0x<64-hex>` or `"instanceId@owner"`). Resolved via ACS. */
+  factoryInstanceAddress: string
 }
 
 /** Parsed `deployTokenPool` params. */
 type ParsedDeployTokenPoolParams = Omit<
   CantonGenerateParams<DeployTokenPoolParams>,
-  'instrumentId' | 'factoryCid'
+  'instrumentId'
 > & {
   instrumentId: { admin: string; id: string }
-  factoryCid?: string
 }
 
 /** Parameters for unsigned `deployTokenPool` generation. */
@@ -146,12 +145,11 @@ export class DeployTokenPool extends CantonOperation<
     }
   }
 
-  /** Parses the instrument ID and validates the factory CID. */
+  /** Parses the instrument ID. */
   protected override parse(p: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
     return {
       ...p,
       instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
-      factoryCid: p.factoryCid ? parseContractCid(this.name, 'factoryCid', p.factoryCid) : undefined,
     }
   }
 
@@ -160,7 +158,7 @@ export class DeployTokenPool extends CantonOperation<
     chain: CantonChain,
     p: ParsedDeployTokenPoolParams,
   ): Promise<JsCommands> {
-    const factoryContract = await resolveFactoryRef(chain, p.sender, p.factoryCid)
+    const factoryContract = await resolveFactoryRef(chain, p.sender, p.factoryInstanceAddress)
     const choice = p.poolType === 'burnMint' ? 'DeployBurnMintTokenPool' : 'DeployLockReleaseTokenPool'
 
     const choiceArgument: Record<string, unknown> = {

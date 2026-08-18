@@ -67,6 +67,7 @@ function tokenConfigContract(admin: string, id: string, contractId: string): Can
     templateId: TOKEN_CONFIG_TEMPLATE_ID,
     createdEventBlob: 'blob-' + id,
     synchronizerId: 'canton::global',
+    signatories: [admin],
     createArgument: tokenConfigCreateArgument(admin, id),
   }
 }
@@ -143,6 +144,7 @@ describe('CantonTokenManager.getSupportedTokens (mocked chain)', () => {
       templateId: TOKEN_CONFIG_TEMPLATE_ID,
       createdEventBlob: 'blob',
       synchronizerId: 'canton::global',
+      signatories: [ADMIN_A],
       createArgument: { fields: [field('instrumentId', { None: {} })] }, // not a record
     }
     const manager = CantonTokenManager.fromChain(

@@ -1,10 +1,10 @@
 /**
  * Unit tests for the Canton CCT `getTokenAdminRegistry` read operation.
  *
- * Mocked {@link CantonChain} whose `findActiveContractByTemplate` /
- * `findActiveContractByCid` return hand-crafted gRPC-JSON `TokenConfig`
- * `createArgument` records, exercising the `Optional Party` / `Bool` /
- * `Optional PoolRegistration` decoders without a live participant.
+ * Mocked {@link CantonChain} whose `findActiveContractByInstanceAddress`
+ * returns a hand-crafted gRPC-JSON `TokenConfig` `createArgument` record,
+ * exercising the `Optional Party` / `Bool` / `Optional PoolRegistration` decoders
+ * without a live participant.
  *
  * @packageDocumentation
  */
@@ -21,7 +21,7 @@ const PARTY = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250
 const ADMIN = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
 const PENDING = 'pendingB::1220b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2'
 const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
-const INSTRUMENT = { admin: ADMIN, id: 'usdc' }
+const TOKEN_CONFIG_INSTANCE_ADDRESS = '0x' + 'ef'.repeat(32)
 
 const sum = (ctor: string, value: unknown) => ({ Sum: { [ctor]: value } })
 const text = (s: string) => sum('Text', s)
@@ -69,26 +69,21 @@ function contract(arg: Record<string, unknown>, contractId = '#cfg-usdc'): Canto
     templateId: TOKEN_CONFIG_TEMPLATE_ID,
     createdEventBlob: 'blob',
     synchronizerId: 'canton::global',
+    signatories: [ADMIN],
     createArgument: arg,
   }
 }
 
-function chainWith(byTemplate: CantonActiveContract[], byCid?: CantonActiveContract): CantonChain {
+/** Mocked chain: returns `contract` when the instance address matches. */
+function chainWith(contract: CantonActiveContract | null): CantonChain {
   return {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    async findActiveContractByTemplate(
+    async findActiveContractByInstanceAddress(
       _t: string,
-      _p: string[],
-      match: (a: unknown) => boolean,
+      instanceAddress: string,
     ): Promise<CantonActiveContract | null> {
-      return byTemplate.find((c) => match(c.createArgument)) ?? null
-    },
-    async findActiveContractByCid(
-      _t: string,
-      contractId: string,
-    ): Promise<CantonActiveContract | null> {
-      return byCid && byCid.contractId === contractId ? byCid : null
+      return contract && instanceAddress === TOKEN_CONFIG_INSTANCE_ADDRESS ? contract : null
     },
   } as unknown as CantonChain
 }
@@ -96,7 +91,7 @@ function chainWith(byTemplate: CantonActiveContract[], byCid?: CantonActiveContr
 describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
   it('decodes admin, pendingAdmin, tokenPool, isCCIPManaged, and the CID', async () => {
     const manager = CantonTokenManager.fromChain(
-      chainWith([
+      chainWith(
         contract(
           tokenConfigArg({
             admin: ADMIN,
@@ -105,10 +100,13 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
             isCCIPManaged: false,
           }),
         ),
-      ]),
+      ),
     )
 
-    const result = await manager.getTokenAdminRegistry({ instrumentId: INSTRUMENT })
+    const result = await manager.getTokenAdminRegistry({
+      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      adminParty: ADMIN,
+    })
 
     assert.equal(result.tokenConfigCid, '#cfg-usdc')
     assert.equal(result.admin, ADMIN)
@@ -119,10 +117,13 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
 
   it('returns undefined admin/pendingAdmin/tokenPool when they are None', async () => {
     const manager = CantonTokenManager.fromChain(
-      chainWith([contract(tokenConfigArg({ isCCIPManaged: true }))]),
+      chainWith(contract(tokenConfigArg({ isCCIPManaged: true }))),
     )
 
-    const result = await manager.getTokenAdminRegistry({ instrumentId: INSTRUMENT })
+    const result = await manager.getTokenAdminRegistry({
+      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      adminParty: ADMIN,
+    })
 
     assert.equal(result.admin, undefined)
     assert.equal(result.pendingAdmin, undefined)
@@ -130,23 +131,13 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
     assert.equal(result.isCCIPManaged, true)
   })
 
-  it('returns an empty result when no TokenConfig matches the instrumentId', async () => {
-    const manager = CantonTokenManager.fromChain(chainWith([]))
-    const result = await manager.getTokenAdminRegistry({ instrumentId: INSTRUMENT })
+  it('returns an empty result when no TokenConfig matches the instance address', async () => {
+    const manager = CantonTokenManager.fromChain(chainWith(null))
+    const result = await manager.getTokenAdminRegistry({
+      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      adminParty: ADMIN,
+    })
     assert.equal(result.tokenConfigCid, '')
     assert.equal(result.isCCIPManaged, false)
-  })
-
-  it('accepts the instrumentId as a string and resolves by CID when provided', async () => {
-    const cfg = contract(tokenConfigArg({ admin: ADMIN }), '#cfg-by-cid')
-    const manager = CantonTokenManager.fromChain(chainWith([cfg], cfg))
-
-    const result = await manager.getTokenAdminRegistry({
-      instrumentId: `${ADMIN}::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1::usdc`,
-      tokenConfigCid: '#cfg-by-cid',
-    })
-
-    assert.equal(result.tokenConfigCid, '#cfg-by-cid')
-    assert.equal(result.admin, ADMIN)
   })
 })

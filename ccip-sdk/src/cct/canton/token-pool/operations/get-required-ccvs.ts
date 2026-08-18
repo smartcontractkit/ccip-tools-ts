@@ -15,7 +15,8 @@
 import type { CantonChain } from '../../../../canton/index.ts'
 import { decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CantonQuery } from '../../query.ts'
-import { parseContractCid, parseNonEmptyString, parsePartyId } from '../../validate.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { parseNonEmptyString, parsePartyId } from '../../validate.ts'
 
 /** Transfer direction for `GetRequiredCCVs` (mirrors Daml `TransferDirection`). */
 export type TransferDirection = 'Inbound' | 'Outbound'
@@ -28,8 +29,10 @@ export type FinalityConfig =
 
 /** Parameters for `getRequiredCCVs`. */
 export interface GetRequiredCCVsParams {
-  /** Pool contract ID. */
-  poolCid: string
+  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). Resolved via ACS. */
+  poolInstanceAddress: string
+  /** Pool owner party (for ACS visibility — must be a stakeholder/signatory). */
+  poolOwner: string
   /** Pool type (determines the template ID). */
   poolType: 'burnMint' | 'lockRelease'
   /** Acting party (`caller` of the read choice + `actAs`). */
@@ -60,7 +63,8 @@ export interface GetRequiredCCVsResult {
 
 /** Parsed params for {@link GetRequiredCCVs.read}. */
 interface ParsedGetRequiredCCVs {
-  poolCid: string
+  poolInstanceAddress: string
+  poolOwner: string
   templateId: string
   caller: string
   remoteChainSelector: string
@@ -80,8 +84,12 @@ export class GetRequiredCCVs extends CantonQuery<
 
   /** Validates inputs and normalizes the pool type into a template ID. */
   protected prepare(p: GetRequiredCCVsParams): ParsedGetRequiredCCVs {
+    if (!p.poolInstanceAddress) {
+      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+    }
     return {
-      poolCid: parseContractCid(this.name, 'poolCid', p.poolCid),
+      poolInstanceAddress: p.poolInstanceAddress,
+      poolOwner: p.poolOwner,
       templateId:
         p.poolType === 'burnMint'
           ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
@@ -96,14 +104,26 @@ export class GetRequiredCCVs extends CantonQuery<
   }
 
   /**
-   * Exercises the `GetRequiredCCVs` non-consuming read choice via
-   * {@link CantonChain.submitReadChoice} and decodes the returned
-   * `[RawInstanceAddress]` into a list of `unpack` strings.
+   * Resolves the pool by InstanceAddress, then exercises the `GetRequiredCCVs`
+   * non-consuming read choice via {@link CantonChain.submitReadChoice} and
+   * decodes the returned `[RawInstanceAddress]` into a list of `unpack` strings.
    */
   protected async read(chain: CantonChain, p: ParsedGetRequiredCCVs): Promise<GetRequiredCCVsResult> {
+    const pool = await chain.findActiveContractByInstanceAddress(
+      p.templateId,
+      p.poolInstanceAddress,
+      [p.poolOwner],
+    )
+    if (!pool) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        `pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
+      )
+    }
     const result = await chain.submitReadChoice(
       p.templateId,
-      p.poolCid,
+      pool.contractId,
       'GetRequiredCCVs',
       {
         remoteChainSelector: p.remoteChainSelector,
