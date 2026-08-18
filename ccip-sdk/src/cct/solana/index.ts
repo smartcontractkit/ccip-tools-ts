@@ -17,15 +17,20 @@ import {
   type ExecuteCreateTokenAccountResult,
   type ExecuteDeployTokenParams,
   type ExecuteDeployTokenResult,
+  type ExecuteMintTokensParams,
+  type ExecuteMintTokensResult,
   type ExecuteTransferAuthorityParams,
   type ExecuteTransferAuthorityResult,
   type GenerateCreateTokenAccountParams,
   type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
+  type GenerateMintTokensParams,
+  type GenerateMintTokensResult,
   type GenerateTransferAuthorityParams,
   type GenerateTransferAuthorityResult,
   CreateTokenAccount,
+  MintTokens,
   TransferAuthority,
 } from './token/operations/index.ts'
 import {
@@ -149,6 +154,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #mintTokens = new MintTokens()
   readonly #transferAuthority = new TransferAuthority()
 
   // Token admin registry operations
@@ -313,6 +319,63 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to mint SPL tokens to a recipient's existing associated token account.
+   *
+   * @remarks
+   * `amount` is in base units. The recipient ATA must already exist; use
+   * {@link generateUnsignedCreateTokenAccount} to create it. `authority` defaults to `payer`. For
+   * an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
+   * with {@link generateUnsignedCreateTokenAccount}.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedMintTokens({
+   *   payer: mintAuthority,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  generateUnsignedMintTokens(opts: GenerateMintTokensParams): Promise<GenerateMintTokensResult> {
+    return this.#mintTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Mints SPL tokens to a recipient's existing associated token account using the executing wallet.
+   *
+   * @remarks
+   * `amount` is in base units. The recipient ATA must already exist; use {@link createTokenAccount}
+   * to create it. SPL Token multisig authorities require `multisigSigners` and external member
+   * signatures; use {@link generateUnsignedMintTokens}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
+   * with {@link createTokenAccount}.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.mintTokens({ wallet, tokenAddress: mint, recipient, amount: 1_000_000n })
+   * ```
+   */
+  mintTokens(opts: ExecuteMintTokensParams): Promise<ExecuteMintTokensResult> {
+    return this.#mintTokens.execute(this.chain, opts)
   }
 
   /**
