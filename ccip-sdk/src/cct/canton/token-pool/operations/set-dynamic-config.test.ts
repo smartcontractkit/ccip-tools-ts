@@ -3,9 +3,10 @@
  *
  * Verifies the `generate()` command shape (choice name, template ID, choice
  * argument, `actAs`, disclosed contract) against a mocked {@link CantonChain} —
- * no live participant required. The mock stubs `findActiveContractByCid` so the
- * disclosure-blob fetch path runs without a ledger. Mirrors the Solana
- * `*.test.ts` idiom (`node:test` + `as unknown as CantonChain`).
+ * no live participant required. The mock stubs
+ * `findActiveContractByInstanceAddress` so the disclosure-blob fetch path runs
+ * without a ledger. Mirrors the Solana `*.test.ts` idiom (`node:test` + `as
+ * unknown as CantonChain`).
  *
  * @packageDocumentation
  */
@@ -18,7 +19,8 @@ import type { CantonActiveContract, CantonChain } from '../../../../canton/index
 import { CantonTokenManager } from '../../index.ts'
 
 const POOL_CID = '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool:00deadbeef'
-const POOL_OWNER = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
+const POOL_OWNER = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
+const POOL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32) // keccak256 hash form
 const RATE_LIMIT_ADMIN = 'rladmin::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
 const BLOB = 'base64-created-event-blob=='
 const SYNCHRONIZER_ID = 'canton::global::domain-1'
@@ -30,24 +32,24 @@ function fakePoolContract(): CantonActiveContract {
     templateId: '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
     createdEventBlob: BLOB,
     synchronizerId: SYNCHRONIZER_ID,
+    signatories: [POOL_OWNER],
     createArgument: {},
   }
 }
 
 /**
  * Minimal `CantonChain` mock: just the surface `setDynamicConfig.generate()`
- * touches — `network.family` and `findActiveContractByCid`. The rest is cast
- * away.
+ * touches — `network.family` and `findActiveContractByInstanceAddress`.
  */
 function mockChain(): CantonChain {
   return {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    async findActiveContractByCid(
+    async findActiveContractByInstanceAddress(
       _templateId: string,
-      contractId: string,
+      instanceAddress: string,
     ): Promise<CantonActiveContract | null> {
-      return contractId === POOL_CID ? fakePoolContract() : null
+      return instanceAddress === POOL_INSTANCE_ADDRESS ? fakePoolContract() : null
     },
   } as unknown as CantonChain
 }
@@ -56,7 +58,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
   it('builds a SetDynamicConfig exercise command with a real disclosure blob', async () => {
     const manager = CantonTokenManager.fromChain(mockChain())
     const unsigned = await manager.generateUnsignedSetDynamicConfig({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'burnMint',
       rateLimitAdmin: RATE_LIMIT_ADMIN,
       sender: POOL_OWNER,
@@ -91,7 +93,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
   it('omits rateLimitAdmin from the choice argument when not provided (Daml None → clear)', async () => {
     const manager = CantonTokenManager.fromChain(mockChain())
     const unsigned = await manager.generateUnsignedSetDynamicConfig({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'burnMint',
       sender: POOL_OWNER,
     })
@@ -105,7 +107,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
   it('uses the LockRelease template ID when poolType is lockRelease', async () => {
     const manager = CantonTokenManager.fromChain(mockChain())
     const unsigned = await manager.generateUnsignedSetDynamicConfig({
-      poolCid: POOL_CID,
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
       poolType: 'lockRelease',
       sender: POOL_OWNER,
     })

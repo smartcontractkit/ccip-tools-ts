@@ -15,7 +15,6 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { parseContractCid } from '../../validate.ts'
 import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
 
 /** Rate-limit config for one direction (capacity + refill rate + enabled flag). */
@@ -30,8 +29,8 @@ export interface RateLimitConfig {
 
 /** Parameters shared by `setRateLimitConfig` generation and execution. */
 export interface SetRateLimitConfigParams {
-  /** Pool contract ID. */
-  poolCid: string
+  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
+  poolInstanceAddress: string
   /** Pool type (determines the template ID). */
   poolType: 'burnMint' | 'lockRelease'
   /** Remote chain selector the rate limit applies to. */
@@ -63,9 +62,11 @@ export type ExecuteSetRateLimitConfigResult = CantonTransactionResult & {
 export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams> {
   readonly name = 'setRateLimitConfig'
 
-  /** Validates the pool CID and rate-limiter address. */
+  /** Validates the pool target and rate-limiter address. */
   protected override validate(p: GenerateSetRateLimitConfigParams): void {
-    parseContractCid(this.name, 'poolCid', p.poolCid)
+    if (!p.poolInstanceAddress) {
+      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+    }
     if (!p.rateLimiterInstanceAddress) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -92,7 +93,7 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
         ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
         : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
-    const poolContract = await resolvePoolRef(chain, p.poolCid, p.poolType, p.sender)
+    const poolContract = await resolvePoolRef(chain, p.poolType, p.sender, p.poolInstanceAddress)
 
     // The Go choice sets one direction per call (caller + rateLimiterInstanceAddress +
     // newIsEnabled/newCapacity/newRate). The facade accepts both directions and emits

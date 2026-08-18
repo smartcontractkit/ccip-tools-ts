@@ -13,27 +13,25 @@ import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
-import { parseContractCid, parseInstrumentId } from '../../validate.ts'
+import { parseInstrumentId } from '../../validate.ts'
 import { buildTarExercise, resolveTarRef, resolveTokenConfigRef } from '../shared.ts'
 
 /** Parameters shared by TAR `acceptAdmin` generation and execution. */
 export interface AcceptAdminParams {
   /** Instrument to accept admin for (`{ admin, id }` or `"admin::1220…::id"`). */
   instrumentId: { admin: string; id: string } | string
-  /** TAR contract ID. When omitted, resolved via ACS. */
-  tarCid?: string
-  /** `TokenConfig` contract ID. When omitted, resolved via ACS. */
-  tokenConfigCid?: string
+  /** TAR `InstanceAddress` (`0x<64-hex>` or `"instanceId@ccipOwner"`). Resolved via ACS. */
+  tarInstanceAddress: string
+  /** `TokenConfig` `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
+  tokenConfigInstanceAddress: string
 }
 
 /** Parsed `acceptAdmin` params. */
 type ParsedAcceptAdminParams = Omit<
   CantonGenerateParams<AcceptAdminParams>,
-  'instrumentId' | 'tarCid' | 'tokenConfigCid'
+  'instrumentId'
 > & {
   instrumentId: { admin: string; id: string }
-  tarCid?: string
-  tokenConfigCid?: string
 }
 
 /** Parameters for unsigned TAR `acceptAdmin` generation. */
@@ -57,15 +55,11 @@ export class AcceptAdmin extends CantonOperation<AcceptAdminParams, ParsedAccept
     parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
   }
 
-  /** Parses the instrument ID into `{ admin, id }` and validates CIDs. */
+  /** Parses the instrument ID into `{ admin, id }`. */
   protected override parse(p: GenerateAcceptAdminParams): ParsedAcceptAdminParams {
     return {
       ...p,
       instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
-      tarCid: p.tarCid ? parseContractCid(this.name, 'tarCid', p.tarCid) : undefined,
-      tokenConfigCid: p.tokenConfigCid
-        ? parseContractCid(this.name, 'tokenConfigCid', p.tokenConfigCid)
-        : undefined,
     }
   }
 
@@ -74,8 +68,12 @@ export class AcceptAdmin extends CantonOperation<AcceptAdminParams, ParsedAccept
     chain: CantonChain,
     p: ParsedAcceptAdminParams,
   ): Promise<JsCommands> {
-    const tarContract = await resolveTarRef(chain, p.sender, p.tarCid)
-    const tokenConfigContract = await resolveTokenConfigRef(chain, p.instrumentId, p.tokenConfigCid)
+    const tarContract = await resolveTarRef(chain, p.sender, p.tarInstanceAddress)
+    const tokenConfigContract = await resolveTokenConfigRef(
+      chain,
+      p.instrumentId.admin,
+      p.tokenConfigInstanceAddress,
+    )
 
     return buildTarExercise({
       choice: 'AcceptAdminRole',

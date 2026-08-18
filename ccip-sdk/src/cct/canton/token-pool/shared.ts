@@ -6,7 +6,6 @@
  */
 
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
-import { decodeDamlRecord } from '../../../canton/index.ts'
 import type { JsCommands } from '../../../canton/client/index.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 
@@ -133,79 +132,62 @@ export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
 }
 
 /**
- * Resolve the active `CCIPFactory` contract for the acting party. Queries the
- * ACS by the `CCIPFactory` template ID and matches on the `owner` create-argument
- * field equal to `party`. The factory is a singleton per `owner` (signatory).
- *
- * @returns The active factory contract (CID + disclosure blob), or throws if none.
- */
-export async function resolveFactoryContract(
-  chain: CantonChain,
-  party: string,
-): Promise<CantonActiveContract> {
-  const contract = await chain.findActiveContractByTemplate(
-    FACTORY_TEMPLATE_ID,
-    [party],
-    (createArgument) => {
-      const fields = decodeDamlRecord(createArgument)
-      return fields['owner'] === party
-    },
-  )
-  if (!contract) {
-    throw new CCTParamsInvalidError(
-      'resolveFactoryContract',
-      'factoryCid',
-      `no active CCIPFactory found for owner ${party}; pass \`factoryCid\` explicitly or ensure the party owns a factory`,
-    )
-  }
-  return contract
-}
-
-/**
- * Resolve a CCIPFactory contract reference for an op. When `factoryCid` is
- * provided, fetches its disclosure blob by CID; otherwise resolves the active
- * factory for `party` (the `owner`) from the ACS.
+ * Resolve a CCIPFactory contract reference by its `InstanceAddress` (the
+ * canonical Canton resolution path). `factoryInstanceAddress` is either the
+ * `0x<64-hex>` keccak256 hash or the `RawInstanceAddress` `"instanceId@owner"`
+ * form. The SDK resolves the CID + disclosure blob together via
+ * {@link CantonChain.findActiveContractByInstanceAddress}.
  */
 export async function resolveFactoryRef(
   chain: CantonChain,
   party: string,
-  factoryCid?: string,
+  factoryInstanceAddress: string,
 ): Promise<PoolContractRef> {
-  if (factoryCid) {
-    const contract = await chain.findActiveContractByCid(FACTORY_TEMPLATE_ID, factoryCid, [party])
-    if (!contract) {
-      throw new CCTParamsInvalidError(
-        'resolveFactoryRef',
-        'factoryCid',
-        `provided factoryCid ${factoryCid} is not active or not visible to ${party}`,
-      )
-    }
-    return toContractRef(contract)
+  const contract = await chain.findActiveContractByInstanceAddress(
+    FACTORY_TEMPLATE_ID,
+    factoryInstanceAddress,
+    [party],
+  )
+  if (!contract) {
+    throw new CCTParamsInvalidError(
+      'resolveFactoryRef',
+      'factoryInstanceAddress',
+      `CCIPFactory ${factoryInstanceAddress} is not active or not visible to ${party}`,
+    )
   }
-  return toContractRef(await resolveFactoryContract(chain, party))
+  return toContractRef(contract)
 }
 
 /**
- * Resolve a pool contract reference by its (mandatory) `poolCid`. Fetches the
- * disclosure blob by CID using the pool template ID. Pool ops require an
- * explicit `poolCid` (pools are not singletons — they are keyed by
- * `poolOwner` + `instrumentId`, and the caller is expected to know which pool
- * it is operating on).
+ * Resolve a pool contract reference by its `InstanceAddress` (the canonical
+ * Canton resolution path, mirroring Go `FindActiveContractByInstanceAddress`).
+ *
+ * `poolInstanceAddress` is the pool's `InstanceAddress` — either the `0x<64-hex>`
+ * keccak256 hash, or the `RawInstanceAddress` `"instanceId@poolOwner"` form
+ * (resolved to the hash internally). The SDK queries the ACS by pool template,
+ * derives each contract's instance address from its `instanceId` create-arg +
+ * sole signatory, and matches — returning the CID + disclosure blob together so
+ * the caller never handles `createdEventBlob`.
  */
 export async function resolvePoolRef(
   chain: CantonChain,
-  poolCid: string,
   poolType: 'burnMint' | 'lockRelease',
   poolOwner: string,
+  poolInstanceAddress: string,
 ): Promise<PoolContractRef> {
   const templateId =
     poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
-  const contract = await chain.findActiveContractByCid(templateId, poolCid, [poolOwner])
+
+  const contract = await chain.findActiveContractByInstanceAddress(
+    templateId,
+    poolInstanceAddress,
+    [poolOwner],
+  )
   if (!contract) {
     throw new CCTParamsInvalidError(
       'resolvePoolRef',
-      'poolCid',
-      `provided poolCid ${poolCid} is not active or not visible to ${poolOwner}`,
+      'poolInstanceAddress',
+      `pool ${poolInstanceAddress} is not active or not visible to ${poolOwner}`,
     )
   }
   return toContractRef(contract)

@@ -14,7 +14,6 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { parseContractCid } from '../../validate.ts'
 import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
@@ -41,8 +40,8 @@ export interface ChainUpdate {
 
 /** Parameters shared by `applyChainUpdates` generation and execution. */
 export interface ApplyChainUpdatesParams {
-  /** Pool contract ID. */
-  poolCid: string
+  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
+  poolInstanceAddress: string
   /** Pool type (determines the template ID). */
   poolType: 'burnMint' | 'lockRelease'
   /** Remote chain selectors to remove from the pool config. */
@@ -70,9 +69,11 @@ export type ExecuteApplyChainUpdatesResult = CantonTransactionResult & {
 export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> {
   readonly name = 'applyChainUpdates'
 
-  /** Validates the pool CID and that at least one add/remove is specified. */
+  /** Validates the pool target and that at least one add/remove is specified. */
   protected override validate(p: GenerateApplyChainUpdatesParams): void {
-    parseContractCid(this.name, 'poolCid', p.poolCid)
+    if (!p.poolInstanceAddress) {
+      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+    }
     if (
       (!p.remoteChainSelectorsToRemove || p.remoteChainSelectorsToRemove.length === 0) &&
       (!p.chainsToAdd || p.chainsToAdd.length === 0)
@@ -111,7 +112,7 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
         ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
         : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
-    const poolContract = await resolvePoolRef(chain, p.poolCid, p.poolType, p.sender)
+    const poolContract = await resolvePoolRef(chain, p.poolType, p.sender, p.poolInstanceAddress)
 
     const choiceArgument: Record<string, unknown> = {
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),

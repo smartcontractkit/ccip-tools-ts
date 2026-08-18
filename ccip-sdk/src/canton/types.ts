@@ -101,6 +101,8 @@ export interface CantonActiveContract {
   createdEventBlob: string
   /** Synchronizer the contract was read from. */
   synchronizerId: string
+  /** Contract signatories (from the created event); used for InstanceAddress derivation. */
+  signatories: string[]
   /** Raw Daml `createArgument` record (decode lazily with field helpers). */
   createArgument: unknown
 }

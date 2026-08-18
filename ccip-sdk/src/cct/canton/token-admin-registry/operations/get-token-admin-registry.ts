@@ -11,18 +11,17 @@
  */
 
 import type { CantonChain } from '../../../../canton/index.ts'
-import type { CantonInstrumentId } from '../../../../canton/types.ts'
-import { decodeDamlRecord, extractFieldValue, extractRecordField } from '../../../../canton/index.ts'
+import { decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CantonQuery } from '../../query.ts'
-import { parseInstrumentId } from '../../validate.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
 
 /** Parameters for `getTokenAdminRegistry`. */
 export interface GetTokenAdminRegistryParams {
-  /** Instrument to look up (`{ admin, id }` or `"admin::1220…::id"`). */
-  instrumentId: { admin: string; id: string } | string
-  /** TokenConfig contract ID. When omitted, resolved via ACS by instrumentId. */
-  tokenConfigCid?: string
+  /** TokenConfig `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
+  tokenConfigInstanceAddress: string
+  /** Admin party (for ACS visibility — must be a stakeholder/signatory of the TokenConfig). */
+  adminParty: string
 }
 
 /** Result of `getTokenAdminRegistry`: the TAR view of an instrument. */
@@ -41,8 +40,8 @@ export interface GetTokenAdminRegistryResult {
 
 /** Parsed params for {@link GetTokenAdminRegistry.read}. */
 interface ParsedGetTokenAdminRegistry {
-  instrumentId: CantonInstrumentId
-  tokenConfigCid?: string
+  tokenConfigInstanceAddress: string
+  adminParty: string
 }
 
 /** Read the TAR state for an instrument. */
@@ -53,38 +52,31 @@ export class GetTokenAdminRegistry extends CantonQuery<
 > {
   readonly name = 'getTokenAdminRegistry'
 
-  /** Parses the instrument ID into `{ admin, id }`. */
+  /** Validates the TokenConfig instance address + admin party. */
   protected prepare(p: GetTokenAdminRegistryParams): ParsedGetTokenAdminRegistry {
+    if (!p.tokenConfigInstanceAddress) {
+      throw new CCTParamsInvalidError(this.name, 'tokenConfigInstanceAddress', 'TokenConfig InstanceAddress is required')
+    }
     return {
-      instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
-      tokenConfigCid: p.tokenConfigCid,
+      tokenConfigInstanceAddress: p.tokenConfigInstanceAddress,
+      adminParty: p.adminParty,
     }
   }
 
   /**
-   * Reads the active `TokenConfig` for the instrument from the ACS and decodes
-   * its fields into the TAR view. When `tokenConfigCid` is provided, fetches it
-   * by CID; otherwise resolves by template + `instrumentId` match. Returns an
-   * empty result (`tokenConfigCid: ''`) when the instrument is not registered.
+   * Reads the active `TokenConfig` by InstanceAddress from the ACS and decodes
+   * its fields into the TAR view. Returns an empty result (`tokenConfigCid: ''`)
+   * when the TokenConfig is not active/visible.
    */
   protected async read(
     chain: CantonChain,
     p: ParsedGetTokenAdminRegistry,
   ): Promise<GetTokenAdminRegistryResult> {
-    const contract = p.tokenConfigCid
-      ? await chain.findActiveContractByCid(TOKEN_CONFIG_TEMPLATE_ID, p.tokenConfigCid, [
-          p.instrumentId.admin,
-        ])
-      : await chain.findActiveContractByTemplate(
-          TOKEN_CONFIG_TEMPLATE_ID,
-          [p.instrumentId.admin],
-          (createArgument) => {
-            const fields = decodeDamlRecord(createArgument)
-            const inst = extractRecordField(fields, 'instrumentId')
-            if (!inst) return false
-            return inst['admin'] === p.instrumentId.admin && inst['id'] === p.instrumentId.id
-          },
-        )
+    const contract = await chain.findActiveContractByInstanceAddress(
+      TOKEN_CONFIG_TEMPLATE_ID,
+      p.tokenConfigInstanceAddress,
+      [p.adminParty],
+    )
 
     if (!contract) {
       return { isCCIPManaged: false, tokenConfigCid: '' }
