@@ -44,7 +44,6 @@ import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
-  CCIPCommitNotFoundError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
@@ -118,6 +117,7 @@ import {
   getDataBytes,
   leToBigInt,
   parseTypeAndVersion,
+  passesTypeAndVersion,
   toLeArray,
   util,
 } from '../utils.ts'
@@ -532,6 +532,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
             ))
         )
           continue
+        if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
         yield log
       }
     }
@@ -612,6 +613,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         {
           ...routerConfig,
           destChainSelector,
+          rmn: routerConfig.rmnRemote,
           ...destChainState.config,
           router: onRamp,
           typeAndVersion,
@@ -665,18 +667,26 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Fetch `reference_addresses` PDA for the OffRamp
+   * Fetch `reference_addresses` PDA for the OffRamp.
+   *
+   * The layout differs between v1.6 (no `bump` byte) and v2 (`bump` between `version` and
+   * `router`), so we load the matching IDL after `typeAndVersion`:
+   *   - v1.6  → `CCIP_OFFRAMP_IDL.referenceAddresses` (version + router + …)
+   *   - v2    → `CCIP_OFFRAMP_V2_IDL.referenceAddresses` (version + bump + router + …)
    */
   private async _getOffRampReferenceAddresses(offRamp: string) {
     const offRamp_ = new PublicKey(offRamp)
-    // Read referenceAddresses PDA for router and other fields
-    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
-    const [referenceAddressesAddr] = PublicKey.findProgramAddressSync(
+    const [, version] = await this.typeAndVersion(offRamp)
+    const program = new Program(
+      version.startsWith('2.') ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL,
+      offRamp_,
+      { connection: this.connection },
+    )
+    const [referenceAddressesPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('reference_addresses')],
       offRamp_,
     )
-    const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
-    return refAddresses
+    return program.account.referenceAddresses.fetch(referenceAddressesPda)
   }
 
   /**
@@ -703,25 +713,33 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const sourceChain = await program.account.sourceChain.fetch(statePda)
-    const { onRamp: onRampField, ...sourceConfig } = sourceChain.config
     // v1 carries a per-lane `state` (minSeqNr); v2 has none.
     const state = 'state' in sourceChain ? sourceChain.state : undefined
-    const onRamp = decodeAddress(
-      getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
-      networkInfo(sourceChainSelector).family,
-    )
+
+    // v1 exposes a single `onRamp`; v2 exposes a `onRamps` Vec. Normalize both to `onRamps`.
+    const sourceFamily = networkInfo(sourceChainSelector).family
+    const decodeOnRampField = (onRampField: { bytes: readonly number[]; len: number }) =>
+      decodeOnRampAddress(
+        getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
+        sourceFamily,
+      )
+    const onRamps = Array.isArray(sourceChain.config.onRamps)
+      ? sourceChain.config.onRamps.map(decodeOnRampField)
+      : [decodeOnRampField(sourceChain.config.onRamp)]
+    const { onRamp: _onRamp, onRamps: _onRamps, ...sourceConfig } = sourceChain.config
 
     return normalizeDeep(
       {
         ...refAddresses,
+        rmn: refAddresses.rmnRemote,
         sourceChainSelector,
         ...sourceConfig,
         ...state,
-        onRamps: [onRamp],
+        onRamps,
         typeAndVersion,
       },
       {
-        sourceFamily: networkInfo(sourceChainSelector).family,
+        sourceFamily,
         destFamily: (this.constructor as typeof SolanaChain).family,
       },
     )
@@ -1595,17 +1613,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const pda = (seed: string, ...extra: Uint8Array[]) =>
         PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
 
-      // Read ReferenceAddresses to get the router for receiver_registry PDA derivation
-      const refAddrPda = pda('reference_addresses')
-      const refAddrAcc = await this.connection.getAccountInfo(refAddrPda)
-      if (!refAddrAcc) {
-        throw new CCIPCommitNotFoundError(
-          String(request.lane.sourceChainSelector),
-          request.message.sequenceNumber,
-        )
-      }
-      // ReferenceAddresses layout: 8(disc) + 1(ver) + 1(bump) + 32(router) + ...
-      const router = new PublicKey(refAddrAcc.data.subarray(10, 42))
+      // Read ReferenceAddresses to get the router (receiver_registry derivation) and the
+      // RMN Remote program (required by the `get_ccvs_for_msg` view since the latest redeploy).
+      const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
+      const router = refAddresses.router
 
       // Resolve the receiver and its remaining_accounts
       const message = request.message as CCIPMessage
@@ -1652,6 +1663,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         }
       }
 
+      // RMN Remote CPI accounts (required by the latest offramp). The `rmn_remote` program is
+      // read from ReferenceAddresses; its two config/curse PDAs are derived under it.
+      const [rmnRemoteCurses] = PublicKey.findProgramAddressSync(
+        [Buffer.from('curses')],
+        refAddresses.rmnRemote,
+      )
+      const [rmnRemoteConfig] = PublicKey.findProgramAddressSync(
+        [Buffer.from('config')],
+        refAddresses.rmnRemote,
+      )
+
       const ccvs = (await program.methods
         .getCcvsForMsg({
           // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
@@ -1664,8 +1686,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         })
         .accounts({
           config: pda('config'),
-          referenceAddress: refAddrPda,
+          referenceAddresses: pda('reference_addresses'),
           sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
+          rmnRemote: refAddresses.rmnRemote,
+          rmnRemoteCurses,
+          rmnRemoteConfig,
         })
         .remainingAccounts(remainingAccounts)
         .view()) as {

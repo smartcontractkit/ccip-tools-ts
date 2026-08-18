@@ -107,17 +107,17 @@ describe(
     })
 
     // ── Lombard (LBTC) — attestation-consuming pools, BOTH generations, on live prod-testnet ──
-    // LBTC is served on Sepolia by a `LombardTokenPoolV2 1.6.1` and on Fuji by a
-    // `LombardTokenPool 2.0.0`; both sit behind v1.x OffRamps, whose 1-arg releaseOrMint decodes
-    // the bridge proof from offchainTokenData — so pre-send the preflight must report
-    // attestation-required (never a false hard block). Pools/offRamps resolved on-chain.
+    // LBTC is served on Sepolia by a `LombardTokenPool` and on Fuji by a `LombardTokenPool`;
+    // both sit behind v1.x OffRamps, whose 1-arg releaseOrMint decodes the bridge proof from
+    // offchainTokenData — so pre-send the preflight must report attestation-required (never a
+    // false hard block). Pools/offRamps resolved on-chain.
     const LBTC = '0x107Fc7d90484534704dD2A9e24c7BD45DB4dD1B5'
     const PROD = {
       sepolia: {
         registry: '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82',
         router: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
         sourceSelector: 14767482510784806043n, // fuji
-        expectPoolType: 'LombardTokenPoolV2', // 1.6.1
+        expectPoolType: 'LombardTokenPool', // 2.0.0
       },
       fuji: {
         registry: '0xA92053a4a3922084d992fD2835bdBa4caC6877e6',
