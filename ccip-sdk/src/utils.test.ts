@@ -144,9 +144,12 @@ describe('decodeAddress', () => {
       assert.equal(decoded, '0x1234567890123456789012345678901234567890')
     })
 
-    it('should throw error for invalid EVM address length', () => {
-      const invalidAddress = '0x12345678901234567890' // Too short
-      assert.throws(() => decodeAddress(invalidAddress))
+    it('should zero-pad short hex input for EVM addresses', () => {
+      // canonical short form (leading zeroes stripped) is now accepted:
+      // getAddressBytes restores the full byte shape before the EVM decode
+      const shortAddress = '0x12345678901234567890' // 10 bytes
+      const decoded = decodeAddress(shortAddress)
+      assert.equal(decoded, '0x0000000000000000000012345678901234567890')
     })
 
     it('should throw error for too long EVM address without proper padding', () => {
@@ -187,13 +190,14 @@ describe('decodeAddress', () => {
     it('should decode Aptos addresses as hex', () => {
       const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
       const decoded = decodeAddress(aptosAddress, ChainFamily.Aptos)
-      assert.equal(decoded, '0x0000000000000000000000000000000000000000000000000000000000000001')
+      // canonical short form: leading zero nibbles stripped
+      assert.equal(decoded, '0x1')
     })
 
     it('should handle shorter Aptos addresses', () => {
       const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000123'
       let decoded = decodeAddress(aptosAddress, ChainFamily.Aptos)
-      assert.equal(decoded, '0x0000000000000000000000000000000000000000000000000000000000000123')
+      assert.equal(decoded, '0x123')
 
       const aptosToken = '0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa'
       decoded = decodeAddress(aptosToken, ChainFamily.Aptos)
@@ -203,7 +207,8 @@ describe('decodeAddress', () => {
     it('should handle Uint8Array for Aptos addresses', () => {
       const aptosBytes = new Uint8Array(32).fill(1)
       const decoded = decodeAddress(aptosBytes, ChainFamily.Aptos)
-      assert.equal(decoded, '0x0101010101010101010101010101010101010101010101010101010101010101')
+      // canonical short form strips a leading zero nibble, leaving odd-length hex
+      assert.equal(decoded, '0x101010101010101010101010101010101010101010101010101010101010101')
     })
   })
 
@@ -224,9 +229,10 @@ describe('decodeAddress', () => {
       )
     })
 
-    it('should handle empty bytes', () => {
+    it('should decode empty bytes as the EVM zero address', () => {
+      // getAddressBytes restores the 32-byte shape of empty/short hex first
       const emptyBytes = '0x'
-      assert.throws(() => decodeAddress(emptyBytes))
+      assert.equal(decodeAddress(emptyBytes), '0x0000000000000000000000000000000000000000')
     })
 
     it('should handle null/undefined input gracefully', () => {
@@ -266,13 +272,10 @@ describe('decodeAddress', () => {
       const decodedShort = decodeAddress(shortBytes, ChainFamily.Solana)
       assert.equal(decodedShort, '11111111111111111111111111111112')
 
-      // Aptos accepts variable length but normalizes to 32 bytes
+      // Aptos accepts variable length and reports its canonical short form
       const longBytes = '0x0000000000000000000000000000000000000000000000000000000000000001'
       const decodedLong = decodeAddress(longBytes, ChainFamily.Aptos)
-      assert.equal(
-        decodedLong,
-        '0x0000000000000000000000000000000000000000000000000000000000000001',
-      )
+      assert.equal(decodedLong, '0x1')
     })
   })
 })
@@ -772,10 +775,7 @@ describe('decodeOnRampAddress', () => {
   it('should append ::onramp for Aptos addresses', () => {
     const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
     const decoded = decodeOnRampAddress(aptosAddress, ChainFamily.Aptos)
-    assert.equal(
-      decoded,
-      '0x0000000000000000000000000000000000000000000000000000000000000001::onramp',
-    )
+    assert.equal(decoded, '0x1::onramp')
   })
 
   it('should decode Solana addresses without ::onramp', () => {
@@ -961,10 +961,11 @@ describe('getAddressBytes', () => {
     assert.equal(result.length, 32)
   })
 
-  it('should handle empty bytes', () => {
+  it('should restore empty hex to the 32-byte zero address', () => {
     const result = getAddressBytes('0x')
     assert.ok(result instanceof Uint8Array)
-    assert.equal(result.length, 0)
+    assert.equal(result.length, 32)
+    assert.ok(result.every((b) => b === 0))
   })
 
   it('should preserve 20-byte addresses without modification', () => {

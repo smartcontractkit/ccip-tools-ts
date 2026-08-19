@@ -3,7 +3,15 @@ import { Signer } from '@mysten/sui/cryptography'
 import { JsonRpcHTTPTransport, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { isValidSuiAddress, isValidTransactionDigest, normalizeSuiAddress } from '@mysten/sui/utils'
-import { type BytesLike, dataLength, hexlify, isBytesLike, isHexString } from 'ethers'
+import {
+  type BytesLike,
+  dataLength,
+  getBytes,
+  hexlify,
+  isBytesLike,
+  isHexString,
+  zeroPadValue,
+} from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetOptional } from 'type-fest'
 
@@ -1302,7 +1310,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /**
    * Converts bytes to a Sui address.
    * @param bytes - Bytes to convert.
-   * @returns Sui address.
+   * @returns Sui address in canonical short form (0x-prefixed hex, leading
+   * zero nibbles stripped).
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {
     return getMoveAddress(bytes)
@@ -1702,7 +1711,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     const { coinType, metadataId } = await this.resolveFeeToken(message, ccip)
 
     if (!message.receiver) throw new CCIPArgumentInvalidError('receiver', String(message.receiver))
-    const receiverBytes = getAddressBytes(getMoveAddress(message.receiver))
+    // Canonical short-form Move addresses (odd-length allowed) must still
+    // serialize to their full byte shape: pad short hex to 32 bytes so the
+    // onramp gets a stable receiver length across families (EVM 20B → 32B,
+    // Move/SVM 32B, TON 36B kept raw).
+    const receiverLong = getAddressBytes(message.receiver)
+    const receiverBytes =
+      receiverLong.length <= 32 ? getBytes(zeroPadValue(receiverLong, 32)) : receiverLong
     const dataBytes = getDataBytes(message.data ?? '0x')
 
     if ((message.tokenAmounts?.length ?? 0) > 1) {

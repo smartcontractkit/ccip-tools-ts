@@ -622,7 +622,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /**
    * Converts bytes to an Aptos address.
    * @param bytes - Bytes to convert.
-   * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
+   * @returns Aptos address in canonical short form (0x-prefixed hex, leading
+   * zero nibbles stripped).
    * @throws {@link CCIPDataFormatUnsupportedError} if bytes length exceeds 32
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {
