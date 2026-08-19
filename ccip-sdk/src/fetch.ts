@@ -22,6 +22,14 @@ export type RateLimitOpts = {
   /** Max concurrent in-flight requests per endpoint (default 5). */
   maxInFlight?: number
   seed?: { limit: number; windowMs: number }
+  /**
+   * Ceiling on how far ahead the pacer may reserve a slot before a request
+   * fails fast instead of sleeping (default 30_000ms). A request that exceeds
+   * it is retried after the already-reserved backlog drains, so the ceiling
+   * bounds per-request latency without converting a slow endpoint into a hard
+   * failure.
+   */
+  maxPacingBacklogMs?: number
 }
 
 /** Default (ceiling) max concurrent in-flight requests per endpoint. */
@@ -119,14 +127,20 @@ class AdaptiveLimiter {
   active: boolean
   limit: number
   windowMs: number
+  /** Fail-fast ceiling on the paced backlog (see {@link RateLimitOpts.maxPacingBacklogMs}). */
+  private readonly maxPacingBacklogMs: number
   private nextSendAt = 0
   private lastLimitTs = 0
   private successStreak = 0
 
-  constructor(seed?: { limit: number; windowMs: number }) {
+  constructor(
+    seed?: { limit: number; windowMs: number },
+    maxPacingBacklogMs: number = MAX_PACING_WAIT_MS,
+  ) {
     this.active = seed != null
     this.limit = Math.max(1, seed?.limit ?? 1)
     this.windowMs = clampWindow(seed?.windowMs ?? DEFAULT_WINDOW_MS)
+    this.maxPacingBacklogMs = Math.max(0, maxPacingBacklogMs)
   }
 
   /** Wait (only when active) for this scope's evenly-paced slot. Fails fast when
@@ -138,15 +152,20 @@ class AdaptiveLimiter {
     if (!this.active) return
     const now = performance.now()
     const at = Math.max(now, this.nextSendAt)
-    if (at - now > MAX_PACING_WAIT_MS) {
+    if (at - now > this.maxPacingBacklogMs) {
       throw new CCIPError(
         'ABORT',
-        `pacing backlog ${at - now}ms exceeds cap ${MAX_PACING_WAIT_MS}ms`,
+        `pacing backlog ${at - now}ms exceeds cap ${this.maxPacingBacklogMs}ms`,
         { isTransient: true },
       )
     }
     this.nextSendAt = at + this.windowMs / this.limit // reserve next slot synchronously
     if (at > now) await sleep(at - now, signal) // abortable: caller checks the signal next
+  }
+
+  /** Milliseconds before the currently-reserved pacing slots drain (0 when inactive/free). */
+  backlogMs(now = performance.now()): number {
+    return this.active ? Math.max(0, this.nextSendAt - now) : 0
   }
 
   /** On a 429: activate + pace ONLY when an explicit reset window is known.
@@ -196,6 +215,8 @@ interface EndpointState {
   limiters: Map<string, AdaptiveLimiter>
   /** Seed applied to newly-created limiters for this endpoint (known hosts). */
   seed?: { limit: number; windowMs: number }
+  /** Fail-fast ceiling for the endpoint's pacing backlog. */
+  pacingBacklogCapMs: number
   /** True once we've seen method-scoped rate headers; routes by JSON-RPC method. */
   methodScoped: boolean
   logRange?: { maxRange: number; source: 'error' | 'success' }
@@ -228,6 +249,7 @@ function getOrCreateEndpoint(
   input: Parameters<typeof fetch>[0],
   seed?: { limit: number; windowMs: number },
   maxInFlight: number = DEFAULT_MAX_IN_FLIGHT,
+  pacingBacklogCapMs: number = MAX_PACING_WAIT_MS,
 ): EndpointState {
   const key = endpointKey(input)
   let state = endpointRegistry.get(key)
@@ -236,6 +258,7 @@ function getOrCreateEndpoint(
       sem: new AdaptiveSemaphore(maxInFlight),
       limiters: new Map(),
       seed,
+      pacingBacklogCapMs: Math.max(0, pacingBacklogCapMs),
       methodScoped: false,
     }
     endpointRegistry.set(key, state)
@@ -246,7 +269,7 @@ function getOrCreateEndpoint(
 function getLimiter(ep: EndpointState, scope: string): AdaptiveLimiter {
   let lim = ep.limiters.get(scope)
   if (!lim) {
-    lim = new AdaptiveLimiter(ep.seed)
+    lim = new AdaptiveLimiter(ep.seed, ep.pacingBacklogCapMs)
     ep.limiters.set(scope, lim)
   }
   return lim
@@ -511,6 +534,7 @@ export function createRateLimitedFetch(
 ): typeof fetch {
   opts.maxRetries ??= 15
   const opts_ = opts as RateLimitOpts
+  const pacingBacklogCapMs = opts_.maxPacingBacklogMs ?? MAX_PACING_WAIT_MS
 
   // Backoff used when the limiter is NOT pacing (occasional/bursty 429s). Uses
   // FULL JITTER over a 250ms→2s ramp: critical because callers often fire a
@@ -543,7 +567,7 @@ export function createRateLimitedFetch(
 
     let lastError: Error | null = null
     const method = extractMethod(init)
-    const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight)
+    const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight, pacingBacklogCapMs)
 
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):
@@ -617,11 +641,15 @@ export function createRateLimitedFetch(
         // concurrency cap and back off before retrying (no header → no pacing).
         ep.sem.decrease()
         // A pacing-backlog abort means acquire() itself won't wait next attempt
-        // (it fails fast instead of sleeping past the cap), so back off here —
-        // otherwise a deep backlog just re-throws instantly on every remaining
-        // attempt instead of giving the queue time to drain.
+        // (it fails fast instead of sleeping past the cap). Rather than retrying
+        // into the same instant refusal under a deep backlog (jittered backoff
+        // drains nothing in 250ms→2s steps), deterministically wait out the
+        // already-reserved slots: the caller is going to wait for this endpoint
+        // anyway, and an idle drain re-enters acquire() below the cap. Sleep is
+        // abort-aware so callers can still bound/cancel the wait.
         const isPacingBacklog = lastError.message.includes('pacing backlog')
-        if (!lim.active || isPacingBacklog) await sleep(backoffMs(attempt), abort)
+        if (isPacingBacklog) await sleep(Math.min(pacingBacklogCapMs, lim.backlogMs() + 250), abort)
+        else if (!lim.active) await sleep(backoffMs(attempt), abort)
         continue
       }
 

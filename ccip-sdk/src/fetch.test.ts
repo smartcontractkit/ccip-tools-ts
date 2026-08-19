@@ -817,6 +817,30 @@ describe('adaptive limiting', () => {
     assert.ok(Date.now() - t0 < 4000, `expected burst+retry (no pacing), took ${Date.now() - t0}ms`)
   })
 
+  it('drains an over-cap pacing backlog instead of failing the requests', async () => {
+    let calls = 0
+    globalThis.fetch = mock.fn(async () => {
+      calls++
+      return ok()
+    })
+    // 1 request per 250ms pacer with a small (test-only) backlog ceiling: the
+    // concurrent burst reserves ~750ms of slots, so the tail requests exceed
+    // the cap and fail fast in acquire(). They must then sleep off the
+    // already-reserved backlog and still go out — no hard failure, no retry
+    // storm (calls stays at the request count).
+    const f = createRateLimitedFetch({
+      seed: { limit: 1, windowMs: 250 },
+      maxPacingBacklogMs: 300,
+    })
+    const url = 'https://drain-backlog.example.com/rpc'
+    const t0 = Date.now()
+    await Promise.all(Array.from({ length: 4 }, (_, i) => f(url, rpc('m', i))))
+    const elapsed = Date.now() - t0
+    assert.equal(calls, 4)
+    assert.ok(elapsed >= 500, `expected paced drain across ~4 slots, took ${elapsed}ms`)
+    assert.ok(elapsed < 10_000, `took suspiciously long: ${elapsed}ms`)
+  })
+
   it('seeded (TON-like) limiter doubles window on consecutive header-less 429s', async () => {
     let calls = 0
     globalThis.fetch = mock.fn(() => {
