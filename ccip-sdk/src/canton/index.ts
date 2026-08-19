@@ -1102,7 +1102,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       return {
         ccvCid: ccv.contractId,
         verifierResults: stripHexPrefix(String(v.ccvData)),
-        ccvExtraContext: ccv.contextData,
+        context: ccv.contextData,
       }
     })
 
@@ -1126,18 +1126,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       tokenTransferInput = {
         tokenPoolCid: tokenPoolExecute.contractId,
         tokenReceiverParty: payer,
-        poolExtraContext: tokenPoolExecute.contextData,
+        context: tokenPoolExecute.contextData,
       }
       tokenTransferDisclosures = tokenPoolExecute.disclosedContracts
     }
 
     // The global EDS contextData is passed as the Execute choice context.
     const choiceArgument: Record<string, unknown> = {
-      context: edsResult.contextData,
       routerCid: acsDisclosures.perPartyRouter.contractId,
       encodedMessage: encodedMessageHex,
       tokenTransfer: tokenTransferInput,
       ccvInputs,
+      context: edsResult.contextData,
     }
 
     // Step 6 — Merge all disclosed contracts (dedup by contractId)
@@ -1826,7 +1826,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   private async createPerPartyRouter(party: string, signer: TransactionSigner): Promise<void> {
     const factory = await this.edsDisclosureProvider.fetchPerPartyRouterFactoryDisclosures(party)
-    const factoryTemplateId = `#${this.ccipPackages.perPartyRouter}:CCIP.PerPartyRouter:PerPartyRouterFactory`
+    const factoryTemplateId = `#${this.ccipPackages.perPartyRouter}:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouterFactory`
     const createCmd: JsCommands = {
       commands: [
         {
