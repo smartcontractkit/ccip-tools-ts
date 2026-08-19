@@ -772,7 +772,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       tokenTransferInput = {
         senderInputCids: tokenHoldings.map((holding) => holding.contractId),
         tokenPoolCid: tokenPoolSend.contractId,
-        poolExtraContext: tokenPoolSend.contextData,
+        context: tokenPoolSend.contextData,
       }
       tokenTransferDisclosures = [
         ...tokenHoldings.map((holding) => holding.disclosedContract),
@@ -816,7 +816,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
       executorInput = {
         executorCid: executorResult.contractId,
-        executorExtraContext: executorResult.contextData,
+        context: executorResult.contextData,
       }
       executorDisclosures = executorResult.disclosedContracts
     } else if (executorMode === 'none') {
@@ -830,7 +830,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const ccvSendInputsForDaml = ccvSendResults.map((ccv) => ({
       ccvAddress: { unpack: ccv.rawInstanceAddress },
       ccvCid: ccv.contractId,
-      ccvExtraContext: ccv.contextData,
+      context: ccv.contextData,
     }))
 
     const ccvExtraArgs = ccvSendResults.map((ccv) => ({
