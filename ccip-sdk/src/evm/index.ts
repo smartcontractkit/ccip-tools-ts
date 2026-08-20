@@ -1,4 +1,6 @@
 import {
+  type Block,
+  type BlockParams,
   type BytesLike,
   type JsonRpcApiProvider,
   type Log,
@@ -388,6 +390,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           }),
         )
       return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapLog.call(
+        this.provider,
+        value,
+        network,
+      )
+    }
+    // fix tron-* evm chains returning `stateRoot="0x"` and breaking ethers
+    provider._wrapBlock = (value: BlockParams, network: Network): Block => {
+      if (
+        typeof value.stateRoot === 'string' &&
+        value.stateRoot !== ZeroHash &&
+        value.stateRoot.match(/^0x0*$/)
+      ) {
+        value.stateRoot = ZeroHash
+      }
+      return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapBlock.call(
         this.provider,
         value,
         network,
