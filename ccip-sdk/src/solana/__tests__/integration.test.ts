@@ -17,7 +17,7 @@ import { SolanaChain } from '../index.ts'
 
 const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C/rpc'
 const SEPOLIA_RPC =
-  process.env.SEPOLIA_RPC ?? process.env.RPC_SEPOLIA ?? 'https://sepolia.gateway.tenderly.co'
+  process.env.SEPOLIA_RPC ?? process.env.RPC_SEPOLIA ?? 'https://rpc.sepolia.ethpandaops.io'
 // devnet.rpcpool.com: public, holds at least ~1 week of txs and doesn't 429 as
 // aggressively as onfinality's free tier; envs can override (e.g. onfinality,
 // which keeps the longest history but throttles hard)
