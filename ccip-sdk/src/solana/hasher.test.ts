@@ -24,7 +24,13 @@ describe('MessageHasher', () => {
       },
     })
   })
+  // Ported from the Go test:
   // https://github.com/smartcontractkit/chainlink-ccip/blob/34a541118d89c346e2c642b089a63c3f2b2df320/chains/solana/utils/ccip/ccip_messages_test.go#L28
+  // Short hex on the fixture's `onRamp` (0x010203) and `sourcePoolAddress`
+  // (0x00010203) now canonicalizes to the 32-byte Move-address shape in
+  // getAddressBytes (leading zeros restored), so this no longer byte-matches
+  // the Go fixture which hashed the raw 3- and 4-byte slices. Full-length
+  // addresses (see the real evm->solana case below) hash identically.
   it('should handle a message to solana', async () => {
     const message = {
       messageId: '0x0805030000000000000000000000000000000000000000000000000000000000',
@@ -72,7 +78,7 @@ describe('MessageHasher', () => {
 
     assert.strictEqual(
       finalHash,
-      '0xbd8025f7b32386d93be284b6b4eb6f36c7b46ea157c0228f00ccba38fe7a448e',
+      '0x52a024d15748ae5f3ce984a80d0bd0c80c5694f3b98f1650cc44ff8e22f316ab',
     )
   })
 
