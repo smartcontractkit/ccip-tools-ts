@@ -1,5 +1,12 @@
 import { parseAbi } from 'abitype'
-import { type EventFragment, type InterfaceAbi, AbiCoder, Interface } from 'ethers'
+import {
+  type InterfaceAbi,
+  AbiCoder,
+  EventFragment,
+  Fragment,
+  Interface,
+  isHexString,
+} from 'ethers'
 
 import Token_ABI from './abi/BurnMintERC677Token.ts'
 import CCIPReceiver_2_0_ABI from './abi/CCIPReceiver_2_0.ts'
@@ -83,22 +90,39 @@ export const interfaces = {
 } as const
 
 /**
- * Gets all event fragments matching the given event names.
- * @param events - Event names to match.
+ * Gets all event fragments matching the given event names, signatures, or topic hashes.
+ *
+ * Supports the same keys as `Interface.getEvent` — bare names, full signatures, and
+ * topic hashes — but where `getEvent` throws on an ambiguous bare name (e.g.
+ * `ConfigSet` exists in many ABIs with different signatures), collects every matching
+ * signature instead.
+ * @param events - Event names, signatures, or topic hashes to match.
  * @returns Map of topic hash to event fragment.
  */
 export function getAllFragmentsMatchingEvents(
   events: readonly string[],
 ): Record<`0x${string}`, EventFragment> {
   const fragments: Record<string, EventFragment> = {}
-  for (const iface of Object.values(interfaces)) {
-    for (const event of events) {
-      const fragment = iface.getEvent(event)
-      if (fragment) fragments[fragment.topicHash] ??= fragment
+  for (const key of events) {
+    for (const iface of Object.values(interfaces)) {
+      for (const fragment of iface.fragments) {
+        if (!Fragment.isEvent(fragment)) continue
+        if (matchesEventKey(fragment, key)) fragments[fragment.topicHash] ??= fragment
+      }
     }
   }
   return fragments
 }
+
+/** Whether an event fragment matches an `Interface.getEvent` key: a topic hash, bare
+ * name, or signature. */
+function matchesEventKey(fragment: EventFragment, key: string): boolean {
+  if (isHexString(key)) return fragment.topicHash === key.toLowerCase()
+  if (!key.includes('(')) return fragment.name === key
+  // Full signature: parse and compare canonical (sighash) format, like `getEvent`.
+  return fragment.format() === EventFragment.from(key).format()
+}
+
 export const requestsFragments = getAllFragmentsMatchingEvents([
   'CCIPSendRequested',
   'CCIPMessageSent',

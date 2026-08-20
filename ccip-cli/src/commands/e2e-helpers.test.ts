@@ -6,9 +6,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const CLI_PATH = path.join(__dirname, '..', 'index.ts')
 
 export const RPCS = [
-  process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co',
+  // sepolia candidates, raced per family: ethPandaOps (public, archive-friendly)
+  // answers first reliably; publicnode/tenderly cover when it's unavailable
+  process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io',
+  process.env['RPC_SEPOLIA_2'] || 'https://ethereum-sepolia-rpc.publicnode.com',
+  process.env['RPC_SEPOLIA_3'] || 'https://sepolia.gateway.tenderly.co',
   process.env['RPC_AVAX'] || 'https://api.avax-test.network/ext/bc/C/rpc',
-  process.env['RPC_APTOS'] || 'testnet',
+  // Aptos testnet fullnodes prune older txs/events; the archival endpoint
+  // retains them, so it is the single default (kept alone on purpose: the
+  // per-family race would otherwise let a pruned fullnode win the chain)
+  process.env['RPC_APTOS'] || 'https://archive.testnet.aptoslabs.com/v1',
   // raced: first endpoint to resolve wins, so a throttled one doesn't stall
   // the suite; onfinality keeps the longest tx history but 429s hardest
   process.env['RPC_SOLANA'] || 'https://solana-devnet.api.onfinality.io/public',

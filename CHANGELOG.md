@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-08-19
+
+- SDK: support a new `typeAndVersions?: (string | RegExp)[]` filter option for `getLogs`, emitting only logs from addresses matching type string or typeAndVersion regexp
+- EVM: gracefully handle RPCs limiting the number of `topics` filters in getLogs
+- EVM: improve `USDCTokenPoolProxy 2.0.0` multiple `getPools()` support
+- Aptos: support multiple topics in `getLogs`
+- Aptos: always format addresses as short hex (strip leading zeros)
+- Solana: preview support for latest v2 contracts
+- TON: improve logs masterchain blockNumber fetching
+- Canton: support v2 apis
+
+## [1.11.0] - 2026-08-07
+
 - SDK: `sendMessage` and `execute` methods now accept `opts.txGasLimit`, skips estimation
 - CLI: `send` and `manual-exec --tx-gas-limit` option to force gas limit for txs
 - SDK/CLI: add `q` free-text filter to `searchMessages` and `-q` to `search messages`; matches token and pool addresses, tx hashes, messageId, sender and receiver

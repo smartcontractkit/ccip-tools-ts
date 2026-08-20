@@ -60,7 +60,7 @@ export function hashV16AptosMessage(
 
   const innerHash = concat([
     message.messageId,
-    zeroPadValue(message.receiver, 32),
+    zeroPadValue(getAddressBytes(message.receiver), 32),
     encodeNumber(message.sequenceNumber),
     encodeNumber(gasLimit), // Aptos as dest uses EVMExtraArgs
     encodeNumber(message.nonce),
@@ -71,7 +71,7 @@ export function hashV16AptosMessage(
     ...message.tokenAmounts.map((token) =>
       concat([
         encodeRawBytes(getAddressBytes(token.sourcePoolAddress)),
-        zeroPadValue(token.destTokenAddress, 32),
+        zeroPadValue(getAddressBytes(token.destTokenAddress), 32),
         encodeNumber(token.destGasAmount),
         encodeRawBytes(token.extraData),
         encodeNumber(token.amount),

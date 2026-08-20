@@ -254,7 +254,7 @@ ccip-cli send \
   --rpc https://ethereum-sepolia-rpc.example.com \
   --to 0xReceiverContract \
   -t link-token=1.0 \
-  -w <64-char-ed25519-seed>
+  --estimate-gas-limit -101
 ```
 
 On Canton source, `-r` is the **CCIPSender instance id** (not an EVM router address). Use `--only-get-fee` to preview — Canton returns `0` since fees are computed on-ledger. Pass Canton send extras via `--extra`:

@@ -25,7 +25,6 @@ export {
 } from './shared/codec.ts'
 import type { Chain, ChainStatic } from './chain.ts'
 import {
-  CCIPBlockBeforeTimestampNotFoundError,
   CCIPChainFamilyUnsupportedError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
@@ -35,87 +34,102 @@ import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
 import { util } from './shared/codec.ts'
 import { supportedChains } from './supported-chains.ts'
-import type { WithLogger } from './types.ts'
+import type { Logger, WithLogger } from './types.ts'
+
+/** How far back the bracketing walk reaches on its first probe. Only a starting
+ * guess: the walk then interpolates with the observed block time, so this just
+ * avoids an extra round-trip on the common "a few thousand blocks back" case. */
+const BRACKET_SEED_BLOCKS = 10_000
 
 /**
- * Returns *some* block number with timestamp prior to `timestamp`
+ * Returns the EXACT first block whose timestamp is `>= timestamp` — the lower
+ * bound, not an approximation.
  *
- * @param getBlockTimestamp - function to get block timestamp
- * @param recentBlockNumber - a block guaranteed to be after `timestamp` (e.g. latest)
- * @param timestamp - target timestamp
- * @param precision - returned blockNumber should be within this many blocks before timestamp
- * @returns blockNumber of a block at provider which is close but before target timestamp
- * @throws {@link CCIPBlockBeforeTimestampNotFoundError} if no block exists before the given timestamp
+ * Callers use this to turn a start *time* into a start *block*, so returning the
+ * boundary block exactly means a scan from it covers everything at or after
+ * `timestamp` and nothing before it. (It replaces an earlier version that stopped
+ * within a `precision` window and returned some block *before* the target, which
+ * made every caller silently over-scan by up to that many blocks.)
+ *
+ * Where several consecutive blocks share a timestamp, the LOWEST is returned, so
+ * nothing at the boundary is skipped.
+ *
+ * Search is interpolating rather than plain binary: block times are near-constant
+ * on most chains, so guessing proportionally converges in a handful of probes even
+ * over millions of blocks. The pivot is clamped strictly inside the bracket, so a
+ * bad interpolation (irregular block times) degrades to a linear scan of that
+ * bracket rather than stalling.
+ *
+ * @param getBlockTimestamp - resolves a block number to its unix timestamp (seconds)
+ * @param recentBlockNumber - a block known to be at/after `timestamp` (e.g. latest)
+ * @param timestamp - target unix timestamp, in seconds
+ * @returns the lowest block number whose timestamp is `>= timestamp`
  */
-export async function getSomeBlockNumberBefore(
+export async function getBlockNumberAtOrAfter(
   getBlockTimestamp: (blockNumber: number) => Promise<number>,
   recentBlockNumber: number,
   timestamp: number,
-  { precision = 10, logger = console }: { precision?: number } & WithLogger = {},
+  { logger = console }: WithLogger = {},
 ): Promise<number> {
   timestamp = Number(timestamp)
   const recentTimestamp = await getBlockTimestamp(recentBlockNumber)
+  // Nothing at/after the target has been mined yet: the tip is the closest a
+  // caller can start from, and a watching scan picks up the rest as it grows.
   if (recentTimestamp <= timestamp) return recentBlockNumber
 
-  let beforeBlockNumber = Math.max(1, recentBlockNumber - precision * 1000)
-  let beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
+  let before = Math.max(1, recentBlockNumber - BRACKET_SEED_BLOCKS)
+  let beforeTs = await getBlockTimestamp(before)
+  let after = recentBlockNumber
+  let afterTs = recentTimestamp
+  let estimatedBlockTime = (recentTimestamp - beforeTs) / (recentBlockNumber - before)
 
-  let estimatedBlockTime =
-      (recentTimestamp - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber),
-    afterBlockNumber = recentBlockNumber,
-    afterTimestamp = recentTimestamp
-
-  // first, go back looking for a block prior to our target timestamp
-  for (let iter = 0; beforeBlockNumber > 1 && beforeTimestamp > timestamp; iter++) {
-    afterBlockNumber = beforeBlockNumber
-    afterTimestamp = beforeTimestamp
-    beforeBlockNumber = Math.max(
+  // Walk back until the target is bracketed, over-shooting by a growing margin so
+  // a chain whose older blocks were slower than recent ones still terminates fast.
+  for (let iter = 0; before > 1 && beforeTs >= timestamp; iter++) {
+    after = before
+    afterTs = beforeTs
+    before = Math.max(
       1,
-      Math.trunc(beforeBlockNumber - (beforeTimestamp - timestamp) / estimatedBlockTime) -
-        10 ** iter,
+      Math.trunc(before - (beforeTs - timestamp) / estimatedBlockTime) - 10 ** iter,
     )
-    beforeTimestamp = await getBlockTimestamp(beforeBlockNumber)
-    estimatedBlockTime =
-      (recentTimestamp - beforeTimestamp) / (recentBlockNumber - beforeBlockNumber)
+    beforeTs = await getBlockTimestamp(before)
+    estimatedBlockTime = (recentTimestamp - beforeTs) / (recentBlockNumber - before)
   }
 
-  if (beforeTimestamp > timestamp) {
-    throw new CCIPBlockBeforeTimestampNotFoundError(timestamp)
-  }
+  // Even the first block is at/after the target, so it IS the answer. (The old
+  // "no block before this timestamp" error belonged to the previous contract:
+  // asking for a block *before* a pre-genesis timestamp is unanswerable, asking
+  // for the first one at/after it is not.)
+  if (beforeTs >= timestamp) return before
 
-  // now, bin-search based on timestamp proportions, looking for
-  // a block at most N estimated blockTimes from our target timestamp
-  while (timestamp - beforeTimestamp >= 1 && afterBlockNumber - beforeBlockNumber > precision) {
-    const prop = (timestamp - beforeTimestamp) / (afterTimestamp - beforeTimestamp)
-    const delta =
-      prop > 0.5
-        ? Math.floor(prop * (afterBlockNumber - beforeBlockNumber))
-        : Math.ceil(prop * (afterBlockNumber - beforeBlockNumber))
-    let pivot = beforeBlockNumber + delta
-    if (pivot === afterBlockNumber) {
-      pivot--
-    }
-    const pivotTimestamp = await getBlockTimestamp(pivot)
-    if (pivotTimestamp > timestamp) {
-      afterBlockNumber = pivot
-      afterTimestamp = pivotTimestamp
+  // Invariant from here: ts(before) < timestamp <= ts(after). Narrow until they
+  // are adjacent, at which point `after` is the exact lower bound.
+  while (after - before > 1) {
+    const span = after - before
+    const prop = (timestamp - beforeTs) / (afterTs - beforeTs)
+    // Clamp strictly inside (before, after) so every probe shrinks the bracket.
+    const pivot = before + Math.min(span - 1, Math.max(1, Math.round(prop * span)))
+    const pivotTs = await getBlockTimestamp(pivot)
+    if (pivotTs >= timestamp) {
+      after = pivot
+      afterTs = pivotTs
     } else {
-      beforeBlockNumber = pivot
-      beforeTimestamp = pivotTimestamp
+      before = pivot
+      beforeTs = pivotTs
     }
-    logger.debug('getSomeBlockNumberBefore: searching block before', {
-      beforeBlockNumber,
-      beforeTimestamp,
+    logger.debug('getBlockNumberAtOrAfter: searching', {
+      before,
+      beforeTs,
       pivot,
-      pivotTimestamp,
-      afterBlockNumber,
-      afterTimestamp,
+      pivotTs,
+      after,
+      afterTs,
       estimatedBlockTime,
       timestamp,
-      diffNumber: afterBlockNumber - beforeBlockNumber,
+      diffNumber: after - before,
     })
   }
-  return beforeBlockNumber
+  return after
 }
 
 const BLOCK_RANGE = 10_000
@@ -524,6 +538,77 @@ export function parseTypeAndVersion(
 
   if (!match[3]) return [type, version, typeAndVersion]
   else return [type, version, typeAndVersion, match[3]]
+}
+
+/**
+ * Matches a parsed `typeAndVersion()` result against a set of patterns, per the rule
+ * documented on {@link passesTypeAndVersion}.
+ *
+ * Candidates are the normalized `type`, the raw (unparsed) string, and `${type} ${version}`.
+ * A plain string pattern must equal one of the three exactly; a RegExp pattern is tested
+ * only against the raw string and `${type} ${version}` — deliberately never against the
+ * bare `type` alone, since a short/generic type name (e.g. `Router`) would otherwise let a
+ * loosely-written regex over-match.
+ */
+function matchesTypeAndVersion(
+  [type, version, raw]: Awaited<ReturnType<Chain['typeAndVersion']>>,
+  typeAndVersions: readonly (string | RegExp)[],
+): boolean {
+  const versioned = `${type} ${version}`
+  const candidates = [type, raw, versioned]
+  return typeAndVersions.some((pattern) =>
+    typeof pattern === 'string'
+      ? candidates.includes(pattern)
+      : pattern.test(raw) || pattern.test(versioned),
+  )
+}
+
+const failCountPerChainPerAddr = new WeakMap<Pick<Chain, 'typeAndVersion'>, Map<string, number>>()
+const MAX_FAILS = 3
+
+/**
+ * Predicate backing {@link LogFilter.typeAndVersions}: does the contract at `address` match
+ * any of the given type/version patterns?
+ *
+ * Resolves to `true` immediately — without calling `typeAndVersion` at all — when
+ * `typeAndVersions` is `undefined` or empty, so the filter is zero-cost when unused.
+ * Otherwise awaits `chain.typeAndVersion(address)` and matches the result via
+ * {@link matchesTypeAndVersion}.
+ *
+ * @remarks
+ * If `typeAndVersion` throws — no `typeAndVersion()` on the contract, a revert,
+ * {@link CCIPTypeVersionInvalidError}, {@link CCIPNotImplementedError} (e.g. Canton), or a
+ * transient RPC error — this resolves to `false` rather than propagating. This predicate is
+ * a narrowing filter over an already topic-filtered set of logs: dropping one address's logs
+ * on a lookup failure costs at most a missed event, whereas letting the error escape would
+ * abort the whole `getLogs` iteration over a single bad/unsupported address.
+ *
+ * @param chain - Chain (or a subset exposing `typeAndVersion`) to query.
+ * @param address - Contract address whose type/version to check.
+ * @param typeAndVersions - Patterns to match against; `undefined`/empty matches everything.
+ */
+export async function passesTypeAndVersion(
+  chain: Pick<Chain, 'typeAndVersion'> & { logger?: Pick<Logger, 'debug'> },
+  address: string,
+  typeAndVersions: readonly (string | RegExp)[] | undefined,
+): Promise<boolean> {
+  if (!typeAndVersions?.length) return true
+
+  if (!failCountPerChainPerAddr.has(chain)) failCountPerChainPerAddr.set(chain, new Map())
+  const count = failCountPerChainPerAddr.get(chain)!.get(address) ?? 0
+  if (count >= MAX_FAILS) return false
+
+  try {
+    const parsed = await chain.typeAndVersion(address)
+    failCountPerChainPerAddr.get(chain)!.set(address, 0)
+    return matchesTypeAndVersion(parsed, typeAndVersions)
+  } catch (err) {
+    failCountPerChainPerAddr.get(chain)!.set(address, count + 1)
+    // Narrowing filter over an already topic-filtered set of logs: a failed lookup should
+    // drop this one address's logs, not abort the whole getLogs iteration.
+    chain.logger?.debug('passesTypeAndVersion: typeAndVersion failed for', address, err)
+    return false
+  }
 }
 
 /**

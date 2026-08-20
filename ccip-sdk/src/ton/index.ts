@@ -57,7 +57,13 @@ import {
   CCIPVersion,
   ExecutionState,
 } from '../types.ts'
-import { bytesToBuffer, decodeAddress, parseTypeAndVersion } from '../utils.ts'
+import {
+  bytesToBuffer,
+  decodeAddress,
+  decodeOnRampAddress,
+  parseTypeAndVersion,
+  passesTypeAndVersion,
+} from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
@@ -626,32 +632,31 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const b = Number(opts.startBlock)
       startSeqno = b
       opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
-      // Consistency gate on the two directions of the mc-seqno↔lt mapping. The caller's
-      // cursor is an mc seqno but the fetch pages in lt, so resuming at `b` is only
-      // lossless while the floor derived here stays at or below the block committingSeqno
-      // would assign that lt to. If the floor lands PAST `b`, the scan silently starts
-      // above txs that belong to `b` and skips them for good: the poller never re-scans
-      // below its watermark, so those logs are lost AND its still-pending handlers for
-      // them get cancelled as phantom reorgs. Fail loudly instead — the getLogs activity
-      // retries (visible as attempts), and a fresh chain instance re-resolves the
-      // memoized shard headers this check distrusts.
-      if (b > 1) {
-        const floorSeqno = await this.committingSeqno(opts_.startBlock, acct)
-        if (floorSeqno > b)
-          throw new CCIPHttpError(
-            0,
-            `Inconsistent TON cursor for ${opts.address}: resume lt=${opts_.startBlock} ` +
-              `derived from startBlock=${b} commits at ${floorSeqno} > ${b} — shard/masterchain ` +
-              `lt mapping disagrees, refusing to scan and skip blocks ${b}..${floorSeqno - 1}`,
-          )
-      }
+      // This boundary is exact, not approximate, because both directions of the
+      // seqno↔lt mapping are the SAME function E(M) = accountShardEndLt(M): a tx commits
+      // at C(t) = min{ M : E(M) >= t.lt } (what committingSeqno computes and getTransaction
+      // stamps as blockNumber), and the resume lt is E(b-1)+1. Hence
+      //     t.lt >= resumeLt  <=>  t.lt > E(b-1)  <=>  C(t) >= b
+      // so paging from resumeLt yields exactly the txs committing at blocks >= b — never
+      // one belonging to b or later, and never one already covered below b.
+      //
+      // In particular, committingSeqno(resumeLt) landing PAST b is normal and lossless,
+      // not a mapping disagreement: E is the shard's end_lt, so it only advances when the
+      // masterchain block references a newer shard block for this account's shard. When
+      // block b references the same shard block as b-1 (frequent — roughly every other
+      // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
+      // transaction at all, so there is nothing in b to skip.
     }
 
     // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
     // below serves the watermark-driven poller, which does not watch).
     if (opts.watch) {
       for await (const tx of streamTransactionsForAddress(opts_, this)) {
-        for (const log of tx.logs) if (matches(log)) yield log
+        for (const log of tx.logs) {
+          if (!matches(log)) continue
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
       }
       return
     }
@@ -698,12 +703,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         break
       }
       const block = tx.blockNumber
-      // Same mapping disagreement as the cursor gate above, caught from the emit side:
-      // the fetch floor was derived from startSeqno, so every tx it returns must commit
-      // at or after it — and must sit at or above the floor in lt space. A violation
-      // means blockNumber under-assigns relative to the resume boundary, which would
-      // advance the poller's watermark past blocks this scan never covered. Drop the
-      // in-progress block and stop, exactly like the gap case; the poller retries.
+      // Defensive: by the resume-boundary identity above, every tx this fetch returns
+      // must sit at or above the floor in lt space and therefore commit at or after
+      // startSeqno. A violation can only mean E disagreed with itself between the
+      // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
+      // and emitting it would rewind the poller's watermark over blocks this scan never
+      // covered. Drop the in-progress block and stop, like the gap case; the poller
+      // retries. Conservative on purpose: stalling is recoverable, skipping is not.
       if (
         (startSeqno !== undefined && block < startSeqno) ||
         (raw && opts_.startBlock != null && raw.lt < BigInt(opts_.startBlock))
@@ -717,7 +723,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         break
       }
       // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
-      if (curBlock !== undefined && block !== curBlock) yield* drain()
+      if (curBlock !== undefined && block !== curBlock) {
+        for (const log of drain()) {
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
+      }
       curBlock = block
       if (block > cutoff) {
         // Reached the unsealed region (prior block already drained). Stop.
@@ -728,7 +739,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (raw) prevLt = raw.lt
     }
     // Exhausted within the sealed cutoff (no gap): the last block is complete.
-    yield* drain()
+    for (const log of drain()) {
+      if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+      yield log
+    }
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -904,7 +918,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         const onRampLength = onRampSlice.loadUint(8)
         onRampBytes = onRampSlice.loadBuffer(onRampLength)
       }
-      const onRamp = decodeAddress(onRampBytes, networkInfo(sourceChainSelector).family)
+      const onRamp = decodeOnRampAddress(onRampBytes, networkInfo(sourceChainSelector).family)
 
       const [{ stack: cfgStack }, [, , typeAndVersion]] = await Promise.all([
         this.provider.runMethod(Address.parse(offRamp), 'config', []),

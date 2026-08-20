@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
-import { beforeEach, describe, it } from 'node:test'
+import { beforeEach, describe, it, mock } from 'node:test'
 
 import type { JsonRpcApiProvider, Log } from 'ethers'
 
 import { CCIPLogRangeTooLargeError, CCIPLogsWatchRequiresFinalityError } from '../errors/index.ts'
-import { getEndpointLogRange, setEndpointLogRange } from '../fetch.ts'
+import {
+  getEndpointLogRange,
+  getEndpointTopicLimit,
+  setEndpointLogRange,
+  setEndpointTopicLimit,
+} from '../fetch.ts'
 import { getEvmLogs } from './logs.ts'
 
 /** Minimal fake log factory */
@@ -999,4 +1004,276 @@ describe('getEvmLogs — watch invariants', () => {
       assert.equal(calls.length, 0, 'expected no getLogs before the finality guard threw')
     },
   )
+})
+
+describe('getEvmLogs — typeAndVersions filter', () => {
+  const ONRAMP_ADDR = '0x0000000000000000000000000000000000000a'
+  const OFFRAMP_ADDR = '0x0000000000000000000000000000000000000b'
+
+  /** Overrides a fake log's address (makeLog's cast type doesn't survive a plain spread). */
+  function withAddress(log: Log, address: string): Log {
+    return { ...log, address } as unknown as Log
+  }
+
+  /** Fake provider that returns a fixed set of logs for any (single-chunk) request. */
+  function makeFixedLogsProvider(url: string, logs: Log[]): JsonRpcApiProvider {
+    return {
+      _getConnection: () => ({ url }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 1000
+        return { number: num, timestamp: num * 12 }
+      },
+      getLogs: async () => logs,
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('yields logs whose contract type matches, drops those that do not', async () => {
+    const url = 'https://fake-rpc-tv-a.example.com/rpc'
+    const logs = [
+      withAddress(makeLog(1000, 0), ONRAMP_ADDR),
+      withAddress(makeLog(1000, 1), OFFRAMP_ADDR),
+    ]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (address: string): Promise<[string, string, string]> =>
+      address === ONRAMP_ADDR
+        ? ['OnRamp', '1.6.0', 'EVM2EVMOnRamp 1.6.0']
+        : ['OffRamp', '1.6.0', 'EVM2EVMOffRamp 1.6.0'],
+    )
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, typeAndVersions: ['OnRamp'] },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 1)
+    assert.equal(result[0]!.address, ONRAMP_ADDR)
+    assert.equal(typeAndVersion.mock.calls.length, 2)
+  })
+
+  it('drops a log when typeAndVersion throws, without the error escaping getLogs', async () => {
+    const url = 'https://fake-rpc-tv-b.example.com/rpc'
+    const logs = [withAddress(makeLog(1000, 0), ONRAMP_ADDR)]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (): Promise<[string, string, string]> => {
+      throw new Error('no typeAndVersion() on this contract')
+    })
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, typeAndVersions: ['OnRamp'] },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 0)
+  })
+
+  it('never calls typeAndVersion when the option is absent (zero-cost when unused)', async () => {
+    const url = 'https://fake-rpc-tv-c.example.com/rpc'
+    const logs = [withAddress(makeLog(1000, 0), ONRAMP_ADDR)]
+    const provider = makeFixedLogsProvider(url, logs)
+    const typeAndVersion = mock.fn(async (): Promise<[string, string, string]> => [
+      'OnRamp',
+      '1.6.0',
+      'EVM2EVMOnRamp 1.6.0',
+    ])
+
+    const result = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000 },
+        { provider, getBlockInfo, logger: console, typeAndVersion },
+      ),
+    )
+
+    assert.equal(result.length, 1)
+    assert.equal(typeAndVersion.mock.calls.length, 0)
+  })
+})
+
+/**
+ * Provider that rejects any getLogs whose position-0 topic OR-set exceeds
+ * `maxTopics`, mimicking the caps some RPCs (Avalanche's public endpoint) impose.
+ * Records every topic set it was asked for, so tests can assert the split shape.
+ */
+function makeTopicCappedProvider(maxTopics: number, url: string, logsPerTopic = 1) {
+  const seen: string[][] = []
+  const provider = {
+    _getConnection: () => ({ url }),
+    getBlock: async (tag: string | number) => {
+      const num = typeof tag === 'number' ? tag : 10_000
+      return { number: num, timestamp: num * 12 }
+    },
+    _getBlockTag: async (tag: string | number) => tag,
+    getLogs: async (filter: { fromBlock: number; toBlock: number; topics?: unknown[] }) => {
+      const topics0 = filter.topics?.[0]
+      const list = Array.isArray(topics0) ? (topics0 as string[]) : []
+      seen.push(list)
+      if (list.length > maxTopics) {
+        throw Object.assign(new Error(`eth_getLogs is limited to ${maxTopics} topics`), {
+          error: { code: -32602 },
+        })
+      }
+      // One log per requested topic, block number derived from the topic index so
+      // the merged output has a checkable order.
+      return list.flatMap((t) =>
+        Array.from({ length: logsPerTopic }, (_, i) => makeLog(1000 + Number(t.slice(-2)), i)),
+      )
+    },
+    on: () => {},
+    off: () => {},
+    once: (_e: unknown, cb: () => void) => setTimeout(cb, 0),
+  } as unknown as JsonRpcApiProvider
+  return { provider, seen }
+}
+
+// Raw topic0s (skip name resolution — getEvmLogs passes 0x… through untouched).
+const rawTopics = Array.from(
+  { length: 7 },
+  (_, i) => `0x${'11'.repeat(31)}${i.toString(16).padStart(2, '0')}`,
+)
+
+describe('getEvmLogs — raw topic0 passthrough', () => {
+  it('forwards raw 0x topic0s that resolve to no bundled ABI event', async () => {
+    // Regression: `.filter(isHexString)` handed Array#filter's INDEX to
+    // isHexString's `length` param, so raw topics were silently dropped — and a
+    // filter made only of raw topics was rejected outright as "no matching topics".
+    // Raw topic0s are the only way to watch an event whose ABI the SDK doesn't
+    // bundle (the pre-v1.6 CCIP ramps), so this failed closed and silently.
+    const url = 'https://rawtopics.example.com/rpc'
+    const { provider, seen } = makeTopicCappedProvider(100, url)
+
+    const logs = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, topics: rawTopics },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    assert.deepEqual(seen[0], rawTopics, 'raw topic0s must reach the RPC untouched')
+    assert.equal(logs.length, rawTopics.length)
+  })
+
+  it('keeps raw topic0s alongside resolvable event names', async () => {
+    const url = 'https://rawtopics-mixed.example.com/rpc'
+    const { provider, seen } = makeTopicCappedProvider(100, url)
+
+    await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, topics: [rawTopics[0]!, 'ExecutionStateChanged'] },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    assert.ok(
+      seen[0]!.includes(rawTopics[0]!),
+      'a raw topic must survive being mixed with named events',
+    )
+    assert.ok(seen[0]!.length > 1, 'the named event must still resolve to its own topic0s')
+  })
+})
+
+describe('getEvmLogs — per-endpoint topic-count cap', () => {
+  it('learns the cap from the error and retries split, returning the full union in order', async () => {
+    const url = 'https://topiccap-learn.example.com/rpc'
+    const { provider, seen } = makeTopicCappedProvider(3, url)
+
+    const logs = await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, topics: rawTopics },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    // First call is the whole set (nothing learned yet) and fails; the retry splits.
+    assert.deepEqual(seen[0], rawTopics, 'first attempt must send the filter whole')
+    assert.deepEqual(
+      seen.slice(1).map((s) => s.length),
+      [3, 3, 1],
+      'retry must split into ceil(7/3) disjoint groups',
+    )
+    assert.deepEqual(
+      seen.slice(1).flat(),
+      rawTopics,
+      'the split must cover every topic exactly once',
+    )
+
+    assert.equal(logs.length, rawTopics.length, 'union of the split equals the unsplit result')
+    const blocks = logs.map((l) => l.blockNumber)
+    assert.deepEqual(
+      blocks,
+      [...blocks].sort((a, b) => a - b),
+      'merged output must stay ascending',
+    )
+
+    assert.equal(getEndpointTopicLimit(url), 3, 'the cap must be remembered for this endpoint')
+  })
+
+  it('splits up-front on later calls, without re-failing', async () => {
+    const url = 'https://topiccap-known.example.com/rpc'
+    setEndpointTopicLimit(url, 2, 'error')
+    const { provider, seen } = makeTopicCappedProvider(2, url)
+
+    await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, topics: rawTopics },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    assert.deepEqual(
+      seen.map((s) => s.length),
+      [2, 2, 2, 1],
+      'a known cap must be applied before the first request, costing no failed call',
+    )
+  })
+
+  it('does not split when the endpoint has no known cap', async () => {
+    const url = 'https://topiccap-none.example.com/rpc'
+    const { provider, seen } = makeTopicCappedProvider(100, url)
+
+    await collect(
+      getEvmLogs(
+        { startBlock: 1000, endBlock: 1000, topics: rawTopics },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    assert.equal(seen.length, 1, 'uncapped endpoints must keep paying exactly one request')
+    assert.equal(getEndpointTopicLimit(url), undefined)
+  })
+
+  it('rethrows a non-topic error rather than splitting blindly', async () => {
+    const url = 'https://topiccap-other.example.com/rpc'
+    const provider = {
+      _getConnection: () => ({ url }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 10_000
+        return { number: num, timestamp: num * 12 }
+      },
+      _getBlockTag: async (tag: string | number) => tag,
+      getLogs: async () => {
+        throw new Error('execution reverted')
+      },
+      on: () => {},
+      off: () => {},
+      once: (_e: unknown, cb: () => void) => setTimeout(cb, 0),
+    } as unknown as JsonRpcApiProvider
+
+    await assert.rejects(
+      collect(
+        getEvmLogs(
+          { startBlock: 1000, endBlock: 1000, topics: rawTopics },
+          { provider, getBlockInfo, logger: console },
+        ),
+      ),
+      /execution reverted/,
+    )
+    assert.equal(
+      getEndpointTopicLimit(url),
+      undefined,
+      'must not learn a cap from an unrelated error',
+    )
+  })
 })

@@ -26,14 +26,29 @@ const SOLANA_DEVNET_RPC =
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'
-const EVM_TO_SOLANA_V2_TX = '0x8be479716729ff555e5ee7a1826af3bf571be820ab3080348f83b28a753cc472'
+const EVM_TO_SOLANA_V2_TX = '0x94721bc1e04f7c5f6bfad4e479092aaf71efefccaa0babade4c4e7b5b3b24a41'
 const SOLANA_V2_EXEC_TX =
-  '32Zj32Px5cxq7HSsLtCKEoecRbEoziWRjSxgBnABmmqLc4MLtQfD6csfFEEf2CKmLymTVmqNSSo51gBEHiXBS5E'
-const SOLANA_V2_OFFRAMP = 'offEFR9DhTdnPR43oBmnGJmoj13Y3n7sR93Vbph77TK'
+  '4qeWX8ELjDt57JLDuDsSW3jYzP915R7wyXLWMshPZJkiDVxt1HAv2DTqmNow64Nxns8PSgrX1vLTYHWTabjFztDM'
+// Latest v2.0.0-dev offramp (has `bump` in ReferenceAddresses, `on_ramps` Vec in
+// SourceChainConfig, and RMN Remote accounts in get_ccvs_for_msg).
+const SOLANA_V2_OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
 const SOLANA_V2_SEND_MESSAGE_ID =
   '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722'
 const EVM_TO_SOLANA_V2_MESSAGE_ID =
-  '0xaef01a07586289eaf1cc1e65d0281c20966c799a5be0d816295907abb2367826'
+  '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f'
+
+// Latest v2 messages on the current (post-redeploy) contracts, for both directions.
+const SOLANA_TO_SEPOLIA_V2_TX =
+  'AstWTNxnDPeXm2Ahv58XD8vkqtUEX26jBa9MCERahRvaR91vvx9LFw7hWr5ngFeCUKJ4NJ9tVuPfBEjZncccQP2'
+const SOLANA_TO_SEPOLIA_V2_MESSAGE_ID =
+  '0xa12415f90306cdb2da8b2e254dc2e0941cc3b5351344da3bf11d0cab6f6837a4'
+// Sepolia (EVM) OffRamp connected to the Solana router/onRamp (solana-devnet -> sepolia).
+const SEPOLIA_V2_OFFRAMP = '0xEBA5d79459484E543BD15607A621ece29B29ca99'
+const SEPOLIA_TO_SOLANA_V2_TX = '0x698bc3a6386f2d0718c0ab24972747d5cebb80565449aacfc044501f381ccb7d'
+const SEPOLIA_TO_SOLANA_V2_MESSAGE_ID =
+  '0x329238fa05b478d834d73163ac36ffe8d0c1daf3af4b3c0c272c6995473a1bad'
+const SEPOLIA_TO_SOLANA_V2_EXEC_TX =
+  '2mDZqfQPSwHBd5Mif2MJciweR6ybPCaAiFhaZrzRWGKZEKmXApEtjXhsHX6hw6vFV5L5uHWXhGLPr4Uz5uAnsSht'
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
@@ -316,10 +331,10 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     assert.equal(receipts.length, 1)
     const execution = receipts[0]!
     assert.equal(execution.log.address, SOLANA_V2_OFFRAMP)
-    assert.equal(execution.log.index, 18)
+    assert.equal(execution.log.index, 30)
     assert.equal(execution.log.level, 2)
     assert.equal(execution.receipt.messageId, EVM_TO_SOLANA_V2_MESSAGE_ID)
-    assert.equal(execution.receipt.sequenceNumber, 149n)
+    assert.equal(execution.receipt.sequenceNumber, 526n)
     assert.equal(execution.receipt.state, ExecutionState.Success)
   })
 
@@ -341,16 +356,111 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
       offRamp: SOLANA_V2_OFFRAMP,
       messageId: request.message.messageId,
       sourceChainSelector: request.lane.sourceChainSelector,
-      startBlock: 479327790,
+      startBlock: 480333626,
     })) {
       executions.push(execution)
     }
 
     assert.equal(executions.length, 1)
     assert.equal(executions[0]!.receipt.messageId, EVM_TO_SOLANA_V2_MESSAGE_ID)
-    assert.equal(executions[0]!.receipt.sequenceNumber, 149n)
+    assert.equal(executions[0]!.receipt.sequenceNumber, 526n)
     assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
     assert.equal(executions[0]!.log.transactionHash, SOLANA_V2_EXEC_TX)
+  })
+
+  it('should read v2 offRamp config with onRamps Vec and bump-aware reference addresses', async () => {
+    const config = await solanaChain.getOffRampConfig(
+      SOLANA_V2_OFFRAMP,
+      networkInfo('ethereum-testnet-sepolia').chainSelector,
+    )
+    // The latest v2.0.0-dev redeploy exposed a Vec `on_ramps` (was a single `on_ramp`).
+    assert.ok(Array.isArray(config.onRamps), 'onRamps should be an array')
+    assert.ok(
+      config.onRamps.some(
+        (r: string) => r.toLowerCase() === '0x99f6faf45ccfa166781ded7d9a4d9c548f2aa344',
+      ),
+      `onRamps should include the Sepolia onRamp, got ${JSON.stringify(config.onRamps)}`,
+    )
+    // Bump-aware reference_addresses decode: the new offramp stores a `bump` byte before `router`.
+    assert.equal(config.router, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
+    assert.ok(config.rmnRemote, 'offRampConfig should expose rmnRemote')
+  })
+
+  it('should resolve v2 verifications policy via get_ccvs_for_msg (RMN accounts) without a simulation panic', async () => {
+    await using disposer = new AsyncDisposableStack()
+    const source = disposer.adopt(
+      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      (source) => source.provider.destroy(),
+    )
+    const tx = await source.getTransaction(EVM_TO_SOLANA_V2_TX)
+    const requests = await source.getMessagesInTx(tx)
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+
+    // The v2 indexer has no verifier results for this message yet, so this must surface a
+    // CCIPMessageNotVerifiedYetError — NOT an Anchor simulation failure. Reaching that error proves
+    // the `get_ccvs_for_msg` view (with its RMN Remote accounts) simulated cleanly.
+    await assert.rejects(
+      solanaChain.getVerifications({ offRamp: SOLANA_V2_OFFRAMP, request }),
+      (err: unknown) => (err as { name?: string }).name === 'CCIPMessageNotVerifiedYetError',
+    )
+  })
+
+  it('should decode the latest Solana -> Sepolia v2 message and discover its offRamp', async () => {
+    await using disposer = new AsyncDisposableStack()
+    const dest = disposer.adopt(
+      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      (dest) => dest.provider.destroy(),
+    )
+
+    const tx = await solanaChain.getTransaction(SOLANA_TO_SEPOLIA_V2_TX)
+    const requests = await solanaChain.getMessagesInTx(tx)
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+    assert.equal(request.message.messageId, SOLANA_TO_SEPOLIA_V2_MESSAGE_ID)
+    assert.equal(request.message.sequenceNumber, 9393n)
+    assert.equal(request.message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
+    assert.equal(request.message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
+    assert.equal(request.message.data, '0x6d756c74692d76657269666965722074657374')
+    assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
+    assert.equal(request.lane.version, '2.0.0')
+
+    const offRamp = await discoverOffRamp(solanaChain, dest, request.lane.onRamp)
+    assert.equal(offRamp, SEPOLIA_V2_OFFRAMP)
+  })
+
+  it('should fetch the latest Sepolia -> Solana v2 execution', async () => {
+    await using disposer = new AsyncDisposableStack()
+    const source = disposer.adopt(
+      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      (source) => source.provider.destroy(),
+    )
+
+    const tx = await source.getTransaction(SEPOLIA_TO_SOLANA_V2_TX)
+    const requests = await source.getMessagesInTx(tx)
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+    assert.equal(request.message.messageId, SEPOLIA_TO_SOLANA_V2_MESSAGE_ID)
+    assert.equal(request.message.sequenceNumber, 9425n)
+    assert.equal(request.message.sender, '0x4aA1B21843b42bA0aB356707a84876DB0B671206')
+    assert.equal(request.message.receiver, 'AmwmhnQYQNhis1tpDRsZ4UYaCv1WruKLP2jikSfVyMLQ')
+    assert.equal(request.lane.onRamp, '0x99F6Faf45CcfA166781DED7d9A4D9C548F2aA344')
+
+    const executions = []
+    for await (const execution of solanaChain.getExecutionReceipts({
+      offRamp: SOLANA_V2_OFFRAMP,
+      messageId: request.message.messageId,
+      sourceChainSelector: request.lane.sourceChainSelector,
+      startBlock: 483957780,
+    })) {
+      executions.push(execution)
+    }
+
+    assert.equal(executions.length, 1)
+    assert.equal(executions[0]!.receipt.messageId, SEPOLIA_TO_SOLANA_V2_MESSAGE_ID)
+    assert.equal(executions[0]!.receipt.sequenceNumber, 9425n)
+    assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
+    assert.equal(executions[0]!.log.transactionHash, SEPOLIA_TO_SOLANA_V2_EXEC_TX)
   })
 })
 

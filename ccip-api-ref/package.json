@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-api-ref",
-  "version": "1.11.1",
+  "version": "1.12.0",
   "private": true,
   "description": "API Reference documentation for CCIP SDK and CLI",
   "scripts": {
@@ -25,21 +25,21 @@
     "@docusaurus/plugin-google-tag-manager": "^3.10.2",
     "@docusaurus/preset-classic": "^3.10.2",
     "@docusaurus/theme-mermaid": "^3.10.2",
-    "@easyops-cn/docusaurus-search-local": "^0.55.2",
+    "@easyops-cn/docusaurus-search-local": "^0.55.3",
     "@mdx-js/react": "^3.1.1",
     "clsx": "^2.1.1",
-    "docusaurus-plugin-openapi-docs": "^5.1.2",
-    "docusaurus-theme-openapi-docs": "^5.1.2",
+    "docusaurus-plugin-openapi-docs": "^5.1.3",
+    "docusaurus-theme-openapi-docs": "^5.1.3",
     "focus-trap-react": "^12.0.3",
     "prism-react-renderer": "^2.4.1",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "scheduler": "^0.27.0"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/types": "^3.10.2",
-    "@types/react-dom": "^19.2.3",
+    "@types/react-dom": "^19.2.4",
     "docusaurus-plugin-typedoc": "^1.4.2",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.12.0"

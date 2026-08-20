@@ -126,11 +126,16 @@ export function getAddressBytes(address: BytesLike | readonly number[]): Uint8Ar
     // supports with or without (long>=20B) 0x-prefix, odd or even length
     bytes = getBytes(
       address.length % 2
-        ? '0x0' + (address.toLowerCase().startsWith('0x') ? address.slice(2) : address)
-        : !address.toLowerCase().startsWith('0x')
+        ? '0x0' + (address.match(/^0x/i) ? address.slice(2) : address)
+        : !address.match(/^0x/i)
           ? '0x' + address
           : address,
     )
+    if (bytes.length < 32 && bytes.length !== 20) {
+      const padded = new Uint8Array(32)
+      padded.set(bytes, 32 - bytes.length)
+      bytes = padded
+    }
   } else if (typeof address === 'string' && isCantonPartyId(address)) {
     // Canton CCIP receivers use keccak256(partyId) as a 32-byte address (see HashedPartyFromString in chainlink-canton).
     bytes = getBytes(`0x${hashedUtf8Hex(address)}`)

@@ -1,4 +1,4 @@
-import type { Keypair } from '@mysten/sui/cryptography'
+import type { Signer } from '@mysten/sui/cryptography'
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 
@@ -92,14 +92,14 @@ export async function generateUnsignedExecutePTB(
  * Signs and executes a pre-built {@link UnsignedSuiTx} using the provided keypair.
  *
  * @param client - Sui RPC client.
- * @param wallet - Keypair used to sign the transaction.
+ * @param wallet - Signer used to sign the transaction.
  * @param unsignedTx - The unsigned Sui transaction to execute.
  * @param logger - Optional logger.
  * @returns The finalized transaction digest string.
  */
 export async function signAndExecuteSuiTx(
   client: SuiJsonRpcClient,
-  wallet: Keypair,
+  wallet: Signer,
   unsignedTx: UnsignedSuiTx,
   logger?: { info: (...args: unknown[]) => void },
 ): Promise<string> {
@@ -126,9 +126,16 @@ export async function signAndExecuteSuiTx(
     digest = result.digest
   } catch (e) {
     if (e instanceof CCIPExecTxRevertedError) throw e
+    // The node aborts pre-execution with MoveAbort before producing effects;
+    // translate the offramp's well-known gates into actionable messages.
+    const abortCode = (e as Error).message.match(/abort code: (\d+)/)?.[1]
+    const gate =
+      abortCode === '9'
+        ? ' (offramp abort 9: EManualExecutionNotYetEnabled - the commit must age past permissionlessExecutionThresholdSeconds before manual execution)'
+        : ''
     throw new CCIPError(
       CCIPErrorCode.TRANSACTION_NOT_FINALIZED,
-      `Failed to send Sui execute transaction: ${(e as Error).message}`,
+      `Failed to send Sui execute transaction: ${(e as Error).message}${gate}`,
     )
   }
 
