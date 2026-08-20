@@ -15,7 +15,7 @@ const PARTY = 'party1::aabbcc'
 
 const ROUTER_CONTRACT_ID = 'router-cid-001'
 const ROUTER_BLOB = 'router-blob'
-const ROUTER_TEMPLATE_ID = 'pkg-router:CCIP.PerPartyRouter:PerPartyRouter'
+const ROUTER_TEMPLATE_ID = 'pkg-router:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouter'
 
 const RECEIVER_CONTRACT_ID = 'receiver-cid-002'
 const RECEIVER_BLOB = 'receiver-blob'

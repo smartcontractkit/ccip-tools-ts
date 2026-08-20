@@ -162,7 +162,7 @@ export type CcipPackageNames = {
 }
 
 const CCIP_MODULE_ENTITIES = {
-  perPartyRouter: 'CCIP.PerPartyRouter:PerPartyRouter',
+  perPartyRouter: 'CCIP.RuntimeV2.PerPartyRouter:PerPartyRouter',
   ccipReceiver: 'CCIP.CCIPReceiver:CCIPReceiver',
   ccipSender: 'CCIP.CCIPSender:CCIPSender',
 } as const

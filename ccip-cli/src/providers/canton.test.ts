@@ -38,7 +38,7 @@ function computeExpectedFingerprint(seedHex: string): string {
   // Derive public key
   const privateKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
   // @types/node@26 dropped the KeyObject overload from createPublicKey's signature
-  const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0])
+  const publicKey = createPublicKey(privateKey)
   const publicKeyDer = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
   const rawPublicKey = publicKeyDer.subarray(publicKeyDer.length - 32)
 
@@ -64,7 +64,7 @@ function derivePublicKeyDer(seedHex: string): Buffer {
   const pkcs8 = Buffer.concat([prefix, seed])
   const privateKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
   // @types/node@26 dropped the KeyObject overload from createPublicKey's signature
-  const publicKey = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0])
+  const publicKey = createPublicKey(privateKey)
   return publicKey.export({ type: 'spki', format: 'der' })
 }
 
