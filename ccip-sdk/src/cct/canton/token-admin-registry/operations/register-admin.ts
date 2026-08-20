@@ -9,13 +9,21 @@
  * @packageDocumentation
  */
 
-import type { CantonChain } from '../../../../canton/index.ts'
+import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTarAdminResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseInstrumentId, parsePartyId } from '../../validate.ts'
-import { buildTarExercise, resolveTarRef, resolveTokenConfigRef } from '../shared.ts'
+import { EMPTY_CHOICE_CONTEXT } from '../../encoding.ts'
+import {
+  buildTarExercise,
+  deriveTokenConfigInstanceAddress,
+  TAR_TEMPLATE_ID,
+  TOKEN_CONFIG_TEMPLATE_ID,
+  toContractRef,
+} from '../shared.ts'
 
 /** Parameters shared by TAR `registerAdmin` generation and execution. */
 export interface RegisterAdminParams {
@@ -25,8 +33,14 @@ export interface RegisterAdminParams {
   newAdmin: string
   /** TAR `InstanceAddress` (`0x<64-hex>` or `"instanceId@ccipOwner"`). Resolved via ACS. */
   tarInstanceAddress: string
-  /** `TokenConfig` `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
-  tokenConfigInstanceAddress: string
+  /**
+   * `TokenConfig` `InstanceAddress` — optional. When omitted, the address is
+   * derived offline from the instrument ID + the TAR owner (the
+   * `tarInstanceAddress` signatory). When the TokenConfig does not exist yet,
+   * `tokenConfigCid: None` is sent and the choice creates it (first-time
+   * registration).
+   */
+  tokenConfigInstanceAddress?: string
 }
 
 /** Parsed `registerAdmin` params. */
@@ -72,18 +86,50 @@ export class RegisterAdmin extends CantonOperation<RegisterAdminParams, ParsedRe
     chain: CantonChain,
     p: ParsedRegisterAdminParams,
   ): Promise<JsCommands> {
-    const tarContract = await resolveTarRef(chain, p.sender, p.tarInstanceAddress)
-    const tokenConfigContract = await resolveTokenConfigRef(
-      chain,
-      p.instrumentId.admin,
-      p.tokenConfigInstanceAddress,
+    // Resolve with the full active contract (not just the ref) — the TAR's
+    // signatory is the ccipOwner, needed to derive the TokenConfig address.
+    // The TAR has no observer for token admins, so the query includes
+    // chain.ccipParty (the ledger JWT needs readAs over it).
+    const queryParties = [...new Set([p.sender, chain.ccipParty])]
+    const tarContract = await chain.findActiveContractByInstanceAddress(
+      TAR_TEMPLATE_ID,
+      p.tarInstanceAddress,
+      queryParties,
     )
+    if (!tarContract) {
+      throw new CCTParamsInvalidError(
+        'registerAdmin',
+        'tarInstanceAddress',
+        `TokenAdminRegistry ${p.tarInstanceAddress} is not active or not visible to ${p.sender}`,
+      )
+    }
+
+    // Resolve the TokenConfig if it already exists; first-time registration
+    // sends `tokenConfigCid: null` (Daml `None`) and the choice creates it.
+    const ccipOwner = tarContract.signatories[0]
+    const tokenConfigInstanceAddress =
+      p.tokenConfigInstanceAddress ??
+      (ccipOwner ? deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner) : undefined)
+    let tokenConfigContract: CantonActiveContract | null = null
+    if (tokenConfigInstanceAddress) {
+      tokenConfigContract = await chain.findActiveContractByInstanceAddress(
+        TOKEN_CONFIG_TEMPLATE_ID,
+        tokenConfigInstanceAddress,
+        queryParties,
+      )
+    }
 
     return buildTarExercise({
       choice: 'ProposeAdministrator',
-      tarContract,
-      tokenConfigContract,
-      choiceArgument: { instrumentId: p.instrumentId, newAdmin: p.newAdmin },
+      tarContract: toContractRef(tarContract),
+      tokenConfigContract: tokenConfigContract ? toContractRef(tokenConfigContract) : undefined,
+      choiceArgument: {
+        tokenConfigCid: tokenConfigContract ? tokenConfigContract.contractId : null,
+        instrumentId: p.instrumentId,
+        newAdmin: p.newAdmin,
+        context: EMPTY_CHOICE_CONTEXT,
+        caller: p.sender,
+      },
       actAs: [p.sender],
       commandIdPrefix: 'cct-register-admin',
     })

@@ -17,15 +17,14 @@ import { decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts
 import { CantonQuery } from '../../query.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseNonEmptyString, parsePartyId } from '../../validate.ts'
+import { EMPTY_CHOICE_CONTEXT, encodeFinalityConfig, type FinalityConfig } from '../../encoding.ts'
+import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
 
 /** Transfer direction for `GetRequiredCCVs` (mirrors Daml `TransferDirection`). */
 export type TransferDirection = 'Inbound' | 'Outbound'
 
 /** Finality config passed to `GetRequiredCCVs` (mirrors Daml `FinalityConfig`). */
-export type FinalityConfig =
-  | { type: 'WaitForFinality' }
-  | { type: 'WaitForSafe' }
-  | { type: 'BlockDepth'; blockConfirmations: number }
+export type { FinalityConfig } from '../../encoding.ts'
 
 /** Parameters for `getRequiredCCVs`. */
 export interface GetRequiredCCVsParams {
@@ -91,9 +90,7 @@ export class GetRequiredCCVs extends CantonQuery<
       poolInstanceAddress: p.poolInstanceAddress,
       poolOwner: p.poolOwner,
       templateId:
-        p.poolType === 'burnMint'
-          ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
-          : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool',
+        p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID,
       caller: parsePartyId(this.name, 'caller', p.caller),
       remoteChainSelector: p.remoteChainSelector.toString(),
       direction: p.direction,
@@ -130,8 +127,8 @@ export class GetRequiredCCVs extends CantonQuery<
         sourceAmount: p.sourceAmount,
         finality: p.finality,
         extraData: p.extraData,
-        direction: { [p.direction]: {} },
-        context: { values: {} },
+        direction: { tag: p.direction, value: {} },
+        context: EMPTY_CHOICE_CONTEXT,
         caller: p.caller,
       },
       p.caller,
@@ -139,22 +136,6 @@ export class GetRequiredCCVs extends CantonQuery<
 
     const ccvs = decodeRawInstanceAddressList(result)
     return { ccvs }
-  }
-}
-
-/**
- * Encode a {@link FinalityConfig} into the Daml variant the choice expects.
- * `WaitForFinality`/`WaitForSafe` are nullary constructors; `BlockDepth` carries
- * an `Int`. The JSON API represents variants as `{ Constructor: { ...fields } }`.
- */
-function encodeFinalityConfig(fc: FinalityConfig): Record<string, unknown> {
-  switch (fc.type) {
-    case 'WaitForFinality':
-      return { WaitForFinality: {} }
-    case 'WaitForSafe':
-      return { WaitForSafe: {} }
-    case 'BlockDepth':
-      return { BlockDepth: { blockConfirmations: fc.blockConfirmations } }
   }
 }
 

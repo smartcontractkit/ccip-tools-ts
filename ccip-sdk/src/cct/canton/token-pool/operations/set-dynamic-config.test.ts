@@ -18,10 +18,10 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { CantonTokenManager } from '../../index.ts'
 
-const POOL_CID = '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool:00deadbeef'
+const POOL_CID = '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool:00deadbeef'
 const POOL_OWNER = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
 const POOL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32) // keccak256 hash form
-const RATE_LIMIT_ADMIN = 'rladmin::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
+const RATE_LIMIT_ADMIN = 'rladmin::1220' + 'a1'.repeat(32)
 const BLOB = 'base64-created-event-blob=='
 const SYNCHRONIZER_ID = 'canton::global::domain-1'
 
@@ -29,7 +29,7 @@ const SYNCHRONIZER_ID = 'canton::global::domain-1'
 function fakePoolContract(): CantonActiveContract {
   return {
     contractId: POOL_CID,
-    templateId: '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
+    templateId: '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
     createdEventBlob: BLOB,
     synchronizerId: SYNCHRONIZER_ID,
     signatories: [POOL_OWNER],
@@ -74,7 +74,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     assert.equal(cmd.ExerciseCommand.choice, 'SetDynamicConfig')
     assert.equal(
       cmd.ExerciseCommand.templateId,
-      '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
+      '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
     )
     assert.equal(cmd.ExerciseCommand.contractId, POOL_CID)
     assert.deepEqual(cmd.ExerciseCommand.choiceArgument, { rateLimitAdmin: RATE_LIMIT_ADMIN })
@@ -90,7 +90,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     assert.equal(disclosed[0]!.synchronizerId, SYNCHRONIZER_ID)
   })
 
-  it('omits rateLimitAdmin from the choice argument when not provided (Daml None → clear)', async () => {
+  it('sends rateLimitAdmin: null when not provided (Daml None → clear)', async () => {
     const manager = CantonTokenManager.fromChain(mockChain())
     const unsigned = await manager.generateUnsignedSetDynamicConfig({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
@@ -101,7 +101,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     const cmd = unsigned.commands.commands[0] as {
       ExerciseCommand: { choiceArgument: Record<string, unknown> }
     }
-    assert.deepEqual(cmd.ExerciseCommand.choiceArgument, {})
+    assert.deepEqual(cmd.ExerciseCommand.choiceArgument, { rateLimitAdmin: null })
   })
 
   it('uses the LockRelease template ID when poolType is lockRelease', async () => {
@@ -117,7 +117,7 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     }
     assert.equal(
       cmd.ExerciseCommand.templateId,
-      '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool',
+      '#ccip-lock-release-token-pool-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool',
     )
   })
 })

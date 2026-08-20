@@ -1,14 +1,15 @@
 /**
- * deployTokenPool — deploy a `BurnMintTokenPool` or `LockReleaseTokenPool` via
- * the `CCIPFactory.DeployBurnMintTokenPool` / `DeployLockReleaseTokenPool`
- * choice. Returns the created pool's contract ID + raw instance address.
+ * deployTokenPool — deploy a `BurnMintTokenPool` or `LockReleaseTokenPool` as
+ * a bare contract `create` (no factory). The pool template's only signatory is
+ * `poolOwner`, so the owner party authorizes the create alone — and since a
+ * create has no input contracts, `generate()` is fully OFFLINE (no ACS reads,
+ * no disclosures), matching the EVM/Solana generate model.
  *
- * Ported from the Go exerciser
- * (`chainlink-canton-fcr/deployment/operations/ccip/factory/factory.go`).
+ * On-ledger `ensure` constraints: `instrumentId.admin == poolOwner`, valid
+ * `instanceId`, valid token `decimals`.
  *
- * `edsConfig` is intentionally NOT returned — the factory choice does not emit
- * disclosure-service config; it is assembled separately by the EDS-standup
- * pipeline from the pool's instance address.
+ * `edsConfig` is intentionally NOT returned — it is assembled separately by
+ * the EDS-standup pipeline from the pool's instance address.
  *
  * @packageDocumentation
  */
@@ -20,16 +21,22 @@ import type { CantonDeployResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseInstrumentId, parsePartyId } from '../../validate.ts'
+import { type TransferTimeout } from '../../encoding.ts'
 import {
-  buildFactoryExercise,
-  resolveFactoryRef,
+  BURN_MINT_POOL_TEMPLATE_ID,
+  buildPoolCreateArguments,
+  LOCK_RELEASE_POOL_TEMPLATE_ID,
 } from '../shared.ts'
 import type { ChainUpdate } from './apply-chain-updates.ts'
 
 /** Pool type to deploy. */
 export type PoolType = 'burnMint' | 'lockRelease'
 
-/** Factory deps (contract instance addresses of shared CCIP contracts). */
+/**
+ * Factory deps — the shared CCIP contracts the pool references, as
+ * `RawInstanceAddress` RAW strings (`"instanceId@party"`, NOT the hashed
+ * `0x…` form — the hash is one-way and the choice stores the raw value).
+ */
 export interface PoolFactoryDeps {
   /** Token Admin Registry raw instance address. */
   tokenAdminRegistry: string
@@ -39,14 +46,11 @@ export interface PoolFactoryDeps {
   rmnRemote: string
 }
 
-/** Pool receive-context choice-context values (opaque `ChoiceContext` map). */
-export type PoolReceiveContext = { values: Record<string, unknown> }
-
-/** Transfer-timeout config. */
-export interface TransferTimeout {
-  /** Transfer timeout in seconds. */
-  timeoutSeconds: number
-}
+/**
+ * Pool receive-context choice-context values. `ChoiceContext.values` is a
+ * `GenMap` → encodes as a JSON array of entries; almost always empty (`[]`).
+ */
+export type PoolReceiveContext = { values: unknown[] }
 
 /** Parameters shared by `deployTokenPool` generation and execution. */
 export interface DeployTokenPoolParams {
@@ -64,20 +68,18 @@ export interface DeployTokenPoolParams {
   decimals: number
   /** Optional rate-limit admin party. */
   rateLimitAdmin?: string
-  /** Factory deps (TAR, FeeQuoter, RMNRemote instance addresses). */
+  /** Factory deps (TAR, FeeQuoter, RMNRemote raw instance addresses). */
   deps: PoolFactoryDeps
   /** Pool receive-context choice-context. */
   poolReceiveContext?: PoolReceiveContext
-  /** Transfer timeout. */
+  /** Transfer timeout (Daml variant; defaults to `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
   /**
-   * Optional remote-chain configs to apply in the same deploy (factory deploys
-   * the pool, then `ApplyChainUpdates` is exercised on it). When omitted, call
-   * `applyChainUpdates` separately.
+   * Optional remote-chain configs — NOT applied at deploy; call
+   * `applyChainUpdates` separately after the pool exists (and after deploying
+   * its rate limiters).
    */
   remoteChainConfigs?: ChainUpdate[]
-  /** CCIPFactory `InstanceAddress` (`0x<64-hex>` or `"instanceId@owner"`). Resolved via ACS. */
-  factoryInstanceAddress: string
 }
 
 /** Parsed `deployTokenPool` params. */
@@ -153,48 +155,37 @@ export class DeployTokenPool extends CantonOperation<
     }
   }
 
-  /** Builds the `DeployBurnMintTokenPool` / `DeployLockReleaseTokenPool` exercise command. */
+  /**
+   * Builds the bare pool `CreateCommand`. No chain access — a create has no
+   * input contracts, so there is nothing to resolve or disclose.
+   */
   protected async buildCommands(
     chain: CantonChain,
     p: ParsedDeployTokenPoolParams,
   ): Promise<JsCommands> {
-    const factoryContract = await resolveFactoryRef(chain, p.sender, p.factoryInstanceAddress)
-    const choice = p.poolType === 'burnMint' ? 'DeployBurnMintTokenPool' : 'DeployLockReleaseTokenPool'
+    const templateId =
+      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
 
-    const choiceArgument: Record<string, unknown> = {
-      instanceId: p.instanceId,
-      poolOwner: p.poolOwner,
-      ccipOwner: p.ccipOwner,
-      instrumentId: p.instrumentId,
-      decimals: p.decimals,
-      tokenAdminRegistry: p.deps.tokenAdminRegistry,
-      feeQuoter: p.deps.feeQuoter,
-      rmnRemote: p.deps.rmnRemote,
-      poolReceiveContext: p.poolReceiveContext ?? { values: {} },
-      transferTimeout: p.transferTimeout ?? { timeoutSeconds: 0 },
-      ...(p.rateLimitAdmin && { rateLimitAdmin: p.rateLimitAdmin }),
-    }
-
-    const deployCmd = buildFactoryExercise({
-      choice,
-      factoryContract,
-      choiceArgument,
-      actAs: [p.sender],
-      commandIdPrefix: `cct-deploy-${p.poolType}-pool`,
-    })
-
-    // When remoteChainConfigs are provided, append an ApplyChainUpdates exercise
-    // on the newly-deployed pool in the same submission. The pool CID is not
-    // known until the deploy executes, so this requires a follow-up submission
-    // in practice — flagged here so the caller knows to call applyChainUpdates
-    // separately after deploy. For now, remoteChainConfigs is validated but the
-    // pool config is applied via a separate applyChainUpdates call.
     if (p.remoteChainConfigs && p.remoteChainConfigs.length > 0) {
       chain.logger.debug(
         `${this.name}: remoteChainConfigs provided; caller must run applyChainUpdates after deploy completes`,
       )
     }
 
-    return deployCmd
+    return {
+      commands: [
+        {
+          CreateCommand: {
+            templateId,
+            createArguments: buildPoolCreateArguments(p),
+          },
+        },
+      ],
+      commandId: `cct-deploy-${p.poolType}-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      // poolOwner is the pool's sole signatory — it alone authorizes the create.
+      actAs: [p.poolOwner],
+      // Bare create — the contract is new, nothing to disclose.
+      disclosedContracts: [],
+    }
   }
 }

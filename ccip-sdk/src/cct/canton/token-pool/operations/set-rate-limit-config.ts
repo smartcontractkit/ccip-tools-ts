@@ -2,9 +2,12 @@
  * setRateLimitConfig — set the rate-limit config for a remote chain on a token
  * pool via the `SetRateLimitConfig` choice (delegates to `RateLimiterV2`).
  *
- * Ported from the Go exerciser (`burn_mint_token_pool.go` `SetRateLimitConfig`).
- * The Go choice arg is `SetRateLimitConfigParams { caller, rateLimiterInstanceAddress,
- * newIsEnabled, newCapacity, newRate }`.
+ * The Daml choice takes `{ caller, rateLimiterCid, newIsEnabled, newCapacity,
+ * newRate }` — the rate limiter is addressed by CONTRACT ID, so this op
+ * resolves the limiter's `InstanceAddress` to a CID (+ disclosure blob) via
+ * the ACS first. One choice per direction; each direction has its own
+ * RateLimiter contract (they must be distinct — `ApplyChainUpdates` enforces
+ * it).
  *
  * @packageDocumentation
  */
@@ -15,10 +18,19 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
+import {
+  buildPoolExercise,
+  BURN_MINT_POOL_TEMPLATE_ID,
+  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  RATE_LIMITER_TEMPLATE_ID,
+  resolvePoolRef,
+  resolveRateLimiterRef,
+} from '../shared.ts'
 
-/** Rate-limit config for one direction (capacity + refill rate + enabled flag). */
+/** Rate-limit config for one direction (capacity + refill rate + enabled flag + limiter). */
 export interface RateLimitConfig {
+  /** Rate-limiter contract instance address for this direction. */
+  rateLimiterInstanceAddress: string
   /** Bucket capacity (max tokens). */
   capacity: bigint
   /** Refill rate (tokens per second). */
@@ -35,8 +47,6 @@ export interface SetRateLimitConfigParams {
   poolType: 'burnMint' | 'lockRelease'
   /** Remote chain selector the rate limit applies to. */
   remoteChainSelector: bigint
-  /** Rate-limiter contract instance address for the target remote chain. */
-  rateLimiterInstanceAddress: string
   /** Inbound rate-limit config. */
   inbound?: RateLimitConfig
   /** Outbound rate-limit config. */
@@ -62,17 +72,10 @@ export type ExecuteSetRateLimitConfigResult = CantonTransactionResult & {
 export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams> {
   readonly name = 'setRateLimitConfig'
 
-  /** Validates the pool target and rate-limiter address. */
+  /** Validates the pool target and rate-limiter addresses. */
   protected override validate(p: GenerateSetRateLimitConfigParams): void {
     if (!p.poolInstanceAddress) {
       throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
-    }
-    if (!p.rateLimiterInstanceAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'rateLimiterInstanceAddress',
-        'rate-limiter instance address is required',
-      )
     }
     if (!p.inbound && !p.outbound) {
       throw new CCTParamsInvalidError(
@@ -81,32 +84,45 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
         'at least one of inbound or outbound rate-limit config must be provided',
       )
     }
+    for (const [dir, cfg] of [
+      ['inbound', p.inbound],
+      ['outbound', p.outbound],
+    ] as const) {
+      if (cfg && !cfg.rateLimiterInstanceAddress) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          `${dir}.rateLimiterInstanceAddress`,
+          'rate-limiter instance address is required',
+        )
+      }
+    }
   }
 
-  /** Builds the `SetRateLimitConfig` exercise command against the pool. */
+  /** Builds the `SetRateLimitConfig` exercise command(s) against the pool. */
   protected async buildCommands(
     chain: CantonChain,
     p: CantonGenerateParams<SetRateLimitConfigParams>,
   ): Promise<JsCommands> {
     const templateId =
-      p.poolType === 'burnMint'
-        ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
-        : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
 
     const poolContract = await resolvePoolRef(chain, p.poolType, p.sender, p.poolInstanceAddress)
 
-    // The Go choice sets one direction per call (caller + rateLimiterInstanceAddress +
-    // newIsEnabled/newCapacity/newRate). The facade accepts both directions and emits
-    // two commands when both are provided.
+    // The Daml choice sets one direction per call (caller + rateLimiterCid +
+    // newIsEnabled/newCapacity/newRate); emit one command per provided
+    // direction. The limiter contract is resolved to a CID and disclosed (the
+    // choice body exercises it).
     const commands: JsCommands[] = []
-    const buildOne = (cfg: RateLimitConfig): JsCommands =>
-      buildPoolExercise({
+    const buildOne = async (cfg: RateLimitConfig): Promise<JsCommands> => {
+      const rateLimiter = await resolveRateLimiterRef(chain, p.sender, cfg.rateLimiterInstanceAddress)
+      return buildPoolExercise({
         choice: 'SetRateLimitConfig',
         templateId,
         poolContract,
+        extraDisclosedContracts: [{ templateId: RATE_LIMITER_TEMPLATE_ID, ...rateLimiter }],
         choiceArgument: {
           caller: p.sender,
-          rateLimiterInstanceAddress: p.rateLimiterInstanceAddress,
+          rateLimiterCid: rateLimiter.contractId,
           newIsEnabled: cfg.enabled,
           newCapacity: cfg.capacity.toString(),
           newRate: cfg.rate.toString(),
@@ -114,9 +130,10 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
         actAs: [p.sender],
         commandIdPrefix: 'cct-set-rate-limit-config',
       })
+    }
 
-    if (p.inbound) commands.push(buildOne(p.inbound))
-    if (p.outbound) commands.push(buildOne(p.outbound))
+    if (p.inbound) commands.push(await buildOne(p.inbound))
+    if (p.outbound) commands.push(await buildOne(p.outbound))
 
     // Merge into a single JsCommands payload (one submission, multiple exercises).
     if (commands.length === 1) return commands[0]!
@@ -124,7 +141,7 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
       commands: commands.flatMap((c) => c.commands),
       commandId: `cct-set-rate-limit-config-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       actAs: [p.sender],
-      disclosedContracts: commands[0]!.disclosedContracts,
+      disclosedContracts: commands.flatMap((c) => c.disclosedContracts ?? []),
     }
   }
 }
