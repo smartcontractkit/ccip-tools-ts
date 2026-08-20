@@ -69,9 +69,7 @@ export class Ed25519TransactionSigner implements TransactionSigner {
     // signature, even though Node itself derives the public key fine from a
     // private KeyObject (verified at runtime). Cast through Parameters<> until
     // upstream restores the overload.
-    const publicKeyObject = createPublicKey(
-      this.privateKeyObject as unknown as Parameters<typeof createPublicKey>[0],
-    )
+    const publicKeyObject = createPublicKey(this.privateKeyObject)
     const publicKeyDer = publicKeyObject.export({ type: 'spki', format: 'der' }) as Buffer
     // Ed25519 SPKI DER is 44 bytes: 12-byte header + 32-byte key.
     const rawPublicKey = publicKeyDer.subarray(publicKeyDer.length - 32)
@@ -262,12 +260,14 @@ export function loadCantonWallet(
     )
   }
 
-  const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
-  if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
-    const signer = new Ed25519TransactionSigner(privateKey, party)
-    logger?.debug(`Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`)
-    return { party, signer }
-  }
+  // Disable external signing for now
+  //
+  // const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
+  // if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
+  //   const signer = new Ed25519TransactionSigner(privateKey, party)
+  //   logger?.debug(`Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`)
+  //   return { party, signer }
+  // }
 
   return { party }
 }

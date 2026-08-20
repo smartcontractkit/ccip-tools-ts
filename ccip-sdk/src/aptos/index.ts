@@ -174,6 +174,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     this.provider = provider
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
       maxSize: 100,
       maxArgs: 1,
       expires: 60e3, // 1min
@@ -444,7 +445,10 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [sourceChainSelector],
       },
     })
-    const onRamp = decodeAddress(sourceChainConfig.on_ramp, networkInfo(sourceChainSelector).family)
+    const onRamp = decodeOnRampAddress(
+      sourceChainConfig.on_ramp,
+      networkInfo(sourceChainSelector).family,
+    )
     return normalizeDeep(
       {
         sourceChainSelector,
@@ -618,7 +622,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /**
    * Converts bytes to an Aptos address.
    * @param bytes - Bytes to convert.
-   * @returns Aptos address (0x-prefixed hex, 32 bytes padded).
+   * @returns Aptos address in canonical short form (0x-prefixed hex, leading
+   * zero nibbles stripped).
    * @throws {@link CCIPDataFormatUnsupportedError} if bytes length exceeds 32
    */
   static getAddress(bytes: BytesLike | readonly number[]): string {

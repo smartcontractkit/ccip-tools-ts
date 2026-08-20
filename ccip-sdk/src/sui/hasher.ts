@@ -7,6 +7,7 @@ import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.t
 import type { CCIPMessage_V1_6_Sui } from './types.ts'
 import { ChainFamily } from '../networks.ts'
 import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
+import { getAddressBytes } from '../utils.ts'
 
 /**
  * Creates a leaf hasher for Sui CCIP messages.
@@ -57,10 +58,10 @@ export function hashV16SuiMessage(
 
   const innerHash = concat([
     encodeNumber(message.messageId),
-    zeroPadValue(message.receiver, 32),
+    zeroPadValue(getAddressBytes(message.receiver), 32),
     encodeNumber(message.sequenceNumber),
     encodeNumber(gasLimit),
-    zeroPadValue(tokenReceiver, 32),
+    zeroPadValue(getAddressBytes(tokenReceiver), 32),
     encodeNumber(message.nonce),
   ])
 
@@ -68,8 +69,8 @@ export function hashV16SuiMessage(
     encodeNumber(message.tokenAmounts.length),
     ...message.tokenAmounts.map((token) =>
       concat([
-        encodeRawBytes(token.sourcePoolAddress),
-        zeroPadValue(token.destTokenAddress, 32),
+        encodeRawBytes(getAddressBytes(token.sourcePoolAddress)),
+        zeroPadValue(getAddressBytes(token.destTokenAddress), 32),
         encodeNumber(token.destGasAmount),
         encodeRawBytes(token.extraData),
         encodeNumber(token.amount),
@@ -81,7 +82,7 @@ export function hashV16SuiMessage(
     zeroPadValue(LEAF_DOMAIN_SEPARATOR, 32),
     metadataHash,
     keccak256(innerHash),
-    keccak256(message.sender),
+    keccak256(getAddressBytes(message.sender)),
     keccak256(message.data),
     keccak256(tokenHash),
   ])

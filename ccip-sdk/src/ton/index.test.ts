@@ -1220,21 +1220,24 @@ describe('TON index unit tests', () => {
       )
     })
 
-    it('refuses to scan when the resume floor lands past startBlock', async () => {
-      // Reproduces the disagreement that lost a finalized execution on ton-testnet: block
-      // 10's shard end_lt comes back one bucket too high (11_999 instead of 10_999 — the
-      // masterchain-vs-shard lt offset), so resuming at startBlock 11 would begin at lt
-      // 12_000 and skip block 11's tx for good. Fail loudly rather than scan and skip.
-      const chain = makeChain(13, [11_001, 12_001])
+    it('scans normally when startBlock commits no transaction (floor lands past it)', async () => {
+      // Regression (ton-testnet pollExecutions): a masterchain block that references the
+      // same shard block as its predecessor leaves the shard end_lt unchanged, so the
+      // resume lt derived from block 10 first commits at block 12, past startBlock 11.
+      // That is normal — block 11 commits nothing for this account, so there is nothing
+      // to skip — and must not fail the scan (it used to throw "Inconsistent TON cursor",
+      // failing the getLogs activity on roughly every other poll).
+      const chain = makeChain(13, [12_001])
       ;(
         chain as unknown as {
           getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
         }
-      ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno === 10 ? 11 : seqno)
-      await assert.rejects(
-        () => collect(chain, { startBlock: 11 }),
-        /Inconsistent TON cursor/,
-        'a floor above startBlock must throw, not silently skip block 11',
+      ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno === 11 ? 10 : seqno)
+      const logs = await collect(chain, { startBlock: 11 })
+      assert.deepEqual(
+        logs.map((l) => l.block),
+        [12],
+        'the scan proceeds and emits block 12 instead of failing',
       )
     })
 
