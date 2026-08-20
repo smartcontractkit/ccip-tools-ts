@@ -78,6 +78,66 @@ export async function resolveTarRef(
   return toContractRef(contract)
 }
 
+/** A resolved TAR contract: the ref for disclosure plus its signatories (ccipOwner). */
+export interface ResolvedTar {
+  /** TAR contract reference (CID + disclosure blob + synchronizer). */
+  tarContract: TarContractRef
+  /** TAR signatories — `[0]` is the ccipOwner (needed to derive TokenConfig addresses). */
+  ccipOwner: string | undefined
+}
+
+/**
+ * Resolve the TAR for a TAR-admin op, WITHOUT requiring the caller's
+ * participant to host ccipOwner.
+ *
+ * The TAR's only stakeholder is its signatory (ccipOwner) — no observers — so
+ * an issuer's participant cannot ACS-read it. Resolution order:
+ *
+ * 1. **Disclosure service** (`EdsDisclosureProvider.fetchContractDisclosure`)
+ *    — the issuer-friendly path: the blob comes from a public endpoint, no
+ *    ccipOwner visibility or readAs needed. This is the default; it makes
+ *    token-admin ops self-sufficient for issuers.
+ * 2. **ACS fallback** — for operators whose participant DOES host ccipOwner
+ *    (or when no disclosure service is configured): query with
+ *    `[sender, chain.ccipParty]` (JWT needs readAs over both).
+ */
+export async function resolveTar(
+  chain: CantonChain,
+  sender: string,
+  tarInstanceAddress: string,
+): Promise<ResolvedTar> {
+  const disclosed = await chain.edsDisclosureProvider
+    ?.fetchContractDisclosure(TAR_TEMPLATE_ID, tarInstanceAddress)
+    .catch(() => null)
+  if (disclosed) {
+    const ownerFromRaw = tarInstanceAddress.includes('@')
+      ? tarInstanceAddress.slice(tarInstanceAddress.indexOf('@') + 1)
+      : undefined
+    return {
+      tarContract: {
+        contractId: disclosed.contractId,
+        createdEventBlob: disclosed.createdEventBlob,
+        synchronizerId: disclosed.synchronizerId,
+      },
+      ccipOwner: disclosed.signatories?.[0] ?? ownerFromRaw,
+    }
+  }
+
+  const contract = await chain.findActiveContractByInstanceAddress(
+    TAR_TEMPLATE_ID,
+    tarInstanceAddress,
+    [...new Set([sender, chain.ccipParty])],
+  )
+  if (!contract) {
+    throw new CCTParamsInvalidError(
+      'resolveTar',
+      'tarInstanceAddress',
+      `TokenAdminRegistry ${tarInstanceAddress} not found via disclosure service and not visible to ${sender} or ${chain.ccipParty}`,
+    )
+  }
+  return { tarContract: toContractRef(contract), ccipOwner: contract.signatories[0] }
+}
+
 /**
  * Resolve a TokenConfig contract reference by its `InstanceAddress` (the
  * canonical Canton resolution path). `tokenConfigInstanceAddress` is either the

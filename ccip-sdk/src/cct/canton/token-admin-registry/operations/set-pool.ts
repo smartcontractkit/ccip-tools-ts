@@ -21,7 +21,7 @@ import { EMPTY_CHOICE_CONTEXT } from '../../encoding.ts'
 import {
   buildTarExercise,
   deriveTokenConfigInstanceAddress,
-  TAR_TEMPLATE_ID,
+  resolveTar,
   TOKEN_CONFIG_TEMPLATE_ID,
   toContractRef,
 } from '../shared.ts'
@@ -98,24 +98,9 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
 
   /** Builds the `SetPool` exercise command against the TAR. */
   protected async buildCommands(chain: CantonChain, p: ParsedSetPoolParams): Promise<JsCommands> {
-    // Resolve with the full active contract — the TAR's signatory (ccipOwner)
-    // is needed to derive the TokenConfig address when it isn't passed in.
-    // The TAR has no observer for token admins, so the query includes
-    // chain.ccipParty (the ledger JWT needs readAs over it).
+    // Disclosure-service-first resolution — no ccipOwner visibility required.
+    const { tarContract, ccipOwner } = await resolveTar(chain, p.sender, p.tarInstanceAddress)
     const queryParties = [...new Set([p.sender, chain.ccipParty])]
-    const tarContract = await chain.findActiveContractByInstanceAddress(
-      TAR_TEMPLATE_ID,
-      p.tarInstanceAddress,
-      queryParties,
-    )
-    if (!tarContract) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tarInstanceAddress',
-        `TokenAdminRegistry ${p.tarInstanceAddress} is not active or not visible to ${p.sender}`,
-      )
-    }
-    const ccipOwner = tarContract.signatories[0]
     const tokenConfigInstanceAddress =
       p.tokenConfigInstanceAddress ??
       (ccipOwner ? deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner) : undefined)
@@ -155,7 +140,7 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
 
     return buildTarExercise({
       choice: 'SetPool',
-      tarContract: toContractRef(tarContract),
+      tarContract,
       tokenConfigContract: toContractRef(tokenConfigContract),
       choiceArgument,
       actAs: [p.sender],
