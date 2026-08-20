@@ -15,7 +15,7 @@ import type { CantonTransactionResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parsePartyId } from '../../validate.ts'
-import { buildPoolExercise, resolvePoolRef, type PoolContractRef } from '../shared.ts'
+import { buildPoolExercise, BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID, resolvePoolRef, type PoolContractRef } from '../shared.ts'
 
 /** Parameters shared by `setDynamicConfig` generation and execution. */
 export interface SetDynamicConfigParams {
@@ -77,9 +77,7 @@ export class SetDynamicConfig extends CantonOperation<SetDynamicConfigParams> {
     p: CantonGenerateParams<SetDynamicConfigParams>,
   ): Promise<JsCommands> {
     const templateId =
-      p.poolType === 'burnMint'
-        ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
-        : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
 
     // Offline-generate: caller-supplied ref (no ACS fetch). Otherwise resolve
     // by InstanceAddress from the ACS.
@@ -92,8 +90,8 @@ export class SetDynamicConfig extends CantonOperation<SetDynamicConfigParams> {
       templateId,
       poolContract,
       choiceArgument: {
-        // rateLimitAdmin is optional; omit the key to clear (Daml `None`).
-        ...(p.rateLimitAdmin && { rateLimitAdmin: p.rateLimitAdmin }),
+        // Daml `Optional Party`; `null` (`None`) clears the rate-limit admin.
+        rateLimitAdmin: p.rateLimitAdmin ?? null,
       },
       actAs: [p.sender],
       commandIdPrefix: 'cct-set-dynamic-config',

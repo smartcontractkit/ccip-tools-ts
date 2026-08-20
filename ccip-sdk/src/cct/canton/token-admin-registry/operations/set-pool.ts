@@ -17,10 +17,13 @@ import type { CantonTarAdminResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { parseInstrumentId, parsePartyId } from '../../validate.ts'
+import { EMPTY_CHOICE_CONTEXT } from '../../encoding.ts'
 import {
   buildTarExercise,
-  resolveTarRef,
-  resolveTokenConfigRef,
+  deriveTokenConfigInstanceAddress,
+  TAR_TEMPLATE_ID,
+  TOKEN_CONFIG_TEMPLATE_ID,
+  toContractRef,
 } from '../shared.ts'
 
 /** Pool registration: the pool owner party + the pool instance ID. */
@@ -42,8 +45,11 @@ export interface SetPoolParams {
   poolRegistration?: PoolRegistration
   /** TAR `InstanceAddress` (`0x<64-hex>` or `"instanceId@ccipOwner"`). Resolved via ACS. */
   tarInstanceAddress: string
-  /** `TokenConfig` `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
-  tokenConfigInstanceAddress: string
+  /**
+   * `TokenConfig` `InstanceAddress` — optional; derived offline from the
+   * instrument ID + TAR owner (ccipOwner) when omitted.
+   */
+  tokenConfigInstanceAddress?: string
 }
 
 /** Parsed `setPool` params: instrument ID normalized. */
@@ -92,28 +98,65 @@ export class SetPool extends CantonOperation<SetPoolParams, ParsedSetPoolParams>
 
   /** Builds the `SetPool` exercise command against the TAR. */
   protected async buildCommands(chain: CantonChain, p: ParsedSetPoolParams): Promise<JsCommands> {
-    const tarContract = await resolveTarRef(chain, p.sender, p.tarInstanceAddress)
-    const tokenConfigContract = await resolveTokenConfigRef(
-      chain,
-      p.instrumentId.admin,
-      p.tokenConfigInstanceAddress,
+    // Resolve with the full active contract — the TAR's signatory (ccipOwner)
+    // is needed to derive the TokenConfig address when it isn't passed in.
+    // The TAR has no observer for token admins, so the query includes
+    // chain.ccipParty (the ledger JWT needs readAs over it).
+    const queryParties = [...new Set([p.sender, chain.ccipParty])]
+    const tarContract = await chain.findActiveContractByInstanceAddress(
+      TAR_TEMPLATE_ID,
+      p.tarInstanceAddress,
+      queryParties,
     )
+    if (!tarContract) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tarInstanceAddress',
+        `TokenAdminRegistry ${p.tarInstanceAddress} is not active or not visible to ${p.sender}`,
+      )
+    }
+    const ccipOwner = tarContract.signatories[0]
+    const tokenConfigInstanceAddress =
+      p.tokenConfigInstanceAddress ??
+      (ccipOwner ? deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner) : undefined)
+    if (!tokenConfigInstanceAddress) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenConfigInstanceAddress',
+        'could not derive the TokenConfig address (TAR has no signatory) — pass it explicitly',
+      )
+    }
+    const tokenConfigContract = await chain.findActiveContractByInstanceAddress(
+      TOKEN_CONFIG_TEMPLATE_ID,
+      tokenConfigInstanceAddress,
+      queryParties,
+    )
+    if (!tokenConfigContract) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenConfigInstanceAddress',
+        `TokenConfig ${tokenConfigInstanceAddress} is not active or not visible`,
+      )
+    }
 
     const choiceArgument: Record<string, unknown> = {
+      tokenConfigCid: tokenConfigContract.contractId,
       instrumentId: p.instrumentId,
-      // tokenPool is optional; omit the key entirely to delist (Daml `None`).
-      ...(p.poolRegistration && {
-        tokenPool: {
-          poolOwner: p.poolRegistration.poolOwner,
-          poolInstanceId: p.poolRegistration.poolInstanceId,
-        },
-      }),
+      // tokenPool is a Daml `Optional`; `null` (`None`) delists.
+      tokenPool: p.poolRegistration
+        ? {
+            poolOwner: p.poolRegistration.poolOwner,
+            poolInstanceId: p.poolRegistration.poolInstanceId,
+          }
+        : null,
+      context: EMPTY_CHOICE_CONTEXT,
+      caller: p.sender,
     }
 
     return buildTarExercise({
       choice: 'SetPool',
-      tarContract,
-      tokenConfigContract,
+      tarContract: toContractRef(tarContract),
+      tokenConfigContract: toContractRef(tokenConfigContract),
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-set-pool',

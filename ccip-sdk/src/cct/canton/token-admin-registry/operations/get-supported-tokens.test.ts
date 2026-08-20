@@ -18,9 +18,9 @@ import type { CantonActiveContract, CantonChain } from '../../../../canton/index
 import { CantonTokenManager } from '../../index.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
 
-const PARTY = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
-const ADMIN_A = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
-const ADMIN_B = 'adminB::1220b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2'
+const PARTY = 'participant::1220' + 'c250'.repeat(16)
+const ADMIN_A = 'adminA::1220' + 'a1'.repeat(32)
+const ADMIN_B = 'adminB::1220' + 'b2'.repeat(32)
 
 /** Build a gRPC-style Daml field value: `{ Sum: { <ctor>: value } }`. */
 function sum(ctor: string, value: unknown): Record<string, unknown> {

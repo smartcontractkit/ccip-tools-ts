@@ -9,13 +9,14 @@ export {
   type PoolType,
   type PoolFactoryDeps,
   type PoolReceiveContext,
-  type TransferTimeout,
   type DeployTokenPoolParams,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
 } from './deploy-token-pool.ts'
+
+export type { TransferTimeout, FinalityConfig } from '../../encoding.ts'
 
 export {
   ApplyChainUpdates,
@@ -36,6 +37,15 @@ export {
   type ExecuteSetRateLimitConfigParams,
   type ExecuteSetRateLimitConfigResult,
 } from './set-rate-limit-config.ts'
+
+export {
+  DeployRateLimiter,
+  type DeployRateLimiterParams,
+  type GenerateDeployRateLimiterParams,
+  type GenerateDeployRateLimiterResult,
+  type ExecuteDeployRateLimiterParams,
+  type ExecuteDeployRateLimiterResult,
+} from './deploy-rate-limiter.ts'
 
 export {
   SetDynamicConfig,

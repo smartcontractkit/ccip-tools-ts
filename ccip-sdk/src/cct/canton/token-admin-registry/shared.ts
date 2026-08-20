@@ -7,6 +7,7 @@
 
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import type { JsCommands } from '../../../canton/client/index.ts'
+import { hashedUtf8Hex } from '../../../shared/codec.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 
 /** TAR template ID (`#<package>:<Module>:<Entity>`). */
@@ -14,6 +15,22 @@ export const TAR_TEMPLATE_ID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:Tok
 
 /** TokenConfig template ID (the per-instrument config contract the TAR manages). */
 export const TOKEN_CONFIG_TEMPLATE_ID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenConfig'
+
+/**
+ * Derive a TokenConfig's raw instance address (`"instanceId@registryOwner"`)
+ * offline from the instrument ID. Mirrors the on-ledger derivation
+ * `tokenConfigInstanceId = keccak256(utf8("<instrumentId.id>@<instrumentId.admin>"))`
+ * (`CCIP.CodecV2.MessageCodecV1.encodeInstrumentId`) — the TokenConfig's
+ * signatory is the registry owner (ccipOwner), so the raw instance address is
+ * `<instanceId>@<ccipOwner>`.
+ */
+export function deriveTokenConfigInstanceAddress(
+  instrumentId: { admin: string; id: string },
+  ccipOwner: string,
+): string {
+  const instanceId = hashedUtf8Hex(`${instrumentId.id}@${instrumentId.admin}`)
+  return `${instanceId}@${ccipOwner}`
+}
 
 /** A contract reference for {@link buildTarExercise}: a CID plus its disclosure blob. */
 export interface TarContractRef {
@@ -93,8 +110,12 @@ export interface BuildTarExerciseInput {
   choice: string
   /** TAR contract reference (CID + disclosure blob). */
   tarContract: TarContractRef
-  /** `TokenConfig` contract reference for the instrument (disclosed with the command). */
-  tokenConfigContract: TarContractRef
+  /**
+   * `TokenConfig` contract reference for the instrument (disclosed with the
+   * command). Omit for first-time `ProposeAdministrator` — the choice creates
+   * the TokenConfig when `tokenConfigCid` is `None`.
+   */
+  tokenConfigContract?: TarContractRef
   /** Daml choice argument record. */
   choiceArgument: Record<string, unknown>
   /** Acting party IDs (`actAs`). */
@@ -105,10 +126,10 @@ export interface BuildTarExerciseInput {
 
 /**
  * Build a `JsCommands` exercising a TAR choice. The TAR contract and the
- * instrument's `TokenConfig` are disclosed alongside the command with their
- * real `createdEventBlob` + `synchronizerId` (fetched by the resolvers or
- * supplied by the caller), so the participant can reconstruct them during
- * interactive submission.
+ * instrument's `TokenConfig` (when it already exists) are disclosed alongside
+ * the command with their real `createdEventBlob` + `synchronizerId` (fetched
+ * by the resolvers or supplied by the caller), so the participant can
+ * reconstruct them during interactive submission.
  */
 export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
   const { choice, tarContract, tokenConfigContract, choiceArgument, actAs, commandIdPrefix } = input
@@ -120,12 +141,16 @@ export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
       createdEventBlob: tarContract.createdEventBlob,
       synchronizerId: tarContract.synchronizerId,
     },
-    {
-      templateId: TOKEN_CONFIG_TEMPLATE_ID,
-      contractId: tokenConfigContract.contractId,
-      createdEventBlob: tokenConfigContract.createdEventBlob,
-      synchronizerId: tokenConfigContract.synchronizerId,
-    },
+    ...(tokenConfigContract
+      ? [
+          {
+            templateId: TOKEN_CONFIG_TEMPLATE_ID,
+            contractId: tokenConfigContract.contractId,
+            createdEventBlob: tokenConfigContract.createdEventBlob,
+            synchronizerId: tokenConfigContract.synchronizerId,
+          },
+        ]
+      : []),
   ]
 
   return {

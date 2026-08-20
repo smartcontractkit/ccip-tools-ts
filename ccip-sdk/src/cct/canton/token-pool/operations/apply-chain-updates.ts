@@ -14,7 +14,12 @@ import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { buildPoolExercise, resolvePoolRef } from '../shared.ts'
+import {
+  encodeFinalityConfig,
+  rawInstanceAddress,
+  type FinalityConfig,
+} from '../../encoding.ts'
+import { buildPoolExercise, BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID, resolvePoolRef } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
 export interface ChainUpdate {
@@ -24,18 +29,24 @@ export interface ChainUpdate {
   remotePools: string[]
   /** Remote token address (encoded instrument ID). */
   remoteTokenAddress: string
-  /** Inbound committee-verifier instance addresses. */
+  /** Inbound committee-verifier raw instance addresses (`"instanceId@party"`). */
   inboundCCVs?: string[]
-  /** Outbound committee-verifier instance addresses. */
+  /** Outbound committee-verifier raw instance addresses (`"instanceId@party"`). */
   outboundCCVs?: string[]
-  /** Finality config (default vs custom block confirmations). */
-  finalityConfig?: { type: string; [k: string]: unknown }
-  /** Inbound rate-limiter instance address. */
-  inboundRateLimiter?: string
-  /** Inbound custom-block-confirmations rate-limiter instance address. */
+  /** Finality config (default: `WaitForFinality`). */
+  finalityConfig?: FinalityConfig
+  /**
+   * Inbound rate-limiter raw instance address (`"instanceId@party"`).
+   * Required by the choice (must be non-empty and distinct from outbound).
+   */
+  inboundRateLimiter: string
+  /**
+   * Inbound custom-block-confirmations rate-limiter raw instance address.
+   * Required when `finalityConfig` is faster than finality.
+   */
   inboundCustomBlockConfirmationsRateLimiter?: string
-  /** Outbound rate-limiter instance address. */
-  outboundRateLimiter?: string
+  /** Outbound rate-limiter raw instance address. Required, distinct from inbound. */
+  outboundRateLimiter: string
 }
 
 /** Parameters shared by `applyChainUpdates` generation and execution. */
@@ -99,6 +110,22 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
           'remote token address is required',
         )
       }
+      // Mirrors the on-ledger assertDistinctRateLimiters: inbound/outbound must
+      // be present and distinct.
+      if (!c.inboundRateLimiter || !c.outboundRateLimiter) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          `chainsToAdd[${i}].inboundRateLimiter`,
+          'inbound and outbound rate limiters are required (the choice rejects empty ones)',
+        )
+      }
+      if (c.inboundRateLimiter === c.outboundRateLimiter) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          `chainsToAdd[${i}].outboundRateLimiter`,
+          'inbound and outbound rate limiters must be distinct',
+        )
+      }
     }
   }
 
@@ -108,24 +135,26 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
     p: CantonGenerateParams<ApplyChainUpdatesParams>,
   ): Promise<JsCommands> {
     const templateId =
-      p.poolType === 'burnMint'
-        ? '#ccip-core-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
-        : '#ccip-core-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
 
     const poolContract = await resolvePoolRef(chain, p.poolType, p.sender, p.poolInstanceAddress)
 
+    // RawInstanceAddress newtypes encode as {unpack: raw}; FinalityConfig is a
+    // Daml variant ({tag, value}).
     const choiceArgument: Record<string, unknown> = {
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),
       chainsToAdd: (p.chainsToAdd ?? []).map((c) => ({
         remoteChainSelector: c.remoteChainSelector.toString(),
         remotePools: c.remotePools,
         remoteTokenAddress: c.remoteTokenAddress,
-        inboundCCVs: c.inboundCCVs ?? [],
-        outboundCCVs: c.outboundCCVs ?? [],
-        finalityConfig: c.finalityConfig ?? { type: 'WaitForFinality' },
-        inboundRateLimiter: c.inboundRateLimiter ?? '',
-        inboundCustomBlockConfirmationsRateLimiter: c.inboundCustomBlockConfirmationsRateLimiter ?? '',
-        outboundRateLimiter: c.outboundRateLimiter ?? '',
+        inboundCCVs: (c.inboundCCVs ?? []).map(rawInstanceAddress),
+        outboundCCVs: (c.outboundCCVs ?? []).map(rawInstanceAddress),
+        finalityConfig: encodeFinalityConfig(c.finalityConfig ?? { type: 'WaitForFinality' }),
+        inboundRateLimiter: rawInstanceAddress(c.inboundRateLimiter),
+        inboundCustomBlockConfirmationsRateLimiter: rawInstanceAddress(
+          c.inboundCustomBlockConfirmationsRateLimiter ?? '',
+        ),
+        outboundRateLimiter: rawInstanceAddress(c.outboundRateLimiter),
       })),
     }
 

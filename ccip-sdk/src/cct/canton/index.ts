@@ -55,6 +55,7 @@ import {
 } from './token-admin-registry/operations/index.ts'
 import {
   DeployTokenPool,
+  DeployRateLimiter,
   ApplyChainUpdates,
   SetRateLimitConfig,
   SetDynamicConfig,
@@ -65,6 +66,11 @@ import {
   type GenerateDeployTokenPoolResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type DeployRateLimiterParams,
+  type GenerateDeployRateLimiterParams,
+  type GenerateDeployRateLimiterResult,
+  type ExecuteDeployRateLimiterParams,
+  type ExecuteDeployRateLimiterResult,
   type ApplyChainUpdatesParams,
   type GenerateApplyChainUpdatesParams,
   type GenerateApplyChainUpdatesResult,
@@ -101,6 +107,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   readonly #acceptAdmin = new AcceptAdmin()
   readonly #transferAdmin = new TransferAdmin()
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #deployRateLimiter = new DeployRateLimiter()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #setRateLimitConfig = new SetRateLimitConfig()
   readonly #setDynamicConfig = new SetDynamicConfig()
@@ -208,6 +215,22 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   /** Deploys a `BurnMintTokenPool` or `LockReleaseTokenPool` via the CCIPFactory. */
   async deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts) as Promise<ExecuteDeployTokenPoolResult>
+  }
+
+  // ─── Pool: deployRateLimiter ────────────────────────────────────────────
+
+  /** Builds unsigned `deployRateLimiter` (CCIPFactory.DeployRateLimiter) commands. */
+  async generateUnsignedDeployRateLimiter(
+    opts: GenerateDeployRateLimiterParams,
+  ): Promise<GenerateDeployRateLimiterResult> {
+    return this.#deployRateLimiter.generate(this.chain, opts)
+  }
+
+  /** Deploys a `RateLimiter` for a pool via the CCIPFactory. */
+  async deployRateLimiter(
+    opts: ExecuteDeployRateLimiterParams,
+  ): Promise<ExecuteDeployRateLimiterResult> {
+    return this.#deployRateLimiter.execute(this.chain, opts) as Promise<ExecuteDeployRateLimiterResult>
   }
 
   // ─── Pool: applyChainUpdates ────────────────────────────────────────────
