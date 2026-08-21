@@ -52,6 +52,133 @@ export function encodeSuiExtraArgsV1(args: SuiExtraArgsV1): string {
 }
 
 /**
+ * The ccip package's fee quoter configuration for one destination chain:
+ * `ccip::fee_quoter`'s `StaticConfig` (which is global to the deployment) merged
+ * with its `DestChainConfig` for that chain, mirroring the EVM FeeQuoter.
+ */
+export type SuiFeeQuoterConfig = {
+  /** Maximum fee, in LINK juels, chargeable for a single message. */
+  maxFeeJuelsPerMsg: bigint
+  /** CoinMetadata address of the LINK token. */
+  linkToken: string
+  /** How long a token price stays usable, in seconds. */
+  tokenPriceStalenessThreshold: bigint
+  /** CoinMetadata addresses accepted as fee tokens. */
+  feeTokens: string[]
+  /** Whether this destination chain is enabled. */
+  isEnabled: boolean
+  /** Maximum number of distinct tokens transferred per message. */
+  maxNumberOfTokensPerMsg: number
+  /** Maximum `data` payload size, in bytes. */
+  maxDataBytes: number
+  /** Maximum gas limit a message may request. */
+  maxPerMsgGasLimit: bigint
+  /** Gas charged on top of the gas limit to cover destination chain costs. */
+  destGasOverhead: number
+  /** Default dest-chain gas charged per byte of `data` payload. */
+  destGasPerPayloadByteBase: number
+  /** High dest-chain gas charged per byte of `data` payload (eip-7623). */
+  destGasPerPayloadByteHigh: number
+  /** Payload size at which billing switches from the base to the high rate. */
+  destGasPerPayloadByteThreshold: number
+  /** Data availability gas charged for overhead costs, e.g. for OCR. */
+  destDataAvailabilityOverheadGas: number
+  /** Gas charged per byte of message data needing availability. */
+  destGasPerDataAvailabilityByte: number
+  /** Multiplier for data availability gas, in multiples of 0.0001. */
+  destDataAvailabilityMultiplierBps: number
+  /** Selector identifying the destination chain's family. */
+  chainFamilySelector: string
+  /** Whether `allowOutOfOrderExecution` must be true in extraArgs. */
+  enforceOutOfOrder: boolean
+  /** Default fee charged per token transfer, in multiples of 0.01 USD. */
+  defaultTokenFeeUsdCents: number
+  /** Default gas charged to execute a token transfer on the destination chain. */
+  defaultTokenDestGasOverhead: number
+  /** Default gas limit for a message. */
+  defaultTxGasLimit: bigint
+  /** Multiplier for gas costs, 1e18-based, so 11e17 is 10% extra. */
+  gasMultiplierWeiPerEth: bigint
+  /** How long a gas price stays usable, in seconds (0 disables the check). */
+  gasPriceStalenessThreshold: number
+  /** Flat network fee per message, in multiples of 0.01 USD. */
+  networkFeeUsdCents: number
+}
+
+/**
+ * `ccip::rmn_remote`'s state, which is global to the deployment.
+ *
+ * Sui has no RMNProxy indirection, so there is no `getARM()` to unwrap as on EVM:
+ * `rmn_remote` *is* the RMN, i.e. the equivalent of what EVM's proxy returns.
+ */
+export type SuiRmnRemoteConfig = {
+  /** Config version, `config_count` on-chain; 0 means RMN was never configured. */
+  version: number
+  /** Digest of the RMNHome config this RMNRemote is configured against. */
+  rmnHomeContractConfigDigest: string
+  /** Number of signatures required to bless a report. */
+  fSign: bigint
+  /** Blessing signers. */
+  signers: { onchainPublicKey: string; nodeIndex: bigint }[]
+  /** Currently cursed subjects; a lane is blocked while its subject is cursed. */
+  cursedSubjects: string[]
+  /** Whether the global curse subject is active, which curses every lane. */
+  isCursedGlobal: boolean
+}
+
+/** `ccip::rmn_remote::RMNRemoteState`, as rendered by the JSON-RPC. */
+export type SuiRmnRemoteStateFields = {
+  local_chain_selector: string
+  config_count: number
+  config: {
+    fields: {
+      rmn_home_contract_config_digest: number[]
+      signers: { fields: { onchain_public_key: number[]; node_index: string } }[]
+      f_sign: string
+    }
+  }
+  cursed_subjects: { fields: { contents: { fields: { key: number[]; value: boolean } }[] } }
+}
+
+/** `ccip_onramp::onramp::OnRampState`, as rendered by the JSON-RPC. */
+export type SuiOnRampStateFields = {
+  chain_selector: string
+  fee_aggregator: string
+  allowlist_admin: string
+  dest_chain_configs: { fields: { id: { id: string } } }
+  ownable_state: { fields: { owner: string } }
+}
+
+/** `ccip_onramp::onramp::DestChainConfig`, as rendered by the JSON-RPC. */
+export type SuiOnRampDestChainConfigFields = {
+  sequence_number: string
+  allowlist_enabled: boolean
+  allowed_senders: string[]
+  /** the *remote* chain's router, in that chain's address format */
+  router: string
+}
+
+/** `ccip_offramp::offramp::OffRampState`, as rendered by the JSON-RPC. */
+export type SuiOffRampStateFields = {
+  chain_selector: string
+  permissionless_execution_threshold_seconds: number
+  latest_price_sequence_number: string
+  source_chain_configs: {
+    fields: { contents: { fields: { key: string; value: { fields: unknown } } }[] }
+  }
+  ownable_state: { fields: { owner: string } }
+}
+
+/** `ccip_offramp::offramp::SourceChainConfig`, as rendered by the JSON-RPC. */
+export type SuiOffRampSourceChainConfigFields = {
+  router: string
+  is_enabled: boolean
+  min_seq_nr: string
+  is_rmn_verification_disabled: boolean
+  on_ramp: number[]
+}
+
+/**
  * Sui-specific CCIP message log structure from events.
  */
 export type SuiCCIPMessageLog = {

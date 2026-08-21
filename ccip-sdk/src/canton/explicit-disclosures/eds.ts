@@ -32,11 +32,13 @@ export interface EdsExecutor {
 export interface EdsTokenTransfer {
   token: EdsInstrumentId
   amount: string
+  holdingContractIds: string[]
 }
 
 /** CCIP message shape accepted by the global and external EDS endpoints. */
 export interface EdsMessage {
   destinationChainSelector: string
+  sender: string
   receiver: string
   payload: string
   tokenTransfer: EdsTokenTransfer | null
@@ -306,13 +308,16 @@ export class EdsDisclosureProvider {
   }
 
   /** Fetch global execute disclosures for an encoded CCIP message. */
-  async fetchExecutionDisclosures(encodedMessage: string): Promise<EdsExecuteResult> {
+  async fetchExecutionDisclosures(
+    encodedMessage: string,
+    receiver: string,
+  ): Promise<EdsExecuteResult> {
     const resp = await post<EdsGlobalExecuteResponse>(
       this.edsBaseUrl,
       '/ccip/v1/global/message/execute',
       EDS_HEADERS,
       this.timeoutMs,
-      { encodedMessage },
+      { encodedMessage, receiver },
     )
     return {
       contextData: contextDataOrEmpty(resp.contextData),
@@ -325,13 +330,14 @@ export class EdsDisclosureProvider {
   async fetchTokenPoolExecuteDisclosure(
     address: string,
     encodedMessage: string,
+    receiver: string,
   ): Promise<EdsTokenPoolDisclosureResult> {
     const resp = await post<EdsTokenPoolDisclosureResponse>(
       this.externalBaseUrlFor(address),
       `/ccip/v1/external/tokenPool/${encodeURIComponent(address)}/execute`,
       EDS_HEADERS,
       this.timeoutMs,
-      { encodedMessage },
+      { encodedMessage, receiver },
     )
     return this.rawTokenPoolResult(resp)
   }
@@ -340,13 +346,14 @@ export class EdsDisclosureProvider {
   async fetchCcvExecuteDisclosure(
     address: string,
     encodedMessage: string,
+    receiver: string,
   ): Promise<EdsExternalDisclosureResult> {
     const resp = await post<EdsExternalDisclosureResponse>(
       this.externalBaseUrlFor(address),
       `/ccip/v1/external/ccv/${encodeURIComponent(address)}/execute`,
       EDS_HEADERS,
       this.timeoutMs,
-      { encodedMessage },
+      { encodedMessage, receiver },
     )
     return this.rawExternalResult(resp)
   }

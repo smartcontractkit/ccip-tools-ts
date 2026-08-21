@@ -13,7 +13,6 @@ import {
   hexlify,
   toBeHex,
   zeroPadBytes,
-  zeroPadValue,
 } from 'ethers'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
@@ -173,10 +172,16 @@ export function decodeMoveExtraArgs(
 }
 
 /**
- * Converts bytes to a Move-chain address (32-byte zero-padded).
+ * Converts bytes to a Move-chain address.
  * Works for both Aptos and Sui since they share the same address format.
- * @param bytes - Bytes to convert.
- * @returns Address as 0x-prefixed hex string, 32 bytes padded.
+ *
+ * The result uses the chains' canonical short form: leading zero nibbles are
+ * stripped (`0x1`, not 64 hex digits), which may produce an odd-length hex
+ * string. Parse such addresses back with {@link getAddressBytes} — raw
+ * `getBytes`/`hexlify` assume whole-byte hex and reject them.
+ *
+ * @param bytes - Bytes to convert (an optional `::module` suffix on string input is preserved).
+ * @returns Address as 0x-prefixed hex string in canonical short form.
  * @throws {@link CCIPDataFormatUnsupportedError} if bytes length exceeds 32
  */
 export function getMoveAddress(bytes: BytesLike | readonly number[]): string {
@@ -192,7 +197,7 @@ export function getMoveAddress(bytes: BytesLike | readonly number[]): string {
   bytes = getDataBytes(bytes)
   if (bytes.length > 32)
     throw new CCIPDataFormatUnsupportedError(`Move address exceeds 32 bytes: ${hexlify(bytes)}`)
-  return zeroPadValue(bytes, 32) + suffix
+  return hexlify(bytes).replace(/^0x0+/, '0x').replace(/0x$/, '0x0') + suffix
 }
 
 /**

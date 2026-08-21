@@ -32,7 +32,8 @@ export type SuiManuallyExecuteInput = {
   ccipAddress: string
   ccipObjectRef: string
   offrampStateObject: string
-  receiverConfig: ManuallyExecuteSuiReceiverConfig
+  /** Registered ccip_receive module, or undefined for plain-address receivers. */
+  receiverConfig?: ManuallyExecuteSuiReceiverConfig
   tokenConfigs?: TokenConfig[]
   overrideReceiverObjectIds?: string[]
 }
@@ -72,12 +73,6 @@ export function buildManualExecutionPTB({
     ],
   })
 
-  // Get the message from the from the report using the offramp helper
-  const messageArg = tx.moveCall({
-    target: `${ccipPackageId}::offramp_state_helper::extract_any2sui_message`,
-    arguments: [receiverParamsArg],
-  })
-
   // Process token pool transfers
   if (tokenConfigs && tokenConfigs.length > 0) {
     if (executionReport.message.tokenAmounts.length !== tokenConfigs.length) {
@@ -98,24 +93,34 @@ export function buildManualExecutionPTB({
     }
   }
 
-  const { receiverObjectIds } = executionReport.message
+  // A receiver registered in the receiver registry gets its ccip_receive call;
+  // plain-address receivers (tokens-only messages with no ccip_receive module)
+  // skip this step entirely — release_or_mint already delivered their tokens
+  // to `token_receiver`.
+  if (receiverConfig) {
+    const { receiverObjectIds } = executionReport.message
 
-  if (receiverObjectIds.length === 0) {
-    throw new CCIPMessageInvalidError('No receiverObjectIds provided in SUIExtraArgsV1')
+    if (receiverObjectIds.length === 0) {
+      throw new CCIPMessageInvalidError('No receiverObjectIds provided in SUIExtraArgsV1')
+    }
+    // Get the message from the report using the offramp helper
+    const messageArg = tx.moveCall({
+      target: `${ccipPackageId}::offramp_state_helper::extract_any2sui_message`,
+      arguments: [receiverParamsArg],
+    })
+    tx.moveCall({
+      target: `${receiverConfig.packageId}::${receiverConfig.moduleName}::ccip_receive`,
+      arguments: [
+        tx.pure.vector('u8', Buffer.from(executionReport.message.messageId.slice(2), 'hex')),
+        tx.object(ccipObjectRef),
+        messageArg,
+        // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from the message
+        ...(overrideReceiverObjectIds && overrideReceiverObjectIds.length > 0
+          ? overrideReceiverObjectIds.map(tx.object)
+          : receiverObjectIds.map(tx.object)),
+      ],
+    })
   }
-  // Call the receiver contract
-  tx.moveCall({
-    target: `${receiverConfig.packageId}::${receiverConfig.moduleName}::ccip_receive`,
-    arguments: [
-      tx.pure.vector('u8', Buffer.from(executionReport.message.messageId.slice(2), 'hex')),
-      tx.object(ccipObjectRef),
-      messageArg,
-      // if overrideReceiverObjectIds is provided, use them; otherwise, use the ones from the message
-      ...(overrideReceiverObjectIds && overrideReceiverObjectIds.length > 0
-        ? overrideReceiverObjectIds.map(tx.object)
-        : receiverObjectIds.map(tx.object)),
-    ],
-  })
 
   // Step 2: Call finish_execute to complete the execution
   tx.moveCall({

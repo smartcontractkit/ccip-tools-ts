@@ -23,61 +23,46 @@ import {
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
-/** Parameters shared by Solana token pool ownership-transfer generation and execution. */
-type TransferPoolOwnershipParams = PoolProgramRef & {
+/** Parameters shared by Solana token pool ownership-acceptance generation and execution. */
+type AcceptOwnershipParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Address proposed as the next pool owner. It must accept ownership separately. */
-  proposedOwner: string
-  /** Current pool owner. Defaults to `payer` for single-signer transactions. */
+  /** Proposed pool owner accepting ownership. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
 
-type ParsedTransferPoolOwnershipParams = {
+type ParsedAcceptOwnershipParams = {
   tokenAddress: PublicKey
-  proposedOwner: PublicKey
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
 }
 
-/** Parameters for unsigned Solana token pool ownership transfer. */
-export type GenerateTransferPoolOwnershipParams = SolanaGenerateParams<TransferPoolOwnershipParams>
+/** Parameters for unsigned Solana token pool ownership acceptance. */
+export type GenerateAcceptOwnershipParams = SolanaGenerateParams<AcceptOwnershipParams>
 
-/** Unsigned Solana token pool ownership transfer result. */
-export type GenerateTransferPoolOwnershipResult = UnsignedSolanaTx
+/** Unsigned Solana token pool ownership acceptance result. */
+export type GenerateAcceptOwnershipResult = UnsignedSolanaTx
 
-/** Parameters for executing Solana token pool ownership transfer. */
-export type ExecuteTransferPoolOwnershipParams = SolanaExecuteParams<TransferPoolOwnershipParams>
+/** Parameters for executing Solana token pool ownership acceptance. */
+export type ExecuteAcceptOwnershipParams = SolanaExecuteParams<AcceptOwnershipParams>
 
-/** Result of executing Solana token pool ownership transfer. */
-export type ExecuteTransferPoolOwnershipResult = TransactionResult
+/** Result of executing Solana token pool ownership acceptance. */
+export type ExecuteAcceptOwnershipResult = TransactionResult
 
-/** Proposes a new owner for a Solana token pool. The proposed owner must accept separately. */
-export class TransferPoolOwnership extends SolanaOperation<
-  TransferPoolOwnershipParams,
+/** Accepts pending ownership of a Solana token pool. */
+export class AcceptOwnership extends SolanaOperation<
+  AcceptOwnershipParams,
   UnsignedSolanaTx,
-  ParsedTransferPoolOwnershipParams
+  ParsedAcceptOwnershipParams
 > {
-  readonly name = 'transferPoolOwnership'
+  readonly name = 'acceptOwnership'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(
-    params: GenerateTransferPoolOwnershipParams,
-  ): ParsedTransferPoolOwnershipParams {
+  protected override parse(params: GenerateAcceptOwnershipParams): ParsedAcceptOwnershipParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
-    const proposedOwner = parsePublicKey(this.name, 'proposedOwner', params.proposedOwner)
-    if (proposedOwner.equals(PublicKey.default)) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'proposedOwner',
-        'must not be the default public key or zero address',
-      )
-    }
-
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      proposedOwner,
       poolProgram: resolvePoolProgram(this.name, params),
       payer,
       authority:
@@ -87,27 +72,25 @@ export class TransferPoolOwnership extends SolanaOperation<
     }
   }
 
-  /** Reads the pool state to reject self-transfer, then builds the unsigned Solana `transferOwnership` instruction. */
+  /** Confirms the authority is the proposed owner, then builds the unsigned `acceptOwnership` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedTransferPoolOwnershipParams,
+    opts: ParsedAcceptOwnershipParams,
   ): Promise<UnsignedSolanaTx> {
     const { config } = await new GetTokenPoolState().query(chain, {
       tokenAddress: opts.tokenAddress.toBase58(),
       poolProgramAddress: opts.poolProgram.toBase58(),
     })
-
-    if (opts.proposedOwner.equals(new PublicKey(config.owner))) {
-      throw new CCTParamsInvalidError(
-        'transferPoolOwnership',
-        'proposedOwner',
-        'must not be the current pool owner',
-      )
+    const proposedOwner = new PublicKey(config.proposedOwner)
+    if (proposedOwner.equals(PublicKey.default)) {
+      throw new CCTParamsInvalidError(this.name, 'authority', 'no proposed owner')
+    }
+    if (!proposedOwner.equals(opts.authority)) {
+      throw new CCTParamsInvalidError(this.name, 'authority', 'must be the proposed owner')
     }
 
-    const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
-    const instruction = await program.methods
-      .transferOwnership(opts.proposedOwner)
+    const instruction = await createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+      .methods.acceptOwnership()
       .accountsStrict({
         state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
         mint: opts.tokenAddress,
@@ -121,11 +104,11 @@ export class TransferPoolOwnership extends SolanaOperation<
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the current pool owner wallet. */
+  /** Generate, sign, simulate, send, and confirm with the proposed owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteTransferPoolOwnershipParams,
-  ): Promise<ExecuteTransferPoolOwnershipResult> {
+    params: ExecuteAcceptOwnershipParams,
+  ): Promise<ExecuteAcceptOwnershipResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
@@ -133,7 +116,7 @@ export class TransferPoolOwnership extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'transferPoolOwnership requires authority to be the executing wallet. Use generateUnsignedTransferPoolOwnership for externally signed transactions.',
+        'acceptOwnership requires authority to be the executing wallet. Use generateUnsignedAcceptOwnership for externally signed transactions.',
       )
     }
 

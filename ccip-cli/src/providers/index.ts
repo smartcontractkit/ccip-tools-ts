@@ -316,7 +316,7 @@ export async function loadChainWallet(
       wallet = await loadAptosWallet(argv, logger)
       return [wallet.accountAddress.toString(), wallet] as const
     case ChainFamily.Sui:
-      wallet = loadSuiWallet(argv)
+      wallet = await loadSuiWallet(argv, logger)
       return [wallet.toSuiAddress(), wallet] as const
     case ChainFamily.TON:
       wallet = await loadTonWallet(
