@@ -54,6 +54,7 @@ async function* fetchTxsForward(
   yield* allTxs // all past logs
 
   if (allTxs.length) until = allTxs[allTxs.length - 1]!.lt
+  allTxs.length = 0 // gc
   // if not watch mode, returns
   while (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) {
     const lastReq = performance.now()
