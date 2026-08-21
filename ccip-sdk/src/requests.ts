@@ -351,9 +351,10 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 export async function getMessageById(
   source: Chain,
   messageId: string,
-  opts?: Pick<LogFilter, 'page' | 'startBlock' | 'startTime'> & { onRamp?: string },
+  opts?: Pick<LogFilter, 'page' | 'startBlock' | 'startTime' | 'since'> & { onRamp?: string },
 ): Promise<CCIPRequest> {
-  if (opts?.startBlock == null && opts?.startTime == null) throw new CCIPLogsRequiresStartError()
+  if (opts?.startBlock == null && opts?.startTime == null && opts?.since == null)
+    throw new CCIPLogsRequiresStartError()
   const { onRamp, ...hints } = opts
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
