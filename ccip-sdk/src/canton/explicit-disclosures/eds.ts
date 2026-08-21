@@ -235,6 +235,35 @@ export class EdsDisclosureProvider {
     )
   }
 
+  /**
+   * Fetch a single contract's disclosure by template + instance address.
+   *
+   * `GET /ccip/v1/global/contract?templateId=…&instanceAddress=…` — a generic
+   * form of the per-entity EDS lookups, intended for shared CCIP singletons
+   * (e.g. the TokenAdminRegistry) whose only stakeholder is ccipOwner: callers
+   * whose participant does not host ccipOwner cannot ACS-read these contracts,
+   * so the disclosure comes from the service instead. 404/empty → `null`
+   * (caller falls back to ACS resolution).
+   */
+  async fetchContractDisclosure(
+    templateId: string,
+    instanceAddress: string,
+  ): Promise<(DisclosedContract & { signatories?: string[] }) | null> {
+    try {
+      const resp = await get<EdsApiDisclosedContract & { signatories?: string[] }>(
+        this.edsBaseUrl,
+        '/ccip/v1/global/contract',
+        EDS_HEADERS,
+        this.timeoutMs,
+        { templateId, instanceAddress },
+      )
+      if (!resp?.contractId || !resp.createdEventBlob) return null
+      return { ...edsContractToSdk(resp), signatories: resp.signatories }
+    } catch {
+      return null
+    }
+  }
+
   /** Fetch global send disclosures for a CCIP message. */
   async fetchSendDisclosures(
     message: EdsMessage,

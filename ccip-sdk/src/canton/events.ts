@@ -444,6 +444,43 @@ export function flattenCantonRecord(record: Record<string, unknown>): Record<str
 }
 
 /**
+ * Decode a Canton Daml `createArgument` / choice-argument value into a flat
+ * `label → value` map, handling both the gRPC `{ Sum: { Record: { fields } } }`
+ * envelope and the bare `{ fields: [...] }` form. Nested record fields are kept
+ * as their extracted (possibly object) values; use {@link extractRecordField}
+ * to descend one level further.
+ */
+export function decodeDamlRecord(argument: unknown): Record<string, unknown> {
+  if (!argument || typeof argument !== 'object') return {}
+  let record = argument as Record<string, unknown>
+  // Unwrap a gRPC Sum→Record envelope: { Sum: { Record: { fields: [...] } } }
+  if (record.Sum && typeof record.Sum === 'object') {
+    const sum = record.Sum as Record<string, unknown>
+    if (sum.Record && typeof sum.Record === 'object') {
+      record = sum.Record as Record<string, unknown>
+    } else {
+      record = sum
+    }
+  }
+  return flattenCantonRecord(record)
+}
+
+/**
+ * Extract a named field from a decoded Daml record and, if it is itself a
+ * record, flatten it into a `label → value` map. Returns `undefined` when the
+ * field is absent. Use for nested fields like `instrumentId` (a `{ admin, id }`
+ * record inside a `TokenConfig` create argument).
+ */
+export function extractRecordField(
+  record: Record<string, unknown>,
+  fieldName: string,
+): Record<string, unknown> | undefined {
+  const value = record[fieldName]
+  if (!value || typeof value !== 'object') return undefined
+  return decodeDamlRecord(value)
+}
+
+/**
  * Extract the entity name from a Canton event, supporting both the gRPC format
  * (`template_id.entity_name`) and the legacy flat format (`templateId` string
  * with colon-separated parts).
