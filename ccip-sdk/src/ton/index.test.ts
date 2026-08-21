@@ -1210,11 +1210,13 @@ describe('TON index unit tests', () => {
         )
         // The address FIELD matches here, but the composite hash embeds another
         // account: its lt is not this account's cursor and must be ignored, or txs
-        // would be silently skipped.
+        // would be silently skipped. blockNumber 12 > startBlock 11 also proves its
+        // block/time floors are discarded along with the cursor (a leaked floor
+        // would skip block 11).
         const foreignEmbedded = await collect(chain, {
           startBlock: 11,
           since: {
-            ...hintFor(11_001),
+            ...hintFor(11_001, 12),
             transactionHash: `0:${'2'.repeat(64)}:11001:${'ab'.repeat(32)}`,
           },
         })

@@ -548,53 +548,40 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
     const acct = Address.parse(opts.address)
 
-    // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime
-    // below — but only when the hint belongs to this account's stream: a
-    // foreign-addressed hint is ignored wholesale, floors included (the cursor
-    // parsing further down re-validates it for the lt resume).
-    if (opts.since?.address) {
-      let foreign = true
-      try {
-        foreign = Address.parse(opts.since.address).toRawString() !== acct.toRawString()
-      } catch {
-        // unparseable hint address: not provably this stream's — ignore the hint
-      }
-      if (foreign) opts = { ...opts, since: undefined }
-    }
-    opts = withSinceStart(opts)
-
     // Resume hint: the composite transactionHash carries an exact per-account cursor
     // ("workchain:address:lt:hash"; lt is unique and monotone per account). The floor
     // is EXCLUSIVE — matching the (lt, hash) pagination cursor, the hinted tx itself is
-    // not re-streamed; only strictly-later txs are. A hint whose address doesn't match
-    // the polled account, or that doesn't parse, is ignored and the usual block/time
-    // floor applies.
+    // not re-streamed; only strictly-later txs are.
+    //
+    // Validation happens BEFORE any floor merging below: a hint provably not from
+    // this account's stream — a foreign address field, or a composite hash embedding
+    // a DIFFERENT account — is ignored wholesale, so its blockNumber/blockTimestamp
+    // can't raise the floors either and skip this account's logs. A hint whose hash
+    // is absent or not composite simply contributes no lt cursor (its block/time
+    // floors still merge); so does one whose embedded lt doesn't parse.
     let sinceLt: bigint | undefined
     let sinceBlock: number | undefined
     if (opts.since) {
+      let foreign = false
       try {
+        if (opts.since.address)
+          foreign = Address.parse(opts.since.address).toRawString() !== acct.toRawString()
         const parts = String(opts.since.transactionHash).split(':')
-        const addressMatches =
-          !opts.since.address ||
-          Address.parse(opts.since.address).toRawString() === acct.toRawString()
-        if (
-          parts.length === 4 &&
-          /^\d+$/.test(parts[2]!) &&
-          addressMatches &&
-          // The lt cursor is only meaningful for the account that produced it: the
-          // composite hash must embed THIS account too, or a foreign stream's lt
-          // would silently skip this account's transactions. (parseRaw throws on a
-          // garbage embedded address, ignored below like any malformed hint.)
-          Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() === acct.toRawString()
-        ) {
-          sinceLt = BigInt(parts[2]!)
-          const b = Number(opts.since.blockNumber)
-          if (Number.isFinite(b) && b > 0) sinceBlock = b
+        if (!foreign && parts.length === 4) {
+          foreign = Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() !== acct.toRawString()
+          if (!foreign && /^\d+$/.test(parts[2]!)) {
+            sinceLt = BigInt(parts[2]!)
+            const b = Number(opts.since.blockNumber)
+            if (Number.isFinite(b) && b > 0) sinceBlock = b
+          }
         }
       } catch {
-        // malformed hint: ignore, fall back to the block/time floor only
+        foreign = true // an unparseable address somewhere: not provably this stream's
       }
+      if (foreign) opts = { ...opts, since: undefined }
     }
+    // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+    opts = withSinceStart(opts)
 
     // Resume strictly after everything masterchain block (startBlock-1) committed, in
     // account-shard lt space.
