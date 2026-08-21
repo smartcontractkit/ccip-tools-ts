@@ -277,6 +277,13 @@ describe('recovery hints', () => {
       assert.ok(DEFAULT_RECOVERY_HINTS.BLOCK_NOT_FOUND?.includes('Wait'))
       assert.ok(DEFAULT_RECOVERY_HINTS.HTTP_ERROR?.includes('rate limiting'))
     })
+
+    it('should explain how to find a missing token pool state', () => {
+      assert.equal(
+        DEFAULT_RECOVERY_HINTS.TOKEN_POOL_STATE_NOT_FOUND,
+        'Verify poolType matches the deployed pool, pass poolProgramAddress for a custom pool, and confirm the pool is initialized for this mint on this cluster.',
+      )
+    })
   })
 
   describe('getDefaultRecovery', () => {
