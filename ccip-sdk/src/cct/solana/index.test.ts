@@ -34,6 +34,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.deployToken, 'function')
     assert.equal(typeof cct.generateUnsignedCreateTokenAccount, 'function')
     assert.equal(typeof cct.createTokenAccount, 'function')
+    assert.equal(typeof cct.generateUnsignedMintTokens, 'function')
+    assert.equal(typeof cct.mintTokens, 'function')
     assert.equal(typeof cct.generateUnsignedTransferAuthority, 'function')
     assert.equal(typeof cct.transferAuthority, 'function')
 
