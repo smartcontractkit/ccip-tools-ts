@@ -1,7 +1,7 @@
 import { type JsonRpcApiProvider, type Log, isHexString } from 'ethers'
 import type { SetFieldType, SetRequired } from 'type-fest'
 
-import type { Chain, LogFilter } from '../chain.ts'
+import { type Chain, type LogFilter, withSinceStart } from '../chain.ts'
 import {
   CCIPLogRangeTooLargeError,
   CCIPLogTopicsNotFoundError,
@@ -287,6 +287,17 @@ export async function* getEvmLogs(
   // in place, and must not mutate the caller's filter object.
   filter = { ...filter }
 
+  // A hint addressed to a different contract is not this stream's: ignore it
+  // wholesale — no floors, no index exclusion.
+  if (
+    filter.since?.address &&
+    filter.address &&
+    filter.since.address.toLowerCase() !== filter.address.toLowerCase()
+  )
+    filter.since = undefined
+  // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+  filter = withSinceStart(filter)
+
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
   if (
     filter.watch &&
@@ -346,11 +357,24 @@ export async function* getEvmLogs(
     ...(filter.topics?.length ? { topics: filter.topics } : {}),
   }
 
+  // Resume-hint exclusivity: queries floor at the hint's block (blocks are always
+  // fetched whole, so callers never have to align the hint to a block boundary),
+  // but within that block the hinted log — and anything at or before its per-block
+  // log index — is not re-emitted, while later same-block followers still are.
+  // Inert whenever the effective floor moved past the hint's block.
+  const sinceBlock = Number(filter.since?.blockNumber)
+  const sinceIndex = Number(filter.since?.index)
+  const excludeResumed =
+    Number.isFinite(sinceBlock) && sinceBlock > 0 && Number.isFinite(sinceIndex) && sinceIndex >= 0
+      ? (log: Log) => log.blockNumber === sinceBlock && log.index <= sinceIndex
+      : () => false
+
   // Enrich each raw log with its block timestamp and track the highest block
   // seen, so the watch loop knows where to resume.
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
+      if (excludeResumed(log)) continue // at/before the resume point within its block
       if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
         continue
       yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
