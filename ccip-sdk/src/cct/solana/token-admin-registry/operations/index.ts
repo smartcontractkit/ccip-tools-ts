@@ -9,6 +9,7 @@ export type {
   ExecuteRegisterAdminResult,
   GenerateRegisterAdminParams,
   GenerateRegisterAdminResult,
+  RegisterAdminMethod,
 } from './register-admin.ts'
 export * from './set-pool.ts'
 export * from './transfer-admin.ts'
