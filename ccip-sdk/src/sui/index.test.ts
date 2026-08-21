@@ -206,6 +206,27 @@ void describe('SuiChain.getLogs multi-topic', () => {
     )
   })
 
+  void it('since alone satisfies the start requirement (blockNumber floors the walk)', async () => {
+    const client = makeFakeClient({
+      DIGEST_A0: { checkpoint: 10, timestampMs: '10000' },
+      DIGEST_A1: { checkpoint: 12, timestampMs: '12000' },
+      DIGEST_B0: { checkpoint: 11, timestampMs: '11000' },
+      DIGEST_B1: { checkpoint: 13, timestampMs: '13000' },
+    })
+    const chain = new SuiChain(client, networkInfo('sui:2') as NetworkInfo<typeof ChainFamily.Sui>)
+
+    // Sui makes no cursor use of `since`: its blockNumber is simply the
+    // startCheckpoint floor (inclusive), standing in for startBlock.
+    const logs = await collect(
+      chain.getLogs({ address: ADDRESS, topics: ['EventA', 'EventB'], since: { blockNumber: 10 } }),
+    )
+
+    assert.deepEqual(
+      logs.map((l) => (l.data as { i: string }).i),
+      ['A0', 'B0', 'A1', 'B1'],
+    )
+  })
+
   void it('keeps the FULL cross-round output ascending with a sparse (far-future) type and a dense, multi-page type — no ceiling needed', async () => {
     // Companion to the Aptos regression test in ../aptos/logs.test.ts, but
     // here to demonstrate Sui does NOT need the same fix: every type's
