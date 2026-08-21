@@ -64,6 +64,8 @@ import {
   type BaseGetTokenPoolStateResult,
   type BurnMintPoolProgramRef,
   type CustomPoolProgramRef,
+  type ExecuteAcceptOwnershipParams,
+  type ExecuteAcceptOwnershipResult,
   type ExecuteAppendRemotePoolAddressesParams,
   type ExecuteAppendRemotePoolAddressesResult,
   type ExecuteApplyChainUpdatesParams,
@@ -86,6 +88,10 @@ import {
   type ExecuteSetChainRateLimitResult,
   type ExecuteSetRateLimitAdminParams,
   type ExecuteSetRateLimitAdminResult,
+  type ExecuteTransferOwnershipParams,
+  type ExecuteTransferOwnershipResult,
+  type GenerateAcceptOwnershipParams,
+  type GenerateAcceptOwnershipResult,
   type GenerateAppendRemotePoolAddressesParams,
   type GenerateAppendRemotePoolAddressesResult,
   type GenerateApplyChainUpdatesParams,
@@ -108,12 +114,15 @@ import {
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
+  type GenerateTransferOwnershipParams,
+  type GenerateTransferOwnershipResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
   type LockReleasePoolProgramRef,
+  AcceptOwnership,
   AppendRemotePoolAddresses,
   ApplyChainUpdates,
   ConfigureAllowlist,
@@ -127,6 +136,7 @@ import {
   RemoveFromAllowlist,
   SetChainRateLimit,
   SetRateLimitAdmin,
+  TransferOwnership,
 } from './token-pool/operations/index.ts'
 
 /** CCT admin facade for Solana. */
@@ -146,6 +156,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
+  readonly #acceptOwnership = new AcceptOwnership()
   readonly #appendRemotePoolAddresses = new AppendRemotePoolAddresses()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #configureAllowlist = new ConfigureAllowlist()
@@ -159,6 +170,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
   readonly #setChainRateLimit = new SetChainRateLimit()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
+  readonly #transferOwnership = new TransferOwnership()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -890,6 +902,121 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that proposes a new owner for an initialized Solana token pool.
+   * Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   * The operation reads pool state and rejects the current owner or default public key. The proposed
+   * owner must accept ownership separately before the transfer takes effect.
+   *
+   * @see {@link transferOwnership}
+   * @see {@link generateUnsignedAcceptOwnership}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newOwner,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedTransferOwnership(
+    opts: GenerateTransferOwnershipParams,
+  ): Promise<GenerateTransferOwnershipResult> {
+    return this.#transferOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new owner for an initialized Solana token pool using the current owner wallet.
+   * It rejects the current owner or default public key. The proposed owner must accept ownership
+   * separately before the transfer takes effect.
+   *
+   * @see {@link generateUnsignedTransferOwnership}
+   * @see {@link acceptOwnership}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newOwner,
+   *   wallet,
+   * })
+   * ```
+   */
+  transferOwnership(opts: ExecuteTransferOwnershipParams): Promise<ExecuteTransferOwnershipResult> {
+    return this.#transferOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that accepts pending ownership of an initialized Solana token
+   * pool. Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to
+   * `payer`. The operation reads pool state and requires it to be the proposed owner.
+   *
+   * @see {@link acceptOwnership}
+   * @see {@link generateUnsignedTransferOwnership}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedAcceptOwnership(
+    opts: GenerateAcceptOwnershipParams,
+  ): Promise<GenerateAcceptOwnershipResult> {
+    return this.#acceptOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts pending ownership of an initialized Solana token pool using the proposed owner wallet.
+   * It verifies the wallet is the proposed owner before submitting.
+   *
+   * @see {@link generateUnsignedAcceptOwnership}
+   * @see {@link transferOwnership}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   * @throws {@link CCTTxFailedError} If the wallet is not the proposed owner or
+   * simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.acceptOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   wallet,
+   * })
+   * ```
+   */
+  acceptOwnership(opts: ExecuteAcceptOwnershipParams): Promise<ExecuteAcceptOwnershipResult> {
+    return this.#acceptOwnership.execute(this.chain, opts)
   }
 
   /**
