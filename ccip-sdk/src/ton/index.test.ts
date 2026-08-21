@@ -1111,7 +1111,12 @@ describe('TON index unit tests', () => {
     // on-chain (its successor still links to it via prevTransactionLt) but isn't indexed yet —
     // i.e. a gap. lookupBlock deliberately UNDER-assigns (returns block-1) to exercise the
     // committingSeqno climb. getTransactions honours the (lt, hash, to_lt, limit) cursor.
-    function makeChain(latest: number, all: number[], missing: number[] = []) {
+    function makeChain(
+      latest: number,
+      all: number[],
+      missing: number[] = [],
+      { underAssign = true }: { underAssign?: boolean } = {},
+    ) {
       const asc = [...all].sort((a, b) => a - b)
       // Link each lt to its true on-chain predecessor (over the FULL history).
       const prevLt = new Map<bigint, bigint>()
@@ -1125,7 +1130,8 @@ describe('TON index unit tests', () => {
       const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
         const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
         if (body.method === 'lookupBlock') {
-          const seqno = Math.max(1, blockOf(BigInt(body.params!.lt!)) - 1) // under-assign by 1
+          const block = blockOf(BigInt(body.params!.lt!))
+          const seqno = underAssign ? Math.max(1, block - 1) : block // under-assign by 1
           return new Response(JSON.stringify({ result: { seqno } }), {
             headers: { 'Content-Type': 'application/json' },
           })
@@ -1250,6 +1256,128 @@ describe('TON index unit tests', () => {
         chain as unknown as { committingSeqno: (lt: bigint, a: Address) => Promise<number> }
       ).committingSeqno = async () => 10
       assert.deepEqual(await collect(chain, { startBlock: 11 }), [])
+    })
+
+    describe('since resume hint', () => {
+      // The composite hash getTransaction stamps: "workchain:address:lt:hash" — the lt in
+      // position 2 is the exact per-account cursor the hint resumes from.
+      const hintFor = (lt: number, block = blockOf(BigInt(lt)), address = OFFRAMP) => ({
+        address,
+        blockNumber: block,
+        blockTimestamp: 100 + lt,
+        transactionHash: `${address}:${lt}:${'ab'.repeat(32)}`,
+        index: lt,
+      })
+
+      it('resumes strictly after the hinted tx, raising a stale startBlock floor', async () => {
+        // startBlock 1 walks from genesis; the hint at 11_001 lifts the floor so block 10
+        // is never scanned. Exclusive (matching the (lt, hash) cursor): the hinted tx
+        // itself is not re-streamed, but its same-block follower (11_002) still is.
+        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
+        const logs = await collect(chain, { startBlock: 1, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'block 10 and the hinted tx skipped; the same-block follower still emitted',
+        )
+      })
+
+      it('skips the shard floor lookup when the hint block covers startBlock', async () => {
+        // No lookupBlock under-assignment here, so committingSeqno only touches each tx's
+        // own block; the floor lookup for startBlock-1 (=10) is then observable directly.
+        const chain = makeChain(13, [11_001, 11_002, 12_001], [], { underAssign: false })
+        const shardCalls: number[] = []
+        const orig = chain.provider.getWorkchainShards.bind(chain.provider)
+        chain.provider.getWorkchainShards = async (seqno: number) => {
+          shardCalls.push(seqno)
+          return orig(seqno)
+        }
+        const logs = await collect(chain, { startBlock: 11, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+        )
+        assert.ok(
+          !shardCalls.includes(10),
+          `startBlock-1 shard lookup must be skipped, got calls: ${shardCalls.join(',')}`,
+        )
+      })
+
+      it('runs the floor lookup when the hint is older than startBlock', async () => {
+        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { underAssign: false })
+        const shardCalls: number[] = []
+        const orig = chain.provider.getWorkchainShards.bind(chain.provider)
+        chain.provider.getWorkchainShards = async (seqno: number) => {
+          shardCalls.push(seqno)
+          return orig(seqno)
+        }
+        const logs = await collect(chain, { startBlock: 11, since: hintFor(10_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+          'hint below startBlock has no effect on the results',
+        )
+        assert.ok(
+          shardCalls.includes(10),
+          `startBlock-1 shard lookup must still run, got calls: ${shardCalls.join(',')}`,
+        )
+      })
+
+      it('ignores a malformed or foreign-address hint', async () => {
+        const chain = makeChain(13, [11_001, 12_001])
+        const bad = await collect(chain, {
+          startBlock: 11,
+          since: { transactionHash: 'not-a-composite-hash' },
+        })
+        assert.deepEqual(
+          bad.map((l) => l.block),
+          [11, 12],
+        )
+        const foreign = await collect(chain, {
+          startBlock: 11,
+          since: hintFor(11_001, 11, '0:' + '2'.repeat(64)),
+        })
+        assert.deepEqual(
+          foreign.map((l) => l.block),
+          [11, 12],
+        )
+        // The address FIELD matches here, but the composite hash embeds another
+        // account: its lt is not this account's cursor and must be ignored, or txs
+        // would be silently skipped.
+        const foreignEmbedded = await collect(chain, {
+          startBlock: 11,
+          since: {
+            ...hintFor(11_001),
+            transactionHash: `0:${'2'.repeat(64)}:11001:${'ab'.repeat(32)}`,
+          },
+        })
+        assert.deepEqual(
+          foreignEmbedded.map((l) => l.block),
+          [11, 12],
+        )
+      })
+
+      it('provides the floor directly on startTime-only scans', async () => {
+        const chain = makeChain(13, [10_001, 11_001, 12_001])
+        const logs = await collect(chain, { startTime: 1, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [12],
+          'no startBlock conversion needed: the hint lt is already the floor (exclusive)',
+        )
+      })
+
+      it('since alone satisfies the start requirement', async () => {
+        // No startBlock/startTime at all: the hint's blockNumber merges into the
+        // startBlock floor (skipping the shard lookup), its lt is the exact cursor.
+        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
+        const logs = await collect(chain, { since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'resumes strictly after the hinted tx with no explicit start',
+        )
+      })
     })
   })
 

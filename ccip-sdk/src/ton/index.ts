@@ -21,6 +21,7 @@ import {
   type LogFilter,
   type TokenTransferFeeOpts,
   Chain,
+  withSinceStart,
 } from '../chain.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
@@ -656,14 +657,70 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
     const acct = Address.parse(opts.address)
 
+    // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime
+    // below — but only when the hint belongs to this account's stream: a
+    // foreign-addressed hint is ignored wholesale, floors included (the cursor
+    // parsing further down re-validates it for the lt resume).
+    if (opts.since?.address) {
+      let foreign = true
+      try {
+        foreign = Address.parse(opts.since.address).toRawString() !== acct.toRawString()
+      } catch {
+        // unparseable hint address: not provably this stream's — ignore the hint
+      }
+      if (foreign) opts = { ...opts, since: undefined }
+    }
+    opts = withSinceStart(opts)
+
+    // Resume hint: the composite transactionHash carries an exact per-account cursor
+    // ("workchain:address:lt:hash"; lt is unique and monotone per account). The floor
+    // is EXCLUSIVE — matching the (lt, hash) pagination cursor, the hinted tx itself is
+    // not re-streamed; only strictly-later txs are. A hint whose address doesn't match
+    // the polled account, or that doesn't parse, is ignored and the usual block/time
+    // floor applies.
+    let sinceLt: bigint | undefined
+    let sinceBlock: number | undefined
+    if (opts.since) {
+      try {
+        const parts = String(opts.since.transactionHash).split(':')
+        const addressMatches =
+          !opts.since.address ||
+          Address.parse(opts.since.address).toRawString() === acct.toRawString()
+        if (
+          parts.length === 4 &&
+          /^\d+$/.test(parts[2]!) &&
+          addressMatches &&
+          // The lt cursor is only meaningful for the account that produced it: the
+          // composite hash must embed THIS account too, or a foreign stream's lt
+          // would silently skip this account's transactions. (parseRaw throws on a
+          // garbage embedded address, ignored below like any malformed hint.)
+          Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() === acct.toRawString()
+        ) {
+          sinceLt = BigInt(parts[2]!)
+          const b = Number(opts.since.blockNumber)
+          if (Number.isFinite(b) && b > 0) sinceBlock = b
+        }
+      } catch {
+        // malformed hint: ignore, fall back to the block/time floor only
+      }
+    }
+
     // Resume strictly after everything masterchain block (startBlock-1) committed, in
     // account-shard lt space.
-    const opts_ = { ...opts }
+    const { since: _, ...opts_ } = opts // consumed here; the walk below only understands lt floors
     let startSeqno: number | undefined
     if (opts.startBlock != null) {
       const b = Number(opts.startBlock)
       startSeqno = b
-      opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
+      if (sinceBlock != null && sinceLt != null && sinceBlock >= b) {
+        // The hint's lt already satisfies this floor — the seqno↔lt identity below
+        // says C(t) >= b <=> t.lt > E(b-1), and the hinted tx commits at
+        // sinceBlock >= b — so the shard-header lookup would only produce a lower
+        // floor. Skip it (saves 2 RPCs per scan on the steady-state poll path).
+        opts_.startBlock = sinceLt + 1n
+      } else {
+        opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
+      }
       // This boundary is exact, not approximate, because both directions of the
       // seqno↔lt mapping are the SAME function E(M) = accountShardEndLt(M): a tx commits
       // at C(t) = min{ M : E(M) >= t.lt } (what committingSeqno computes and getTransaction
@@ -679,6 +736,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
       // transaction at all, so there is nothing in b to skip.
     }
+
+    // Compose with the resume hint's floor (strictly after the hinted tx, matching
+    // (lt, hash) cursor exclusivity): the higher (newer) of the two wins, so the hint
+    // can only shrink the scan, never widen it below the requested floor. Both sides
+    // are in account-shard lt space (the startBlock floor was converted above), so the
+    // comparison is exact.
+    if (sinceLt != null && (opts_.startBlock == null || BigInt(opts_.startBlock) <= sinceLt))
+      opts_.startBlock = sinceLt + 1n
 
     // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
     // below serves the watermark-driven poller, which does not watch).
