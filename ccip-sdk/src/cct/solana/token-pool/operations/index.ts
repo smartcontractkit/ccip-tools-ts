@@ -1,3 +1,4 @@
+export * from './accept-ownership.ts'
 export * from './append-remote-pool-addresses.ts'
 export * from './apply-chain-updates.ts'
 export * from './configure-allowlist.ts'
