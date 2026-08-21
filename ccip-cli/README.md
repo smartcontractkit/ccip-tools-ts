@@ -271,6 +271,11 @@ to be cleared.
 
 #### Sui Special Cases
 
+> [!IMPORTANT]
+> The Sui RPC URL must point to a **full node with archival data** that supports the **JSON-RPC API**.
+> The CCIP CLI will migrate to gRPC before October 2026, following the Sui Foundation's
+> [JSON-RPC deprecation announcement](https://docs.sui.io/develop/accessing-data/json-rpc-migration).
+
 `--receiver-object-ids` specifies receiver object IDs required for Sui execution (e.g., `--receiver-object-ids 0xabc... 0xdef...`).
 
 #### Canton Special Cases
