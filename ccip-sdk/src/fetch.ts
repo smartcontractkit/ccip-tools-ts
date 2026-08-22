@@ -21,6 +21,16 @@ export type RateLimitOpts = {
   maxRetries: number
   /** Max concurrent in-flight requests per endpoint (default 5). */
   maxInFlight?: number
+  /**
+   * How requests share limiter state (default `'path'`): `'path'` keys by
+   * origin + pathname — distinct backends behind one proxy host (e.g.
+   * gateway.example/ethereum/sepolia/provider1) keep independent limiters.
+   * `'origin'` merges every path of a host into one shared limiter — for a
+   * host whose quota is genuinely per-host, like TonCenter v3's keyless ~1 RPS
+   * across /messages, /transactions and /masterchainInfo. Opt-in: callers
+   * decide whether the host throttles per path or per origin.
+   */
+  keyBy?: 'origin' | 'path'
   seed?: { limit: number; windowMs: number }
   /**
    * Ceiling on how far ahead the pacer may reserve a slot before a request
@@ -245,13 +255,25 @@ export function endpointKey(input: Parameters<typeof fetch>[0]): string {
   }
 }
 
+/** Key by origin only; unparseable input falls back to {@link endpointKey}. */
+export function originKey(input: Parameters<typeof fetch>[0]): string {
+  try {
+    if (typeof input === 'string') return new URL(input).origin
+    if (input instanceof Request) return new URL(input.url).origin
+    return input.origin
+  } catch {
+    return endpointKey(input)
+  }
+}
+
 function getOrCreateEndpoint(
   input: Parameters<typeof fetch>[0],
   seed?: { limit: number; windowMs: number },
   maxInFlight: number = DEFAULT_MAX_IN_FLIGHT,
   pacingBacklogCapMs: number = MAX_PACING_WAIT_MS,
+  keyBy: RateLimitOpts['keyBy'] = 'path',
 ): EndpointState {
-  const key = endpointKey(input)
+  const key = keyBy === 'origin' ? originKey(input) : endpointKey(input)
   let state = endpointRegistry.get(key)
   if (!state) {
     state = {
@@ -571,7 +593,13 @@ export function createRateLimitedFetch(
 
     let lastError: Error | null = null
     const method = extractMethod(init)
-    const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight, pacingBacklogCapMs)
+    const ep = getOrCreateEndpoint(
+      input,
+      opts_.seed,
+      opts_.maxInFlight,
+      pacingBacklogCapMs,
+      opts_.keyBy,
+    )
 
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):

@@ -265,7 +265,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const v3Fetch: typeof fetch | undefined =
       ctx?.v3Fetch ??
       ctx?.fetch ??
-      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 2 }, ctx)
+      createRateLimitedFetch(
+        { seed: { limit: 1, windowMs: 1500 }, maxRetries: 2, keyBy: 'origin' },
+        ctx,
+      )
 
     // For known public providers, detect network from URL to avoid an API call during init
     // (free-tier endpoints are rate-limited and return transient 5xx errors).
@@ -488,8 +491,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
   /** The dedicated v3-index fetch (see the note above); lazily created when unset. */
   private v3FetchFor(baseUrl: string): typeof fetch {
+    // keyBy origin: the index's keyless quota (~1 RPS per egress IP) is shared
+    // across /messages, /transactions and /masterchainInfo — per-path limiters
+    // would each pace independently and re-burst the host, tripping 429s.
     return (this.v3Fetch_ ??= createRateLimitedFetch(
-      { ...fetchProfileForUrl(baseUrl), maxRetries: 2 },
+      { ...fetchProfileForUrl(baseUrl), maxRetries: 2, keyBy: 'origin' },
       { logger: this.logger },
     ))
   }

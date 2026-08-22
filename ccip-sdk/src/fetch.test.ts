@@ -8,6 +8,7 @@ import {
   fetchProfileForUrl,
   getEndpointLogRange,
   getEndpointTopicLimit,
+  originKey,
   parseLogRangeError,
   parseRateLimitHeaders,
   parseRetryAfter,
@@ -183,6 +184,31 @@ describe('endpointKey', () => {
     const k1 = endpointKey('https://api.example.com/rpc?a=1')
     const k2 = endpointKey('https://api.example.com/rpc?b=2')
     assert.equal(k1, k2)
+  })
+})
+
+describe('originKey', () => {
+  it('merges every path of a host into one key', () => {
+    const k1 = originKey('https://testnet.toncenter.com/api/v3/messages?source=x')
+    const k2 = originKey('https://testnet.toncenter.com/api/v3/transactions')
+    const k3 = originKey('https://testnet.toncenter.com/api/v3/masterchainInfo')
+    assert.equal(k1, 'https://testnet.toncenter.com')
+    assert.equal(k2, k1)
+    assert.equal(k3, k1)
+  })
+
+  it('keeps distinct hosts (and proxy paths) separate', () => {
+    assert.notEqual(
+      originKey('https://testnet.toncenter.com/api/v3/messages'),
+      originKey('https://toncenter.com/api/v3/messages'),
+    )
+    // path-keying remains the default for callers that want it: distinct
+    // backends behind one proxy host stay separate under endpointKey, while
+    // originKey is the opt-in for hosts throttled per-origin.
+    assert.notEqual(
+      endpointKey('https://gateway.example/ton/testnet/node1/jsonRPC'),
+      endpointKey('https://gateway.example/ton/testnet/node2/jsonRPC'),
+    )
   })
 })
 
