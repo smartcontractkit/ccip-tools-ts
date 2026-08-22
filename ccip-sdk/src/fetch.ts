@@ -262,6 +262,10 @@ function getOrCreateEndpoint(
       methodScoped: false,
     }
     endpointRegistry.set(key, state)
+  } else if (seed && !state.seed) {
+    // A caller that knows the host is throttled may seed an entry another caller
+    // created unseeded (limiters constructed before this point stay unseeded).
+    state.seed = seed
   }
   return state
 }
