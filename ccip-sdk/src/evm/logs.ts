@@ -357,24 +357,18 @@ export async function* getEvmLogs(
     ...(filter.topics?.length ? { topics: filter.topics } : {}),
   }
 
-  // Resume-hint exclusivity: queries floor at the hint's block (blocks are always
-  // fetched whole, so callers never have to align the hint to a block boundary),
-  // but within that block the hinted log — and anything at or before its per-block
-  // log index — is not re-emitted, while later same-block followers still are.
-  // Inert whenever the effective floor moved past the hint's block.
-  const sinceBlock = Number(filter.since?.blockNumber)
-  const sinceIndex = Number(filter.since?.index)
-  const excludeResumed =
-    Number.isFinite(sinceBlock) && sinceBlock > 0 && Number.isFinite(sinceIndex) && sinceIndex >= 0
-      ? (log: Log) => log.blockNumber === sinceBlock && log.index <= sinceIndex
-      : () => false
-
   // Enrich each raw log with its block timestamp and track the highest block
   // seen, so the watch loop knows where to resume.
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
-      if (excludeResumed(log)) continue // at/before the resume point within its block
+      if (
+        filter.since?.blockNumber &&
+        filter.since.index != null &&
+        log.blockNumber <= filter.since.blockNumber &&
+        log.index <= filter.since.index
+      )
+        continue // at/before the resume point within its block
       if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
         continue
       yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
