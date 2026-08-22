@@ -12,7 +12,6 @@ import {
 } from './extra-args.ts'
 import {
   type TonV3Event,
-  type TonV3Transaction,
   fetchV3IndexedTip,
   openV3EventStream,
   streamTransactionsForAddress,
@@ -40,6 +39,7 @@ import {
   CCIPHttpError,
   CCIPLogsAddressRequiredError,
   CCIPLogsRequiresStartError,
+  CCIPLogsStreamInconsistentError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
@@ -133,6 +133,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
     supportedChains[ChainFamily.TON] = TONChain
   }
+
+  // Minimum estimated floor age for the index-driven bounded walk to engage (see
+  // windowAgeSeconds). Shallower windows stay on the plain v2 pagination.
+  private static readonly WALK_META_MIN_AGE_S = 4 * 3600 // ~4h
   static readonly family = ChainFamily.TON
   static readonly decimals = 9 // GRAM uses 9 decimals (nanograms)
   static readonly extraArgGasLimitMin = toNano('0.025') // 0.025 GRAM
@@ -491,61 +495,24 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   private v3Tip_?: { at: number; seqno: number }
 
   /**
-   * Lazy v3 seqno oracle for deep v2 walks. Deep scans (cold backfills) would
-   * otherwise pay ~2–3 RPCs per tx in {@link committingSeqno}; past a small threshold
-   * the index's paged `/transactions` meta (one call per ~100 account txs) supplies the
-   * same committing-block seqno instead. Shallow walks — the steady-state poll — never
-   * touch v3. Any index error kills the oracle for the rest of the scan (txs fall back
-   * to `committingSeqno` individually); a walked tx missing from the index (tip lag)
-   * falls back without stalling the lt merge-join (both sides ascend).
+   * Rough age (seconds) of a scan floor in lt space, estimated live from the account's
+   * two newest transactions: lt advances ~2.5e6/s sustained on ton-testnet (up to ~2×
+   * faster in bursts), clamped to [1e6, 1e7]/s. Zero on any failure — the caller then
+   * keeps the plain v2 walk, which is the cheap path for shallow windows anyway.
    */
-  private v3SeqnoOracle(acct: Address): { lookup: (lt: bigint) => Promise<number | undefined> } {
-    const ORACLE_AFTER_N_TXS = 16
-    const ctxV3 = {
-      rateLimitedFetch: this.v3FetchFor(
-        tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
-      ),
-      v3BaseUrl: tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
-    }
-    let stream: AsyncGenerator<TonV3Transaction, void, undefined> | undefined
-    let pending: TonV3Transaction | undefined // one-slot lookahead for the merge-join
-    let preOracleTxs = 0
-    let dead = false
-    return {
-      lookup: async (lt: bigint) => {
-        if (dead) return undefined
-        if (!stream) {
-          if (++preOracleTxs < ORACLE_AFTER_N_TXS) return undefined
-          stream = streamV3TxMeta(ctxV3, acct, 0, lt - 1n) // start_lt is exclusive
-        }
-        const s = stream
-        try {
-          for (;;) {
-            if (!pending) {
-              const next = await s.next()
-              if (next.done) {
-                dead = true // index window exhausted (tip lag) — fall back from here on
-                return undefined
-              }
-              pending = next.value
-            }
-            const mlt = BigInt(pending.lt)
-            if (mlt < lt) {
-              pending = undefined // index entry behind the walk — advance
-              continue
-            }
-            if (mlt === lt) {
-              const seqno = pending.mc_block_seqno
-              pending = undefined
-              return seqno
-            }
-            return undefined // tx not yet indexed — keep the lookahead for the next tx
-          }
-        } catch {
-          dead = true // index unhappy — the v2 path stays authoritative
-          return undefined
-        }
-      },
+  private async windowAgeSeconds(acct: Address, sinceLt: bigint): Promise<number> {
+    try {
+      const [newest, prev] = await this.provider.getTransactions(acct, { limit: 2 })
+      if (!newest || newest.lt <= sinceLt) return 0 // nothing above the floor
+      let ltPerSec = 2_500_000 // sustained rate measured live (ton-testnet, 2026-08)
+      if (prev && prev.lt < newest.lt && newest.now > prev.now)
+        ltPerSec = Math.min(
+          1e7,
+          Math.max(1e6, Number(newest.lt - prev.lt) / (newest.now - prev.now)),
+        )
+      return Number(newest.lt - sinceLt) / ltPerSec
+    } catch {
+      return 0
     }
   }
 
@@ -705,7 +672,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       blockNumber: seqno,
       timestamp: tx.now,
       from: address.toRawString(),
-      tx,
+      // Lean chain-link scalars only — never the raw @ton/ton Transaction (tens of KB
+      // and hundreds of parsed Cells each): getLogs verifies chain continuity and the
+      // resume floor off these, and anything retaining or serializing a log (activity
+      // batches, Temporal payloads) stays small.
+      lt: tx.lt.toString(),
+      prevTransactionLt: tx.prevTransactionLt.toString(),
     }
     const logs: ChainLog[] = []
     for (const [, msg] of tx.outMessages) {
@@ -1013,7 +985,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     let curBlock: number | undefined
     let buf: ChainLog[] = []
-    let prevLt: bigint | undefined
+    let prevLt: string | undefined // lean chain-link scalar carried by ChainTransaction
     // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
     const drain = (): ChainLog[] => {
       const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
@@ -1021,66 +993,99 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return out
     }
 
-    // Deep walks stamp seqnos via the lazily-engaged v3 meta oracle (see
-    // v3SeqnoOracle); shallow ones — the steady-state poll — stay pure v2. Misses and
-    // index errors fall back per tx to the (memoized) committingSeqno path.
-    const seqnoOracle = this.v3SeqnoOracle(acct)
+    // Deep windows engage the index-driven bounded walk: the v3 index's ordered lt
+    // list drives v2 hydration pages of ≤100 raw txs (with authoritative mc seqnos), so
+    // memory stays O(batch) at any window depth and no per-tx committingSeqno lookups
+    // are needed. Shallow windows (< ~WALK_META_MIN_AGE_S old — the steady-state poll)
+    // take the plain v2 pagination instead; and if the index is unreachable before the
+    // first yield, the walk degrades to the legacy collect-then-drain pagination with
+    // per-tx seqno resolution. An index/RPC disagreement mid-stream truncates like a
+    // chain gap.
+    const v3Base = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
+    const deep = (await this.windowAgeSeconds(acct, sinceLtFloor)) >= TONChain.WALK_META_MIN_AGE_S
     const walkCtx = {
       provider: this.provider,
-      getTransaction: async (tx: Transaction): Promise<ChainTransaction> => {
-        const seqno = await seqnoOracle.lookup(tx.lt)
-        return seqno != null ? this.buildChainTransaction(tx, acct, seqno) : this.getTransaction(tx)
-      },
+      getTransaction: (tx: Transaction, seqno?: number): Promise<ChainTransaction> =>
+        seqno != null ? this.buildChainTransaction(tx, acct, seqno) : this.getTransaction(tx),
+      ...(deep && {
+        v3Meta: (afterLt: bigint) =>
+          streamV3TxMeta(
+            { rateLimitedFetch: this.v3FetchFor(v3Base), v3BaseUrl: v3Base },
+            acct,
+            0,
+            afterLt,
+          ),
+      }),
     }
-    for await (const tx of streamTransactionsForAddress(
-      { ...opts_, sinceLt: sinceLtFloor },
-      walkCtx,
-    )) {
-      const raw = (tx as { tx?: { lt: bigint; prevTransactionLt: bigint } }).tx
-      if (raw && prevLt !== undefined && raw.prevTransactionLt !== prevLt) {
-        // Gap: a committed tx between prevLt and this one is not yet indexed — the
-        // current block may be incomplete. Drop it and stop; the poller retries.
-        buf = []
-        curBlock = undefined
-        break
-      }
-      const block = tx.blockNumber
-      // Defensive: by the resume-boundary identity above, every tx this fetch returns
-      // must sit at or above the floor in lt space and therefore commit at or after
-      // startSeqno. A violation can only mean E disagreed with itself between the
-      // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
-      // and emitting it would rewind the poller's watermark over blocks this scan never
-      // covered. Drop the in-progress block and stop, like the gap case; the poller
-      // retries. Conservative on purpose: stalling is recoverable, skipping is not.
-      if ((startSeqno !== undefined && block < startSeqno) || (raw && raw.lt <= sinceLtFloor)) {
-        this.logger.warn(
-          `TON getLogs: tx lt=${raw?.lt} commits at block ${block}, below the ` +
-            `startBlock=${startSeqno} / lt cursor=${sinceLtFloor} resume boundary; stopping scan`,
-        )
-        buf = []
-        curBlock = undefined
-        break
-      }
-      // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
-      if (curBlock !== undefined && block !== curBlock) {
-        for (const log of drain()) {
-          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
-          yield log
+    let streamErr = false
+    try {
+      for await (const tx of streamTransactionsForAddress(
+        { ...opts_, sinceLt: sinceLtFloor },
+        walkCtx,
+      )) {
+        const raw = tx as ChainTransaction & { lt?: string; prevTransactionLt?: string }
+        if (
+          raw.prevTransactionLt !== undefined &&
+          prevLt !== undefined &&
+          raw.prevTransactionLt !== prevLt
+        ) {
+          // Gap: a committed tx between prevLt and this one is not yet indexed — the
+          // current block may be incomplete. Drop it and stop; the poller retries.
+          buf = []
+          curBlock = undefined
+          break
         }
+        const block = tx.blockNumber
+        // Defensive: by the resume-boundary identity above, every tx this fetch returns
+        // must sit at or above the floor in lt space and therefore commit at or after
+        // startSeqno. A violation can only mean E disagreed with itself between the
+        // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
+        // and emitting it would rewind the poller's watermark over blocks this scan never
+        // covered. Drop the in-progress block and stop, like the gap case; the poller
+        // retries. Conservative on purpose: stalling is recoverable, skipping is not.
+        if (
+          (startSeqno !== undefined && block < startSeqno) ||
+          (raw.lt != null && BigInt(raw.lt) <= sinceLtFloor)
+        ) {
+          this.logger.warn(
+            `TON getLogs: tx lt=${raw.lt} commits at block ${block}, below the ` +
+              `startBlock=${startSeqno} / lt cursor=${sinceLtFloor} resume boundary; stopping scan`,
+          )
+          buf = []
+          curBlock = undefined
+          break
+        }
+        // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
+        if (curBlock !== undefined && block !== curBlock) {
+          for (const log of drain()) {
+            if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+            yield log
+          }
+        }
+        curBlock = block
+        if (block > cutoff) {
+          // Reached the unsealed region (prior block already drained). Stop.
+          curBlock = undefined
+          break
+        }
+        for (const log of tx.logs) if (matches(log)) buf.push(log)
+        if (raw.lt != null) prevLt = raw.lt
       }
-      curBlock = block
-      if (block > cutoff) {
-        // Reached the unsealed region (prior block already drained). Stop.
-        curBlock = undefined
-        break
-      }
-      for (const log of tx.logs) if (matches(log)) buf.push(log)
-      if (raw) prevLt = raw.lt
+    } catch (err) {
+      if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
+      // Index/RPC disagreement mid-scan: same contract as a chain gap — the block in
+      // progress may be incomplete, drop it and stop; the poller resumes from its hint.
+      this.logger.warn('TON getLogs: stream inconsistent mid-scan; stopping:', err)
+      buf = []
+      curBlock = undefined
+      streamErr = true
     }
-    // Exhausted within the sealed cutoff (no gap): the last block is complete.
-    for (const log of drain()) {
-      if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
-      yield log
+    if (!streamErr) {
+      // Exhausted within the sealed cutoff (no gap): the last block is complete.
+      for (const log of drain()) {
+        if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+        yield log
+      }
     }
   }
 

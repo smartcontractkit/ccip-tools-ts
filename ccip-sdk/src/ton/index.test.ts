@@ -810,16 +810,28 @@ describe('TON index unit tests', () => {
         tx.prevTransactionHash = 0n
       })
 
-      let callCount = 0
       return {
         parameters: { endpoint: 'http://mock-ton-api' },
         ...mockMasterchain,
-        getTransactions: async () => {
-          // First call returns all transactions, subsequent calls return empty (end of history)
-          if (callCount++ === 0) {
-            return sortedTxs.map((t) => t.tx)
-          }
-          return []
+        // Stateless pagination over the fixture, honoring TonClient semantics: a
+        // (lt, hash) anchor is EXCLUSIVE unless `inclusive: true`; to_lt exclusive;
+        // newest first. (The first-call-only version broke when getLogs started
+        // probing the account tip to age-gate the index-driven walk.)
+        getTransactions: async (
+          _addr: unknown,
+          opts?: { lt?: string; to_lt?: string; limit?: number; inclusive?: boolean },
+        ) => {
+          const toLt = opts?.to_lt != null ? BigInt(opts.to_lt) : 0n
+          const topBound =
+            opts?.lt == null
+              ? undefined
+              : opts.inclusive === true
+                ? BigInt(opts.lt)
+                : BigInt(opts.lt) - 1n
+          return sortedTxs
+            .filter((t) => t.tx.lt > toLt && (topBound == null || t.tx.lt <= topBound))
+            .slice(0, opts?.limit ?? 99)
+            .map((t) => t.tx)
         },
       } as unknown as TonClient
     }

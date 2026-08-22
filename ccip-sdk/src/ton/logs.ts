@@ -5,6 +5,7 @@ import type { LogFilter } from '../chain.ts'
 import {
   CCIPHttpError,
   CCIPLogsRequiresStartError,
+  CCIPLogsStreamInconsistentError,
   CCIPLogsWatchRequiresFinalityError,
 } from '../errors/index.ts'
 import { CCIPLogsAddressRequiredError } from '../errors/specialized.ts'
@@ -14,6 +15,9 @@ import { signalToPromise } from '../utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5000
 
+/** Batch size for v2 hydration pages in the meta-driven walk (≤ the meta page size). */
+const WALK_CHUNK = 100
+
 async function* fetchTxsForward(
   opts: LeanNumbers<Omit<LogFilter, 'topics' | 'startBlock' | 'startTime'>> & {
     /** Exclusive account-lt cursor: only txs with `lt > sinceLt` stream. `to_lt` is
@@ -22,17 +26,58 @@ async function* fetchTxsForward(
     sinceLt: bigint
     pollInterval?: number
   },
-  { provider }: { provider: TonClient },
-) {
+  ctx: {
+    provider: TonClient
+    /** Ordered lt list from the v3 index (paged `/transactions`, ascending from
+     * strictly after the given cursor). When present, the backfill hydrates the window
+     * in bounded forward batches — O(chunk) memory at any window depth. */
+    v3Meta?: (afterLt: bigint) => AsyncGenerator<TonV3Transaction, void, undefined>
+  },
+): AsyncGenerator<{ tx: Transaction; seqno?: number }> {
   const limit = Math.min(Number(opts.page) || 99, 99)
   const { sinceLt } = opts
 
-  // forward collect all matching txs in array
+  const notAfter =
+    (typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint') ||
+    Number(opts.endBlock) < 0
+      ? undefined
+      : BigInt(opts.endBlock)
+
+  if (ctx.v3Meta) {
+    let yielded = 0
+    const { v3Meta } = ctx
+    try {
+      for await (const item of streamAccountTxsByMeta(
+        opts.address!,
+        sinceLt,
+        {
+          provider: ctx.provider,
+          v3Meta,
+        },
+        notAfter,
+      )) {
+        yielded++
+        yield item
+      }
+      return // meta path completed the window
+    } catch (err) {
+      // Mid-stream failures truncate by error (the consumer drops the block in
+      // progress; the poller resumes from its hint). A DISAGREEMENT between the index
+      // and the v2 RPC always throws, even before the first yield — falling back would
+      // silently hide it. Only a pre-yield FETCH failure (index down) falls through to
+      // the legacy walk below.
+      if (yielded > 0 || err instanceof CCIPLogsStreamInconsistentError) throw err
+    }
+  }
+
+  // Legacy v2-only fallback: page the account's tx chain backward from the tip,
+  // collecting the whole window before draining. Memory-heavy on deep windows — used
+  // only when no usable v3 index answers (the meta path above failed before yielding).
   const allTxs = [] as Transaction[]
   let batch: typeof allTxs,
     until: bigint = sinceLt
   do {
-    batch = await provider.getTransactions(Address.parse(opts.address!), {
+    batch = await ctx.provider.getTransactions(Address.parse(opts.address!), {
       limit,
       ...(!!allTxs.length && {
         lt: allTxs[allTxs.length - 1]!.lt.toString(),
@@ -50,11 +95,6 @@ async function* fetchTxsForward(
 
   allTxs.reverse() // forward
 
-  const notAfter =
-    (typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint') ||
-    Number(opts.endBlock) < 0
-      ? undefined
-      : BigInt(opts.endBlock)
   while (notAfter != null && allTxs.length > 0 && allTxs[allTxs.length - 1]!.lt > notAfter) {
     allTxs.length-- // truncate head (after reverse) of txs newer than requested end
   }
@@ -67,7 +107,7 @@ async function* fetchTxsForward(
   for (let i = 0; i < allTxs.length; i++) {
     const tx = allTxs[i]!
     allTxs[i] = undefined as never
-    yield tx
+    yield { tx }
   }
   allTxs.length = 0 // gc
 
@@ -75,7 +115,7 @@ async function* fetchTxsForward(
   // if not watch mode, returns
   while (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) {
     const lastReq = performance.now()
-    batch = await provider.getTransactions(Address.parse(opts.address!), {
+    batch = await ctx.provider.getTransactions(Address.parse(opts.address!), {
       limit,
       to_lt: until.toString(),
     })
@@ -84,7 +124,7 @@ async function* fetchTxsForward(
 
     for (const tx of batch) {
       until = tx.lt
-      yield tx
+      yield { tx }
     }
 
     let delay$ = AbortSignal.timeout(
@@ -102,6 +142,74 @@ async function* fetchTxsForward(
 }
 
 /**
+ * The account's transactions strictly after `sinceLt`, streamed forward in bounded
+ * batches: the v3 index's paged meta supplies the ordered lt list (and authoritative
+ * masterchain seqnos), and each ≤WALK_CHUNK window of it is hydrated in ONE v2
+ * `getTransactions` call — anchored at the chunk's newest (lt, hash), which is
+ * INCLUSIVE server-side, with `to_lt` at the chunk's exclusive lower bound. Memory
+ * stays O(chunk) regardless of window depth.
+ *
+ * The two sources are cross-validated per chunk (exact lt-list equality) and the
+ * account tx chain is verified link by link (`prevTransactionLt`): any disagreement
+ * throws {@link CCIPLogsStreamInconsistentError}, which the consumer treats like a
+ * chain gap — the block in progress is dropped and the poller resumes from its hint.
+ */
+async function* streamAccountTxsByMeta(
+  address: string,
+  sinceLt: bigint,
+  ctx: {
+    provider: TonClient
+    v3Meta: (afterLt: bigint) => AsyncGenerator<TonV3Transaction, void, undefined>
+  },
+  notAfter?: bigint,
+): AsyncGenerator<{ tx: Transaction; seqno: number }> {
+  const acct = Address.parse(address)
+  let cursorLt = sinceLt
+  let prevLt: bigint | undefined
+  let metas: TonV3Transaction[] = []
+
+  const flush = async function* (): AsyncGenerator<{ tx: Transaction; seqno: number }> {
+    if (!metas.length) return
+    const anchor = metas[metas.length - 1]!
+    // `inclusive: true`: @ton/ton otherwise fetches limit+1 and shifts the anchor off
+    // (its pagination-cursor behavior). We want the chunk INCLUDING the anchor.
+    const page = await ctx.provider.getTransactions(acct, {
+      limit: metas.length,
+      lt: anchor.lt,
+      hash: anchor.hash,
+      to_lt: cursorLt.toString(),
+      inclusive: true,
+    })
+    page.reverse() // forward
+    if (page.length !== metas.length || page.some((tx, i) => tx.lt !== BigInt(metas[i]!.lt)))
+      throw new CCIPLogsStreamInconsistentError(
+        `v2 page (${page.length} txs) != index meta (${metas.length} txs) under lt=${anchor.lt}`,
+      )
+    for (let i = 0; i < page.length; i++) {
+      const tx = page[i]!
+      if (prevLt !== undefined && tx.prevTransactionLt !== prevLt)
+        throw new CCIPLogsStreamInconsistentError(
+          `account tx chain link broken at lt=${tx.lt} (after ${prevLt})`,
+        )
+      prevLt = tx.lt
+      yield { tx, seqno: metas[i]!.mc_block_seqno }
+      page[i] = undefined as never // release as yielded
+    }
+    metas = []
+    cursorLt = prevLt!
+  }
+
+  for await (const meta of ctx.v3Meta(sinceLt)) {
+    const lt = BigInt(meta.lt)
+    if (notAfter != null && lt > notAfter) break
+    if (lt <= sinceLt) continue // index rows at/below the exclusive cursor (defensive)
+    metas.push(meta)
+    if (metas.length >= WALK_CHUNK) yield* flush()
+  }
+  yield* flush()
+}
+
+/**
  * Internal method to get transactions for an address with pagination.
  * @param opts - Log filter options.
  * @returns Async generator of TON transactions.
@@ -116,7 +224,10 @@ export async function* streamTransactionsForAddress(
   },
   ctx: {
     provider: TonClient
-    getTransaction: (tx: Transaction) => Promise<ChainTransaction>
+    /** Decode/stamp a raw tx; `seqno` is the index-authoritative committing block when
+     * the meta-driven backfill supplied it (otherwise resolved via committingSeqno). */
+    getTransaction: (tx: Transaction, seqno?: number) => Promise<ChainTransaction>
+    v3Meta?: (afterLt: bigint) => AsyncGenerator<TonV3Transaction, void, undefined>
   },
 ): AsyncGenerator<ChainTransaction> {
   if (!opts.address) throw new CCIPLogsAddressRequiredError()
@@ -139,8 +250,8 @@ export async function* streamTransactionsForAddress(
   const allTransactions = fetchTxsForward(opts, ctx)
 
   // Process transactions
-  for await (const tx of allTransactions) {
-    yield await ctx.getTransaction(tx)
+  for await (const { tx, seqno } of allTransactions) {
+    yield await ctx.getTransaction(tx, seqno)
   }
 }
 
@@ -270,7 +381,8 @@ export async function* streamV3TxMeta(
     const txs = transactions ?? []
     yield* txs
     if (txs.length < V3_PAGE_LIMIT) return
-    startLt = BigInt(txs[txs.length - 1]!.lt)
+    // v3 `start_lt` is INCLUSIVE (verified live): +1 so the boundary tx isn't repeated.
+    startLt = BigInt(txs[txs.length - 1]!.lt) + 1n
   }
 }
 

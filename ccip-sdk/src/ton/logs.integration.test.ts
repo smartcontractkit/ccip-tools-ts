@@ -18,11 +18,12 @@ import type { ChainLog } from '../types.ts'
  *     real logs hydrated from v2 by (lt, hash) after the sparse index seeding.
  *  B. startBlock a day old, no hint — the v2 walk: paginates the account's tx chain
  *     over the window and streams matches progressively (first yield in seconds).
- *     Deep walks stamp block numbers via the lazily-engaged v3 meta oracle (paged
- *     /transactions, not per-tx lookupBlock/getBlockHeader); shallow scans stay pure v2.
- *  C. A `since` hint a day old — the v2 walk resumed exclusively off the cursor; the
+ *     Deep windows (floor older than ~4h, estimated live from the account's lt rate)
+ *     hydrate in bounded ≤100-tx v2 pages driven by the index's ordered lt list —
+ *     memory stays O(batch) at any depth; shallow scans stay on plain v2 pagination.
+ *  C. A `since` hint a day old — the walk resumes exclusively off the cursor; the
  *     hinted transaction is not re-streamed (the exclusive lt cursor reaches the wire
- *     as `to_lt`), and the v3 index is not touched.
+ *     as `to_lt`). The lt list itself is one paged index read; hydration stays on v2.
  *  D. A quiet (dormant) address — the v3 seed answers "no events since T" in exactly
  *     one /messages call (plus the cached tip), never touching the v2 walk.
  *
@@ -254,7 +255,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'startBlock a day old: v2 walk streams matches, v3 meta oracle stamps seqnos',
+    'startBlock a day old: bounded index-driven walk streams matches progressively',
     {
       timeout: 420_000,
     },
@@ -359,12 +360,15 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           'resumes strictly past the cursor',
         )
         assert.equal(spy.calls.v3messages, 0, 'an lt-carrying hint keeps the scan on the v2 walk')
-        // Usually fewer than the 16-tx seqno-oracle threshold are walked before the
-        // first 3 matches; busier organic traffic may legitimately push past it, so
-        // only bound it loosely by pages — per-tx index lookups would dwarf this.
+        // The walk seeds the ordered lt list from the index: one paged meta call for
+        // a shallow scan — never the event index, never per-tx seqno lookups.
         assert.ok(
           spy.calls.v3transactions <= 3,
-          'seqno oracle engaged in pages at most; never per-tx index lookups',
+          `lt list seeded in pages (saw ${spy.calls.v3transactions})`,
+        )
+        assert.ok(
+          spy.calls.v2SeqnoLookups <= 8,
+          `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups})`,
         )
         // The composite hash's lt becomes the exclusive wire cursor (`to_lt` is
         // exclusive server-side — verified against toncenter v2 — so un-incremented).
