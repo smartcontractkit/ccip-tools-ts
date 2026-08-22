@@ -555,6 +555,93 @@ void describe('streamAptosLogs since hint', () => {
     )
   })
 
+  void it('ignores a hint from a different topic (handles own independent sequence spaces)', async () => {
+    // A hint captured from ExecutionStateChanged (off_ramp handle) replayed on a
+    // single-topic CCIPMessageSent stream must not resume from the on_ramp handle's
+    // seq — and its floors must not merge either (ignored wholesale).
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            topics: ['ExecutionStateChanged'],
+            index: 1,
+            blockNumber: 103, // a floor leak would skip everything below 103
+            blockTimestamp: 103,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100, 101, 102, 103],
+      'a hint from another handle is ignored wholesale: no seq cursor, no floors',
+    )
+  })
+
+  void it('uses the seq cursor when the hint topic matches the handle', async () => {
+    const calls: { url: string; params: unknown }[] = []
+    const provider = makeFakeProvider(FOUR_EVENTS, calls)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            topics: ['CCIPMessageSent'],
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+    )
+    const starts = calls
+      .filter((c) => c.url.includes('events/'))
+      .map((c) => (c.params as { start?: number }).start)
+    assert.deepEqual(starts, [undefined, 2], 'resumes directly at the hint cursor (seq+1)')
+  })
+
+  void it("drops an unattributable seq cursor against the handle's own event type (raw-path topic)", async () => {
+    // The stream's topic is a raw handle path, so the wholesale gate can't resolve
+    // the hint's (unmapped, pathless) struct name offline: initHandleState checks it
+    // against the handle's own event type — 'NotThisHandle' != 'CCIPMessageSent'.
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['OnRampState/ccip_message_sent_events'],
+          startBlock: 0,
+          versionAsHash: true,
+          since: {
+            topics: ['NotThisHandle'],
+            index: 3, // would skip everything if applied to this handle
+            blockNumber: 0,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100, 101, 102, 103],
+      "seq 3 belongs to some other handle's sequence space — nothing is skipped",
+    )
+  })
+
   void it('multi-handle streams resume past the hint blockNumber, exclusively', async () => {
     const provider = makeFakeProvider({
       ...FOUR_EVENTS,

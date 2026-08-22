@@ -259,6 +259,10 @@ async function* streamLogs(
 /**
  * Implements Chain.getLogs for EVM.
  * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
+ * When both a block floor (`startBlock`, or `since.blockNumber` merged by
+ * withSinceStart) and `startTime` are provided, the scan still starts at the floor
+ * block and `startTime` only skips the early blocks before it (log timestamps are
+ * block timestamps).
  * @param filter - Chain LogFilter
  * @param ctx - Context object containing provider, logger and optional abort signal
  * @returns Async iterator of logs.
@@ -293,8 +297,10 @@ export async function* getEvmLogs(
     filter.since?.address &&
     filter.address &&
     filter.since.address.toLowerCase() !== filter.address.toLowerCase()
-  )
+  ) {
+    logger.warn('Invalid since.address: ', filter.since.address, '!==', filter.address)
     filter.since = undefined
+  }
   // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
   filter = withSinceStart(filter)
 
@@ -369,9 +375,14 @@ export async function* getEvmLogs(
         log.index <= filter.since.index
       )
         continue // at/before the resume point within its block
+      const blockTimestamp = (await ctx.getBlockInfo(log.blockNumber)).timestamp
+      // When the block floor came from startBlock/since.blockNumber, startTime's only
+      // remaining job is to skip the early blocks before it. (When startTime alone
+      // derived the floor, getBlockNumberAtOrAfter already guaranteed this.)
+      if (filter.startTime != null && blockTimestamp < Number(filter.startTime)) continue
       if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
         continue
-      yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
+      yield { ...log, blockTimestamp }
     }
   }
 

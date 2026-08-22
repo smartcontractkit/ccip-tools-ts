@@ -2,6 +2,7 @@ import './index.ts' // Register supported chains
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { Address } from '@ton/core'
 import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
@@ -25,7 +26,7 @@ import {
 
 // Mock Chain class for testing
 class MockChain extends Chain {
-  static family = ChainFamily.EVM
+  static family: ChainFamily = ChainFamily.EVM
   private mockTypeAndVersion: string
   private mockLogs: ChainLog[] = []
   private mockBlockTimestamp = 1700000000
@@ -486,5 +487,32 @@ describe('discoverOffRamp', () => {
       async () => await discoverOffRamp(sourceChain, destChain, onRamp),
       /No matching offRamp found/,
     )
+  })
+
+  it('should discover offRamp for TON lanes with a friendly onRamp input, normalized to raw', async () => {
+    class MockTONChain extends MockChain {
+      static override family: ChainFamily = ChainFamily.TON
+    }
+    const sourceChain = new MockTONChain(-3) // ton-testnet
+    const destChain = new MockTONChain(-3)
+    const rawOnRamp = `0:${'ab'.repeat(32)}`
+    const friendlyOnRamp = Address.parseRaw(rawOnRamp).toString()
+    const rawOffRamp = `0:${'cd'.repeat(32)}`
+    const rawRouter = `0:${'ef'.repeat(32)}`
+    const rawSourceOffRamp = `0:${'23'.repeat(32)}`
+    const rawDestRouter = `0:${'01'.repeat(32)}`
+
+    // Every mock is keyed on the canonical raw form — a friendly onRamp that was
+    // not normalized before discovery would miss all these lookups.
+    sourceChain.setRouterForOnRamp(rawOnRamp, rawRouter)
+    sourceChain.setOffRampsForRouter(rawRouter, [rawSourceOffRamp])
+    sourceChain.setOnRampForOffRamp(rawSourceOffRamp, rawOnRamp)
+
+    destChain.setRouterForOnRamp(rawOnRamp, rawDestRouter)
+    destChain.setOffRampsForRouter(rawDestRouter, [rawOffRamp])
+    destChain.setOnRampForOffRamp(rawOffRamp, rawOnRamp)
+
+    const result = await discoverOffRamp(sourceChain, destChain, friendlyOnRamp)
+    assert.equal(result, rawOffRamp, 'offRamp should be returned in raw TON form')
   })
 })

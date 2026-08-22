@@ -1322,6 +1322,40 @@ describe('getEvmLogs — since hint', () => {
     )
   })
 
+  it('startBlock + startTime: scans from the floor block, startTime only skips early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        // timestamps are block*12 here: startTime 1212 == block 101's time, one past
+        // the requested floor block 100.
+        { startBlock: 100, endBlock: 101, startTime: 1212 },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'the floor is NOT raised to startTime’s block')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'block 100 (ts 1200 < 1212) is fetched whole but its logs are skipped',
+    )
+  })
+
+  it('since.blockNumber + startTime: startTime still applies to skip early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        { endBlock: 101, startTime: 1212, since: { blockNumber: 100, index: 0 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'queries from the hint block, fetching it whole')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'the hinted log is excluded by index; the rest of its early block by startTime',
+    )
+  })
+
   it('takes the larger of startBlock and since.blockNumber', async () => {
     const calls: { fromBlock: number; toBlock: number | string }[] = []
     await collect(

@@ -44,7 +44,7 @@ export type {
   TokenTransferFeeOpts,
   TotalFeesEstimate,
 } from './chain.ts'
-export { DEFAULT_API_RETRY_CONFIG, LaneFeature, withSinceStart } from './chain.ts'
+export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
 export { type FetchVerificationsOpts, fetchVerifications } from './commits.ts'
 export {

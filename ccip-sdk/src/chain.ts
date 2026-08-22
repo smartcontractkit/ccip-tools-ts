@@ -321,24 +321,24 @@ export type LogFilter = {
    *    is the LARGER of the explicitly requested bound and the hint's — so a `since`
    *    carrying either satisfies the start requirement on its own. Blocks/versions
    *    are always fetched and emitted complete.
-   * 2. Exclusive resume (chains with a native per-log cursor): the hinted log itself
-   *    is NOT re-emitted, while later same-transaction/same-block followers still
-   *    are. TON resumes from the `lt` embedded in the composite `transactionHash`;
-   *    Solana passes the hint's signature as `until` (with `blockNumber` as an
-   *    absolute slot floor); Aptos resumes single-handle event streams from the
-   *    hint's `index` (the handle's event sequence_number) and floors multi-handle
-   *    streams just past the hint's `blockNumber` (a global ledger version — one
-   *    transaction per version, and versions are emitted complete, so it needs no
-   *    re-delivery); EVM queries from the hint's `blockNumber` and skips that
-   *    block's logs with `index <= since.index`.
+   * 2. Block completeness: all chains implementations must guarantee all logs in
+   *    some block are yielded in the same call before it returns.
+   * 3. Exclusive resume (chains with a native per-log cursor): the hinted log itself
+   *    is NOT re-emitted, and other logs in the same block/tx may also not be;
+   *    some chains may attempt to yield logs in the same block or transaction, but
+   *    from 2., the contract guarantees only that logs from the next block or tx on
+   *    are emitted, so for an hermetic poller, it's safer to only ever pass
+   *    the *last* finalized log in the previous call as `since` hint.
    *
    * The hint only ever RAISES the start floors — it never scans below
-   * `startBlock`/`startTime` — and a stale, foreign or malformed hint is ignored
-   * (the usual walk runs). Pass only logs the chain has finalized: an unfinalized
-   * hint can skip its own re-delivery window.
+   * `startBlock`/`startTime` — and a stale, foreign or malformed hint may be ignored
+   * (the usual walk runs).
    */
   since?: Partial<
-    Pick<ChainLog, 'address' | 'blockNumber' | 'blockTimestamp' | 'transactionHash' | 'index'>
+    Pick<
+      ChainLog,
+      'address' | 'blockNumber' | 'blockTimestamp' | 'transactionHash' | 'index' | 'topics'
+    >
   >
 }
 
@@ -954,6 +954,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *        required unless startTime is provided; explicit 0 is allowed
    *   - `startTime`: instead of a startBlock, a start timestamp may be provided;
    *        if either is provided, fetch logs forward from this starting point
+   *   - `since`: a previous log (preferably the *last* finalized from a previous call),
+   *        as log cursor; may be more efficient in some chains for paginating, and may
+   *        replace `startTime` or `startBlock`
    *   - `endBlock`: a fixed block height, finality tag or negative finality depth to stop iteration
    *        at; defaults to `latest`
    *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock

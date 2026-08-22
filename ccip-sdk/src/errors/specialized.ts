@@ -1760,7 +1760,7 @@ export class CCIPLogsRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsRequiresStartError'
   /** Creates a logs requires start error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOGS_REQUIRES_START, `Logs query requires startBlock or startTime`, {
+    super(CCIPErrorCode.LOGS_REQUIRES_START, `Logs query requires startBlock, startTime or since`, {
       ...options,
       isTransient: false,
     })

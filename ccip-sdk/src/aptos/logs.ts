@@ -129,7 +129,7 @@ const missingHandles = new WeakMap<Aptos, Set<string>>()
  * hint's `blockNumber` — a ledger version) is global and can floor every handle of a
  * multi-handle stream (see fetchEventsForward).
  */
-type AptosResumeHint = { seq?: number; block?: number; timestamp?: number }
+type AptosResumeHint = { seq?: number; block?: number; timestamp?: number; topic?: string }
 
 /** Parses and validates opts.since; undefined when absent, malformed, or
  * foreign-addressed (the emitted log carries opts.address verbatim, so an equal-form
@@ -146,8 +146,21 @@ function parseResumeHint(opts: LeanNumbers<LogFilter>): AptosResumeHint | undefi
     timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined,
   }
   if (Number.isSafeInteger(seq) && seq >= 0) parsed.seq = seq
+  const topic = hint.topics?.[0]
+  if (typeof topic === 'string' && topic) parsed.topic = topic
   if (parsed.seq == null && parsed.block == null) return undefined
   return parsed
+}
+
+/**
+ * Best-effort topic → event-handle mapping: raw `Struct/field` handle paths pass
+ * through, known event names map via eventToHandler; anything else (notably a struct
+ * name emitted into a log's topics[0] for a raw-path stream) is unresolvable offline.
+ */
+function handleForTopic(topic: unknown): string | undefined {
+  if (typeof topic !== 'string' || !topic) return undefined
+  if (topic.includes('/')) return topic
+  return (eventToHandler as Record<string, string>)[topic]
 }
 
 async function initHandleState(
@@ -203,13 +216,28 @@ async function initHandleState(
   if (!initialBatch.length) return undefined
   const end = +initialBatch[initialBatch.length - 1]!.sequence_number
 
+  // Every event handle owns an INDEPENDENT sequence space: the hint's seq is an
+  // exact cursor for THIS handle only when the hinted event is of this handle's own
+  // type (a log's topics[0] is its event's struct name). A cursor captured from
+  // another handle's topic would silently skip this handle's events — drop it; the
+  // merged block/timestamp floors are global (ledger versions), not per-handle, and
+  // still apply.
+  let cursorHint = hint
+  if (hint?.topic != null) {
+    const eventType = initialBatch[0]!.type
+    const structName = eventType.slice(eventType.lastIndexOf('::') + 2)
+    if (hint.topic !== structName) cursorHint = undefined
+  }
+
   // The hint covers the floor when it sits past every requested start bound —
   // resuming at seq+1 then IS the floor, so the floor computation (and its binary
   // search / timestamp lookups) is skipped entirely.
   const hintCoversFloor =
-    hint != null &&
-    (opts.startBlock == null || (hint.block != null && hint.block >= Number(opts.startBlock))) &&
-    (opts.startTime == null || (hint.timestamp != null && hint.timestamp >= Number(opts.startTime)))
+    cursorHint != null &&
+    (opts.startBlock == null ||
+      (cursorHint.block != null && cursorHint.block >= Number(opts.startBlock))) &&
+    (opts.startTime == null ||
+      (cursorHint.timestamp != null && cursorHint.timestamp >= Number(opts.startTime)))
 
   let start: number | undefined
   if (!hintCoversFloor) {
@@ -236,7 +264,7 @@ async function initHandleState(
   }
   // Exclusive resume (matching the SVM `until` / TON lt cursors): the hinted event
   // itself is not re-emitted. The hint can only ever RAISE the computed floor.
-  if (hint != null) start = Math.max(hint.seq + 1, start ?? 0)
+  if (cursorHint != null) start = Math.max(cursorHint.seq + 1, start ?? 0)
 
   const notAfter =
     typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint'
@@ -384,7 +412,7 @@ async function fetchHandleRound(
 }
 
 async function* fetchEventsForward(
-  ctx: { provider: Aptos },
+  ctx: { provider: Aptos } & WithLogger,
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   eventHandlerFields: string[],
   stateAddr: string,
@@ -399,6 +427,8 @@ async function* fetchEventsForward(
   opts.endBlock ??= 'latest'
 
   const hint = parseResumeHint(opts)
+  if (opts.since && hint == null) ctx.logger?.warn('Invalid `since` hint: ', opts)
+
   // Single-handle: the hint's `index` is attributable to the one handle's sequence
   // space — an exact cursor. Multi-handle: a lone `index` can't be attributed (each
   // handle's sequence space is independent), but the hint's blockNumber is a global
@@ -410,7 +440,11 @@ async function* fetchEventsForward(
   let opts_ = opts
   if (hint != null) {
     if (eventHandlerFields.length === 1 && hint.seq != null) {
-      seqHint = { seq: hint.seq, block: hint.block, timestamp: hint.timestamp }
+      // The seq is attributable to the one handle ONLY IF the hinted event is of this
+      // handle's own type — verified against the handle's events in initHandleState
+      // (handles at one address own independent sequence spaces; the address gate
+      // alone can't tell them apart).
+      seqHint = { seq: hint.seq, block: hint.block, timestamp: hint.timestamp, topic: hint.topic }
     } else if (hint.block != null) {
       const versionFloor = hint.block + 1
       if (opts.startBlock == null || versionFloor > Number(opts.startBlock))
@@ -540,6 +574,19 @@ export async function* streamAptosLogs(
   if (
     opts.since?.address &&
     (!opts.address || opts.since.address.toLowerCase() !== opts.address.toLowerCase())
+  )
+    opts = { ...opts, since: undefined }
+  // A hint bearing a PROVABLY different handle's topic is foreign the same way:
+  // every event handle at an address owns an independent sequence space, so a cursor
+  // (or floor) captured from topic X must not resume a stream of topic Y. Only
+  // offline-resolvable topics are checked here; a struct name emitted for a raw
+  // handle path defers to initHandleState, which checks it against the handle's own
+  // event type before applying the seq cursor.
+  const hintHandle = handleForTopic(opts.since?.topics?.[0])
+  if (
+    hintHandle != null &&
+    opts.topics?.length &&
+    !opts.topics.some((topic) => handleForTopic(topic) === hintHandle)
   )
     opts = { ...opts, since: undefined }
   opts = withSinceStart(opts)

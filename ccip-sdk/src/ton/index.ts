@@ -10,7 +10,12 @@ import {
   decodeTONExtraArgsCell,
   encodeExtraArgsCell,
 } from './extra-args.ts'
-import { streamTransactionsForAddress } from './logs.ts'
+import {
+  type TonV3Event,
+  openV3EventStream,
+  streamTransactionsForAddress,
+  tonV3BaseUrl,
+} from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { boundTonClientCaches } from './ton-cache.ts'
 import {
@@ -26,9 +31,12 @@ import {
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
   CCIPArgumentInvalidError,
+  CCIPError,
+  CCIPErrorCode,
   CCIPExecutionReportChainMismatchError,
   CCIPHttpError,
   CCIPLogsAddressRequiredError,
+  CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
@@ -163,6 +171,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       maxArgs: 1,
       maxSize: 100,
     })
+    this.getMCSeqNoByUnixtime = memoize(this.getMCSeqNoByUnixtime.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+    })
     this.getMCBlockHeader = memoize(this.getMCBlockHeader.bind(this), {
       async: true,
       maxArgs: 1,
@@ -275,6 +288,35 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * The masterchain block current at a unix time — the last with `gen_utime` at or
+   * before it (v2 `lookupBlock` by `unixtime`). Errors when the time is past the
+   * node's tip; callers handle that case.
+   * @internal
+   */
+  async getMCSeqNoByUnixtime(utime: number): Promise<number> {
+    const res = await this.rateLimitedFetch(this.provider.parameters.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'lookupBlock',
+        params: {
+          workchain: -1,
+          shard: '-9223372036854775808',
+          unixtime: utime,
+        },
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new CCIPHttpError(res.status, `Failed to lookupBlock by unixtime=${utime}: ${text}`)
+    }
+    const { result } = (await res.json()) as { result: { seqno: number } }
+    return result.seqno
+  }
+
+  /**
    * Fetches the masterchain block header by seqno.
    * @internal
    */
@@ -363,6 +405,37 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * The exclusive account-lt cursor for a `startTime` bound: the shard-lt boundary of
+   * the masterchain block current at that time. Whole-block semantics — the boundary
+   * block is scanned whole (its txs may slightly predate startTime), matching EVM's
+   * startTime handling.
+   * @internal
+   */
+  async floorLtForTime(startTime: number | bigint, acct: Address): Promise<bigint> {
+    const utime = Math.max(0, Math.floor(Number(startTime)))
+    let b: number
+    try {
+      b = await this.getMCSeqNoByUnixtime(utime)
+    } catch (err) {
+      // lookupBlock errors when the time is past the node's tip. Confirm against the
+      // tip's own timestamp: a genuinely future startTime means an empty backfill —
+      // the floor is the tip's shard end and a watch proceeds from there. Anything
+      // else (transient RPC failure) rethrows.
+      const tip = await this.getBlockInfo('latest').catch(() => undefined)
+      if (!tip || utime <= tip.timestamp) throw err
+      return this.accountShardEndLt(tip.number, acct)
+    }
+    return b > 1 ? this.accountShardEndLt(b - 1, acct) : 0n
+  }
+
+  // Last masterchain block resolved by lt lookup, with its [start_lt, end_lt) range.
+  // Adjacent account txs overwhelmingly commit within the same (or a nearby) mc block,
+  // so a long walk over an account's txs would otherwise pay one rate-limited
+  // lookupBlock RPC per tx; reusing the range costs one lookup per NEW block instead.
+  // The climb below is unaffected: it still runs (memoized) from the range's seqno.
+  private lastMcLookup?: { startLt: bigint; endLt: bigint; seqno: number }
+
+  /**
    * The masterchain seqno that actually commits the account transaction at logical time
    * `lt` — the first block whose account-shard `end_lt` covers `lt`. `getMCSeqNoByLt`
    * maps by masterchain lt range and under-assigns (returns a block at/earlier than the
@@ -371,8 +444,23 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @internal
    */
   async committingSeqno(lt: number | bigint, acct: Address): Promise<number> {
-    let n = await this.getMCSeqNoByLt(lt)
     const ltBig = BigInt(lt)
+    const known = this.lastMcLookup
+    let n: number
+    if (known && ltBig > known.startLt && ltBig < known.endLt) {
+      n = known.seqno // lt falls strictly inside the block we already resolved — no RPC
+      // (strict bounds: a tx exactly on start_lt/end_lt always refetches — off-by-one
+      // at a block edge must never answer from the memo)
+    } else {
+      n = await this.getMCSeqNoByLt(lt)
+      try {
+        // Learn the resolved block's lt range for the next calls (header is memoized).
+        const h = await this.getMCBlockHeader(n)
+        this.lastMcLookup = { startLt: BigInt(h.start_lt), endLt: BigInt(h.end_lt), seqno: n }
+      } catch {
+        // a failing header lookup only loses the memo — the resolved seqno stands
+      }
+    }
     // Climb while the candidate block's shard end_lt is below lt (under-assignment); the
     // under-assignment is small, so this is a handful of memoized lookups at most. Bounded
     // so inconsistent/stale RPC shard data can never spin forever — overshooting the cap
@@ -455,13 +543,27 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     } else {
       address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
     }
+    return this.buildChainTransaction(tx, address)
+  }
 
+  /**
+   * Build a {@link ChainTransaction} from a raw transaction: stamp the composite hash,
+   * resolve the committing masterchain seqno (unless one is supplied — e.g. the v3
+   * index's authoritative `mc_block_seqno` on the startTime-only fast path), and
+   * decode external-out messages into logs.
+   * @internal
+   */
+  async buildChainTransaction(
+    tx: Transaction,
+    address: Address,
+    seqno?: number,
+  ): Promise<ChainTransaction> {
     // Extract logs from outgoing external messages
     // Build composite hash format: workchain:address:lt:hash
     const compositeHash = `${address.toRawString()}:${tx.lt}:${tx.hash().toString('hex')}`
     // Authoritative committing masterchain seqno (not the lt-range approximation), so a
     // tx's blockNumber is the block that actually finalizes it and matches getLogs.
-    const seqno = await this.committingSeqno(tx.lt, address)
+    seqno ??= await this.committingSeqno(tx.lt, address)
     const res = {
       hash: compositeHash,
       logs: [] as ChainLog[],
@@ -562,71 +664,89 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     let sinceLt: bigint | undefined
     let sinceBlock: number | undefined
     if (opts.since) {
-      let foreign = false
       try {
-        if (opts.since.address)
-          foreign = Address.parse(opts.since.address).toRawString() !== acct.toRawString()
-        const parts = String(opts.since.transactionHash).split(':')
-        if (!foreign && parts.length === 4) {
-          foreign = Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() !== acct.toRawString()
-          if (!foreign && /^\d+$/.test(parts[2]!)) {
-            sinceLt = BigInt(parts[2]!)
-            const b = Number(opts.since.blockNumber)
-            if (Number.isFinite(b) && b > 0) sinceBlock = b
+        if (
+          opts.since.address &&
+          Address.parse(opts.since.address).toRawString() !== acct.toRawString()
+        )
+          throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since.address does not match')
+        if (opts.since.transactionHash) {
+          const parts = opts.since.transactionHash.split(':')
+          if (parts.length === 4) {
+            if (Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() !== acct.toRawString())
+              throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since.address does not match')
+            if (/^\d+$/.test(parts[2]!)) {
+              sinceLt = BigInt(parts[2]!)
+              const b = Number(opts.since.blockNumber)
+              if (Number.isFinite(b) && b > 0) sinceBlock = b
+            }
           }
         }
+        if (sinceLt == null && opts.since.index != null) sinceLt = BigInt(opts.since.index)
+        if (sinceBlock == null && opts.since.blockNumber != null)
+          sinceBlock = Number(opts.since.blockNumber)
       } catch {
-        foreign = true // an unparseable address somewhere: not provably this stream's
+        delete opts.since
       }
-      if (foreign) opts = { ...opts, since: undefined }
     }
     // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
     opts = withSinceStart(opts)
 
-    // Resume strictly after everything masterchain block (startBlock-1) committed, in
-    // account-shard lt space.
-    const { since: _, ...opts_ } = opts // consumed here; the walk below only understands lt floors
+    const { since: _, ...opts_ } = opts // consumed here; the v2 walk below only understands lt floors
+
+    // Resolve every start bound into one EXCLUSIVE account-lt cursor for the v2 walk
+    // (streamTransactionsForAddress streams strictly after it):
+    // - a `since` hint contributes its lt directly (the hinted tx is never re-streamed);
+    // - startBlock b becomes E(b-1) — resume strictly after everything masterchain block
+    //   b-1 committed, in account-shard lt space. This boundary is exact, not
+    //   approximate, because both directions of the seqno↔lt mapping are the SAME
+    //   function E(M) = accountShardEndLt(M): a tx commits at C(t) = min{ M : E(M) >=
+    //   t.lt } (what committingSeqno computes and getTransaction stamps as blockNumber).
+    //   Hence
+    //       t.lt > E(b-1)  <=>  C(t) >= b
+    //   so paging from E(b-1) yields exactly the txs committing at blocks >= b — never
+    //   one belonging to b or later, and never one already covered below b.
+    // - startTime converts via lookupBlock(unixtime) on the walk paths (watch, or the
+    //   v2 fallback when the v3 fast path below is unavailable) — whole-block
+    //   over-inclusion at the boundary block, matching EVM's startTime handling.
+    //
+    // In particular, committingSeqno(E(b-1)+1) landing PAST b is normal and lossless,
+    // not a mapping disagreement: E is the shard's end_lt, so it only advances when the
+    // masterchain block references a newer shard block for this account's shard. When
+    // block b references the same shard block as b-1 (frequent — roughly every other
+    // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
+    // transaction at all, so there is nothing in b to skip.
     let startSeqno: number | undefined
+    let sinceLtFloor: bigint | undefined = sinceLt
     if (opts.startBlock != null) {
       const b = Number(opts.startBlock)
       startSeqno = b
       if (sinceBlock != null && sinceLt != null && sinceBlock >= b) {
-        // The hint's lt already satisfies this floor — the seqno↔lt identity below
-        // says C(t) >= b <=> t.lt > E(b-1), and the hinted tx commits at
-        // sinceBlock >= b — so the shard-header lookup would only produce a lower
-        // floor. Skip it (saves 2 RPCs per scan on the steady-state poll path).
-        opts_.startBlock = sinceLt + 1n
+        // The hint's lt already satisfies this floor — the seqno↔lt identity above says
+        // C(t) >= b <=> t.lt > E(b-1), and the hinted tx commits at sinceBlock >= b — so
+        // the shard-header lookup would only produce a lower floor. Skip it (saves 2 RPCs
+        // per scan on the steady-state poll path).
       } else {
-        opts_.startBlock = b > 1 ? (await this.accountShardEndLt(b - 1, acct)) + 1n : 0n
+        const floor = b > 1 ? await this.accountShardEndLt(b - 1, acct) : 0n
+        // The hint only ever RAISES the floor (it can shrink the scan, never widen it
+        // below the requested one): the higher (newer) of the two cursors wins.
+        if (sinceLtFloor == null || floor > sinceLtFloor) sinceLtFloor = floor
       }
-      // This boundary is exact, not approximate, because both directions of the
-      // seqno↔lt mapping are the SAME function E(M) = accountShardEndLt(M): a tx commits
-      // at C(t) = min{ M : E(M) >= t.lt } (what committingSeqno computes and getTransaction
-      // stamps as blockNumber), and the resume lt is E(b-1)+1. Hence
-      //     t.lt >= resumeLt  <=>  t.lt > E(b-1)  <=>  C(t) >= b
-      // so paging from resumeLt yields exactly the txs committing at blocks >= b — never
-      // one belonging to b or later, and never one already covered below b.
-      //
-      // In particular, committingSeqno(resumeLt) landing PAST b is normal and lossless,
-      // not a mapping disagreement: E is the shard's end_lt, so it only advances when the
-      // masterchain block references a newer shard block for this account's shard. When
-      // block b references the same shard block as b-1 (frequent — roughly every other
-      // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
-      // transaction at all, so there is nothing in b to skip.
     }
+    if (sinceLtFloor == null && opts.startTime == null) throw new CCIPLogsRequiresStartError()
 
-    // Compose with the resume hint's floor (strictly after the hinted tx, matching
-    // (lt, hash) cursor exclusivity): the higher (newer) of the two wins, so the hint
-    // can only shrink the scan, never widen it below the requested floor. Both sides
-    // are in account-shard lt space (the startBlock floor was converted above), so the
-    // comparison is exact.
-    if (sinceLt != null && (opts_.startBlock == null || BigInt(opts_.startBlock) <= sinceLt))
-      opts_.startBlock = sinceLt + 1n
+    // The walk consumes no startBlock/startTime: both are carried by sinceLtFloor.
+    const { startBlock: _startBlock, startTime: _startTime, ...walkBase } = opts_
 
     // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
-    // below serves the watermark-driven poller, which does not watch).
+    // below serves the watermark-driven poller, which does not watch). The v3 fast path
+    // is non-watch only, so a startTime-only watch converts its floor here.
     if (opts.watch) {
-      for await (const tx of streamTransactionsForAddress(opts_, this)) {
+      sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
+      for await (const tx of streamTransactionsForAddress(
+        { ...walkBase, sinceLt: sinceLtFloor },
+        this,
+      )) {
         for (const log of tx.logs) {
           if (!matches(log)) continue
           if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
@@ -652,9 +772,38 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const latest = (await this.provider.getMasterchainInfo()).latestSeqno
       cutoff = Math.max(1, latest - Math.max(1, confirmations))
     }
+
+    // v3 fast path: on hintless startTime-only scans (the poller's cold backfill),
+    // enumerate the account's log messages straight from the TonCenter v3 index
+    // instead of walking the whole tx chain from the tip with rate-limited v2 pages —
+    // see openV3EventStream. Gated to hintless scans: a `since` lt cursor or a
+    // startBlock floor already bounds the v2 walk to an exact, cheap window. When the
+    // RPC endpoint has no v3 API of its own, the public TonCenter index for this
+    // network stands in (same fallback as raw-hash transaction lookups).
+    if (opts.startBlock == null && opts.startTime != null && sinceLt == null) {
+      const v3Stream = await openV3EventStream(
+        opts_,
+        {
+          provider: this.provider,
+          v3BaseUrl: tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
+          rateLimitedFetch: this.rateLimitedFetch,
+          getTransaction: (tx, seqno) => this.buildChainTransaction(tx, acct, seqno),
+          logger: this.logger,
+        },
+        cutoff,
+      )
+      if (v3Stream) {
+        yield* this.emitSealedV3Events(v3Stream, opts, cutoff, matches)
+        return
+      }
+    }
+
+    // v2 walk (only path left): a startTime-only scan converts its floor here, once.
+    sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
+
     // Cap the fetch just past the cutoff so a tx of block (cutoff+1) can confirm the
     // cutoff block complete, without pulling the whole unsealed tip.
-    opts_.endBlock = await this.accountShardEndLt(cutoff + 1, acct).catch(() =>
+    walkBase.endBlock = await this.accountShardEndLt(cutoff + 1, acct).catch(() =>
       this.accountShardEndLt(cutoff, acct),
     )
 
@@ -668,7 +817,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       return out
     }
 
-    for await (const tx of streamTransactionsForAddress(opts_, this)) {
+    for await (const tx of streamTransactionsForAddress(
+      { ...walkBase, sinceLt: sinceLtFloor },
+      this,
+    )) {
       const raw = (tx as { tx?: { lt: bigint; prevTransactionLt: bigint } }).tx
       if (raw && prevLt !== undefined && raw.prevTransactionLt !== prevLt) {
         // Gap: a committed tx between prevLt and this one is not yet indexed — the
@@ -679,19 +831,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
       const block = tx.blockNumber
       // Defensive: by the resume-boundary identity above, every tx this fetch returns
-      // must sit at or above the floor in lt space and therefore commit at or after
+      // must sit above the cursor in lt space and therefore commit at or after
       // startSeqno. A violation can only mean E disagreed with itself between the
       // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
       // and emitting it would rewind the poller's watermark over blocks this scan never
       // covered. Drop the in-progress block and stop, like the gap case; the poller
       // retries. Conservative on purpose: stalling is recoverable, skipping is not.
-      if (
-        (startSeqno !== undefined && block < startSeqno) ||
-        (raw && opts_.startBlock != null && raw.lt < BigInt(opts_.startBlock))
-      ) {
+      if ((startSeqno !== undefined && block < startSeqno) || (raw && raw.lt <= sinceLtFloor)) {
         this.logger.warn(
           `TON getLogs: tx lt=${raw?.lt} commits at block ${block}, below the ` +
-            `startBlock=${startSeqno} / lt=${opts_.startBlock} resume boundary; stopping scan`,
+            `startBlock=${startSeqno} / lt cursor=${sinceLtFloor} resume boundary; stopping scan`,
         )
         buf = []
         curBlock = undefined
@@ -718,6 +867,62 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
       yield log
     }
+  }
+
+  /**
+   * Consume the v3 event stream (see {@link openV3EventStream}), emitting complete
+   * sealed blocks. Mirrors the v2 consumption loop in getLogs, minus the
+   * chain-integrity and lt-floor checks: the index is block-atomic (a block's log
+   * messages appear all at once), blocks are non-decreasing along the
+   * created_lt-ordered stream, and the time floor is applied index-side. A block
+   * rewind or a truncated tail drops the block in progress and stops — the poller
+   * resumes from its hint.
+   */
+  private async *emitSealedV3Events(
+    stream: AsyncGenerator<TonV3Event, void, undefined>,
+    opts: LeanNumbers<LogFilter>,
+    cutoff: number,
+    matches: (log: ChainLog) => boolean,
+  ): AsyncIterableIterator<ChainLog> {
+    let curBlock: number | undefined
+    let buf: ChainLog[] = []
+    // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
+    const drain = async function* (chain: TONChain): AsyncIterableIterator<ChainLog> {
+      const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
+      buf = []
+      for (const log of out) {
+        if (await passesTypeAndVersion(chain, log.address, opts.typeAndVersions)) yield log
+      }
+    }
+
+    for await (const item of stream) {
+      if (!('tx' in item)) {
+        // Truncated on index inconsistency: the block in progress may be incomplete.
+        buf = []
+        curBlock = undefined
+        break
+      }
+      const block = item.tx.blockNumber
+      if (curBlock !== undefined && block < curBlock) {
+        this.logger.warn(
+          `TON getLogs v3: block rewind ${curBlock} -> ${block} mid-stream; stopping scan`,
+        )
+        buf = []
+        curBlock = undefined
+        break
+      }
+      // Crossed a block boundary ⇒ the previous block's events are complete in the index.
+      if (curBlock !== undefined && block !== curBlock) yield* drain(this)
+      curBlock = block
+      if (block > cutoff) {
+        // Reached the unsealed region (prior block already drained). Stop.
+        curBlock = undefined
+        break
+      }
+      for (const log of item.tx.logs) if (matches(log)) buf.push(log)
+    }
+    // Exhausted within the sealed cutoff (not truncated): the last block is complete.
+    yield* drain(this)
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -767,13 +972,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const chainSelector = staticStack.readBigNumber()
 
     // dynamicConfig() -> feeQuoter, feeAggregator, allowlistAdmin, reserve
-    const feeQuoter = dynamicStack.readAddress().toString()
-    const feeAggregator = dynamicStack.readAddress().toString()
-    const allowlistAdmin = dynamicStack.readAddress().toString()
+    // TON addresses are stored/returned in raw "workchain:hash" form everywhere.
+    const feeQuoter = dynamicStack.readAddress().toRawString()
+    const feeAggregator = dynamicStack.readAddress().toRawString()
+    const allowlistAdmin = dynamicStack.readAddress().toRawString()
     const reserve = dynamicStack.readBigNumber()
 
     // destChainConfig() -> router, sequenceNumber, allowlistEnabled, allowedSenders (dict cell)
-    const router = destStack.readAddress().toString()
+    const router = destStack.readAddress().toRawString()
     const sequenceNumber = BigInt(destStack.readBigNumber().toString())
     const allowlistEnabled = destStack.readBoolean()
 
@@ -787,7 +993,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     // FeeQuoter staticConfig() -> maxFeeJuelsPerMsg: uint96, linkToken: address, tokenPriceStalenessThreshold: uint32
     const maxFeeJuelsPerMsg = fqStaticStack.readBigNumber()
-    const linkToken = fqStaticStack.readAddress().toString()
+    const linkToken = fqStaticStack.readAddress().toRawString()
     const tokenPriceStalenessThreshold = fqStaticStack.readNumber()
 
     // FeeQuoter destChainConfig() -> 18 FeeQuoterDestChainConfig scalar fields, then usdPerUnitGas cell
@@ -878,7 +1084,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const { stack } = await this.provider.runMethod(Address.parse(offRamp), 'sourceChainConfig', [
         { type: 'int', value: sourceChainSelector },
       ])
-      const router = stack.readAddress().toString()
+      const router = stack.readAddress().toRawString()
       const isEnabled = stack.readBoolean()
       const minSeqNr = BigInt(stack.readBigNumber().toString())
       const isRMNVerificationDisabled = stack.readBoolean()
@@ -902,7 +1108,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // config() -> chainSelector, feeQuoter, permissionlessExecutionThresholdSeconds
       const chainSelector = cfgStack.readBigNumber()
-      const feeQuoter = cfgStack.readAddress().toString()
+      const feeQuoter = cfgStack.readAddress().toRawString()
       const permissionlessExecutionThresholdSeconds = cfgStack.readNumber()
 
       return {
@@ -1066,8 +1272,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // Load tokenAmounts from ref 3
       const tokenAmounts: CCIPMessage_V1_6_EVM['tokenAmounts'] = [] // TODO: FIXME: parse when implemented
 
-      // Load feeToken (inline address in body)
-      const feeToken = bodySlice.loadMaybeAddress()?.toString() ?? ''
+      // Load feeToken (inline address in body) — canonical raw "workchain:hash" form
+      const feeToken = bodySlice.loadMaybeAddress()?.toRawString() ?? ''
 
       // Load feeTokenAmount (256 bits)
       const feeTokenAmount = bodySlice.loadUintBig(256)
@@ -1250,26 +1456,24 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * - 36-byte CCIP format: workchain(4 bytes, big-endian) + hash(32 bytes)
    * - 33-byte format: workchain(1 byte) + hash(32 bytes)
    * - 32-byte format: hash only (assumes workchain 0)
-   * Also handles user-friendly format strings (e.g., "EQ...", "UQ...", "kQ...", "0Q...")
-   * and raw format strings ("workchain:hash").
+   * Also handles user-friendly format strings (e.g., "EQ...", "UQ...", "kQ...", "0Q...",
+   * including test-only/bounceable variants) and raw format strings ("workchain:hash").
+   * Any friendly string form the SDK sees is canonicalized to raw on the way in.
    * @param bytes - Bytes or string to convert.
    * @returns TON raw address string in format "workchain:hash".
    * @throws {@link CCIPArgumentInvalidError} if bytes length is invalid
    */
   static getAddress(bytes: BytesLike): string {
-    // If it's already a string address, try to parse and return raw format
+    // String addresses are canonicalized to the raw "workchain:hash" form — the
+    // only representation TON values are stored and compared in across the SDK.
     if (typeof bytes === 'string') {
       // Handle raw format "workchain:hash"
-      if (bytes.includes(':') && !bytes.startsWith('0x')) {
+      if (/^-?\d+:[0-9a-fA-F]{64}$/.test(bytes)) {
         return bytes
       }
-      // Handle user-friendly format (EQ..., UQ..., etc.)
-      if (
-        bytes.startsWith('EQ') ||
-        bytes.startsWith('UQ') ||
-        bytes.startsWith('kQ') ||
-        bytes.startsWith('0Q')
-      ) {
+      // Handle user-friendly formats (EQ..., UQ..., kQ..., 0Q..., including the
+      // test-only/bounceable variants) — Address.isFriendly covers all flag combos.
+      if (Address.isFriendly(bytes)) {
         return Address.parse(bytes).toRawString()
       }
     }

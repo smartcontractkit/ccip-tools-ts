@@ -2,7 +2,7 @@ import { discoverOffRamp, jsonStringify, networkInfo } from '@chainlink/ccip-sdk
 import type { Argv } from 'yargs'
 
 import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, prettyTable } from './utils.ts'
+import { formatDisplayAddress, getCtx, logParsedError, prettyFormat, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 
@@ -98,7 +98,14 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       break
     case Format.pretty:
       output.write(`OnRamp (${sourceNetwork.name}) [${sourceNetwork.family}]:`)
-      prettyTable.call(ctx, { onRamp, ...onRampConfig })
+      prettyTable.call(ctx, {
+        onRamp: formatDisplayAddress(onRamp, sourceNetwork.family),
+        // offRamp/offramp (v2 configs) are dest-chain addresses
+        ...(prettyFormat(onRampConfig, sourceNetwork.family, {
+          offRamp: destNetwork.family,
+          offramp: destNetwork.family,
+        }) as Record<string, unknown>),
+      })
       break
     default:
       if (jsonEnvelope) {
@@ -143,7 +150,13 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       break
     case Format.pretty:
       output.write(`OffRamp (${destNetwork.name}) [${destNetwork.family}]:`)
-      prettyTable.call(ctx, { offRamp, ...offRampConfig })
+      prettyTable.call(ctx, {
+        offRamp: formatDisplayAddress(offRamp, destNetwork.family),
+        // onRamps accepted by the offRamp are source-chain addresses
+        ...(prettyFormat(offRampConfig, destNetwork.family, {
+          onRamps: sourceNetwork.family,
+        }) as Record<string, unknown>),
+      })
       break
     default:
       if (jsonEnvelope) {

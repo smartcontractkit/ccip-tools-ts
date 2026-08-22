@@ -65,12 +65,14 @@ describe('logs start position validation', () => {
     )
   })
 
-  it('requires startBlock or startTime for TON logs', async () => {
+  it('requires a sinceLt cursor for TON logs', async () => {
     await assert.rejects(
       () =>
         consume(
           streamTransactionsForAddress(
-            { address: `0:${'1'.repeat(64)}` },
+            // sinceLt is required by type (callers resolve startBlock/startTime/since
+            // into lt first); the runtime guard covers untyped callers
+            { address: `0:${'1'.repeat(64)}` } as never,
             {
               provider: {} as TonClient,
               getTransaction: mock.fn(),
