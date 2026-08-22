@@ -311,6 +311,71 @@ export type LogFilter = {
    * no restriction (default), and costs nothing — `typeAndVersion` is never called.
    */
   typeAndVersions?: readonly (string | RegExp)[]
+  /**
+   * Resume hint: the last log emitted by a previous getLogs call on the same
+   * address/filter. Any subset of fields may be provided; each chain uses what it
+   * can. Two layers of behavior:
+   *
+   * 1. Start floors (ALL chains — see {@link withSinceStart}): `blockNumber` and
+   *    `blockTimestamp` stand in for `startBlock`/`startTime` — each effective floor
+   *    is the LARGER of the explicitly requested bound and the hint's — so a `since`
+   *    carrying either satisfies the start requirement on its own. Blocks/versions
+   *    are always fetched and emitted complete.
+   * 2. Block completeness: all chains implementations must guarantee all logs in
+   *    some block are yielded in the same call before it returns.
+   * 3. Exclusive resume (chains with a native per-log cursor): the hinted log itself
+   *    is NOT re-emitted, and other logs in the same block/tx may also not be;
+   *    some chains may attempt to yield logs in the same block or transaction, but
+   *    from 2., the contract guarantees only that logs from the next block or tx on
+   *    are emitted, so for an hermetic poller, it's safer to only ever pass
+   *    the *last* finalized log in the previous call as `since` hint.
+   *
+   * The hint only ever RAISES the start floors — it never scans below
+   * `startBlock`/`startTime` — and a stale, foreign or malformed hint may be ignored
+   * (the usual walk runs).
+   */
+  since?: Partial<
+    Pick<
+      ChainLog,
+      'address' | 'blockNumber' | 'blockTimestamp' | 'transactionHash' | 'index' | 'topics'
+    >
+  >
+}
+
+/**
+ * Merges a partial {@link LogFilter.since} hint into the requested start bounds:
+ * each floor is the LARGER of the explicitly requested bound and the hint's
+ * (`since.blockNumber` stands in for or raises `startBlock`, `since.blockTimestamp`
+ * for `startTime`), so a `since` carrying either satisfies the start requirement on
+ * its own. Non-finite or absent hint fields contribute nothing. Chain-specific
+ * cursor uses of `since` (TON's composite-hash lt, Solana's `until`, Aptos's event
+ * sequence number, EVM's per-block index exclusion) read `opts.since` directly and
+ * only ever raise these floors further.
+ */
+export function withSinceStart<
+  T extends {
+    startBlock?: number | bigint
+    startTime?: number | bigint
+    since?: { blockNumber?: number | bigint; blockTimestamp?: number | bigint }
+  },
+>(opts: T): T {
+  const since = opts.since
+  if (!since) return opts
+  const block = Number(since.blockNumber)
+  const timestamp = Number(since.blockTimestamp)
+  return {
+    ...opts,
+    ...(Number.isFinite(block) &&
+    block > 0 &&
+    (opts.startBlock == null || block > Number(opts.startBlock))
+      ? { startBlock: block }
+      : null),
+    ...(Number.isFinite(timestamp) &&
+    timestamp > 0 &&
+    (opts.startTime == null || timestamp > Number(opts.startTime))
+      ? { startTime: timestamp }
+      : null),
+  }
 }
 
 /**
@@ -889,6 +954,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *        required unless startTime is provided; explicit 0 is allowed
    *   - `startTime`: instead of a startBlock, a start timestamp may be provided;
    *        if either is provided, fetch logs forward from this starting point
+   *   - `since`: a previous log (preferably the *last* finalized from a previous call),
+   *        as log cursor; may be more efficient in some chains for paginating, and may
+   *        replace `startTime` or `startBlock`
    *   - `endBlock`: a fixed block height, finality tag or negative finality depth to stop iteration
    *        at; defaults to `latest`
    *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock
@@ -1920,10 +1988,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     verifications?: CCIPVerifications
   } & Pick<
     LogFilter,
-    'page' | 'watch' | 'startBlock' | 'startTime'
+    'page' | 'watch' | 'startBlock' | 'startTime' | 'since'
   >): AsyncIterableIterator<CCIPExecution> {
     if (verifications && 'log' in verifications) hints.startBlock ??= verifications.log.blockNumber
-    if (hints.startTime == null && hints.startBlock == null) throw new CCIPLogsRequiresStartError()
+    if (hints.startTime == null && hints.startBlock == null && hints.since == null)
+      throw new CCIPLogsRequiresStartError()
     for await (const log of this.getLogs({
       address: offRamp,
       topics: ['ExecutionStateChanged'],

@@ -8,6 +8,7 @@ import type { TonClient } from '@ton/ton'
 import type { JsonRpcApiProvider } from 'ethers'
 
 import { streamAptosLogs } from './aptos/logs.ts'
+import { withSinceStart } from './chain.ts'
 import { getEvmLogs } from './evm/logs.ts'
 import { getTransactionsForAddress } from './solana/logs.ts'
 import { streamSuiLogs } from './sui/events.ts'
@@ -64,12 +65,14 @@ describe('logs start position validation', () => {
     )
   })
 
-  it('requires startBlock or startTime for TON logs', async () => {
+  it('requires a sinceLt cursor for TON logs', async () => {
     await assert.rejects(
       () =>
         consume(
           streamTransactionsForAddress(
-            { address: `0:${'1'.repeat(64)}` },
+            // sinceLt is required by type (callers resolve startBlock/startTime/since
+            // into lt first); the runtime guard covers untyped callers
+            { address: `0:${'1'.repeat(64)}` } as never,
             {
               provider: {} as TonClient,
               getTransaction: mock.fn(),
@@ -101,6 +104,49 @@ describe('logs start position validation', () => {
         ),
       { name: 'CCIPLogsRequiresStartError' },
     )
+  })
+})
+
+describe('withSinceStart', () => {
+  it('merges since floors with requested starts, largest of each', () => {
+    assert.deepEqual(withSinceStart({}), {})
+    assert.deepEqual(withSinceStart({ startBlock: 5 }), { startBlock: 5 })
+    assert.deepEqual(withSinceStart({ since: { blockNumber: 10 } }), {
+      startBlock: 10,
+      since: { blockNumber: 10 },
+    })
+    assert.deepEqual(withSinceStart({ startBlock: 20, since: { blockNumber: 10 } }), {
+      startBlock: 20,
+      since: { blockNumber: 10 },
+    })
+    assert.deepEqual(withSinceStart({ startBlock: 5, since: { blockNumber: 10 } }), {
+      startBlock: 10,
+      since: { blockNumber: 10 },
+    })
+    assert.deepEqual(withSinceStart({ startTime: 300, since: { blockTimestamp: 200 } }), {
+      startTime: 300,
+      since: { blockTimestamp: 200 },
+    })
+    assert.deepEqual(withSinceStart({ startTime: 100, since: { blockTimestamp: 200 } }), {
+      startTime: 200,
+      since: { blockTimestamp: 200 },
+    })
+    // both channels merge independently
+    assert.deepEqual(
+      withSinceStart({ startBlock: 5, since: { blockNumber: 10, blockTimestamp: 200 } }),
+      { startBlock: 10, startTime: 200, since: { blockNumber: 10, blockTimestamp: 200 } },
+    )
+  })
+
+  it('ignores non-finite or non-positive hint floors', () => {
+    assert.deepEqual(withSinceStart({ since: {} }), { since: {} })
+    assert.deepEqual(withSinceStart({ since: { blockNumber: 0 } }), { since: { blockNumber: 0 } })
+    assert.deepEqual(withSinceStart({ since: { blockNumber: Number.NaN } }), {
+      since: { blockNumber: Number.NaN },
+    })
+    assert.deepEqual(withSinceStart({ since: { blockTimestamp: -5 } }), {
+      since: { blockTimestamp: -5 },
+    })
   })
 })
 

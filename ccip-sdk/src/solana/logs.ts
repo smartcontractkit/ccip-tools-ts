@@ -1,6 +1,6 @@
 import { type Connection, PublicKey } from '@solana/web3.js'
 
-import type { LogFilter } from '../chain.ts'
+import { type LogFilter, withSinceStart } from '../chain.ts'
 import type { LeanNumbers } from '../types.ts'
 import type { SolanaTransaction } from './index.ts'
 import {
@@ -19,30 +19,46 @@ async function* fetchSigsForward(
   const { connection } = ctx
   const limit = Math.min(Number(opts.page) || 1000, 1000)
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
+  const addrKey = new PublicKey(opts.address!)
+
+  // Resume hint: the signature doubles as Solana's native `until` cursor (exclusive —
+  // the hinted sig itself is not re-emitted). But `until` only has an effect when the
+  // queried node actually knows the signature, so the hint's blockNumber is ALSO an
+  // absolute slot floor: a lagging or pruning node silently matches nothing, and the
+  // floor is what then keeps sigs older than the hint from being included.
+  const startFloor = Math.max(
+    Number(opts.startBlock ?? 0) || 0,
+    Number(opts.since?.blockNumber ?? 0) || 0,
+  )
 
   // forward collect all matching sigs in array
   const allSigs: Awaited<ReturnType<typeof connection.getSignaturesForAddress>> = []
-  let batch: typeof allSigs, until: string | undefined
+  let batch: typeof allSigs,
+    until = opts.since?.transactionHash ? opts.since.transactionHash : undefined
   do {
     batch = await connection.getSignaturesForAddress(
-      new PublicKey(opts.address!),
-      { limit, before: allSigs[allSigs.length - 1]?.signature ?? opts.endBefore },
+      addrKey,
+      { before: allSigs[allSigs.length - 1]?.signature ?? opts.endBefore, until, limit },
       commitment,
     )
+    // Newest sig seen, captured even when the whole batch is about to be truncated
+    // away below: it becomes the watch-mode resume cursor when the scan collects
+    // nothing — an empty allSigs must not restart polling from the unbounded head.
     until ??= batch[0]?.signature
 
     while (
       batch.length > 0 &&
-      (batch[batch.length - 1]!.slot < Number(opts.startBlock ?? 0) ||
+      (batch[batch.length - 1]!.slot < startFloor ||
         (batch[batch.length - 1]!.blockTime ?? -1) < Number(opts.startTime ?? 0))
     ) {
       batch.length-- // truncate tail of txs which are older than requested start
     }
 
     allSigs.push(...batch) // concat in descending order
-    // special case: if startBlock=0, do a single pass
-  } while (batch.length >= limit && (opts.startBlock || opts.startTime))
+    // special case: with no start floor (startBlock=0 and no hint), do a single pass
+  } while (batch.length >= limit && (startFloor || opts.startTime))
 
+  until = allSigs[0]?.signature || until
   allSigs.reverse() // forward
 
   const notAfter =
@@ -56,15 +72,11 @@ async function* fetchSigsForward(
   }
   yield* allSigs // all past logs
 
-  if (allSigs.length) until = allSigs[allSigs.length - 1]!.signature
+  until = allSigs[allSigs.length - 1]?.signature || until
   // if not watch mode, returns
   while (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) {
     const lastReq = performance.now()
-    batch = await connection.getSignaturesForAddress(
-      new PublicKey(opts.address!),
-      { limit, until },
-      commitment,
-    )
+    batch = await connection.getSignaturesForAddress(addrKey, { limit, until }, commitment)
 
     batch.reverse() // forward
 
@@ -78,6 +90,9 @@ async function* fetchSigsForward(
     for (const sig of batch) {
       if (notAfter != null && sig.slot > notAfter) break
       until = sig.signature
+      // The start floor is absolute: a poll whose `until` the node doesn't know
+      // returns the newest page — never emit sigs older than requested from it.
+      if (sig.slot < startFloor || (sig.blockTime ?? -1) < Number(opts.startTime ?? 0)) continue
       yield sig
     }
 
@@ -116,6 +131,11 @@ export async function* getTransactionsForAddress(
 
   opts.endBlock ??= 'latest'
 
+  // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+  // No address gating here, unlike other chains: a log's address is the EMITTING
+  // program, not the queried account, so hints from cross-program streams are valid.
+  opts = withSinceStart(opts)
+
   const hasStart = opts.startBlock != null || opts.startTime != null
   if (!hasStart) throw new CCIPLogsRequiresStartError()
   if (
@@ -131,7 +151,9 @@ export async function* getTransactionsForAddress(
   const allSignatures = fetchSigsForward(opts, ctx)
   const excludeSet = new Set<string>()
   for (const addr of opts.excludeAddresses ?? []) {
-    const { watch: _, ...optsWithoutWatch } = opts
+    // The resume hint tracks the primary address's stream; applying it to an
+    // exclude-address walk would truncate that stream at a foreign signature.
+    const { watch: _, since: _s, ...optsWithoutWatch } = opts
     for await (const { signature } of fetchSigsForward(
       { ...optsWithoutWatch, address: addr },
       ctx,

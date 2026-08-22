@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: `getLogs` filters accept a partial `since` resume hint (e.g. the last log from a previous call), to resume a stream without re-scanning
+  - `since.blockNumber`/`blockTimestamp` stand in for (or raise) `startBlock`/`startTime` on all chains; a `since` with either satisfies the start requirement on its own
+  - EVM: resumes from `since.blockNumber`, excluding that block's logs with `index <= since.index` (blocks are still fetched whole)
+  - Solana: resumes from the hint's signature as the native `until` cursor, with `since.blockNumber` as an absolute slot floor when the node doesn't know the signature
+  - TON: resumes from the `lt` embedded in the composite `transactionHash` (exclusive), skipping the shard-header floor lookup when the hint covers `startBlock`
+  - Aptos: single-topic streams resume from the event `index` (handle sequence number); multi-topic streams floor at `blockNumber + 1`
+  - `getMessageById` and `getExecutionReceipts` accept `since` too
+- Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
+- TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory
+
 ## [1.12.0] - 2026-08-19
 
 - SDK: support a new `typeAndVersions?: (string | RegExp)[]` filter option for `getLogs`, emitting only logs from addresses matching type string or typeAndVersion regexp

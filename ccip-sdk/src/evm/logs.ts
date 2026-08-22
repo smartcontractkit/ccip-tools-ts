@@ -1,7 +1,7 @@
 import { type JsonRpcApiProvider, type Log, isHexString } from 'ethers'
 import type { SetFieldType, SetRequired } from 'type-fest'
 
-import type { Chain, LogFilter } from '../chain.ts'
+import { type Chain, type LogFilter, withSinceStart } from '../chain.ts'
 import {
   CCIPLogRangeTooLargeError,
   CCIPLogTopicsNotFoundError,
@@ -259,6 +259,10 @@ async function* streamLogs(
 /**
  * Implements Chain.getLogs for EVM.
  * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
+ * When both a block floor (`startBlock`, or `since.blockNumber` merged by
+ * withSinceStart) and `startTime` are provided, the scan still starts at the floor
+ * block and `startTime` only skips the early blocks before it (log timestamps are
+ * block timestamps).
  * @param filter - Chain LogFilter
  * @param ctx - Context object containing provider, logger and optional abort signal
  * @returns Async iterator of logs.
@@ -286,6 +290,19 @@ export async function* getEvmLogs(
   // Work on a shallow copy: getEvmLogs resolves page/endBlock/startBlock/topics
   // in place, and must not mutate the caller's filter object.
   filter = { ...filter }
+
+  // A hint addressed to a different contract is not this stream's: ignore it
+  // wholesale — no floors, no index exclusion.
+  if (
+    filter.since?.address &&
+    filter.address &&
+    filter.since.address.toLowerCase() !== filter.address.toLowerCase()
+  ) {
+    logger.warn('Invalid since.address: ', filter.since.address, '!==', filter.address)
+    filter.since = undefined
+  }
+  // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+  filter = withSinceStart(filter)
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
   if (
@@ -351,9 +368,21 @@ export async function* getEvmLogs(
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
+      if (
+        filter.since?.blockNumber &&
+        filter.since.index != null &&
+        log.blockNumber <= filter.since.blockNumber &&
+        log.index <= filter.since.index
+      )
+        continue // at/before the resume point within its block
+      const blockTimestamp = (await ctx.getBlockInfo(log.blockNumber)).timestamp
+      // When the block floor came from startBlock/since.blockNumber, startTime's only
+      // remaining job is to skip the early blocks before it. (When startTime alone
+      // derived the floor, getBlockNumberAtOrAfter already guaranteed this.)
+      if (filter.startTime != null && blockTimestamp < Number(filter.startTime)) continue
       if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
         continue
-      yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
+      yield { ...log, blockTimestamp }
     }
   }
 

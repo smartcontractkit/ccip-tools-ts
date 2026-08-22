@@ -1277,3 +1277,144 @@ describe('getEvmLogs — per-endpoint topic-count cap', () => {
     )
   })
 })
+
+describe('getEvmLogs — since hint', () => {
+  const url = 'https://fake-rpc-since.example.com/rpc'
+
+  // Block 100 has log indexes 0,1,2; block 101 has index 0. The provider serves
+  // exactly the logs intersecting the requested [fromBlock, toBlock] range.
+  const RANGE_LOGS = [makeLog(100, 0), makeLog(100, 1), makeLog(100, 2), makeLog(101, 0)]
+
+  function makeRangeProvider(calls: { fromBlock: number; toBlock: number | string }[]) {
+    return {
+      _getConnection: () => ({ url }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 10_000
+        return { number: num, timestamp: num * 12 }
+      },
+      _getBlockTag: async (tag: string | number) => tag,
+      getLogs: async (filter: { fromBlock: number; toBlock: number }) => {
+        calls.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock })
+        return RANGE_LOGS.filter(
+          (l) => l.blockNumber >= filter.fromBlock && l.blockNumber <= filter.toBlock,
+        )
+      },
+      on: () => {},
+      off: () => {},
+      once: (_event: unknown, cb: () => void) => setTimeout(cb, 0),
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('since alone satisfies the start requirement; the hint block is fetched whole, then filtered by index', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        { endBlock: 101, since: { blockNumber: 100, index: 1, blockTimestamp: 1200 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'queries from the hint block, fetching it whole')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['100:2', '101:0'],
+      'the hinted log (index 1) and earlier same-block logs are excluded; later ' +
+        'same-block followers and later blocks are emitted in full',
+    )
+  })
+
+  it('startBlock + startTime: scans from the floor block, startTime only skips early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        // timestamps are block*12 here: startTime 1212 == block 101's time, one past
+        // the requested floor block 100.
+        { startBlock: 100, endBlock: 101, startTime: 1212 },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'the floor is NOT raised to startTime’s block')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'block 100 (ts 1200 < 1212) is fetched whole but its logs are skipped',
+    )
+  })
+
+  it('since.blockNumber + startTime: startTime still applies to skip early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        { endBlock: 101, startTime: 1212, since: { blockNumber: 100, index: 0 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'queries from the hint block, fetching it whole')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'the hinted log is excluded by index; the rest of its early block by startTime',
+    )
+  })
+
+  it('takes the larger of startBlock and since.blockNumber', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    await collect(
+      getEvmLogs(
+        { startBlock: 105, endBlock: 106, since: { blockNumber: 100, index: 1 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 105, 'the explicit startBlock wins over the older hint')
+  })
+
+  it('since.blockTimestamp stands in for startTime (resolved to a block)', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    await collect(
+      getEvmLogs(
+        // timestamps are block*12 in this fixture: 1200 resolves to block 100
+        { endBlock: 200, since: { blockTimestamp: 1200 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100)
+  })
+
+  it('still requires a start when since carries no usable floor', async () => {
+    await assert.rejects(
+      () =>
+        collect(
+          getEvmLogs(
+            { since: { transactionHash: '0xabc' } },
+            { provider: makeRangeProvider([]), getBlockInfo, logger: console },
+          ),
+        ),
+      { name: 'CCIPLogsRequiresStartError' },
+    )
+  })
+
+  it('ignores a foreign-address hint wholesale', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const provider = makeRangeProvider(calls)
+    const logs = await collect(
+      getEvmLogs(
+        {
+          startBlock: 99,
+          endBlock: 101,
+          address: '0x00000000000000000000000000000000000000aa',
+          since: {
+            blockNumber: 101,
+            index: 0,
+            address: '0x00000000000000000000000000000000000000bb',
+          },
+        },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 99, 'the foreign hint does not raise the floor')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      RANGE_LOGS.map((l) => `${l.blockNumber}:${l.index}`),
+      'no index exclusion either',
+    )
+  })
+})

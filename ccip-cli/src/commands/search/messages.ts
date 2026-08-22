@@ -43,7 +43,15 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../../index.ts'
 import { type Ctx, Format } from '../types.ts'
-import { getCtx, logParsedError, prettyRequest, prettyTable, withDateTimestamp } from '../utils.ts'
+import {
+  formatDisplayAddress,
+  formatDisplayTxHash,
+  getCtx,
+  logParsedError,
+  prettyRequest,
+  prettyTable,
+  withDateTimestamp,
+} from '../utils.ts'
 
 export const command = ['messages [sender]', 'msgs [sender]']
 export const describe = 'Search CCIP messages'
@@ -214,9 +222,9 @@ function formatResult(msg: MessageSearchResult) {
     status: msg.status,
     source: `${msg.sourceNetworkInfo.name} [${msg.sourceNetworkInfo.chainId}]`,
     dest: `${msg.destNetworkInfo.name} [${msg.destNetworkInfo.chainId}]`,
-    sender: msg.sender,
-    receiver: msg.receiver,
-    txHash: msg.sendTransactionHash,
+    sender: formatDisplayAddress(msg.sender, msg.sourceNetworkInfo.family),
+    receiver: formatDisplayAddress(msg.receiver, msg.destNetworkInfo.family),
+    txHash: formatDisplayTxHash(msg.sendTransactionHash, msg.sourceNetworkInfo.family),
     timestamp: msg.sendTimestamp,
   }
 }
@@ -259,7 +267,7 @@ async function interactiveMenu(
     ...results.map((msg, i) => ({
       value: i,
       name: formatChoiceLabel(msg),
-      description: `sender: ${msg.sender}\nreceiver: ${msg.receiver}\ntx: ${msg.sendTransactionHash}\ntime: ${msg.sendTimestamp}`,
+      description: `sender: ${formatDisplayAddress(msg.sender, msg.sourceNetworkInfo.family)}\nreceiver: ${formatDisplayAddress(msg.receiver, msg.destNetworkInfo.family)}\ntx: ${formatDisplayTxHash(msg.sendTransactionHash, msg.sourceNetworkInfo.family)}\ntime: ${msg.sendTimestamp}`,
     })),
     { value: MENU_QUIT, name: 'Quit' },
   ]

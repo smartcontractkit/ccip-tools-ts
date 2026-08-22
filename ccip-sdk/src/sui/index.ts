@@ -26,6 +26,7 @@ import {
   type TokenPoolRemote,
   type TokenTransferFeeOpts,
   Chain,
+  withSinceStart,
 } from '../chain.ts'
 import {
   getCcipStateAddress,
@@ -791,7 +792,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, messageId, sourceChainSelector, ...hints } = opts
+    const { offRamp, messageId, sourceChainSelector, ...restHints } = opts
+    // `since` floors stand in for (or raise) startBlock/startTime here too — this
+    // override scans the indexer directly instead of going through getLogs.
+    const hints = withSinceStart(restHints)
     // executions target the LATEST offramp package (older versions are
     // version-gated and revert), so the indexer filter must too
     const offRampPkg = normalizeSuiAddress(
