@@ -1247,6 +1247,27 @@ describe('TON index unit tests', () => {
           'no startBlock conversion needed: the hint lt is already the floor (exclusive)',
         )
       })
+
+      it('a block/time-only hint satisfies the start requirement on its own', async () => {
+        // No explicit startBlock/startTime: the hint's blockNumber (merged via
+        // withSinceStart) stands in for startBlock and its composite lt is the cursor.
+        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
+        const logs = await collect(chain, { since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+          'hint blockNumber floors the scan; hinted tx excluded, same-block follower emitted',
+        )
+      })
+
+      it('a rejected hint contributes no floor (start-less query errors)', async () => {
+        const chain = makeChain(13, [11_001, 12_001])
+        await assert.rejects(
+          collect(chain, { since: hintFor(11_001, 11, '0:' + '2'.repeat(64)) }),
+          /requires startBlock/,
+          'a foreign-account hint must not raise startBlock via withSinceStart',
+        )
+      })
     })
   })
 

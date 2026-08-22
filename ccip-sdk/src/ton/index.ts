@@ -29,6 +29,7 @@ import {
   type LogFilter,
   type TokenTransferFeeOpts,
   Chain,
+  withSinceStart,
 } from '../chain.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
@@ -38,6 +39,7 @@ import {
   CCIPExecutionReportChainMismatchError,
   CCIPHttpError,
   CCIPLogsAddressRequiredError,
+  CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
@@ -857,6 +859,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     let sinceBlock: number | undefined
     if (opts.since) {
       try {
+        // A hint with a mismatching address field is not this stream's: reject it
+        // wholesale (like the mismatched composite below) so its block/time floors
+        // can't raise this scan's start either.
+        if (
+          opts.since.address &&
+          Address.parse(opts.since.address).toRawString() !== acct.toRawString()
+        )
+          throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since.address does not match')
         const parts = String(opts.since.transactionHash).split(':')
         const addressMatches =
           !opts.since.address ||
@@ -877,11 +887,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           if (Number.isFinite(b) && b > 0) sinceBlock = b
         }
       } catch {
-        // Malformed or provably-foreign hint: no cursor, no floor contribution.
+        // Malformed or provably-foreign hint: no cursor, and no floor contribution
+        // either — withSinceStart below must not trust a hint this stream rejected.
         sinceLt = undefined
         sinceBlock = undefined
+        delete opts.since
       }
     }
+    // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime,
+    // like every other chain (see withSinceStart): each floor is the LARGER of the
+    // explicit bound and the hint's, so a block/time-only hint satisfies the start
+    // requirement on its own. Runs after the parsing above, which empties a
+    // foreign/malformed hint first so it can contribute nothing.
+    opts = withSinceStart(opts)
 
     // Resume strictly after everything masterchain block (startBlock-1) committed, in
     // account-shard lt space. Every bound resolves into ONE exclusive account-lt cursor
@@ -925,6 +943,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
       // transaction at all, so there is nothing in b to skip.
     }
+    // No cursor and no time bound anywhere: withSinceStart may have raised startBlock
+    // from the hint, but when neither `since` nor an explicit bound supplies one, this
+    // is a start-less query.
+    if (sinceLtFloor == null && opts.startTime == null) throw new CCIPLogsRequiresStartError()
 
     // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
     // below serves the watermark-driven poller, which does not watch). The v3 fast path
