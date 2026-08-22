@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- TON: `getLogs` cold backfills (startTime-only, watermark-less polls) seed from the TonCenter v3 index instead of walking the account's whole tx history: one strictly-filtered `/messages` page (plus a briefly-cached tip for the lag guard), paged `/transactions` meta joins event txs by hash, and raw event txs hydrate from the v2 RPC by `(lt, hash)`
+  - Index calls use a dedicated paced, fail-fast fetch (a caller-provided `fetch` is reused verbatim; override via the TON-local `v3Fetch` context option); index inconsistencies truncate the scan like a chain gap, and the caller resumes from `since`
+  - Deep v2 walks (`startBlock`/`since` over long windows) stamp block numbers via a lazily-engaged index meta oracle after 16 txs — one index page per ~100 txs instead of 2-3 RPCs per tx (24h windows: ~130s → ~17s); shallow polls never touch the index
+  - Fix resume floors skipping the boundary transaction (`to_lt` is exclusive server-side; floors are passed un-incremented), and a TON log's `index` (its message's created_lt) is honored as an exact resume cursor
 - SDK: `getLogs` filters accept a partial `since` resume hint (e.g. the last log from a previous call), to resume a stream without re-scanning
   - `since.blockNumber`/`blockTimestamp` stand in for (or raise) `startBlock`/`startTime` on all chains; a `since` with either satisfies the start requirement on its own
   - EVM: resumes from `since.blockNumber`, excluding that block's logs with `index <= since.index` (blocks are still fetched whole)
