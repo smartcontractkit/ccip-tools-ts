@@ -168,7 +168,6 @@ type TonV3Message = {
   out_msg_tx_hash?: string | null
 }
 
-/** Subset of a TonCenter v3 `/transactions` entry the fast path relies on. */
 /** Subset of a TonCenter v3 `/transactions` entry: meta for stamping/hydration. */
 export type TonV3Transaction = {
   account: string

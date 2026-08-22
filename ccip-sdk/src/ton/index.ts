@@ -107,17 +107,6 @@ function shardContainsAccount(shardStr: string, acct: Address): boolean {
 }
 
 /**
- * TON chain implementation supporting TON networks.
- *
- * TON uses two different ordering concepts:
- * - `seqno` (sequence number): The actual block number in the masterchain
- * - `lt` (logical time): A per-account transaction ordering timestamp
- *
- * This implementation uses the masterchain `seqno` for the `blockNumber` field and
- * the message's `lt` for the `logIndex` field. The `startBlock`/`endBlock` filter
- * parameters accept masterchain seqnos and are converted to lt ranges internally.
- */
-/**
  * TON-specific {@link ChainContext} extras. Optional and local to this module on
  * purpose: the shared ChainContext stays family-agnostic, while TON's secondary index
  * API (TonCenter v3, used by the getLogs fast path) accepts its own fetch override.
@@ -129,9 +118,6 @@ export type TONChainContext = ChainContext & {
   v3Fetch?: typeof fetch
 }
 
-/**
- *
- */
 /**
  * TON chain implementation supporting TON networks.
  *
