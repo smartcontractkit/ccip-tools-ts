@@ -16,15 +16,15 @@ const DEFAULT_POLL_INTERVAL = 5000
 
 async function* fetchTxsForward(
   opts: LeanNumbers<Omit<LogFilter, 'topics' | 'startBlock' | 'startTime'>> & {
+    /** Exclusive account-lt cursor: only txs with `lt > sinceLt` stream. `to_lt` is
+     * exclusive server-side (verified against toncenter v2), so the boundary tx is
+     * never even fetched; the tail truncation below is only a defensive duplicate. */
     sinceLt: bigint
     pollInterval?: number
   },
   { provider }: { provider: TonClient },
 ) {
   const limit = Math.min(Number(opts.page) || 99, 99)
-  // Exclusive resume cursor: only txs with lt > sinceLt stream. `to_lt` is exclusive
-  // server-side (verified against toncenter v2), so the boundary tx is never even
-  // fetched; the tail truncation below is only a defensive duplicate of that.
   const { sinceLt } = opts
 
   // forward collect all matching txs in array
@@ -42,7 +42,7 @@ async function* fetchTxsForward(
     })
 
     while (batch.length > 0 && batch[batch.length - 1]!.lt <= sinceLt) {
-      batch.length-- // truncate tail of txs at/older than the exclusive cursor
+      batch.length-- // truncate tail of txs at/older than the exclusive cursor (defensive)
     }
 
     allTxs.push(...batch) // concat in descending order
@@ -103,17 +103,14 @@ async function* fetchTxsForward(
 
 /**
  * Internal method to get transactions for an address with pagination.
- *
- * Takes the start position as a resolved, exclusive account-lt cursor (`sinceLt`):
- * only transactions with `lt > sinceLt` stream. Callers resolve `startBlock`/
- * `startTime`/`since` hints into lt space beforehand (see TONChain.getLogs).
- *
- * @param opts - Log filter options plus the required `sinceLt` cursor.
+ * @param opts - Log filter options.
  * @returns Async generator of TON transactions.
  */
 export async function* streamTransactionsForAddress(
   opts: LeanNumbers<Omit<LogFilter, 'topics' | 'startBlock' | 'startTime'>> & {
-    /** Exclusive account-lt cursor to resume from: only txs with `lt > sinceLt` stream. */
+    /** Exclusive account-lt cursor to resume from: only txs with `lt > sinceLt` stream.
+     * Callers resolve `startBlock`/`startTime`/`since` hints into lt space beforehand
+     * (see TONChain.getLogs — floorLtForTime covers startTime). */
     sinceLt: bigint
     pollInterval?: number
   },
@@ -172,7 +169,8 @@ type TonV3Message = {
 }
 
 /** Subset of a TonCenter v3 `/transactions` entry the fast path relies on. */
-type TonV3Transaction = {
+/** Subset of a TonCenter v3 `/transactions` entry: meta for stamping/hydration. */
+export type TonV3Transaction = {
   account: string
   hash: string
   lt: string
@@ -194,7 +192,13 @@ export type TonV3Context = {
   provider: TonClient
   /** TonCenter v3 index base URL (see {@link tonV3BaseUrl}); without one there is no fast path. */
   v3BaseUrl?: string
+  /** Dedicated v3-index fetch: the chain seeds it paced and fail-fast (few retries) —
+   * the public index's keyless quota is ~1 RPS per egress IP, so bursting or patiently
+   * retrying here is what used to stall probes for minutes before the v2 fallback. */
   rateLimitedFetch: typeof fetch
+  /** The index's masterchain tip, for the lag guard. Network-global — implementations
+   * should cache it briefly (~30s) rather than re-query per scan. */
+  getIndexedTip: () => Promise<number>
   /** Decode a raw transaction, stamping it with the index-authoritative masterchain seqno. */
   getTransaction: (tx: Transaction, blockSeqno: number) => Promise<ChainTransaction>
   logger?: Pick<Logger, 'debug' | 'warn'>
@@ -237,21 +241,44 @@ async function fetchV3Messages(
   return messages ?? []
 }
 
-async function fetchV3TransactionByHash(
-  ctx: TonV3Context & { v3BaseUrl: string },
-  hash: string,
-): Promise<TonV3Transaction | undefined> {
-  const url = new URL(`${ctx.v3BaseUrl}/transactions`)
-  url.searchParams.set('hash', hash)
-  const res = await ctx.rateLimitedFetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) {
-    throw new CCIPHttpError(res.status, `TON v3 transaction query failed: ${await res.text()}`)
+/**
+ * The account's transactions from the v3 index, paged ascending by lt. Used as a lazy
+ * meta oracle for the event stream: one index page per ~100 account txs instead of one
+ * `/transactions?hash=` lookup per event tx — the public index's keyless quota is the
+ * scarce resource, and raw-tx hydration below already stays on the owned v2 RPC.
+ */
+export async function* streamV3TxMeta(
+  ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
+  acct: Address,
+  startUtime: number,
+  /** Seed the stream strictly after this account lt (exclusive, matching the index's
+   * `start_lt`) — used by the v2 walk's seqno oracle, which engages mid-walk. */
+  afterLt?: bigint,
+): AsyncGenerator<TonV3Transaction, void, undefined> {
+  let startLt: bigint | undefined = afterLt
+  for (;;) {
+    const url = new URL(`${ctx.v3BaseUrl}/transactions`)
+    url.searchParams.set('account', acct.toRawString())
+    if (startUtime > 0) url.searchParams.set('start_utime', String(startUtime))
+    url.searchParams.set('sort', 'asc')
+    url.searchParams.set('limit', String(V3_PAGE_LIMIT))
+    if (startLt != null) url.searchParams.set('start_lt', startLt.toString()) // exclusive
+    const res = await ctx.rateLimitedFetch(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) {
+      throw new CCIPHttpError(res.status, `TON v3 transactions query failed: ${await res.text()}`)
+    }
+    const { transactions } = (await res.json()) as { transactions?: TonV3Transaction[] }
+    const txs = transactions ?? []
+    yield* txs
+    if (txs.length < V3_PAGE_LIMIT) return
+    startLt = BigInt(txs[txs.length - 1]!.lt)
   }
-  const { transactions } = (await res.json()) as { transactions?: TonV3Transaction[] }
-  return transactions?.[0]
 }
 
-async function fetchV3IndexedTip(ctx: TonV3Context & { v3BaseUrl: string }): Promise<number> {
+/** Fetches the v3 index's masterchain tip seqno (`/masterchainInfo`), for the lag guard. */
+export async function fetchV3IndexedTip(
+  ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
+): Promise<number> {
   const res = await ctx.rateLimitedFetch(`${ctx.v3BaseUrl}/masterchainInfo`, {
     headers: { Accept: 'application/json' },
   })
@@ -296,17 +323,18 @@ export async function openV3EventStream(
   const startUtime = Math.max(0, Math.floor(Number(opts.startTime ?? 0)))
   let firstPage: TonV3Message[]
   try {
-    const [page, indexedTip] = await Promise.all([
-      fetchV3Messages(ctxV3, { source: acct.toRawString(), startUtime, limit }),
-      fetchV3IndexedTip(ctxV3),
-    ])
+    // Serialized (never concurrent): firing both at once would self-trip the public
+    // index's 1-burst keyless quota and 429 the probe. Messages page first — it is the
+    // load-bearing call; the tip is cached chain-side (~30s), so a steady-state probe
+    // costs exactly ONE index call.
+    firstPage = await fetchV3Messages(ctxV3, { source: acct.toRawString(), startUtime, limit })
+    const indexedTip = await ctx.getIndexedTip()
     if (indexedTip < cutoff - V3_MAX_INDEX_LAG) {
       throw new CCIPHttpError(
         0,
         `TON v3 index lagging: tip ${indexedTip} vs requested cutoff ${cutoff}`,
       )
     }
-    firstPage = page
   } catch (err) {
     ctx.logger?.debug('TON getLogs: v3 fast path unavailable, falling back to v2 walk:', err)
     return null
@@ -323,6 +351,29 @@ async function* generateV3Events(
   // Pages are ascending by created_lt (unique per account message), so a tx's first
   // message marks its position and the created_lt cursor is a safe page boundary.
   const seen = new Set<string>()
+  // Lazy lt-ordered meta oracle over the account's txs (one index page per ~100 txs).
+  // Within an account, message created_lt order aligns with tx lt order (a tx's
+  // messages sit in (tx.lt, nextTx.lt)), so the join only ever looks ahead; entries
+  // behind the last match are pruned.
+  const metaStream = streamV3TxMeta(ctx, acct, q.startUtime)
+  const metaByHash = new Map<string, TonV3Transaction>()
+  let metaDone = false
+  const metaLookup = async (hash: string): Promise<TonV3Transaction | undefined> => {
+    for (;;) {
+      const hit = metaByHash.get(hash)
+      if (hit) {
+        for (const [h, t] of metaByHash) if (BigInt(t.lt) < BigInt(hit.lt)) metaByHash.delete(h)
+        return hit
+      }
+      if (metaDone) return undefined
+      const next = await metaStream.next()
+      if (next.done) {
+        metaDone = true
+        return undefined
+      }
+      metaByHash.set(next.value.hash, next.value)
+    }
+  }
   let page = firstPage
   for (;;) {
     for (const msg of page) {
@@ -331,7 +382,7 @@ async function* generateV3Events(
       seen.add(txHash)
       let meta: TonV3Transaction | undefined, raw: Transaction | null | undefined
       try {
-        meta = await fetchV3TransactionByHash(ctx, txHash)
+        meta = await metaLookup(txHash)
         raw = meta ? await ctx.provider.getTransaction(acct, meta.lt, txHash) : undefined
       } catch (err) {
         ctx.logger?.warn(`TON v3 event stream truncated (tx ${txHash}):`, err)

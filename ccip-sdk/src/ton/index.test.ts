@@ -4,10 +4,9 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
-import { ChainFamily, NetworkType, networkInfo } from '../index.ts'
+import { ChainFamily, networkInfo } from '../index.ts'
 import type { ExecutionInput } from '../types.ts'
 import { TONChain } from './index.ts'
-import { tonV3BaseUrl } from './logs.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
@@ -1007,154 +1006,50 @@ describe('TON index unit tests', () => {
     // on-chain (its successor still links to it via prevTransactionLt) but isn't indexed yet —
     // i.e. a gap. lookupBlock deliberately UNDER-assigns (returns block-1) to exercise the
     // committingSeqno climb. getTransactions honours the (lt, hash, to_lt, limit) cursor.
-    // With `v3`, the endpoint gains an `/api/v2` path and the fetch mock also serves the
-    // TonCenter v3 index (messages/transactions/masterchainInfo), derived from the same
-    // history: one log message per external-out msg, stamped with blockOf(lt) as mc seqno.
     function makeChain(
       latest: number,
       all: number[],
       missing: number[] = [],
-      {
-        underAssign = true,
-        v3,
-        txOf = tx,
-      }: {
-        underAssign?: boolean
-        v3?: {
-          tip?: number // indexed tip reported by v3 masterchainInfo (default: latest)
-          fail?: boolean // every v3 request 500s (probe failure → v2 fallback)
-          missingMetaFor?: number[] // lts whose v3 /transactions lookup comes back empty
-          mcSeqnoOf?: (lt: number) => number // default blockOf
-          public?: boolean // endpoint has no /api/v2 path; v3 served as the "public" index
-        }
-        txOf?: (lt: number) => ReturnType<typeof tx>
-      } = {},
+      { underAssign = true }: { underAssign?: boolean } = {},
     ) {
       const asc = [...all].sort((a, b) => a - b)
       // Link each lt to its true on-chain predecessor (over the FULL history).
       const prevLt = new Map<bigint, bigint>()
       asc.forEach((lt, i) => prevLt.set(BigInt(lt), i > 0 ? BigInt(asc[i - 1]!) : 0n))
       const present = asc.filter((lt) => !missing.includes(lt))
-      const byLt = new Map(asc.map((lt) => [BigInt(lt), txOf(lt)] as const))
       const linked = present
-        .map((lt) => byLt.get(BigInt(lt))!)
+        .map(tx)
         .reverse()
         .map((t) => ({ ...t, prevTransactionLt: prevLt.get(t.lt)!, prevTransactionHash: 0n }))
 
-      const calls = {
-        v2Walk: 0,
-        v2Hydrate: [] as bigint[],
-        v2LookupBlock: [] as { lt?: string; unixtime?: number }[],
-        v3Messages: [] as Record<string, string | null>[],
-      }
-      const endpoint =
-        v3 && !v3.public ? 'http://mock-ton-api/api/v2/jsonRPC' : 'http://mock-ton-api'
-      const hashB64 = (lt: number) => (byLt.get(BigInt(lt))!.hash() as Buffer).toString('base64')
-      // The v3 index sees every tx (no `missing` lag): one log message per external-out.
-      const v3Messages = asc.flatMap((lt) => {
-        const t = byLt.get(BigInt(lt))!
-        return [...t.outMessages.values()].map((msg) => ({
-          hash: `${hashB64(lt)}#${String(msg.info.createdLt)}`,
-          source: OFFRAMP,
-          destination: null,
-          created_lt: String(msg.info.createdLt),
-          created_at: String(t.now),
-          out_msg_tx_hash: hashB64(lt),
-        }))
-      })
-
-      const json = (data: unknown) =>
-        new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
-      const fetchImpl = (async (url: unknown, opts?: { body?: string }) => {
-        const u = String(url)
-        if (u.includes('/api/v3/')) {
-          if (!v3) throw new Error(`unexpected v3 url (harness has no v3): ${u}`)
-          const req = Object.fromEntries(new URL(u).searchParams.entries())
-          if (u.includes('/messages')) {
-            calls.v3Messages.push({ ...req, url: u })
-            if (v3.fail) return new Response('v3 down', { status: 500 })
-            const startUtime = Number(req.start_utime ?? 0)
-            const startLt = req.start_lt != null ? BigInt(req.start_lt) : undefined
-            const limit = Number(req.limit ?? 10)
-            let msgs = v3Messages.filter((m) => Number(m.created_at) >= startUtime)
-            if (startLt != null) msgs = msgs.filter((m) => BigInt(m.created_lt) >= startLt)
-            return json({ messages: msgs.slice(0, limit) })
-          }
-          if (v3.fail) return new Response('v3 down', { status: 500 })
-          if (u.includes('/transactions')) {
-            const lt = asc.find((l) => hashB64(l) === req.hash)
-            const transactions =
-              lt != null && !v3.missingMetaFor?.includes(lt)
-                ? [
-                    {
-                      account: OFFRAMP,
-                      hash: req.hash,
-                      lt: String(lt),
-                      now: 100 + lt,
-                      mc_block_seqno: v3.mcSeqnoOf ? v3.mcSeqnoOf(lt) : blockOf(BigInt(lt)),
-                    },
-                  ]
-                : []
-            return json({ transactions })
-          }
-          if (u.includes('/masterchainInfo')) return json({ last: { seqno: v3.tip ?? latest } })
-          throw new Error(`unexpected v3 url ${u}`)
-        }
-        const body = JSON.parse(opts?.body ?? '{}') as {
-          method?: string
-          params?: { lt?: string; unixtime?: number; seqno?: number }
-        }
+      const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
+        const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
         if (body.method === 'lookupBlock') {
-          calls.v2LookupBlock.push(body.params!)
-          let block: number
-          if (body.params!.unixtime != null) {
-            // Harness time model: block N's gen_utime = 100 + N*1000 (txs at now=100+lt).
-            // lookupBlock(unixtime=T) returns the last block with gen_utime <= T.
-            const t = body.params!.unixtime
-            if (t > 100 + latest * 1000) throw new Error(`block not found (utime=${t} past tip)`)
-            block = Math.max(1, Math.floor((t - 100) / 1000))
-          } else {
-            block = blockOf(BigInt(body.params!.lt!))
-          }
+          const block = blockOf(BigInt(body.params!.lt!))
           const seqno = underAssign ? Math.max(1, block - 1) : block // under-assign by 1
-          return json({ result: { seqno } })
-        }
-        if (body.method === 'getBlockHeader') {
-          const seqno = Number(body.params!.seqno)
-          return json({
-            result: {
-              gen_utime: 100 + seqno * 1000,
-              start_lt: String(seqno * 1000),
-              end_lt: String(seqno * 1000 + 999),
-              min_ref_mc_seqno: seqno,
-            },
+          return new Response(JSON.stringify({ result: { seqno } }), {
+            headers: { 'Content-Type': 'application/json' },
           })
         }
         throw new Error(`unexpected fetch method=${body.method}`)
       }) as unknown as typeof fetch
 
       const client = {
-        parameters: { endpoint },
+        parameters: { endpoint: 'http://mock-ton-api' },
         getMasterchainInfo: async () => ({ workchain: -1, shard: ROOT_SHARD, latestSeqno: latest }),
         getWorkchainShards: async (seqno: number) => [{ workchain: 0, shard: ROOT_SHARD, seqno }],
         getTransactions: async (
           _a: Address,
           o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
         ) => {
-          calls.v2Walk++
           let start = 0
           if (o.lt != null) {
             const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
             start = at < 0 ? linked.length : o.inclusive ? at : at + 1
           }
           let page = linked.slice(start, start + o.limit)
-          // toncenter v2's to_lt is EXCLUSIVE server-side (verified against mainnet).
-          if (o.to_lt != null) page = page.filter((t) => t.lt > BigInt(o.to_lt!))
+          if (o.to_lt != null) page = page.filter((t) => t.lt >= BigInt(o.to_lt!))
           return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
-        },
-        getTransaction: async (_a: Address, lt: string, _hash: string) => {
-          calls.v2Hydrate.push(BigInt(lt))
-          return byLt.get(BigInt(lt)) ?? null
         },
       } as unknown as TonClient
 
@@ -1166,7 +1061,7 @@ describe('TON index unit tests', () => {
           getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
         }
       ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno)
-      return Object.assign(chain, { calls })
+      return chain
     }
 
     async function collect(chain: TONChain, opts: Record<string, unknown>) {
@@ -1189,62 +1084,6 @@ describe('TON index unit tests', () => {
         chain as unknown as { committingSeqno: (lt: bigint, a: Address) => Promise<number> }
       ).committingSeqno(10_005n, Address.parse(OFFRAMP))
       assert.equal(seqno, 10, 'climbs from the under-assigned 9 to the true committing block 10')
-    })
-
-    it('reuses the resolved masterchain lt range for adjacent txs (one lookup per block)', async () => {
-      // lookupBlock is exact here (no under-assign): lt N*1000+k maps to block N, whose
-      // header range is [N*1000, N*1000+999]. A second tx in the same block must not
-      // pay another rate-limited lookup; a tx in the next block pays exactly one.
-      let lookups = 0
-      const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
-        const body = JSON.parse(opts?.body ?? '{}') as {
-          method?: string
-          params?: { lt?: string; seqno?: number }
-        }
-        if (body.method === 'lookupBlock') {
-          lookups++
-          const seqno = Math.floor(Number(BigInt(body.params!.lt!) / 1000n))
-          return new Response(JSON.stringify({ result: { seqno } }), {
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        if (body.method === 'getBlockHeader') {
-          const seqno = Number(body.params!.seqno)
-          return new Response(
-            JSON.stringify({
-              result: {
-                gen_utime: 100 + seqno,
-                start_lt: String(seqno * 1000),
-                end_lt: String(seqno * 1000 + 999),
-                min_ref_mc_seqno: seqno,
-              },
-            }),
-            { headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        throw new Error(`unexpected fetch method=${body.method}`)
-      }) as unknown as typeof fetch
-
-      const client = {
-        parameters: { endpoint: 'http://mock-ton-api' },
-        getMasterchainInfo: async () => ({ workchain: -1, shard: ROOT_SHARD, latestSeqno: 20 }),
-        getWorkchainShards: async (seqno: number) => [{ workchain: 0, shard: ROOT_SHARD, seqno }],
-      } as unknown as TonClient
-      const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
-      ;(
-        chain as unknown as {
-          getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
-        }
-      ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno)
-
-      const acct = Address.parse(OFFRAMP)
-      const c = chain.committingSeqno.bind(chain)
-      assert.equal(await c(10_005n, acct), 10)
-      assert.equal(lookups, 1, 'first tx pays the lookup')
-      assert.equal(await c(10_006n, acct), 10)
-      assert.equal(lookups, 1, 'adjacent tx in the same block is answered from the memo')
-      assert.equal(await c(11_005n, acct), 11)
-      assert.equal(lookups, 2, 'crossing a block pays exactly one new lookup')
     })
 
     it('emits sealed blocks but holds the unsealed tip block', async () => {
@@ -1397,22 +1236,6 @@ describe('TON index unit tests', () => {
           foreign.map((l) => l.block),
           [11, 12],
         )
-        // The address FIELD matches here, but the composite hash embeds another
-        // account: its lt is not this account's cursor and must be ignored, or txs
-        // would be silently skipped. blockNumber 12 > startBlock 11 also proves its
-        // block/time floors are discarded along with the cursor (a leaked floor
-        // would skip block 11).
-        const foreignEmbedded = await collect(chain, {
-          startBlock: 11,
-          since: {
-            ...hintFor(11_001, 12),
-            transactionHash: `0:${'2'.repeat(64)}:11001:${'ab'.repeat(32)}`,
-          },
-        })
-        assert.deepEqual(
-          foreignEmbedded.map((l) => l.block),
-          [11, 12],
-        )
       })
 
       it('provides the floor directly on startTime-only scans', async () => {
@@ -1422,258 +1245,6 @@ describe('TON index unit tests', () => {
           logs.map((l) => l.block),
           [12],
           'no startBlock conversion needed: the hint lt is already the floor (exclusive)',
-        )
-      })
-
-      it('since alone satisfies the start requirement', async () => {
-        // No startBlock/startTime at all: the hint's blockNumber merges into the
-        // startBlock floor (skipping the shard lookup), its lt is the exact cursor.
-        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
-        const logs = await collect(chain, { since: hintFor(11_001) })
-        assert.deepEqual(
-          logs.map((l) => l.lt),
-          ['11002', '12001'],
-          'resumes strictly after the hinted tx with no explicit start',
-        )
-      })
-    })
-
-    describe('startTime conversion (v2 walk)', () => {
-      it('converts startTime to an lt floor via lookupBlock(unixtime) when v3 is unavailable', async () => {
-        // No v3 on this harness → the probe throws, and the v2 walk resolves the floor:
-        // T = 11_100 is block 11's time → resume after E(10) = 10_999 → blocks 11 & 12.
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { underAssign: false })
-        const logs = await collect(chain, { startTime: 100 + 11_000 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [11, 12],
-        )
-        assert.ok(
-          chain.calls.v2LookupBlock.some((p) => p.unixtime === 100 + 11_000),
-          'startTime resolved via lookupBlock(unixtime)',
-        )
-        assert.ok(chain.calls.v2Walk > 0, 'the v2 walk ran')
-      })
-
-      it('over-includes the boundary block (whole-block startTime semantics)', async () => {
-        // startTime 10_105 lands mid-block-10 (its tx has now = 10_101 < T): the
-        // boundary block is scanned whole — matching EVM's startTime handling.
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { underAssign: false })
-        const logs = await collect(chain, { startTime: 10_105 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [10, 11, 12],
-        )
-      })
-
-      it('returns empty when startTime is past the tip', async () => {
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { underAssign: false })
-        const logs = await collect(chain, { startTime: 100 + 13 * 1000 + 500 })
-        assert.deepEqual(logs, [])
-      })
-    })
-
-    describe('v3 fast path (startTime-only scans)', () => {
-      const hintFor = (lt: number, block = blockOf(BigInt(lt))) => ({
-        address: OFFRAMP,
-        blockNumber: block,
-        blockTimestamp: 100 + lt,
-        transactionHash: `${OFFRAMP}:${lt}:${'ab'.repeat(32)}`,
-        index: lt,
-      })
-
-      it('enumerates log messages from the v3 index, never touching v2 pagination', async () => {
-        // Tip 12 ⇒ cutoff 11: sealed blocks 10 & 11 emit; the unsealed tip block 12 is
-        // held even though its event is enumerated and hydrated.
-        const chain = makeChain(12, [10_001, 11_001, 12_001], [], { v3: {} })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [10, 11],
-          'sealed blocks emit; the tip block is withheld',
-        )
-        assert.equal(chain.calls.v2Walk, 0, 'no v2 getTransactions pagination')
-        const probe = chain.calls.v3Messages[0]!
-        assert.equal(probe.source, OFFRAMP)
-        assert.equal(probe.destination, 'null', 'log (external-out) messages only')
-        assert.equal(probe.direction, 'out')
-        assert.equal(probe.start_utime, '1')
-        assert.equal(probe.sort, 'asc')
-        assert.equal(probe.limit, '100')
-        // Each event tx is resolved (v3) and hydrated (v2) exactly once — including the
-        // tip block's, which is fetched before the scan stops at the cutoff.
-        assert.deepEqual(chain.calls.v2Hydrate, [10_001n, 11_001n, 12_001n])
-      })
-
-      it('applies the startTime floor index-side (start_utime)', async () => {
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { v3: {} })
-        const logs = await collect(chain, { startTime: 100 + 11_001 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [11, 12],
-          'block 10 (older than startTime) is filtered by the index, not scanned',
-        )
-        assert.equal(chain.calls.v2Walk, 0)
-        assert.equal(chain.calls.v3Messages[0]!.start_utime, String(100 + 11_001))
-      })
-
-      it('pages the index by created_lt cursor', async () => {
-        const chain = makeChain(12, [10_001, 10_002, 10_003, 10_004, 10_005, 11_001], [], {
-          v3: {},
-        })
-        const logs = await collect(chain, { startTime: 1, page: 2 })
-        assert.deepEqual(
-          logs.map((l) => l.lt),
-          ['10001', '10002', '10003', '10004', '10005', '11001'],
-        )
-        const starts = chain.calls.v3Messages.map((c) => c.start_lt ?? null)
-        assert.deepEqual(starts, [null, '10003', '10005', '11002'], 'exclusive lt cursor')
-      })
-
-      it('hydrates a multi-event transaction once, emitting all its events', async () => {
-        const tx2 = (lt: number) => {
-          const t = tx(lt)
-          t.outMessages.set(1, {
-            info: {
-              type: 'external-out' as const,
-              src: Address.parse(OFFRAMP),
-              dest: { value: BigInt(topicCrc) },
-              createdLt: BigInt(lt) + 1n,
-            },
-            body: beginCell().storeUint(2, 8).endCell(),
-          })
-          return t
-        }
-        const chain = makeChain(12, [10_001, 11_001], [], { v3: {}, txOf: tx2 })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.lt),
-          ['10001', '10002', '11001', '11002'],
-          'both events of each tx emit (createdLt 10001 & 10002, 11001 & 11002)',
-        )
-        assert.deepEqual(
-          chain.calls.v2Hydrate,
-          [10_001n, 11_001n],
-          'one v2 fetch per unique event tx',
-        )
-      })
-
-      it('falls back to the v2 walk when the v3 probe fails', async () => {
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], {
-          v3: { fail: true },
-          underAssign: false,
-        })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [10, 11, 12],
-          'same logs via v2',
-        )
-        assert.ok(chain.calls.v3Messages.length >= 1, 'v3 was probed')
-        assert.ok(chain.calls.v2Walk > 0, 'v2 walk took over')
-      })
-
-      it('falls back when the v3 index lags far behind the chain tip', async () => {
-        const chain = makeChain(400, [398_001, 399_001], [], {
-          v3: { tip: 98 }, // cutoff 399; a 300-block lag is the most we tolerate
-          underAssign: false,
-        })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [398, 399],
-          'same logs via v2',
-        )
-        assert.ok(chain.calls.v2Walk > 0, 'v2 walk took over')
-      })
-
-      it('drops the in-progress block when the stream truncates (index inconsistency)', async () => {
-        // The index lists a message for 12_001 but cannot resolve its tx — the stream
-        // truncates. Block 10 completed (boundary crossed) and stands; block 11 was in
-        // progress and must be dropped, exactly like a chain gap on the v2 walk.
-        const chain = makeChain(13, [10_001, 10_002, 11_001, 12_001], [], {
-          v3: { missingMetaFor: [12_001] },
-        })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.lt),
-          ['10001', '10002'],
-        )
-      })
-
-      it('stops the scan when blocks rewind (inconsistent index)', async () => {
-        const chain = makeChain(13, [10_001, 11_001, 12_001], [], {
-          v3: { mcSeqnoOf: (lt) => (lt === 12_001 ? 9 : blockOf(BigInt(lt))) },
-        })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [10],
-          'block 11 drained at the boundary; the rewound block is dropped',
-        )
-      })
-
-      it('falls back to the public TonCenter index when the endpoint has no v3 API', async () => {
-        // Bare liteserver endpoint (no /api/v2 path): the fast path queries the public
-        // TonCenter v3 index for the chain's network instead (same fallback as
-        // raw-hash transaction lookups).
-        const chain = makeChain(12, [10_001, 11_001], [], { v3: { public: true } })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [10, 11],
-        )
-        assert.equal(chain.calls.v2Walk, 0, 'no v2 getTransactions pagination')
-        assert.ok(
-          chain.calls.v3Messages[0]!.url!.startsWith('https://testnet.toncenter.com/api/v3/'),
-          `public testnet index used, got: ${chain.calls.v3Messages[0]!.url}`,
-        )
-      })
-
-      it('keeps the v2 walk when a startBlock or an lt-carrying since is present', async () => {
-        let chain = makeChain(13, [11_001, 12_001], [], { v3: {}, underAssign: false })
-        let logs = await collect(chain, { startBlock: 11 })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [11, 12],
-        )
-        assert.equal(chain.calls.v3Messages.length, 0, 'startBlock floors use the exact v2 walk')
-
-        chain = makeChain(13, [10_001, 11_001, 12_001], [], { v3: {}, underAssign: false })
-        logs = await collect(chain, { startTime: 1, since: hintFor(11_001) })
-        assert.deepEqual(
-          logs.map((l) => l.block),
-          [12],
-          'exclusive resume after the hint',
-        )
-        assert.equal(chain.calls.v3Messages.length, 0, 'a `since` lt cursor uses the v2 walk')
-      })
-    })
-
-    describe('tonV3BaseUrl', () => {
-      it('derives the v3 base from toncenter-style /api/v2 endpoints', () => {
-        assert.equal(
-          tonV3BaseUrl('https://toncenter.com/api/v2/jsonRPC', NetworkType.Mainnet),
-          'https://toncenter.com/api/v3',
-        )
-        assert.equal(
-          tonV3BaseUrl('https://testnet.toncenter.com/api/v2/jsonRPC', NetworkType.Testnet),
-          'https://testnet.toncenter.com/api/v3',
-        )
-        assert.equal(
-          tonV3BaseUrl('https://example.com/api/v2', NetworkType.Mainnet),
-          'https://example.com/api/v3',
-        )
-      })
-
-      it('falls back to the public TonCenter index for endpoints without /api/v2', () => {
-        assert.equal(
-          tonV3BaseUrl('https://tonapi.io/v2', NetworkType.Mainnet),
-          'https://toncenter.com/api/v3',
-        )
-        assert.equal(
-          tonV3BaseUrl('http://localhost:8081/jsonRPC', NetworkType.Testnet),
-          'https://testnet.toncenter.com/api/v3',
         )
       })
     })

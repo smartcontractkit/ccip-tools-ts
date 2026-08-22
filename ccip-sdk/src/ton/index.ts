@@ -12,8 +12,11 @@ import {
 } from './extra-args.ts'
 import {
   type TonV3Event,
+  type TonV3Transaction,
+  fetchV3IndexedTip,
   openV3EventStream,
   streamTransactionsForAddress,
+  streamV3TxMeta,
   tonV3BaseUrl,
 } from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
@@ -26,7 +29,6 @@ import {
   type LogFilter,
   type TokenTransferFeeOpts,
   Chain,
-  withSinceStart,
 } from '../chain.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
@@ -36,7 +38,6 @@ import {
   CCIPExecutionReportChainMismatchError,
   CCIPHttpError,
   CCIPLogsAddressRequiredError,
-  CCIPLogsRequiresStartError,
   CCIPNotImplementedError,
   CCIPReceiptNotFoundError,
   CCIPSourceChainUnsupportedError,
@@ -114,6 +115,32 @@ function shardContainsAccount(shardStr: string, acct: Address): boolean {
  * the message's `lt` for the `logIndex` field. The `startBlock`/`endBlock` filter
  * parameters accept masterchain seqnos and are converted to lt ranges internally.
  */
+/**
+ * TON-specific {@link ChainContext} extras. Optional and local to this module on
+ * purpose: the shared ChainContext stays family-agnostic, while TON's secondary index
+ * API (TonCenter v3, used by the getLogs fast path) accepts its own fetch override.
+ * `v3Fetch` defaults to `fetch` verbatim when one is provided; otherwise the chain
+ * builds a host-paced, fail-fast instance itself.
+ */
+export type TONChainContext = ChainContext & {
+  /** Fetch override for the TonCenter v3 index API (see TONChain.v3FetchFor). */
+  v3Fetch?: typeof fetch
+}
+
+/**
+ *
+ */
+/**
+ * TON chain implementation supporting TON networks.
+ *
+ * TON uses two different ordering concepts:
+ * - `seqno` (sequence number): The actual block number in the masterchain
+ * - `lt` (logical time): A per-account transaction ordering timestamp
+ *
+ * This implementation uses the masterchain `seqno` for the `blockNumber` field and
+ * the message's `lt` for the `logIndex` field. The `startBlock`/`endBlock` filter
+ * parameters accept masterchain seqnos and are converted to lt ranges internally.
+ */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
     supportedChains[ChainFamily.TON] = TONChain
@@ -130,7 +157,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param network - Network information for this chain.
    * @param ctx - Context containing logger.
    */
-  constructor(client: TonClient, network: NetworkInfo, ctx?: ChainContext) {
+  constructor(client: TonClient, network: NetworkInfo, ctx?: TONChainContext) {
     super(network, ctx)
     this.provider = client
 
@@ -138,6 +165,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.rateLimitedFetch =
       ctx?.fetch ??
       createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
+
+    // v3 index fetch: an explicit `v3Fetch` (TON-local ctx extra) wins; a
+    // caller-provided `fetch` is reused verbatim (tests, tuned callers); otherwise the
+    // first v3 call lazily installs a host-paced, fail-fast instance (see v3FetchFor).
+    this.v3Fetch_ = ctx?.v3Fetch ?? ctx?.fetch
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
@@ -199,7 +231,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @param ctx - Optional chain context with logger, API client, and fetch function.
    * @returns TONChain instance configured for the detected network (mainnet or testnet).
    */
-  static async fromClient(client: TonClient, ctx?: ChainContext): Promise<TONChain> {
+  static async fromClient(client: TonClient, ctx?: TONChainContext): Promise<TONChain> {
     // Verify connection by getting the latest block
     const isMainnet =
       (
@@ -219,12 +251,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @returns A new TONChain instance.
    * @throws {@link CCIPHttpError} if connection to the RPC endpoint fails
    */
-  static async fromUrl(url: string, ctx?: ChainContext): Promise<TONChain> {
+  static async fromUrl(url: string, ctx?: TONChainContext): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
     if (!url.endsWith('/jsonRPC')) url += '/jsonRPC'
 
     // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
     const fetchFn: typeof fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+    // Same provenance for the v3 index fetch (a TON-local ctx extra): a
+    // caller-supplied fetch is reused verbatim; the default path gets a dedicated
+    // paced, fail-fast instance instead of the v2 endpoint's profile (see v3FetchFor).
+    const v3Fetch: typeof fetch | undefined =
+      ctx?.v3Fetch ??
+      ctx?.fetch ??
+      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 2 }, ctx)
 
     // For known public providers, detect network from URL to avoid an API call during init
     // (free-tier endpoints are rate-limited and return transient 5xx errors).
@@ -250,8 +289,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
               ...ctx,
               fetch: fetchFn,
+              v3Fetch,
             })
-          : await this.fromClient(client, { ...ctx, fetch: fetchFn })
+          : await this.fromClient(client, { ...ctx, fetch: fetchFn, v3Fetch })
       logger.debug(`Connected to TON V2 endpoint: ${url}`)
       return chain
     } catch (error) {
@@ -314,6 +354,30 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
     const { result } = (await res.json()) as { result: { seqno: number } }
     return result.seqno
+  }
+
+  /**
+   * The exclusive account-lt cursor for a `startTime` bound: the shard-lt boundary of
+   * the masterchain block current at that time. Whole-block semantics — the boundary
+   * block is scanned whole (its txs may slightly predate startTime), matching EVM's
+   * startTime handling.
+   * @internal
+   */
+  async floorLtForTime(startTime: number | bigint, acct: Address): Promise<bigint> {
+    const utime = Math.max(0, Math.floor(Number(startTime)))
+    let b: number
+    try {
+      b = await this.getMCSeqNoByUnixtime(utime)
+    } catch (err) {
+      // lookupBlock errors when the time is past the node's tip. Confirm against the
+      // tip's own timestamp: a genuinely future startTime means an empty backfill —
+      // the floor is the tip's shard end and a watch proceeds from there. Anything
+      // else (transient RPC failure) rethrows.
+      const tip = await this.getBlockInfo('latest').catch(() => undefined)
+      if (!tip || utime <= tip.timestamp) throw err
+      return this.accountShardEndLt(tip.number, acct)
+    }
+    return b > 1 ? this.accountShardEndLt(b - 1, acct) : 0n
   }
 
   /**
@@ -405,27 +469,102 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * The exclusive account-lt cursor for a `startTime` bound: the shard-lt boundary of
-   * the masterchain block current at that time. Whole-block semantics — the boundary
-   * block is scanned whole (its txs may slightly predate startTime), matching EVM's
-   * startTime handling.
+   * The masterchain seqno that actually commits the account transaction at logical time
+   * `lt` — the first block whose account-shard `end_lt` covers `lt`. `getMCSeqNoByLt`
+   * maps by masterchain lt range and under-assigns (returns a block at/earlier than the
+   * committing one); this climbs from that lower bound to the true committing block, so
+   * a tx's `blockNumber` is stable and never appears "in" an already-passed block.
    * @internal
    */
-  async floorLtForTime(startTime: number | bigint, acct: Address): Promise<bigint> {
-    const utime = Math.max(0, Math.floor(Number(startTime)))
-    let b: number
-    try {
-      b = await this.getMCSeqNoByUnixtime(utime)
-    } catch (err) {
-      // lookupBlock errors when the time is past the node's tip. Confirm against the
-      // tip's own timestamp: a genuinely future startTime means an empty backfill —
-      // the floor is the tip's shard end and a watch proceeds from there. Anything
-      // else (transient RPC failure) rethrows.
-      const tip = await this.getBlockInfo('latest').catch(() => undefined)
-      if (!tip || utime <= tip.timestamp) throw err
-      return this.accountShardEndLt(tip.number, acct)
+  // Dedicated fetch for the v3 index: seeded from the INDEX host's profile (paced —
+  // the public keyless quota is ~1 RPS per egress IP) and fail-fast (2 retries) — the
+  // v2 walk remains the patient path. Reusing the v2 endpoint's fetch for v3 calls
+  // would inherit an unseeded full-speed profile (bursts → 429 storms) and its deep
+  // retry budget (minute-plus stalls before the fallback can engage). Pre-set by the
+  // constructor when the caller supplies `v3Fetch`/`fetch`; lazily created otherwise.
+  private v3Fetch_?: typeof fetch
+
+  /** The dedicated v3-index fetch (see the note above); lazily created when unset. */
+  private v3FetchFor(baseUrl: string): typeof fetch {
+    return (this.v3Fetch_ ??= createRateLimitedFetch(
+      { ...fetchProfileForUrl(baseUrl), maxRetries: 2 },
+      { logger: this.logger },
+    ))
+  }
+
+  // The v3 index's masterchain tip, cached 30s: the lag guard is network-global, so a
+  // scan should pay one index call (its messages page), not two.
+  private v3Tip_?: { at: number; seqno: number }
+
+  /**
+   * Lazy v3 seqno oracle for deep v2 walks. Deep scans (cold backfills) would
+   * otherwise pay ~2–3 RPCs per tx in {@link committingSeqno}; past a small threshold
+   * the index's paged `/transactions` meta (one call per ~100 account txs) supplies the
+   * same committing-block seqno instead. Shallow walks — the steady-state poll — never
+   * touch v3. Any index error kills the oracle for the rest of the scan (txs fall back
+   * to `committingSeqno` individually); a walked tx missing from the index (tip lag)
+   * falls back without stalling the lt merge-join (both sides ascend).
+   */
+  private v3SeqnoOracle(acct: Address): { lookup: (lt: bigint) => Promise<number | undefined> } {
+    const ORACLE_AFTER_N_TXS = 16
+    const ctxV3 = {
+      rateLimitedFetch: this.v3FetchFor(
+        tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
+      ),
+      v3BaseUrl: tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
     }
-    return b > 1 ? this.accountShardEndLt(b - 1, acct) : 0n
+    let stream: AsyncGenerator<TonV3Transaction, void, undefined> | undefined
+    let pending: TonV3Transaction | undefined // one-slot lookahead for the merge-join
+    let preOracleTxs = 0
+    let dead = false
+    return {
+      lookup: async (lt: bigint) => {
+        if (dead) return undefined
+        if (!stream) {
+          if (++preOracleTxs < ORACLE_AFTER_N_TXS) return undefined
+          stream = streamV3TxMeta(ctxV3, acct, 0, lt - 1n) // start_lt is exclusive
+        }
+        const s = stream
+        try {
+          for (;;) {
+            if (!pending) {
+              const next = await s.next()
+              if (next.done) {
+                dead = true // index window exhausted (tip lag) — fall back from here on
+                return undefined
+              }
+              pending = next.value
+            }
+            const mlt = BigInt(pending.lt)
+            if (mlt < lt) {
+              pending = undefined // index entry behind the walk — advance
+              continue
+            }
+            if (mlt === lt) {
+              const seqno = pending.mc_block_seqno
+              pending = undefined
+              return seqno
+            }
+            return undefined // tx not yet indexed — keep the lookahead for the next tx
+          }
+        } catch {
+          dead = true // index unhappy — the v2 path stays authoritative
+          return undefined
+        }
+      },
+    }
+  }
+
+  /** The v3 index's masterchain tip, cached 30s (network-global, not per-scan). */
+  private async getV3IndexedTip(baseUrl: string): Promise<number> {
+    const cached = this.v3Tip_
+    if (cached && Date.now() - cached.at < 30_000) return cached.seqno
+    const seqno = await fetchV3IndexedTip({
+      rateLimitedFetch: this.v3FetchFor(baseUrl),
+      v3BaseUrl: baseUrl,
+    })
+    this.v3Tip_ = { at: Date.now(), seqno }
+    return seqno
   }
 
   // Last masterchain block resolved by lt lookup, with its [start_lt, end_lt) range.
@@ -436,11 +575,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   private lastMcLookup?: { startLt: bigint; endLt: bigint; seqno: number }
 
   /**
-   * The masterchain seqno that actually commits the account transaction at logical time
-   * `lt` — the first block whose account-shard `end_lt` covers `lt`. `getMCSeqNoByLt`
-   * maps by masterchain lt range and under-assigns (returns a block at/earlier than the
-   * committing one); this climbs from that lower bound to the true committing block, so
-   * a tx's `blockNumber` is stable and never appears "in" an already-passed block.
+   * The masterchain seqno that actually commits the account transaction at logical
+   * time `lt` — the first block whose account-shard `end_lt` covers `lt`.
+   * `getMCSeqNoByLt` maps by masterchain lt range and under-assigns (returns a block
+   * at/earlier than the committing one); this climbs from that lower bound to the true
+   * committing block, so a tx's `blockNumber` is stable and never appears "in" an
+   * already-passed block.
    * @internal
    */
   async committingSeqno(lt: number | bigint, acct: Address): Promise<number> {
@@ -543,6 +683,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     } else {
       address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
     }
+
     return this.buildChainTransaction(tx, address)
   }
 
@@ -605,271 +746,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * Async generator that yields logs from TON transactions.
-   *
-   * `startBlock`/`endBlock` are masterchain seqnos (public interface). Internally they
-   * are converted to the account's *shard* logical-time range — not the masterchain lt
-   * range — before paginating, because account transactions carry shard lt: converting
-   * through masterchain lt would skip shard txs whose lt falls below a masterchain
-   * block's start_lt.
-   *
-   * Completeness invariant (non-watch): a masterchain block's account transactions land
-   * asynchronously as shards commit, so a block can gain txs after it first appears. The
-   * poller advances a per-block watermark and never re-scans below it, so getLogs must
-   * only emit a block once it is proven complete — either a later block's tx has been
-   * observed with the on-chain tx chain intact across the boundary, or the scan reached
-   * a sealed cutoff (`latest - confirmations`). A break in the chain (a `prevTransactionLt`
-   * link that does not match) means a committed tx is not yet indexed, so getLogs stops
-   * before that block and the poller retries. Watch mode streams live (no buffering).
-   *
-   * @param opts - Log filter options (startBlock/endBlock are masterchain seqnos)
-   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
-   */
-  async *getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog> {
-    if (opts.watch) {
-      opts = {
-        ...opts,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : this.abort,
-      }
-    }
-    let topics: Set<string> | undefined
-    if (opts.topics?.length) {
-      if (!opts.topics.every((topic) => typeof topic === 'string'))
-        throw new CCIPTopicsInvalidError(opts.topics)
-      // append events discriminants (if not 0x-8B already), but keep OG topics
-      topics = new Set([
-        ...opts.topics,
-        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => crc32(t)),
-      ])
-    }
-    const matches = (log: ChainLog) => !topics || topics.has(log.topics[0]!)
-
-    if (!opts.address) throw new CCIPLogsAddressRequiredError()
-    const acct = Address.parse(opts.address)
-
-    // Resume hint: the composite transactionHash carries an exact per-account cursor
-    // ("workchain:address:lt:hash"; lt is unique and monotone per account). The floor
-    // is EXCLUSIVE — matching the (lt, hash) pagination cursor, the hinted tx itself is
-    // not re-streamed; only strictly-later txs are.
-    //
-    // Validation happens BEFORE any floor merging below: a hint provably not from
-    // this account's stream — a foreign address field, or a composite hash embedding
-    // a DIFFERENT account — is ignored wholesale, so its blockNumber/blockTimestamp
-    // can't raise the floors either and skip this account's logs. A hint whose hash
-    // is absent or not composite simply contributes no lt cursor (its block/time
-    // floors still merge); so does one whose embedded lt doesn't parse.
-    let sinceLt: bigint | undefined
-    let sinceBlock: number | undefined
-    if (opts.since) {
-      try {
-        if (
-          opts.since.address &&
-          Address.parse(opts.since.address).toRawString() !== acct.toRawString()
-        )
-          throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since.address does not match')
-        if (opts.since.transactionHash) {
-          const parts = opts.since.transactionHash.split(':')
-          if (parts.length === 4) {
-            if (Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() !== acct.toRawString())
-              throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since.address does not match')
-            if (/^\d+$/.test(parts[2]!)) {
-              sinceLt = BigInt(parts[2]!)
-              const b = Number(opts.since.blockNumber)
-              if (Number.isFinite(b) && b > 0) sinceBlock = b
-            }
-          }
-        }
-        if (sinceLt == null && opts.since.index != null) sinceLt = BigInt(opts.since.index)
-        if (sinceBlock == null && opts.since.blockNumber != null)
-          sinceBlock = Number(opts.since.blockNumber)
-      } catch {
-        delete opts.since
-      }
-    }
-    // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
-    opts = withSinceStart(opts)
-
-    const { since: _, ...opts_ } = opts // consumed here; the v2 walk below only understands lt floors
-
-    // Resolve every start bound into one EXCLUSIVE account-lt cursor for the v2 walk
-    // (streamTransactionsForAddress streams strictly after it):
-    // - a `since` hint contributes its lt directly (the hinted tx is never re-streamed);
-    // - startBlock b becomes E(b-1) — resume strictly after everything masterchain block
-    //   b-1 committed, in account-shard lt space. This boundary is exact, not
-    //   approximate, because both directions of the seqno↔lt mapping are the SAME
-    //   function E(M) = accountShardEndLt(M): a tx commits at C(t) = min{ M : E(M) >=
-    //   t.lt } (what committingSeqno computes and getTransaction stamps as blockNumber).
-    //   Hence
-    //       t.lt > E(b-1)  <=>  C(t) >= b
-    //   so paging from E(b-1) yields exactly the txs committing at blocks >= b — never
-    //   one belonging to b or later, and never one already covered below b.
-    // - startTime converts via lookupBlock(unixtime) on the walk paths (watch, or the
-    //   v2 fallback when the v3 fast path below is unavailable) — whole-block
-    //   over-inclusion at the boundary block, matching EVM's startTime handling.
-    //
-    // In particular, committingSeqno(E(b-1)+1) landing PAST b is normal and lossless,
-    // not a mapping disagreement: E is the shard's end_lt, so it only advances when the
-    // masterchain block references a newer shard block for this account's shard. When
-    // block b references the same shard block as b-1 (frequent — roughly every other
-    // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
-    // transaction at all, so there is nothing in b to skip.
-    let startSeqno: number | undefined
-    let sinceLtFloor: bigint | undefined = sinceLt
-    if (opts.startBlock != null) {
-      const b = Number(opts.startBlock)
-      startSeqno = b
-      if (sinceBlock != null && sinceLt != null && sinceBlock >= b) {
-        // The hint's lt already satisfies this floor — the seqno↔lt identity above says
-        // C(t) >= b <=> t.lt > E(b-1), and the hinted tx commits at sinceBlock >= b — so
-        // the shard-header lookup would only produce a lower floor. Skip it (saves 2 RPCs
-        // per scan on the steady-state poll path).
-      } else {
-        const floor = b > 1 ? await this.accountShardEndLt(b - 1, acct) : 0n
-        // The hint only ever RAISES the floor (it can shrink the scan, never widen it
-        // below the requested one): the higher (newer) of the two cursors wins.
-        if (sinceLtFloor == null || floor > sinceLtFloor) sinceLtFloor = floor
-      }
-    }
-    if (sinceLtFloor == null && opts.startTime == null) throw new CCIPLogsRequiresStartError()
-
-    // The walk consumes no startBlock/startTime: both are carried by sinceLtFloor.
-    const { startBlock: _startBlock, startTime: _startTime, ...walkBase } = opts_
-
-    // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
-    // below serves the watermark-driven poller, which does not watch). The v3 fast path
-    // is non-watch only, so a startTime-only watch converts its floor here.
-    if (opts.watch) {
-      sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
-      for await (const tx of streamTransactionsForAddress(
-        { ...walkBase, sinceLt: sinceLtFloor },
-        this,
-      )) {
-        for (const log of tx.logs) {
-          if (!matches(log)) continue
-          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
-          yield log
-        }
-      }
-      return
-    }
-
-    // Completeness cutoff: the highest masterchain block we may emit. An explicit
-    // positive endBlock bounds it; otherwise it's `latest - confirmations` so the
-    // unsealed tip is never emitted. `finality` (a negative depth, as the poller passes)
-    // overrides the default confirmation depth.
-    const finality = (opts as { finality?: unknown }).finality
-    const confirmations = typeof finality === 'number' && finality < 0 ? -finality : 1
-    let cutoff = Number.MAX_SAFE_INTEGER
-    if (
-      (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
-      Number(opts.endBlock) > 0
-    ) {
-      cutoff = Number(opts.endBlock)
-    } else {
-      const latest = (await this.provider.getMasterchainInfo()).latestSeqno
-      cutoff = Math.max(1, latest - Math.max(1, confirmations))
-    }
-
-    // v3 fast path: on hintless startTime-only scans (the poller's cold backfill),
-    // enumerate the account's log messages straight from the TonCenter v3 index
-    // instead of walking the whole tx chain from the tip with rate-limited v2 pages —
-    // see openV3EventStream. Gated to hintless scans: a `since` lt cursor or a
-    // startBlock floor already bounds the v2 walk to an exact, cheap window. When the
-    // RPC endpoint has no v3 API of its own, the public TonCenter index for this
-    // network stands in (same fallback as raw-hash transaction lookups).
-    if (opts.startBlock == null && opts.startTime != null && sinceLt == null) {
-      const v3Stream = await openV3EventStream(
-        opts_,
-        {
-          provider: this.provider,
-          v3BaseUrl: tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType),
-          rateLimitedFetch: this.rateLimitedFetch,
-          getTransaction: (tx, seqno) => this.buildChainTransaction(tx, acct, seqno),
-          logger: this.logger,
-        },
-        cutoff,
-      )
-      if (v3Stream) {
-        yield* this.emitSealedV3Events(v3Stream, opts, cutoff, matches)
-        return
-      }
-    }
-
-    // v2 walk (only path left): a startTime-only scan converts its floor here, once.
-    sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
-
-    // Cap the fetch just past the cutoff so a tx of block (cutoff+1) can confirm the
-    // cutoff block complete, without pulling the whole unsealed tip.
-    walkBase.endBlock = await this.accountShardEndLt(cutoff + 1, acct).catch(() =>
-      this.accountShardEndLt(cutoff, acct),
-    )
-
-    let curBlock: number | undefined
-    let buf: ChainLog[] = []
-    let prevLt: bigint | undefined
-    // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
-    const drain = (): ChainLog[] => {
-      const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
-      buf = []
-      return out
-    }
-
-    for await (const tx of streamTransactionsForAddress(
-      { ...walkBase, sinceLt: sinceLtFloor },
-      this,
-    )) {
-      const raw = (tx as { tx?: { lt: bigint; prevTransactionLt: bigint } }).tx
-      if (raw && prevLt !== undefined && raw.prevTransactionLt !== prevLt) {
-        // Gap: a committed tx between prevLt and this one is not yet indexed — the
-        // current block may be incomplete. Drop it and stop; the poller retries.
-        buf = []
-        curBlock = undefined
-        break
-      }
-      const block = tx.blockNumber
-      // Defensive: by the resume-boundary identity above, every tx this fetch returns
-      // must sit above the cursor in lt space and therefore commit at or after
-      // startSeqno. A violation can only mean E disagreed with itself between the
-      // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
-      // and emitting it would rewind the poller's watermark over blocks this scan never
-      // covered. Drop the in-progress block and stop, like the gap case; the poller
-      // retries. Conservative on purpose: stalling is recoverable, skipping is not.
-      if ((startSeqno !== undefined && block < startSeqno) || (raw && raw.lt <= sinceLtFloor)) {
-        this.logger.warn(
-          `TON getLogs: tx lt=${raw?.lt} commits at block ${block}, below the ` +
-            `startBlock=${startSeqno} / lt cursor=${sinceLtFloor} resume boundary; stopping scan`,
-        )
-        buf = []
-        curBlock = undefined
-        break
-      }
-      // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
-      if (curBlock !== undefined && block !== curBlock) {
-        for (const log of drain()) {
-          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
-          yield log
-        }
-      }
-      curBlock = block
-      if (block > cutoff) {
-        // Reached the unsealed region (prior block already drained). Stop.
-        curBlock = undefined
-        break
-      }
-      for (const log of tx.logs) if (matches(log)) buf.push(log)
-      if (raw) prevLt = raw.lt
-    }
-    // Exhausted within the sealed cutoff (no gap): the last block is complete.
-    for (const log of drain()) {
-      if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
-      yield log
-    }
-  }
-
-  /**
    * Consume the v3 event stream (see {@link openV3EventStream}), emitting complete
    * sealed blocks. Mirrors the v2 consumption loop in getLogs, minus the
    * chain-integrity and lt-floor checks: the index is block-atomic (a block's log
@@ -923,6 +799,275 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     }
     // Exhausted within the sealed cutoff (not truncated): the last block is complete.
     yield* drain(this)
+  }
+
+  /**
+   * Async generator that yields logs from TON transactions.
+   *
+   * `startBlock`/`endBlock` are masterchain seqnos (public interface). Internally they
+   * are converted to the account's *shard* logical-time range — not the masterchain lt
+   * range — before paginating, because account transactions carry shard lt: converting
+   * through masterchain lt would skip shard txs whose lt falls below a masterchain
+   * block's start_lt.
+   *
+   * Completeness invariant (non-watch): a masterchain block's account transactions land
+   * asynchronously as shards commit, so a block can gain txs after it first appears. The
+   * poller advances a per-block watermark and never re-scans below it, so getLogs must
+   * only emit a block once it is proven complete — either a later block's tx has been
+   * observed with the on-chain tx chain intact across the boundary, or the scan reached
+   * a sealed cutoff (`latest - confirmations`). A break in the chain (a `prevTransactionLt`
+   * link that does not match) means a committed tx is not yet indexed, so getLogs stops
+   * before that block and the poller retries. Watch mode streams live (no buffering).
+   *
+   * @param opts - Log filter options (startBlock/endBlock are masterchain seqnos)
+   * @throws {@link CCIPTopicsInvalidError} if topics format is invalid
+   */
+  async *getLogs(opts: LeanNumbers<LogFilter>): AsyncIterableIterator<ChainLog> {
+    if (opts.watch) {
+      opts = {
+        ...opts,
+        watch:
+          opts.watch instanceof AbortSignal
+            ? AbortSignal.any([opts.watch, this.abort])
+            : this.abort,
+      }
+    }
+    let topics: Set<string> | undefined
+    if (opts.topics?.length) {
+      if (!opts.topics.every((topic) => typeof topic === 'string'))
+        throw new CCIPTopicsInvalidError(opts.topics)
+      // append events discriminants (if not 0x-8B already), but keep OG topics
+      topics = new Set([
+        ...opts.topics,
+        ...opts.topics.filter((t) => !isHexString(t, 8)).map((t) => crc32(t)),
+      ])
+    }
+    const matches = (log: ChainLog) => !topics || topics.has(log.topics[0]!)
+
+    if (!opts.address) throw new CCIPLogsAddressRequiredError()
+    const acct = Address.parse(opts.address)
+
+    // Resume hint: the composite transactionHash carries an exact per-account cursor
+    // ("workchain:address:lt:hash"; lt is unique and monotone per account). The floor
+    // is EXCLUSIVE — matching the (lt, hash) pagination cursor, the hinted tx itself is
+    // not re-streamed; only strictly-later txs are. A hint whose address doesn't match
+    // the polled account, or that doesn't parse, is ignored and the usual block/time
+    // floor applies.
+    let sinceLt: bigint | undefined
+    let sinceBlock: number | undefined
+    if (opts.since) {
+      try {
+        const parts = String(opts.since.transactionHash).split(':')
+        const addressMatches =
+          !opts.since.address ||
+          Address.parse(opts.since.address).toRawString() === acct.toRawString()
+        if (parts.length === 4 && /^\d+$/.test(parts[2]!) && addressMatches) {
+          // The composite embeds its account: a foreign one is not this stream's
+          // cursor — a mismatched lt would silently skip this account's txs, so reject
+          // the hint wholesale (its blockNumber must not raise the floors either).
+          if (Address.parseRaw(`${parts[0]}:${parts[1]}`).toRawString() !== acct.toRawString())
+            throw new CCIPError(CCIPErrorCode.UNKNOWN, 'since hash embeds a foreign account')
+          sinceLt = BigInt(parts[2]!)
+        }
+        if (addressMatches) {
+          // A TON log's `index` IS its message's created_lt — an exact account-lt
+          // cursor on its own (worker hints carry a naked hash but always an index).
+          if (sinceLt == null && opts.since.index != null) sinceLt = BigInt(opts.since.index)
+          const b = Number(opts.since.blockNumber)
+          if (Number.isFinite(b) && b > 0) sinceBlock = b
+        }
+      } catch {
+        // Malformed or provably-foreign hint: no cursor, no floor contribution.
+        sinceLt = undefined
+        sinceBlock = undefined
+      }
+    }
+
+    // Resume strictly after everything masterchain block (startBlock-1) committed, in
+    // account-shard lt space. Every bound resolves into ONE exclusive account-lt cursor
+    // (`sinceLtFloor`) — the walk only understands lt space, and its `to_lt` is
+    // exclusive server-side (verified against toncenter v2), so floors are passed
+    // un-incremented: +1 would skip the boundary tx. startTime-only scans carry no
+    // cursor and are bounded by the walk's in-page `now` truncation instead.
+    const opts_ = { ...opts }
+    delete opts_.since // consumed here
+    delete opts_.startBlock // converted to `sinceLtFloor` (public startBlock is a seqno)
+    let startSeqno: number | undefined
+    // The hint seeds the floor, so the block floor below can only RAISE it (the hint
+    // shrinks the scan, never widens it below the requested one): the higher (newer)
+    // of the two cursors wins. Both sides are in account-shard lt space, so the
+    // comparison is exact.
+    let sinceLtFloor: bigint | undefined = sinceLt
+    if (opts.startBlock != null) {
+      const b = Number(opts.startBlock)
+      startSeqno = b
+      if (sinceBlock != null && sinceLt != null && sinceBlock >= b) {
+        // The hint's lt already satisfies this floor — the seqno↔lt identity below
+        // says C(t) >= b <=> t.lt > E(b-1), and the hinted tx commits at
+        // sinceBlock >= b — so the shard-header lookup would only produce a lower
+        // floor. Skip it (saves 2 RPCs per scan on the steady-state poll path).
+      } else {
+        const floor = b > 1 ? await this.accountShardEndLt(b - 1, acct) : 0n
+        if (sinceLtFloor == null || floor > sinceLtFloor) sinceLtFloor = floor
+      }
+      // This boundary is exact, not approximate, because both directions of the
+      // seqno↔lt mapping are the SAME function E(M) = accountShardEndLt(M): a tx commits
+      // at C(t) = min{ M : E(M) >= t.lt } (what committingSeqno computes and getTransaction
+      // stamps as blockNumber), and the resume lt is E(b-1)+1. Hence
+      //     t.lt >= resumeLt  <=>  t.lt > E(b-1)  <=>  C(t) >= b
+      // so paging from resumeLt yields exactly the txs committing at blocks >= b — never
+      // one belonging to b or later, and never one already covered below b.
+      //
+      // In particular, committingSeqno(resumeLt) landing PAST b is normal and lossless,
+      // not a mapping disagreement: E is the shard's end_lt, so it only advances when the
+      // masterchain block references a newer shard block for this account's shard. When
+      // block b references the same shard block as b-1 (frequent — roughly every other
+      // masterchain block on ton-testnet), E(b) == E(b-1) and block b commits no account
+      // transaction at all, so there is nothing in b to skip.
+    }
+
+    // Watch mode streams live: emit logs as their txs arrive (the completeness buffering
+    // below serves the watermark-driven poller, which does not watch). The v3 fast path
+    // is non-watch only, so a startTime-only watch converts its floor here, once.
+    if (opts.watch) {
+      sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
+      for await (const tx of streamTransactionsForAddress(
+        { ...opts_, sinceLt: sinceLtFloor },
+        this,
+      )) {
+        for (const log of tx.logs) {
+          if (!matches(log)) continue
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
+      }
+      return
+    }
+
+    // Completeness cutoff: the highest masterchain block we may emit. An explicit
+    // positive endBlock bounds it; otherwise it's `latest - confirmations` so the
+    // unsealed tip is never emitted. `finality` (a negative depth, as the poller passes)
+    // overrides the default confirmation depth.
+    const finality = (opts as { finality?: unknown }).finality
+    const confirmations = typeof finality === 'number' && finality < 0 ? -finality : 1
+    let cutoff = Number.MAX_SAFE_INTEGER
+    if (
+      (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      Number(opts.endBlock) > 0
+    ) {
+      cutoff = Number(opts.endBlock)
+    } else {
+      const latest = (await this.provider.getMasterchainInfo()).latestSeqno
+      cutoff = Math.max(1, latest - Math.max(1, confirmations))
+    }
+
+    // v3 fast path: on hintless startTime-only scans (the poller's cold backfill),
+    // enumerate the account's log messages straight from the TonCenter v3 index instead
+    // of walking the whole window's tx pages and paying a committingSeqno resolution
+    // per tx — see openV3EventStream. Gated to hintless scans: a `since` lt cursor
+    // or a startBlock floor already bounds the v2 walk to an exact, cheap window. Index
+    // calls go through a dedicated paced, fail-fast fetch and the lag-guard tip is
+    // cached ~30s, so a steady-state scan costs exactly one index call.
+    if (opts.startBlock == null && opts.startTime != null && sinceLt == null) {
+      const v3BaseUrl = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
+      const v3Stream = await openV3EventStream(
+        opts_,
+        {
+          provider: this.provider,
+          v3BaseUrl,
+          rateLimitedFetch: this.v3FetchFor(v3BaseUrl),
+          getIndexedTip: () => this.getV3IndexedTip(v3BaseUrl),
+          getTransaction: (tx, seqno) => this.buildChainTransaction(tx, acct, seqno),
+          logger: this.logger,
+        },
+        cutoff,
+      )
+      if (v3Stream) {
+        yield* this.emitSealedV3Events(v3Stream, opts, cutoff, matches)
+        return
+      }
+    }
+
+    // v2 walk (only path left): a startTime-only scan converts its floor here, once.
+    sinceLtFloor ??= await this.floorLtForTime(opts.startTime!, acct)
+
+    // Cap the fetch just past the cutoff so a tx of block (cutoff+1) can confirm the
+    // cutoff block complete, without pulling the whole unsealed tip.
+    opts_.endBlock = await this.accountShardEndLt(cutoff + 1, acct).catch(() =>
+      this.accountShardEndLt(cutoff, acct),
+    )
+
+    let curBlock: number | undefined
+    let buf: ChainLog[] = []
+    let prevLt: bigint | undefined
+    // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
+    const drain = (): ChainLog[] => {
+      const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
+      buf = []
+      return out
+    }
+
+    // Deep walks stamp seqnos via the lazily-engaged v3 meta oracle (see
+    // v3SeqnoOracle); shallow ones — the steady-state poll — stay pure v2. Misses and
+    // index errors fall back per tx to the (memoized) committingSeqno path.
+    const seqnoOracle = this.v3SeqnoOracle(acct)
+    const walkCtx = {
+      provider: this.provider,
+      getTransaction: async (tx: Transaction): Promise<ChainTransaction> => {
+        const seqno = await seqnoOracle.lookup(tx.lt)
+        return seqno != null ? this.buildChainTransaction(tx, acct, seqno) : this.getTransaction(tx)
+      },
+    }
+    for await (const tx of streamTransactionsForAddress(
+      { ...opts_, sinceLt: sinceLtFloor },
+      walkCtx,
+    )) {
+      const raw = (tx as { tx?: { lt: bigint; prevTransactionLt: bigint } }).tx
+      if (raw && prevLt !== undefined && raw.prevTransactionLt !== prevLt) {
+        // Gap: a committed tx between prevLt and this one is not yet indexed — the
+        // current block may be incomplete. Drop it and stop; the poller retries.
+        buf = []
+        curBlock = undefined
+        break
+      }
+      const block = tx.blockNumber
+      // Defensive: by the resume-boundary identity above, every tx this fetch returns
+      // must sit at or above the floor in lt space and therefore commit at or after
+      // startSeqno. A violation can only mean E disagreed with itself between the
+      // boundary and the blockNumber stamp (e.g. a stale/other RPC answering mid-scan),
+      // and emitting it would rewind the poller's watermark over blocks this scan never
+      // covered. Drop the in-progress block and stop, like the gap case; the poller
+      // retries. Conservative on purpose: stalling is recoverable, skipping is not.
+      if ((startSeqno !== undefined && block < startSeqno) || (raw && raw.lt <= sinceLtFloor)) {
+        this.logger.warn(
+          `TON getLogs: tx lt=${raw?.lt} commits at block ${block}, below the ` +
+            `startBlock=${startSeqno} / lt cursor=${sinceLtFloor} resume boundary; stopping scan`,
+        )
+        buf = []
+        curBlock = undefined
+        break
+      }
+      // Crossed a block boundary with the chain intact ⇒ curBlock is complete.
+      if (curBlock !== undefined && block !== curBlock) {
+        for (const log of drain()) {
+          if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+          yield log
+        }
+      }
+      curBlock = block
+      if (block > cutoff) {
+        // Reached the unsealed region (prior block already drained). Stop.
+        curBlock = undefined
+        break
+      }
+      for (const log of tx.logs) if (matches(log)) buf.push(log)
+      if (raw) prevLt = raw.lt
+    }
+    // Exhausted within the sealed cutoff (no gap): the last block is complete.
+    for (const log of drain()) {
+      if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
+      yield log
+    }
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
