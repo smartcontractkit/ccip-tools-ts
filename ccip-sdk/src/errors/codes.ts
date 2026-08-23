@@ -208,6 +208,7 @@ export const TRANSIENT_ERROR_CODES = new Set<CCIPErrorCode>([
   CCIPErrorCode.TIMEOUT,
   CCIPErrorCode.SOLANA_LOOKUP_TABLE_NOT_FOUND,
   CCIPErrorCode.SOLANA_REF_ADDRESSES_NOT_FOUND,
+  CCIPErrorCode.LOGS_STREAM_INCONSISTENT,
 ])
 
 /** Returns true if error code is transient. */
