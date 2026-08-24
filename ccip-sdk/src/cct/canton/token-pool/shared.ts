@@ -7,6 +7,7 @@
 
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import type { JsCommands } from '../../../canton/client/index.ts'
+import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 import {
   EMPTY_CHOICE_CONTEXT,
@@ -37,6 +38,14 @@ export interface PoolContractRef {
   createdEventBlob: string
   /** Synchronizer the contract was read from. */
   synchronizerId: string
+  /**
+   * Concrete package-ID template ID (`<pkg-id>:<Module>:<Entity>`) as returned
+   * by the ACS. Preferred over the symbolic `#<pkg-name>:…` form — the
+   * participant's interactive-submission path rejects package-name references
+   * (`#…`) in exercise commands (`non expected character 0x23 in Daml-LF
+   * Package ID`). Populated by {@link resolvePoolRef} / {@link toContractRef}.
+   */
+  templateId?: string
 }
 
 /** Project a resolved {@link CantonActiveContract} into a {@link PoolContractRef}. */
@@ -45,7 +54,53 @@ export function toContractRef(contract: CantonActiveContract): PoolContractRef {
     contractId: contract.contractId,
     createdEventBlob: contract.createdEventBlob,
     synchronizerId: contract.synchronizerId,
+    templateId: contract.templateId,
   }
+}
+
+/**
+ * Shared CCIP singleton deps (TAR / FeeQuoter / RMNRemote raw instance
+ * addresses) a pool references. All fields optional at the API surface —
+ * unresolved fields fall back to the well-known per-network constants.
+ */
+export interface PoolFactoryDeps {
+  /** Token Admin Registry raw instance address. */
+  tokenAdminRegistry: string
+  /** FeeQuoter raw instance address. */
+  feeQuoter: string
+  /** RMNRemote raw instance address. */
+  rmnRemote: string
+}
+
+/**
+ * Resolve pool factory deps: explicit per-field overrides win; missing fields
+ * fall back to the well-known contracts registered for `chain.network.chainId`
+ * (see {@link getCantonNetworkConfig}). Throws unless every field resolves.
+ */
+export function resolvePoolFactoryDeps(
+  opName: string,
+  chain: CantonChain,
+  overrides?: Partial<PoolFactoryDeps>,
+): PoolFactoryDeps {
+  const chainId = String(chain.network.chainId)
+  const wellKnown = getCantonNetworkConfig(chainId)
+  const deps = {
+    tokenAdminRegistry: overrides?.tokenAdminRegistry ?? wellKnown?.tokenAdminRegistry,
+    feeQuoter: overrides?.feeQuoter ?? wellKnown?.feeQuoter,
+    rmnRemote: overrides?.rmnRemote ?? wellKnown?.rmnRemote,
+  }
+  const missing = Object.entries(deps)
+    .filter(([, v]) => !v)
+    .map(([k]) => k)
+  if (missing.length > 0) {
+    throw new CCTParamsInvalidError(
+      opName,
+      'deps',
+      `missing ${missing.join(', ')} and no well-known contracts registered for network ` +
+        `"${chainId}" — pass deps explicitly`,
+    )
+  }
+  return deps as PoolFactoryDeps
 }
 
 /** Inputs to {@link buildFactoryExercise}. */
@@ -122,11 +177,17 @@ export interface BuildPoolExerciseInput {
 export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
   const { choice, templateId, poolContract, extraDisclosedContracts, choiceArgument, actAs, commandIdPrefix } =
     input
+  // Prefer the concrete package-ID template from the resolved contract over
+  // the symbolic `#<pkg-name>:…` form — the interactive-submission `prepare`
+  // step rejects package-name references (`non expected character 0x23 in
+  // Daml-LF Package ID`). The ACS / EDS return the concrete form; fall back to
+  // the symbolic form only if the contract was supplied without one.
+  const concreteTemplateId = poolContract.templateId ?? templateId
   return {
     commands: [
       {
         ExerciseCommand: {
-          templateId,
+          templateId: concreteTemplateId,
           contractId: poolContract.contractId,
           choice,
           choiceArgument,
@@ -137,7 +198,7 @@ export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
     actAs,
     disclosedContracts: [
       {
-        templateId,
+        templateId: concreteTemplateId,
         contractId: poolContract.contractId,
         createdEventBlob: poolContract.createdEventBlob,
         synchronizerId: poolContract.synchronizerId,
@@ -257,7 +318,7 @@ export interface PoolCreateArgsInput {
   /** TAR / RMNRemote / FeeQuoter RAW instance addresses (`"instanceId@party"`). */
   deps: { tokenAdminRegistry: string; rmnRemote: string; feeQuoter: string }
   /** Pool receive-context choice-context (default: empty). */
-  poolReceiveContext?: { values: unknown[] }
+  poolReceiveContext?: { values: Record<string, unknown> }
   /** Transfer timeout (default: `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
 }

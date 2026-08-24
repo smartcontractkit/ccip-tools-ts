@@ -182,6 +182,39 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     })
   })
 
+  it('decodes remoteChainConfigs in natural JSON (array of [key, value] pairs, Numeric key with trailing dot)', async () => {
+    // The Canton JSON Ledger API (and the gateway `ledgerApi` proxy) serializes
+    // a Daml `Map (Numeric 0) X` as a bare array of [key, value] pairs, with the
+    // `Numeric 0` key carrying a trailing `.` — the live shape confirmed by
+    // scripts/dump-pool-state.ts against CV1.
+    const naturalMap = [
+      [
+        '16015286601757825753.',
+        remoteChainConfig({
+          remotePools: ['0x0000000000000000000000000000000000000001'],
+          remoteTokenAddress: '0x0000000000000000000000000000000000000001',
+        }),
+      ],
+    ]
+    const manager = CantonTokenManager.fromChain(
+      chainWith(poolContract({ remoteChainConfigs: naturalMap as unknown as Record<string, unknown> })),
+    )
+
+    const result = await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+      poolType: 'burnMint',
+      poolOwner: POOL_OWNER,
+    })
+
+    assert.equal(result.remoteChainConfigs.length, 1)
+    assert.deepEqual(result.remoteChainConfigs[0], {
+      // Trailing `.` stripped from the Numeric key.
+      remoteChainSelector: '16015286601757825753',
+      remotePools: ['0x0000000000000000000000000000000000000001'],
+      remoteTokenAddress: '0x0000000000000000000000000000000000000001',
+    })
+  })
+
   it('throws when the pool is not active/visible', async () => {
     const manager = CantonTokenManager.fromChain(chainWith(null))
     await assert.rejects(

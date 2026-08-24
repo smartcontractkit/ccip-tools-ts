@@ -12,8 +12,8 @@
  * @packageDocumentation
  */
 
-/** Empty `Splice.Api.Token.MetadataV1.ChoiceContext` (`values` is a `GenMap` → JSON array). */
-export const EMPTY_CHOICE_CONTEXT: Record<string, unknown> = { values: [] }
+/** Empty `Splice.Api.Token.MetadataV1.ChoiceContext` (`values` is a `TextMap` → JSON object). */
+export const EMPTY_CHOICE_CONTEXT: Record<string, unknown> = { values: {} }
 
 /**
  * Encode a `Chainlink.InstanceAddress.RawInstanceAddress` newtype. Note this
@@ -54,20 +54,25 @@ export function encodeFinalityConfig(f: FinalityConfig): Record<string, unknown>
   }
 }
 
-/** Rate-limiter direction — Daml variant `RateLimitDirection_Inbound | RateLimitDirection_Outbound`. */
-export function encodeRateLimitDirection(direction: 'inbound' | 'outbound'): Record<string, unknown> {
-  return {
-    tag: direction === 'inbound' ? 'RateLimitDirection_Inbound' : 'RateLimitDirection_Outbound',
-    value: {},
-  }
+/**
+ * Rate-limiter direction — Daml **enum** `RateLimitDirection_Inbound |
+ * RateLimitDirection_Outbound`. Canton's JSON Ledger API encodes enums as a
+ * **bare string** (the constructor name), NOT the `{tag, value:{}}` variant
+ * form (that form is for payload-carrying variants and causes
+ * `Expected ujson.Str` at submit). Mirrors go-daml's `JsonCodec.enumToDynamicValue`
+ * → `enum.GetEnumConstructor()` (returns `string(e)`).
+ */
+export function encodeRateLimitDirection(direction: 'inbound' | 'outbound'): string {
+  return direction === 'inbound' ? 'RateLimitDirection_Inbound' : 'RateLimitDirection_Outbound'
 }
 
-/** Rate-limiter mode — Daml variant `RateLimitMode_DefaultFinality | RateLimitMode_CustomFinality`. */
-export function encodeRateLimitMode(mode: 'defaultFinality' | 'customFinality'): Record<string, unknown> {
-  return {
-    tag: mode === 'defaultFinality' ? 'RateLimitMode_DefaultFinality' : 'RateLimitMode_CustomFinality',
-    value: {},
-  }
+/**
+ * Rate-limiter mode — Daml **enum** `RateLimitMode_DefaultFinality |
+ * RateLimitMode_CustomFinality`. Bare-string encoded (see
+ * {@link encodeRateLimitDirection}); NOT `{tag, value:{}}`.
+ */
+export function encodeRateLimitMode(mode: 'defaultFinality' | 'customFinality'): string {
+  return mode === 'defaultFinality' ? 'RateLimitMode_DefaultFinality' : 'RateLimitMode_CustomFinality'
 }
 
 /** Current time as a Daml `Time` (ISO-8601, microsecond padding). */

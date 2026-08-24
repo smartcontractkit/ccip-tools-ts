@@ -93,11 +93,17 @@ export class GetTokenAdminRegistry extends CantonQuery<
   }
 }
 
-/** Decode a Daml `Optional Party` into a string (or `undefined` when `None`). */
+/** Decode a Daml `Optional Party` into a string (or `undefined` when `None`).
+ *  Handles three encodings:
+ *   - JSON Ledger API (natural): `Some` → bare string `"partyId"`; `None` → `null`.
+ *   - gRPC JSON: `Some` → `{ Some: { Sum: { Party: "partyId" } } }`; `None` → `{ None: {} }`. */
 function decodeOptionalParty(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined
+  if (value == null) return undefined // JSON `null` (None) or absent
+  // Natural JSON: a bare string is `Some party`.
+  if (typeof value === 'string') return value
+  if (typeof value !== 'object') return undefined
   const v = value as Record<string, unknown>
-  // Daml `Some p` → { Some: { ... } }; `None` → { None: {} }
+  // gRPC JSON: `Some p` → { Some: { ... } }; `None` → { None: {} }
   if ('Some' in v && v.Some != null) {
     const inner = extractFieldValue(v.Some)
     return typeof inner === 'string' ? inner : undefined
@@ -111,12 +117,27 @@ function decodeBool(value: unknown): boolean {
   return v === true
 }
 
-/** Decode a Daml `Optional PoolRegistration` into `{ poolOwner, poolInstanceId }`. */
+/** Decode a Daml `Optional PoolRegistration` into `{ poolOwner, poolInstanceId }`.
+ *  Handles two encodings:
+ *   - JSON Ledger API (natural): `Some` → bare object `{ poolOwner, poolInstanceId }`;
+ *     `None` → `null`.
+ *   - gRPC JSON: `Some` → `{ Some: { fields: [...] } }`; `None` → `{ None: {} }`. */
 function decodeTokenPool(
   value: unknown,
 ): { poolOwner: string; poolInstanceId: string } | undefined {
-  if (!value || typeof value !== 'object') return undefined
+  if (value == null) return undefined
+  if (typeof value !== 'object') return undefined
   const v = value as Record<string, unknown>
+  // Natural JSON: a bare object with poolOwner/poolInstanceId fields is `Some`.
+  if ('poolOwner' in v || 'poolInstanceId' in v) {
+    const fields = decodeDamlRecord(v)
+    const poolOwner = extractFieldValue(fields['poolOwner'])
+    const poolInstanceId = extractFieldValue(fields['poolInstanceId'])
+    if (typeof poolOwner === 'string' && typeof poolInstanceId === 'string') {
+      return { poolOwner, poolInstanceId }
+    }
+  }
+  // gRPC JSON: `Some` → { Some: { fields: [...] } }
   if ('Some' in v && v.Some != null) {
     const fields = decodeDamlRecord(v.Some)
     const poolOwner = extractFieldValue(fields['poolOwner'])

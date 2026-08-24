@@ -157,34 +157,89 @@ function decodeInstrumentId(fields: Record<string, unknown>): { admin: string; i
 
 /**
  * Decode the `remoteChainConfigs` Daml `Map (Numeric 0) RemoteChainConfig`.
- * The gRPC JSON `GenMap` shape is `{ mapTextInt64: [{ key, value }, ...] }` (or
- * another `map*` variant); this decoder tolerates any `map*` key holding an
- * array of `{ key, value }` entries. Entries that fail to decode are skipped.
+ *
+ * Two encodings are handled:
+ *   - **Natural JSON** (the Canton JSON Ledger API / `ledgerApi` proxy): a bare
+ *     array of `[key, value]` pairs, e.g.
+ *     `[["16015286601757825753.", { remotePools: […], … }]]`. The `Numeric 0`
+ *     key carries a trailing `.` (decimal notation) — stripped here so the
+ *     selector compares as a plain integer string.
+ *   - **gRPC JSON `GenMap`**: `{ mapTextInt64: [{ key, value }, …] }` (or another
+ *     `map*` variant), where `key`/`value` are Sum-wrapped. Tolerated as a
+ *     fallback for direct gRPC callers.
+ *
+ * Entries that fail to decode are skipped.
  */
 function decodeRemoteChainConfigs(value: unknown): PoolRemoteChainConfig[] {
-  if (!value || typeof value !== 'object') return []
+  if (!value) return []
+
+  // Natural JSON: bare array of [key, value] pairs.
+  if (Array.isArray(value)) {
+    return (value as unknown[])
+      .map((pair) => decodeRemoteChainConfigEntry(pair, /*natural=*/ true))
+      .filter((c): c is PoolRemoteChainConfig => c !== null)
+  }
+
+  if (typeof value !== 'object') return []
   const v = value as Record<string, unknown>
   // `extractFieldValue` unwraps a Sum→GenMap envelope to its inner object.
   const mapValue = (extractFieldValue(v) ?? v) as Record<string, unknown>
   const entries = findMapEntries(mapValue)
   if (!entries) return []
 
-  const out: PoolRemoteChainConfig[] = []
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue
-    const e = entry as Record<string, unknown>
-    const key = extractFieldValue(e['key'])
-    const valueRec = e['value']
-    if (typeof key !== 'string' || !valueRec) continue
-    const cfg = decodeDamlRecord(valueRec)
-    const remotePools = decodeStringList(cfg['remotePools'])
-    const remoteTokenAddress = decodeString(cfg['remoteTokenAddress'])
-    out.push({ remoteChainSelector: key, remotePools, remoteTokenAddress })
-  }
-  return out
+  return entries
+    .map((entry) => decodeRemoteChainConfigEntry(entry, /*natural=*/ false))
+    .filter((c): c is PoolRemoteChainConfig => c !== null)
 }
 
-/** Find the array of `{ key, value }` entries under any `map*` key. */
+/** Decode one map entry into a {@link PoolRemoteChainConfig}, or `null`. */
+function decodeRemoteChainConfigEntry(
+  entry: unknown,
+  natural: boolean,
+): PoolRemoteChainConfig | null {
+  // Natural JSON: entry is a 2-element [key, value] array.
+  if (natural) {
+    if (!Array.isArray(entry) || entry.length < 2) return null
+    const key = normalizeNumericKey(entry[0])
+    const valueRec = entry[1]
+    if (key == null || !valueRec) return null
+    return decodeRemoteChainConfigRecord(key, valueRec)
+  }
+  // gRPC GenMap: entry is { key, value } with Sum-wrapped fields.
+  if (!entry || typeof entry !== 'object') return null
+  const e = entry as Record<string, unknown>
+  const key = normalizeNumericKey(extractFieldValue(e['key']))
+  const valueRec = e['value']
+  if (key == null || !valueRec) return null
+  return decodeRemoteChainConfigRecord(key, valueRec)
+}
+
+/** Decode the `RemoteChainConfig` record value → result (remotePools + token). */
+function decodeRemoteChainConfigRecord(
+  key: string,
+  valueRec: unknown,
+): PoolRemoteChainConfig | null {
+  const cfg = decodeDamlRecord(valueRec)
+  return {
+    remoteChainSelector: key,
+    remotePools: decodeStringList(cfg['remotePools']),
+    remoteTokenAddress: decodeString(cfg['remoteTokenAddress']),
+  }
+}
+
+/**
+ * Normalize a `Numeric 0` map key to a plain integer string. The JSON Ledger
+ * API serializes `Numeric 0` with a trailing `.` (e.g. `"16015286601757825753."`);
+ * strip it so the selector matches `BigInt(x).toString()` / `remoteChainSelector.toString()`.
+ * Returns `null` for non-string keys.
+ */
+function normalizeNumericKey(key: unknown): string | null {
+  const s = typeof key === 'string' ? key : (extractFieldValue(key) as string)
+  if (typeof s !== 'string' || !s) return null
+  return s.replace(/\.$/, '')
+}
+
+/** Find the array of entries under any `map*` key (gRPC GenMap shape). */
 function findMapEntries(mapValue: Record<string, unknown>): unknown[] | null {
   for (const [k, val] of Object.entries(mapValue)) {
     if (k.startsWith('map') && Array.isArray(val)) return val as unknown[]

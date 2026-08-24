@@ -91,7 +91,11 @@ export class RegisterAdmin extends CantonOperation<RegisterAdminParams, ParsedRe
 
     // Resolve the TokenConfig if it already exists; first-time registration
     // sends `tokenConfigCid: null` (Daml `None`) and the choice creates it.
-    const queryParties = [...new Set([p.sender, chain.ccipParty])]
+    // TokenConfig is signed by ccipOwner (registryOwner) and OBSERVED by the
+    // configured admin / instrumentId.admin (`p.sender` when it's the instrument
+    // admin). The gateway `ledgerApi` proxy authenticates as the caller's Bearer
+    // token, which has CanReadAs(sender) but NOT CanReadAs(ccipOwner) — so the
+    // ACS query MUST key on `sender`, never ccipOwner.
     const tokenConfigInstanceAddress =
       p.tokenConfigInstanceAddress ??
       (ccipOwner ? deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner) : undefined)
@@ -100,8 +104,8 @@ export class RegisterAdmin extends CantonOperation<RegisterAdminParams, ParsedRe
       tokenConfigContract = await chain.findActiveContractByInstanceAddress(
         TOKEN_CONFIG_TEMPLATE_ID,
         tokenConfigInstanceAddress,
-        queryParties,
-      )
+        [p.sender],
+      ).catch(() => null)
     }
 
     return buildTarExercise({

@@ -81,7 +81,11 @@ export class AcceptAdmin extends CantonOperation<AcceptAdminParams, ParsedAccept
   ): Promise<JsCommands> {
     // Disclosure-service-first resolution — no ccipOwner visibility required.
     const { tarContract, ccipOwner } = await resolveTar(chain, p.sender, p.tarInstanceAddress)
-    const queryParties = [...new Set([p.sender, chain.ccipParty])]
+    // TokenConfig is signed by ccipOwner (registryOwner) and OBSERVED by the
+    // proposed admin (pendingAdmin = sender). The gateway `ledgerApi` proxy
+    // authenticates as the caller's Bearer token, which has CanReadAs(sender)
+    // but NOT CanReadAs(ccipOwner) — so the ACS query MUST key on `sender`
+    // (the user is a TokenConfig observer via pendingAdmin), never ccipOwner.
     const tokenConfigInstanceAddress =
       p.tokenConfigInstanceAddress ??
       (ccipOwner ? deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner) : undefined)
@@ -95,7 +99,7 @@ export class AcceptAdmin extends CantonOperation<AcceptAdminParams, ParsedAccept
     const tokenConfigContract = await chain.findActiveContractByInstanceAddress(
       TOKEN_CONFIG_TEMPLATE_ID,
       tokenConfigInstanceAddress,
-      queryParties,
+      [p.sender],
     )
     if (!tokenConfigContract) {
       throw new CCTParamsInvalidError(
