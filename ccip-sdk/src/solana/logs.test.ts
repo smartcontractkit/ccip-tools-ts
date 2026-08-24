@@ -62,15 +62,19 @@ describe('Solana getTransactionsForAddress since hint', () => {
     return { hashes, rpc: state.rpc, untils: state.untils }
   }
 
-  it('stops the backward walk at the hint signature, exclusively', async () => {
-    // page=2 forces pagination; without a hint the walk to startBlock=100 takes 6 pages.
+  it('walks by the hint slot floor, streaming the hinted tx whole', async () => {
+    // B1: the node's `until` cursor is transaction-granular — passing the hint's
+    // signature would drop the WHOLE hinted tx, including same-tx logs after the
+    // hint's index. The walk therefore pages to the absolute slot floor and
+    // INCLUDES the hinted sig (like EVM fetching its hinted block whole); the
+    // per-log (transactionHash, index) exclusion happens in SolanaChain.getLogs.
     const res = await collectHashes({
       startBlock: 100,
       page: 2,
       since: { transactionHash: 'sig108', blockNumber: 108, address: ADDRESS },
     })
-    assert.deepEqual(res.hashes, ['sig109', 'sig110'], 'the hinted sig itself is excluded')
-    assert.equal(res.rpc, 2, 'walk stops at the hinted page instead of paging to the floor')
+    assert.deepEqual(res.hashes, ['sig108', 'sig109', 'sig110'], 'the hinted tx is re-streamed')
+    assert.equal(res.rpc, 2, 'the backward walk stops once paging reaches the floor')
   })
 
   it('falls back to the hint blockNumber floor when the node does not know the hint sig', async () => {
@@ -149,12 +153,13 @@ describe('Solana getTransactionsForAddress since hint', () => {
   })
 
   it('since alone satisfies the start requirement', async () => {
-    // No startBlock/startTime: the hint's slot is the floor, its sig the cursor.
+    // No startBlock/startTime: the hint's slot is the floor; the hinted tx itself
+    // is walked (its per-log exclusion is applied at getLogs level).
     const res = await collectHashes({
       page: 2,
       since: { transactionHash: 'sig108', blockNumber: 108, blockTimestamp: 108 },
     })
-    assert.deepEqual(res.hashes, ['sig109', 'sig110'])
+    assert.deepEqual(res.hashes, ['sig108', 'sig109', 'sig110'])
     assert.equal(res.rpc, 2)
   })
 

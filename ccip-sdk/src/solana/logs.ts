@@ -21,11 +21,13 @@ async function* fetchSigsForward(
   const commitment = opts.endBlock === 'finalized' ? 'finalized' : 'confirmed'
   const addrKey = new PublicKey(opts.address!)
 
-  // Resume hint: the signature doubles as Solana's native `until` cursor (exclusive —
-  // the hinted sig itself is not re-emitted). But `until` only has an effect when the
-  // queried node actually knows the signature, so the hint's blockNumber is ALSO an
-  // absolute slot floor: a lagging or pruning node silently matches nothing, and the
-  // floor is what then keeps sigs older than the hint from being included.
+  // Resume hint: the hint's blockNumber is an absolute slot floor — the walk keeps
+  // only sigs at/above it, so a lagging or pruning node (which may not know the
+  // hint's signature) silently matches nothing below it. The hinted tx itself is
+  // NOT excluded here: `until` is transaction-granular (it would drop the WHOLE
+  // hinted transaction, including logs after the hint's index), so the hinted tx
+  // streams whole and SolanaChain.getLogs applies the per-log (transactionHash,
+  // index) exclusion instead — mirroring EVM's per-block behavior.
   const startFloor = Math.max(
     Number(opts.startBlock ?? 0) || 0,
     Number(opts.since?.blockNumber ?? 0) || 0,
@@ -33,8 +35,8 @@ async function* fetchSigsForward(
 
   // forward collect all matching sigs in array
   const allSigs: Awaited<ReturnType<typeof connection.getSignaturesForAddress>> = []
-  let batch: typeof allSigs,
-    until = opts.since?.transactionHash ? opts.since.transactionHash : undefined
+  let batch: typeof allSigs
+  let until: string | undefined
   do {
     batch = await connection.getSignaturesForAddress(
       addrKey,

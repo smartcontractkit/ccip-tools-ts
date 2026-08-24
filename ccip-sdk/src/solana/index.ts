@@ -520,8 +520,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
+    const since = opts.since
     for await (const tx of this.getTransactionsForAddress({ ...opts, excludeAddresses })) {
       for (const log of tx.logs) {
+        // Per-log resume exclusivity: the hinted tx streams WHOLE (the node's
+        // `until` cursor is transaction-granular and would drop its same-tx
+        // followers), so within the hinted tx logs at/before the hinted index —
+        // which the previous run emitted — are skipped, while later same-tx
+        // logs (batch executions, multi-topic streams) still flow.
+        if (
+          since?.transactionHash != null &&
+          since.index != null &&
+          log.transactionHash === since.transactionHash &&
+          log.index <= since.index
+        )
+          continue
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
           (programs !== true && !programs.includes(log.address)) ||
