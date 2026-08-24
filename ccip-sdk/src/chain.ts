@@ -801,7 +801,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiClient: CCIPAPIClient | null
   /** Retry configuration for API fallback operations (null if API client is disabled) */
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
-  /** Abort signal from ChainContext; fires when the chain should tear down. */
+  /**
+   * Fires when the chain should tear down: either {@link Chain.destroy} was
+   * called, or the ChainContext abort signal fired. Listeners registered with
+   * `{ once: true }` therefore self-unregister on whichever condition happens
+   * first, so no listener ever outlives its chain on a long-lived context.
+   */
   readonly abort: AbortSignal
 
   /**
@@ -823,9 +828,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     this.logger = logger
 
     const ac = new AbortController()
-    this.abort = ac.signal
+    // Composite: `destroy()` aborts the inner controller, the context abort
+    // fires the same signal directly. `once` listeners registered on
+    // `this.abort` (e.g. provider teardown) are unregistered by EITHER path,
+    // so a destroyed chain is not kept alive by a listener on a long-lived
+    // context signal (see the reload-churn retention in ccip-o11y workers).
+    this.abort = abort ? AbortSignal.any([ac.signal, abort]) : ac.signal
     this.destroy = ac.abort.bind(ac)
-    abort?.addEventListener('abort', (r?: unknown) => this.destroy(r), { once: true })
 
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {

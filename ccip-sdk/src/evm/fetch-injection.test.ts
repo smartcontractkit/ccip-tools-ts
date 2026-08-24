@@ -40,7 +40,7 @@ describe('EVMChain._getProvider fetch injection', () => {
     })
 
     const ac = new AbortController()
-    const provider = await EVMChain._getProvider('http://localhost:8545', {
+    const [provider, detach] = await EVMChain._getProvider('http://localhost:8545', {
       fetch: customFetch as unknown as typeof fetch,
       abort: ac.signal,
     })
@@ -52,6 +52,7 @@ describe('EVMChain._getProvider fetch injection', () => {
       // may fail due to response parsing, but the important thing is our fetch was called
     }
     ac.abort()
+    detach?.()
     provider.destroy()
 
     assert.ok(callCount > 0, `custom fetch should have been called, got ${callCount} calls`)
@@ -70,7 +71,7 @@ describe('EVMChain._getProvider fetch injection', () => {
         }),
     )
 
-    const provider = await EVMChain._getProvider('https://eth-mainnet.example.com', {
+    const [provider] = await EVMChain._getProvider('https://eth-mainnet.example.com', {
       fetch: fastFetch as unknown as typeof fetch,
       abort: ac.signal,
     })
@@ -85,7 +86,7 @@ describe('EVMChain._getProvider fetch injection', () => {
     const ac = new AbortController()
     ac.abort()
 
-    const provider = await EVMChain._getProvider('https://eth-mainnet.example.com', {
+    const [provider] = await EVMChain._getProvider('https://eth-mainnet.example.com', {
       abort: ac.signal,
     })
 

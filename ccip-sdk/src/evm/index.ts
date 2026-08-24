@@ -498,26 +498,43 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates a JSON-RPC provider from a URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
-   * @returns A ready JSON-RPC provider.
+   * @returns The ready JSON-RPC provider plus an optional `detach` that removes
+   * its mid-handshake abort listener once the provider is owned by a chain
+   * (the chain's composite abort then owns teardown).
    */
   static async _getProvider(
     url: string,
     ctx?: { abort?: AbortSignal; fetch?: typeof fetch } & Parameters<
       typeof createRateLimitedFetch
     >[1],
-  ): Promise<JsonRpcApiProvider> {
+  ): Promise<[JsonRpcApiProvider, (() => void) | undefined]> {
     const abort = ctx?.abort
-    let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
-      abort?.addEventListener('abort', () => void provider.destroy(), { once: true })
-      providerReady = new Promise((resolve, reject) => {
+      // Destroy the socket when the caller aborts — during the handshake AND
+      // while a hanging request still has no owning chain (e.g. `getNetwork` in
+      // fromProvider). The listener is removed only once the chain is installed
+      // (the detach, in fromUrl's finally) or the handshake fails (below): a
+      // dangling one on a long-lived signal would root the provider — and via
+      // its _wrap* hooks the whole chain — forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      const providerReady = new Promise<JsonRpcApiProvider>((resolve, reject) => {
         provider.websocket.onerror = reject
         provider
           ._waitUntilReady()
           .then(() => resolve(provider))
-          .catch(reject)
+          .catch((err) => {
+            // No chain will own this provider: drop the listener so a long-lived
+            // caller signal does not root the failed provider.
+            abort?.removeEventListener('abort', onAbort)
+            reject(err as Error)
+          })
       })
+      return [
+        await providerReady,
+        abort ? () => abort.removeEventListener('abort', onAbort) : undefined,
+      ]
     } else if (url.startsWith('http')) {
       const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
       const req = new FetchRequest(url)
@@ -539,12 +556,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         staticNetwork: true,
         batchMaxCount: 20,
       })
-      abort?.addEventListener('abort', () => provider.destroy(), { once: true })
-      providerReady = Promise.resolve(provider)
+      // Tear down an unresponsive provider while it has no owning chain yet
+      // (e.g. `getNetwork` hanging during construction) when the caller aborts.
+      // Detached once the chain is installed: from then on the chain's
+      // composite `this.abort` — firing on `destroy()` AND the context abort —
+      // owns teardown, and a listener left on a long-lived signal would root
+      // the provider (and via its _wrap* hooks the whole chain) forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      return [provider, abort ? () => abort.removeEventListener('abort', onAbort) : undefined]
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
     }
-    return providerReady
   }
 
   /**
@@ -580,7 +603,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url, ctx), ctx)
+    const [provider, detach] = await this._getProvider(url, ctx)
+    try {
+      return await this.fromProvider(provider, ctx)
+    } finally {
+      // Chain installed (or construction failed and the provider destroyed):
+      // the chain's composite `this.abort` owns provider teardown from here.
+      detach?.()
+    }
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
