@@ -10,6 +10,7 @@ import {
   type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
+  CCIPError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
@@ -232,19 +233,38 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
         )
       }
 
-      Promise.race([Promise.allSettled(chains$), signalToPromise(ctx.abort)])
-        .finally(() => {
+      Promise.race([
+        Promise.allSettled(chains$).then((results) => {
+          // When all RPCs for a family fail, surface the most specific error
+          // (e.g. CANTON_AUTH_ERROR) instead of a generic RPC_NOT_FOUND.
           if (finished[F]) return
           finished[F] = true
+          // Find the most informative rejection reason from the settled results.
+          // Prefer CCIPError with specific codes over generic errors.
+          let bestError: Error | undefined
+          for (const result of results) {
+            if (result.status === 'rejected' && result.reason instanceof Error) {
+              if (!bestError || CCIPError.isCCIPError(result.reason)) {
+                bestError = result.reason
+              }
+            }
+          }
           Object.entries(pendingChainsCbs)
             .filter(([name]) => networkInfo(name).family === F)
-            .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
-        })
-        .catch(() => {
-          // signalToPromise(ctx.abort) rejects with DOMException when the parent
-          // context aborts before all race URLs settle; swallow it here so the
-          // void-discarded chain doesn't surface as an unhandled rejection.
-        })
+            .forEach(([name, [_, reject]]) => {
+              if (bestError && CCIPError.isCCIPError(bestError)) {
+                reject(bestError)
+              } else {
+                reject(new CCIPRpcNotFoundError(name))
+              }
+            })
+        }),
+        signalToPromise(ctx.abort),
+      ]).catch(() => {
+        // signalToPromise(ctx.abort) rejects with DOMException when the parent
+        // context aborts before all race URLs settle; swallow it here so the
+        // void-discarded chain doesn't surface as an unhandled rejection.
+      })
       return txs$
     }))
 

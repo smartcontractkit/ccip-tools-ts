@@ -164,6 +164,33 @@ export {
   resolveFeeTransferFactoryAmount,
   resolveSenderInstanceId,
 } from './canton/defaults.ts'
+// Canton authentication (OAuth 2.0: static, clientCredentials, authorizationCode)
+export {
+  type AccessToken,
+  type AnyAuthProvider,
+  type AuthConfig as CantonAuthConfig,
+  type AuthProvider as CantonAuthProvider,
+  type AuthProviderOptions as CantonAuthProviderOptions,
+  type AuthType as CantonAuthType,
+  type AuthorizationCodeAuthConfig,
+  type AuthorizationServerMetadata,
+  type ClientCredentialsAuthConfig,
+  type StaticAuthConfig,
+  type TokenSource as CantonTokenSource,
+  AuthorizationCodeProvider as CantonAuthorizationCodeProvider,
+  CachingTokenSource as CantonCachingTokenSource,
+  ClientCredentialsProvider as CantonClientCredentialsProvider,
+  InsecureStaticProvider as CantonInsecureStaticProvider,
+  StaticProvider as CantonStaticProvider,
+  StaticTokenSource as CantonStaticTokenSource,
+  createAuthProvider as createCantonAuthProvider,
+  createAuthorizationCodeProvider as createCantonAuthorizationCodeProvider,
+  createClientCredentialsProvider as createCantonClientCredentialsProvider,
+  createInsecureStaticProvider as createCantonInsecureStaticProvider,
+  createStaticProvider as createCantonStaticProvider,
+  resolveCantonJwt,
+  resolveCantonJwtFromConfig,
+} from './canton/index.ts'
 export { AptosChain, CantonChain, EVMChain, SolanaChain, SuiChain, TONChain }
 // use `supportedChains` to override/register derived classes, if needed
 export { supportedChains } from './supported-chains.ts'

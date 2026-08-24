@@ -2,6 +2,7 @@ import { type BytesLike, dataLength, hexlify, id as keccak256Utf8 } from 'ethers
 
 import {
   type BlockInfo,
+  type CantonConfig,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -52,6 +53,13 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
+import {
+  type AuthConfig,
+  type AuthProvider,
+  type AuthProviderOptions,
+  AuthType,
+  createAuthProvider,
+} from './authentication/index.ts'
 import {
   damlRequiredCcvsList,
   decodeCantonVerifierDestAddress,
@@ -146,6 +154,138 @@ export {
   selectFeeTokenHoldingCids,
   sumCantonHoldingAmounts,
 } from './defaults.ts'
+
+// Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode)
+export {
+  type AccessToken,
+  type AnyAuthProvider,
+  type AuthConfig,
+  type AuthProvider,
+  type AuthProviderOptions,
+  type AuthType,
+  type AuthorizationCodeAuthConfig,
+  type AuthorizationServerMetadata,
+  type ClientCredentialsAuthConfig,
+  type StaticAuthConfig,
+  type TokenSource,
+  AuthType as CantonAuthType,
+  AuthorizationCodeProvider,
+  CachingTokenSource,
+  ClientCredentialsProvider,
+  InsecureStaticProvider,
+  StaticProvider,
+  StaticTokenSource,
+  codeChallengeFromVerifier,
+  createAuthProvider,
+  createAuthorizationCodeProvider,
+  createClientCredentialsProvider,
+  createInsecureStaticProvider,
+  createStaticProvider,
+  generateCodeVerifier,
+  generateState,
+  getAuthorizationServerMetadata,
+  isAccessToken,
+  isTokenExpired,
+  resolveCantonJwt,
+} from './authentication/index.ts'
+
+/**
+ * Resolve a JWT from a {@link CantonConfig}.
+ *
+ * Priority:
+ * 1. `config.jwt` (explicit override)
+ * 2. `config.auth` (OAuth2 provider — client credentials, authorization code, or static)
+ *
+ * For `clientCredentials` and `authorizationCode` flows, `clientId` and
+ * `clientSecret` may be omitted from the `auth` block and will be resolved
+ * from `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars. This keeps
+ * secrets out of config files that may be committed to version control.
+ *
+ * The {@link AuthProvider} is memoized per auth-config fingerprint so repeated
+ * calls within one process reuse the same cached token.
+ *
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) when neither `jwt` nor `auth` is set.
+ */
+export async function resolveCantonJwtFromConfig(
+  config: CantonConfig,
+  options?: AuthProviderOptions,
+): Promise<string> {
+  const jwtOverride = config.jwt?.trim()
+  if (jwtOverride) return jwtOverride
+
+  if (config.auth) {
+    const merged = mergeAuthEnvVars(config.auth)
+    const provider = await getOrCreateAuthProvider(merged, options)
+    const token = await provider.tokenSource().token()
+    return token.accessToken
+  }
+
+  throw new CCIPError(
+    CCIPErrorCode.CANTON_AUTH_ERROR,
+    'Canton JWT is required. Set cantonConfig.jwt, or set cantonConfig.auth (static, clientCredentials, or authorizationCode).',
+  )
+}
+
+/** Process-wide cache of auth providers, keyed by config fingerprint (avoids re-login). */
+const authProviderCache = new Map<string, AuthProvider>()
+
+/** Stable fingerprint for an {@link AuthConfig}, ignoring volatile fields. */
+function authConfigFingerprint(config: AuthConfig): string {
+  const parts: string[] = [config.type ?? AuthType.Static]
+  if ('authUrl' in config && typeof config.authUrl === 'string')
+    parts.push(`authUrl=${config.authUrl}`)
+  if ('audience' in config && typeof config.audience === 'string')
+    parts.push(`audience=${config.audience}`)
+  if ('scopes' in config && Array.isArray(config.scopes))
+    parts.push(`scopes=${config.scopes.join(',')}`)
+  if ('clientId' in config && typeof config.clientId === 'string')
+    parts.push(`clientId=${config.clientId}`)
+  return parts.join('|')
+}
+
+/** Return a cached {@link AuthProvider} for `config`, or create and cache one. */
+async function getOrCreateAuthProvider(
+  config: AuthConfig,
+  options?: AuthProviderOptions,
+): Promise<AuthProvider> {
+  const key = authConfigFingerprint(config)
+  let provider = authProviderCache.get(key)
+  if (!provider) {
+    provider = await createAuthProvider(config, options)
+    authProviderCache.set(key, provider)
+  }
+  return provider
+}
+
+/**
+ * Merge `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars into an {@link AuthConfig}
+ * when the `auth` block omits them.
+ *
+ * This allows config files to specify the non-secret OIDC parameters (`type`,
+ * `authUrl`, `audience`, `scopes`) while credentials come from environment
+ * variables — keeping secrets out of version-controlled JSON files.
+ */
+function mergeAuthEnvVars(auth: AuthConfig): AuthConfig {
+  const envClientId = process.env.CANTON_CLIENT_ID?.trim()
+  const envClientSecret = process.env.CANTON_CLIENT_SECRET?.trim()
+
+  if (auth.type === AuthType.ClientCredentials) {
+    return {
+      ...auth,
+      clientId: auth.clientId || envClientId || '',
+      clientSecret: auth.clientSecret || envClientSecret || '',
+    }
+  }
+
+  if (auth.type === AuthType.AuthorizationCode) {
+    return {
+      ...auth,
+      clientId: auth.clientId || envClientId || '',
+    }
+  }
+
+  return auth
+}
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.
@@ -374,7 +514,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<CantonChain> {
     // Check that ctx has the necessary cantonConfig
-    if (!ctx || !ctx.cantonConfig || typeof ctx.cantonConfig.jwt !== 'string') {
+    if (!ctx || !ctx.cantonConfig) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
         'CantonChain.fromUrl: ctx.cantonConfig is required',
@@ -388,10 +528,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    // Resolve the JWT: explicit `jwt` takes precedence; otherwise use `auth`.
+    const jwt = await resolveCantonJwtFromConfig(ctx.cantonConfig, {
+      fetch: ctx.fetch,
+      signal: ctx.abort,
+    })
+
     const fetchFn = ctx.fetch
     const client = createCantonClient({
       baseUrl: url,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
       signal: ctx.abort,
       fetch: fetchFn,
     })
@@ -416,16 +562,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     })
     const transferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
     })
     const linkTransferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.edsUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
       useScanProxy: false,
     })
     const tokenMetadataClient = createTokenMetadataClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
     })
     return CantonChain.fromClient(
       client,
@@ -1380,12 +1526,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the
    * indexer attestation (mirrors Go `GetOrCreateReceiver`).
+   *
+   * When a {@link TransactionSigner} is supplied, contract creation/update uses
+   * the interactive submission path; otherwise it falls back to direct
+   * `submitAndWaitForTransaction` (JWT-authenticated).
    */
   private async ensureReceiverForExecute(
     payer: string,
     finality: number,
     attestationCcvRaw: string | undefined,
-    signer: TransactionSigner | undefined,
+    signer?: TransactionSigner,
     hint?: string,
   ): Promise<string> {
     const requiredCcvsRaw = attestationCcvRaw ? [attestationCcvRaw] : []
@@ -1416,6 +1566,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Exercise `UpdateRequiredCCVs` on an existing `CCIPReceiver` contract.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async updateReceiverRequiredCCVs(
     receiverCid: string,
@@ -1461,6 +1614,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * match the receiver's `minBlockConfirmations`, so each distinct finality value needs its own
    * receiver instance.  This method first searches the ACS; if no match is found it creates a
    * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async createReceiverForFinality(
     payer: string,
@@ -1773,7 +1929,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Ensure PerPartyRouter + CCIPSender disclosures exist for send (mirrors Go GetOrCreateRouter/Sender).
-   * Creates missing contracts when `signer` is provided.
+   *
+   * Creates missing contracts on demand. Canton authenticates via the ledger
+   * JWT (OIDC / static / client-credentials), so an external
+   * {@link TransactionSigner} is *not* required — when omitted, contract
+   * creation uses the direct `submitAndWaitForTransaction` path. When a
+   * signer is supplied, the interactive (prepare → sign → execute) path is
+   * used instead.
    */
   private async ensureSendDisclosures(
     party: string,
@@ -1782,13 +1944,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     let found = await this.acsDisclosureProvider.findSendDisclosures()
 
     if (!found.perPartyRouter) {
-      if (!signer) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain: no active PerPartyRouter for party "${party}". ` +
-            'Submit via CantonWallet.sendMessage to auto-create, or create one with the Go CLI.',
-        )
-      }
       this.logger.debug(
         `CantonChain.ensureSendDisclosures: creating PerPartyRouter for party ${party}`,
       )
@@ -1800,13 +1955,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     if (!found.ccipSender) {
-      if (!signer) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain: no active CCIPSender for party "${party}". ` +
-            'Submit via CantonWallet.sendMessage to auto-create, or create one with the Go CLI.',
-        )
-      }
       this.logger.debug(`CantonChain.ensureSendDisclosures: creating CCIPSender for party ${party}`)
       await this.createCcipSender(party, signer)
       found = {
@@ -1823,8 +1971,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Create a `PerPartyRouter` for `party` via the EDS factory disclosure.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createPerPartyRouter(party: string, signer: TransactionSigner): Promise<void> {
+  private async createPerPartyRouter(party: string, signer?: TransactionSigner): Promise<void> {
     const factory = await this.edsDisclosureProvider.fetchPerPartyRouterFactoryDisclosures(party)
     const factoryTemplateId = `#${this.ccipPackages.perPartyRouter}:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouterFactory`
     const createCmd: JsCommands = {
@@ -1855,8 +2006,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Create a `CCIPSender` contract for `party` when none exists in ACS.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createCcipSender(party: string, signer: TransactionSigner): Promise<void> {
+  private async createCcipSender(party: string, signer?: TransactionSigner): Promise<void> {
     const senderTemplateId = `#${this.ccipPackages.ccipSender}:CCIP.CCIPSender:CCIPSender`
     const createCmd: JsCommands = {
       commands: [

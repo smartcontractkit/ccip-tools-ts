@@ -83,6 +83,7 @@
     "buffer": "^6.0.3",
     "ethers": "6.17.0",
     "micro-memoize": "^5.1.2",
+    "oauth4webapi": "^3.8.7",
     "type-fest": "^5.8.0",
     "yaml": "2.9.0"
   },

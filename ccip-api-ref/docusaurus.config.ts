@@ -50,16 +50,38 @@ const config: Config = {
     //
     // - `path`: used by bigint-buffer / postman-code-generators (pre-existing)
     // - `undici`: used by @chainlink/ccip-sdk's Canton client (CantonChain → canton/client.ts).
+    // - `node:` scheme URIs: used by the Canton auth-code provider (callback server, browser
+    //   launching). Webpack 5 throws UnhandledSchemeError for `node:` URIs; we use a
+    //   NormalModuleReplacementPlugin to redirect them to an empty stub before resolution.
     function webpackNodeFallbacks(): Plugin {
       return {
         name: 'webpack-node-fallbacks',
         configureWebpack(_config, isServer) {
           if (isServer) return {}
+          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
+          const webpack = require('webpack')
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          const { NormalModuleReplacementPlugin } = webpack
+          const nodeMods = ['node:child_process', 'node:http', 'node:url']
           return {
             resolve: {
               alias: { undici: false },
               fallback: { path: false },
             },
+            plugins: nodeMods.map((mod) => {
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment
+              const plugin = new NormalModuleReplacementPlugin(
+                new RegExp(`^${mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+                (resource: { request: string }) => {
+                  // Redirect node: imports to a stub that exports empty values
+                  // for any named import (exec, createServer, URL, etc.).
+                  resource.request =
+                    'data:text/javascript,export default {};export const exec=()=>{};export const createServer=()=>{};export const URL=globalThis.URL;export const spawn=()=>{};'
+                },
+              )
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+              return plugin
+            }),
           }
         },
       }

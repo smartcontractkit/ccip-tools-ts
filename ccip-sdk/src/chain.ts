@@ -3,6 +3,7 @@ import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
+import type { AuthConfig } from './canton/authentication/index.ts'
 import type { UnsignedCantonTx } from './canton/types.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import {
@@ -210,8 +211,24 @@ export type CantonConfig = {
   /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
-  /** JSON Web Token for authentication with the Canton Ledger API. */
-  jwt: string
+  /**
+   * JSON Web Token for authentication with the Canton Ledger API.
+   *
+   * When `auth` is provided, `jwt` is optional — the SDK resolves a JWT from
+   * the auth provider on demand. When both are set, `jwt` takes precedence
+   * (explicit override).
+   */
+  jwt?: string
+
+  /**
+   * Optional OAuth 2.0 auth configuration for obtaining a JWT automatically.
+   *
+   * Supports `static`, `insecureStatic`, `clientCredentials`, and
+   * `authorizationCode` flows (mirroring the Go `commonconfig.AuthConfig`).
+   * When set, {@link CantonChain.fromUrl} resolves a JWT via the auth provider
+   * unless `jwt` is already present.
+   */
+  auth?: CantonAuthConfig
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
@@ -276,6 +293,14 @@ export type CantonConfig = {
    */
   ccvs?: string[]
 }
+
+/**
+ * OAuth 2.0 auth configuration for a {@link CantonConfig}.
+ *
+ * Re-exported from the Canton authentication package; see
+ * `canton/authentication` for the full provider API.
+ */
+export type CantonAuthConfig = AuthConfig
 
 /**
  * Filter options for getLogs queries across chains.

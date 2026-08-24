@@ -11,8 +11,9 @@ import type {
 /**
  * Wallet object returned by {@link loadCantonWallet}.
  *
- * `signer` is present only when the caller supplied a private key, enabling the
- * external-signing (prepare → sign → execute) flow.
+ * `signer` is reserved for the external-signing (prepare → sign → execute)
+ * flow, which is not yet enabled in `loadCantonWallet`. Canton sends currently
+ * use JWT-authenticated direct submit.
  */
 export interface CantonWalletWithSigner {
   party: string
@@ -65,10 +66,6 @@ export class Ed25519TransactionSigner implements TransactionSigner {
     })
 
     // Derive the public key and compute the Canton fingerprint.
-    // @types/node@26 dropped the KeyObject overload from createPublicKey's
-    // signature, even though Node itself derives the public key fine from a
-    // private KeyObject (verified at runtime). Cast through Parameters<> until
-    // upstream restores the overload.
     const publicKeyObject = createPublicKey(this.privateKeyObject)
     const publicKeyDer = publicKeyObject.export({ type: 'spki', format: 'der' }) as Buffer
     // Ed25519 SPKI DER is 44 bytes: 12-byte header + 32-byte key.
@@ -186,7 +183,11 @@ export function loadCantonConfig(
   const raw = readFileSync(configPath, 'utf8')
   const parsed = JSON.parse(raw) as Record<string, unknown>
 
-  const required = ['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const
+  // `jwt` is required unless `auth` is present (OAuth2 provider resolves JWT on demand).
+  const hasAuth = typeof parsed['auth'] === 'object' && parsed['auth'] !== null
+  const required = hasAuth
+    ? (['party', 'ccipParty', 'edsUrl', 'transferInstructionUrl'] as const)
+    : (['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const)
   for (const field of required) {
     if (typeof parsed[field] !== 'string' || !parsed[field].length) {
       throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
@@ -242,11 +243,9 @@ export function resolveCliRouter(
 /**
  * Resolve a Canton wallet from CLI argv.
  *
- * The `party` is sourced from the Canton config file. When a private key is
- * provided (via `--wallet`, `PRIVATE_KEY` env, or rpcsFile — resolved upstream
- * by `loadChainWallet`), an {@link Ed25519TransactionSigner} is attached so
- * `sendMessage` / `execute` use the interactive submission API
- * (prepare → sign → execute).
+ * The `party` is sourced from the Canton config file. Canton sends use
+ * JWT-authenticated direct submit (no external signer); the `--wallet` flag
+ * is accepted but ignored on Canton lanes.
  */
 export function loadCantonWallet(
   argv: { wallet?: unknown; cantonConfig?: string },
@@ -259,15 +258,6 @@ export function loadCantonWallet(
       'Canton wallet requires a party ID: provide --canton-config with a "party" field',
     )
   }
-
-  // Disable external signing for now
-  //
-  // const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
-  // if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
-  //   const signer = new Ed25519TransactionSigner(privateKey, party)
-  //   logger?.debug(`Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`)
-  //   return { party, signer }
-  // }
 
   return { party }
 }

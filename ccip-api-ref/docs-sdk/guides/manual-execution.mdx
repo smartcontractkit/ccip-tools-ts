@@ -290,7 +290,7 @@ Unlike `generateUnsignedSendMessage` (which may return multiple transactions for
 
 ## Canton Execution
 
-Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`:
+Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`. No private key or signer is needed — the JWT from `cantonConfig` (either the static `jwt` field or a token resolved from `auth`) authenticates the submission. The `wallet` parameter only needs a `party` ID (for `actAs` in command submissions):
 
 ```typescript
 import { CantonChain } from '@chainlink/ccip-sdk'
@@ -299,7 +299,7 @@ const dest = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
   cantonConfig: {
     party: 'receiver::1220...',
     ccipParty: 'ccip::1220...',
-    jwt: 'eyJ...',
+    jwt: 'eyJ...', // or use `auth` for OIDC — see Canton Configuration
     edsUrl: 'https://eds.example.com',
     transferInstructionUrl: 'https://transfer-instruction.example.com',
     indexerUrl: 'https://indexer.example.com',
@@ -309,19 +309,19 @@ const dest = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
 // Execute by message ID (CCIP API provides verifications)
 const execution = await dest.execute({
   messageId: '0x1234...abcd',
-  wallet: cantonWallet,
+  wallet: { party: 'receiver::1220...' }, // Canton wallet (party ID, no signer needed)
 })
 
 // Or execute with pre-fetched input (CCIP v2.0 only)
 const execution = await dest.execute({
   encodedMessage: '0x...',
   verifications: [...],
-  wallet: cantonWallet,
+  wallet: { party: 'receiver::1220...' },
   receiver: 'receiver::1220...', // optional; defaults to message receiver
 })
 ```
 
-Canton accepts **ledger update IDs** (`1220` + SHA-256 digest) as transaction identifiers. Use `CantonChain.isTxHash()` to validate update ID format.
+Canton accepts **ledger update IDs** (`1220` + SHA-256 digest) as transaction identifiers when the source is Canton. Use `CantonChain.isTxHash()` to validate update ID format.
 
 ## Using the CLI
 
@@ -350,12 +350,18 @@ ccip-cli manual-exec 0xSourceTxHash \
   --wallet $PRIVATE_KEY \
   --log-index 1
 
-# Canton destination (by ledger update ID)
+# Canton source (by ledger update ID; --wallet needed for non-Canton dest)
 ccip-cli manual-exec 1220a1b2c3d4... \
   --canton-config ./canton-config.json \
   --rpc https://ledger.example.com/api/json \
-  --receiver sender::1220... \
-  --wallet <64-char-ed25519-seed>
+  --rpc https://ethereum-sepolia-rpc.example.com \
+  --wallet $PRIVATE_KEY
+
+# Canton destination (no --wallet needed; JWT from canton-config is used)
+ccip-cli manual-exec 0x1234... \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --rpc https://ethereum-sepolia-rpc.example.com
 ```
 
 The CLI auto-detects whether the argument is a message ID, transaction hash, or Canton update ID.
