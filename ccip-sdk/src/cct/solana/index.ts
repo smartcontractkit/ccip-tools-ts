@@ -94,6 +94,8 @@ import {
   type ExecuteInitChainRemoteConfigResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
+  type ExecuteSetCanAcceptLiquidityParams,
+  type ExecuteSetCanAcceptLiquidityResult,
   type ExecuteSetChainRateLimitParams,
   type ExecuteSetChainRateLimitResult,
   type ExecuteSetRateLimitAdminParams,
@@ -120,6 +122,8 @@ import {
   type GenerateInitChainRemoteConfigResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
+  type GenerateSetCanAcceptLiquidityParams,
+  type GenerateSetCanAcceptLiquidityResult,
   type GenerateSetChainRateLimitParams,
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
@@ -144,6 +148,7 @@ import {
   GetTokenPoolState,
   InitChainRemoteConfig,
   RemoveFromAllowlist,
+  SetCanAcceptLiquidity,
   SetChainRateLimit,
   SetRateLimitAdmin,
   TransferOwnership,
@@ -180,6 +185,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
+  readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity()
   readonly #setChainRateLimit = new SetChainRateLimit()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #transferOwnership = new TransferOwnership()
@@ -1056,6 +1062,61 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that sets whether an initialized Solana lock-release token pool
+   * accepts liquidity. Pass canonical `poolType: 'lock-release'` or a compatible
+   * `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetCanAcceptLiquidity({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   allow: true,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetCanAcceptLiquidity(
+    opts: GenerateSetCanAcceptLiquidityParams,
+  ): Promise<GenerateSetCanAcceptLiquidityResult> {
+    return this.#setCanAcceptLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets whether an initialized Solana lock-release token pool accepts liquidity using the pool
+   * owner wallet.
+   *
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setCanAcceptLiquidity({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   allow: true,
+   *   wallet,
+   * })
+   * ```
+   */
+  setCanAcceptLiquidity(
+    opts: ExecuteSetCanAcceptLiquidityParams,
+  ): Promise<ExecuteSetCanAcceptLiquidityResult> {
+    return this.#setCanAcceptLiquidity.execute(this.chain, opts)
   }
 
   /**
