@@ -1066,8 +1066,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets whether an initialized Solana lock-release token pool
-   * accepts liquidity. Pass canonical `poolType: 'lock-release'` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. Pass canonical
+   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
    *
    * @see {@link setCanAcceptLiquidity}
    *
@@ -1092,8 +1092,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Sets whether an initialized Solana lock-release token pool accepts liquidity using the pool
-   * owner wallet.
+   * Sets whether an initialized Solana lock-release token pool accepts `provideLiquidity` deposits
+   * and `withdrawLiquidity` transfers using the pool owner wallet.
    *
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
