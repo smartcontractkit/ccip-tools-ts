@@ -4,6 +4,7 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
+import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import { ChainFamily, networkInfo } from '../index.ts'
 import type { ExecutionInput } from '../types.ts'
 import { TONChain } from './index.ts'
@@ -1025,7 +1026,21 @@ describe('TON index unit tests', () => {
       {
         underAssign = true,
         txOf = tx,
-      }: { underAssign?: boolean; txOf?: (lt: number) => ReturnType<typeof tx> } = {},
+        v3,
+      }: {
+        underAssign?: boolean
+        txOf?: (lt: number) => ReturnType<typeof tx>
+        v3?: {
+          /** Indexed masterchain tip (default: latest). */
+          tip?: number
+          /** Every v3 request 500s (probe failure → v2 fallback). */
+          fail?: boolean
+          /** Explicit `/messages` rows in the order the index serves them (its native
+           * created_at order) — lets tests inject created_lt disorder. Each row's tx
+           * must be one of `all`; `out_msg_tx_hash` is derived from `txLt`. */
+          rows?: { txLt: number; createdLt: string; createdAt: string; noHash?: boolean }[]
+        }
+      } = {},
     ) {
       const asc = [...all].sort((a, b) => a - b)
       // Link each lt to its true on-chain predecessor (over the FULL history).
@@ -1037,26 +1052,102 @@ describe('TON index unit tests', () => {
         .reverse()
         .map((t) => ({ ...t, prevTransactionLt: prevLt.get(t.lt)!, prevTransactionHash: 0n }))
 
-      const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
+      const byLt = new Map(asc.map((lt) => [BigInt(lt), txOf(lt)] as const))
+      const hashB64 = (lt: number) => (byLt.get(BigInt(lt))!.hash() as Buffer).toString('base64')
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+      // The v3 index: one row per account out-message. Default rows are derived
+      // lt-ascending (created_at = 100 + lt, matching every tx builder); explicit
+      // `rows` are served verbatim, in the given order.
+      const v3Rows: {
+        hash: string
+        source: string | null
+        destination: string | null
+        created_lt: string
+        created_at: string
+        out_msg_tx_hash?: string | null
+      }[] =
+        v3?.rows?.map((r) => ({
+          hash: `${hashB64(r.txLt)}#${r.createdLt}`,
+          source: OFFRAMP,
+          destination: null,
+          created_lt: r.createdLt,
+          created_at: r.createdAt,
+          out_msg_tx_hash: r.noHash ? null : hashB64(r.txLt),
+        })) ??
+        asc.flatMap((lt) => {
+          const t = byLt.get(BigInt(lt))!
+          return [...t.outMessages.values()].map((msg) => ({
+            hash: `${hashB64(lt)}#${String(msg.info.createdLt)}`,
+            source: OFFRAMP,
+            destination: null,
+            created_lt: String(msg.info.createdLt),
+            created_at: String(t.now),
+            out_msg_tx_hash: hashB64(lt),
+          }))
+        })
+
+      const calls = { v3Messages: 0, v3Reqs: [] as Record<string, string>[], v2Walk: 0 }
+      const fetchImpl = (async (input: unknown, opts?: { body?: string }) => {
+        const url = String(input instanceof Request ? input.url : input)
+        if (url.includes('/api/v3/')) {
+          if (!v3) throw new Error(`unexpected v3 url (harness has no v3): ${url}`)
+          calls.v3Messages++
+          const req = Object.fromEntries(new URL(url).searchParams.entries())
+          if (url.includes('/messages')) {
+            if (v3.fail) return new Response('v3 down', { status: 500 })
+            calls.v3Reqs.push(req)
+            const startUtime = Number(req.start_utime ?? 0)
+            // start_lt is INCLUSIVE on the index (verified live).
+            const startLt = req.start_lt != null ? BigInt(req.start_lt) : undefined
+            const limit = Number(req.limit ?? 10)
+            const offset = Number(req.offset ?? 0)
+            let msgs = v3Rows.filter((m) => Number(m.created_at) >= startUtime)
+            if (startLt != null) msgs = msgs.filter((m) => BigInt(m.created_lt) >= startLt)
+            return json({ messages: msgs.slice(offset, offset + limit) })
+          }
+          if (url.includes('/transactions')) {
+            if (v3.fail) return new Response('v3 down', { status: 500 })
+            // List mode (the meta oracle) pages lt-ascending with INCLUSIVE start_lt;
+            // a `hash` param narrows to a single tx.
+            const startLt = req.start_lt != null ? BigInt(req.start_lt) : undefined
+            let txs = asc
+              .filter((lt) => startLt == null || BigInt(lt) >= startLt)
+              .map((lt) => ({
+                account: OFFRAMP,
+                hash: hashB64(lt),
+                lt: String(lt),
+                now: 100 + lt,
+                mc_block_seqno: blockOf(BigInt(lt)),
+              }))
+            if (req.hash != null) txs = txs.filter((t) => t.hash === req.hash)
+            return json({ transactions: txs.slice(0, Number(req.limit ?? 100)) })
+          }
+          if (url.includes('/masterchainInfo')) return json({ last: { seqno: v3.tip ?? latest } })
+          throw new Error(`unexpected v3 url ${url}`)
+        }
         const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
         if (body.method === 'lookupBlock') {
           const block = blockOf(BigInt(body.params!.lt!))
           const seqno = underAssign ? Math.max(1, block - 1) : block // under-assign by 1
-          return new Response(JSON.stringify({ result: { seqno } }), {
-            headers: { 'Content-Type': 'application/json' },
-          })
+          return json({ result: { seqno } })
         }
         throw new Error(`unexpected fetch method=${body.method}`)
       }) as unknown as typeof fetch
 
       const client = {
-        parameters: { endpoint: 'http://mock-ton-api' },
+        parameters: {
+          // With v3 the endpoint carries the /api/v2 path so tonV3BaseUrl derives
+          // the harness's own /api/v3 base; without it the public index would be hit.
+          endpoint: v3 ? 'http://mock-ton-api/api/v2/jsonRPC' : 'http://mock-ton-api',
+        },
         getMasterchainInfo: async () => ({ workchain: -1, shard: ROOT_SHARD, latestSeqno: latest }),
         getWorkchainShards: async (seqno: number) => [{ workchain: 0, shard: ROOT_SHARD, seqno }],
         getTransactions: async (
           _a: Address,
           o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
         ) => {
+          calls.v2Walk++
           let start = 0
           if (o.lt != null) {
             const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
@@ -1066,6 +1157,10 @@ describe('TON index unit tests', () => {
           if (o.to_lt != null) page = page.filter((t) => t.lt >= BigInt(o.to_lt!))
           return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
         },
+        // Fast-path hydration fetches raw txs by (lt, hash) straight from the client;
+        // the LINKED copy carries prevTransactionLt, which buildChainTransaction reads.
+        getTransaction: async (_a: Address, lt: string, _hash: string) =>
+          linked.find((t) => t.lt === BigInt(lt)) ?? null,
       } as unknown as TonClient
 
       const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
@@ -1076,7 +1171,7 @@ describe('TON index unit tests', () => {
           getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
         }
       ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno)
-      return chain
+      return Object.assign(chain, { calls })
     }
 
     async function collect(chain: TONChain, opts: Record<string, unknown>) {
@@ -1168,17 +1263,17 @@ describe('TON index unit tests', () => {
       assert.deepEqual(await collect(chain, { startBlock: 11 }), [])
     })
 
-    describe('since resume hint', () => {
-      // The composite hash getTransaction stamps: "workchain:address:lt:hash" — the lt in
-      // position 2 is the exact per-account cursor the hint resumes from.
-      const hintFor = (lt: number, block = blockOf(BigInt(lt)), address = OFFRAMP) => ({
-        address,
-        blockNumber: block,
-        blockTimestamp: 100 + lt,
-        transactionHash: `${address}:${lt}:${'ab'.repeat(32)}`,
-        index: lt,
-      })
+    // The composite hash getTransaction stamps: "workchain:address:lt:hash" — the lt in
+    // position 2 is the exact per-account cursor a since hint resumes from.
+    const hintFor = (lt: number, block = blockOf(BigInt(lt)), address = OFFRAMP) => ({
+      address,
+      blockNumber: block,
+      blockTimestamp: 100 + lt,
+      transactionHash: `${address}:${lt}:${'ab'.repeat(32)}`,
+      index: lt,
+    })
 
+    describe('since resume hint', () => {
       it('resumes strictly after the hinted tx, raising a stale startBlock floor', async () => {
         // startBlock 1 walks from genesis; the hint at 11_001 lifts the floor so block 10
         // is never scanned. The floor goes INCLUSIVE of the hinted tx (sinceLt - 1) and
@@ -1330,6 +1425,147 @@ describe('TON index unit tests', () => {
           logs.map((l) => l.lt),
           ['12001'],
           'the whole hinted tx stays behind the cursor (no re-emission)',
+        )
+      })
+    })
+
+    describe('v3 fast path', () => {
+      it('hint scan runs on the index: message-granular floor, same-tx followers kept', async () => {
+        // The hint's `index` (its log's created_lt) seeds /messages at index + 1
+        // (`start_lt` inclusive): the hinted log's own row is excluded, the hinted
+        // tx's later messages (same-tx) and later blocks still flow — with NO v2
+        // tx-chain pagination.
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          v3: {},
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(11_001) }) // hint = first log
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'hinted log excluded; its same-tx follower and later txs emitted via the fast path',
+        )
+        const { calls } = chain
+        assert.equal(calls.v2Walk, 0, 'no v2 tx-chain pagination on the fast path')
+      })
+
+      it('completes without truncation when the indexed tip covers the cutoff', async () => {
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: {} })
+        const logs = await collect(chain, { startTime: 1 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '12001'],
+        )
+      })
+
+      it('created_lt disorder never skips rows or truncates (time-ordered paging, hash join)', async () => {
+        // The index orders /messages by created_at; created_lt can regress across
+        // rows of the same second, and a later-time row can carry a LOWER lt. With
+        // page=2 the boundary cuts after txA: a created_lt page cursor would drop
+        // txC (lt below the boundary), and a forward-only meta prune would lose
+        // txB to truncation. The fast path must emit all three, in lt order.
+        const chain = makeChain(13, [10_005, 10_002, 10_001], [], {
+          v3: {
+            rows: [
+              { txLt: 10_005, createdLt: '10005', createdAt: '10105' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10105' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10106' },
+            ],
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt).sort(),
+          ['10001', '10002', '10005'],
+          'no silent skip (lt cursor) and no truncation (forward-only prune)',
+        )
+      })
+
+      it('clamps to the ingested tip and surfaces the shortfall', async () => {
+        // The index ingested only up to block 11 while the scan's cutoff is 12:
+        // within the lag tolerance the probe passes, but emitting to the cutoff
+        // would silently skip block 12. The scan must throw
+        // CCIPLogsStreamInconsistentError so the poller re-polls instead of
+        // trusting a "complete" watermark.
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: { tip: 11 } })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a fast-path scan cut short by the index tip throws instead of ending silently',
+        )
+      })
+
+      it('drains a boundary second that overflows the page (offset probe), never cutting it', async () => {
+        // Three rows in ONE second with page=2: page 1 covers rows 0-1; the turn
+        // re-sees them (all repeats, full page) — the offset drain must reach row 2
+        // instead of advancing past it.
+        const chain = makeChain(13, [10_001, 10_002, 10_003], [], {
+          v3: {
+            rows: [10_001, 10_002, 10_003].map((lt) => ({
+              txLt: lt,
+              createdLt: String(lt),
+              createdAt: '10100',
+            })),
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10001', '10002', '10003'],
+        )
+        assert.ok(
+          chain.calls.v3Reqs.some((r) => r.offset === '2'),
+          'the boundary second was drained by offset',
+        )
+      })
+
+      it('truncates loudly on a log message with no tx hash (index inconsistency)', async () => {
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a row missing its producing tx hash truncates the scan loudly',
+        )
+      })
+
+      it("turns pages from the page's max created_at, never regressing under lt disorder", async () => {
+        // Row A (lt 10002) sits at second 10100, row B (lt 10001) at 10105. After the
+        // per-page lt re-sort, B comes first and A last — the turn floor must be the
+        // page's max created_at (10105), not the lt-max row's (10100).
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_002, createdLt: '10002', createdAt: '10100' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10105' },
+            ],
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10001', '10002'],
+        )
+        assert.equal(
+          chain.calls.v3Reqs[1]?.start_utime,
+          '10105',
+          "the turn cursor is the page's max created_at, not its lt-max row's",
         )
       })
     })

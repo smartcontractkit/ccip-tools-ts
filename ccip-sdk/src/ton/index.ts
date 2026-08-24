@@ -756,10 +756,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     for await (const item of stream) {
       if (!('tx' in item)) {
-        // Truncated on index inconsistency: the block in progress may be incomplete.
+        // Truncated tail: the index did not deliver the full requested window
+        // (mid-stream inconsistency, or its ingested tip sat below the cutoff — see
+        // openV3EventStream). Ending silently would look like a complete scan to
+        // the watermark-driven poller: surface it (CCIPLogsStreamInconsistentError)
+        // so the caller re-polls instead of trusting the watermark.
         buf = []
         curBlock = undefined
-        break
+        throw new CCIPLogsStreamInconsistentError(
+          'TON getLogs: v3 fast path truncated (incomplete tail); re-poll to catch up',
+        )
       }
       const block = item.tx.blockNumber
       if (curBlock !== undefined && block < curBlock) {
@@ -768,7 +774,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         )
         buf = []
         curBlock = undefined
-        break
+        throw new CCIPLogsStreamInconsistentError(
+          `TON getLogs v3: block rewind ${curBlock} -> ${block} mid-stream`,
+        )
       }
       // Crossed a block boundary ⇒ the previous block's events are complete in the index.
       if (curBlock !== undefined && block !== curBlock) yield* drain(this)

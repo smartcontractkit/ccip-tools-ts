@@ -333,7 +333,7 @@ export function tonV3BaseUrl(endpoint: string, networkType: NetworkType): string
 
 async function fetchV3Messages(
   ctx: TonV3Context & { v3BaseUrl: string },
-  q: { source: string; startUtime: number; startLt?: bigint; limit: number },
+  q: { source: string; startUtime: number; startLt?: bigint; limit: number; offset?: number },
 ): Promise<TonV3Message[]> {
   const url = new URL(`${ctx.v3BaseUrl}/messages`)
   url.searchParams.set('source', q.source)
@@ -341,8 +341,9 @@ async function fetchV3Messages(
   url.searchParams.set('direction', 'out')
   if (q.startUtime > 0) url.searchParams.set('start_utime', String(q.startUtime))
   if (q.startLt != null) url.searchParams.set('start_lt', q.startLt.toString())
-  url.searchParams.set('sort', 'asc') // ascending by created_lt
+  url.searchParams.set('sort', 'asc') // the index orders rows by created_at; page turns use start_utime (see generateV3Events)
   url.searchParams.set('limit', String(q.limit))
+  if (q.offset) url.searchParams.set('offset', String(q.offset))
   const res = await ctx.rateLimitedFetch(url, { headers: { Accept: 'application/json' } })
   if (!res.ok) {
     throw new CCIPHttpError(res.status, `TON v3 messages query failed: ${await res.text()}`)
@@ -425,7 +426,13 @@ export async function fetchV3IndexedTip(
  * message-granular, so flooring there ALWAYS includes the hinted tx's own later
  * messages (same-tx logs) and same-block logs, and the hinted log itself is never
  * re-fetched. `start_lt` is INCLUSIVE (verified live), so the seed is the hint's
- * created_lt + 1.
+ * created_lt + 1. Page turns after the seed are driven by created_at (the index's
+ * native order) — never by created_lt, which can regress across rows.
+ *
+ * The scan is clamped to the index's INGESTED tip: blocks past it are not in the
+ * index yet, so emitting up to the requested cutoff would silently under-deliver.
+ * When the clamp cuts the scan short, the stream ends with a `truncated` marker
+ * (see {@link TonV3Event}) instead of pretending the window was complete.
  *
  * @internal
  */
@@ -443,6 +450,7 @@ export async function openV3EventStream(
   const limit = Math.min(Number(opts.page) || V3_PAGE_LIMIT, V3_PAGE_LIMIT)
   const startUtime = Math.max(0, Math.floor(Number(opts.startTime ?? 0)))
   let firstPage: TonV3Message[]
+  let indexedTip: number
   try {
     // Serialized (never concurrent): firing both at once would self-trip the public
     // index's 1-burst keyless quota and 429 the probe. Messages page first — it is the
@@ -454,8 +462,10 @@ export async function openV3EventStream(
       ...(startLt != null ? { startLt } : {}),
       limit,
     })
-    const indexedTip = await ctx.getIndexedTip()
+    indexedTip = await ctx.getIndexedTip()
     if (indexedTip < cutoff - V3_MAX_INDEX_LAG) {
+      // Far-behind index: the v2 walk talks to the liteserver and is complete, so
+      // fall back to it instead of serving a sliver of the requested window.
       throw new CCIPHttpError(
         0,
         `TON v3 index lagging: tip ${indexedTip} vs requested cutoff ${cutoff}`,
@@ -465,10 +475,17 @@ export async function openV3EventStream(
     ctx.logger?.debug('TON getLogs: v3 fast path unavailable, falling back to v2 walk:', err)
     return null
   }
+  // Within tolerance, CLAMP the scan to what the index has actually ingested:
+  // blocks (indexedTip, cutoff] aren't in the index yet, and emitting up to the
+  // requested cutoff would silently skip them (the lag threshold alone can't see
+  // a shortfall inside it). `clamped` surfaces the shortfall at stream end so the
+  // consumer re-polls instead of trusting the scan as complete.
+  const clamped = indexedTip < cutoff
   return generateV3Events(ctxV3, acct, firstPage, {
     startUtime,
     limit,
     ...(startLt != null ? { startLt } : {}),
+    clamped,
   })
 }
 
@@ -476,25 +493,33 @@ async function* generateV3Events(
   ctx: TonV3Context & { v3BaseUrl: string },
   acct: Address,
   firstPage: TonV3Message[],
-  q: { startUtime: number; limit: number; startLt?: bigint },
+  q: { startUtime: number; limit: number; startLt?: bigint; clamped: boolean },
 ): AsyncGenerator<TonV3Event, void, undefined> {
-  // Pages are ascending by created_lt (unique per account message), so a tx's first
-  // message marks its position and the created_lt cursor is a safe page boundary.
+  // The index orders /messages rows by created_at, NOT by created_lt — lts can
+  // regress across rows of the same second (parallel shards). Page turns therefore
+  // use a TIME cursor, each page is re-sorted by created_lt so same-second rows
+  // arrive block-ordered, and the `seen` set dedupes rows repeated across a
+  // same-second page boundary. The page COMMENT above the loop documents the
+  // column of truth.
   const seen = new Set<string>()
+  // Unique rows seen per second (pages arrive created_at-ordered, so rows of a
+  // second already seen form a prefix of its query order — the boundary-second
+  // drain below skips exactly that prefix by offset).
+  const seenRows = new Set<string>()
+  const rowsBySecond = new Map<number, number>()
+  const rowsSeenAt = (utime: number) => rowsBySecond.get(utime) ?? 0
   // Lazy lt-ordered meta oracle over the account's txs (one index page per ~100 txs).
-  // Within an account, message created_lt order aligns with tx lt order (a tx's
-  // messages sit in (tx.lt, nextTx.lt)), so the join only ever looks ahead; entries
-  // behind the last match are pruned.
+  // Rows are joined BY TX HASH, so the oracle never outruns a lookup: entries are
+  // NOT pruned — a later-arriving row can reference an EARLIER tx (out-of-order
+  // created_at vs created_lt), whose meta must still be here. The map is bounded
+  // by the window's tx count (a few thousand entries at most).
   const metaStream = streamV3TxMeta(ctx, acct, q.startUtime)
   const metaByHash = new Map<string, TonV3Transaction>()
   let metaDone = false
   const metaLookup = async (hash: string): Promise<TonV3Transaction | undefined> => {
     for (;;) {
       const hit = metaByHash.get(hash)
-      if (hit) {
-        for (const [h, t] of metaByHash) if (BigInt(t.lt) < BigInt(hit.lt)) metaByHash.delete(h)
-        return hit
-      }
+      if (hit) return hit
       if (metaDone) return undefined
       const next = await metaStream.next()
       if (next.done) {
@@ -504,11 +529,32 @@ async function* generateV3Events(
       metaByHash.set(next.value.hash, next.value)
     }
   }
+  // Ends the stream: `clamped` means the index's ingested tip sat below the
+  // requested cutoff, so the tail may still be arriving — the consumer must not
+  // treat the scan as complete (it re-polls; see emitSealedV3Events).
+  const end = function* (): Generator<TonV3Event, void, undefined> {
+    if (q.clamped) yield { truncated: true }
+  }
   let page = firstPage
   for (;;) {
+    // The index sorts rows by created_at; restore lt/block order within the page.
+    page.sort((a, b) => Number(BigInt(a.created_lt) - BigInt(b.created_lt)))
     for (const msg of page) {
+      if (!seenRows.has(msg.hash)) {
+        seenRows.add(msg.hash)
+        const sec = Number(msg.created_at)
+        rowsBySecond.set(sec, (rowsBySecond.get(sec) ?? 0) + 1)
+      }
       const txHash = msg.out_msg_tx_hash
-      if (!txHash || seen.has(txHash)) continue
+      if (!txHash) {
+        // An external-out row without its producing tx's hash is an index
+        // inconsistency — the event can't be placed or verified, and dropping it
+        // would silently lose a log. Truncate loudly instead; the caller re-polls.
+        ctx.logger?.warn('TON v3 event stream truncated: a log message carries no tx hash')
+        yield { truncated: true }
+        return
+      }
+      if (seen.has(txHash)) continue
       seen.add(txHash)
       let meta: TonV3Transaction | undefined, raw: Transaction | null | undefined
       try {
@@ -531,19 +577,53 @@ async function* generateV3Events(
       // Decode errors propagate (deterministic — failing loudly beats stalling silently).
       yield { tx: await ctx.getTransaction(raw, meta.mc_block_seqno) }
     }
-    if (page.length < q.limit) return
-    const nextLt = BigInt(page[page.length - 1]!.created_lt) + 1n
-    try {
-      page = await fetchV3Messages(ctx, {
+    if (page.length < q.limit) {
+      // Natural end of the index's message list for this account.
+      yield* end()
+      return
+    }
+    // Page full: turn by TIME (start_utime is an inclusive floor) with NO lt
+    // floor, so rows of the boundary second keep ANY created_lt — a created_lt
+    // cursor here would silently skip rows whose lt sits below a later page's
+    // boundary. Rows of the boundary second repeat across the turn and are deduped
+    // by `seen`. Turn from the page's NEWEST second (max created_at — after the lt
+    // re-sort above, the last row needn't hold it): the time cursor then never
+    // regresses into earlier seconds, which would burn extra calls of the index's
+    // scarce keyless quota on re-covered rows (and could masquerade as overflow).
+    const turnUtime = Math.max(q.startUtime, ...page.map((m) => Number(m.created_at)))
+    let next: TonV3Message[]
+    const turn = async (startUtime: number, offset?: number): Promise<TonV3Message[]> =>
+      fetchV3Messages(ctx, {
         source: acct.toRawString(),
-        startUtime: q.startUtime,
-        startLt: nextLt,
+        startUtime,
         limit: q.limit,
+        ...(offset ? { offset } : {}),
       })
+    // A hash-less row always counts as fresh: it must reach the loop above, which
+    // truncates on it (an index inconsistency), rather than being advanced past.
+    const fresh = (rows: TonV3Message[]) =>
+      rows.some((m) => !m.out_msg_tx_hash || !seen.has(m.out_msg_tx_hash))
+    try {
+      next = await turn(turnUtime)
+      if (!fresh(next) && next.length >= q.limit) {
+        // A FULL page of only repeats: the boundary second may hold more rows than
+        // one page — the index pages by size within the same second. Its seen rows
+        // are a prefix of the query's (deterministic) order, so skip exactly past
+        // them by offset to drain any remainder rather than cutting it silently.
+        next = await turn(turnUtime, rowsSeenAt(turnUtime))
+      }
+      if (!fresh(next)) next = await turn(turnUtime + 1) // boundary second drained → advance
     } catch (err) {
       ctx.logger?.warn('TON v3 event stream truncated (page turn):', err)
       yield { truncated: true }
       return
     }
+    // Both the boundary second and the next one returned nothing new: the index has
+    // no further rows for this account (its ingested tip was reached).
+    if (!fresh(next)) {
+      yield* end()
+      return
+    }
+    page = next
   }
 }

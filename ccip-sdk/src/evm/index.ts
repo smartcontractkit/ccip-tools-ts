@@ -347,7 +347,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
+    const providerRef = new WeakRef(this.provider)
+    this.abort.addEventListener('abort', () => providerRef.deref()?.destroy(), { once: true })
 
     const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
@@ -536,12 +537,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         provider
           ._waitUntilReady()
           .then(() => resolve(provider))
-          .catch((err) => {
-            // No chain will own this provider: drop the listener so a long-lived
-            // caller signal does not root the failed provider.
-            abort?.removeEventListener('abort', onAbort)
-            reject(err as Error)
-          })
+          .catch(reject)
+      }).catch((err) => {
+        // No chain will own this provider: drop the listener so a long-lived
+        // caller signal does not root the failed provider.
+        abort?.removeEventListener('abort', onAbort)
+        throw err as Error
       })
       return [
         await providerReady,
