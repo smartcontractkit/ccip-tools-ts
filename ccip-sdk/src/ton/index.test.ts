@@ -1022,7 +1022,10 @@ describe('TON index unit tests', () => {
       latest: number,
       all: number[],
       missing: number[] = [],
-      { underAssign = true }: { underAssign?: boolean } = {},
+      {
+        underAssign = true,
+        txOf = tx,
+      }: { underAssign?: boolean; txOf?: (lt: number) => ReturnType<typeof tx> } = {},
     ) {
       const asc = [...all].sort((a, b) => a - b)
       // Link each lt to its true on-chain predecessor (over the FULL history).
@@ -1030,7 +1033,7 @@ describe('TON index unit tests', () => {
       asc.forEach((lt, i) => prevLt.set(BigInt(lt), i > 0 ? BigInt(asc[i - 1]!) : 0n))
       const present = asc.filter((lt) => !missing.includes(lt))
       const linked = present
-        .map(tx)
+        .map((lt) => txOf(lt))
         .reverse()
         .map((t) => ({ ...t, prevTransactionLt: prevLt.get(t.lt)!, prevTransactionHash: 0n }))
 
@@ -1178,14 +1181,15 @@ describe('TON index unit tests', () => {
 
       it('resumes strictly after the hinted tx, raising a stale startBlock floor', async () => {
         // startBlock 1 walks from genesis; the hint at 11_001 lifts the floor so block 10
-        // is never scanned. Exclusive (matching the (lt, hash) cursor): the hinted tx
-        // itself is not re-streamed, but its same-block follower (11_002) still is.
+        // is never scanned. The floor goes INCLUSIVE of the hinted tx (sinceLt - 1) and
+        // the emit loop drops its logs at/before the hint's index — same-tx and
+        // same-block followers still flow (see the multi-log tests below).
         const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
         const logs = await collect(chain, { startBlock: 1, since: hintFor(11_001) })
         assert.deepEqual(
           logs.map((l) => l.lt),
           ['11002', '12001'],
-          'block 10 and the hinted tx skipped; the same-block follower still emitted',
+          'block 10 skipped; the hinted log excluded, its same-block follower emitted',
         )
       })
 
@@ -1278,6 +1282,54 @@ describe('TON index unit tests', () => {
           collect(chain, { since: hintFor(11_001, 11, '0:' + '2'.repeat(64)) }),
           /requires startBlock/,
           'a foreign-account hint must not raise startBlock via withSinceStart',
+        )
+      })
+
+      it('keeps same-transaction followers after the hinted log (multi-log tx)', async () => {
+        // Batch execution: the hinted tx emits TWO matching logs (createdLt
+        // 11_001 and 11_002). The tx-granular `to_lt` floor must not lose the
+        // follower: the hint floors INCLUSIVE of the tx (sinceLt - 1) and the
+        // emit loop drops only its logs at/before the hint's index.
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(11_001) }) // hint = first log
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'the hinted log is excluded; its same-tx follower and later txs are emitted',
+        )
+      })
+
+      it('re-emits nothing when the hint is the hinted tx’s last log', async () => {
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: { ...hintFor(11_001), index: 11_002 } })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['12001'],
+          'the whole hinted tx stays behind the cursor (no re-emission)',
         )
       })
     })

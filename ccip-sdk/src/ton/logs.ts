@@ -404,11 +404,12 @@ export async function fetchV3IndexedTip(
 }
 
 /**
- * Open the TonCenter v3 fast path for a startTime-only getLogs scan, or return null
- * (no v3 API at this endpoint, or it errors/lags — the caller then falls back to the
- * v2 walk). The probe (first messages page + indexed tip) doubles as the lag check;
- * once it succeeds the stream is committed: later irregularities only truncate it
- * gracefully (see {@link TonV3Event}), they never fall back mid-stream.
+ * Open the TonCenter v3 fast path for a startTime-only cold backfill or a
+ * `since`-hinted scan whose hint carries a per-log `index`, or return null (no v3 API
+ * at this endpoint, or it errors/lags — the caller then falls back to the v2 walk).
+ * The probe (first messages page + indexed tip) doubles as the lag check; once it
+ * succeeds the stream is committed: later irregularities only truncate it gracefully
+ * (see {@link TonV3Event}), they never fall back mid-stream.
  *
  * Instead of walking the account's whole transaction chain from the tip with
  * rate-limited v2 pages, the index answers "this account's log messages since T"
@@ -419,12 +420,21 @@ export async function fetchV3IndexedTip(
  * external addresses, so the event topic (the external dest's uint32) exists only in
  * the raw transaction.
  *
+ * `startLt` seeds the message stream strictly after an account message lt (a
+ * `since` hint's `index`, which IS its log's created_lt): the index is
+ * message-granular, so flooring there ALWAYS includes the hinted tx's own later
+ * messages (same-tx logs) and same-block logs, and the hinted log itself is never
+ * re-fetched. `start_lt` is INCLUSIVE (verified live), so the seed is the hint's
+ * created_lt + 1.
+ *
  * @internal
  */
 export async function openV3EventStream(
   opts: LeanNumbers<Omit<LogFilter, 'topics'>>,
   ctx: TonV3Context,
   cutoff: number,
+  /** Resume strictly after this account message lt (a hint's `index`). */
+  startLt?: bigint,
 ): Promise<AsyncGenerator<TonV3Event, void, undefined> | null> {
   const { v3BaseUrl } = ctx
   if (!v3BaseUrl) return null // fast path explicitly disabled by the caller
@@ -438,7 +448,12 @@ export async function openV3EventStream(
     // index's 1-burst keyless quota and 429 the probe. Messages page first — it is the
     // load-bearing call; the tip is cached chain-side (~30s), so a steady-state probe
     // costs exactly ONE index call.
-    firstPage = await fetchV3Messages(ctxV3, { source: acct.toRawString(), startUtime, limit })
+    firstPage = await fetchV3Messages(ctxV3, {
+      source: acct.toRawString(),
+      startUtime,
+      ...(startLt != null ? { startLt } : {}),
+      limit,
+    })
     const indexedTip = await ctx.getIndexedTip()
     if (indexedTip < cutoff - V3_MAX_INDEX_LAG) {
       throw new CCIPHttpError(
@@ -450,14 +465,18 @@ export async function openV3EventStream(
     ctx.logger?.debug('TON getLogs: v3 fast path unavailable, falling back to v2 walk:', err)
     return null
   }
-  return generateV3Events(ctxV3, acct, firstPage, { startUtime, limit })
+  return generateV3Events(ctxV3, acct, firstPage, {
+    startUtime,
+    limit,
+    ...(startLt != null ? { startLt } : {}),
+  })
 }
 
 async function* generateV3Events(
   ctx: TonV3Context & { v3BaseUrl: string },
   acct: Address,
   firstPage: TonV3Message[],
-  q: { startUtime: number; limit: number },
+  q: { startUtime: number; limit: number; startLt?: bigint },
 ): AsyncGenerator<TonV3Event, void, undefined> {
   // Pages are ascending by created_lt (unique per account message), so a tx's first
   // message marks its position and the created_lt cursor is a safe page boundary.

@@ -728,11 +728,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   ): AsyncIterableIterator<ChainLog> {
     let curBlock: number | undefined
     let buf: ChainLog[] = []
+    // A `since` hint's per-log index (the hinted message's created_lt): the index
+    // floor at index + 1 excludes the hint's own ROW, but hydration decodes the
+    // WHOLE hinted tx — drop its messages at/before the hint; same-tx followers
+    // (batch execution) still flow.
+    const sinceIndexLt = opts.since?.index != null ? BigInt(opts.since.index) : undefined
     // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
     const drain = async function* (chain: TONChain): AsyncIterableIterator<ChainLog> {
       const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
       buf = []
       for (const log of out) {
+        if (sinceIndexLt != null && BigInt(log.index) <= sinceIndexLt) continue
         if (await passesTypeAndVersion(chain, log.address, opts.typeAndVersions)) yield log
       }
     }
@@ -813,13 +819,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     if (!opts.address) throw new CCIPLogsAddressRequiredError()
     const acct = Address.parse(opts.address)
 
-    // Resume hint: the composite transactionHash carries an exact per-account cursor
-    // ("workchain:address:lt:hash"; lt is unique and monotone per account). The floor
-    // is EXCLUSIVE — matching the (lt, hash) pagination cursor, the hinted tx itself is
-    // not re-streamed; only strictly-later txs are. A hint whose address doesn't match
-    // the polled account, or that doesn't parse, is ignored and the usual block/time
-    // floor applies.
+    // Resume hint: the composite transactionHash carries the hinted TX's lt
+    // ("workchain:address:lt:hash") and the hint's `index` carries its log's own
+    // created_lt (unique per account message). The v2 walk's (lt, hash) cursor is
+    // transaction-granular, so the composite lt EXCLUDES the whole hinted tx — with
+    // the index, the walk instead streams the hinted tx whole and the emit loops
+    // drop its logs at/before the hint (same-tx followers flow); the v3 `/messages`
+    // fast path floors directly at the message lt (see the gate below). A hint whose
+    // address doesn't match the polled account, or that doesn't parse, is ignored
+    // and the usual block/time floor applies.
     let sinceLt: bigint | undefined
+    let sinceIndexLt: bigint | undefined
     let sinceBlock: number | undefined
     if (opts.since) {
       try {
@@ -844,16 +854,25 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           sinceLt = BigInt(parts[2]!)
         }
         if (addressMatches) {
-          // A TON log's `index` IS its message's created_lt — an exact account-lt
-          // cursor on its own (worker hints carry a naked hash but always an index).
-          if (sinceLt == null && opts.since.index != null) sinceLt = BigInt(opts.since.index)
+          // A TON log's `index` IS its message's created_lt — unique per log — so it
+          // is the per-log resume cursor: the v3 `/messages` fast path floors at it
+          // (message-granular: same-tx and same-block logs still flow), and combined
+          // with the composite's tx lt it locates the hinted log INSIDE the hinted
+          // transaction on the v2 walk (whose `to_lt` cursor is transaction-granular
+          // and can't express that).
+          if (opts.since.index != null) sinceIndexLt = BigInt(opts.since.index)
           const b = Number(opts.since.blockNumber)
           if (Number.isFinite(b) && b > 0) sinceBlock = b
         }
-      } catch {
+      } catch (err) {
         // Malformed or provably-foreign hint: no cursor, and no floor contribution
         // either — withSinceStart below must not trust a hint this stream rejected.
+        this.logger.warn(
+          'TON getLogs: invalid `since` hint:',
+          err instanceof Error ? err.message : err,
+        )
         sinceLt = undefined
+        sinceIndexLt = undefined
         sinceBlock = undefined
         delete opts.since
       }
@@ -862,7 +881,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // like every other chain (see withSinceStart): each floor is the LARGER of the
     // explicit bound and the hint's, so a block/time-only hint satisfies the start
     // requirement on its own. Runs after the parsing above, which empties a
-    // foreign/malformed hint first so it can contribute nothing.
+    // foreign/malformed hint first so it can contribute nothing. The user's own
+    // startBlock is captured BEFORE the merge: a full ChainLog hint always carries a
+    // blockNumber, and only an EXPLICIT startBlock is a seqno floor the walk must
+    // honor (the v3 fast path can't express one — see the gate below).
+    const userStartBlock = opts.startBlock
     opts = withSinceStart(opts)
 
     // Resume strictly after everything masterchain block (startBlock-1) committed, in
@@ -879,7 +902,18 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // shrinks the scan, never widens it below the requested one): the higher (newer)
     // of the two cursors wins. Both sides are in account-shard lt space, so the
     // comparison is exact.
-    let sinceLtFloor: bigint | undefined = sinceLt
+    // The walk's `to_lt` cursor is transaction-granular, so the floor only ever
+    // excludes whole transactions: with the composite tx lt AND the hint's per-log
+    // index (the canonical `since = last log` shape — index is the hinted message's
+    // created_lt), floor INCLUSIVE of the hinted tx (sinceLt - 1) and let the emit
+    // loops below drop its logs at/before the hint's index — same-tx followers
+    // (batch execution) still flow. A composite-only hint keeps the tx-exclusive
+    // floor; an index-only hint floors exclusively at the message lt (its tx can't
+    // be located without the composite) — the hinted log itself is never re-emitted
+    // either way. On the v3 `/messages` fast path the index is used directly
+    // (message-granular), so no tx-level floor is needed there.
+    let sinceLtFloor: bigint | undefined =
+      sinceLt != null ? (sinceIndexLt != null ? sinceLt - 1n : sinceLt) : sinceIndexLt
     if (opts.startBlock != null) {
       const b = Number(opts.startBlock)
       startSeqno = b
@@ -923,6 +957,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       )) {
         for (const log of tx.logs) {
           if (!matches(log)) continue
+          // The inclusive hint floor re-streams the hinted tx: drop its logs
+          // at/before the hint's index (the previous run emitted them); its
+          // same-tx followers flow on.
+          if (sinceIndexLt != null && BigInt(log.index) <= sinceIndexLt) continue
+          // startTime is a filter at emission when the scan floor is block-derived
+          // (see withSinceStart): never emit logs older than it.
+          if (opts.startTime != null && log.blockTimestamp < Number(opts.startTime)) continue
           if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
           yield log
         }
@@ -947,14 +988,21 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       cutoff = Math.max(1, latest - Math.max(1, confirmations))
     }
 
-    // v3 fast path: on hintless startTime-only scans (the poller's cold backfill),
-    // enumerate the account's log messages straight from the TonCenter v3 index instead
-    // of walking the whole window's tx pages and paying a committingSeqno resolution
-    // per tx — see openV3EventStream. Gated to hintless scans: a `since` lt cursor
-    // or a startBlock floor already bounds the v2 walk to an exact, cheap window. Index
+    // v3 fast path: HINTLESS startTime-only scans (the poller's cold backfill) and
+    // scans whose hint carries a per-log `index` enumerate the account's log
+    // messages straight from the TonCenter v3 index instead of walking the whole
+    // window's tx pages and paying a committingSeqno resolution per tx — see
+    // openV3EventStream. For hints the index's message granularity makes the floor
+    // EXACT: seeding at the hint's created_lt + 1 (`start_lt` is inclusive) keeps
+    // the hinted tx's own later messages and same-block logs, and never re-fetches
+    // the hinted log. A composite-only hint (no index) or a startBlock floor stays
+    // on the v2 walk, which its lt cursor bounds to an exact, cheap window. Index
     // calls go through a dedicated paced, fail-fast fetch and the lag-guard tip is
     // cached ~30s, so a steady-state scan costs exactly one index call.
-    if (opts.startBlock == null && opts.startTime != null && sinceLt == null) {
+    if (
+      userStartBlock == null &&
+      ((opts.startTime != null && sinceLt == null) || sinceIndexLt != null)
+    ) {
       const v3BaseUrl = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
       const v3Stream = await openV3EventStream(
         opts_,
@@ -967,6 +1015,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           logger: this.logger,
         },
         cutoff,
+        sinceIndexLt != null ? sinceIndexLt + 1n : undefined,
       )
       if (v3Stream) {
         yield* this.emitSealedV3Events(v3Stream, opts, cutoff, matches)
@@ -1068,7 +1117,18 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           curBlock = undefined
           break
         }
-        for (const log of tx.logs) if (matches(log)) buf.push(log)
+        for (const log of tx.logs) {
+          if (!matches(log)) continue
+          // The inclusive hint floor re-streams the hinted tx: drop its logs
+          // at/before the hint's index (the previous run emitted them) — its
+          // same-tx followers (batch execution) flow on, which the
+          // tx-granular `to_lt` cursor would otherwise lose.
+          if (sinceIndexLt != null && BigInt(log.index) <= sinceIndexLt) continue
+          // startTime is a filter at emission when the scan floor is block-derived
+          // (see withSinceStart): never emit logs older than it.
+          if (opts.startTime != null && log.blockTimestamp < Number(opts.startTime)) continue
+          buf.push(log)
+        }
         if (raw.lt != null) prevLt = raw.lt
       }
     } catch (err) {

@@ -84,6 +84,9 @@ function spyFetch() {
     walkPages: 0,
     /** `to_lt` params seen on v2 getTransactions calls (the walk's wire cursor). */
     walkToLts: [] as string[],
+    /** v2 getTransactions with limit:1 and no `to_lt` — the hydration of event txs
+     * by (lt, hash) on the fast path (and of walked txs on the v2 path). */
+    v2Hydrate: 0,
     /** v2 lookupBlock/getBlockHeader calls — the per-tx seqno-resolution cost that the
      * v3 meta oracle replaces on deep walks (a few per scan are unrelated: floor
      * resolution, the endBlock cap). */
@@ -113,11 +116,13 @@ function spyFetch() {
         try {
           const m = JSON.parse(bodyText) as {
             method?: string
-            params?: { to_lt?: string }
+            params?: { to_lt?: string; limit?: number }
           }
           if (m.method === 'getTransactions' && m.params?.to_lt != null) {
             calls.walkPages++
             calls.walkToLts.push(String(m.params.to_lt))
+          } else if (m.method === 'getTransactions' && m.params?.limit === 1) {
+            calls.v2Hydrate++
           } else if (m.method === 'lookupBlock' || m.method === 'getBlockHeader') {
             calls.v2SeqnoLookups++
           }
@@ -383,7 +388,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'since cursor a day old: resumes exclusively off the hint, no v3',
+    'since cursor a day old, composite-only hint: resumes on the v2 walk, tx-exclusive',
     {
       timeout: 420_000,
     },
@@ -392,6 +397,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       const spy = spyFetch()
       let logs: ChainLog[] = []
       try {
+        // A hint WITHOUT its per-log index has no message-granular cursor: it stays
+        // on the v2 walk (composite lt, tx-exclusive `to_lt`).
+        const hint = { ...OLD_LOG, index: undefined }
         // Same retry-with-spacing as the other live scans: under a degraded index a
         // scan may legitimately truncate before the first sealed block.
         for (let attempt = 0; attempt < 3 && logs.length === 0; attempt++) {
@@ -400,7 +408,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           for await (const log of chain.getLogs({
             address: ADDR,
             topics: ['CCIPMessageSent'],
-            since: OLD_LOG,
+            since: hint,
           })) {
             logs.push(log)
             if (logs.length >= 3) break
@@ -411,32 +419,97 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           return
         }
         const first = logs[0]!
-        assert.notEqual(first.transactionHash, OLD_LOG.transactionHash, 'hinted tx not re-streamed')
+        assert.notEqual(
+          first.transactionHash,
+          hint.transactionHash,
+          'the hinted tx is not re-streamed (tx-exclusive floor)',
+        )
         assert.ok(
-          Number(first.blockNumber) > OLD_LOG.blockNumber ||
-            (Number(first.blockNumber) === OLD_LOG.blockNumber && first.index > OLD_LOG.index),
+          Number(first.blockNumber) > hint.blockNumber ||
+            (Number(first.blockNumber) === hint.blockNumber && first.index > OLD_LOG.index),
           'resumes strictly past the cursor',
         )
-        assert.equal(spy.calls.v3messages, 0, 'an lt-carrying hint keeps the scan on the v2 walk')
+        assert.equal(
+          spy.calls.v3messages,
+          0,
+          'a hint without an index keeps the scan on the v2 walk',
+        )
         // The walk seeds the ordered lt list from the index: one paged meta call for
-        // a shallow scan — never the event index, never per-tx seqno lookups.
-        assert.ok(
-          spy.calls.v3transactions <= 3,
-          `lt list seeded in pages (saw ${spy.calls.v3transactions})`,
-        )
-        assert.ok(
-          spy.calls.v2SeqnoLookups <= 8,
-          `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups})`,
-        )
-        // The composite hash's lt becomes the exclusive wire cursor (`to_lt` is
-        // exclusive server-side — verified against toncenter v2 — so un-incremented).
+        // a shallow scan — never the event index, never per-tx seqno lookups. When
+        // the public index degrades mid-scan the walk falls back to per-tx seqno
+        // resolution (correct, just slower) — don't fail the call shape for that.
+        if (spy.calls.v3transactions > 0) {
+          assert.ok(
+            spy.calls.v3transactions <= 3,
+            `lt list seeded in pages (saw ${spy.calls.v3transactions})`,
+          )
+          assert.ok(
+            spy.calls.v2SeqnoLookups <= 8,
+            `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups})`,
+          )
+        } else {
+          assert.ok(
+            spy.calls.v2SeqnoLookups < 200,
+            `legacy per-tx resolution under a degraded index (saw ${spy.calls.v2SeqnoLookups})`,
+          )
+        }
         assert.ok(
           spy.calls.walkToLts.includes('91384259000015'),
-          `walk paged with to_lt at the hinted lt; saw: ${spy.calls.walkToLts.slice(0, 3).join(',')}`,
+          `walk paged with to_lt at the hinted tx lt (exclusive); saw: ${spy.calls.walkToLts.slice(0, 3).join(',')}`,
         )
       } finally {
         spy.restore()
       }
+    },
+  )
+
+  it(
+    'since cursor a day old, with per-log index: hint scan on the v3 /messages fast path',
+    {
+      timeout: 420_000,
+    },
+    async (t) => {
+      if (guard(t)) return
+      // The hint's `index` IS its log's created_lt: the message-granular index
+      // floors at index + 1 (`start_lt` is inclusive), so same-tx/same-block logs
+      // still flow and the hinted log is never re-fetched — no v2 walk at all.
+      // A degraded/lagging public index legitimately falls back to the v2 walk
+      // (the probe is fail-fast by design); retry once before failing the
+      // fast-path shape, mirroring the startTime-only fast-path test.
+      let logs: ChainLog[] = []
+      let spy!: ReturnType<typeof spyFetch>
+      for (let attempt = 0; attempt < 2; attempt++) {
+        spy = spyFetch()
+        try {
+          logs = []
+          for await (const log of chain.getLogs({
+            address: ADDR,
+            topics: ['CCIPMessageSent'],
+            since: OLD_LOG,
+          })) {
+            logs.push(log)
+            if (logs.length >= 3) break
+          }
+        } finally {
+          spy.restore()
+        }
+        if (logs.length === 0) {
+          t.skip('index degraded: every attempt truncated before the first sealed block')
+          return
+        }
+        if (spy.calls.walkPages === 0 || attempt === 1) break
+        await sleep(10_000)
+      }
+      const first = logs[0]!
+      assert.ok(
+        Number(first.blockNumber) > OLD_LOG.blockNumber ||
+          (Number(first.blockNumber) === OLD_LOG.blockNumber && first.index > OLD_LOG.index),
+        'resumes strictly past the cursor',
+      )
+      assert.ok(spy.calls.v3messages >= 1, 'the /messages fast path served the hint scan')
+      assert.equal(spy.calls.walkPages, 0, 'no v2 tx-chain pagination on the fast path')
+      assert.equal(spy.calls.v2SeqnoLookups, 0, 'no per-tx seqno resolution (index stamps them)')
+      assert.ok(spy.calls.v2Hydrate > 0, 'event txs hydrated from v2 by (lt, hash)')
     },
   )
 
