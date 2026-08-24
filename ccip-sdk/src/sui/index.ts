@@ -152,16 +152,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getRegistryTokenConfig = memoize(this.getRegistryTokenConfig.bind(this), {
       async: true,
@@ -263,6 +266,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.client.getCoinMetadata = memoize(this.client.getCoinMetadata.bind(this.client), {
         async: true,
         maxSize: 100, // coin metadata is immutable per coin type
+        expires: 600e3,
         transformKey: ([args]: Parameters<typeof this.client.getCoinMetadata>) => [args.coinType],
       })
   }

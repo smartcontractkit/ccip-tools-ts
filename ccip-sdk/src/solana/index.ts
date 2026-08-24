@@ -255,7 +255,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
@@ -268,16 +269,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     // cache account info for 30 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
-      maxSize: 100,
       maxArgs: 2,
+      maxSize: 100,
       expires: 5e3,
       transformKey: ([address, commitment]) =>
         [(address as PublicKey).toString(), commitment] as const,
@@ -308,7 +311,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
       maxArgs: 2,
-      maxSize: 20,
+      maxSize: 10,
     })
   }
 

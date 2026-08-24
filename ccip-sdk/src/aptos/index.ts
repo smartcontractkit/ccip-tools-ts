@@ -181,13 +181,15 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
-      maxSize: 100,
       maxArgs: 1,
+      maxSize: 100,
+      expires: 5e3,
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
-      maxSize: 100,
       maxArgs: 1,
+      maxSize: 100,
+      expires: 600e3,
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
@@ -203,8 +205,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     })
     this.getTokenInfo = memoize((token) => getTokenInfo(this.provider, token), {
       async: true,
-      maxSize: 100,
       maxArgs: 1,
+      maxSize: 100,
+      expires: 600e3,
     })
 
     this._getAccountModulesNames = memoize(
@@ -212,13 +215,14 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         this.provider
           .getAccountModules({ accountAddress: address })
           .then((modules) => modules.map(({ abi }) => abi!.name)),
-      { maxSize: 100, maxArgs: 1 },
+      { async: true, maxSize: 100, maxArgs: 1, expires: 600e3 },
     )
     this.provider.getTransactionByVersion = memoize(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
-        maxSize: 100,
         async: true,
+        maxSize: 100,
+        expires: 5e3,
         transformKey: ([arg]: [{ ledgerVersion: bigint | number }]) => [Number(arg.ledgerVersion)],
       },
     )

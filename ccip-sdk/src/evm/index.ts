@@ -352,7 +352,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
     this.getBlockInfo = getBlockInfo
@@ -411,7 +412,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
     }
 
-    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), { async: true, maxArgs: 1 })
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 600e3,
+    })
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
@@ -423,27 +429,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
     })
     this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this), { async: true })
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this), { async: true })
@@ -451,6 +462,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,

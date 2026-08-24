@@ -165,35 +165,43 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
+      maxArgs: 1,
       maxSize: 100,
+      expires: 5e3,
     })
 
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxArgs: 1,
       async: true,
+      maxSize: 100,
+      expires: 600e3,
     })
 
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
       maxArgs: 2,
+      maxSize: 10,
       expires: 60e3,
     })
     this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
       async: true,
       maxArgs: 2,
+      maxSize: 10,
       expires: 60e3,
     })
     this.getMCSeqNoByLt = memoize(this.getMCSeqNoByLt.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getMCSeqNoByUnixtime = memoize(this.getMCSeqNoByUnixtime.bind(this), {
       async: true,
@@ -204,16 +212,19 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getWorkchainShards = memoize(this.getWorkchainShards.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getShardBlockEndLt = memoize(this.getShardBlockEndLt.bind(this), {
       async: true,
       maxArgs: 3,
       maxSize: 200,
+      expires: 600e3,
     })
   }
 
