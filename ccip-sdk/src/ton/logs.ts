@@ -266,8 +266,10 @@ const V3_PAGE_LIMIT = 100
  * Max acceptable lag (in masterchain blocks) of the v3 index behind the v2 tip for the
  * fast path to be trusted. A healthy TonCenter v3 index lags by a few blocks; a larger
  * gap means a degraded index, in which case the caller falls back to the v2 walk.
+ * Exported for the live integration suite's health probe (it skips shape assertions
+ * whenever scans would legitimately fall back).
  */
-const V3_MAX_INDEX_LAG = 300
+export const V3_MAX_INDEX_LAG = 300
 
 /** Subset of a TonCenter v3 `/messages` entry the fast path relies on. */
 type TonV3Message = {

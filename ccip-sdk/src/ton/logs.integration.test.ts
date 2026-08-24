@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 
 import { TONChain } from './index.ts'
-import { tonV3BaseUrl } from './logs.ts'
+import { V3_MAX_INDEX_LAG, tonV3BaseUrl } from './logs.ts'
 import { NetworkType } from '../networks.ts'
 import { sleep } from '../utils.ts'
 import { crc32 } from './utils.ts'
@@ -136,17 +136,34 @@ function spyFetch() {
   return { calls, restore: () => (globalThis.fetch = orig) }
 }
 
-/** Probe the v3 index tip twice; unhealthy = unreachable or rate-limiting us (the
- * public index 429-storms hostile shared-egress networks, e.g. CI runners). */
-async function v3IndexHealthy(base: string): Promise<boolean> {
+/** Headroom over the fast path's own lag tolerance (V3_MAX_INDEX_LAG mc blocks, a
+ * few seconds of testnet traffic at ~1 block/s) for probe/scan timing skew — the
+ * probe runs once in `before`, the scans later. Beyond (V3_MAX_INDEX_LAG +
+ * headroom) blocks, near-tip scans legitimately fall back to the v2 walk and the
+ * shape assertions have nothing to prove; a reachable-but-lagging index is
+ * exactly the CI failure mode this guards. */
+const V3_HEALTH_MAX_LAG = V3_MAX_INDEX_LAG + 60
+
+/** Probe the v3 index tip twice; unhealthy = unreachable, rate-limiting us (the
+ * public index 429-storms hostile shared-egress networks, e.g. CI runners), or
+ * lagging more than {@link V3_HEALTH_MAX_LAG} blocks behind the v2 tip. */
+async function v3IndexHealthy(base: string, v2Tip?: number): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(`${base}/masterchainInfo`, {
         headers: { Accept: 'application/json' },
       })
-      if (res.ok) return true
+      if (res.ok) {
+        const seqno = ((await res.json()) as { last?: { seqno?: unknown } }).last?.seqno
+        if (typeof seqno !== 'number' || !Number.isFinite(seqno)) return false
+        if (v2Tip != null && v2Tip - seqno > V3_HEALTH_MAX_LAG) {
+          console.warn(`v3 index degraded: ${v2Tip - seqno} mc blocks behind the v2 tip (${base})`)
+          return false
+        }
+        return true
+      }
     } catch {
-      // network-level failure — retry once
+      // network-level failure or bad body — retry once
     }
     if (attempt === 0) await sleep(1500)
   }
@@ -162,18 +179,27 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       logger: VERBOSE ? console : { ...console, debug: () => {} },
     })
     // Self-skip under hostile networks (CI runners' shared egress gets 429-stormed by
-    // the keyless public index) instead of flapping; the mocked unit suite covers the
-    // logic hermetically, and these run fully on healthy networks.
-    indexHealthy = await v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet))
+    // the keyless public index, and the index itself can lag hours behind the tip)
+    // instead of flapping; the mocked unit suite covers the logic hermetically, and
+    // these run fully on healthy networks.
+    let v2Tip: number | undefined
+    try {
+      v2Tip = (await chain.getBlockInfo('latest')).number
+    } catch {
+      // v2 endpoint unreachable too — the probe falls back to reachability-only
+    }
+    indexHealthy = await v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
     if (!indexHealthy)
-      console.warn('skipping live TON getLogs scans: v3 index unreachable/rate-limited')
+      console.warn(
+        'skipping live TON getLogs scans: v3 index unreachable, rate-limited, or lagging',
+      )
   })
   after(() => chain.destroy())
 
   /** Skip the test when the live index probe failed (see before hook). */
   function guard(t: { skip: (msg?: string) => void }): boolean {
     if (indexHealthy) return false
-    t.skip('toncenter v3 index unreachable or rate-limiting this network')
+    t.skip('toncenter v3 index unreachable, rate-limiting, or lagging this network')
     return true
   }
 
