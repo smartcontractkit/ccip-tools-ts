@@ -115,6 +115,37 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
     assert.deepEqual(result.tokenPool, { poolOwner: POOL_OWNER, poolInstanceId: 'pool-inst-1' })
   })
 
+  it('decodes natural-JSON (bare string Optional, bare object tokenPool) from the JSON Ledger API', async () => {
+    // The Canton JSON Ledger API (and the gateway `ledgerApi` proxy) serializes
+    // a TokenConfig with natural JSON: Optional Party is a bare string (Some) or
+    // null (None), not the gRPC { Some: { Sum: { Party } } } form; tokenPool is a
+    // bare object, not { Some: { fields: [...] } }. Confirmed against CV1 via
+    // scripts/dump-token-config.ts.
+    const naturalArg = {
+      instanceId: `${ADMIN}::usdc`,
+      registryInstanceId: 'tar-inst',
+      registryOwner: PARTY,
+      index: 0,
+      isCCIPManaged: false,
+      instrumentId: { admin: ADMIN, id: 'usdc' },
+      admin: null,
+      pendingAdmin: PENDING,
+      tokenPool: { poolOwner: POOL_OWNER, poolInstanceId: 'pool-inst-1' },
+    }
+    const manager = CantonTokenManager.fromChain(chainWith(contract(naturalArg)))
+
+    const result = await manager.getTokenAdminRegistry({
+      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      adminParty: ADMIN,
+    })
+
+    assert.equal(result.tokenConfigCid, '#cfg-usdc')
+    assert.equal(result.admin, undefined)
+    assert.equal(result.pendingAdmin, PENDING)
+    assert.equal(result.isCCIPManaged, false)
+    assert.deepEqual(result.tokenPool, { poolOwner: POOL_OWNER, poolInstanceId: 'pool-inst-1' })
+  })
+
   it('returns undefined admin/pendingAdmin/tokenPool when they are None', async () => {
     const manager = CantonTokenManager.fromChain(
       chainWith(contract(tokenConfigArg({ isCCIPManaged: true }))),

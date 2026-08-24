@@ -26,31 +26,21 @@ import {
   BURN_MINT_POOL_TEMPLATE_ID,
   buildPoolCreateArguments,
   LOCK_RELEASE_POOL_TEMPLATE_ID,
+  type PoolFactoryDeps,
+  resolvePoolFactoryDeps,
 } from '../shared.ts'
 import type { ChainUpdate } from './apply-chain-updates.ts'
 
 /** Pool type to deploy. */
 export type PoolType = 'burnMint' | 'lockRelease'
 
-/**
- * Factory deps — the shared CCIP contracts the pool references, as
- * `RawInstanceAddress` RAW strings (`"instanceId@party"`, NOT the hashed
- * `0x…` form — the hash is one-way and the choice stores the raw value).
- */
-export interface PoolFactoryDeps {
-  /** Token Admin Registry raw instance address. */
-  tokenAdminRegistry: string
-  /** Fee Quoter raw instance address. */
-  feeQuoter: string
-  /** RMN Remote raw instance address. */
-  rmnRemote: string
-}
+export type { PoolFactoryDeps } from '../shared.ts'
 
 /**
  * Pool receive-context choice-context values. `ChoiceContext.values` is a
- * `GenMap` → encodes as a JSON array of entries; almost always empty (`[]`).
+ * `TextMap` → encodes as a JSON object; almost always empty (`{}`).
  */
-export type PoolReceiveContext = { values: unknown[] }
+export type PoolReceiveContext = { values: Record<string, unknown> }
 
 /** Parameters shared by `deployTokenPool` generation and execution. */
 export interface DeployTokenPoolParams {
@@ -68,8 +58,13 @@ export interface DeployTokenPoolParams {
   decimals: number
   /** Optional rate-limit admin party. */
   rateLimitAdmin?: string
-  /** Factory deps (TAR, FeeQuoter, RMNRemote raw instance addresses). */
-  deps: PoolFactoryDeps
+  /**
+   * Factory deps overrides (TAR, FeeQuoter, RMNRemote raw instance
+   * addresses). Any field left unset falls back to the well-known contracts
+   * registered for the connected network — end users on a known network
+   * omit `deps` entirely; overrides are for devnet / testing.
+   */
+  deps?: Partial<PoolFactoryDeps>
   /** Pool receive-context choice-context. */
   poolReceiveContext?: PoolReceiveContext
   /** Transfer timeout (Daml variant; defaults to `RelativeHours 24`, matching Go). */
@@ -132,19 +127,8 @@ export class DeployTokenPool extends CantonOperation<
       )
     }
     if (p.rateLimitAdmin) parsePartyId(this.name, 'rateLimitAdmin', p.rateLimitAdmin)
-    if (!p.deps?.tokenAdminRegistry) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'deps.tokenAdminRegistry',
-        'TAR instance address is required',
-      )
-    }
-    if (!p.deps?.feeQuoter) {
-      throw new CCTParamsInvalidError(this.name, 'deps.feeQuoter', 'FeeQuoter instance address is required')
-    }
-    if (!p.deps?.rmnRemote) {
-      throw new CCTParamsInvalidError(this.name, 'deps.rmnRemote', 'RMNRemote instance address is required')
-    }
+    // deps are NOT validated here: unset fields fall back to the well-known
+    // per-network contracts at build time (see resolvePoolFactoryDeps).
   }
 
   /** Parses the instrument ID. */
@@ -166,6 +150,10 @@ export class DeployTokenPool extends CantonOperation<
     const templateId =
       p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
 
+    // Explicit deps win; missing fields resolve from the connected network's
+    // well-known contracts (throws if the network has none registered).
+    const deps = resolvePoolFactoryDeps(this.name, chain, p.deps)
+
     if (p.remoteChainConfigs && p.remoteChainConfigs.length > 0) {
       chain.logger.debug(
         `${this.name}: remoteChainConfigs provided; caller must run applyChainUpdates after deploy completes`,
@@ -177,7 +165,7 @@ export class DeployTokenPool extends CantonOperation<
         {
           CreateCommand: {
             templateId,
-            createArguments: buildPoolCreateArguments(p),
+            createArguments: buildPoolCreateArguments({ ...p, deps }),
           },
         },
       ],

@@ -40,6 +40,13 @@ export interface TarContractRef {
   createdEventBlob: string
   /** Synchronizer the contract was read from. */
   synchronizerId: string
+  /**
+   * Concrete package-ID template ID (`<pkg-id>:<Module>:<Entity>`) as returned
+   * by the EDS / ACS. Preferred over the symbolic `#<pkg-name>:…` form —
+   * the participant's interactive-submission path rejects package-name
+   * references (`#…`) in exercise commands.
+   */
+  templateId?: string
 }
 
 /** Project a resolved {@link CantonActiveContract} into a {@link TarContractRef}. */
@@ -48,34 +55,8 @@ export function toContractRef(contract: CantonActiveContract): TarContractRef {
     contractId: contract.contractId,
     createdEventBlob: contract.createdEventBlob,
     synchronizerId: contract.synchronizerId,
+    templateId: contract.templateId,
   }
-}
-
-/**
- * Resolve a TAR contract reference by its `InstanceAddress` (the canonical
- * Canton resolution path). `tarInstanceAddress` is either the `0x<64-hex>`
- * keccak256 hash or the `RawInstanceAddress` `"instanceId@ccipOwner"` form.
- * The SDK resolves the CID + disclosure blob together via
- * {@link CantonChain.findActiveContractByInstanceAddress}.
- */
-export async function resolveTarRef(
-  chain: CantonChain,
-  sender: string,
-  tarInstanceAddress: string,
-): Promise<TarContractRef> {
-  const contract = await chain.findActiveContractByInstanceAddress(
-    TAR_TEMPLATE_ID,
-    tarInstanceAddress,
-    [sender],
-  )
-  if (!contract) {
-    throw new CCTParamsInvalidError(
-      'resolveTarRef',
-      'tarInstanceAddress',
-      `TokenAdminRegistry ${tarInstanceAddress} is not active or not visible to ${sender}`,
-    )
-  }
-  return toContractRef(contract)
 }
 
 /** A resolved TAR contract: the ref for disclosure plus its signatories (ccipOwner). */
@@ -118,6 +99,9 @@ export async function resolveTar(
         contractId: disclosed.contractId,
         createdEventBlob: disclosed.createdEventBlob,
         synchronizerId: disclosed.synchronizerId,
+        // EDS returns the concrete package-ID template — preferred over the
+        // symbolic form, which the interactive-submission path rejects.
+        templateId: disclosed.templateId,
       },
       ccipOwner: disclosed.signatories?.[0] ?? ownerFromRaw,
     }
@@ -136,32 +120,6 @@ export async function resolveTar(
     )
   }
   return { tarContract: toContractRef(contract), ccipOwner: contract.signatories[0] }
-}
-
-/**
- * Resolve a TokenConfig contract reference by its `InstanceAddress` (the
- * canonical Canton resolution path). `tokenConfigInstanceAddress` is either the
- * `0x<64-hex>` keccak256 hash or the `RawInstanceAddress` `"instanceId@admin"`
- * form.
- */
-export async function resolveTokenConfigRef(
-  chain: CantonChain,
-  adminParty: string,
-  tokenConfigInstanceAddress: string,
-): Promise<TarContractRef> {
-  const contract = await chain.findActiveContractByInstanceAddress(
-    TOKEN_CONFIG_TEMPLATE_ID,
-    tokenConfigInstanceAddress,
-    [adminParty],
-  )
-  if (!contract) {
-    throw new CCTParamsInvalidError(
-      'resolveTokenConfigRef',
-      'tokenConfigInstanceAddress',
-      `TokenConfig ${tokenConfigInstanceAddress} is not active or not visible to ${adminParty}`,
-    )
-  }
-  return toContractRef(contract)
 }
 
 /** Inputs to {@link buildTarExercise}. */
@@ -196,7 +154,7 @@ export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
 
   const disclosedContracts = [
     {
-      templateId: TAR_TEMPLATE_ID,
+      templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
       contractId: tarContract.contractId,
       createdEventBlob: tarContract.createdEventBlob,
       synchronizerId: tarContract.synchronizerId,
@@ -204,7 +162,7 @@ export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
     ...(tokenConfigContract
       ? [
           {
-            templateId: TOKEN_CONFIG_TEMPLATE_ID,
+            templateId: tokenConfigContract.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
             contractId: tokenConfigContract.contractId,
             createdEventBlob: tokenConfigContract.createdEventBlob,
             synchronizerId: tokenConfigContract.synchronizerId,
@@ -217,7 +175,7 @@ export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
     commands: [
       {
         ExerciseCommand: {
-          templateId: TAR_TEMPLATE_ID,
+          templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
           contractId: tarContract.contractId,
           choice,
           choiceArgument,

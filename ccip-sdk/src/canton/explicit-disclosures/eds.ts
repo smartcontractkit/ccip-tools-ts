@@ -234,29 +234,34 @@ export class EdsDisclosureProvider {
   }
 
   /**
-   * Fetch a single contract's disclosure by template + instance address.
+   * Fetch a single contract's disclosure by instance address (raw or hashed).
    *
-   * `GET /ccip/v1/global/contract?templateId=…&instanceAddress=…` — a generic
-   * form of the per-entity EDS lookups, intended for shared CCIP singletons
-   * (e.g. the TokenAdminRegistry) whose only stakeholder is ccipOwner: callers
-   * whose participant does not host ccipOwner cannot ACS-read these contracts,
-   * so the disclosure comes from the service instead. 404/empty → `null`
+   * `POST /ccip/v1/global/disclosure/batch` with a one-element `addresses`
+   * array — the batch endpoint is the EDS's generic disclosure lookup,
+   * intended for shared CCIP singletons (e.g. the TokenAdminRegistry) whose
+   * only stakeholder is ccipOwner: callers whose participant does not host
+   * ccipOwner cannot ACS-read these contracts, so the disclosure comes from
+   * the service instead. Unknown address (404) or empty response → `null`
    * (caller falls back to ACS resolution).
+   *
+   * The response carries no signatories — callers derive the owner from the
+   * raw address form (`instanceId@owner`) when needed.
    */
   async fetchContractDisclosure(
-    templateId: string,
+    _templateId: string,
     instanceAddress: string,
   ): Promise<(DisclosedContract & { signatories?: string[] }) | null> {
     try {
-      const resp = await get<EdsApiDisclosedContract & { signatories?: string[] }>(
+      const resp = await post<{ disclosures?: EdsApiDisclosedContract[] }>(
         this.edsBaseUrl,
-        '/ccip/v1/global/contract',
+        '/ccip/v1/global/disclosure/batch',
         EDS_HEADERS,
         this.timeoutMs,
-        { templateId, instanceAddress },
+        { addresses: [instanceAddress] },
       )
-      if (!resp?.contractId || !resp.createdEventBlob) return null
-      return { ...edsContractToSdk(resp), signatories: resp.signatories }
+      const contract = resp?.disclosures?.[0]
+      if (!contract?.contractId || !contract.createdEventBlob) return null
+      return edsContractToSdk(contract)
     } catch {
       return null
     }

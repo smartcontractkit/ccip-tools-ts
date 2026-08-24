@@ -119,7 +119,11 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
         choice: 'SetRateLimitConfig',
         templateId,
         poolContract,
-        extraDisclosedContracts: [{ templateId: RATE_LIMITER_TEMPLATE_ID, ...rateLimiter }],
+        // Use the rate limiter's CONCRETE package-ID template (from the ACS) —
+        // the symbolic `#…` form is rejected by interactive-submission prepare.
+        extraDisclosedContracts: [
+          { templateId: rateLimiter.templateId ?? RATE_LIMITER_TEMPLATE_ID, ...rateLimiter },
+        ],
         choiceArgument: {
           caller: p.sender,
           rateLimiterCid: rateLimiter.contractId,
