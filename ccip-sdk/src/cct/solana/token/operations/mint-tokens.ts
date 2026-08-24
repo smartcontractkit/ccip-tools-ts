@@ -14,14 +14,26 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
-import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
+import {
+  U64_MAX,
+  parsePublicKey,
+  validateAuthorityMatchesWallet,
+  validateBigInt,
+} from '../../validate.ts'
 
 type MintTokensParams = {
   /** SPL token mint address. */
   tokenAddress: string
-  /** Wallet or PDA owner of the recipient associated token account. */
+  /**
+   * Associated Token Account (ATA) address for the recipient on this token mint.
+   * ⚠️ ATA must already exist; use `createTokenAccount` if needed.
+   */
   recipient: string
-  /** Amount to mint in base units. Must be a positive bigint. */
+  /**
+   * Amount to mint in base units (not human-readable tokens).
+   * E.g., 1_000_000n with 6 decimals = 1 token.
+   * Maximum u64: 2^64 - 1.
+   */
   amount: bigint
   /** Mint authority. Defaults to `payer` for single-signer transactions. */
   authority?: string
@@ -59,9 +71,7 @@ export class MintTokens extends SolanaOperation<
 
   /** Parses public keys, amount, and optional SPL Token multisig signers. */
   protected override parse(params: GenerateMintTokensParams): ParsedMintTokensParams {
-    if (typeof params.amount !== 'bigint' || params.amount <= 0n) {
-      throw new CCTParamsInvalidError(this.name, 'amount', 'must be a positive bigint')
-    }
+    validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')
     }

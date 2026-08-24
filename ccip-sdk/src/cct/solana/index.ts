@@ -343,7 +343,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer: mintAuthority,
    *   tokenAddress: mint,
    *   recipient,
-   *   amount: 1_000_000n,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
    * })
    * ```
    */
@@ -371,7 +371,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.mintTokens({ wallet, tokenAddress: mint, recipient, amount: 1_000_000n })
+   * await cct.mintTokens({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
+   * })
    * ```
    */
   mintTokens(opts: ExecuteMintTokensParams): Promise<ExecuteMintTokensResult> {

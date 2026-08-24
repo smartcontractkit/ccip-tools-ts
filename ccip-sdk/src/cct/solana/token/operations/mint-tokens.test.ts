@@ -17,6 +17,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
+import { U64_MAX } from '../../validate.ts'
 
 const TOKEN = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -133,6 +134,11 @@ describe('MintTokens (cct/solana)', () => {
       )
     })
 
+    it('encodes the maximum u64 amount', async () => {
+      const unsigned = await generate({ amount: U64_MAX })
+      assert.equal(unsigned.instructions[0]!.data.readBigUInt64LE(1), U64_MAX)
+    })
+
     it('defaults authority to payer', async () => {
       const unsigned = await generate({ authority: undefined })
       assert.equal(unsigned.instructions[0]!.keys[2]!.pubkey.toBase58(), PAYER)
@@ -147,6 +153,7 @@ describe('MintTokens (cct/solana)', () => {
         [{ authority: 'invalid' }, 'authority'],
         [{ amount: 0n }, 'amount'],
         [{ amount: 1 }, 'amount'],
+        [{ amount: U64_MAX + 1n }, 'amount'],
         [{ multisigSigners: 'invalid' }, 'multisigSigners'],
         [{ multisigSigners: ['invalid'] }, 'multisigSigners[0]'],
       ] as const) {
