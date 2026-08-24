@@ -1306,10 +1306,21 @@ describe('getEvmLogs — since hint', () => {
   }
 
   it('since alone satisfies the start requirement; the hint block is fetched whole, then filtered by index', async () => {
+    // Address-scoped (the exclusion is only sound there — an addressless sweep
+    // cannot attribute the hint's index; see the B4 test below).
     const calls: { fromBlock: number; toBlock: number | string }[] = []
     const logs = await collect(
       getEvmLogs(
-        { endBlock: 101, since: { blockNumber: 100, index: 1, blockTimestamp: 1200 } },
+        {
+          endBlock: 101,
+          address: '0x00000000000000000000000000000000000000aa',
+          since: {
+            address: '0x00000000000000000000000000000000000000aa',
+            blockNumber: 100,
+            index: 1,
+            blockTimestamp: 1200,
+          },
+        },
         { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
       ),
     )
@@ -1415,6 +1426,36 @@ describe('getEvmLogs — since hint', () => {
       logs.map((l) => `${l.blockNumber}:${l.index}`),
       RANGE_LOGS.map((l) => `${l.blockNumber}:${l.index}`),
       'no index exclusion either',
+    )
+  })
+
+  it('addressless sweeps resume from the full (blockNumber, index) cursor', async () => {
+    // A topic-only sweep's hint is its OWN last emitted log (every log carries
+    // an address), so (blockNumber, index) is the valid resume cursor even when
+    // the filter spans the whole network: the hinted block is fetched whole and
+    // its logs at or before the hinted index — which the previous run of the
+    // same sweep already emitted — are skipped, later same-block logs flow.
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        {
+          endBlock: 101,
+          topics: [['0x' + 'ab'.repeat(32)]],
+          since: {
+            address: '0x00000000000000000000000000000000000000bb',
+            blockNumber: 100,
+            index: 1,
+            blockTimestamp: 1200,
+          },
+        },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'the hint’s blockNumber still raises the floor')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['100:2', '101:0'],
+      'the hinted log and earlier same-block logs are excluded; later same-block logs flow',
     )
   })
 })

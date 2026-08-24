@@ -330,9 +330,17 @@ export type LogFilter = {
    *    are emitted, so for an hermetic poller, it's safer to only ever pass
    *    the *last* finalized log in the previous call as `since` hint.
    *
-   * The hint only ever RAISES the start floors — it never scans below
-   * `startBlock`/`startTime` — and a stale, foreign or malformed hint may be ignored
-   * (the usual walk runs).
+   * The hint only ever RAISES the start floors — `startBlock` is the scan floor
+   * (the scan never starts below it) and, when a `startBlock` exists, `startTime`
+   * is evaluated at filter-time just before emitting. A stale, foreign or malformed
+   * hint may be ignored (the usual walk runs). At-least-once is the only guarantee
+   * all families share: dedupe by `(transactionHash, index)`.
+   *
+   * Per-family resume — EVM/Solana/TON: the hinted block/tx streams whole and logs
+   * at/before the hinted `index` are skipped (later same-block/same-tx logs still
+   * flow; TON floors its v3 `/messages` fast path at the hint's created_lt). Aptos:
+   * event `index` on single-topic streams, `blockNumber + 1` on multi-topic ones.
+   * Sui: inclusive checkpoint floors (re-delivered). Canton: unsupported.
    */
   since?: Partial<
     Pick<
@@ -347,33 +355,45 @@ export type LogFilter = {
  * each floor is the LARGER of the explicitly requested bound and the hint's
  * (`since.blockNumber` stands in for or raises `startBlock`, `since.blockTimestamp`
  * for `startTime`), so a `since` carrying either satisfies the start requirement on
- * its own. Non-finite or absent hint fields contribute nothing. Chain-specific
- * cursor uses of `since` (TON's composite-hash lt, Solana's `until`, Aptos's event
- * sequence number, EVM's per-block index exclusion) read `opts.since` directly and
- * only ever raise these floors further.
+ * its own. Non-finite or absent hint fields contribute nothing.
+ *
+ * The merged `startBlock` is the scan floor — the scan never starts below it — and
+ * `startTime` is then evaluated at filter-time just before emitting (families do
+ * this at their emission points; Sui floors at the max of both instead). Chain
+ * cursor uses of `since` (TON's composite-hash lt, Solana's signature + per-log
+ * index, Aptos's event sequence number, EVM's per-block index exclusion) read
+ * `opts.since` directly and only ever raise these floors further.
+ *
+ * The returned `since` carries the hint minus its `tx` backref — never the full
+ * {@link ChainLog} with its self-referencing transaction (and sibling logs), so a
+ * retained hint doesn't pin whole transactions in memory.
  */
 export function withSinceStart<
   T extends {
     startBlock?: number | bigint
     startTime?: number | bigint
-    since?: { blockNumber?: number | bigint; blockTimestamp?: number | bigint }
+    // Callers pass LeanNumbers<LogFilter>, whose mapped numeric fields widen to
+    // number | bigint — the constraint must accept them on every field the
+    // helper reads or writes (plain LogFilter fields would reject the callers).
+    since?: LeanNumbers<LogFilter['since']>
   },
 >(opts: T): T {
-  const since = opts.since
-  if (!since) return opts
+  if (!opts.since) return opts
+  const { tx: _, ...since } = opts.since as NonNullable<LogFilter['since']> & { tx?: unknown }
   const block = Number(since.blockNumber)
   const timestamp = Number(since.blockTimestamp)
   return {
     ...opts,
+    since,
     ...(Number.isFinite(block) &&
     block > 0 &&
     (opts.startBlock == null || block > Number(opts.startBlock))
-      ? { startBlock: block }
+      ? { startBlock: typeof opts.startBlock === 'bigint' ? BigInt(block) : block }
       : null),
     ...(Number.isFinite(timestamp) &&
     timestamp > 0 &&
     (opts.startTime == null || timestamp > Number(opts.startTime))
-      ? { startTime: timestamp }
+      ? { startTime: typeof opts.startTime === 'bigint' ? BigInt(timestamp) : timestamp }
       : null),
   }
 }

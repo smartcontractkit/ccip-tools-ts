@@ -148,6 +148,26 @@ describe('withSinceStart', () => {
       since: { blockTimestamp: -5 },
     })
   })
+
+  it('strips the tx backref from a since hint (no whole-transaction retention)', () => {
+    // M4: a retained ChainLog carries a `tx` self-reference back to the whole
+    // transaction and its sibling logs; the merged hint must not pin them for
+    // the life of the stream — `tx` is dropped, the read fields stay.
+    const heavyHint = {
+      since: { blockNumber: 10, data: 'x', tx: { huge: true }, topics: ['T'] },
+    } as unknown as Parameters<typeof withSinceStart>[0]
+    assert.deepEqual(withSinceStart(heavyHint), {
+      startBlock: 10,
+      since: { blockNumber: 10, data: 'x', topics: ['T'] },
+    })
+  })
+
+  it('preserves a bigint startBlock kind when the hint raises it', () => {
+    assert.deepEqual(withSinceStart({ startBlock: 1n, since: { blockNumber: 5 } }), {
+      startBlock: 5n,
+      since: { blockNumber: 5 },
+    })
+  })
 })
 
 describe('EVM logs block tags', () => {

@@ -13,10 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix resume floors skipping the boundary transaction (`to_lt` is exclusive server-side; floors are passed un-incremented), and a TON log's `index` (its message's created_lt) is honored as an exact resume cursor
 - SDK: `getLogs` filters accept a partial `since` resume hint (e.g. the last log from a previous call), to resume a stream without re-scanning
   - `since.blockNumber`/`blockTimestamp` stand in for (or raise) `startBlock`/`startTime` on all chains; a `since` with either satisfies the start requirement on its own
-  - EVM: resumes from `since.blockNumber`, excluding that block's logs with `index <= since.index` (blocks are still fetched whole)
-  - Solana: resumes from the hint's signature as the native `until` cursor, with `since.blockNumber` as an absolute slot floor when the node doesn't know the signature
-  - TON: resumes from the `lt` embedded in the composite `transactionHash` (exclusive), skipping the shard-header floor lookup when the hint covers `startBlock`
-  - Aptos: single-topic streams resume from the event `index` (handle sequence number); multi-topic streams floor at `blockNumber + 1`
+  - EVM: resumes from `since.blockNumber` + `index`, excluding that block's logs at or before the hinted index (blocks are still fetched whole) — on address-scoped filters and on addressless (topic-/typeAndVersions-only) sweeps alike, where the hint is the sweep's own last emitted log (every log carries an address) and `(blockNumber, index)` is its resume cursor
+  - Solana: resumes by walking the hint's slot floor and re-streaming the hinted transaction whole, skipping logs at or before the hinted `index` — same-transaction followers (batch executions) are never lost to the transaction-granular `until` cursor
+  - TON: resumes from the `lt` embedded in the composite `transactionHash`; when the hint also carries its per-log `index`, the hinted transaction is re-streamed and its logs at or before the hint are skipped (same-transaction followers kept); a lone lt cursor stays transaction-exclusive
+  - Aptos: single-topic streams resume from the event `index` (handle sequence number) once the hint's topic is verified against the handle's own events; multi-topic streams floor at `blockNumber + 1`
+  - `since` floors: the merged `startBlock` is the scan floor — the scan never starts below it — and `startTime` is then evaluated at filter-time just before emitting
   - `getMessageById` and `getExecutionReceipts` accept `since` too
 - Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
 - TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory

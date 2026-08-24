@@ -404,11 +404,16 @@ export async function getMessagesInBatch<
   type LogAnchor = Pick<R['log'], 'blockNumber' | 'blockTimestamp'>
   type BatchEntry = { log: LogAnchor; message: R['message'] }
 
+  // A `since` hint is a per-log resume cursor for a CONTINUOUS scan; this batch
+  // walk bounds each leg by explicit floors (startBlock/startTime/endBlock)
+  // recomputed per retry, so forwarding it would pin the floor into the backward
+  // retry legs and exhaust them into CCIPMessageBatchIncompleteError. Drop it.
+  const { since: _since, ...floorOpts } = opts
   const baseFilter = {
-    page: opts.page ?? BLOCK_LOG_WINDOW_SIZE,
+    page: floorOpts.page ?? BLOCK_LOG_WINDOW_SIZE,
     topics: [request.log.topics[0]],
     address: request.log.address,
-    ...opts,
+    ...floorOpts,
   }
 
   const entries: BatchEntry[] = []

@@ -292,10 +292,13 @@ export async function* getEvmLogs(
   filter = { ...filter }
 
   // A hint addressed to a different contract is not this stream's: ignore it
-  // wholesale — no floors, no index exclusion.
+  // wholesale — no floors, no index exclusion. An ADDRESSLESS sweep keeps the
+  // hint whole: every log carries an address, so the hint is normally that
+  // sweep's OWN last emitted log — a valid resume cursor for a filter spanning
+  // the whole network.
   if (
-    filter.since?.address &&
     filter.address &&
+    filter.since?.address &&
     filter.since.address.toLowerCase() !== filter.address.toLowerCase()
   ) {
     logger.warn('Invalid since.address: ', filter.since.address, '!==', filter.address)
@@ -368,6 +371,11 @@ export async function* getEvmLogs(
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
+      // Resume-cursor exclusivity: the hinted block is fetched whole, and its
+      // logs at or before the hinted (blockNumber, index) were emitted by the
+      // previous run of this same filter — addressless or not — so they are
+      // skipped, while later same-block logs (and other contracts' logs past
+      // the cursor) still flow.
       if (
         filter.since?.blockNumber &&
         filter.since.index != null &&
