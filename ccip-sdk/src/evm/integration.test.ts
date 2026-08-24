@@ -16,6 +16,10 @@ import { ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
+
+// Live RPCs: Sepolia, Fuji, Arbitrum Sepolia — plus the CCIP API (prod default + staging in places).
+await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'api'])
 
 // ── Chain constants ──
 

@@ -3,11 +3,14 @@ import { after, before, describe, it } from 'node:test'
 
 import { TONChain } from './index.ts'
 import { V3_MAX_INDEX_LAG, tonV3BaseUrl } from './logs.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import { NetworkType } from '../networks.ts'
 import { sleep } from '../utils.ts'
 import { crc32 } from './utils.ts'
 import type { ChainLog } from '../types.ts'
+
+await useResource(['ton-testnet'])
 
 /**
  * Live-testnet coverage of the three getLogs scan shapes the ccip-o11y Temporal

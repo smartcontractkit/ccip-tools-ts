@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Tests: networked suites (`*.integration.test.ts`, `*.e2e.test.ts`, `*.fork.test.ts`) take per-network OS locks via the new `useResource` test helper, so concurrent `node --test` file runs never share a live RPC endpoint (suites declare the networks they talk to and wait on each other instead of rate-limiting public gateways); `npm run test:unit` now runs only offline unit tests
 - TON: `getLogs` cold backfills (startTime-only, watermark-less polls) seed from the TonCenter v3 index instead of walking the account's whole tx history: one strictly-filtered `/messages` page (plus a briefly-cached tip for the lag guard), paged `/transactions` meta joins event txs by hash, and raw event txs hydrate from the v2 RPC by `(lt, hash)`
   - Index calls use a dedicated paced, fail-fast fetch (a caller-provided `fetch` is reused verbatim; override via the TON-local `v3Fetch` context option); index inconsistencies truncate the scan like a chain gap, and the caller resumes from `since`
   - Deep v2 walks (`startBlock`/`since` over long windows) stamp block numbers via a lazily-engaged index meta oracle after 16 txs — one index page per ~100 txs instead of 2-3 RPCs per tx (24h windows: ~130s → ~17s); shallow polls never touch the index

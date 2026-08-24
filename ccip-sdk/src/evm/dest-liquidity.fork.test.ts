@@ -29,7 +29,11 @@ import { getErrorData, parseWithFragment } from './errors.ts'
 import { findBalancesSlot } from './gas.ts'
 import { EVMChain } from './index.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
+
+// Forks run atop live Sepolia/Fuji RPCs (anvil fetches state from the upstream lazily).
+await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 

@@ -6,8 +6,11 @@ import { Address } from '@ton/core'
 import '../index.ts'
 import { TONChain } from './index.ts'
 import { crc32 } from './utils.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
+
+await useResource(['ton-testnet'])
 
 // CRC32 hex values for TON external message topics
 const CCIP_MESSAGE_SENT_TOPIC = crc32('CCIPMessageSent') // 0xa45d293c

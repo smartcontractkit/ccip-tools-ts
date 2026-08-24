@@ -10,8 +10,9 @@ For project overview and architecture, see the [documentation](docs/index.md).
 ## Quick Start
 
 ```bash
-npm ci          # Install dependencies
-npm test        # Run all tests
+npm ci           # Install dependencies
+npm run test:unit  # Unit tests only (no network access; integration/e2e/fork excluded)
+npm test         # Run all tests (unit + integration + e2e + fork)
 npm run check   # Lint + typecheck
 ```
 
@@ -22,11 +23,45 @@ Run before submitting a PR:
 ```bash
 npm run lint        # Prettier + ESLint
 npm run typecheck   # TypeScript validation
+npm run test:unit   # Unit tests only with coverage
 npm run test        # All tests with coverage
 npm run build       # Full build
 ```
 
 CI runs: `npm ci` → `npm run check` → `npm test`
+
+## Test Suite Layout
+
+Test files are classified by filename suffix:
+
+| Suffix | Category | Included in `test:unit` |
+| --- | --- | --- |
+| `*.test.ts` | Unit — mocked, no network access | ✅ |
+| `*.integration.test.ts` | Integration — live RPCs / staging API | ❌ |
+| `*.e2e.test.ts` | End-to-end — CLI spawned against live networks | ❌ |
+| `*.fork.test.ts` | Fork — anvil/surfpool forking live state | ❌ |
+
+A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized as integration exactly like `logs.integration.test.ts` — the suffix is what matters, and `fork.test.data.ts` is a data helper, not a test.
+
+### Networked tests and the `useResource` lock
+
+`node --test` runs every test file concurrently, so networked suites that share public RPC endpoints would trip their rate limiters. Each networked suite instead declares the networks it talks to with an OS-level lock:
+
+```ts
+import { useResource } from '../../../scripts/useResource.ts'
+
+// Module top-level: the suite's tests do not start before every lock is held.
+await useResource(['sepolia', 'fuji'])
+```
+
+Each network tag is a directory in a well-known lock root (`<tmpdir>/ccip-tools-ts-network-locks`), created atomically with `fs.mkdir`, so exactly one test process holds a tag at a time. The filesystem is the queue: when a suite finishes, its tags release and the next suite waiting on them starts immediately — there is no batch/round scheduling. Locks auto-release on process exit; crashed holders are detected by pid liveness (or owner-file age) and self-heal on the next acquisition.
+
+Locks are per-machine, so all networked suites must run inside a single CI job/runner. Configure via env:
+
+| Variable | Effect |
+| --- | --- |
+| `CCIP_TOOLS_TEST_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
+| `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
 
 ## Fork Tests
 

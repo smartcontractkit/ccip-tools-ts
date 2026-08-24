@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
+import { useResource } from '../../../scripts/useResource.ts'
+
+// The CLI is pointed at these endpoints via the shared RPCS list (e2e-helpers.ts), and
+// `show` also resolves 32-byte tx hashes through the default CCIP API (show.ts).
+await useResource(['sepolia', 'fuji', 'aptos-testnet', 'solana-devnet', 'ton-testnet', 'api'])
 
 function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
   return [
