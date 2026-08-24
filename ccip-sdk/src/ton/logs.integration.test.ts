@@ -3,6 +3,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { TONChain } from './index.ts'
 import { V3_MAX_INDEX_LAG, tonV3BaseUrl } from './logs.ts'
+import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import { NetworkType } from '../networks.ts'
 import { sleep } from '../utils.ts'
 import { crc32 } from './utils.ts'
@@ -218,6 +219,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       let v3tipCalls = 0
       // A degraded/lagging public index legitimately falls back to the v2 walk (the
       // probe is fail-fast by design); retry once before failing the fast-path shape.
+      let truncated = false
       for (let attempt = 0; attempt < 2; attempt++) {
         const spy = spyFetch()
         const t0 = Date.now()
@@ -230,17 +232,27 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           })) {
             logs.push(log)
           }
+        } catch (err) {
+          // A scan that EMITTED logs and ended past the index's ingested tip throws
+          // CCIPLogsStreamInconsistentError (transient, by design): retryable until
+          // the tail is ingested, not a shape failure.
+          if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
+          truncated = true
         } finally {
           spy.restore()
         }
         calls = spy.calls
         v3tipCalls += calls.v3tip
         elapsed = Date.now() - t0
-        if (calls.walkPages === 0 || attempt === 1) break
+        if ((!truncated && calls.walkPages === 0) || attempt === 1) break
         // Give the public index's shared keyless quota a beat to refill: back-to-back
         // attempts can land in the same 429 window (bursts from shared CI egress IPs
         // are outside this process's pacing). The poller spaces its retries too.
         await sleep(10_000)
+      }
+      if (truncated) {
+        t.skip('index degraded: every attempt truncated past the ingested tip')
+        return
       }
       // Whatever the (usually zero) config events, every emitted log must match the
       // filter and carry an authoritative masterchain block number.
@@ -291,6 +303,10 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             logs.push(log)
             if (++taken >= 3) break // stream shape proven; the 24h tail lives in the repro
           }
+        } catch (err) {
+          // Emitted logs then hit the index's ingested tip: transient truncation
+          // (see the first fast-path test) — the emitted prefix is valid, retry.
+          if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
         } finally {
           spy.restore()
         }
@@ -516,6 +532,10 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             logs.push(log)
             if (logs.length >= 3) break
           }
+        } catch (err) {
+          // Emitted logs then hit the index's ingested tip: transient truncation
+          // (see the first fast-path test) — the emitted prefix is valid, retry.
+          if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
         } finally {
           spy.restore()
         }

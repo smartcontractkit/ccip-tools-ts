@@ -729,7 +729,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * messages appear all at once), blocks are non-decreasing along the
    * created_lt-ordered stream, and the time floor is applied index-side. A block
    * rewind or a truncated tail drops the block in progress and stops — the poller
-   * resumes from its hint.
+   * resumes from its hint. A truncated scan that emitted NOTHING ends quietly: no
+   * watermark can have moved, so there is nothing to signal — and the index tip
+   * always trails a near-tip cutoff by a few blocks, so loud empty scans would
+   * storm the poller with transient errors on every dormant poll.
    */
   private async *emitSealedV3Events(
     stream: AsyncGenerator<TonV3Event, void, undefined>,
@@ -739,6 +742,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   ): AsyncIterableIterator<ChainLog> {
     let curBlock: number | undefined
     let buf: ChainLog[] = []
+    // Whether anything was actually EMITTED (survived the topic/type/version filters
+    // and the hint's per-log drop). An all-empty scan cannot advance any poller
+    // watermark, so a clamped tail loses nothing — and the index tip ALWAYS trails
+    // a near-tip cutoff by a few blocks, so throwing on empty scans would turn the
+    // ordinary "dormant address / nothing new" answer into a permanent transient-
+    // error storm. The N2 truncation signal is for scans that emitted logs, whose
+    // watermark could be trusted past the index's ingested tip.
+    let emitted = 0
     // A `since` hint's per-log index (the hinted message's created_lt): the index
     // floor at index + 1 excludes the hint's own ROW, but hydration decodes the
     // WHOLE hinted tx — drop its messages at/before the hint; same-tx followers
@@ -750,7 +761,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       buf = []
       for (const log of out) {
         if (sinceIndexLt != null && BigInt(log.index) <= sinceIndexLt) continue
-        if (await passesTypeAndVersion(chain, log.address, opts.typeAndVersions)) yield log
+        if (await passesTypeAndVersion(chain, log.address, opts.typeAndVersions)) {
+          emitted++
+          yield log
+        }
       }
     }
 
@@ -759,13 +773,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         // Truncated tail: the index did not deliver the full requested window
         // (mid-stream inconsistency, or its ingested tip sat below the cutoff — see
         // openV3EventStream). Ending silently would look like a complete scan to
-        // the watermark-driven poller: surface it (CCIPLogsStreamInconsistentError)
-        // so the caller re-polls instead of trusting the watermark.
+        // the watermark-driven poller, so scans that EMITTED logs surface it
+        // (CCIPLogsStreamInconsistentError) and the caller re-polls instead of
+        // trusting the watermark. Empty scans stay quiet: nothing was emitted, so
+        // no watermark moved and the tail is re-scanned on the next poll anyway.
         buf = []
         curBlock = undefined
-        throw new CCIPLogsStreamInconsistentError(
-          'TON getLogs: v3 fast path truncated (incomplete tail); re-poll to catch up',
-        )
+        if (emitted > 0)
+          throw new CCIPLogsStreamInconsistentError(
+            'TON getLogs: v3 fast path truncated (incomplete tail); re-poll to catch up',
+          )
+        return
       }
       const block = item.tx.blockNumber
       if (curBlock !== undefined && block < curBlock) {

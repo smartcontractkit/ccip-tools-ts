@@ -1505,6 +1505,20 @@ describe('TON index unit tests', () => {
         )
       })
 
+      it('clamped scan that emits nothing ends quietly (dormant address)', async () => {
+        // The index tip ALWAYS trails a near-tip cutoff (cutoff = latest - 1, and
+        // the index ingests a few blocks behind), so an EMPTY fast-path scan is
+        // almost always clamped. An empty result cannot advance any poller
+        // watermark — nothing was emitted, nothing is lost — so loudly truncating
+        // it would turn every "dormant address / nothing new" poll into a
+        // permanent transient-error storm. It must end cleanly, still on the
+        // index (no v2 walk).
+        const chain = makeChain(13, [11_001], [], { v3: { tip: 11 } })
+        const logs = await collect(chain, { startTime: 1, topics: ['Unrelated'] })
+        assert.deepEqual(logs, [], 'an empty clamped scan completes quietly')
+        assert.equal(chain.calls.v2Walk, 0, 'the index answered "no events" without a v2 walk')
+      })
+
       it('drains a boundary second that overflows the page (offset probe), never cutting it', async () => {
         // Three rows in ONE second with page=2: page 1 covers rows 0-1; the turn
         // re-sees them (all repeats, full page) — the offset drain must reach row 2
@@ -1529,7 +1543,35 @@ describe('TON index unit tests', () => {
         )
       })
 
-      it('truncates loudly on a log message with no tx hash (index inconsistency)', async () => {
+      it('truncates loudly once the scan has emitted logs (row with no tx hash)', async () => {
+        // A `/messages` row missing its producing tx hash mid-stream is an index
+        // inconsistency: the block in progress is dropped and, once the scan has
+        // EMITTED logs, the truncation must surface loudly — the poller's watermark
+        // could otherwise be trusted past the gap. Blocks 10 (drained when 11
+        // arrives) and 11 precede the corrupted 12, so this scan has emitted data
+        // before the marker.
+        const chain = makeChain(13, [10_001, 11_001, 12_001], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 11_001, createdLt: '11001', createdAt: '10101' },
+              { txLt: 12_001, createdLt: '12001', createdAt: '10102', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a row missing its tx hash truncates loudly once data was emitted',
+        )
+      })
+
+      it('truncation before anything was emitted ends quietly (no watermark to protect)', async () => {
+        // Same inconsistency, but the marker arrives before any block was drained:
+        // no log was emitted, so no poller watermark can have moved and nothing is
+        // lost on re-poll — staying quiet avoids turning the ordinary near-tip
+        // "nothing new" answer into a transient-error storm. Applies to the clamp
+        // end-marker and mid-stream inconsistency alike.
         const chain = makeChain(13, [10_001, 10_002], [], {
           v3: {
             rows: [
@@ -1538,11 +1580,9 @@ describe('TON index unit tests', () => {
             ],
           },
         })
-        await assert.rejects(
-          collect(chain, { startTime: 1 }),
-          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
-          'a row missing its producing tx hash truncates the scan loudly',
-        )
+        const logs = await collect(chain, { startTime: 1 })
+        assert.deepEqual(logs, [], 'a pre-emission truncation completes quietly')
+        assert.equal(chain.calls.v2Walk, 0, 'stayed on the index; no v2 fallback')
       })
 
       it("turns pages from the page's max created_at, never regressing under lt disorder", async () => {
