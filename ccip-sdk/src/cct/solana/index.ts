@@ -17,11 +17,21 @@ import {
   type ExecuteCreateTokenAccountResult,
   type ExecuteDeployTokenParams,
   type ExecuteDeployTokenResult,
+  type ExecuteMintTokensParams,
+  type ExecuteMintTokensResult,
+  type ExecuteSetTokenAuthorityParams,
+  type ExecuteSetTokenAuthorityResult,
   type GenerateCreateTokenAccountParams,
   type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
+  type GenerateMintTokensParams,
+  type GenerateMintTokensResult,
+  type GenerateSetTokenAuthorityParams,
+  type GenerateSetTokenAuthorityResult,
   CreateTokenAccount,
+  MintTokens,
+  SetTokenAuthority,
 } from './token/operations/index.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -144,6 +154,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly chain: SolanaChain
   // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #mintTokens = new MintTokens()
+  readonly #setTokenAuthority = new SetTokenAuthority()
 
   // Token admin registry operations
   readonly #acceptAdmin = new AcceptAdmin()
@@ -307,6 +319,148 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to mint SPL tokens to a recipient's existing associated token account.
+   *
+   * @remarks
+   * `amount` is in base units. The recipient ATA must already exist; use
+   * {@link generateUnsignedCreateTokenAccount} to create it. `authority` defaults to `payer`. For
+   * an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
+   * with {@link generateUnsignedCreateTokenAccount}.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedMintTokens({
+   *   payer: mintAuthority,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
+   * })
+   * ```
+   */
+  generateUnsignedMintTokens(opts: GenerateMintTokensParams): Promise<GenerateMintTokensResult> {
+    return this.#mintTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Mints SPL tokens to a recipient's existing associated token account using the executing wallet.
+   *
+   * @remarks
+   * `amount` is in base units. The recipient ATA must already exist; use {@link createTokenAccount}
+   * to create it. SPL Token multisig authorities require `multisigSigners` and external member
+   * signatures; use {@link generateUnsignedMintTokens}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
+   * with {@link createTokenAccount}.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.mintTokens({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
+   * })
+   * ```
+   */
+  mintTokens(opts: ExecuteMintTokensParams): Promise<ExecuteMintTokensResult> {
+    return this.#mintTokens.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions for an immediate SPL Token mint and/or freeze authority update.
+   *
+   * @see {@link setTokenAuthority} For wallet-based execution.
+   *
+   * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * instructions are atomic: no role changes if any selected update fails.
+   * `authority` defaults to `payer`. For an SPL Token multisig authority, provide `multisigSigners`
+   * and collect member signatures externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetTokenAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority,
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
+   *
+   * @example Permanently revoke mint authority
+   * ```ts
+   * const revokeUnsigned = await cct.generateUnsignedSetTokenAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority: null, // ⚠️ PERMANENT
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
+   */
+  generateUnsignedSetTokenAuthority(
+    opts: GenerateSetTokenAuthorityParams,
+  ): Promise<GenerateSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.generate(this.chain, opts)
+  }
+
+  /**
+   * Immediately sets SPL Token mint and/or freeze authority using the executing wallet.
+   *
+   * @see {@link generateUnsignedSetTokenAuthority} For externally signed transactions.
+   *
+   * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * transaction is atomic: no role changes if any selected update fails.
+   * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
+   * {@link generateUnsignedSetTokenAuthority}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setTokenAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
+   * ```
+   */
+  setTokenAuthority(opts: ExecuteSetTokenAuthorityParams): Promise<ExecuteSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -1671,6 +1825,7 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/operations/set-token-authority.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
