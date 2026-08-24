@@ -19,19 +19,19 @@ import {
   type ExecuteDeployTokenResult,
   type ExecuteMintTokensParams,
   type ExecuteMintTokensResult,
-  type ExecuteTransferAuthorityParams,
-  type ExecuteTransferAuthorityResult,
+  type ExecuteSetTokenAuthorityParams,
+  type ExecuteSetTokenAuthorityResult,
   type GenerateCreateTokenAccountParams,
   type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
   type GenerateDeployTokenResult,
   type GenerateMintTokensParams,
   type GenerateMintTokensResult,
-  type GenerateTransferAuthorityParams,
-  type GenerateTransferAuthorityResult,
+  type GenerateSetTokenAuthorityParams,
+  type GenerateSetTokenAuthorityResult,
   CreateTokenAccount,
   MintTokens,
-  TransferAuthority,
+  SetTokenAuthority,
 } from './token/operations/index.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -155,7 +155,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token operations
   readonly #createTokenAccount = new CreateTokenAccount()
   readonly #mintTokens = new MintTokens()
-  readonly #transferAuthority = new TransferAuthority()
+  readonly #setTokenAuthority = new SetTokenAuthority()
 
   // Token admin registry operations
   readonly #acceptAdmin = new AcceptAdmin()
@@ -379,13 +379,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned instructions for an immediate SPL Token mint and/or freeze authority transfer.
+   * Builds unsigned instructions for an immediate SPL Token mint and/or freeze authority update.
+   *
+   * @see {@link setTokenAuthority} For wallet-based execution.
    *
    * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
    * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
-   * `['mint']`, `['freeze']`, or both. Set `newAuthority` to null to permanently revoke the selected
-   * roles; a revoked role cannot be transferred or restored. All selected roles must have the same
-   * current authority. The instructions are atomic: no role changes if any selected transfer fails.
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * instructions are atomic: no role changes if any selected update fails.
    * `authority` defaults to `payer`. For an SPL Token multisig authority, provide `multisigSigners`
    * and collect member signatures externally.
    *
@@ -396,30 +401,45 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedTransferAuthority({
+   * const unsigned = await cct.generateUnsignedSetTokenAuthority({
    *   payer: currentAuthority,
    *   tokenAddress: mint,
    *   newAuthority,
    *   authorityTypes: ['mint'],
    * })
    * ```
+   *
+   * @example Permanently revoke mint authority
+   * ```ts
+   * const revokeUnsigned = await cct.generateUnsignedSetTokenAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority: null, // ⚠️ PERMANENT
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
    */
-  generateUnsignedTransferAuthority(
-    opts: GenerateTransferAuthorityParams,
-  ): Promise<GenerateTransferAuthorityResult> {
-    return this.#transferAuthority.generate(this.chain, opts)
+  generateUnsignedSetTokenAuthority(
+    opts: GenerateSetTokenAuthorityParams,
+  ): Promise<GenerateSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.generate(this.chain, opts)
   }
 
   /**
-   * Immediately transfers SPL Token mint and/or freeze authority using the executing wallet.
+   * Immediately sets SPL Token mint and/or freeze authority using the executing wallet.
+   *
+   * @see {@link generateUnsignedSetTokenAuthority} For externally signed transactions.
    *
    * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
    * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
-   * `['mint']`, `['freeze']`, or both. Set `newAuthority` to null to permanently revoke the selected
-   * roles; a revoked role cannot be transferred or restored. All selected roles must have the same
-   * current authority. The transaction is atomic: no role changes if any selected transfer fails.
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * transaction is atomic: no role changes if any selected update fails.
    * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
-   * {@link generateUnsignedTransferAuthority}.
+   * {@link generateUnsignedSetTokenAuthority}.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid, or
@@ -431,11 +451,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.transferAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
+   * await cct.setTokenAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
    * ```
    */
-  transferAuthority(opts: ExecuteTransferAuthorityParams): Promise<ExecuteTransferAuthorityResult> {
-    return this.#transferAuthority.execute(this.chain, opts)
+  setTokenAuthority(opts: ExecuteSetTokenAuthorityParams): Promise<ExecuteSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -1800,8 +1820,7 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
-export { TOKEN_AUTHORITY_TYPES } from './token/operations/transfer-authority.ts'
-export { REGISTER_ADMIN_METHODS } from './token-admin-registry/operations/register-admin.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/operations/set-token-authority.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'

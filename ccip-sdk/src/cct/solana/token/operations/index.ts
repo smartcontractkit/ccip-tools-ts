@@ -1,11 +1,11 @@
 export * from './create-token-account.ts'
 export * from './deploy-token.ts'
 export * from './mint-tokens.ts'
-export { TransferAuthority } from './transfer-authority.ts'
+export { SetTokenAuthority } from './set-token-authority.ts'
 export type {
-  ExecuteTransferAuthorityParams,
-  ExecuteTransferAuthorityResult,
-  GenerateTransferAuthorityParams,
-  GenerateTransferAuthorityResult,
+  ExecuteSetTokenAuthorityParams,
+  ExecuteSetTokenAuthorityResult,
+  GenerateSetTokenAuthorityParams,
+  GenerateSetTokenAuthorityResult,
   TokenAuthorityType,
-} from './transfer-authority.ts'
+} from './set-token-authority.ts'

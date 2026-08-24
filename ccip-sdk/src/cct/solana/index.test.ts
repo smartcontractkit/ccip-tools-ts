@@ -3,13 +3,7 @@ import { describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
 
-import {
-  type RegisterAdminMethod,
-  type TokenAuthorityType,
-  REGISTER_ADMIN_METHODS,
-  SolanaTokenManager,
-  TOKEN_AUTHORITY_TYPES,
-} from './index.ts'
+import { type TokenAuthorityType, SolanaTokenManager, TOKEN_AUTHORITY_TYPES } from './index.ts'
 import type {
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
@@ -36,8 +30,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.createTokenAccount, 'function')
     assert.equal(typeof cct.generateUnsignedMintTokens, 'function')
     assert.equal(typeof cct.mintTokens, 'function')
-    assert.equal(typeof cct.generateUnsignedTransferAuthority, 'function')
-    assert.equal(typeof cct.transferAuthority, 'function')
+    assert.equal(typeof cct.generateUnsignedSetTokenAuthority, 'function')
+    assert.equal(typeof cct.setTokenAuthority, 'function')
 
     // Token admin registry operations
     assert.equal(typeof cct.generateUnsignedAcceptAdmin, 'function')
@@ -84,14 +78,11 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.getTokenPoolState, 'function')
   })
 
-  it('exports public operation constants', () => {
+  it('exports public token authority constants', () => {
     const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
-    const registrationMethod: RegisterAdminMethod = REGISTER_ADMIN_METHODS.OWNER
 
     assert.equal(authorityType, 'mint')
     assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
-    assert.equal(registrationMethod, 'owner')
-    assert.equal(REGISTER_ADMIN_METHODS.CCIP_ADMIN, 'ccip-admin')
   })
 
   it('creates from a connection provider', async (t) => {
