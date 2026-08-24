@@ -21,7 +21,7 @@ import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 
 /** Authorization paths used to register a token in the TokenAdminRegistry. */
-export const REGISTER_ADMIN_METHODS = {
+const REGISTER_ADMIN_METHODS = {
   OWNER: 'owner',
   CCIP_ADMIN: 'ccip-admin',
 } as const

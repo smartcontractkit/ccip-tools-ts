@@ -49,7 +49,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | null) {
-  return SolanaTokenManager.fromChain(chain(mintOwner)).generateUnsignedTransferAuthority({
+  return SolanaTokenManager.fromChain(chain(mintOwner)).generateUnsignedSetTokenAuthority({
     tokenAddress: TOKEN,
     payer: PAYER,
     authority: AUTHORITY,
@@ -59,9 +59,9 @@ function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | nu
   })
 }
 
-describe('TransferAuthority (cct/solana)', () => {
+describe('SetTokenAuthority (cct/solana)', () => {
   describe('generate', () => {
-    it('builds selected mint and freeze authority transfers', async () => {
+    it('builds selected mint and freeze authority updates', async () => {
       const unsigned = await generate()
 
       assert.equal(unsigned.family, ChainFamily.Solana)
@@ -94,7 +94,7 @@ describe('TransferAuthority (cct/solana)', () => {
       )
     })
 
-    it('builds only the selected authority transfer for Token-2022', async () => {
+    it('builds only the selected authority update for Token-2022', async () => {
       const unsigned = await generate({ authorityTypes: ['freeze'] }, TOKEN_2022_PROGRAM_ID)
 
       assert.equal(unsigned.instructions.length, 1)
@@ -196,7 +196,7 @@ describe('TransferAuthority (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).transferAuthority({
+      const result = await SolanaTokenManager.fromChain(submitChain()).setTokenAuthority({
         tokenAddress: TOKEN,
         newAuthority: NEW_AUTHORITY,
         authorityTypes: ['mint'],
@@ -209,7 +209,7 @@ describe('TransferAuthority (cct/solana)', () => {
     it('requires unsigned generation for SPL multisig authorities', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).transferAuthority({
+          SolanaTokenManager.fromChain(chain()).setTokenAuthority({
             tokenAddress: TOKEN,
             newAuthority: NEW_AUTHORITY,
             authority: MULTISIG,
@@ -222,10 +222,10 @@ describe('TransferAuthority (cct/solana)', () => {
       )
     })
 
-    it('rejects a non-wallet authority for signed transfer', async () => {
+    it('rejects a non-wallet authority for signed updates', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).transferAuthority({
+          SolanaTokenManager.fromChain(chain()).setTokenAuthority({
             tokenAddress: TOKEN,
             newAuthority: NEW_AUTHORITY,
             authority: AUTHORITY,
@@ -234,7 +234,7 @@ describe('TransferAuthority (cct/solana)', () => {
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'transferAuthority' &&
+          err.context.operation === 'setTokenAuthority' &&
           err.context.param === 'authority',
       )
     })
