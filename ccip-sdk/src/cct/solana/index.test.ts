@@ -70,6 +70,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.setChainRateLimit, 'function')
     assert.equal(typeof cct.generateUnsignedSetRateLimitAdmin, 'function')
     assert.equal(typeof cct.setRateLimitAdmin, 'function')
+    assert.equal(typeof cct.generateUnsignedProvideLiquidity, 'function')
+    assert.equal(typeof cct.provideLiquidity, 'function')
     assert.equal(typeof cct.generateUnsignedSetRebalancer, 'function')
     assert.equal(typeof cct.setRebalancer, 'function')
     assert.equal(typeof cct.generateUnsignedTransferOwnership, 'function')

@@ -97,6 +97,8 @@ import {
   type ExecuteEditChainRemoteConfigResult,
   type ExecuteInitChainRemoteConfigParams,
   type ExecuteInitChainRemoteConfigResult,
+  type ExecuteProvideLiquidityParams,
+  type ExecuteProvideLiquidityResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
   type ExecuteSetCanAcceptLiquidityParams,
@@ -127,6 +129,8 @@ import {
   type GenerateEditChainRemoteConfigResult,
   type GenerateInitChainRemoteConfigParams,
   type GenerateInitChainRemoteConfigResult,
+  type GenerateProvideLiquidityParams,
+  type GenerateProvideLiquidityResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
   type GenerateSetCanAcceptLiquidityParams,
@@ -156,6 +160,7 @@ import {
   GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainRemoteConfig,
+  ProvideLiquidity,
   RemoveFromAllowlist,
   SetCanAcceptLiquidity,
   SetChainRateLimit,
@@ -195,6 +200,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
+  readonly #provideLiquidity = new ProvideLiquidity()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
   readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity()
   readonly #setChainRateLimit = new SetChainRateLimit()
@@ -1135,6 +1141,88 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to deposit a rebalancer's tokens into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. `authority`
+   * defaults to `payer`. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
+   * to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   *
+   * @see {@link provideLiquidity}
+   * @see {@link generateUnsignedApproveToken}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example Prepare and generate liquidity instructions
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const amount = 1_000_000n
+   * const { config } = await cct.getTokenPoolState({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   * })
+   * const approval = await cct.generateUnsignedApproveToken({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   delegate: config.poolSigner,
+   *   amount,
+   * })
+   * const liquidity = await cct.generateUnsignedProvideLiquidity({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount,
+   * })
+   * ```
+   */
+  generateUnsignedProvideLiquidity(
+    opts: GenerateProvideLiquidityParams,
+  ): Promise<GenerateProvideLiquidityResult> {
+    return this.#provideLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits tokens from the executing rebalancer wallet into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. The wallet's
+   * associated token account must exist and hold the positive u64 `amount` in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
+   * to the pool signer PDA; use {@link approveToken} first.
+   *
+   * @see {@link generateUnsignedProvideLiquidity}
+   * @see {@link approveToken}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
+   * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, liquidity is disabled, the
+   * token account lacks funds, or simulation/submission fails.
+   *
+   * @example Prepare and provide liquidity
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const amount = 1_000_000n
+   * const { config } = await cct.getTokenPoolState({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   * })
+   * await cct.approveToken({ wallet, tokenAddress: mint, delegate: config.poolSigner, amount })
+   * await cct.provideLiquidity({ wallet, tokenAddress: mint, poolType: 'lock-release', amount })
+   * ```
+   */
+  provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
+    return this.#provideLiquidity.execute(this.chain, opts)
   }
 
   /**
