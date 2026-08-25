@@ -29,6 +29,7 @@
  * Env overrides:
  *   CCIP_TOOLS_TEST_LOCK_DIR         lock root (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`)
  *   CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS  max total wait for all requested locks (default: 60 min)
+ *   CCIP_TOOLS_TEST_LOCK_VERBOSE     force lock diagnostics on in CI (default: local only)
  */
 import {
   lstatSync,
@@ -51,6 +52,14 @@ const LOG_INTERVAL_MS = 5_000
 /** A lock directory without a readable owner.json is stolen once this old. */
 const UNOWNED_STALE_MS = 10 * 60_000
 
+/**
+ * Lock diagnostics (acquire/wait/release lines) are for local debugging: they are
+ * silent in CI unless VERBOSE is set, so they cannot pollute CI logs or the PR
+ * coverage comment (which captures the full test output).
+ */
+const lockLoggingEnabled =
+  !process.env['CI'] || !!process.env['VERBOSE'] || !!process.env['CCIP_TOOLS_TEST_LOCK_VERBOSE']
+
 const RESOURCE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
 /** resource tag → number of times this process has acquired it (refcounted). */
@@ -66,7 +75,7 @@ function lockDir(resource: string): string {
 }
 
 function log(message: string): void {
-  console.error(`[network-locks] ${message}`)
+  if (lockLoggingEnabled) console.error(`[network-locks] ${message}`)
 }
 
 function sleep(ms: number): Promise<void> {

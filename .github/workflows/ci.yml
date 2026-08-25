@@ -106,8 +106,13 @@ jobs:
             const fs = require('fs');
 
             let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
-            coverageSummary = coverageSummary.slice(
-              coverageSummary.findIndex(line => line.match(/^ℹ/))
+            // Only the c8 table belongs in the comment: the teed file starts with the
+            // full node --test output (test logs, [network-locks] lines, per-file `ℹ`
+            // summaries), so slicing on the first `ℹ` would dump all of it into the PR.
+            const tableStart = coverageSummary.findIndex(line => /^\s*File\s+\|/.test(line));
+            coverageSummary = (tableStart >= 0
+              ? coverageSummary.slice(tableStart)
+              : coverageSummary
             ).join('\n');
 
             if (coverageSummary.trim().length === 0) {
