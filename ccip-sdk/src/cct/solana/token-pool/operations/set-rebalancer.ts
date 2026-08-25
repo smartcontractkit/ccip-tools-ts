@@ -26,7 +26,7 @@ import {
 type SetRebalancerParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Address authorized to provide or withdraw pool liquidity. The default address disables rebalancing. */
+  /** Address authorized to provide or withdraw pool liquidity. Use the default/zero address (`11111111111111111111111111111111`) to disable rebalancing. */
   rebalancer: string
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string

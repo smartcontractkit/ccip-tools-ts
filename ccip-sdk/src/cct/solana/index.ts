@@ -1129,7 +1129,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds an unsigned instruction that sets the address authorized to provide or withdraw
    * liquidity for an initialized Solana lock-release token pool. Pass canonical
    * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to
-   * `payer`. The default public key disables rebalancing.
+   * `payer`. The default/zero public key (`11111111111111111111111111111111`) disables
+   * rebalancing.
    *
    * @see {@link setRebalancer}
    *
@@ -1156,8 +1157,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Sets the address authorized to provide or withdraw liquidity for an initialized Solana
    * lock-release token pool using the pool owner wallet. Pass canonical `poolType: 'lock-release'`
-   * or a compatible `poolProgramAddress`; set `rebalancer` to the default public key to disable
-   * rebalancing.
+   * or a compatible `poolProgramAddress`; set `rebalancer` to the default/zero public key
+   * (`11111111111111111111111111111111`) to disable rebalancing.
    *
    * @see {@link generateUnsignedSetRebalancer}
    *
