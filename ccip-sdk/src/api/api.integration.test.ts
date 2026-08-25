@@ -30,12 +30,15 @@ describe(
     let api: CCIPAPIClient
 
     before(() => {
-      // Uses staging API by default (api.ccip.cldev.cloud)
-      api = CCIPAPIClient.fromUrl()
+      // Pin staging (api.ccip.cldev.cloud): the fromUrl() default is prod
+      // (api.ccip.chain.link), which can lack data for low-traffic testnet
+      // lanes (e.g. getLaneLatency -> INSUFFICIENT_DATA there, but not here).
+      api = CCIPAPIClient.fromUrl(STAGING_API_URL)
     })
 
     describe('getLaneLatency', () => {
       it('should return totalMs for valid testnet lane', { timeout: 30000 }, async () => {
+        // default window (no numOfBlocks); staging serves this lane, prod may not
         const result = await api.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR)
 
         assert.equal(typeof result.totalMs, 'number')

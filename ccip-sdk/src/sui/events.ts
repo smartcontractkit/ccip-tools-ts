@@ -161,6 +161,13 @@ async function collectByCheckpointWalk<T>(
     const page = await withLookupRetry(() =>
       client.getCheckpoints({ cursor, limit: 100, descendingOrder: false }),
     )
+    // Walk mode fills the shared tx-meta cache directly, bypassing the cap check
+    // in resolveTxMetas — enforce the same bound here so long-running watch
+    // streams (e.g. after a queryEvents retention-boundary failure) can't grow
+    // it unboundedly. Lookups below only consume digests set on THIS page, so
+    // clearing an overfull cache just before inserting never evicts an entry
+    // still in flight.
+    if (txMetas.size > TX_META_CACHE_MAX) txMetas.clear()
     const digests: string[] = []
     let pastWindow = false
     for (const checkpoint of page.data) {

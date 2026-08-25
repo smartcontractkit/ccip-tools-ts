@@ -22,7 +22,7 @@ import { estimateReceiveExecution } from '../gas.ts'
 import { EVMChain } from './index.ts'
 import { simulateReleaseOrMint } from './simulate.ts'
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co'
+const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
 const SEPOLIA_SELECTOR = 16015286601757825753n
 
 const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'

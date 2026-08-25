@@ -3,7 +3,16 @@ import { execSync } from 'node:child_process'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
+import {
+  AbiCoder,
+  Contract,
+  JsonRpcProvider,
+  Wallet,
+  ZeroAddress,
+  keccak256,
+  parseUnits,
+  toBeHex,
+} from 'ethers'
 import { Instance } from 'prool'
 import { createPublicClient, http } from 'viem'
 
@@ -21,7 +30,7 @@ import { ViemTransportProvider } from './viem/client-adapter.ts'
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co'
+const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
@@ -31,6 +40,12 @@ const FUJI_CHAIN_ID = 43113
 
 const ARB_SEP_RPC = process.env['RPC_ARB_SEPOLIA'] || 'https://sepolia-rollup.arbitrum.io/rpc'
 const ARB_SEP_CHAIN_ID = 421614
+
+// Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
+// Router 1.2.0 from the CCIP Directory (https://docs.chain.link/ccip/directory/testnet)
+const HEDERA_TESTNET_RPC = process.env['RPC_HEDERA_TESTNET'] || 'https://testnet.hashio.io/api'
+const HEDERA_CHAIN_ID = 296
+const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
@@ -119,10 +134,12 @@ const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
 describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
+  let hederaChain: EVMChain | undefined
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let arbSepChain: EVMChain | undefined
   let wallet: Wallet
+  let hederaInstance: ReturnType<typeof Instance.anvil> | undefined
   let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
   let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
   let arbSepInstance: ReturnType<typeof Instance.anvil> | undefined
@@ -154,7 +171,16 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       { forkUrl: ARB_SEP_RPC, chainId: ARB_SEP_CHAIN_ID, port: 8644, ...forkOpts },
       {},
     )
-    await Promise.all([sepoliaInstance.start(), fujiInstance.start(), arbSepInstance.start()])
+    hederaInstance = Instance.anvil(
+      { forkUrl: HEDERA_TESTNET_RPC, chainId: HEDERA_CHAIN_ID, port: 8643, ...forkOpts },
+      {},
+    )
+    await Promise.all([
+      sepoliaInstance.start(),
+      fujiInstance.start(),
+      arbSepInstance.start(),
+      hederaInstance.start(),
+    ])
 
     const sepoliaProvider = new JsonRpcProvider(
       `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
@@ -162,6 +188,9 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
     const arbSepProvider = new JsonRpcProvider(
       `http://${arbSepInstance.host}:${arbSepInstance.port}`,
+    )
+    const hederaProvider = new JsonRpcProvider(
+      `http://${hederaInstance.host}:${hederaInstance.port}`,
     )
 
     sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
@@ -173,14 +202,24 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       apiClient: null,
       logger: testLogger,
     })
+    hederaChain = await EVMChain.fromProvider(hederaProvider, {
+      apiClient: null,
+      logger: testLogger,
+    })
     wallet = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
   })
 
   after(async () => {
+    hederaChain?.provider.destroy()
     sepoliaChain?.provider.destroy()
     fujiChain?.provider.destroy()
     arbSepChain?.provider.destroy()
-    await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop(), arbSepInstance?.stop()])
+    await Promise.all([
+      hederaInstance?.stop(),
+      sepoliaInstance?.stop(),
+      fujiInstance?.stop(),
+      arbSepInstance?.stop(),
+    ])
   })
 
   // ── State-mutating tests (sendMessage / execute / ViemTransportProvider) ──
@@ -295,6 +334,39 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
       assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
+    })
+  })
+
+  describe('generateUnsignedSendMessage (Hedera testnet)', () => {
+    // Hedera's EVM quotes native (WHBAR) fees in tinybars, i.e. with the native
+    // token's 8 decimals; return this tx's `value` to the SDK's 18-decimal wei
+    // representation by scaling the fee by 10^(18-8) = 10^10.
+    it('should scale the native fee by 10^10 (tinybar -> weibar) in the ccipSend value', async () => {
+      assert.ok(hederaChain, 'hedera chain should be initialized')
+      const sender = wallet.address
+      const message = { receiver: sender, data: '0x', feeToken: ZeroAddress }
+      const fee = await hederaChain.getFee({
+        router: HEDERA_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        message,
+      })
+      assert.ok(fee > 0n, `expected a positive fee on the live hedera->sepolia lane, got ${fee}`)
+
+      const unsigned = await hederaChain.generateUnsignedSendMessage({
+        sender,
+        router: HEDERA_ROUTER,
+        destChainSelector: SEPOLIA_SELECTOR,
+        message,
+      })
+      assert.equal(unsigned.transactions.length, 1, 'data-only send should not need approvals')
+      const [sendTx] = unsigned.transactions
+      assert.equal(sendTx?.to, HEDERA_ROUTER)
+      assert.equal(sendTx.from, sender)
+      assert.equal(
+        sendTx.value,
+        fee * 10n ** 10n,
+        'native msg.value should be the fee in tinybars scaled to weibar',
+      )
     })
   })
 

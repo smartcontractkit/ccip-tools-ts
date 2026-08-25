@@ -6,11 +6,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const CLI_PATH = path.join(__dirname, '..', 'index.ts')
 
 export const RPCS = [
-  // sepolia candidates, raced per family: ethPandaOps (public, archive-friendly)
-  // answers first reliably; publicnode/tenderly cover when it's unavailable
   process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io',
-  process.env['RPC_SEPOLIA_2'] || 'https://ethereum-sepolia-rpc.publicnode.com',
-  process.env['RPC_SEPOLIA_3'] || 'https://sepolia.gateway.tenderly.co',
+  process.env['RPC_SEPOLIA_2'] || 'https://0xrpc.io/sep',
+  process.env['RPC_SEPOLIA_3'] || 'https://gateway.tenderly.co/public/sepolia',
   process.env['RPC_AVAX'] || 'https://api.avax-test.network/ext/bc/C/rpc',
   // Aptos testnet fullnodes prune older txs/events; the archival endpoint
   // retains them, so it is the single default (kept alone on purpose: the

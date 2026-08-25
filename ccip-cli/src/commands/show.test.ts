@@ -31,7 +31,7 @@ describe('e2e command show EVM', () => {
         const args = buildShowArgs(TX_HASH)
         const result = await spawnCLI(args, 120000)
 
-        assert.equal(result.exitCode, 0)
+        assert.equal(result.exitCode, 0, result.stderr)
         const output = result.stdout
 
         // Lane information
@@ -114,7 +114,7 @@ describe('e2e command show EVM', () => {
         const args = buildShowArgs(TX_HASH, '--format', 'json')
         const result = await spawnCLI(args, 120000)
 
-        assert.equal(result.exitCode, 0)
+        assert.equal(result.exitCode, 0, result.stderr)
 
         // Should be a single parseable JSON envelope
         const envelope = JSON.parse(result.stdout)
@@ -146,7 +146,7 @@ describe('e2e command show EVM', () => {
       const args = buildShowArgs(TX_HASH, '--format', 'log')
       const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0)
+      assert.equal(result.exitCode, 0, result.stderr)
 
       // Log format should contain assignment operators
       assert.match(result.stdout, /message.*=/)
@@ -165,7 +165,7 @@ describe('e2e command show EVM', () => {
       const args = buildShowArgs(TX_HASH, '--verbose')
       const result = await spawnCLI(args, 120000)
 
-      assert.equal(result.exitCode, 0)
+      assert.equal(result.exitCode, 0, result.stderr)
       assert.ok(result.stdout.length > 0)
 
       // Should still contain main output
