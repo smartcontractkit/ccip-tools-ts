@@ -726,13 +726,17 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * Consume the v3 event stream (see {@link openV3EventStream}), emitting complete
    * sealed blocks. Mirrors the v2 consumption loop in getLogs, minus the
    * chain-integrity and lt-floor checks: the index is block-atomic (a block's log
+   * index is block-atomic (a block's log
    * messages appear all at once), blocks are non-decreasing along the
-   * created_lt-ordered stream, and the time floor is applied index-side. A block
-   * rewind or a truncated tail drops the block in progress and stops — the poller
-   * resumes from its hint. A truncated scan that emitted NOTHING ends quietly: no
-   * watermark can have moved, so there is nothing to signal — and the index tip
-   * always trails a near-tip cutoff by a few blocks, so loud empty scans would
-   * storm the poller with transient errors on every dormant poll.
+   * created_lt-ordered stream, and the time floor is applied index-side. `cutoff`
+   * is the scan's effective seal boundary — the requested cutoff clamped to the
+   * index's ingested tip (see {@link openV3EventStream}) — so a clamped scan
+   * still ends as a COMPLETE prefix the poller resumes from. A block rewind or a
+   * truncated tail (genuine index self-contradiction) drops the block in progress
+   * and stops: a scan that EMITTED logs surfaces that loudly
+   * (CCIPLogsStreamInconsistentError) so the poller re-polls instead of trusting
+   * a watermark — one that emitted nothing ends quietly, since no watermark can
+   * have moved and there is nothing to signal.
    */
   private async *emitSealedV3Events(
     stream: AsyncGenerator<TonV3Event, void, undefined>,
@@ -744,11 +748,9 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     let buf: ChainLog[] = []
     // Whether anything was actually EMITTED (survived the topic/type/version filters
     // and the hint's per-log drop). An all-empty scan cannot advance any poller
-    // watermark, so a clamped tail loses nothing — and the index tip ALWAYS trails
-    // a near-tip cutoff by a few blocks, so throwing on empty scans would turn the
-    // ordinary "dormant address / nothing new" answer into a permanent transient-
-    // error storm. The N2 truncation signal is for scans that emitted logs, whose
-    // watermark could be trusted past the index's ingested tip.
+    // watermark, so a mid-scan inconsistency loses nothing by ending quietly; the
+    // loud truncation signal is only meaningful for scans that emitted logs, whose
+    // watermark could be trusted past the truncated tail.
     let emitted = 0
     // A `since` hint's per-log index (the hinted message's created_lt): the index
     // floor at index + 1 excludes the hint's own ROW, but hydration decodes the
@@ -770,13 +772,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
     for await (const item of stream) {
       if (!('tx' in item)) {
-        // Truncated tail: the index did not deliver the full requested window
-        // (mid-stream inconsistency, or its ingested tip sat below the cutoff — see
-        // openV3EventStream). Ending silently would look like a complete scan to
-        // the watermark-driven poller, so scans that EMITTED logs surface it
+        // Truncated: a mid-stream index self-contradiction (see openV3EventStream /
+        // TonV3Event) — ending silently would look like a complete scan to the
+        // watermark-driven poller, so scans that EMITTED logs surface it
         // (CCIPLogsStreamInconsistentError) and the caller re-polls instead of
-        // trusting the watermark. Empty scans stay quiet: nothing was emitted, so
-        // no watermark moved and the tail is re-scanned on the next poll anyway.
+        // trusting the watermark. Scans that emitted nothing stay quiet: no
+        // watermark moved, so the tail is re-scanned on the next poll anyway.
         buf = []
         curBlock = undefined
         if (emitted > 0)
@@ -787,14 +788,22 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
       const block = item.tx.blockNumber
       if (curBlock !== undefined && block < curBlock) {
+        // A block rewind is the same class of index self-contradiction: the block
+        // in progress is dropped (its seal is not attested). With logs already
+        // EMITTED it surfaces loudly — the watermark could otherwise be trusted
+        // past the rewind; before anything was emitted no watermark can have
+        // moved, so the scan ends quietly.
+        const prev = curBlock
         this.logger.warn(
-          `TON getLogs v3: block rewind ${curBlock} -> ${block} mid-stream; stopping scan`,
+          `TON getLogs v3: block rewind ${prev} -> ${block} mid-stream; stopping scan`,
         )
         buf = []
         curBlock = undefined
-        throw new CCIPLogsStreamInconsistentError(
-          `TON getLogs v3: block rewind ${curBlock} -> ${block} mid-stream`,
-        )
+        if (emitted > 0)
+          throw new CCIPLogsStreamInconsistentError(
+            `TON getLogs v3: block rewind ${prev} -> ${block} mid-stream`,
+          )
+        return
       }
       // Crossed a block boundary ⇒ the previous block's events are complete in the index.
       if (curBlock !== undefined && block !== curBlock) yield* drain(this)
@@ -1041,7 +1050,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ((opts.startTime != null && sinceLt == null) || sinceIndexLt != null)
     ) {
       const v3BaseUrl = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
-      const v3Stream = await openV3EventStream(
+      const v3 = await openV3EventStream(
         opts_,
         {
           provider: this.provider,
@@ -1054,8 +1063,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         cutoff,
         sinceIndexLt != null ? sinceIndexLt + 1n : undefined,
       )
-      if (v3Stream) {
-        yield* this.emitSealedV3Events(v3Stream, opts, cutoff, matches)
+      if (v3) {
+        // The returned cutoff is the scan's seal boundary: the requested cutoff
+        // clamped to the index's ingested tip (see openV3EventStream).
+        yield* this.emitSealedV3Events(v3.stream, opts, v3.cutoff, matches)
         return
       }
     }

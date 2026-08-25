@@ -292,10 +292,14 @@ export type TonV3Transaction = {
 
 /**
  * One item of the v3 event stream: a hydrated event-carrying transaction, or an
- * end-of-stream marker signalling the stream stopped early on index inconsistency —
- * the block in progress may be incomplete and must be dropped, the same contract as a
- * chain gap on the v2 walk (already-emitted blocks stand; the poller resumes from its
- * hint).
+ * end-of-stream marker signalling the stream stopped early on genuine index
+ * self-contradiction (a message row without its producing tx's hash, or an
+ * unrecoverable page turn) — the block in progress may be incomplete and must be
+ * dropped, the same contract as a chain gap on the v2 walk (already-emitted
+ * blocks stand; the poller resumes from its hint). A scan whose window merely
+ * extends past the index's INGESTED TIP does NOT produce this marker: the stream
+ * is clamped to the tip and ends as a complete prefix (see
+ * {@link openV3EventStream}).
  */
 export type TonV3Event = { tx: ChainTransaction } | { truncated: true }
 
@@ -431,10 +435,14 @@ export async function fetchV3IndexedTip(
  * created_lt + 1. Page turns after the seed are driven by created_at (the index's
  * native order) — never by created_lt, which can regress across rows.
  *
- * The scan is clamped to the index's INGESTED tip: blocks past it are not in the
- * index yet, so emitting up to the requested cutoff would silently under-deliver.
- * When the clamp cuts the scan short, the stream ends with a `truncated` marker
- * (see {@link TonV3Event}) instead of pretending the window was complete.
+ * The scan is CLAMPED to the index's ingested tip: the returned `cutoff` is
+ * `min(requested cutoff, indexedTip)` — blocks past it aren't in the index, so the
+ * stream can't attest them, and the consumer seals there. The scan therefore ends
+ * as a COMPLETE prefix by construction (a watermark poller resumes from its own
+ * last emitted log, so the tail is fetched by the next poll) and no truncation
+ * marker is produced for the clamp. A PINNED `endBlock` above the ingested tip
+ * cannot be clamped — the caller asked for a definite window — so the fast path
+ * declines (returns null) and the complete v2 walk serves it.
  *
  * @internal
  */
@@ -444,7 +452,7 @@ export async function openV3EventStream(
   cutoff: number,
   /** Resume strictly after this account message lt (a hint's `index`). */
   startLt?: bigint,
-): Promise<AsyncGenerator<TonV3Event, void, undefined> | null> {
+): Promise<{ stream: AsyncGenerator<TonV3Event, void, undefined>; cutoff: number } | null> {
   const { v3BaseUrl } = ctx
   if (!v3BaseUrl) return null // fast path explicitly disabled by the caller
   const ctxV3 = { ...ctx, v3BaseUrl }
@@ -473,29 +481,37 @@ export async function openV3EventStream(
         `TON v3 index lagging: tip ${indexedTip} vs requested cutoff ${cutoff}`,
       )
     }
+    // A PINNED endBlock above the ingested tip is a definite-window request: a
+    // bounded prefix would silently under-deliver it, so decline — the v2 walk
+    // serves the complete range.
+    const endBlock = Number(opts.endBlock)
+    if (Number.isFinite(endBlock) && endBlock > 0 && indexedTip < endBlock) return null
   } catch (err) {
     ctx.logger?.debug('TON getLogs: v3 fast path unavailable, falling back to v2 walk:', err)
     return null
   }
-  // Within tolerance, CLAMP the scan to what the index has actually ingested:
-  // blocks (indexedTip, cutoff] aren't in the index yet, and emitting up to the
-  // requested cutoff would silently skip them (the lag threshold alone can't see
-  // a shortfall inside it). `clamped` surfaces the shortfall at stream end so the
-  // consumer re-polls instead of trusting the scan as complete.
-  const clamped = indexedTip < cutoff
-  return generateV3Events(ctxV3, acct, firstPage, {
-    startUtime,
-    limit,
-    ...(startLt != null ? { startLt } : {}),
-    clamped,
-  })
+  // Real clamp: seal at the index's ingested tip — rows past it aren't in the
+  // index, so the stream can't attest them, and the returned cutoff bounds the
+  // consumer's sealing. The scan ends as a COMPLETE prefix by construction; the
+  // poller resumes from its own last emitted log, so the tail is picked up by the
+  // next poll. The probe tip is cached ~30s, so the clamp may sit below rows the
+  // index would already serve — safe, just a slightly shorter prefix. No truncated
+  // marker here: the completeness claim is bounded by construction.
+  return {
+    stream: generateV3Events(ctxV3, acct, firstPage, {
+      startUtime,
+      limit,
+      ...(startLt != null ? { startLt } : {}),
+    }),
+    cutoff: Math.min(cutoff, indexedTip),
+  }
 }
 
 async function* generateV3Events(
   ctx: TonV3Context & { v3BaseUrl: string },
   acct: Address,
   firstPage: TonV3Message[],
-  q: { startUtime: number; limit: number; startLt?: bigint; clamped: boolean },
+  q: { startUtime: number; limit: number; startLt?: bigint },
 ): AsyncGenerator<TonV3Event, void, undefined> {
   // The index orders /messages rows by created_at, NOT by created_lt — lts can
   // regress across rows of the same second (parallel shards). Page turns therefore
@@ -531,12 +547,10 @@ async function* generateV3Events(
       metaByHash.set(next.value.hash, next.value)
     }
   }
-  // Ends the stream: `clamped` means the index's ingested tip sat below the
-  // requested cutoff, so the tail may still be arriving — the consumer must not
-  // treat the scan as complete (it re-polls; see emitSealedV3Events).
-  const end = function* (): Generator<TonV3Event, void, undefined> {
-    if (q.clamped) yield { truncated: true }
-  }
+  // The caller (openV3EventStream) already clamped the seal boundary to the
+  // index's ingested tip, so the stream ending here IS a complete prefix — no
+  // end-of-stream marker is needed; `truncated` is reserved for the genuine
+  // self-contradictions above.
   let page = firstPage
   for (;;) {
     // The index sorts rows by created_at; restore lt/block order within the page.
@@ -580,8 +594,8 @@ async function* generateV3Events(
       yield { tx: await ctx.getTransaction(raw, meta.mc_block_seqno) }
     }
     if (page.length < q.limit) {
-      // Natural end of the index's message list for this account.
-      yield* end()
+      // Natural end of the index's message list for this account: the complete
+      // prefix up to the clamped cutoff.
       return
     }
     // Page full: turn by TIME (start_utime is an inclusive floor) with NO lt
@@ -621,11 +635,9 @@ async function* generateV3Events(
       return
     }
     // Both the boundary second and the next one returned nothing new: the index has
-    // no further rows for this account (its ingested tip was reached).
-    if (!fresh(next)) {
-      yield* end()
-      return
-    }
+    // no further rows for this account (its ingested tip was reached) — the stream
+    // ends at the clamped cutoff boundary; completeness is bounded there already.
+    if (!fresh(next)) return
     page = next
   }
 }

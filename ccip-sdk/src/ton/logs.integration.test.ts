@@ -233,9 +233,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             logs.push(log)
           }
         } catch (err) {
-          // A scan that EMITTED logs and ended past the index's ingested tip throws
-          // CCIPLogsStreamInconsistentError (transient, by design): retryable until
-          // the tail is ingested, not a shape failure.
+          // Genuine mid-stream index self-contradiction (e.g. a message row without
+          // its producing tx's hash) truncates loudly once logs were emitted:
+          // transient, by design — retryable, not a shape failure.
           if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
           truncated = true
         } finally {
@@ -304,8 +304,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             if (++taken >= 3) break // stream shape proven; the 24h tail lives in the repro
           }
         } catch (err) {
-          // Emitted logs then hit the index's ingested tip: transient truncation
-          // (see the first fast-path test) — the emitted prefix is valid, retry.
+          // Genuine mid-stream index self-contradiction (see the first fast-path
+          // test): the emitted prefix is valid, retry.
           if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
         } finally {
           spy.restore()
@@ -533,8 +533,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             if (logs.length >= 3) break
           }
         } catch (err) {
-          // Emitted logs then hit the index's ingested tip: transient truncation
-          // (see the first fast-path test) — the emitted prefix is valid, retry.
+          // Genuine mid-stream index self-contradiction (see the first fast-path
+          // test): the emitted prefix is valid, retry.
           if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
         } finally {
           spy.restore()

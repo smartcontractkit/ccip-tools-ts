@@ -1126,9 +1126,15 @@ describe('TON index unit tests', () => {
           if (url.includes('/masterchainInfo')) return json({ last: { seqno: v3.tip ?? latest } })
           throw new Error(`unexpected v3 url ${url}`)
         }
-        const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
+        const body = JSON.parse(opts?.body ?? '{}') as {
+          method?: string
+          params?: { lt?: string; unixtime?: number }
+        }
         if (body.method === 'lookupBlock') {
-          const block = blockOf(BigInt(body.params!.lt!))
+          // TonCenter lookupBlock takes `lt` OR `unixtime`; both map to the same
+          // deliberately under-assigned seqno (blockOf(param) - 1).
+          const param = body.params?.unixtime ?? body.params?.lt
+          const block = blockOf(BigInt(param ?? 0))
           const seqno = underAssign ? Math.max(1, block - 1) : block // under-assign by 1
           return json({ result: { seqno } })
         }
@@ -1491,32 +1497,48 @@ describe('TON index unit tests', () => {
         )
       })
 
-      it('clamps to the ingested tip and surfaces the shortfall', async () => {
+      it('clamps to the ingested tip and ends as a complete prefix', async () => {
         // The index ingested only up to block 11 while the scan's cutoff is 12:
-        // within the lag tolerance the probe passes, but emitting to the cutoff
-        // would silently skip block 12. The scan must throw
-        // CCIPLogsStreamInconsistentError so the poller re-polls instead of
-        // trusting a "complete" watermark.
+        // within the lag tolerance the probe passes, but rows past the tip aren't
+        // in the index. The scan seals at min(cutoff, tip) = 11 and ends CLEANLY —
+        // a complete prefix whose bounded claim the poller resumes from (its
+        // watermark is its last emitted log, so the tail is fetched next poll).
         const chain = makeChain(13, [11_001, 12_001], [], { v3: { tip: 11 } })
-        await assert.rejects(
-          collect(chain, { startTime: 1 }),
-          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
-          'a fast-path scan cut short by the index tip throws instead of ending silently',
+        const logs = await collect(chain, { startTime: 1 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001'],
+          'the sealed prefix up to the ingested tip is delivered, no truncation error',
         )
       })
 
       it('clamped scan that emits nothing ends quietly (dormant address)', async () => {
-        // The index tip ALWAYS trails a near-tip cutoff (cutoff = latest - 1, and
-        // the index ingests a few blocks behind), so an EMPTY fast-path scan is
-        // almost always clamped. An empty result cannot advance any poller
-        // watermark — nothing was emitted, nothing is lost — so loudly truncating
-        // it would turn every "dormant address / nothing new" poll into a
-        // permanent transient-error storm. It must end cleanly, still on the
-        // index (no v2 walk).
+        // An EMPTY fast-path scan (dormant address / nothing matching) over a
+        // window whose far edge sits past the index tip is the ordinary near-tip
+        // shape — the index tip always trails `latest - 1` by a few blocks. The
+        // clamp bounds the claim (this scan's prefix is empty), the stream ends
+        // cleanly, and no watermark can have moved; staying on the index (no v2
+        // walk) keeps the dormant poll at one /messages call.
         const chain = makeChain(13, [11_001], [], { v3: { tip: 11 } })
         const logs = await collect(chain, { startTime: 1, topics: ['Unrelated'] })
         assert.deepEqual(logs, [], 'an empty clamped scan completes quietly')
         assert.equal(chain.calls.v2Walk, 0, 'the index answered "no events" without a v2 walk')
+      })
+
+      it('declines the fast path when a pinned endBlock sits above the ingested tip', async () => {
+        // A caller requesting a DEFINITE [startTime, endBlock] window can't be
+        // served a bounded prefix — clamping would silently under-deliver the
+        // pinned range. The fast path must decline (after its one-/messages
+        // probe, which also supplies the tip) and the complete v2 walk serves it.
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: { tip: 11 } })
+        const logs = await collect(chain, { startTime: 1, endBlock: 12 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '12001'],
+          'the v2 walk delivers the whole pinned window',
+        )
+        assert.ok(chain.calls.v2Walk >= 1, 'v2 walked')
+        assert.equal(chain.calls.v3Reqs.length, 1, 'the fast path declined after its probe')
       })
 
       it('drains a boundary second that overflows the page (offset probe), never cutting it', async () => {
