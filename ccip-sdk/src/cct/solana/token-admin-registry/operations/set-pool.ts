@@ -17,9 +17,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { parsePublicKey, validateWritableIndexes } from '../../validate.ts'
-
-/** Standard BurnMint/LockRelease pool ALT writable positions. */
-export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
+import { DEFAULT_WRITABLE_INDEXES } from '../constants.ts'
 
 /** Parameters shared by Solana TokenAdminRegistry `setPool` generation and execution. */
 type SetPoolParams = {

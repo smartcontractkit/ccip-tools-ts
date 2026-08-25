@@ -1825,7 +1825,11 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
-export { TOKEN_AUTHORITY_TYPES } from './token/operations/set-token-authority.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/constants.ts'
+export {
+  DEFAULT_WRITABLE_INDEXES,
+  REGISTER_ADMIN_METHODS,
+} from './token-admin-registry/constants.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
