@@ -27,6 +27,11 @@ import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SOLANA_DEVNET_TO_SEPOLIA, TON_TO_SEPOLIA } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
 import { ViemTransportProvider } from './viem/client-adapter.ts'
+import { useResource } from '../../../scripts/useResource.ts'
+
+// Forks fetch live state from Sepolia/Fuji/Arb-Sepolia/Hedera-testnet upstreams; several
+// execution paths also hit the staging CCIP API.
+await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'hedera-testnet', 'api'])
 
 // ── Chain constants ──
 

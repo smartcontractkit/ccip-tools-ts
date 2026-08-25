@@ -13,8 +13,7 @@
   ],
   "scripts": {
     "test": "npm run clean:coverage && c8 npm test -w ccip-sdk -w ccip-cli",
-    "test:unit": "npm run clean:coverage && c8 npm test -w ccip-sdk",
-    "test:e2e": "npm run clean:coverage && c8 npm test -w ccip-cli",
+    "test:unit": "npm run clean:coverage && c8 npm run test:unit -w ccip-sdk -w ccip-cli",
     "lint": "npm run lint --workspaces && npm run generate:lint",
     "lint:fix": "npm run lint:fix --workspaces && npm run generate",
     "typecheck": "npm run typecheck --workspaces",

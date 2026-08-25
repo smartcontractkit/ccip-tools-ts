@@ -4,12 +4,16 @@ import { before, describe, it } from 'node:test'
 import '../index.ts'
 
 import { CCIPAPIClient } from './index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
 } from '../errors/index.ts'
 import { MessageStatus } from '../types.ts'
+
+// The suite only talks to the staging CCIP API — the selectors below are data, not endpoints.
+await useResource(['api'])
 
 // Test data from CLI E2E tests (show.test.ts)
 const SEPOLIA_SELECTOR = 16015286601757825753n

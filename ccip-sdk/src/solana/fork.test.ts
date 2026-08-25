@@ -10,7 +10,11 @@ import { CCIPAPIClient } from '../api/index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
 import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import { networkInfo } from '../index.ts'
+
+// Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
+await useResource(['solana-mainnet', 'api'])
 
 // ── Constants ──
 

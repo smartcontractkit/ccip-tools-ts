@@ -4,6 +4,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
+import { useResource } from '../../../../scripts/useResource.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
@@ -14,6 +15,10 @@ import {
   SOLANA_TO_ETHEREUM,
 } from '../fork.test.data.ts'
 import { SolanaChain } from '../index.ts'
+
+// Live lanes exercised: Solana devnet (send/execute fixtures) and Solana mainnet
+// (getTokenInfo / mainnet CCIP message suites), plus Fuji/Sepolia RPCs for lane data.
+await useResource(['sepolia', 'fuji', 'solana-devnet', 'solana-mainnet'])
 
 const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C/rpc'
 const SEPOLIA_RPC =
