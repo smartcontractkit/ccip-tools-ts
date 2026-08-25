@@ -1,8 +1,19 @@
 #!/usr/bin/env node
 
 const fs = require('fs/promises')
-const { glob } = require('glob') // FIXME: replace with fs.glob after node22 LTS
+const path = require('node:path')
+const { globSync } = require('node:fs')
 const prettier = require('prettier')
+
+const ROOT = path.join(__dirname, '..')
+
+/**
+ * `require` for eval'd blocks: bare ids resolve normally, relative ids resolve
+ * against the repo root — the blocks historically ran with this script living at
+ * the root, so e.g. `./package.json` means the root's package.json.
+ */
+const rootRequire = (id) =>
+  require(id.startsWith('.') ? require.resolve(id, { paths: [ROOT] }) : id)
 
 const newLineRe = /(?:\r\n|\r|\n)/g
 const DRY = process.argv.includes('--dry')
@@ -29,7 +40,10 @@ async function generate(filepath) {
     }
 
     expr = expr.join('\n')
-    let res = await eval(expr)
+    // Evaluate with eval semantics (completion value of the expression) in a scope
+    // whose only injected binding is the root-relative `require` above.
+    const runExpr = new Function('require', `return eval(${JSON.stringify(expr)})`)
+    let res = await runExpr(rootRequire)
     if (typeof res === 'string') res = [res]
 
     const endIdx = lines.findIndex(
@@ -49,9 +63,9 @@ async function generate(filepath) {
 process.argv
   .slice(2)
   .filter((param) => param !== '--dry')
-  .forEach(async (param) => {
-    for (const filepath of await glob(param)) {
-      await generate(filepath).then(
+  .forEach((param) => {
+    for (const filepath of globSync(param)) {
+      generate(filepath).then(
         (changed) => {
           if (changed == -1) process.exitCode = 1
           console.info(changed ? 'generated' : 'up-to-date', filepath)
