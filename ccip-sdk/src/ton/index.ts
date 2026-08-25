@@ -1183,6 +1183,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
       // Index/RPC disagreement mid-scan: same contract as a chain gap — the block in
       // progress may be incomplete, drop it and stop; the poller resumes from its hint.
+      // NOTE the deliberate asymmetry with the v3 fast path (emitSealedV3Events
+      // THROWS the same class once logs were emitted): this walk talks to the
+      // authoritative liteserver and is self-bounded by its own lt cursor, so the
+      // poller's watermark is never at risk — v3 is a secondary index that
+      // contradicted itself, whose louder signal is worth the retry.
       this.logger.warn('TON getLogs: stream inconsistent mid-scan; stopping:', err)
       buf = []
       curBlock = undefined

@@ -1589,11 +1589,10 @@ describe('TON index unit tests', () => {
       })
 
       it('truncation before anything was emitted ends quietly (no watermark to protect)', async () => {
-        // Same inconsistency, but the marker arrives before any block was drained:
-        // no log was emitted, so no poller watermark can have moved and nothing is
-        // lost on re-poll — staying quiet avoids turning the ordinary near-tip
-        // "nothing new" answer into a transient-error storm. Applies to the clamp
-        // end-marker and mid-stream inconsistency alike.
+        // The marker (a row without its tx hash) arrives before any block was
+        // drained: no log was emitted, so no poller watermark can have moved and
+        // nothing is lost on re-poll — staying quiet avoids turning the ordinary
+        // near-tip "nothing new" answer into a transient-error storm.
         const chain = makeChain(13, [10_001, 10_002], [], {
           v3: {
             rows: [
@@ -1605,6 +1604,68 @@ describe('TON index unit tests', () => {
         const logs = await collect(chain, { startTime: 1 })
         assert.deepEqual(logs, [], 'a pre-emission truncation completes quietly')
         assert.equal(chain.calls.v2Walk, 0, 'stayed on the index; no v2 fallback')
+      })
+
+      it('keeps the since seed across page turns (boundary-second rows below the hint)', async () => {
+        // Turn queries carry start_utime only, so the boundary second re-serves
+        // rows BELOW the hint's seed floor (the hinted tx's own row and earlier
+        // rows of the same second, parallel shards). They must be counted for the
+        // offset drain but never hydrated — hydrating them re-reads an EARLIER
+        // block and trips a mid-stream rewind — and the hinted tx's followers
+        // (same out_msg_tx_hash) must still flow. The rows sit AT the hint's own
+        // block time (hintFor's blockTimestamp = 100 + lt, which withSinceStart
+        // merges into startTime and floors the seed query with).
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [10_001, 11_001], [], {
+          v3: {
+            rows: [
+              { txLt: 11_001, createdLt: '11001', createdAt: '10101' },
+              { txLt: 11_001, createdLt: '11002', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10101' },
+            ],
+          },
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(10_001), page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '11002'],
+          'the hinted log stays excluded and its same-tx followers flow past the turn ' +
+            're-serving the seed second',
+        )
+      })
+
+      it('reports the block rewind with both block numbers', async () => {
+        // Same-second created_lt disorder across a page boundary (the accepted N1
+        // residual): a later-time page re-serves an EARLIER block, which the
+        // consumer reads as a mid-stream rewind. The error must name both blocks —
+        // a regression test for the diagnostic printing `undefined` after the
+        // cursor was reset before the template literal.
+        const chain = makeChain(13, [10_002, 11_001, 12_001], [], {
+          v3: {
+            rows: [
+              { txLt: 11_001, createdLt: '11001', createdAt: '10100' },
+              { txLt: 12_001, createdLt: '12001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101' },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1, page: 2 }),
+          (err: unknown) =>
+            err instanceof CCIPLogsStreamInconsistentError &&
+            /block rewind 12 -> 10/.test(err.message),
+          'the rewind diagnostic names both the current and the rewound block',
+        )
       })
 
       it("turns pages from the page's max created_at, never regressing under lt disorder", async () => {

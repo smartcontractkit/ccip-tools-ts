@@ -551,6 +551,15 @@ async function* generateV3Events(
   // index's ingested tip, so the stream ending here IS a complete prefix — no
   // end-of-stream marker is needed; `truncated` is reserved for the genuine
   // self-contradictions above.
+  // Turn queries carry start_utime only (a created_lt cursor would silently skip
+  // regressing rows), so when the stream was SEEDED by a `since` hint's index
+  // (q.startLt), the boundary second re-serves rows BELOW the seed — the hinted
+  // log's own row and earlier rows of the same second (parallel shards). Those
+  // rows are counted for the offset drain (they're part of the server-side result
+  // set) but never hydrated or emitted: hydrating them re-reads an EARLIER block
+  // and trips a mid-stream rewind. They must NOT be added to `seen` — it is keyed
+  // by tx hash, and the hinted tx's own followers share that hash and must flow.
+  const belowFloor = (msg: TonV3Message) => q.startLt != null && BigInt(msg.created_lt) < q.startLt
   let page = firstPage
   for (;;) {
     // The index sorts rows by created_at; restore lt/block order within the page.
@@ -561,6 +570,7 @@ async function* generateV3Events(
         const sec = Number(msg.created_at)
         rowsBySecond.set(sec, (rowsBySecond.get(sec) ?? 0) + 1)
       }
+      if (belowFloor(msg)) continue
       const txHash = msg.out_msg_tx_hash
       if (!txHash) {
         // An external-out row without its producing tx's hash is an index
@@ -617,8 +627,14 @@ async function* generateV3Events(
       })
     // A hash-less row always counts as fresh: it must reach the loop above, which
     // truncates on it (an index inconsistency), rather than being advanced past.
+    // Rows below the `since` seed floor never count as fresh: they are repeats of
+    // the floor-excluded prefix (see belowFloor) — accepting them as new work
+    // would loop the turn on the seed second forever.
     const fresh = (rows: TonV3Message[]) =>
-      rows.some((m) => !m.out_msg_tx_hash || !seen.has(m.out_msg_tx_hash))
+      rows.some((m) => {
+        if (belowFloor(m)) return false
+        return !m.out_msg_tx_hash || !seen.has(m.out_msg_tx_hash)
+      })
     try {
       next = await turn(turnUtime)
       if (!fresh(next) && next.length >= q.limit) {

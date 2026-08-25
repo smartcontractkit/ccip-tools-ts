@@ -277,7 +277,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       maxSize: 100,
       expires: 600e3,
     })
-    // cache account info for 30 seconds
+    // cache account info for 5 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
       maxArgs: 2,
       maxSize: 100,
