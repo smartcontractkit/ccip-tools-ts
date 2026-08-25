@@ -296,6 +296,11 @@ export function isTokenOnlyEstimate(message: {
   return dataLength === 0 && receiveGasLimit === 0n
 }
 
+function destroyOnAbort(abort: AbortSignal, provider: JsonRpcApiProvider): void {
+  const ref = new WeakRef(provider)
+  abort.addEventListener('abort', () => ref.deref()?.destroy(), { once: true })
+}
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
@@ -347,8 +352,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    const providerRef = new WeakRef(this.provider)
-    this.abort.addEventListener('abort', () => providerRef.deref()?.destroy(), { once: true })
+    destroyOnAbort(this.abort, this.provider)
 
     const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
