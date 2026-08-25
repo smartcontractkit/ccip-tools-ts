@@ -378,7 +378,7 @@ npm run lint -w ccip-api-ref
 npm run lint:fix -w ccip-api-ref
 ```
 
-Prettier formats markdown files. ESLint checks TypeScript configuration files.
+Prettier formats markdown files. Oxlint checks TypeScript configuration files.
 
 ## Deployment
 
@@ -431,17 +431,16 @@ The sidebar references docs that don't exist. Check:
 1. File has the correct `id` in frontmatter (or uses filename as id)
 1. Sidebar uses the correct path (relative to docs folder)
 
-### ESLint error on generated sidebar imports
+### Oxlint error on generated sidebar imports
 
-TypeDoc and OpenAPI generate sidebar files during build. The ESLint config ignores these import patterns. If you see errors, ensure `eslint.config.mjs` includes:
+TypeDoc and OpenAPI generate sidebar files during build. The Oxlint config ignores these import patterns. If you see errors, ensure `.oxlintrc.json` includes:
 
-```javascript
+```json
 {
-  files: ['ccip-api-ref/sidebars*.ts'],
-  rules: {
-    'import/no-unresolved': ['error', { ignore: ['typedoc-sidebar\\.cjs$', '/sidebar$'] }],
-    'import/extensions': 'off',
-    '@typescript-eslint/no-unsafe-assignment': 'off',
-  },
-},
+  "files": ["ccip-api-ref/sidebars*.ts"],
+  "rules": {
+    "import/extensions": "off",
+    "typescript/no-unsafe-assignment": "off"
+  }
+}
 ```

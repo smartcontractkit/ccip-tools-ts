@@ -9,7 +9,6 @@ import {
 import type { WithLogger } from './types.ts'
 import { sleep } from './utils.ts'
 
-/* eslint-disable jsdoc/require-jsdoc */
 /**
  * Tuning for the rate-limited fetch wrapper.
  * - `maxRetries`: attempts on transient (429/5xx) responses.
@@ -250,7 +249,7 @@ export function endpointKey(input: Parameters<typeof fetch>[0]): string {
     }
     return url.origin + url.pathname
   } catch {
-    // eslint-disable-next-line @typescript-eslint/no-base-to-string
+    // oxlint-disable-next-line typescript/no-base-to-string
     return typeof input === 'string' ? input : String(input)
   }
 }
@@ -300,8 +299,6 @@ function getLimiter(ep: EndpointState, scope: string): AdaptiveLimiter {
   }
   return lim
 }
-/* eslint-enable jsdoc/require-jsdoc */
-
 /**
  * Parses a Retry-After header value into an epoch-ms wait-until time.
  * Handles both delta-seconds (integer) and HTTP-date formats.

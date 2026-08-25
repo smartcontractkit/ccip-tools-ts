@@ -21,7 +21,7 @@ npm run check   # Lint + typecheck
 Run before submitting a PR:
 
 ```bash
-npm run lint        # Prettier + ESLint
+npm run lint        # Prettier + Oxlint
 npm run typecheck   # TypeScript validation
 npm run test:unit   # Unit tests only with coverage
 npm run test        # All tests with coverage
@@ -29,6 +29,11 @@ npm run build       # Full build
 ```
 
 CI runs: `npm ci` → `npm run check` → `npm test`
+
+TypeScript 7 provides the `tsc` compiler used by the SDK, CLI, and docs
+typechecks. The root `typescript` alias points to the official TypeScript 6
+compatibility package because TypeDoc still requires TypeScript's classic API;
+this bridge can be removed when TypeDoc supports TypeScript 7.
 
 ## Test Suite Layout
 
@@ -131,7 +136,7 @@ To add a new error type:
 1. `recovery.ts` - Add recovery hints (actionable fix suggestions)
 1. `index.ts` - Export the new class
 
-ESLint enforces `CCIPError` usage. Generic `throw new Error()` fails linting.
+Oxlint enforces `CCIPError` usage. Generic `throw new Error()` fails linting.
 
 ## Cross-Platform Portability
 
@@ -480,7 +485,7 @@ This is unconditional. No format-dependent behavior. The type system enforces it
 
 ### Output Rules
 
-1. **Never use `console.*` in command or provider code.** Use `ctx.output` for data, `ctx.logger` for diagnostics. The only exceptions are `index.ts` top-level error and debug handlers (no ctx available). ESLint `no-console` rule enforces this.
+1. **Never use `console.*` in command or provider code.** Use `ctx.output` for data, `ctx.logger` for diagnostics. The only exceptions are `index.ts` top-level error and debug handlers (no ctx available). Oxlint `no-console` rule enforces this.
 
 2. **Data output uses `ctx.output.write()`**, not `ctx.logger.info()`. This includes JSON envelopes, log-format assignments (`'result =', data`), and pretty-mode section headers (`'Lane:'`, `'Fee Tokens:'`).
 

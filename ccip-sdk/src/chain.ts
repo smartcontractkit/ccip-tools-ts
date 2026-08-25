@@ -2541,7 +2541,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
  * const normalized = EVMChain.getAddress('0xABC...')
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+// oxlint-disable-next-line typescript/no-unsafe-function-type
 export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   readonly family: F
   readonly decimals: number

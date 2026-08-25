@@ -235,7 +235,7 @@ export async function* streamTransactionsForAddress(
   opts.endBlock ??= 'latest'
 
   // Required by type; guarded at runtime for untyped (JS) callers.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // oxlint-disable-next-line typescript/no-unnecessary-condition
   if (opts.sinceLt == null) throw new CCIPLogsRequiresStartError()
   if (
     opts.watch &&

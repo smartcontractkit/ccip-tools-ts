@@ -125,7 +125,7 @@ function CLIBuilderForm({
 
     for (const opt of schema.options) {
       const group = opt.group ?? 'other'
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- groups is built dynamically
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- groups is built dynamically
       if (!groups[group]) {
         groups[group] = []
       }
@@ -138,7 +138,7 @@ function CLIBuilderForm({
   // Get ordered group names
   const groupOrder = ['message', 'gas', 'solana', 'wallet', 'output', 'rpc', 'other']
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- groupedOptions[g] may be undefined for groups with no options
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- groupedOptions[g] may be undefined for groups with no options
   const orderedGroups = groupOrder.filter((g) => groupedOptions[g]?.length > 0)
 
   return (
@@ -214,10 +214,10 @@ function CLIBuilderForm({
 /**
  * Render appropriate input for an argument
  *
- * Note: eslint disable for no-unnecessary-condition because OptionValue includes undefined,
+ * Note: Oxlint disable for no-unnecessary-condition because OptionValue includes undefined,
  * but type assertions narrow it before the nullish coalescing check.
  */
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+/* oxlint-disable typescript/no-unnecessary-condition */
 function renderArgumentInput(
   arg: ArgumentDefinition,
   values: Record<string, OptionValue>,
@@ -323,4 +323,4 @@ function renderOptionInput(
       )
   }
 }
-/* eslint-enable @typescript-eslint/no-unnecessary-condition */
+/* oxlint-enable typescript/no-unnecessary-condition */

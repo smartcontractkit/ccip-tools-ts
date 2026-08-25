@@ -923,7 +923,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     let contract
     if (type === 'PriceRegistry') {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.PriceRegistry_v1_2,
@@ -940,14 +940,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     }
     if (version < CCIPVersion.V2_0) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v2_0,

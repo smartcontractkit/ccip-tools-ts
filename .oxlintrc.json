@@ -1,0 +1,112 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "import", "jsdoc"],
+  "jsPlugins": ["./oxlint-plugin.mjs"],
+  "options": {
+    "typeAware": true
+  },
+  "ignorePatterns": [
+    "ccip-api-ref/.docusaurus/**",
+    "ccip-api-ref/build/**",
+    "ccip-api-ref/docs/api/**",
+    "ccip-api-ref/docs-api/**/*.js",
+    "ccip-api-ref/docs-api/**/*.js.map",
+    "ccip-api-ref/scripts/**"
+  ],
+  "rules": {
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/no-non-null-assertion": "off",
+    "typescript/consistent-type-imports": ["warn", { "fixStyle": "inline-type-imports" }],
+    "typescript/consistent-type-exports": [
+      "warn",
+      { "fixMixedExportsWithInlineTypeSpecifier": true }
+    ],
+    "typescript/no-import-type-side-effects": "warn",
+    "typescript/no-unnecessary-condition": "warn",
+    "typescript/require-await": "off",
+    "import/no-duplicates": ["warn", { "preferInline": true }],
+    "import/extensions": ["warn", "always", { "ignorePackages": true, "checkTypeImports": true }],
+    "jsdoc/check-tag-names": "off",
+    "jsdoc/no-blank-blocks": "error",
+    "jsdoc/require-param-name": "error",
+    "jsdoc/require-yields": "off"
+  },
+  "overrides": [
+    {
+      "files": ["ccip-sdk/src/**/*.ts"],
+      "excludeFiles": ["**/*.test.ts", "**/__tests__/**", "**/__mocks__/**"],
+      "rules": {
+        "ccip/restricted-syntax": "error",
+        "import/no-nodejs-modules": ["error", { "allow": ["buffer"] }]
+      }
+    },
+    {
+      "files": ["ccip-cli/src/**/*.ts"],
+      "excludeFiles": ["**/*.test.ts", "ccip-cli/src/index.ts"],
+      "rules": {
+        "eslint/no-console": "error"
+      }
+    },
+    {
+      "files": ["ccip-cli/src/**/*.ts"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(?!@chainlink/ccip-sdk/src/index\\.ts$).*\\/ccip-sdk\\b",
+                "message": "Import from @chainlink/ccip-sdk/src/index.ts instead of other modules."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["**/*.test.ts", "**/__tests__/**/*.ts", "**/__mocks__/**/*.ts"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-floating-promises": "off"
+      }
+    },
+    {
+      "files": ["ccip-api-ref/plugins/**/index.js"],
+      "globals": {
+        "module": "readonly",
+        "require": "readonly",
+        "__dirname": "readonly"
+      },
+      "rules": {
+        "typescript/no-require-imports": "off"
+      }
+    },
+    {
+      "files": ["ccip-api-ref/sidebars*.ts"],
+      "rules": {
+        "import/extensions": "off",
+        "typescript/no-unsafe-assignment": "off"
+      }
+    },
+    {
+      "files": ["ccip-sdk/src/**/*.ts", "ccip-cli/src/**/*.ts", "ccip-api-ref/src/**/*.ts"],
+      "excludeFiles": ["**/*.test.ts", "**/__tests__/**", "**/__mocks__/**", "**/idl/**"],
+      "rules": {
+        "jsdoc/no-blank-blocks": "error",
+        "jsdoc/require-param-name": "error"
+      }
+    }
+  ]
+}

@@ -328,7 +328,7 @@ function convertOpenApiFieldToMarkdown(el: HTMLElement): string {
 
   // Get field name from legend or first strong element
   const legend = el.querySelector('legend')
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM element may be null
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM element may be null
   const fieldName = legend?.textContent?.trim()
 
   if (fieldName) {
@@ -377,7 +377,7 @@ function extractCodeContent(el: HTMLElement): string {
  */
 function extractLanguage(el: HTMLElement): string {
   // Check class for language-* pattern
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- className may be undefined in some contexts
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- className may be undefined in some contexts
   const classMatch = el.className?.match(/language-(\w+)/)
   if (classMatch) return classMatch[1]
 
@@ -404,7 +404,7 @@ function convertTabsToMarkdown(el: HTMLElement): string {
   const selectedTab = el.querySelector(
     ':scope > [role="tab"][aria-selected="true"], [role="tab"][aria-selected="true"]',
   )
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM query may return null
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM query may return null
   const tabName = selectedTab?.textContent?.trim() || ''
 
   // Find the associated tabpanel - should be a sibling or nearby element
@@ -500,11 +500,11 @@ function convertAdmonitionToMarkdown(el: HTMLElement): string {
 
   // Get title if present
   const titleEl = el.querySelector('[class*="admonitionHeading"]')
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM query may return null
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM query may return null
   const title = titleEl?.textContent?.trim() || type
 
   // Get content (excluding title)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- Element needs HTMLElement cast for convertToMarkdown
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- Element needs HTMLElement cast for convertToMarkdown
   const contentEl = el.querySelector('[class*="admonitionContent"]') as HTMLElement | null
 
   const content = contentEl ? convertToMarkdown(contentEl) : convertToMarkdown(el)

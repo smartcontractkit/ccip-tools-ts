@@ -180,7 +180,7 @@ if (import.meta.main || wasCalledAsScript()) {
         util.inspect.defaultOptions.depth = 3
         console.debug(
           'Pending handles after main completion:',
-          (process as any)._getActiveHandles().length, // eslint-disable-line
+          (process as any)._getActiveHandles().length, // oxlint-disable-line
         )
         process.exit()
       }, 5e3).unref()

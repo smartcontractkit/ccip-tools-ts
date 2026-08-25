@@ -33,8 +33,8 @@
   "scripts": {
     "test": "node --test",
     "test:unit": "node ../scripts/run-tests.mjs src --exclude integration,e2e,fork",
-    "lint": "prettier --check ./src && eslint ./src",
-    "lint:fix": "prettier --write ./src && eslint --fix ./src",
+    "lint": "prettier --check ./src && oxlint ./src",
+    "lint:fix": "prettier --write ./src && oxlint --fix ./src",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
@@ -62,7 +62,7 @@
     "@types/node": "26.1.2",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.14",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "viem": "^2.55.11"
   },
   "dependencies": {
