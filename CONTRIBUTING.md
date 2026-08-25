@@ -709,6 +709,46 @@ Use `.check()` for custom validation with helpful error messages:
 1. Update CHANGELOG.md
 1. Keep commits focused and atomic
 
+## Signed commits
+
+Commits pushed to remote branches must be signed (the pre-push hook enforces it).
+Sign with your SSH key as usual (`git commit -S`), or re-sign existing commits
+with `git rebase --exec 'git commit --amend --no-edit -S' <base>`.
+
+The hook lives at [`scripts/git-hooks/pre-push`](scripts/git-hooks/pre-push) and
+refuses a push when any commit in `<remote-tip>..<pushed>` — or `main..<pushed>`
+for a brand-new branch — carries no valid signature (force-push rewrites are
+checked across the whole rewritten range). Install it locally with either:
+
+```bash
+# Option A — symlink into this clone's hooks dir (tracks the file, no drift;
+# the hooks dir is shared, so one symlink guards every worktree):
+ln -s ../../scripts/git-hooks/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+
+# Option B — point core.hooksPath at the tracked directory:
+git config core.hooksPath scripts/git-hooks
+```
+
+## Signed commits
+
+Commits pushed to remote branches must be signed (the pre-push hook enforces it).
+Sign with your SSH key as usual (`git commit -S`), or re-sign existing commits
+with `git rebase --exec 'git commit --amend --no-edit -S' <base>`.
+
+The hook lives at [`scripts/git-hooks/pre-push`](scripts/git-hooks/pre-push) and
+refuses a push when any commit in `<remote-tip>..<pushed>` — or `main..<pushed>`
+for a brand-new branch — carries no valid signature (force-push rewrites are
+checked across the whole rewritten range). Install it locally with either:
+
+```bash
+# Option A — symlink into this clone's hooks dir (tracks the file, no drift;
+# the hooks dir is shared, so one symlink guards every worktree):
+ln -s ../../scripts/git-hooks/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+
+# Option B — point core.hooksPath at the tracked directory:
+git config core.hooksPath scripts/git-hooks
+```
+
 ## Adding New Chain Support
 
 See **[docs/adding-new-chain.md](docs/adding-new-chain.md)** for the complete guide.
