@@ -1588,11 +1588,14 @@ describe('TON index unit tests', () => {
         )
       })
 
-      it('truncation before anything was emitted ends quietly (no watermark to protect)', async () => {
+      it('truncation before emission ends quietly for a RESUMABLE (since-hinted) poll', async () => {
         // The marker (a row without its tx hash) arrives before any block was
-        // drained: no log was emitted, so no poller watermark can have moved and
-        // nothing is lost on re-poll — staying quiet avoids turning the ordinary
-        // near-tip "nothing new" answer into a transient-error storm.
+        // drained, with nothing emitted. Silence is only legal when the caller can
+        // recover on its own: a scan carrying a `since` resume position (and no
+        // pinned endBlock) re-polls from the same hint, so the truncated tail is
+        // picked up and the ordinary near-tip "nothing new" answer never becomes
+        // a transient-error storm. One-shot readers have no next poll and always
+        // get the error (see the following tests).
         const chain = makeChain(13, [10_001, 10_002], [], {
           v3: {
             rows: [
@@ -1601,9 +1604,96 @@ describe('TON index unit tests', () => {
             ],
           },
         })
-        const logs = await collect(chain, { startTime: 1 })
-        assert.deepEqual(logs, [], 'a pre-emission truncation completes quietly')
+        const logs = await collect(chain, { since: hintFor(10_001) })
+        assert.deepEqual(
+          logs,
+          [],
+          'a pre-emission truncation completes quietly for a since-hinted scan',
+        )
         assert.equal(chain.calls.v2Walk, 0, 'stayed on the index; no v2 fallback')
+      })
+
+      it('truncation surfaces on a one-shot startTime scan that emitted nothing', async () => {
+        // getMessageById / getExecutionReceipts / ccip-cli show drive the v3 path
+        // as startTime + topics with NO since: they emit nothing until they find
+        // their log, have no next poll, and nothing to resume from — a quiet end
+        // would make "not in this window" indistinguishable from "the index bailed
+        // halfway", so the truncation must surface even with zero emissions.
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a one-shot scan with nothing to resume from never answers "empty" on a truncated stream',
+        )
+      })
+
+      it('truncation inside a PINNED window surfaces even before anything was emitted', async () => {
+        // A pinned endBlock is a DEFINITE window: its caller cannot tell a quiet
+        // early stop from "no logs in the window", and there is no next poll even
+        // with a hint. openV3EventStream declines pinned windows above the index
+        // tip; a mid-stream truncation must stay loud here.
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1, endBlock: 12 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a pinned-window scan surfaces truncation even with zero emissions',
+        )
+      })
+
+      it('drains a seed second whose below-floor prefix fills a page', async () => {
+        // The offset drain skips rowsSeenAt(second) — the rows THIS stream counted
+        // — while an un-floored page turn re-serves the below-floor rows first, so
+        // the drain under-skips by their count B. With B >= the page size the
+        // drained page is still all repeats, the turn advances the second, and the
+        // seed second's remaining above-floor rows are dropped with no warning.
+        // Carrying the CONSTANT seed floor on turns (not a moving lt cursor) keeps
+        // every query's result set identical to the seed's, so the counted rows
+        // are always a prefix of it and the drain is exact. B = 2 (rows '10000' +
+        // the hinted '10001') fills the page-2 drain over the seed second. NB the
+        // tx builder stamps its message with createdLt == tx lt, so txs 10003 /
+        // 10004 (not 10002 / 10003) carry the above-floor rows' logs.
+        const multi = tx(10_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 10_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [10_000, 10_001, 10_003, 10_004], [], {
+          v3: {
+            rows: [
+              { txLt: 10_000, createdLt: '10000', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10002', createdAt: '10101' },
+              { txLt: 10_003, createdLt: '10003', createdAt: '10101' },
+              { txLt: 10_004, createdLt: '10004', createdAt: '10101' },
+            ],
+          },
+          txOf: (lt) => (lt === 10_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(10_001), page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10002', '10003', '10004'],
+          'the seed second drains past its below-floor prefix exactly once',
+        )
       })
 
       it('keeps the since seed across page turns (boundary-second rows below the hint)', async () => {

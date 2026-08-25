@@ -336,6 +336,16 @@ export type LogFilter = {
    * hint may be ignored (the usual walk runs). At-least-once is the only guarantee
    * all families share: dedupe by `(transactionHash, index)`.
    *
+   * Cursors are FILTER-SCOPED: a hint produced by a NARROWER filter must never be
+   * replayed on a wider one. Where the cursor is a per-block prefix (EVM), the wider
+   * filter's earlier-index logs in the hinted block count as already emitted and are
+   * SKIPPED — a loss, not a duplicate. The SDK cannot validate this: the hint carries
+   * the log's own `topics`, never the breadth of the filter that produced it, so a
+   * wide sweep and a narrow one over the same block hand out a byte-identical hint
+   * while requiring opposite resume behavior (an address mismatch IS detectable and
+   * is rejected; a topic-subset resume is not). Key each cursor by the filter that
+   * produced it, and start a new filter from its own `startBlock`.
+   *
    * Per-family resume — EVM/Solana/TON: the hinted block/tx streams whole and logs
    * at/before the hinted `index` are skipped (later same-block/same-tx logs still
    * flow; TON floors its v3 `/messages` fast path at the hint's created_lt). Aptos:

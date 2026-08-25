@@ -608,14 +608,22 @@ async function* generateV3Events(
       // prefix up to the clamped cutoff.
       return
     }
-    // Page full: turn by TIME (start_utime is an inclusive floor) with NO lt
-    // floor, so rows of the boundary second keep ANY created_lt — a created_lt
-    // cursor here would silently skip rows whose lt sits below a later page's
-    // boundary. Rows of the boundary second repeat across the turn and are deduped
-    // by `seen`. Turn from the page's NEWEST second (max created_at — after the lt
-    // re-sort above, the last row needn't hold it): the time cursor then never
-    // regresses into earlier seconds, which would burn extra calls of the index's
-    // scarce keyless quota on re-covered rows (and could masquerade as overflow).
+    // Page full: turn by TIME (start_utime is an inclusive floor) with no MOVING lt
+    // cursor, so rows of the boundary second keep ANY created_lt — a per-page
+    // created_lt cursor would silently skip rows whose lt sits below a later page's
+    // boundary. The seed floor `q.startLt` is NOT such a cursor: it is the constant
+    // the FIRST page was queried with, and every row below it is dropped anyway
+    // (see belowFloor), so carrying it on every turn changes no row's fate — but it
+    // keeps each query's result set identical to the seed's, which the offset drain
+    // below depends on (it skips `rowsSeenAt`, the rows this stream COUNTED; an
+    // un-floored turn prepends the below-floor rows, so the drain would under-skip
+    // by their count and, when they fill a page, advance the second over the
+    // remaining above-floor rows, dropping them silently). Rows of the boundary
+    // second repeat across the turn and are deduped by `seen`. Turn from the page's
+    // NEWEST second (max created_at — after the lt re-sort above, the last row
+    // needn't hold it): the time cursor then never regresses into earlier seconds,
+    // which would burn extra calls of the index's scarce keyless quota on
+    // re-covered rows (and could masquerade as overflow).
     const turnUtime = Math.max(q.startUtime, ...page.map((m) => Number(m.created_at)))
     let next: TonV3Message[]
     const turn = async (startUtime: number, offset?: number): Promise<TonV3Message[]> =>
@@ -623,6 +631,7 @@ async function* generateV3Events(
         source: acct.toRawString(),
         startUtime,
         limit: q.limit,
+        ...(q.startLt != null ? { startLt: q.startLt } : {}),
         ...(offset ? { offset } : {}),
       })
     // A hash-less row always counts as fresh: it must reach the loop above, which

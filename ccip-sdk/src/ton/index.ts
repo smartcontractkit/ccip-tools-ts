@@ -733,10 +733,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * index's ingested tip (see {@link openV3EventStream}) — so a clamped scan
    * still ends as a COMPLETE prefix the poller resumes from. A block rewind or a
    * truncated tail (genuine index self-contradiction) drops the block in progress
-   * and stops: a scan that EMITTED logs surfaces that loudly
-   * (CCIPLogsStreamInconsistentError) so the poller re-polls instead of trusting
-   * a watermark — one that emitted nothing ends quietly, since no watermark can
-   * have moved and there is nothing to signal.
+   * and stops, surfacing loudly (CCIPLogsStreamInconsistentError) so the caller
+   * re-polls instead of trusting a partial scan. The one exception is the shape
+   * that can recover on its own: a scan that emitted NOTHING and carries a `since`
+   * resume position (and no pinned `endBlock`) ends quietly — its next poll
+   * re-scans from the same hint, so the tail is picked up and the ordinary
+   * near-tip "nothing new" answer never becomes a transient-error storm. One-shot
+   * readers (startTime + topics, no `since`) have no such next poll and always get
+   * the error.
    */
   private async *emitSealedV3Events(
     stream: AsyncGenerator<TonV3Event, void, undefined>,
@@ -747,16 +751,33 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     let curBlock: number | undefined
     let buf: ChainLog[] = []
     // Whether anything was actually EMITTED (survived the topic/type/version filters
-    // and the hint's per-log drop). An all-empty scan cannot advance any poller
-    // watermark, so a mid-scan inconsistency loses nothing by ending quietly; the
-    // loud truncation signal is only meaningful for scans that emitted logs, whose
-    // watermark could be trusted past the truncated tail.
+    // and the hint's per-log drop). Emitted logs make a truncation unconditionally
+    // loud: the caller's watermark would otherwise be trusted past the gap.
     let emitted = 0
+    // A PINNED endBlock makes this a DEFINITE window: its caller cannot tell a quiet
+    // early stop from "no logs in the window". openV3EventStream already DECLINES
+    // pinned windows it cannot cover to the index tip rather than clamp-truncating
+    // them; a mid-stream truncation must not reopen that hole.
+    const definiteWindow =
+      (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+      Number(opts.endBlock) > 0
     // A `since` hint's per-log index (the hinted message's created_lt): the index
     // floor at index + 1 excludes the hint's own ROW, but hydration decodes the
     // WHOLE hinted tx — drop its messages at/before the hint; same-tx followers
     // (batch execution) still flow.
     const sinceIndexLt = opts.since?.index != null ? BigInt(opts.since.index) : undefined
+    // The ONLY shape a truncation may end quietly on: a scan that emitted nothing AND
+    // carries a resume position it will re-poll from. `emitted === 0` alone is NOT
+    // that test — it was the original justification ("no watermark can have moved"),
+    // but that reasoning presumes a watermark-driven poller. The v3 path also serves
+    // ONE-SHOT readers (getExecutionReceipts, getMessageById, `ccip-cli show`) as
+    // startTime + topics scans with no `since`: they emit nothing until they find
+    // their log, have no next poll, and nothing to resume from — so a quiet end
+    // makes "not in this window" indistinguishable from "the index bailed halfway".
+    // A resume position is what makes the tail recoverable, so that is what gates
+    // the silence. (On the v3 path `sinceIndexLt != null` iff the scan is
+    // since-hinted: composite-only hints stay on the v2 walk.)
+    const resumable = sinceIndexLt != null && !definiteWindow
     // Emit the current block's buffered logs iff it is within the sealed cutoff; reset.
     const drain = async function* (chain: TONChain): AsyncIterableIterator<ChainLog> {
       const out = curBlock !== undefined && curBlock <= cutoff ? buf : []
@@ -773,14 +794,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     for await (const item of stream) {
       if (!('tx' in item)) {
         // Truncated: a mid-stream index self-contradiction (see openV3EventStream /
-        // TonV3Event) — ending silently would look like a complete scan to the
-        // watermark-driven poller, so scans that EMITTED logs surface it
-        // (CCIPLogsStreamInconsistentError) and the caller re-polls instead of
-        // trusting the watermark. Scans that emitted nothing stay quiet: no
-        // watermark moved, so the tail is re-scanned on the next poll anyway.
+        // TonV3Event) — ending silently would look like a complete scan, so the
+        // truncation surfaces unless the caller can recover on its own (emitted
+        // nothing AND holds a since resume position, no pinned endBlock — see
+        // `resumable` above).
         buf = []
         curBlock = undefined
-        if (emitted > 0)
+        if (emitted > 0 || !resumable)
           throw new CCIPLogsStreamInconsistentError(
             'TON getLogs: v3 fast path truncated (incomplete tail); re-poll to catch up',
           )
@@ -789,17 +809,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const block = item.tx.blockNumber
       if (curBlock !== undefined && block < curBlock) {
         // A block rewind is the same class of index self-contradiction: the block
-        // in progress is dropped (its seal is not attested). With logs already
-        // EMITTED it surfaces loudly — the watermark could otherwise be trusted
-        // past the rewind; before anything was emitted no watermark can have
-        // moved, so the scan ends quietly.
+        // in progress is dropped (its seal is not attested). It surfaces loudly
+        // (the watermark could be trusted past the rewind) unless the caller can
+        // recover on its own — see `resumable` above.
         const prev = curBlock
         this.logger.warn(
           `TON getLogs v3: block rewind ${prev} -> ${block} mid-stream; stopping scan`,
         )
         buf = []
         curBlock = undefined
-        if (emitted > 0)
+        if (emitted > 0 || !resumable)
           throw new CCIPLogsStreamInconsistentError(
             `TON getLogs v3: block rewind ${prev} -> ${block} mid-stream`,
           )

@@ -251,7 +251,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         await sleep(10_000)
       }
       if (truncated) {
-        t.skip('index degraded: every attempt truncated past the ingested tip')
+        t.skip('index degraded: every attempt hit a mid-stream self-contradiction')
         return
       }
       // Whatever the (usually zero) config events, every emitted log must match the

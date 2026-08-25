@@ -1459,3 +1459,103 @@ describe('getEvmLogs — since hint', () => {
     )
   })
 })
+
+describe('since — topic-scoped cursors are undetectable', () => {
+  const A = '0x' + 'ab'.repeat(32)
+  const B = '0x' + 'cd'.repeat(32)
+
+  function logAt(block: number, index: number, topic: string): Log {
+    return {
+      blockNumber: block,
+      logIndex: index,
+      index,
+      blockHash: `0x${'00'.repeat(31)}${block.toString(16).padStart(2, '0')}`,
+      transactionHash: `0x${'00'.repeat(32)}`,
+      transactionIndex: 0,
+      address: '0x0000000000000000000000000000000000000001',
+      topics: [topic],
+      data: '0x',
+      removed: false,
+    } as unknown as Log
+  }
+
+  /** Provider whose getLogs dispatches on the OR-list of topic0s the SDK sends. */
+  function makeTopicProvider(blockLogs: Record<string, Log[]>): JsonRpcApiProvider {
+    return {
+      _getConnection: () => ({ url: 'https://topic-impossible.example.com/rpc' }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 10_000
+        return { number: num, timestamp: num * 12 }
+      },
+      _getBlockTag: async (tag: string | number) => tag,
+      getLogs: async (filter: {
+        fromBlock: number
+        toBlock: number
+        topics?: (string | string[])[]
+      }) => {
+        const t0 = Array.isArray(filter.topics?.[0]) ? filter.topics[0] : []
+        return blockLogs[[...t0].sort().join(',')] ?? []
+      },
+      on: () => {},
+      off: () => {},
+      once: (_event: unknown, cb: () => void) => {
+        setTimeout(cb, 0)
+      },
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('two filter histories over the same block yield byte-identical hints with opposite resumes', async () => {
+    // S1 — previous filter [A, B] over block 100: emitted 100:0(A), 100:1(A), 100:2(B).
+    // S2 — previous filter [B] over block 100: emitted 100:2(B) only.
+    // Both hints are the last emitted log, B@2 — byte-identical. The correct resume
+    // from S1 is to skip 0, 1, 2; from S2 it is to skip 2 and DELIVER 0 and 1. No
+    // predicate over the hint can separate the two: the hint carries the log's own
+    // topics, never the breadth of the filter that produced it, so the
+    // over-exclusion of the wider filter is undetectable by construction (the SDK
+    // docs state cursors are filter-scoped for this reason).
+    const blockLogs = {
+      [`${A},${B}`]: [logAt(100, 0, A), logAt(100, 1, A), logAt(100, 2, B)],
+      [B]: [logAt(100, 2, B)],
+    }
+    const p = makeTopicProvider(blockLogs)
+    const [hintS1, hintS2] = await Promise.all([
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [[A, B]] },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      ).then((logs) => logs.at(-1)),
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [B] },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      ).then((logs) => logs.at(-1)),
+    ])
+    assert.equal(hintS1?.index, 2)
+    assert.deepEqual(hintS1, hintS2, 'the hints are byte-identical')
+    // Both histories DID emit a hint (proven above); fan out the non-null.
+    const resumableHints = [hintS1, hintS2!]
+
+    // Replaying either hint on the WIDE filter skips the whole block prefix:
+    // correct for S1, over-excluding for S2 (logs 0 and 1 were never emitted by
+    // S2). The identical hints make the difference unobservable to the SDK.
+    const resumedWide = async (since: (typeof resumableHints)[number]) =>
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [[A, B]], since },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      )
+    assert.deepEqual(
+      await resumedWide(resumableHints[0]!),
+      [],
+      'S1 resume: skip 0, 1, 2 — complete',
+    )
+    assert.deepEqual(
+      await resumedWide(resumableHints[1]!),
+      [],
+      'S2 resume: same bytes, but logs 0 and 1 were never emitted by S2 and are lost',
+    )
+  })
+})
