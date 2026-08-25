@@ -12,6 +12,7 @@ import {
 } from './extra-args.ts'
 import { streamTransactionsForAddress } from './logs.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
+import { boundTonClientCaches } from './ton-cache.ts'
 import {
   type BlockInfo,
   type ChainContext,
@@ -144,6 +145,15 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // Entries expire TX_CACHE_TTL after the last fetch so a later burst restarts from
     // a fresh head and never serves reorged-away txs.
     const TX_CACHE_TTL = 5_000
+    // Watch-mode bounds: every active poll merges freshly fetched head pages into the
+    // window and refreshes the entry's TTL, so an uncapped window would grow with an
+    // account's entire transaction history for as long as the stream lives — and a
+    // stored Transaction carries its full parsed message cells. Trimming the oldest
+    // txs (and evicting the stalest address beyond the fan-out cap) only costs the
+    // next deep-cursor request a re-fetch: the contiguity/bottom invariants make the
+    // serve-or-refetch decision, and re-fetching is always correct.
+    const TX_CACHE_MAX_TXS_PER_ADDRESS = 500
+    const TX_CACHE_MAX_ADDRESSES = 16
     const txCache = new Map<string, Transaction[]>()
     const txCacheExpiry = new Map<string, number>()
     const origGetTransactions = this.provider.getTransactions.bind(this.provider)
@@ -202,7 +212,25 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const allTxsHashes = new Set(allTxs.map((tx) => tx.hash().toString('base64')))
       allTxs.push(...txs.filter((tx) => !allTxsHashes.has(tx.hash().toString('base64'))))
       allTxs.sort((a, b) => Number(b.lt - a.lt))
+      // Bounds (see constants above): the window keeps only its newest txs, and the
+      // stalest unused address beyond the cap is evicted. Degrades gracefully: the
+      // cursor hash for a trimmed tx misses the cache and re-fetches from the RPC.
+      if (allTxs.length > TX_CACHE_MAX_TXS_PER_ADDRESS) allTxs.length = TX_CACHE_MAX_TXS_PER_ADDRESS
       txCacheExpiry.set(key, Date.now() + TX_CACHE_TTL)
+      if (txCache.size > TX_CACHE_MAX_ADDRESSES) {
+        let victim: string | undefined
+        let victimExpiry = Infinity
+        for (const [addr, expiresAt] of txCacheExpiry) {
+          if (addr !== key && expiresAt < victimExpiry) {
+            victim = addr
+            victimExpiry = expiresAt
+          }
+        }
+        if (victim !== undefined) {
+          txCache.delete(victim)
+          txCacheExpiry.delete(victim)
+        }
+      }
       return txs
     }
 
@@ -307,6 +335,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     const httpAdapter = createAxiosFetchAdapter(fetchFn, ctx?.abort)
 
     const client = new TonClient({ endpoint: url, httpAdapter })
+    // @ton/ton hardcodes a per-client unbounded InMemoryCache for its internal
+    // shard/block caches; swap it for bounded LRUs so long-lived workers with
+    // watch-mode getLogs don't accumulate seqno-keyed entries forever.
+    boundTonClientCaches(client)
     try {
       const chain =
         isMainnetHint !== undefined
