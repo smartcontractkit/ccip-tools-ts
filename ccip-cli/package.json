@@ -43,10 +43,10 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@types/node": "26.1.2",
+    "@types/node": "26.2.0",
     "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
-    "tsx": "4.23.8",
+    "tsx": "4.23.12",
     "typescript": "7.0.2"
   },
   "dependencies": {
@@ -58,7 +58,7 @@
     "@ledgerhq/hw-app-aptos": "6.37.0",
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
-    "@mysten/sui": "^2.23.1",
+    "@mysten/sui": "^2.23.2",
     "@solana/web3.js": "^1.98.4",
     "@ton-community/ton-ledger": "^7.3.0",
     "@ton/crypto": "^3.3.0",
