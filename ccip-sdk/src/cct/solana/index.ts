@@ -1069,9 +1069,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. Pass canonical
    * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
+   *
    * @see {@link setCanAcceptLiquidity}
    *
-   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCTParamsInvalidError} If `allow`, a pool parameter, or public key is invalid.
    *
    * @example
    * ```ts
@@ -1095,10 +1100,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Sets whether an initialized Solana lock-release token pool accepts `provideLiquidity` deposits
    * and `withdrawLiquidity` transfers using the pool owner wallet.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
+   *
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * @throws {@link CCTParamsInvalidError} If `allow` or a pool parameter is invalid, or the authority differs
    * from the executing wallet.
    * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
    *
