@@ -7,7 +7,7 @@ import {
   type RegisterAdminMethod,
   type TokenAuthorityType,
   DEFAULT_WRITABLE_INDEXES,
-  REGISTER_ADMIN_METHODS,
+  REGISTRATION_METHODS,
   SolanaTokenManager,
   TOKEN_AUTHORITY_TYPES,
 } from './index.ts'
@@ -87,12 +87,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
 
   it('exports public CCT constants', () => {
     const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
-    const method: RegisterAdminMethod = REGISTER_ADMIN_METHODS.OWNER
+    const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER
 
     assert.equal(authorityType, 'mint')
     assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
     assert.equal(method, 'owner')
-    assert.equal(REGISTER_ADMIN_METHODS.CCIP_ADMIN, 'ccip-admin')
+    assert.equal(REGISTRATION_METHODS.CCIP_ADMIN, 'ccip-admin')
     assert.deepEqual(DEFAULT_WRITABLE_INDEXES, [3, 4, 7])
   })
 
