@@ -21,7 +21,7 @@ npm run check   # Lint + typecheck
 Run before submitting a PR:
 
 ```bash
-npm run lint        # Prettier + Oxlint
+npm run lint        # Oxfmt + Oxlint
 npm run typecheck   # TypeScript validation
 npm run test:unit   # Unit tests only with coverage
 npm run test        # All tests with coverage

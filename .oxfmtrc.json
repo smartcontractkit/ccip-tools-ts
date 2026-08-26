@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "all",
+  "tabWidth": 2,
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 100,
+  "ignorePatterns": [
+    "ccip-api-ref/.docusaurus/**",
+    "ccip-api-ref/build/**",
+    "ccip-api-ref/docs-sdk/**",
+    "ccip-api-ref/docs-api/**",
+    "ccip-api-ref/test-results/**"
+  ],
+  "sortPackageJson": false
+}

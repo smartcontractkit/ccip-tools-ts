@@ -29,7 +29,7 @@ npm ci
 ### Quality Gates
 
 ```bash
-npm run lint        # Prettier + Oxlint
+npm run lint        # Oxfmt + Oxlint
 npm run typecheck   # TypeScript validation
 npm run test        # All tests with coverage
 npm run build       # Full build
