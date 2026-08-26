@@ -71,6 +71,28 @@ export function validateUint8(operation: string, param: string, value: unknown):
   )
 }
 
+const UINT64_MAX = BigInt(2) ** BigInt(64) - 1n
+
+/**
+ * Asserts `value` is a `bigint` in `[0, 2^64 − 1]` (a Solidity `uint64`), narrowing it to
+ * `bigint` for callers.
+ * @remarks The width of a CCIP chain selector, so this is the check every `remoteChainSelector`
+ * param goes through.
+ * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
+ */
+export function validateUint64(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is bigint {
+  if (typeof value === 'bigint' && value >= 0n && value <= UINT64_MAX) return
+  throw new CCTParamsInvalidError(
+    operation,
+    param,
+    `must be a bigint in [0, 2^64 − 1], got ${String(value)}`,
+  )
+}
+
 /** Largest value representable by a Solidity `uint256`. */
 const UINT256_MAX = BigInt(2) ** BigInt(256) - 1n
 

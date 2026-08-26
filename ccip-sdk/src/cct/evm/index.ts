@@ -49,6 +49,11 @@ import {
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
 import {
+  type GetTokenPoolRemotesParams,
+  type GetTokenPoolRemotesResult,
+  GetTokenPoolRemotes,
+} from './token-pool/operations/get-token-pool-remotes.ts'
+import {
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   GetTokenPoolState,
@@ -76,6 +81,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #transferOwnership = new TransferOwnership()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
@@ -592,6 +598,32 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
+
+  /**
+   * Reads a pool's remote-lane configuration, v1.5.0 through v2.0.0: for each configured remote
+   * chain, the `remoteToken`, the `remotePools` authorized to mint/release against it, and the
+   * inbound/outbound rate-limiter buckets. Keyed by remote network name.
+   * @remarks Omit `remoteChainSelector` to scan every lane the pool reports through
+   * `getSupportedChains()`; pass one to read a single lane. `inboundRateLimiterState` /
+   * `outboundRateLimiterState` are `null` when that direction is unlimited, and their amounts are
+   * in the *local* token's smallest unit; v2.0.0 pools add `fast*RateLimiterState` for
+   * Faster-Than-Finality and safe-finality (FCR) transfers.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address, or
+   * `remoteChainSelector` is given and is not a `uint64`
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if a lane read has no remote token
+   * configured — including a `remoteChainSelector` the pool knows nothing about
+   * @example
+   * ```typescript
+   * const remotes = await cct.getTokenPoolRemotes({ poolAddress: '0xPool...' })
+   * for (const [network, lane] of Object.entries(remotes)) {
+   *   // inboundRateLimiterState is null when inbound transfers are unlimited
+   *   console.log(network, lane.remoteToken, lane.inboundRateLimiterState?.capacity)
+   * }
+   * ```
+   */
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts)
+  }
 }
 
 export * from '../errors.ts'
@@ -623,6 +655,12 @@ export type {
   LockReleaseTokenPoolStateV2_0_0,
   TokenPoolStateV2_0_0,
 } from './token-pool/operations/get-token-pool-state.ts'
+export type {
+  GetTokenPoolRemotesParams,
+  GetTokenPoolRemotesResult,
+} from './token-pool/operations/get-token-pool-remotes.ts'
+/** The lane types `GetTokenPoolRemotesResult` is keyed over; shared with `Chain.getTokenPoolRemotes`. */
+export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export type {
