@@ -233,25 +233,80 @@ interface EndpointState {
   topicLimit?: { maxTopics: number; source: 'error' | 'success' }
 }
 
-/** Module-global registry keyed by origin + pathname (query/hash stripped). */
+/** Module-global registry keyed by {@link endpointKey} (query/hash stripped). */
 const endpointRegistry = new Map<string, EndpointState>()
 
-/** Derive a stable key from a fetch input (string | URL | Request). */
-export function endpointKey(input: Parameters<typeof fetch>[0]): string {
+/**
+ * Chain base URLs registered by the chain constructors (`registerEndpointBase`)
+ * so deep REST paths (e.g. aptos `/transactions/by_version/<ledger version>`)
+ * resolve to the same endpoint state as the chain's own URL instead of minting
+ * one state per resource identifier. Sorted by path length descending per
+ * origin for longest-prefix lookup.
+ */
+const endpointBases = new Map<string, string[]>()
+
+/** Parse a fetch input into a URL, or null when unparseable. */
+function toURL(input: Parameters<typeof fetch>[0]): URL | null {
   try {
-    let url: URL
-    if (typeof input === 'string') {
-      url = new URL(input)
-    } else if (input instanceof Request) {
-      url = new URL(input.url)
-    } else {
-      url = input
-    }
-    return url.origin + url.pathname
+    if (typeof input === 'string') return new URL(input)
+    if (input instanceof Request) return new URL(input.url)
+    return input instanceof URL ? input : new URL(String(input))
   } catch {
-    // oxlint-disable-next-line typescript/no-base-to-string
-    return typeof input === 'string' ? input : String(input)
+    return null
   }
+}
+
+/** Normalize a base URL: origin + path with trailing slashes stripped (root → origin). */
+function normalizeBase(url: URL): string {
+  const path = url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, '')
+  return url.origin + path
+}
+
+/**
+ * Register a chain endpoint's base URL. Every fetch whose URL is this origin
+ * with this path prefix resolves to the same {@link endpointKey} — the longest
+ * registered prefix wins, so per-endpoint limiters stay precise while REST
+ * resource paths under a chain share its limiter. Returns the normalized base.
+ *
+ * @param input - The chain's endpoint URL (string | URL | Request).
+ */
+export function registerEndpointBase(input: Parameters<typeof fetch>[0]): string {
+  const url = toURL(input)
+  if (!url) return typeof input === 'string' ? input : String(input)
+  const base = normalizeBase(url)
+  const list = endpointBases.get(url.origin)
+  if (list) {
+    if (!list.includes(base)) {
+      list.push(base)
+      list.sort((a, b) => b.length - a.length)
+    }
+  } else {
+    endpointBases.set(url.origin, [base])
+  }
+  return base
+}
+
+/**
+ * Derive a stable key from a fetch input (string | URL | Request).
+ *
+ * Resolves to the LONGEST registered chain base URL that prefixes the input
+ * path (boundary-aware: `/base` matches `/base/…` but not `/basex/…`); when no
+ * registered base matches, falls back to the origin alone. This keeps the
+ * endpoint-state key space bounded by the registered chain endpoints while
+ * never minting states for per-resource REST paths.
+ */
+export function endpointKey(input: Parameters<typeof fetch>[0]): string {
+  const url = toURL(input)
+  if (!url) return typeof input === 'string' ? input : String(input)
+  const bases = endpointBases.get(url.origin)
+  if (bases) {
+    const path = url.pathname.replace(/\/+$/, '') || '/'
+    for (const base of bases) {
+      const basePath = base.slice(url.origin.length) || '/'
+      if (path === basePath || path.startsWith(basePath === '/' ? '/' : basePath + '/')) return base
+    }
+  }
+  return url.origin
 }
 
 /** Key by origin only; unparseable input falls back to {@link endpointKey}. */
@@ -438,6 +493,11 @@ function extractRateHint(response: Response, method?: string): RateHint {
  * @returns Partial RateLimitOpts (optionally with a `seed`) for the host.
  */
 export function fetchProfileForUrl(url: string): Partial<RateLimitOpts> {
+  // Every chain endpoint flows through here: register it as an endpoint base
+  // so deep REST paths under it (e.g. aptos `/transactions/by_version/<ledger
+  // version>`) resolve to the chain's own endpoint state instead of minting
+  // one per resource identifier. No-op for unparseable URLs.
+  registerEndpointBase(url)
   try {
     const { hostname } = new URL(url)
     // TON public gateways genuinely cap at ~1 req/sec and 429 constantly from a
