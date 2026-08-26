@@ -47,6 +47,14 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
+        env:
+          # setup-node v7 no longer exports a placeholder NODE_AUTH_TOKEN when none is
+          # set (v6 did), while the registry npmrc it writes still references
+          # ${NODE_AUTH_TOKEN} — yarn (postman-code-generators deepinstall) then dies on
+          # the unresolved placeholder during npm ci. Restore v6 behavior: the real
+          # token when a secret exists, else the same dummy placeholder the last
+          # successful release (2026-08-19) ran with.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || 'XXXXX-XXXXX-XXXXX-XXXXX' }}
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
@@ -67,6 +75,14 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
+        env:
+          # setup-node v7 no longer exports a placeholder NODE_AUTH_TOKEN when none is
+          # set (v6 did), while the registry npmrc it writes still references
+          # ${NODE_AUTH_TOKEN} — yarn (postman-code-generators deepinstall) then dies on
+          # the unresolved placeholder during npm ci. Restore v6 behavior: the real
+          # token when a secret exists, else the same dummy placeholder the last
+          # successful release (2026-08-19) ran with.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || 'XXXXX-XXXXX-XXXXX-XXXXX' }}
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
