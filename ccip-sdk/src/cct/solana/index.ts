@@ -1076,6 +1076,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress`; `authority` defaults to `payer`.
    *
    * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetRebalancer}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
    *
@@ -1102,6 +1103,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * owner wallet.
    *
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   * @see {@link setRebalancer}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
@@ -1132,7 +1134,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `payer`. The default/zero public key (`11111111111111111111111111111111`) disables
    * rebalancing.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
    * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
    *
@@ -1160,7 +1170,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * or a compatible `poolProgramAddress`; set `rebalancer` to the default/zero public key
    * (`11111111111111111111111111111111`) to disable rebalancing.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
    * @see {@link generateUnsignedSetRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
@@ -1174,6 +1192,17 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
    *   rebalancer,
+   *   wallet,
+   * })
+   * ```
+   *
+   * @example Disable rebalancing
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setRebalancer({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   rebalancer: PublicKey.default.toBase58(), // disable
    *   wallet,
    * })
    * ```

@@ -26,7 +26,7 @@ import {
 type SetRebalancerParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Address authorized to provide or withdraw pool liquidity. Use the default/zero address (`11111111111111111111111111111111`) to disable rebalancing. */
+  /** Address authorized to provide or withdraw pool liquidity (stored on the pool; not a transaction signer). Use the default/zero address (`11111111111111111111111111111111`) to disable rebalancing. */
   rebalancer: string
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
@@ -62,11 +62,13 @@ export class SetRebalancer extends SolanaOperation<
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
   protected override parse(params: GenerateSetRebalancerParams): ParsedSetRebalancerParams {
+    const poolProgram = resolveLockReleasePoolProgram(this.name, params)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
+
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       rebalancer: parsePublicKey(this.name, 'rebalancer', params.rebalancer),
-      poolProgram: resolveLockReleasePoolProgram(this.name, params),
+      poolProgram,
       payer,
       authority:
         params.authority === undefined
