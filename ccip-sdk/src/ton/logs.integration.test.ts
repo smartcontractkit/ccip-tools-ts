@@ -95,6 +95,10 @@ function spyFetch() {
      * v3 meta oracle replaces on deep walks (a few per scan are unrelated: floor
      * resolution, the endBlock cap). */
     v2SeqnoLookups: 0,
+    /** HTTP 429 responses observed on any fetch: the public index's shared-egress
+     * storm signature. The suite-start probe can miss bursty storms that never touch
+     * masterchainInfo, so retry loops key off these and failure messages carry them. */
+    rateLimited: 0,
   }
   const orig = globalThis.fetch
   globalThis.fetch = async (
@@ -135,7 +139,9 @@ function spyFetch() {
         }
       }
     }
-    return orig(input, init)
+    const res = await orig(input, init)
+    if (res.status === 429) calls.rateLimited++
+    return res
   }
   return { calls, restore: () => (globalThis.fetch = orig) }
 }
@@ -174,6 +180,20 @@ async function v3IndexHealthy(base: string, v2Tip?: number): Promise<boolean> {
   return false
 }
 
+/** Live scans retry until an attempt's shapes hold (each test's clean condition):
+ * the shared public index 429-storms shared-egress networks in minute-scale
+ * bursts, and the index can lag the v2 tip in the same window — both transient.
+ * Spacing grows so a storm is ridden out without hammering the index further,
+ * while a dead index (every attempt yields nothing) still skips in bounded time. */
+const RETRY_SPACING_MS = [10_000, 20_000, 40_000]
+/** Maximum scan attempts per live test; the shapes are asserted on the last one. */
+const MAX_SCAN_ATTEMPTS = RETRY_SPACING_MS.length + 1
+
+/** Growing spacing between scan attempts (caps at the last entry). */
+function retrySpacingMs(attempt: number): number {
+  return RETRY_SPACING_MS[Math.min(attempt, RETRY_SPACING_MS.length - 1)] ?? 30_000
+}
+
 describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   let chain: TONChain
   let indexHealthy = true
@@ -186,19 +206,24 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     // the keyless public index, and the index itself can lag hours behind the tip)
     // instead of flapping; the mocked unit suite covers the logic hermetically, and
     // these run fully on healthy networks.
-    let v2Tip: number | undefined
-    try {
-      v2Tip = (await chain.getBlockInfo('latest')).number
-    } catch {
-      // v2 endpoint unreachable too — the probe falls back to reachability-only
-    }
-    indexHealthy = await v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
+    indexHealthy = await probeIndexHealth()
     if (!indexHealthy)
       console.warn(
         'skipping live TON getLogs scans: v3 index unreachable, rate-limited, or lagging',
       )
   })
   after(() => chain.destroy())
+
+  /** Probe the v3 index against the v2 tip: the before hook's suite gate. */
+  async function probeIndexHealth(): Promise<boolean> {
+    let v2Tip: number | undefined
+    try {
+      v2Tip = (await chain.getBlockInfo('latest')).number
+    } catch {
+      // v2 endpoint unreachable too — the probe falls back to reachability-only
+    }
+    return v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
+  }
 
   /** Skip the test when the live index probe failed (see before hook). */
   function guard(t: { skip: (msg?: string) => void }): boolean {
@@ -221,9 +246,13 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // so count it across attempts (the messages page is re-queried every attempt).
       let v3tipCalls = 0
       // A degraded/lagging public index legitimately falls back to the v2 walk (the
-      // probe is fail-fast by design); retry once before failing the fast-path shape.
-      let truncated = false
-      for (let attempt = 0; attempt < 2; attempt++) {
+      // probe is fail-fast by design). The storm or lag is transient: retry with
+      // growing spacing until a clean fast-path attempt completes, then assert on
+      // it. Only a mid-stream index self-contradiction (data inconsistency, not
+      // transport) on the last attempt skips.
+      let lastTruncated = false
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
+        lastTruncated = false
         const spy = spyFetch()
         const t0 = Date.now()
         try {
@@ -240,21 +269,18 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           // its producing tx's hash) truncates loudly once logs were emitted:
           // transient, by design — retryable, not a shape failure.
           if (!(err instanceof CCIPLogsStreamInconsistentError)) throw err
-          truncated = true
+          lastTruncated = true
         } finally {
           spy.restore()
         }
         calls = spy.calls
         v3tipCalls += calls.v3tip
         elapsed = Date.now() - t0
-        if ((!truncated && calls.walkPages === 0) || attempt === 1) break
-        // Give the public index's shared keyless quota a beat to refill: back-to-back
-        // attempts can land in the same 429 window (bursts from shared CI egress IPs
-        // are outside this process's pacing). The poller spaces its retries too.
-        await sleep(10_000)
+        if (!lastTruncated && calls.walkPages === 0) break
+        await sleep(retrySpacingMs(attempt))
       }
-      if (truncated) {
-        t.skip('index degraded: every attempt hit a mid-stream self-contradiction')
+      if (lastTruncated) {
+        t.skip('index degraded: no clean attempt, the last scan self-contradicted mid-stream')
         return
       }
       // Whatever the (usually zero) config events, every emitted log must match the
@@ -268,7 +294,11 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       }
       assert.ok(calls.v3messages >= 1, 'v3 messages index queried')
       assert.ok(v3tipCalls >= 1, 'v3 index tip consulted (lag guard)')
-      assert.equal(calls.walkPages, 0, 'no v2 tx-chain pagination on the fast path')
+      assert.equal(
+        calls.walkPages,
+        0,
+        `no v2 tx-chain pagination on the fast path${calls.rateLimited ? ` (rate-limited ${calls.rateLimited}×)` : ''}`,
+      )
       // Pathology guard on the final attempt's wall time (a fallback retry can
       // legitimately double the total): this scan took ~80s of 429-retry hell before
       // the fast-path transport fixes (paced, fail-fast, tip-cached).
@@ -279,21 +309,24 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   it(
     'startTime-only 24h scan with a matching topic: v3 seed + v2 hydration yields real logs',
     {
-      timeout: 420_000,
+      timeout: 600_000,
     },
     async (t) => {
       if (guard(t)) return
-      const t0 = Date.now()
       let firstYieldMs: number | undefined
       const logs: ChainLog[] = []
       let calls!: ReturnType<typeof spyFetch>['calls']
       // A scan may legitimately truncate early on index inconsistency (the block in
       // progress is dropped — the same contract as a chain gap on the v2 walk), fail
-      // its probe on a transient 429, or fall back to v2 when the index degrades. A
-      // clean attempt yields logs without touching v2 pagination; retry with spacing
-      // (the quota refills; the poller spaces its retries the same way).
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // its probe on a transient 429, or fall back to v2 when the index degrades.
+      // A clean attempt yields logs WITHOUT touching v2 pagination; stormed or
+      // lagging attempts finish on the v2 walk with the wrong shapes, so retry with
+      // growing spacing until the fast path is back, then assert on the clean
+      // attempt (the quota refills; the poller spaces its retries the same way).
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         const spy = spyFetch()
+        const attemptT0 = Date.now()
+        firstYieldMs = undefined
         try {
           logs.length = 0
           let taken = 0
@@ -302,7 +335,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             topics: ['CCIPMessageSent'],
             startTime: Math.floor(Date.now() / 1e3) - DAY_S,
           })) {
-            firstYieldMs ??= Date.now() - t0
+            firstYieldMs ??= Date.now() - attemptT0
             logs.push(log)
             if (++taken >= 3) break // stream shape proven; the 24h tail lives in the repro
           }
@@ -314,13 +347,13 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.restore()
         }
         calls = spy.calls
-        if ((logs.length >= 1 && calls.walkPages === 0) || attempt === 2) break
-        await sleep(10_000)
+        if (logs.length >= 1 && calls.walkPages === 0) break
+        await sleep(retrySpacingMs(attempt))
       }
       if (logs.length === 0) {
-        // All attempts truncated before the first sealed block: a degraded index is an
-        // environment condition, not a regression — the wire assertions below only have
-        // meaning once a scan actually yields.
+        // Every attempt truncated before the first sealed block: a degraded index is
+        // an environment condition, not a regression — the wire assertions below only
+        // have meaning once a scan actually yields.
         t.skip('index degraded: every attempt truncated before the first sealed block')
         return
       }
@@ -335,7 +368,11 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'blocks non-decreasing',
       )
       assert.ok(calls.v3messages >= 1, 'v3 messages index seeded the scan')
-      assert.equal(calls.walkPages, 0, 'no v2 tx-chain pagination on the fast path')
+      assert.equal(
+        calls.walkPages,
+        0,
+        `no v2 tx-chain pagination on the fast path${calls.rateLimited ? ` (rate-limited ${calls.rateLimited}×)` : ''}`,
+      )
       // The sparse index finds the events; only the raw event txs are hydrated over v2.
       // First yield is seconds even on the paced public index (repro: ~5s direct RPC).
       assert.ok(
@@ -348,20 +385,22 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   it(
     'startBlock a day old: bounded index-driven walk streams matches progressively',
     {
-      timeout: 420_000,
+      timeout: 600_000,
     },
     async (t) => {
       if (guard(t)) return
       const startBlock = await chain.getMCSeqNoByUnixtime(Math.floor(Date.now() / 1e3) - DAY_S)
-      // Up to two scans: the oracle dies on a transient public-index 429 (fail-fast →
-      // per-tx fallback — the designed degradation), so a first scan can legitimately
-      // show no index meta. Two consecutive oracle-less deep scans mean it's broken.
+      // The seqno oracle dies on a transient public-index 429 (fail-fast → per-tx
+      // fallback — the designed degradation), so a first scan can legitimately show
+      // no index meta. Retry with growing spacing until the oracle engages, or until
+      // attempts run out and the pre-existing degraded-index skip applies.
       let logs: ChainLog[] = []
       let calls!: ReturnType<typeof spyFetch>['calls']
       let firstYieldMs: number | undefined
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         const spy = spyFetch()
         const t0 = Date.now()
+        firstYieldMs = undefined
         try {
           logs = []
           // 25 matching logs ≈ 57 txs walked here — past the 16-tx threshold, so the v3
@@ -380,10 +419,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.restore()
         }
         calls = spy.calls
-        if (calls.v3transactions >= 1 || attempt === 1) break // oracle engaged (or last try)
-        // Same 429-refill spacing as the fast-path scans: the /transactions meta oracle
-        // shares the public index's keyless quota with the other CI shares of the egress.
-        await sleep(10_000)
+        if (calls.v3transactions >= 1) break // oracle engaged
+        await sleep(retrySpacingMs(attempt))
       }
       if (calls.v3transactions === 0) {
         // The index never answered across attempts; the logs arrived via the legacy
@@ -435,20 +472,18 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   it(
     'since cursor a day old, composite-only hint: resumes on the v2 walk, tx-exclusive',
     {
-      timeout: 420_000,
+      timeout: 600_000,
     },
     async (t) => {
       if (guard(t)) return
-      const spy = spyFetch()
+      // A hint WITHOUT its per-log index has no message-granular cursor: it stays
+      // on the v2 walk (composite lt, tx-exclusive `to_lt`).
+      const hint = { ...OLD_LOG, index: undefined }
       let logs: ChainLog[] = []
-      try {
-        // A hint WITHOUT its per-log index has no message-granular cursor: it stays
-        // on the v2 walk (composite lt, tx-exclusive `to_lt`).
-        const hint = { ...OLD_LOG, index: undefined }
-        // Same retry-with-spacing as the other live scans: under a degraded index a
-        // scan may legitimately truncate before the first sealed block.
-        for (let attempt = 0; attempt < 3 && logs.length === 0; attempt++) {
-          if (attempt > 0) await sleep(10_000)
+      let spy!: ReturnType<typeof spyFetch>
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
+        spy = spyFetch()
+        try {
           logs = []
           for await (const log of chain.getLogs({
             address: ADDR,
@@ -458,60 +493,70 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
             logs.push(log)
             if (logs.length >= 3) break
           }
+        } finally {
+          spy.restore()
         }
-        if (logs.length === 0) {
-          t.skip('index degraded: every attempt truncated before the first sealed block')
-          return
-        }
-        const first = logs[0]!
-        assert.notEqual(
-          first.transactionHash,
-          hint.transactionHash,
-          'the hinted tx is not re-streamed (tx-exclusive floor)',
+        // Clean attempt: the meta seed either never engaged (legacy v2-only walk,
+        // per-tx lookups bounded) or fully covered the window (no per-tx seqno
+        // resolution, and seed pages proportionate to the walk's own depth — each
+        // ≤100 txs, so they grow with the window's organic traffic, not a fixed
+        // count). A 429'd/truncated seed walks the rest on per-tx seqno resolution
+        // (correct, just slower) — transient, retry with spacing.
+        const { v3transactions, v2SeqnoLookups, walkPages } = spy.calls
+        if (
+          logs.length >= 1 &&
+          ((v3transactions === 0 && v2SeqnoLookups < 200) ||
+            (v3transactions > 0 &&
+              v2SeqnoLookups <= 8 &&
+              v3transactions <= Math.max(3, walkPages + 1)))
         )
-        assert.ok(
-          Number(first.blockNumber) > hint.blockNumber ||
-            (Number(first.blockNumber) === hint.blockNumber && first.index > OLD_LOG.index),
-          'resumes strictly past the cursor',
-        )
-        assert.equal(
-          spy.calls.v3messages,
-          0,
-          'a hint without an index keeps the scan on the v2 walk',
-        )
-        // The walk seeds the ordered lt list from the index: one paged meta call for
-        // a shallow scan — never the event index, never per-tx seqno lookups. When
-        // the public index degrades mid-scan the walk falls back to per-tx seqno
-        // resolution (correct, just slower) — don't fail the call shape for that.
-        if (spy.calls.v3transactions > 0) {
-          assert.ok(
-            spy.calls.v3transactions <= 3,
-            `lt list seeded in pages (saw ${spy.calls.v3transactions})`,
-          )
-          assert.ok(
-            spy.calls.v2SeqnoLookups <= 8,
-            `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups})`,
-          )
-        } else {
-          assert.ok(
-            spy.calls.v2SeqnoLookups < 200,
-            `legacy per-tx resolution under a degraded index (saw ${spy.calls.v2SeqnoLookups})`,
-          )
-        }
-        assert.ok(
-          spy.calls.walkToLts.includes('91384259000015'),
-          `walk paged with to_lt at the hinted tx lt (exclusive); saw: ${spy.calls.walkToLts.slice(0, 3).join(',')}`,
-        )
-      } finally {
-        spy.restore()
+          break
+        await sleep(retrySpacingMs(attempt))
       }
+      if (logs.length === 0) {
+        t.skip('index degraded: every attempt truncated before the first sealed block')
+        return
+      }
+      const first = logs[0]!
+      assert.notEqual(
+        first.transactionHash,
+        hint.transactionHash,
+        'the hinted tx is not re-streamed (tx-exclusive floor)',
+      )
+      assert.ok(
+        Number(first.blockNumber) > hint.blockNumber ||
+          (Number(first.blockNumber) === hint.blockNumber && first.index > OLD_LOG.index),
+        'resumes strictly past the cursor',
+      )
+      assert.equal(spy.calls.v3messages, 0, 'a hint without an index keeps the scan on the v2 walk')
+      // The walk seeds the ordered lt list from the index: one paged meta call for
+      // a shallow scan — never the event index, never per-tx seqno lookups.
+      if (spy.calls.v3transactions > 0) {
+        assert.ok(
+          spy.calls.v3transactions <= Math.max(3, spy.calls.walkPages + 1),
+          `lt list seeded in pages proportionate to the walk (saw ${spy.calls.v3transactions} seed pages for ${spy.calls.walkPages} walk pages)`,
+        )
+        assert.ok(
+          spy.calls.v2SeqnoLookups <= 8,
+          `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups}${spy.calls.rateLimited ? `, rate-limited ${spy.calls.rateLimited}×` : ''})`,
+        )
+      } else {
+        assert.ok(
+          spy.calls.v2SeqnoLookups < 200,
+          `legacy per-tx resolution under a degraded index (saw ${spy.calls.v2SeqnoLookups})`,
+        )
+      }
+      assert.ok(
+        spy.calls.walkToLts.includes('91384259000015'),
+        `walk paged with to_lt at the hinted tx lt (exclusive); saw: ${spy.calls.walkToLts.slice(0, 3).join(',')}`,
+      )
     },
   )
 
   it(
     'since cursor a day old, with per-log index: hint scan on the v3 /messages fast path',
     {
-      timeout: 420_000,
+      timeout: 600_000,
     },
     async (t) => {
       if (guard(t)) return
@@ -519,11 +564,12 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // floors at index + 1 (`start_lt` is inclusive), so same-tx/same-block logs
       // still flow and the hinted log is never re-fetched — no v2 walk at all.
       // A degraded/lagging public index legitimately falls back to the v2 walk
-      // (the probe is fail-fast by design); retry once before failing the
-      // fast-path shape, mirroring the startTime-only fast-path test.
+      // (the probe is fail-fast by design); stormed or lagging attempts finish on
+      // the v2 walk with the wrong shapes, so retry with growing spacing until the
+      // fast path is back, then assert on the clean attempt.
       let logs: ChainLog[] = []
       let spy!: ReturnType<typeof spyFetch>
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         spy = spyFetch()
         try {
           logs = []
@@ -542,12 +588,12 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         } finally {
           spy.restore()
         }
-        if (logs.length === 0) {
-          t.skip('index degraded: every attempt truncated before the first sealed block')
-          return
-        }
-        if (spy.calls.walkPages === 0 || attempt === 1) break
-        await sleep(10_000)
+        if (logs.length >= 1 && spy.calls.walkPages === 0) break
+        await sleep(retrySpacingMs(attempt))
+      }
+      if (logs.length === 0) {
+        t.skip('index degraded: every attempt truncated before the first sealed block')
+        return
       }
       const first = logs[0]!
       assert.ok(
@@ -556,7 +602,11 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'resumes strictly past the cursor',
       )
       assert.ok(spy.calls.v3messages >= 1, 'the /messages fast path served the hint scan')
-      assert.equal(spy.calls.walkPages, 0, 'no v2 tx-chain pagination on the fast path')
+      assert.equal(
+        spy.calls.walkPages,
+        0,
+        `no v2 tx-chain pagination on the fast path${spy.calls.rateLimited ? ` (rate-limited ${spy.calls.rateLimited}×)` : ''}`,
+      )
       assert.equal(spy.calls.v2SeqnoLookups, 0, 'no per-tx seqno resolution (index stamps them)')
       assert.ok(spy.calls.v2Hydrate > 0, 'event txs hydrated from v2 by (lt, hash)')
     },
@@ -565,39 +615,48 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   it(
     'quiet address: the v3 seed answers "no events in 24h" in one index call',
     {
-      timeout: 120_000,
+      timeout: 600_000,
     },
     async (t) => {
       if (guard(t)) return
-      const spy = spyFetch()
-      const t0 = Date.now()
-      try {
-        const logs: ChainLog[] = []
-        for await (const log of chain.getLogs({
-          address: QUIET_ADDR,
-          topics: CONFIG_TOPICS,
-          startTime: Math.floor(Date.now() / 1e3) - DAY_S,
-        })) {
-          logs.push(log)
+      let logs: ChainLog[] = []
+      let calls!: ReturnType<typeof spyFetch>['calls']
+      let elapsedMs = 0
+      for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
+        const spy = spyFetch()
+        const t0 = Date.now()
+        try {
+          logs = []
+          for await (const log of chain.getLogs({
+            address: QUIET_ADDR,
+            topics: CONFIG_TOPICS,
+            startTime: Math.floor(Date.now() / 1e3) - DAY_S,
+          })) {
+            logs.push(log)
+          }
+        } finally {
+          spy.restore()
         }
-        // A degraded/lagging index falls back to the v2 walk — the fast-path shape this
-        // test asserts never ran, so skip rather than fail on the probe's health.
-        if (spy.calls.walkPages > 0) {
-          t.skip('v3 probe fell back to the v2 walk (index degraded)')
-          return
-        }
-        assert.equal(logs.length, 0, 'dormant address emits nothing')
-        assert.ok(
-          spy.calls.v3messages <= 3,
-          `one strictly-filtered /messages query, plus at most paced 429 retries on the public index (saw ${spy.calls.v3messages})`,
-        )
-        assert.equal(spy.calls.walkPages, 0, 'never walks the v2 tx chain')
-        // The pre-fast-path behavior here was a full tx-history walk per poll; now it's
-        // one index call and done (~2s on a direct RPC, paced on the public one).
-        assert.ok(Date.now() - t0 < 60_000, 'quiet scans are cheap')
-      } finally {
-        spy.restore()
+        calls = spy.calls
+        elapsedMs = Date.now() - t0
+        // A degraded/lagging index falls back to the v2 walk — the fast-path shape
+        // this test asserts never ran on that attempt; retry with spacing.
+        if (calls.walkPages === 0) break
+        await sleep(retrySpacingMs(attempt))
       }
+      if (calls.walkPages > 0) {
+        t.skip('v3 probe fell back to the v2 walk (index degraded)')
+        return
+      }
+      assert.equal(logs.length, 0, 'dormant address emits nothing')
+      assert.ok(
+        calls.v3messages <= 3,
+        `one strictly-filtered /messages query, plus at most paced 429 retries on the public index (saw ${calls.v3messages})`,
+      )
+      assert.equal(calls.walkPages, 0, 'never walks the v2 tx chain')
+      // The pre-fast-path behavior here was a full tx-history walk per poll; now it's
+      // one index call and done (~2s on a direct RPC, paced on the public one).
+      assert.ok(elapsedMs < 60_000, 'quiet scans are cheap')
     },
   )
 })
