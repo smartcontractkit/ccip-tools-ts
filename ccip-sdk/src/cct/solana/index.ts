@@ -1164,6 +1164,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    *
    * @example Prepare and generate liquidity instructions
@@ -1212,6 +1213,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * the authority differs from the executing wallet.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
    * signer, the pool rejects the rebalancer, liquidity is disabled, the token account lacks funds,
