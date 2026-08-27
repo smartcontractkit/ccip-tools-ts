@@ -27,7 +27,7 @@ import {
 type SetCanAcceptLiquidityParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
-  /** Whether the pool accepts liquidity. */
+  /** Whether to enable liquidity provision and withdrawal. */
   allow: boolean
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
