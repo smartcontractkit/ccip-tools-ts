@@ -3070,6 +3070,37 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Read the CCV policy the destination enforces for an already-encoded message.
+   *
+   * Calls `OffRamp.getCCVsForMessage(bytes)` with the message exactly as it was emitted, so the
+   * token transfer, extraArgs and finality it carries are the ones the policy is computed from.
+   * Reconstructing the message instead can drop the token transfer and yield the lane default.
+   *
+   * @param opts.offRamp - Destination OffRamp address
+   * @param opts.encodedMessage - The encoded message, as emitted on the source chain
+   * @returns The required and optional CCVs, and the optional threshold
+   */
+  override async getCCVsForEncodedMessage(opts: {
+    offRamp: string
+    encodedMessage: BytesLike
+  }): Promise<{
+    requiredCCVs: readonly string[]
+    optionalCCVs: readonly string[]
+    optionalThreshold: number
+  }> {
+    const contract = new Contract(
+      opts.offRamp,
+      interfaces.OffRamp_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
+    const ccvs = await contract.getCCVsForMessage(hexlify(getDataBytes(opts.encodedMessage)))
+    const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
+      resultToObject,
+    ) as unknown as CleanAddressable<typeof ccvs>
+    return { requiredCCVs, optionalCCVs, optionalThreshold: Number(optionalThreshold) }
+  }
+
+  /**
    * Resolve the CCVs the destination OffRamp will require for a candidate message, and whether its
    * finality is accepted, via the on-chain `getCCVsForMessage(bytes)` view (a read; no send). Builds the
    * MessageV1 candidate with {@link encodeMessageV1}; a rejected finality throws

@@ -2529,6 +2529,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string
     message: GetRequiredCCVsMessage
   }): Promise<GetRequiredCCVsResult>
+
+  /**
+   * Read the CCV policy the destination enforces for an already-encoded message.
+   *
+   * @param opts.offRamp - Destination OffRamp address
+   * @param opts.encodedMessage - The encoded message, as emitted on the source chain
+   * @returns The required and optional CCVs, and the optional threshold
+   */
+  getCCVsForEncodedMessage?(opts: { offRamp: string; encodedMessage: BytesLike }): Promise<{
+    requiredCCVs: readonly string[]
+    optionalCCVs: readonly string[]
+    optionalThreshold: number
+  }>
 }
 
 /**

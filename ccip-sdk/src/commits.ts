@@ -3,10 +3,12 @@ import type { PickDeep } from 'type-fest'
 import type { CCIPAPIClient } from './api/index.ts'
 import type { Chain, ChainStatic, LogFilter } from './chain.ts'
 import {
+  CCIPArgumentInvalidError,
   CCIPCommitNotFoundError,
   CCIPHttpError,
   CCIPMessageNotVerifiedYetError,
 } from './errors/index.ts'
+import { fetchWithTimeout } from './fetch.ts'
 import { NetworkType } from './networks.ts'
 import {
   type CCIPRequest,
@@ -54,6 +56,46 @@ export type FetchVerificationsOpts = {
   watch?: AbortSignal
   /** Milliseconds between poll retries when `watch` is set (default: 5000). */
   pollInterval?: number
+  /** Custom fetch used for indexer requests; defaults to `globalThis.fetch`. */
+  fetch?: typeof globalThis.fetch
+  /** Per-request timeout in milliseconds for indexer requests (default: 30000). */
+  timeoutMs?: number
+}
+
+/**
+ * Validate that every indexer entry is a base URL string.
+ *
+ * yargs applies boolean negation regardless of the declared option type, so `--no-indexer` on the
+ * CLI's array-typed `--indexer` yields `[false]`. Rejecting it here keeps a non-string out of
+ * `baseUrl.replace` below, where it would escape as a raw `TypeError` rather than a `CCIPError` and
+ * render as a stack trace.
+ *
+ * @param indexer - Candidate indexer base URLs, unvalidated
+ * @throws {@link CCIPArgumentInvalidError} if it is not an array, or any entry is not a string
+ */
+function assertIndexerUrls(indexer: unknown): asserts indexer is readonly string[] {
+  // A bare string is iterable of strings, so a `for..of` type check alone would accept it and then
+  // fail later on `.map`. Require an actual array first.
+  if (!Array.isArray(indexer)) {
+    throw new CCIPArgumentInvalidError(
+      'indexer',
+      `expected an array of base URLs, got ${typeof indexer}`,
+      {
+        context: { indexer },
+      },
+    )
+  }
+  for (const url of indexer) {
+    if (typeof url !== 'string') {
+      throw new CCIPArgumentInvalidError(
+        'indexer',
+        `expected base URL strings, got ${typeof url}`,
+        {
+          context: { indexer },
+        },
+      )
+    }
+  }
 }
 
 /**
@@ -68,8 +110,9 @@ export type FetchVerificationsOpts = {
  *
  * @param messageId - The CCIP message ID (hex string)
  * @param opts - See {@link FetchVerificationsOpts}
- * @returns CCIPVerifications with verificationPolicy and verifier results
+ * @returns The verifier results served by the first source to respond successfully
  * @throws {@link CCIPMessageNotVerifiedYetError} if all sources fail or signal fires
+ * @throws {@link CCIPArgumentInvalidError} if `opts.indexer` contains a non-string entry
  */
 export async function fetchVerifications(
   messageId: string,
@@ -78,10 +121,14 @@ export async function fetchVerifications(
     apiClient,
     watch,
     pollInterval = 5_000,
+    fetch: fetchFn,
+    timeoutMs,
   }: FetchVerificationsOpts = {},
 ): Promise<VerifierResult[]> {
   if (indexer === NetworkType.Mainnet) indexer = MAINNET_INDEXER_URLS
   else if (indexer === NetworkType.Testnet) indexer = TESTNET_INDEXER_URLS
+
+  assertIndexerUrls(indexer)
 
   // Polling loop: retry on CCIPMessageNotVerifiedYetError only when watch is supplied.
   let lastErr
@@ -91,7 +138,11 @@ export async function fetchVerifications(
         ...(apiClient != null ? [apiClient.getVerifications(messageId, { signal: watch })] : []),
         ...indexer.map(async (baseUrl) => {
           const url = `${baseUrl.replace(/\/+$/, '')}/v1/verifierresults/${messageId}`
-          const res = await fetch(url, { signal: watch })
+          const res = await fetchWithTimeout(url, 'fetchVerifications', {
+            signal: watch,
+            fetch: fetchFn,
+            timeoutMs,
+          })
           if (!res.ok) throw new CCIPHttpError(res.status, res.statusText, { context: { url } })
           const json = (await res.json()) as IndexerResponse
           if (!json.success) throw new CCIPMessageNotVerifiedYetError(messageId)

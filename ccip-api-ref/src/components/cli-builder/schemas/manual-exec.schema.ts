@@ -25,6 +25,35 @@ export const manualExecSchema: CommandSchema<'manual-exec'> = {
   ],
 
   options: [
+    // Verification Sources
+    {
+      type: 'array',
+      name: 'verifier',
+      alias: 'verifier-endpoint',
+      label: 'Verifier Endpoints',
+      description:
+        'Fetch CCV attestations from a verifier when the CCIP API and indexer cannot cover the ' +
+        'required CCV set. Format: [<ccv-address>=]<scheme>://<host>[:port]. Schemes: grpc:// ' +
+        '(aggregator over TLS), grpc+plaintext:// (no TLS). Repeat the same address to give it ' +
+        'failover endpoints, tried in order. Use different addresses for different CCVs, or omit ' +
+        'the address to apply one endpoint to every required CCV.',
+      group: 'verification',
+      itemType: 'string',
+      placeholder: '0x345AEDB0...=grpc://aggregator.example:443',
+    },
+    {
+      type: 'array',
+      name: 'ccv-data',
+      label: 'Supplied CCV Attestations',
+      description:
+        'Supply a CCV attestation directly as <ccv-address>=<0x-hex>. The bottom of the source ' +
+        'ladder: use it when the CCIP API, the indexer and the verifier endpoint are all ' +
+        'unavailable, or to execute bytes obtained out of band. The CCV verifyMessage decides ' +
+        'validity onchain, so wrong bytes can only waste gas.',
+      group: 'verification',
+      itemType: 'string',
+      placeholder: '0x345AEDB0...=0x00010001...',
+    },
     // Message Selection
     {
       type: 'number',
