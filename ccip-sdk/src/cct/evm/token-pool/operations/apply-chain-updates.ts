@@ -30,6 +30,7 @@ import {
   TokenPoolVersion,
   assertPoolOwner,
   getTokenPoolInterface,
+  resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
 
@@ -429,6 +430,12 @@ export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
 type ParsedApplyChainUpdatesParams =
   ParsedApplyChainUpdatesParamsV1_5_0 | ParsedApplyChainUpdatesParamsV1_5_1
 
+/** Encodes parsed params into `applyChainUpdates` calldata, widened over the parsed union. */
+type Encoder = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx
+
+/** One {@link ApplyChainUpdates.encoders} entry: the shape it accepts, and the encoder for it. */
+type EncoderEntry = { shape: ApplyChainUpdatesParamVersion; encode: Encoder }
+
 /**
  * Configures, enables and disables a token pool's remote lanes via `applyChainUpdates`.
  *
@@ -441,6 +448,15 @@ export class ApplyChainUpdates extends EVMOperation<
   ParsedApplyChainUpdatesParams
 > {
   readonly name = 'applyChainUpdates'
+
+  /**
+   * Encoder per pool version, floor-matched; v1.6.1 and v2.0.0 inherit v1.5.1's. The cast holds
+   * only while {@link buildUnsigned} checks `shape` against `params.version` before encoding.
+   */
+  private readonly encoders = {
+    [TokenPoolVersion.V1_5_0]: { shape: TokenPoolVersion.V1_5_0, encode: encodeV1_5_0 },
+    [TokenPoolVersion.V1_5_1]: { shape: TokenPoolVersion.V1_5_1, encode: encodeV1_5_1 },
+  } as Partial<Record<TokenPoolVersion, EncoderEntry>>
 
   /**
    * Validates the pool address and every lane entry before any RPC, *keeping* what each check
@@ -510,15 +526,20 @@ export class ApplyChainUpdates extends EVMOperation<
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
 
+    const { shape, encode } = resolveEncoder(this.encoders, version, this.name)
+    if (params.version !== shape)
+      throw new CCTParamsInvalidError(
+        this.name,
+        'version',
+        `must be '${shape}' for this pool, which reports v${version} — the two signatures have different selectors, so the declared shape would not exist on-chain`,
+      )
+
     this.assertRateBounds(params, version)
 
     if (params.sender !== undefined)
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
 
-    const iface = getTokenPoolInterface(type, version)
-    return params.version === TokenPoolVersion.V1_5_0
-      ? encodeV1_5_0(iface, params)
-      : encodeV1_5_1(iface, params)
+    return encode(getTokenPoolInterface(type, version), params)
   }
 
   /**
