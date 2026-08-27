@@ -1,10 +1,9 @@
-import { createApproveInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token'
+import { createApproveInstruction } from '@solana/spl-token'
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveTokenProgram } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -16,6 +15,7 @@ import { submit } from '../../submit.ts'
 import {
   U64_MAX,
   parsePublicKey,
+  resolveExistingTokenAccount,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
@@ -23,14 +23,13 @@ import {
 type ApproveTokenParams = {
   /** SPL token mint address. */
   tokenAddress: string
-  /** Token account to approve from. Defaults to the authority's associated token account. */
+  /** Token account to approve from. Defaults to the authority's existing associated token account. */
   tokenAccount?: string
-  /** Delegate address authorized to transfer tokens. */
+  /** Trusted delegate address authorized to transfer tokens. Re-approval replaces the current delegate. */
   delegate: string
   /**
-   * Allowance in base units (not human-readable tokens).
-   * E.g., 1_000_000n with 6 decimals = 1 token.
-   * Maximum u64: 2^64 - 1.
+   * Allowance in base units (not human-readable tokens). Re-approval replaces the current allowance;
+   * use `0n` to clear it. E.g., 1_000_000n with 6 decimals = 1 token. Maximum u64: 2^64 - 1.
    */
   amount: bigint
   /** Token account owner. Defaults to `payer` for single-signer transactions. */
@@ -70,7 +69,7 @@ export class ApproveToken extends SolanaOperation<
 
   /** Parses public keys, allowance, and optional SPL Token multisig signers. */
   protected override parse(params: GenerateApproveTokenParams): ParsedApproveTokenParams {
-    validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
+    validateBigInt(this.name, 'amount', params.amount, 0n, U64_MAX)
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')
     }
@@ -99,10 +98,12 @@ export class ApproveToken extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedApproveTokenParams,
   ): Promise<UnsignedSolanaTx> {
-    const tokenProgram = await resolveTokenProgram(chain.connection, opts.tokenAddress)
-    const tokenAccount =
-      opts.tokenAccount ??
-      getAssociatedTokenAddressSync(opts.tokenAddress, opts.authority, true, tokenProgram)
+    const { tokenAccount, tokenProgram } = await resolveExistingTokenAccount(
+      chain.connection,
+      opts.tokenAddress,
+      opts.authority,
+      opts.tokenAccount,
+    )
 
     const instructions: TransactionInstruction[] = [
       createApproveInstruction(

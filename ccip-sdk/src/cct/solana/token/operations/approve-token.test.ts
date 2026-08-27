@@ -8,7 +8,11 @@ import {
 } from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
-import { CCIPTokenMintInvalidError, CCIPTokenMintNotFoundError } from '../../../../errors/index.ts'
+import {
+  CCIPTokenAccountNotFoundError,
+  CCIPTokenMintInvalidError,
+  CCIPTokenMintNotFoundError,
+} from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
@@ -25,10 +29,18 @@ const MULTISIG_SIGNER = Keypair.generate().publicKey.toBase58()
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = { publicKey: Keypair.generate().publicKey, signTransaction: async <T>(tx: T) => tx }
 
-function chain(mintOwner: PublicKey | null = TOKEN_PROGRAM_ID): SolanaChain {
+function chain(
+  mintOwner: PublicKey | null = TOKEN_PROGRAM_ID,
+  tokenAccountExists = true,
+): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: { getAccountInfo: async () => (mintOwner ? { owner: mintOwner } : null) },
+    connection: {
+      getAccountInfo: async (address: PublicKey) => {
+        if (!mintOwner || address.equals(TOKEN)) return mintOwner ? { owner: mintOwner } : null
+        return tokenAccountExists ? { owner: mintOwner, data: Buffer.alloc(165) } : null
+      },
+    },
   } as unknown as SolanaChain
 }
 
@@ -36,7 +48,7 @@ function submitChain(): SolanaChain {
   return {
     ...chain(),
     connection: {
-      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(165) }),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -122,10 +134,13 @@ describe('ApproveToken (cct/solana)', () => {
       )
     })
 
-    it('defaults authority to payer and supports the maximum u64 allowance', async () => {
-      const unsigned = await generate({ authority: undefined, amount: U64_MAX })
-      assert.equal(unsigned.instructions[0]!.keys[2]!.pubkey.toBase58(), PAYER)
-      assert.equal(unsigned.instructions[0]!.data.readBigUInt64LE(1), U64_MAX)
+    it('defaults authority to payer and supports zero through maximum u64 allowances', async () => {
+      const zero = await generate({ amount: 0n })
+      const maximum = await generate({ authority: undefined, amount: U64_MAX })
+
+      assert.equal(zero.instructions[0]!.data.readBigUInt64LE(1), 0n)
+      assert.equal(maximum.instructions[0]!.keys[2]!.pubkey.toBase58(), PAYER)
+      assert.equal(maximum.instructions[0]!.data.readBigUInt64LE(1), U64_MAX)
     })
   })
 
@@ -136,7 +151,6 @@ describe('ApproveToken (cct/solana)', () => {
         [{ tokenAccount: 'invalid' }, 'tokenAccount'],
         [{ delegate: 'invalid' }, 'delegate'],
         [{ authority: 'invalid' }, 'authority'],
-        [{ amount: 0n }, 'amount'],
         [{ amount: 1 }, 'amount'],
         [{ amount: U64_MAX + 1n }, 'amount'],
         [{ multisigSigners: 'invalid' }, 'multisigSigners'],
@@ -147,6 +161,21 @@ describe('ApproveToken (cct/solana)', () => {
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
+    })
+
+    it('rejects a missing token account before submission', async () => {
+      await assert.rejects(
+        () =>
+          SolanaTokenManager.fromChain(chain(TOKEN_PROGRAM_ID, false)).generateUnsignedApproveToken(
+            {
+              payer: PAYER,
+              tokenAddress: TOKEN.toBase58(),
+              delegate: DELEGATE,
+              amount: 1n,
+            },
+          ),
+        (err: unknown) => err instanceof CCIPTokenAccountNotFoundError,
+      )
     })
 
     it('rejects missing and non-token mints', async () => {

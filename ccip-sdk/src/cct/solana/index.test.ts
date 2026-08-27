@@ -3,7 +3,14 @@ import { describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
 
-import { type TokenAuthorityType, SolanaTokenManager, TOKEN_AUTHORITY_TYPES } from './index.ts'
+import {
+  type RegisterAdminMethod,
+  type TokenAuthorityType,
+  DEFAULT_WRITABLE_INDEXES,
+  REGISTRATION_METHODS,
+  SolanaTokenManager,
+  TOKEN_AUTHORITY_TYPES,
+} from './index.ts'
 import type {
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
@@ -86,11 +93,15 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.getTokenPoolState, 'function')
   })
 
-  it('exports public token authority constants', () => {
+  it('exports public CCT constants', () => {
     const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
+    const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER
 
     assert.equal(authorityType, 'mint')
     assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
+    assert.equal(method, 'owner')
+    assert.equal(REGISTRATION_METHODS.CCIP_ADMIN, 'ccip-admin')
+    assert.deepEqual(DEFAULT_WRITABLE_INDEXES, [3, 4, 7])
   })
 
   it('creates from a connection provider', async (t) => {

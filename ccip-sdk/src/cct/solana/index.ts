@@ -292,12 +292,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link approveToken} For wallet-based execution.
    *
    * @remarks
-   * `amount` is in base units. `tokenAccount` defaults to the authority's associated token account,
-   * which must already exist. Approval replaces that account's current delegate and allowance.
-   * For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
    * externally.
    *
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -325,14 +328,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedApproveToken} For externally signed transactions.
    *
    * @remarks
-   * `amount` is in base units. `tokenAccount` defaults to the wallet's associated token account,
-   * which must already exist. Approval replaces that account's current delegate and allowance.
-   * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
-   * {@link generateUnsignedApproveToken}.
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. SPL Token multisig authorities require `multisigSigners`.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid, or
    * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
@@ -1227,12 +1232,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets whether an initialized Solana lock-release token pool
-   * accepts liquidity. Pass canonical `poolType: 'lock-release'` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. Pass canonical
+   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
    *
    * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetRebalancer}
    *
-   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCTParamsInvalidError} If `allow`, a pool parameter, or public key is invalid.
    *
    * @example
    * ```ts
@@ -1253,13 +1264,19 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Sets whether an initialized Solana lock-release token pool accepts liquidity using the pool
-   * owner wallet.
+   * Sets whether an initialized Solana lock-release token pool accepts `provideLiquidity` deposits
+   * and `withdrawLiquidity` transfers using the pool owner wallet.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
    *
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   * @see {@link setRebalancer}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * @throws {@link CCTParamsInvalidError} If `allow` or a pool parameter is invalid, or the authority differs
    * from the executing wallet.
    * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
    *
@@ -1287,7 +1304,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `payer`. The default/zero public key (`11111111111111111111111111111111`) disables
    * rebalancing.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
    * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
    *
@@ -1315,7 +1340,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * or a compatible `poolProgramAddress`; set `rebalancer` to the default/zero public key
    * (`11111111111111111111111111111111`) to disable rebalancing.
    *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
    * @see {@link generateUnsignedSetRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
@@ -1329,6 +1362,17 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
    *   rebalancer,
+   *   wallet,
+   * })
+   * ```
+   *
+   * @example Disable rebalancing
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setRebalancer({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   rebalancer: PublicKey.default.toBase58(), // disable
    *   wallet,
    * })
    * ```
@@ -2104,7 +2148,8 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
-export { TOKEN_AUTHORITY_TYPES } from './token/operations/set-token-authority.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/constants.ts'
+export { DEFAULT_WRITABLE_INDEXES, REGISTRATION_METHODS } from './token-admin-registry/constants.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
