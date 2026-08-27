@@ -38,7 +38,6 @@ function createUncircularReplacer() {
         (item) =>
           typeof item !== 'object' ||
           item === null ||
-          // oxlint-disable-next-line typescript/no-unsafe-argument
           (item !== replaced && !ancestorStack.includes(originals.get(item) ?? item)),
       )
       if (filtered.length !== replaced.length) {

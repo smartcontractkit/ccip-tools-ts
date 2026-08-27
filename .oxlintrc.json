@@ -3,7 +3,9 @@
   "plugins": ["eslint", "typescript", "import", "jsdoc"],
   "jsPlugins": ["./oxlint-plugin.mjs"],
   "options": {
-    "typeAware": true
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "deny",
+    "denyWarnings": true
   },
   "ignorePatterns": [
     "ccip-api-ref/.docusaurus/**",

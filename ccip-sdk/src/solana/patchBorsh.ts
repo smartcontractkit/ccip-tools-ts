@@ -55,7 +55,7 @@ export function patchBorsh() {
       this: BorshInstructionCoder,
       nameSpace: string,
       ixName: string,
-      ix: any, // oxlint-disable-line typescript/no-explicit-any
+      ix: any,
     ): Buffer {
       const methodName = snakeToCamel(ixName)
       const layout = (this as unknown as { ixLayout: Map<string, Layout_> }).ixLayout.get(
