@@ -3,7 +3,14 @@ import { describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
 
-import { type TokenAuthorityType, SolanaTokenManager, TOKEN_AUTHORITY_TYPES } from './index.ts'
+import {
+  type RegisterAdminMethod,
+  type TokenAuthorityType,
+  DEFAULT_WRITABLE_INDEXES,
+  REGISTRATION_METHODS,
+  SolanaTokenManager,
+  TOKEN_AUTHORITY_TYPES,
+} from './index.ts'
 import type {
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
@@ -26,6 +33,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     // Token operations
     assert.equal(typeof cct.generateUnsignedDeployToken, 'function')
     assert.equal(typeof cct.deployToken, 'function')
+    assert.equal(typeof cct.generateUnsignedApproveToken, 'function')
+    assert.equal(typeof cct.approveToken, 'function')
     assert.equal(typeof cct.generateUnsignedCreateTokenAccount, 'function')
     assert.equal(typeof cct.createTokenAccount, 'function')
     assert.equal(typeof cct.generateUnsignedMintTokens, 'function')
@@ -62,10 +71,14 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.deployTokenPool, 'function')
     assert.equal(typeof cct.generateUnsignedDeleteChainRemoteConfig, 'function')
     assert.equal(typeof cct.deleteChainRemoteConfig, 'function')
+    assert.equal(typeof cct.generateUnsignedSetCanAcceptLiquidity, 'function')
+    assert.equal(typeof cct.setCanAcceptLiquidity, 'function')
     assert.equal(typeof cct.generateUnsignedSetChainRateLimit, 'function')
     assert.equal(typeof cct.setChainRateLimit, 'function')
     assert.equal(typeof cct.generateUnsignedSetRateLimitAdmin, 'function')
     assert.equal(typeof cct.setRateLimitAdmin, 'function')
+    assert.equal(typeof cct.generateUnsignedSetRebalancer, 'function')
+    assert.equal(typeof cct.setRebalancer, 'function')
     assert.equal(typeof cct.generateUnsignedTransferOwnership, 'function')
     assert.equal(typeof cct.transferOwnership, 'function')
     assert.equal(typeof cct.generateUnsignedAcceptOwnership, 'function')
@@ -78,11 +91,15 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.getTokenPoolState, 'function')
   })
 
-  it('exports public token authority constants', () => {
+  it('exports public CCT constants', () => {
     const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
+    const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER
 
     assert.equal(authorityType, 'mint')
     assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
+    assert.equal(method, 'owner')
+    assert.equal(REGISTRATION_METHODS.CCIP_ADMIN, 'ccip-admin')
+    assert.deepEqual(DEFAULT_WRITABLE_INDEXES, [3, 4, 7])
   })
 
   it('creates from a connection provider', async (t) => {

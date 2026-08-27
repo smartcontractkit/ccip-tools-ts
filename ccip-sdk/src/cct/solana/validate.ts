@@ -1,9 +1,11 @@
 import { Buffer } from 'buffer'
 
-import { PublicKey } from '@solana/web3.js'
+import { TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
+import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { CCIPAddressInvalidError } from '../../errors/index.ts'
+import { CCIPAddressInvalidError, CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
+import { resolveATA } from '../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
 import {
   type PoolProgramRef,
@@ -135,6 +137,22 @@ export function resolvePoolProgram(operation: string, params: PoolProgramRef): P
   return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
 }
 
+/** Resolves a lock-release token pool program and rejects the canonical burn-mint program. */
+export function resolveLockReleasePoolProgram(
+  operation: string,
+  params: PoolProgramRef,
+): PublicKey {
+  const poolProgram = resolvePoolProgram(operation, params)
+  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) {
+    throw new CCTParamsInvalidError(
+      operation,
+      params.poolProgramAddress === undefined ? 'poolType' : 'poolProgramAddress',
+      'must be lock-release',
+    )
+  }
+  return poolProgram
+}
+
 /**
  * Asserts `value` is an integer, optionally inside inclusive bounds.
  * @throws CCTParamsInvalidError if `value` is not an integer or is outside bounds.
@@ -245,4 +263,29 @@ export function parseNonEmptyHexBytes(
   const bytes = parseHexBytes(operation, param, value, maxBytes)
   if (!bytes.length) throw new CCTParamsInvalidError(operation, param, 'must not be empty')
   return bytes
+}
+
+/**
+ * Resolves an existing token account, defaulting to the holder's associated token account.
+ * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+ */
+export async function resolveExistingTokenAccount(
+  connection: Connection,
+  tokenAddress: PublicKey,
+  holder: PublicKey,
+  tokenAccount?: PublicKey,
+): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey }> {
+  const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
+  const account = tokenAccount ?? ata
+
+  try {
+    await getAccount(connection, account, undefined, tokenProgram)
+  } catch (error) {
+    if (error instanceof TokenAccountNotFoundError) {
+      throw new CCIPTokenAccountNotFoundError(tokenAddress.toBase58(), holder.toBase58())
+    }
+    throw error
+  }
+
+  return { tokenAccount: account, tokenProgram }
 }
