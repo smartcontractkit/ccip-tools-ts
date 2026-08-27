@@ -1,11 +1,10 @@
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import type { PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveATA } from '../../../../solana/utils.ts'
+import { CCTTxFailedError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -23,9 +22,11 @@ import { submit } from '../../submit.ts'
 import {
   U64_MAX,
   parsePublicKey,
+  resolveExistingTokenAccount,
   resolveLockReleasePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
+  validatePoolLiquidityConfig,
 } from '../../validate.ts'
 
 type PoolProgramRef = LockReleasePoolProgramRef | CustomPoolProgramRef
@@ -91,18 +92,35 @@ export class WithdrawLiquidity extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedWithdrawLiquidityParams,
   ): Promise<UnsignedSolanaTx> {
-    const { ata: remoteTokenAccount, tokenProgram } = await resolveATA(
+    // The caller must be the configured rebalancer and the pool must accept withdrawals.
+    await validatePoolLiquidityConfig(
+      this.name,
+      chain,
+      opts.poolProgram,
+      opts.tokenAddress,
+      opts.authority,
+    )
+
+    // The rebalancer's destination ATA must exist.
+    const { tokenAccount: remoteTokenAccount, tokenProgram } = await resolveExistingTokenAccount(
       chain.connection,
       opts.tokenAddress,
       opts.authority,
     )
     const poolSigner = deriveTokenPoolSignerPda(opts.poolProgram, opts.tokenAddress)
-    const poolTokenAccount = getAssociatedTokenAddressSync(
-      opts.tokenAddress,
-      poolSigner,
-      true,
-      tokenProgram,
-    )
+
+    // The pool vault ATA must have been created during pool initialization and hold the withdrawal.
+    const { tokenAccount: poolTokenAccount, account: poolTokenAccountInfo } =
+      await resolveExistingTokenAccount(chain.connection, opts.tokenAddress, poolSigner)
+
+    // Avoid an opaque SPL Token insufficient-funds failure.
+    if (poolTokenAccountInfo.amount < opts.amount) {
+      throw new CCTTxFailedError(
+        this.name,
+        `pool token account ${poolTokenAccount.toBase58()} has ${poolTokenAccountInfo.amount}, but ${opts.amount} is required`,
+      )
+    }
+
     const instruction = await createLockReleaseTokenPoolProgram(chain, opts.poolProgram, opts.payer)
       .methods.withdrawLiquidity(new BN(opts.amount.toString()))
       .accountsStrict({
