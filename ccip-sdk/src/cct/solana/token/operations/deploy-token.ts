@@ -21,6 +21,7 @@ import {
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
 import { validateOptionalPublicKey, validatePublicKey } from '../../validate.ts'
+import { METADATA_PROGRAM_ID } from '../constants.ts'
 
 type BaseDeployTokenParams = {
   /** Mint decimals. Must be an integer between 0 and 255. */
@@ -75,8 +76,6 @@ export type ExecuteDeployTokenResult = TransactionResult & {
   tokenAddress: string
   metadataAddress?: string
 }
-
-const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 
 function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length

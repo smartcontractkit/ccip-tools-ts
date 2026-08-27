@@ -23,6 +23,8 @@ import {
   type ExecuteMintTokensResult,
   type ExecuteSetTokenAuthorityParams,
   type ExecuteSetTokenAuthorityResult,
+  type ExecuteUpdateMetadataAuthorityParams,
+  type ExecuteUpdateMetadataAuthorityResult,
   type GenerateApproveTokenParams,
   type GenerateApproveTokenResult,
   type GenerateCreateTokenAccountParams,
@@ -33,10 +35,13 @@ import {
   type GenerateMintTokensResult,
   type GenerateSetTokenAuthorityParams,
   type GenerateSetTokenAuthorityResult,
+  type GenerateUpdateMetadataAuthorityParams,
+  type GenerateUpdateMetadataAuthorityResult,
   ApproveToken,
   CreateTokenAccount,
   MintTokens,
   SetTokenAuthority,
+  UpdateMetadataAuthority,
 } from './token/operations/index.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -182,6 +187,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createTokenAccount = new CreateTokenAccount()
   readonly #mintTokens = new MintTokens()
   readonly #setTokenAuthority = new SetTokenAuthority()
+  readonly #updateMetadataAuthority = new UpdateMetadataAuthority()
 
   // Token admin registry operations
   readonly #acceptAdmin = new AcceptAdmin()
@@ -557,6 +563,64 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setTokenAuthority(opts: ExecuteSetTokenAuthorityParams): Promise<ExecuteSetTokenAuthorityResult> {
     return this.#setTokenAuthority.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to transfer a token's Metaplex metadata update authority.
+   *
+   * @see {@link updateMetadataAuthority} For wallet-based execution.
+   *
+   * @remarks
+   * The mint must have mutable Metaplex Token Metadata and `authority` must match its current
+   * update authority. `authority` defaults to `payer`; both the payer and authority must sign if
+   * they differ.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the current authority does
+   * not match the metadata.
+   * @throws {@link CCTTxFailedError} If the metadata is immutable.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedUpdateMetadataAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedUpdateMetadataAuthority(
+    opts: GenerateUpdateMetadataAuthorityParams,
+  ): Promise<GenerateUpdateMetadataAuthorityResult> {
+    return this.#updateMetadataAuthority.generate(this.chain, opts)
+  }
+
+  /**
+   * Transfers a token's Metaplex metadata update authority using the executing wallet.
+   *
+   * @see {@link generateUnsignedUpdateMetadataAuthority} For externally signed transactions.
+   *
+   * @remarks
+   * The mint must have mutable Metaplex Token Metadata and the executing wallet must be its
+   * current update authority. Use {@link generateUnsignedUpdateMetadataAuthority} when payer and
+   * authority differ or external signatures are required.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the metadata or executing wallet.
+   * @throws {@link CCTTxFailedError} If the metadata is immutable, simulation fails, or the Metaplex
+   * program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.updateMetadataAuthority({ wallet, tokenAddress: mint, newAuthority })
+   * ```
+   */
+  updateMetadataAuthority(
+    opts: ExecuteUpdateMetadataAuthorityParams,
+  ): Promise<ExecuteUpdateMetadataAuthorityResult> {
+    return this.#updateMetadataAuthority.execute(this.chain, opts)
   }
 
   /**

@@ -41,6 +41,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     assert.equal(typeof cct.mintTokens, 'function')
     assert.equal(typeof cct.generateUnsignedSetTokenAuthority, 'function')
     assert.equal(typeof cct.setTokenAuthority, 'function')
+    assert.equal(typeof cct.generateUnsignedUpdateMetadataAuthority, 'function')
+    assert.equal(typeof cct.updateMetadataAuthority, 'function')
 
     // Token admin registry operations
     assert.equal(typeof cct.generateUnsignedAcceptAdmin, 'function')
