@@ -3,14 +3,21 @@ import { Buffer } from 'buffer'
 import { type Account, TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
 import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { CCIPAddressInvalidError, CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
+import {
+  CCIPAddressInvalidError,
+  CCIPTokenAccountNotFoundError,
+  CCIPTokenPoolStateNotFoundError,
+} from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
   TOKEN_POOL_PROGRAMS,
+  decodeTokenPoolState,
+  deriveTokenPoolConfigPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
 
@@ -295,6 +302,40 @@ export function validateDelegation(
       },
     },
   )
+}
+
+/**
+ * Verifies that a rebalancer may move liquidity for a lock-release pool.
+ * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+ * @throws {@link CCTTxFailedError} If the authority is not the rebalancer or liquidity is disabled.
+ */
+export async function validatePoolLiquidityConfig(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  mint: PublicKey,
+  authority: PublicKey,
+): Promise<void> {
+  const state = deriveTokenPoolConfigPda(poolProgram, mint)
+  const account = await chain.connection.getAccountInfo(state)
+  if (!account) throw new CCIPTokenPoolStateNotFoundError(state.toBase58())
+
+  const { config } = decodeTokenPoolState(account.data, {
+    tokenPool: state.toBase58(),
+    mint: mint.toBase58(),
+    poolProgram: poolProgram.toBase58(),
+    accountOwner: account.owner.toBase58(),
+  })
+  if (!config.rebalancer.equals(authority))
+    throw new CCTTxFailedError(
+      operation,
+      `pool rebalancer is ${config.rebalancer.toBase58()}, not ${authority.toBase58()}; set it with setRebalancer first`,
+    )
+  if (!config.canAcceptLiquidity)
+    throw new CCTTxFailedError(
+      operation,
+      'pool does not accept liquidity; enable it with setCanAcceptLiquidity(true) first',
+    )
 }
 
 /**

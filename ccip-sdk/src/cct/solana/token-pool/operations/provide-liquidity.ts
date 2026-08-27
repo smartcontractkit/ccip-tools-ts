@@ -1,7 +1,6 @@
 import type { PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
-import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
@@ -16,7 +15,6 @@ import {
   type CustomPoolProgramRef,
   type LockReleasePoolProgramRef,
   createLockReleaseTokenPoolProgram,
-  decodeTokenPoolState,
   deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
 } from '../../programs/token-pool.ts'
@@ -29,6 +27,7 @@ import {
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
+  validatePoolLiquidityConfig,
 } from '../../validate.ts'
 
 type PoolProgramRef = LockReleasePoolProgramRef | CustomPoolProgramRef
@@ -48,34 +47,6 @@ type ParsedProvideLiquidityParams = {
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
-}
-
-async function validatePoolLiquidityConfig(
-  chain: SolanaChain,
-  poolProgram: PublicKey,
-  mint: PublicKey,
-  authority: PublicKey,
-): Promise<void> {
-  const state = deriveTokenPoolConfigPda(poolProgram, mint)
-  const account = await chain.connection.getAccountInfo(state)
-  if (!account) throw new CCIPTokenPoolStateNotFoundError(state.toBase58())
-
-  const { config } = decodeTokenPoolState(account.data, {
-    tokenPool: state.toBase58(),
-    mint: mint.toBase58(),
-    poolProgram: poolProgram.toBase58(),
-    accountOwner: account.owner.toBase58(),
-  })
-  if (!config.rebalancer.equals(authority))
-    throw new CCTTxFailedError(
-      'provideLiquidity',
-      `pool rebalancer is ${config.rebalancer.toBase58()}, not ${authority.toBase58()}; set it with setRebalancer first`,
-    )
-  if (!config.canAcceptLiquidity)
-    throw new CCTTxFailedError(
-      'provideLiquidity',
-      'pool does not accept liquidity; enable it with setCanAcceptLiquidity(true) first',
-    )
 }
 
 /** Parameters for unsigned Solana lock-release pool liquidity provision. */
@@ -123,7 +94,13 @@ export class ProvideLiquidity extends SolanaOperation<
     opts: ParsedProvideLiquidityParams,
   ): Promise<UnsignedSolanaTx> {
     // The caller must be the configured rebalancer and the pool must accept deposits.
-    await validatePoolLiquidityConfig(chain, opts.poolProgram, opts.tokenAddress, opts.authority)
+    await validatePoolLiquidityConfig(
+      this.name,
+      chain,
+      opts.poolProgram,
+      opts.tokenAddress,
+      opts.authority,
+    )
 
     // The rebalancer's source ATA must exist.
     const {
