@@ -135,6 +135,22 @@ export function resolvePoolProgram(operation: string, params: PoolProgramRef): P
   return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
 }
 
+/** Resolves a lock-release token pool program and rejects the canonical burn-mint program. */
+export function resolveLockReleasePoolProgram(
+  operation: string,
+  params: PoolProgramRef,
+): PublicKey {
+  const poolProgram = resolvePoolProgram(operation, params)
+  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) {
+    throw new CCTParamsInvalidError(
+      operation,
+      params.poolProgramAddress === undefined ? 'poolType' : 'poolProgramAddress',
+      'must be lock-release',
+    )
+  }
+  return poolProgram
+}
+
 /**
  * Asserts `value` is an integer, optionally inside inclusive bounds.
  * @throws CCTParamsInvalidError if `value` is not an integer or is outside bounds.

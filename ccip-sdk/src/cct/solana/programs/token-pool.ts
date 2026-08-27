@@ -6,6 +6,7 @@ import { PublicKey } from '@solana/web3.js'
 import { CCIPError } from '../../../errors/index.ts'
 import {
   type TokenPoolConfig,
+  LOCK_RELEASE_TOKEN_POOL_IDL,
   TOKEN_POOL_IDL,
   tokenPoolCoder,
 } from '../../../solana/idl/token-pool-coder.ts'
@@ -64,13 +65,22 @@ export function resolveTokenPoolProgram(poolType: TokenPoolType): PublicKey {
   return new PublicKey(TOKEN_POOL_PROGRAMS[poolType])
 }
 
-/** Creates an Anchor Program client for a token pool program. */
+/** Creates an Anchor Program client for a burn-mint token pool program. */
 export function createTokenPoolProgram(
   chain: SolanaChain,
   poolProgram: PublicKey,
   payer: PublicKey,
 ) {
   return new Program(TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
+}
+
+/** Creates an Anchor Program client for a lock-release token pool program. */
+export function createLockReleaseTokenPoolProgram(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  payer: PublicKey,
+) {
+  return new Program(LOCK_RELEASE_TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
 }
 
 /** Decodes a canonical token pool state account. */
