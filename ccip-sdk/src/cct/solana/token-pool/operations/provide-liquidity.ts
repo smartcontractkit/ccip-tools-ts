@@ -1,11 +1,11 @@
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import type { PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
+import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveATA } from '../../../../solana/utils.ts'
+import { CCTTxFailedError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -16,6 +16,7 @@ import {
   type CustomPoolProgramRef,
   type LockReleasePoolProgramRef,
   createLockReleaseTokenPoolProgram,
+  decodeTokenPoolState,
   deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
 } from '../../programs/token-pool.ts'
@@ -23,9 +24,11 @@ import { submit } from '../../submit.ts'
 import {
   U64_MAX,
   parsePublicKey,
+  resolveExistingTokenAccount,
   resolveLockReleasePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
+  validateDelegation,
 } from '../../validate.ts'
 
 type PoolProgramRef = LockReleasePoolProgramRef | CustomPoolProgramRef
@@ -45,6 +48,34 @@ type ParsedProvideLiquidityParams = {
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
+}
+
+async function validatePoolLiquidityConfig(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  mint: PublicKey,
+  authority: PublicKey,
+): Promise<void> {
+  const state = deriveTokenPoolConfigPda(poolProgram, mint)
+  const account = await chain.connection.getAccountInfo(state)
+  if (!account) throw new CCIPTokenPoolStateNotFoundError(state.toBase58())
+
+  const { config } = decodeTokenPoolState(account.data, {
+    tokenPool: state.toBase58(),
+    mint: mint.toBase58(),
+    poolProgram: poolProgram.toBase58(),
+    accountOwner: account.owner.toBase58(),
+  })
+  if (!config.rebalancer.equals(authority))
+    throw new CCTTxFailedError(
+      'provideLiquidity',
+      `pool rebalancer is ${config.rebalancer.toBase58()}, not ${authority.toBase58()}; set it with setRebalancer first`,
+    )
+  if (!config.canAcceptLiquidity)
+    throw new CCTTxFailedError(
+      'provideLiquidity',
+      'pool does not accept liquidity; enable it with setCanAcceptLiquidity(true) first',
+    )
 }
 
 /** Parameters for unsigned Solana lock-release pool liquidity provision. */
@@ -91,18 +122,40 @@ export class ProvideLiquidity extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedProvideLiquidityParams,
   ): Promise<UnsignedSolanaTx> {
-    const { ata: remoteTokenAccount, tokenProgram } = await resolveATA(
+    // The caller must be the configured rebalancer and the pool must accept deposits.
+    await validatePoolLiquidityConfig(chain, opts.poolProgram, opts.tokenAddress, opts.authority)
+
+    // The rebalancer's source ATA must exist.
+    const {
+      tokenAccount: remoteTokenAccount,
+      tokenProgram,
+      account: remoteTokenAccountInfo,
+    } = await resolveExistingTokenAccount(chain.connection, opts.tokenAddress, opts.authority)
+    const poolSigner = deriveTokenPoolSignerPda(opts.poolProgram, opts.tokenAddress)
+
+    // Avoid an opaque SPL Token insufficient-funds failure.
+    if (remoteTokenAccountInfo.amount < opts.amount)
+      throw new CCTTxFailedError(
+        this.name,
+        `source token account ${remoteTokenAccount.toBase58()} has ${remoteTokenAccountInfo.amount}, but ${opts.amount} is required; mint or transfer tokens first`,
+      )
+
+    // The pool signer transfers from the rebalancer ATA as its SPL Token delegate.
+    validateDelegation(
+      this.name,
+      remoteTokenAccount,
+      remoteTokenAccountInfo,
+      poolSigner,
+      opts.amount,
+    )
+
+    // The pool vault ATA must have been created during pool initialization.
+    const { tokenAccount: poolTokenAccount } = await resolveExistingTokenAccount(
       chain.connection,
       opts.tokenAddress,
-      opts.authority,
-    )
-    const poolSigner = deriveTokenPoolSignerPda(opts.poolProgram, opts.tokenAddress)
-    const poolTokenAccount = getAssociatedTokenAddressSync(
-      opts.tokenAddress,
       poolSigner,
-      true,
-      tokenProgram,
     )
+
     const instruction = await createLockReleaseTokenPoolProgram(chain, opts.poolProgram, opts.payer)
       .methods.provideLiquidity(new BN(opts.amount.toString()))
       .accountsStrict({

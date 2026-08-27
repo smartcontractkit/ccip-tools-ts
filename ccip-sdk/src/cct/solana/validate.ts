@@ -1,12 +1,12 @@
 import { Buffer } from 'buffer'
 
-import { TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
+import { type Account, TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
 import { type Connection, PublicKey } from '@solana/web3.js'
 
 import { CCIPAddressInvalidError, CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { resolveATA } from '../../solana/utils.ts'
-import { CCTParamsInvalidError } from '../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
@@ -266,6 +266,38 @@ export function parseNonEmptyHexBytes(
 }
 
 /**
+ * Validates that a token account delegates at least an amount to the expected delegate.
+ * @throws {@link CCTTxFailedError} If the delegate is missing, differs, or has insufficient allowance.
+ */
+export function validateDelegation(
+  operation: string,
+  tokenAccount: PublicKey,
+  account: Account,
+  delegate: PublicKey,
+  amount: bigint,
+): void {
+  if (account.delegate?.equals(delegate) && account.delegatedAmount >= amount) return
+
+  const delegation = !account.delegate
+    ? 'has no delegate'
+    : !account.delegate.equals(delegate)
+      ? `delegates to ${account.delegate.toBase58()}`
+      : `delegates only ${account.delegatedAmount}`
+  throw new CCTTxFailedError(
+    operation,
+    `token account ${tokenAccount.toBase58()} ${delegation}; delegate at least ${amount} to ${delegate.toBase58()} with approveToken first`,
+    {
+      context: {
+        tokenAccount: tokenAccount.toBase58(),
+        delegate: account.delegate?.toBase58(),
+        expectedDelegate: delegate.toBase58(),
+        delegatedAmount: account.delegatedAmount.toString(),
+      },
+    },
+  )
+}
+
+/**
  * Resolves an existing token account, defaulting to the holder's associated token account.
  * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
  */
@@ -274,12 +306,13 @@ export async function resolveExistingTokenAccount(
   tokenAddress: PublicKey,
   holder: PublicKey,
   tokenAccount?: PublicKey,
-): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey }> {
+): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey; account: Account }> {
   const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
   const account = tokenAccount ?? ata
+  let tokenAccountInfo: Account
 
   try {
-    await getAccount(connection, account, undefined, tokenProgram)
+    tokenAccountInfo = await getAccount(connection, account, undefined, tokenProgram)
   } catch (error) {
     if (error instanceof TokenAccountNotFoundError) {
       throw new CCIPTokenAccountNotFoundError(tokenAddress.toBase58(), holder.toBase58())
@@ -287,5 +320,5 @@ export async function resolveExistingTokenAccount(
     throw error
   }
 
-  return { tokenAccount: account, tokenProgram }
+  return { tokenAccount: account, tokenProgram, account: tokenAccountInfo }
 }

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token'
+import { BorshAccountsCoder } from '@coral-xyz/anchor'
+import { AccountLayout, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 import {
   deriveTokenPoolConfigPda,
@@ -24,18 +25,83 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
-function chain(): SolanaChain {
+function tokenAccount(delegate?: PublicKey, delegatedAmount = 0n, amount = 1_000_000n) {
+  const data = Buffer.alloc(AccountLayout.span)
+  AccountLayout.encode(
+    {
+      mint: new PublicKey(TOKEN),
+      owner: new PublicKey(AUTHORITY),
+      amount,
+      delegateOption: delegate ? 1 : 0,
+      delegate: delegate ?? PublicKey.default,
+      state: 1,
+      isNativeOption: 0,
+      isNative: 0n,
+      delegatedAmount,
+      closeAuthorityOption: 0,
+      closeAuthority: PublicKey.default,
+    },
+    data,
+  )
+  return { owner: TOKEN_PROGRAM_ID, data }
+}
+
+function poolState(poolProgram: PublicKey, rebalancer = new PublicKey(AUTHORITY), accepts = true) {
+  const mint = new PublicKey(TOKEN)
+  const poolSigner = deriveTokenPoolSignerPda(poolProgram, mint)
+  return Buffer.concat([
+    BorshAccountsCoder.accountDiscriminator('State'),
+    Buffer.from([1]),
+    TOKEN_PROGRAM_ID.toBuffer(),
+    mint.toBuffer(),
+    Buffer.from([9]),
+    poolSigner.toBuffer(),
+    PublicKey.default.toBuffer(),
+    new PublicKey(AUTHORITY).toBuffer(),
+    PublicKey.default.toBuffer(),
+    PublicKey.default.toBuffer(),
+    PublicKey.default.toBuffer(),
+    PublicKey.default.toBuffer(),
+    rebalancer.toBuffer(),
+    Buffer.from([accepts ? 1 : 0, 0]),
+    Buffer.alloc(4),
+    PublicKey.default.toBuffer(),
+  ])
+}
+
+function chain(
+  poolProgram = resolveTokenPoolProgram('lock-release'),
+  rebalancer = new PublicKey(AUTHORITY),
+  acceptsLiquidity = true,
+  sourceBalance = 1_000_000n,
+): SolanaChain {
+  const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
+  const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: { getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }) },
+    connection: {
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(state)
+          ? { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
+          : tokenAccount(poolSigner, 1_000_000n, sourceBalance),
+    },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
+  const poolSigner = deriveTokenPoolSignerPda(
+    resolveTokenPoolProgram('lock-release'),
+    new PublicKey(TOKEN),
+  )
+  const poolProgram = resolveTokenPoolProgram('lock-release')
+  const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
   return {
     ...chain(),
     connection: {
-      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(state)
+          ? { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
+          : tokenAccount(poolSigner, 1_000_000n),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -107,8 +173,41 @@ describe('ProvideLiquidity (cct/solana)', () => {
       )
     })
 
+    it('explains failed liquidity preflight checks', async () => {
+      for (const [pool, hint] of [
+        [chain(resolveTokenPoolProgram('lock-release'), PublicKey.default), 'setRebalancer'],
+        [
+          chain(resolveTokenPoolProgram('lock-release'), new PublicKey(AUTHORITY), false),
+          'setCanAcceptLiquidity(true)',
+        ],
+        [
+          chain(resolveTokenPoolProgram('lock-release'), new PublicKey(AUTHORITY), true, 0n),
+          'mint or transfer tokens first',
+        ],
+      ] as const) {
+        await assert.rejects(
+          () =>
+            SolanaTokenManager.fromChain(pool).generateUnsignedProvideLiquidity({
+              tokenAddress: TOKEN,
+              poolType: 'lock-release',
+              payer: PAYER,
+              authority: AUTHORITY,
+              amount: 1n,
+            }),
+          (error: unknown) => error instanceof CCTTxFailedError && error.message.includes(hint),
+        )
+      }
+    })
+
     it('defaults authority to payer', async () => {
-      const unsigned = await generate({ authority: undefined })
+      const unsigned = await SolanaTokenManager.fromChain(
+        chain(resolveTokenPoolProgram('lock-release'), new PublicKey(PAYER)),
+      ).generateUnsignedProvideLiquidity({
+        tokenAddress: TOKEN,
+        poolType: 'lock-release',
+        payer: PAYER,
+        amount: 1_000_000n,
+      })
 
       assert.equal(unsigned.instructions[0]!.keys[6]!.pubkey.toBase58(), PAYER)
     })
@@ -134,7 +233,15 @@ describe('ProvideLiquidity (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await SolanaTokenManager.fromChain(
+        chain(new PublicKey(poolProgramAddress)),
+      ).generateUnsignedProvideLiquidity({
+        tokenAddress: TOKEN,
+        poolProgramAddress,
+        payer: PAYER,
+        authority: AUTHORITY,
+        amount: 1_000_000n,
+      })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
