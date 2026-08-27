@@ -13,9 +13,9 @@ import { ChainFamily as ChainFamilyEnum } from '@chainlink/ccip-sdk'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 
 import styles from './ChainsExplorer.module.css'
+import { cn } from '../../utils/classNames.ts'
 import { useChains, useFilters, useSearch } from './hooks/index.ts'
 import type { ChainInfo, ChainsExplorerProps } from './types.ts'
-import { cn } from '../../utils/classNames.ts'
 
 // Family options for filter dropdown
 const FAMILY_OPTIONS = [

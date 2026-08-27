@@ -40,6 +40,7 @@ import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import {
@@ -49,7 +50,6 @@ import {
   logParsedError,
   parseTokenAmounts,
 } from './utils.ts'
-import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'

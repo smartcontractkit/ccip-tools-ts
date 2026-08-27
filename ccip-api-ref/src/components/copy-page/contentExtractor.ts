@@ -328,8 +328,7 @@ function convertOpenApiFieldToMarkdown(el: HTMLElement): string {
 
   // Get field name from legend or first strong element
   const legend = el.querySelector('legend')
-  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM element may be null
-  const fieldName = legend?.textContent?.trim()
+  const fieldName = legend?.textContent.trim()
 
   if (fieldName) {
     markdown += `\n**${fieldName}**\n\n`
@@ -377,8 +376,7 @@ function extractCodeContent(el: HTMLElement): string {
  */
 function extractLanguage(el: HTMLElement): string {
   // Check class for language-* pattern
-  // oxlint-disable-next-line typescript/no-unnecessary-condition -- className may be undefined in some contexts
-  const classMatch = el.className?.match(/language-(\w+)/)
+  const classMatch = el.className.match(/language-(\w+)/)
   if (classMatch) return classMatch[1]
 
   // Check data-language attribute
@@ -404,8 +402,7 @@ function convertTabsToMarkdown(el: HTMLElement): string {
   const selectedTab = el.querySelector(
     ':scope > [role="tab"][aria-selected="true"], [role="tab"][aria-selected="true"]',
   )
-  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM query may return null
-  const tabName = selectedTab?.textContent?.trim() || ''
+  const tabName = selectedTab?.textContent.trim() || ''
 
   // Find the associated tabpanel - should be a sibling or nearby element
   // First try to find by aria-controls/id relationship
@@ -500,11 +497,9 @@ function convertAdmonitionToMarkdown(el: HTMLElement): string {
 
   // Get title if present
   const titleEl = el.querySelector('[class*="admonitionHeading"]')
-  // oxlint-disable-next-line typescript/no-unnecessary-condition -- DOM query may return null
-  const title = titleEl?.textContent?.trim() || type
+  const title = titleEl?.textContent.trim() || type
 
   // Get content (excluding title)
-  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- Element needs HTMLElement cast for convertToMarkdown
   const contentEl = el.querySelector('[class*="admonitionContent"]') as HTMLElement | null
 
   const content = contentEl ? convertToMarkdown(contentEl) : convertToMarkdown(el)

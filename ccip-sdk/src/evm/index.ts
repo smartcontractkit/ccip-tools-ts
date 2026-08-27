@@ -646,10 +646,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     const { timestamp } = await this.getBlockInfo(tx.blockNumber)
     const chainTx = {
-      ...tx,
+      ...tx, // oxlint-disable-line typescript/no-misused-spread
       timestamp,
       logs: [] as ChainLog[],
     }
+    // oxlint-disable-next-line typescript/no-misused-spread
     const logs: ChainLog[] = tx.logs.map((l) => ({ ...l, blockTimestamp: timestamp, tx: chainTx }))
     chainTx.logs = logs
     return chainTx
@@ -739,7 +740,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
         }
         if (message) break
-      } catch (_) {
+      } catch {
         // try next fragment
       }
     }
@@ -773,7 +774,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       let result
       try {
         result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-      } catch (_) {
+      } catch {
         continue
       }
       if (result.length === 1) result = result[0] as Result
@@ -837,7 +838,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...result,
           state: Number(result.state) as ExecutionState,
         } as ExecutionReceipt
-      } catch (_) {
+      } catch {
         // continue
       }
     }
@@ -923,7 +924,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     let contract
     if (type === 'PriceRegistry') {
-      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.PriceRegistry_v1_2,
@@ -940,14 +940,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     }
     if (version < CCIPVersion.V2_0) {
-      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     } else {
-      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v2_0,
@@ -2420,7 +2418,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
                   const filterDynamicConfig = (dynamicConfig: { router: string }) => {
                     return Object.fromEntries(
                       Object.entries(resultToObject(dynamicConfig)).filter(
-                        ([_, v]) => v && v !== ZeroAddress,
+                        ([, v]) => v && v !== ZeroAddress,
                       ),
                     )
                   }

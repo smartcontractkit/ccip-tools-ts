@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 import { useResource } from '../../../scripts/useResource.ts'
+import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 
 // The CLI is pointed at these endpoints via the shared RPCS list (e2e-helpers.ts), and
 // `show` also resolves 32-byte tx hashes through the default CCIP API (show.ts).

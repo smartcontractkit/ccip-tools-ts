@@ -1,6 +1,6 @@
 import type { WrapperProps } from '@docusaurus/types'
-import type CodeBlockType from '@theme/CodeBlock'
 import CodeBlock from '@theme-original/CodeBlock'
+import type CodeBlockType from '@theme/CodeBlock'
 import React from 'react'
 
 import styles from './CodeBlock.module.css'

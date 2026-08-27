@@ -19,9 +19,9 @@ import {
   setEndpointLogRange,
   setEndpointTopicLimit,
 } from '../fetch.ts'
+import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 import { getBlockNumberAtOrAfter, passesTypeAndVersion, signalToPromise } from '../utils.ts'
 import { getAllFragmentsMatchingEvents } from './const.ts'
-import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
 
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
@@ -390,6 +390,7 @@ export async function* getEvmLogs(
       if (filter.startTime != null && blockTimestamp < Number(filter.startTime)) continue
       if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
         continue
+      // oxlint-disable-next-line typescript/no-misused-spread
       yield { ...log, blockTimestamp }
     }
   }

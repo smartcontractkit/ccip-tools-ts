@@ -19,15 +19,15 @@ import { createPublicClient, http } from 'viem'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SOLANA_DEVNET_TO_SEPOLIA, TON_TO_SEPOLIA } from './fork.test.data.ts'
-import { EVMChain } from './index.ts'
 import { ViemTransportProvider } from './viem/client-adapter.ts'
-import { useResource } from '../../../scripts/useResource.ts'
+import { EVMChain } from './index.ts'
 
 // Forks fetch live state from Sepolia/Fuji/Arb-Sepolia/Hedera-testnet upstreams; several
 // execution paths also hit the staging CCIP API.

@@ -225,7 +225,8 @@ export function prettyFormat(
 async function formatToken(
   source: Chain | undefined,
   ta: { amount: bigint } & (
-    { token: string } | { sourceTokenAddress?: string; sourcePoolAddress: string }
+    | { token: string }
+    | { sourceTokenAddress?: string; sourcePoolAddress: string }
   ),
   family?: ChainFamily,
 ): Promise<string> {
@@ -355,7 +356,7 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
   let finalized
   try {
     if (source) finalized = await source.getBlockTimestamp('finalized')
-  } catch (_) {
+  } catch {
     // no finalized tag support
   }
   let nonce

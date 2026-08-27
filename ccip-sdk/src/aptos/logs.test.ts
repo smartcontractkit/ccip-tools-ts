@@ -510,7 +510,7 @@ void describe('streamAptosLogs since hint', () => {
       provider.getTransactionByVersion as unknown as ReturnType<typeof mock.fn>
     ).mock.calls.map((c) => (c.arguments[0] as { ledgerVersion: number }).ledgerVersion)
     assert.deepEqual(
-      [...tsLookups].sort(),
+      [...tsLookups].sort((a, b) => a - b),
       [102, 103],
       'no floor-search probes — only the yielded logs’ own blockTimestamp lookups',
     )

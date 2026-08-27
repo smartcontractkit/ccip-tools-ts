@@ -15,8 +15,8 @@ import { afterEach, describe, it, mock } from 'node:test'
 import { JsonRpcProvider } from 'ethers'
 
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
-import { EVMChain } from './index.ts'
 import { SolanaChain } from '../solana/index.ts'
+import { EVMChain } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // EVM — _getProvider helper

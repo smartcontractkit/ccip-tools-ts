@@ -10,10 +10,10 @@ import {
   getEndpointTopicLimit,
   originKey,
   parseLogRangeError,
-  registerEndpointBase,
   parseRateLimitHeaders,
   parseRetryAfter,
   parseTopicLimitError,
+  registerEndpointBase,
   setEndpointLogRange,
   setEndpointTopicLimit,
 } from './fetch.ts'

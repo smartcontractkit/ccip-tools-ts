@@ -33,6 +33,8 @@ import { search } from '@inquirer/prompts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
+import type { GlobalOpts } from '../index.ts'
+import { fetchChainsFromRpcs } from '../providers/index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   formatDisplayAddress,
@@ -42,8 +44,6 @@ import {
   omit,
   prettyTable,
 } from './utils.ts'
-import type { GlobalOpts } from '../index.ts'
-import { fetchChainsFromRpcs } from '../providers/index.ts'
 
 export const command = ['getSupportedTokens', 'get-supported-tokens']
 export const describe =

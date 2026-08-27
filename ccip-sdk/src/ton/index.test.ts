@@ -5,13 +5,13 @@ import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
 import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { ChainFamily, networkInfo } from '../index.ts'
 import type { ExecutionInput } from '../types.ts'
-import { TONChain } from './index.ts'
+import { util } from '../utils.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { util } from '../utils.ts'
+import { TONChain } from './index.ts'
 
 // Mock fetch for TON tests that handles lookupBlock (getMCSeqNoByLt) calls
 async function mockTonFetch(

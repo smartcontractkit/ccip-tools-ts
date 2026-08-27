@@ -191,7 +191,7 @@ describe('getEvmLogs — adaptive range pagination', () => {
     // Explicit page=50 → should use 50-block chunks (not the default 10e3)
     const calls: Array<{ fromBlock: number; toBlock: number }> = []
     const trackingProvider = {
-      ...provider,
+      ...provider, // oxlint-disable-line typescript/no-misused-spread
       getLogs: async (filter: { fromBlock: number; toBlock: number }) => {
         calls.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock })
         return [makeLog(filter.fromBlock)]
@@ -1012,7 +1012,7 @@ describe('getEvmLogs — typeAndVersions filter', () => {
 
   /** Overrides a fake log's address (makeLog's cast type doesn't survive a plain spread). */
   function withAddress(log: Log, address: string): Log {
-    return { ...log, address } as unknown as Log
+    return { ...log, address } as unknown as Log // oxlint-disable-line typescript/no-misused-spread
   }
 
   /** Fake provider that returns a fixed set of logs for any (single-chunk) request. */

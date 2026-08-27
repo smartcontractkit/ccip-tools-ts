@@ -3,12 +3,12 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, makeError, randomBytes, toBeHex } from 'ethers'
 
-import { interfaces } from './const.ts'
-import { EVMChain, isTokenOnlyEstimate } from './index.ts'
 import { CCIPFinalityNotAllowedError, CCIPVersionUnsupportedError } from '../errors/index.ts'
 import { decodeFinalityAllowed } from '../extra-args.ts'
 import { ChainFamily, NetworkType } from '../networks.ts'
 import { CCIPVersion } from '../types.ts'
+import { interfaces } from './const.ts'
+import { EVMChain, isTokenOnlyEstimate } from './index.ts'
 
 // Under the authoritative preflight, estimateReceiveExecution resolves finality + CCVs via the OffRamp's
 // getCCVsForMessage(bytes) view (through EVMChain.getRequiredCCVs), not by reading the receiver directly.

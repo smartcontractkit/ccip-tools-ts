@@ -1,14 +1,14 @@
 import { type Connection, PublicKey } from '@solana/web3.js'
 
 import { type LogFilter, withSinceStart } from '../chain.ts'
-import type { LeanNumbers } from '../types.ts'
-import type { SolanaTransaction } from './index.ts'
 import {
   CCIPLogsAddressRequiredError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
 } from '../errors/index.ts'
+import type { LeanNumbers } from '../types.ts'
 import { signalToPromise } from '../utils.ts'
+import type { SolanaTransaction } from './index.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
 

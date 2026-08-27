@@ -272,7 +272,8 @@ function normalizeBase(url: URL): string {
  */
 export function registerEndpointBase(input: Parameters<typeof fetch>[0]): string {
   const url = toURL(input)
-  if (!url)    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
+  if (!url)
+    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
   const base = normalizeBase(url)
   const list = endpointBases.get(url.origin)
   if (list) {
@@ -297,7 +298,8 @@ export function registerEndpointBase(input: Parameters<typeof fetch>[0]): string
  */
 export function endpointKey(input: Parameters<typeof fetch>[0]): string {
   const url = toURL(input)
-  if (!url) return typeof input === 'string' ? input : String(input)
+  if (!url)
+    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
   const bases = endpointBases.get(url.origin)
   if (bases) {
     const path = url.pathname.replace(/\/+$/, '') || '/'
@@ -596,7 +598,8 @@ function extractMethod(init?: RequestInit): string | undefined {
   if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
   try {
     const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
-      { method?: string } | undefined
+      | { method?: string }
+      | undefined
     if (parsed && typeof parsed.method === 'string') return parsed.method
   } catch {
     // Not JSON or no method field

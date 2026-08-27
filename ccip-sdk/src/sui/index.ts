@@ -29,27 +29,6 @@ import {
   withSinceStart,
 } from '../chain.ts'
 import {
-  getCcipStateAddress,
-  getOffRampsForCcip,
-  getOffRampsFromRampOwner,
-  getOnRampForSelectorFromRouterState,
-  getOnRampsForCcip,
-  moduleOfPackage,
-  resolveCcipStateAddress,
-} from './discovery.ts'
-import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
-import { getSuiLeafHasher } from './hasher.ts'
-import {
-  deriveObjectID,
-  getDynamicFieldIds,
-  getLatestPackageId,
-  getObjectFields,
-  getObjectRef,
-  getPackageDisassembly,
-  getTableEntryFields,
-  parseSuiNumbers,
-} from './objects.ts'
-import {
   CCIPArgumentInvalidError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
@@ -96,7 +75,28 @@ import {
   passesTypeAndVersion,
   util,
 } from '../utils.ts'
+import {
+  getCcipStateAddress,
+  getOffRampsForCcip,
+  getOffRampsFromRampOwner,
+  getOnRampForSelectorFromRouterState,
+  getOnRampsForCcip,
+  moduleOfPackage,
+  resolveCcipStateAddress,
+} from './discovery.ts'
+import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
+import { getSuiLeafHasher } from './hasher.ts'
+import {
+  deriveObjectID,
+  getDynamicFieldIds,
+  getLatestPackageId,
+  getObjectFields,
+  getObjectRef,
+  getPackageDisassembly,
+  getTableEntryFields,
+  parseSuiNumbers,
+} from './objects.ts'
 import type {
   CCIPMessage_V1_6_Sui,
   SuiFeeQuoterConfig,
@@ -1213,7 +1213,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)
-    } catch (_) {
+    } catch {
       // return undefined
     }
   }
@@ -2074,7 +2074,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
 
     const tokenPoolState = (content.fields as Record<string, unknown>)['token_pool_state'] as
-      { fields?: { remote_chain_configs?: { fields?: { contents?: unknown[] } } } } | undefined
+      | { fields?: { remote_chain_configs?: { fields?: { contents?: unknown[] } } } }
+      | undefined
     const contents = tokenPoolState?.fields?.remote_chain_configs?.fields?.contents ?? []
 
     const remotes: Record<string, TokenPoolRemote> = {}

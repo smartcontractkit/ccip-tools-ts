@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { parseCantonInstrumentId } from './types.ts'
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
+import { parseCantonInstrumentId } from './types.ts'
 
 const LINK_INSTRUMENT =
   'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551::link-token'

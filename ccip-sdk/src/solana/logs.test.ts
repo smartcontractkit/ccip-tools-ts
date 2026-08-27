@@ -3,8 +3,8 @@ import { describe, it } from 'node:test'
 
 import type { Connection } from '@solana/web3.js'
 
-import type { SolanaTransaction } from './index.ts'
 import { getTransactionsForAddress } from './logs.ts'
+import type { SolanaTransaction } from './index.ts'
 
 describe('Solana getTransactionsForAddress since hint', () => {
   const ADDRESS = '11111111111111111111111111111111' // system program (mock ignores it)

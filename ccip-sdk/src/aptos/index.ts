@@ -25,11 +25,6 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
-import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
-import { getAptosLeafHasher } from './hasher.ts'
-import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
-import { generateUnsignedCcipSend, getFee } from './send.ts'
 import {
   CCIPAptosExtraArgsV2RequiredError,
   CCIPAptosNetworkUnknownError,
@@ -43,6 +38,7 @@ import {
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
@@ -51,9 +47,10 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
+import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
+import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import {
   BcsEVMExtraArgsV2Codec,
   BcsSVMExtraArgsV1Codec,
@@ -82,9 +79,12 @@ import {
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
+import { getAptosLeafHasher } from './hasher.ts'
+import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
+import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { getTokenInfo } from './token.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
+import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
 export type { UnsignedAptosTx }
 
 /**
@@ -526,7 +526,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)
-    } catch (_) {
+    } catch {
       // return undefined
     }
   }

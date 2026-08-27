@@ -7,6 +7,7 @@ import { Contract, JsonRpcProvider, Wallet } from 'ethers'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { discoverOffRamp } from '../execution.ts'
@@ -16,7 +17,6 @@ import { ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SEPOLIA_TO_FUJI } from './fork.test.data.ts'
 import { EVMChain } from './index.ts'
-import { useResource } from '../../../scripts/useResource.ts'
 
 // Live RPCs: Sepolia, Fuji, Arbitrum Sepolia — plus the CCIP API (prod default + staging in places).
 await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'api'])

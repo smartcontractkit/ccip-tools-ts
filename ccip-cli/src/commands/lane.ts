@@ -1,10 +1,10 @@
 import { discoverOffRamp, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
-import { type Ctx, Format } from './types.ts'
-import { formatDisplayAddress, getCtx, logParsedError, prettyFormat, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import { formatDisplayAddress, getCtx, logParsedError, prettyFormat, prettyTable } from './utils.ts'
 
 export const command = ['lane', 'get-lane']
 export const describe = 'Show OnRamp and OffRamp configs for a CCIP lane between two chains'

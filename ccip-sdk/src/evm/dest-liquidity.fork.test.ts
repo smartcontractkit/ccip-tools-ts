@@ -24,13 +24,13 @@ import { Instance } from 'prool'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
+import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
 import { getErrorData, parseWithFragment } from './errors.ts'
 import { findBalancesSlot } from './gas.ts'
-import { EVMChain } from './index.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
-import { useResource } from '../../../scripts/useResource.ts'
-import { CCIPDestExecutionRevertError } from '../errors/index.ts'
+import { EVMChain } from './index.ts'
 
 // Forks run atop live Sepolia/Fuji RPCs (anvil fetches state from the upstream lazily).
 await useResource(['sepolia', 'fuji'])
