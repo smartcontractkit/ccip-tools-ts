@@ -272,7 +272,7 @@ function normalizeBase(url: URL): string {
  */
 export function registerEndpointBase(input: Parameters<typeof fetch>[0]): string {
   const url = toURL(input)
-  if (!url) return typeof input === 'string' ? input : String(input)
+  if (!url)    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
   const base = normalizeBase(url)
   const list = endpointBases.get(url.origin)
   if (list) {

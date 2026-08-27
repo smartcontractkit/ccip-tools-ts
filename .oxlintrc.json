@@ -24,11 +24,13 @@
     ],
     "typescript/no-non-null-assertion": "off",
     "typescript/consistent-type-imports": ["warn", { "fixStyle": "inline-type-imports" }],
+    "ccip/sort-named-specifiers": "error",
     "typescript/consistent-type-exports": [
       "warn",
       { "fixMixedExportsWithInlineTypeSpecifier": true }
     ],
     "typescript/no-import-type-side-effects": "warn",
+    "typescript/no-meaningless-void-operator": "off",
     "typescript/no-unnecessary-condition": "warn",
     "typescript/require-await": "off",
     "import/no-duplicates": ["warn", { "preferInline": true }],

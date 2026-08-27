@@ -49,6 +49,7 @@ async function generate(filepath) {
     expr = expr.join('\n')
     // Evaluate with eval semantics (completion value of the expression) in a scope
     // whose only injected binding is the root-relative `require` above.
+    // oxlint-disable-next-line typescript/no-implied-eval
     const runExpr = new Function('require', `return eval(${JSON.stringify(expr)})`)
     let res = await runExpr(rootRequire)
     if (typeof res === 'string') res = [res]
