@@ -572,8 +572,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `feeAdmin` role, the allowed finality window, and a lock/release pool's `lockBox`.
    * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
-   * (see the example). A v2.0.0 `SiloedLockReleaseTokenPool` is rejected — it escrows per remote
-   * chain (`getLockBox(uint64)`). For a legacy pool's `allowList` / `rebalancer`, proxy/USDC
+   * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
+   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC
    * pools, or v1.5.0 `*AndProxy` pools, use `cct.chain.getTokenPoolConfig()`, the tolerant
    * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is
    * not readable here.

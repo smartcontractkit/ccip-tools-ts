@@ -137,6 +137,60 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     assert.equal(state.lockBox, LOCKBOX)
   })
 
+  it('reads a v2.0.0 siloed pool, reporting every field but the lockbox', async () => {
+    // no no-arg getter in `reads`: a siloed pool declares getLockBox(uint64) instead
+    const chain = stubChain({
+      typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
+      family: 'LockRelease',
+      reads: READS,
+    })
+
+    const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+    assert.deepEqual(state, {
+      poolAddress: POOL,
+      version: '2.0.0',
+      type: 'SiloedLockReleaseTokenPool',
+      token: TOKEN,
+      tokenDecimals: 18,
+      router: ROUTER,
+      owner: OWNER,
+      rmnProxy: RMN_PROXY,
+      rateLimitAdmin: RATE_LIMIT_ADMIN,
+      feeAdmin: FEE_ADMIN,
+      supportedChains: CHAINS,
+      finalityDepth: 10,
+      finalitySafe: false,
+    })
+    // per-lane escrow: no single lockbox, so the field is absent rather than zeroed
+    assert.ok(!('lockBox' in state))
+  })
+
+  it('never calls getLockBox() on a siloed pool, whose escrow is keyed per remote chain', async () => {
+    const noArgLockBox =
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0].getFunction(
+        'getLockBox()',
+      )!.selector
+    const seen: string[] = []
+    const chain = stubChain({
+      typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
+      family: 'LockRelease',
+      reads: READS,
+    })
+    const provider = chain.provider as unknown as {
+      call: (tx: { data: string }) => Promise<string>
+    }
+    const { call } = provider
+    provider.call = (tx) => {
+      seen.push(tx.data.slice(0, 10))
+      return call(tx)
+    }
+
+    await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+    assert.ok(!seen.includes(noArgLockBox), 'getLockBox() is not implemented by a siloed pool')
+  })
+
   it('reads router and both admin roles from the single getDynamicConfig call', async () => {
     let calls = 0
     const chain = stubChain({ reads: READS })
@@ -211,7 +265,8 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       assert.ok(!('lockBox' in state))
     })
 
-    it('reads a siloed pool before v2.0.0, where per-lane escrow does not exist yet', async () => {
+    it('reads a siloed pool at a legacy version through the legacy reader', async () => {
+      // The legacy reader only calls getters TokenPool itself declares, so it serves any type.
       const chain = stubChain({
         typeAndVersion: 'SiloedLockReleaseTokenPool 1.6.1',
         family: 'LockRelease',
@@ -221,7 +276,6 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
 
       const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
 
-      // only the v2.0.0 reader needs getLockBox(), so there is nothing to reject here
       assert.equal(state.type, 'SiloedLockReleaseTokenPool')
       assert.equal(state.version, '1.6.1')
     })
@@ -288,41 +342,6 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       await assert.rejects(
         () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
         (err: unknown) => err instanceof CCTContractTypeInvalidError,
-      )
-    })
-
-    it('rejects a siloed pool, whose lockboxes are keyed per remote chain', async () => {
-      // SiloedLockReleaseTokenPool exposes getLockBox(uint64), not getLockBox() — hence no
-      // no-arg getter in `reads`: reading it through the LockRelease ABI would hit a selector
-      // the contract does not implement, so the type has to be rejected up front.
-      const chain = stubChain({
-        typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
-        family: 'LockRelease',
-        reads: READS,
-      })
-
-      await assert.rejects(
-        () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
-        (err: unknown) =>
-          err instanceof CCTContractTypeInvalidError &&
-          err.context.actual === 'SiloedLockReleaseTokenPool',
-      )
-    })
-
-    it('tells a siloed pool apart from a wrong address, naming the per-lane getter', async () => {
-      const chain = stubChain({
-        typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
-        family: 'LockRelease',
-        reads: READS,
-      })
-
-      await assert.rejects(
-        () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
-        (err: unknown) =>
-          err instanceof CCTContractTypeInvalidError &&
-          // the reason, not just the type mismatch — otherwise this reads as "wrong address"
-          err.message.includes('getLockBox(remoteChainSelector)') &&
-          err.context.reason === (err.message.split(' — ')[1] as string),
       )
     })
 
