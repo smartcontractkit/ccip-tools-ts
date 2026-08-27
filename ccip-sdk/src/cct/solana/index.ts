@@ -286,12 +286,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link approveToken} For wallet-based execution.
    *
    * @remarks
-   * `amount` is in base units. `tokenAccount` defaults to the authority's associated token account,
-   * which must already exist. Approval replaces that account's current delegate and allowance.
-   * For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
    * externally.
    *
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -319,14 +322,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedApproveToken} For externally signed transactions.
    *
    * @remarks
-   * `amount` is in base units. `tokenAccount` defaults to the wallet's associated token account,
-   * which must already exist. Approval replaces that account's current delegate and allowance.
-   * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
-   * {@link generateUnsignedApproveToken}.
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. SPL Token multisig authorities require `multisigSigners`.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid, or
    * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.

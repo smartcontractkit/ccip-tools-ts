@@ -1,11 +1,9 @@
-import { TokenAccountNotFoundError, createMintToInstruction, getAccount } from '@solana/spl-token'
+import { createMintToInstruction } from '@solana/spl-token'
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
-import { CCIPTokenAccountNotFoundError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -17,6 +15,7 @@ import { submit } from '../../submit.ts'
 import {
   U64_MAX,
   parsePublicKey,
+  resolveExistingTokenAccount,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
@@ -96,27 +95,16 @@ export class MintTokens extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedMintTokensParams,
   ): Promise<UnsignedSolanaTx> {
-    const { ata, tokenProgram } = await resolveATA(
+    const { tokenAccount, tokenProgram } = await resolveExistingTokenAccount(
       chain.connection,
       opts.tokenAddress,
       opts.recipient,
     )
-    try {
-      await getAccount(chain.connection, ata, undefined, tokenProgram)
-    } catch (error) {
-      if (error instanceof TokenAccountNotFoundError) {
-        throw new CCIPTokenAccountNotFoundError(
-          opts.tokenAddress.toBase58(),
-          opts.recipient.toBase58(),
-        )
-      }
-      throw error
-    }
 
     const instructions: TransactionInstruction[] = [
       createMintToInstruction(
         opts.tokenAddress,
-        ata,
+        tokenAccount,
         opts.authority,
         opts.amount,
         opts.multisigSigners,
