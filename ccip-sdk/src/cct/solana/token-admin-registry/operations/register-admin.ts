@@ -19,16 +19,10 @@ import {
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
-
-/** Authorization paths used to register a token in the TokenAdminRegistry. */
-const REGISTER_ADMIN_METHODS = {
-  OWNER: 'owner',
-  CCIP_ADMIN: 'ccip-admin',
-} as const
+import { REGISTRATION_METHODS } from '../constants.ts'
 
 /** Authorization path used to register a token in the TokenAdminRegistry. */
-export type RegisterAdminMethod =
-  (typeof REGISTER_ADMIN_METHODS)[keyof typeof REGISTER_ADMIN_METHODS]
+export type RegisterAdminMethod = (typeof REGISTRATION_METHODS)[keyof typeof REGISTRATION_METHODS]
 
 type RegisterAdminParams = {
   /** Token mint to register. The proposed administrator remains pending until accepted. */
@@ -146,7 +140,7 @@ export class RegisterAdmin extends SolanaOperation<
   protected override parse(params: GenerateRegisterAdminParams): ParsedRegisterAdminParams {
     if (
       params.registrationMethod !== undefined &&
-      !Object.values(REGISTER_ADMIN_METHODS).includes(params.registrationMethod)
+      !Object.values(REGISTRATION_METHODS).includes(params.registrationMethod)
     ) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -166,7 +160,7 @@ export class RegisterAdmin extends SolanaOperation<
       ...(params.administrator !== undefined && {
         administrator: parsePublicKey(this.name, 'administrator', params.administrator),
       }),
-      method: params.registrationMethod ?? REGISTER_ADMIN_METHODS.OWNER,
+      method: params.registrationMethod ?? REGISTRATION_METHODS.OWNER,
     }
   }
 
@@ -204,12 +198,12 @@ export class RegisterAdmin extends SolanaOperation<
 
     const instructions: TransactionInstruction[] = []
     switch (method) {
-      case REGISTER_ADMIN_METHODS.OWNER: {
+      case REGISTRATION_METHODS.OWNER: {
         const ownerIx = await buildOwnerInstruction(program, accounts, mintAuthority, administrator)
         instructions.push(ownerIx)
         break
       }
-      case REGISTER_ADMIN_METHODS.CCIP_ADMIN: {
+      case REGISTRATION_METHODS.CCIP_ADMIN: {
         const ccipAdminIx = await buildCcipAdminInstruction(program, accounts, administrator)
         instructions.push(ccipAdminIx)
         break
