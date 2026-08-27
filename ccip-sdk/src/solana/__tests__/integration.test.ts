@@ -412,26 +412,48 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   })
 
   it('should decode the latest Solana -> Sepolia v2 message and discover its offRamp', async () => {
-    await using disposer = new AsyncDisposableStack()
-    const dest = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
-      (dest) => dest.provider.destroy(),
-    )
+    // Devnet RPCs intermittently serve inconsistent account state under load — a 200
+    // response carrying a truncated/foreign blob that then fails anchor's borsh decode
+    // (observed as ERR_OUT_OF_RANGE on the offRamp config). The chain memoizes
+    // getAccountInfo for 5s, so space retries beyond that TTL and assert on the first
+    // clean pass, like the TON live scans (see ton/logs.integration.test.ts).
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await runAssertions()
+        return
+      } catch (err) {
+        lastErr = err
+        testLogger.debug(
+          `decode/discover attempt ${attempt}/3 failed, retrying in ${5 * attempt}s: ${(err as Error).message}`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, 5_000 * attempt))
+      }
+    }
+    throw lastErr
 
-    const tx = await solanaChain.getTransaction(SOLANA_TO_SEPOLIA_V2_TX)
-    const requests = await solanaChain.getMessagesInTx(tx)
-    assert.equal(requests.length, 1)
-    const request = requests[0]!
-    assert.equal(request.message.messageId, SOLANA_TO_SEPOLIA_V2_MESSAGE_ID)
-    assert.equal(request.message.sequenceNumber, 9393n)
-    assert.equal(request.message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
-    assert.equal(request.message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
-    assert.equal(request.message.data, '0x6d756c74692d76657269666965722074657374')
-    assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
-    assert.equal(request.lane.version, '2.0.0')
+    async function runAssertions() {
+      await using disposer = new AsyncDisposableStack()
+      const dest = disposer.adopt(
+        await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+        (dest) => dest.provider.destroy(),
+      )
 
-    const offRamp = await discoverOffRamp(solanaChain, dest, request.lane.onRamp)
-    assert.equal(offRamp, SEPOLIA_V2_OFFRAMP)
+      const tx = await solanaChain.getTransaction(SOLANA_TO_SEPOLIA_V2_TX)
+      const requests = await solanaChain.getMessagesInTx(tx)
+      assert.equal(requests.length, 1)
+      const request = requests[0]!
+      assert.equal(request.message.messageId, SOLANA_TO_SEPOLIA_V2_MESSAGE_ID)
+      assert.equal(request.message.sequenceNumber, 9393n)
+      assert.equal(request.message.sender, 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx')
+      assert.equal(request.message.receiver, '0x3aa5EbB10dC797Cac828524e59A333d0A371443d')
+      assert.equal(request.message.data, '0x6d756c74692d76657269666965722074657374')
+      assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
+      assert.equal(request.lane.version, '2.0.0')
+
+      const offRamp = await discoverOffRamp(solanaChain, dest, request.lane.onRamp)
+      assert.equal(offRamp, SEPOLIA_V2_OFFRAMP)
+    }
   })
 
   it('should fetch the latest Sepolia -> Solana v2 execution', async () => {
