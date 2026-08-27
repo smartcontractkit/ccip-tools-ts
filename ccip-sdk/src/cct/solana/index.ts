@@ -13,6 +13,8 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
+  type ExecuteApproveTokenParams,
+  type ExecuteApproveTokenResult,
   type ExecuteCreateTokenAccountParams,
   type ExecuteCreateTokenAccountResult,
   type ExecuteDeployTokenParams,
@@ -21,6 +23,8 @@ import {
   type ExecuteMintTokensResult,
   type ExecuteSetTokenAuthorityParams,
   type ExecuteSetTokenAuthorityResult,
+  type GenerateApproveTokenParams,
+  type GenerateApproveTokenResult,
   type GenerateCreateTokenAccountParams,
   type GenerateCreateTokenAccountResult,
   type GenerateDeployTokenParams,
@@ -29,6 +33,7 @@ import {
   type GenerateMintTokensResult,
   type GenerateSetTokenAuthorityParams,
   type GenerateSetTokenAuthorityResult,
+  ApproveToken,
   CreateTokenAccount,
   MintTokens,
   SetTokenAuthority,
@@ -163,6 +168,7 @@ import {
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
   // Token operations
+  readonly #approveToken = new ApproveToken()
   readonly #createTokenAccount = new CreateTokenAccount()
   readonly #mintTokens = new MintTokens()
   readonly #setTokenAuthority = new SetTokenAuthority()
@@ -272,6 +278,72 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
     const { DeployToken } = await import('./token/operations/index.ts')
     return new DeployToken().execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to approve a delegate to transfer SPL tokens.
+   *
+   * @see {@link approveToken} For wallet-based execution.
+   *
+   * @remarks
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApproveToken({
+   *   payer: owner,
+   *   tokenAddress: mint,
+   *   delegate,
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  generateUnsignedApproveToken(
+    opts: GenerateApproveTokenParams,
+  ): Promise<GenerateApproveTokenResult> {
+    return this.#approveToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Approves a delegate to transfer SPL tokens from the selected token account using the executing
+   * authority wallet.
+   *
+   * @see {@link generateUnsignedApproveToken} For externally signed transactions.
+   *
+   * @remarks
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. SPL Token multisig authorities require `multisigSigners`.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.approveToken({ wallet, tokenAddress: mint, delegate, amount: 1_000_000n })
+   * ```
+   */
+  approveToken(opts: ExecuteApproveTokenParams): Promise<ExecuteApproveTokenResult> {
+    return this.#approveToken.execute(this.chain, opts)
   }
 
   /**

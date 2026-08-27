@@ -1,4 +1,4 @@
-import { createMintToInstruction } from '@solana/spl-token'
+import { createApproveInstruction } from '@solana/spl-token'
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
@@ -20,57 +20,56 @@ import {
   validateBigInt,
 } from '../../validate.ts'
 
-type MintTokensParams = {
+type ApproveTokenParams = {
   /** SPL token mint address. */
   tokenAddress: string
+  /** Token account to approve from. Defaults to the authority's existing associated token account. */
+  tokenAccount?: string
+  /** Trusted delegate address authorized to transfer tokens. Re-approval replaces the current delegate. */
+  delegate: string
   /**
-   * Associated Token Account (ATA) address for the recipient on this token mint.
-   * ⚠️ ATA must already exist; use `createTokenAccount` if needed.
-   */
-  recipient: string
-  /**
-   * Amount to mint in base units (not human-readable tokens).
-   * E.g., 1_000_000n with 6 decimals = 1 token.
-   * Maximum u64: 2^64 - 1.
+   * Allowance in base units (not human-readable tokens). Re-approval replaces the current allowance;
+   * use `0n` to clear it. E.g., 1_000_000n with 6 decimals = 1 token. Maximum u64: 2^64 - 1.
    */
   amount: bigint
-  /** Mint authority. Defaults to `payer` for single-signer transactions. */
+  /** Token account owner. Defaults to `payer` for single-signer transactions. */
   authority?: string
   /** SPL Token multisig member addresses. Required when authority is an SPL Token multisig. */
   multisigSigners?: string[]
 }
 
-type ParsedMintTokensParams = {
+type ParsedApproveTokenParams = {
   tokenAddress: PublicKey
-  recipient: PublicKey
+  tokenAccount?: PublicKey
+  delegate: PublicKey
   amount: bigint
   authority: PublicKey
   multisigSigners: PublicKey[]
 }
 
-/** Parameters for unsigned Solana SPL token minting. */
-export type GenerateMintTokensParams = SolanaGenerateParams<MintTokensParams>
+/** Parameters for unsigned Solana SPL Token delegate approval. */
+export type GenerateApproveTokenParams = SolanaGenerateParams<ApproveTokenParams>
 
-/** Unsigned Solana SPL token minting result. */
-export type GenerateMintTokensResult = UnsignedSolanaTx
+/** Unsigned Solana SPL Token delegate approval result. */
+export type GenerateApproveTokenResult = UnsignedSolanaTx
 
-/** Parameters for executing Solana SPL token minting. */
-export type ExecuteMintTokensParams = SolanaExecuteParams<MintTokensParams>
+/** Parameters for executing Solana SPL Token delegate approval. */
+export type ExecuteApproveTokenParams = SolanaExecuteParams<ApproveTokenParams>
 
-/** Result of executing Solana SPL token minting. */
-export type ExecuteMintTokensResult = TransactionResult
+/** Result of executing Solana SPL Token delegate approval. */
+export type ExecuteApproveTokenResult = TransactionResult
 
-/** Mints SPL tokens to a recipient's existing associated token account. */
-export class MintTokens extends SolanaOperation<
-  MintTokensParams,
+/** Approves a delegate to transfer up to an allowance from an SPL token account. */
+export class ApproveToken extends SolanaOperation<
+  ApproveTokenParams,
   UnsignedSolanaTx,
-  ParsedMintTokensParams
+  ParsedApproveTokenParams
 > {
-  readonly name = 'mintTokens'
+  readonly name = 'approveToken'
 
-  /** Parses public keys, amount, and optional SPL Token multisig signers. */
-  protected override parse(params: GenerateMintTokensParams): ParsedMintTokensParams {
-    validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
+  /** Parses public keys, allowance, and optional SPL Token multisig signers. */
+  protected override parse(params: GenerateApproveTokenParams): ParsedApproveTokenParams {
+    validateBigInt(this.name, 'amount', params.amount, 0n, U64_MAX)
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')
     }
@@ -78,7 +77,11 @@ export class MintTokens extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      recipient: parsePublicKey(this.name, 'recipient', params.recipient),
+      tokenAccount:
+        params.tokenAccount === undefined
+          ? undefined
+          : parsePublicKey(this.name, 'tokenAccount', params.tokenAccount),
+      delegate: parsePublicKey(this.name, 'delegate', params.delegate),
       amount: params.amount,
       authority:
         params.authority === undefined
@@ -90,21 +93,22 @@ export class MintTokens extends SolanaOperation<
     }
   }
 
-  /** Builds an SPL Token `MintTo` instruction for the recipient's associated token account. */
+  /** Builds an SPL Token `Approve` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedMintTokensParams,
+    opts: ParsedApproveTokenParams,
   ): Promise<UnsignedSolanaTx> {
     const { tokenAccount, tokenProgram } = await resolveExistingTokenAccount(
       chain.connection,
       opts.tokenAddress,
-      opts.recipient,
+      opts.authority,
+      opts.tokenAccount,
     )
 
     const instructions: TransactionInstruction[] = [
-      createMintToInstruction(
-        opts.tokenAddress,
+      createApproveInstruction(
         tokenAccount,
+        opts.delegate,
         opts.authority,
         opts.amount,
         opts.multisigSigners,
@@ -113,23 +117,23 @@ export class MintTokens extends SolanaOperation<
     ]
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, recipient = ${opts.recipient.toBase58()}, amount = ${opts.amount}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, tokenAccount = ${tokenAccount.toBase58()}, delegate = ${opts.delegate.toBase58()}, amount = ${opts.amount}`,
     )
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the mint authority wallet. */
+  /** Generate, sign, simulate, send, and confirm with the token account owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteMintTokensParams,
-  ): Promise<ExecuteMintTokensResult> {
+    params: ExecuteApproveTokenParams,
+  ): Promise<ExecuteApproveTokenResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (parsed.multisigSigners.length > 0) {
       throw new CCTParamsInvalidError(
         this.name,
         'multisigSigners',
-        'requires externally signed transactions; use generateUnsignedMintTokens',
+        'requires externally signed transactions; use generateUnsignedApproveToken',
       )
     }
 
@@ -138,7 +142,7 @@ export class MintTokens extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'mintTokens requires authority to be the executing wallet. Use generateUnsignedMintTokens for externally signed transactions.',
+        'approveToken requires authority to be the executing wallet. Use generateUnsignedApproveToken for externally signed transactions.',
       )
     }
 
