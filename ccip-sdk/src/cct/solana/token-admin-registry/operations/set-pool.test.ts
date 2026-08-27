@@ -7,7 +7,7 @@ import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import { DEFAULT_WRITABLE_INDEXES, SolanaTokenManager } from '../../index.ts'
 
 const BLOCKHASH = PublicKey.default.toBase58()
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -56,6 +56,12 @@ describe('SetPool (cct/solana)', () => {
       assert.ok(instruction.keys.some((key) => key.pubkey.toBase58() === TOKEN))
       assert.ok(instruction.keys.some((key) => key.pubkey.toBase58() === POOL_LOOKUP_TABLE))
       assert.ok(instruction.keys.some((key) => key.pubkey.toBase58() === PAYER))
+    })
+
+    it('accepts the default writable indexes directly', async () => {
+      const unsigned = await generate({ writableIndexes: DEFAULT_WRITABLE_INDEXES })
+
+      assert.equal(unsigned.instructions[0]!.data.toString('hex'), '771e0eb473e1a7ee03000000030407')
     })
 
     it('uses caller-provided writable indexes', async () => {

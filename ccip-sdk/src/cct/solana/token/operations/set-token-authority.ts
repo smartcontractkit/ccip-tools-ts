@@ -14,12 +14,7 @@ import {
 } from '../../operation.ts'
 import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
-
-/** SPL Token authority roles that can be set. */
-export const TOKEN_AUTHORITY_TYPES = {
-  MINT: 'mint',
-  FREEZE: 'freeze',
-} as const
+import { TOKEN_AUTHORITY_TYPES } from '../constants.ts'
 
 /** SPL Token authority role that can be set. */
 export type TokenAuthorityType = (typeof TOKEN_AUTHORITY_TYPES)[keyof typeof TOKEN_AUTHORITY_TYPES]
