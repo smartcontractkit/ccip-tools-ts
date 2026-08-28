@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, it, mock } from 'node:test'
 
+import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { type Connection, PublicKey } from '@solana/web3.js'
 
+import { CCIPDataFormatUnsupportedError } from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
 import { hexDiscriminator } from '../utils.ts'
 
 // Create mock functions
 const mockGetAccountInfo = mock.fn(() => null as any)
+const mockGetAddressLookupTable = mock.fn(() => null as any)
 const mockGetParsedAccountInfo = mock.fn(() => null as any)
 const mockGetGenesisHash = mock.fn(() => null as any)
 const mockGetSignaturesForAddress = mock.fn(() => null as any)
@@ -18,6 +21,7 @@ const mockConnection = {
   getGenesisHash: mockGetGenesisHash,
   getParsedAccountInfo: mockGetParsedAccountInfo,
   getAccountInfo: mockGetAccountInfo,
+  getAddressLookupTable: mockGetAddressLookupTable,
   getSignaturesForAddress: mockGetSignaturesForAddress,
 } as unknown as Connection
 
@@ -608,6 +612,75 @@ describe('SolanaChain.encodeExtraArgs', () => {
 
     const parsed = SolanaChain.decodeExtraArgs(encodedExtraArgs)
     assert.equal(parsed?._tag, 'EVMExtraArgsV2')
+  })
+})
+
+describe('SolanaChain getRegistryTokenConfig', () => {
+  const key = (byte: number): PublicKey => {
+    return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
+  }
+
+  const router = key(1)
+  const mint = key(2)
+  const administrator = key(3)
+  const pendingAdministrator = key(4)
+  const lookupTable = key(5)
+  const tokenPool = key(6)
+
+  function tokenAdminRegistryData(
+    administrator: PublicKey,
+    pendingAdministrator: PublicKey,
+    lookupTable: PublicKey,
+    mint: PublicKey,
+  ): Buffer {
+    const data = Buffer.alloc(170)
+    BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry').copy(data)
+    data[8] = 2
+    administrator.toBuffer().copy(data, 9)
+    pendingAdministrator.toBuffer().copy(data, 41)
+    lookupTable.toBuffer().copy(data, 73)
+    mint.toBuffer().copy(data, 137)
+    return data
+  }
+
+  function chainWithLookupTable(lookup: () => Promise<unknown>): SolanaChain {
+    return new SolanaChain(
+      {
+        getAccountInfo: async () => ({
+          data: tokenAdminRegistryData(administrator, pendingAdministrator, lookupTable, mint),
+        }),
+        getAddressLookupTable: lookup,
+        getSignaturesForAddress: async () => [],
+      } as unknown as Connection,
+      mockNetworkInfo,
+    )
+  }
+
+  it('returns the configured administrator, pending administrator, and token pool', async () => {
+    const chain = chainWithLookupTable(async () => ({
+      value: {
+        state: {
+          addresses: [PublicKey.default, PublicKey.default, PublicKey.default, tokenPool],
+        },
+      },
+    }))
+
+    assert.deepEqual(await chain.getRegistryTokenConfig(router.toBase58(), mint.toBase58()), {
+      administrator: administrator.toBase58(),
+      pendingAdministrator: pendingAdministrator.toBase58(),
+      tokenPool: tokenPool.toBase58(),
+    })
+  })
+
+  it('omits the token pool when lookup-table resolution fails', async () => {
+    const chain = chainWithLookupTable(async () => {
+      throw new CCIPDataFormatUnsupportedError('RPC unavailable')
+    })
+
+    assert.deepEqual(await chain.getRegistryTokenConfig(router.toBase58(), mint.toBase58()), {
+      administrator: administrator.toBase58(),
+      pendingAdministrator: pendingAdministrator.toBase58(),
+    })
   })
 })
 
