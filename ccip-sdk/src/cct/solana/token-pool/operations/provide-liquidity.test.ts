@@ -95,8 +95,7 @@ function submitChain(): SolanaChain {
   )
   const poolProgram = resolveTokenPoolProgram('lock-release')
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
@@ -110,7 +109,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

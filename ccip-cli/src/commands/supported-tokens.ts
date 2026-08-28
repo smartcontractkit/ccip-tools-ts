@@ -33,10 +33,17 @@ import { search } from '@inquirer/prompts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
-import { type Ctx, Format } from './types.ts'
-import { formatDuration, getCtx, logParsedError, omit, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import {
+  formatDisplayAddress,
+  formatDuration,
+  getCtx,
+  logParsedError,
+  omit,
+  prettyTable,
+} from './utils.ts'
 
 export const command = ['getSupportedTokens', 'get-supported-tokens']
 export const describe =
@@ -145,7 +152,14 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     switch (argv.format) {
       case Format.pretty:
         output.write('Fee Tokens:')
-        output.table(feeTokens)
+        output.table(
+          Object.fromEntries(
+            Object.entries(feeTokens).map(([addr, info]) => [
+              formatDisplayAddress(addr, sourceNetwork.family),
+              info,
+            ]),
+          ),
+        )
         break
       case Format.json:
         jsonFeeTokens = feeTokens // deferred — combined with subsequent output
@@ -213,17 +227,22 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
 
   prettyTable.call(ctx, {
     network: `${source.network.name} [${source.network.chainSelector}]`,
-    token: poolConfig.token,
+    token: formatDisplayAddress(poolConfig.token, source.network.family),
     symbol: info.symbol,
     name: info.name,
     decimals: info.decimals,
-    tokenPool,
+    tokenPool: formatDisplayAddress(tokenPool, source.network.family),
     typeAndVersion: poolConfig.typeAndVersion,
-    router: poolConfig.router,
-    tokenAdminRegistry: registry,
-    administrator: registryConfig.administrator,
+    router: formatDisplayAddress(poolConfig.router, source.network.family),
+    tokenAdminRegistry: registry && formatDisplayAddress(registry, source.network.family),
+    administrator:
+      registryConfig.administrator &&
+      formatDisplayAddress(registryConfig.administrator, source.network.family),
     ...(registryConfig.pendingAdministrator && {
-      pendingAdministrator: registryConfig.pendingAdministrator,
+      pendingAdministrator: formatDisplayAddress(
+        registryConfig.pendingAdministrator,
+        source.network.family,
+      ),
     }),
     ...(poolConfig.finalityDepth != null && {
       finalityDepth: poolConfig.finalityDepth === 0 ? '0 (finalized)' : poolConfig.finalityDepth,
@@ -233,11 +252,12 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
   })
   const remotesLen = Object.keys(remotes).length
   if (remotesLen > 0) output.write('Remotes [', remotesLen, ']:')
-  for (const [network, remote] of Object.entries(remotes))
+  for (const [network, remote] of Object.entries(remotes)) {
+    const remoteFamily = networkInfo(network).family
     prettyTable.call(ctx, {
       remoteNetwork: `${network} [${networkInfo(network).chainSelector}]`,
-      remoteToken: remote.remoteToken,
-      remotePool: remote.remotePools,
+      remoteToken: formatDisplayAddress(remote.remoteToken, remoteFamily),
+      remotePool: remote.remotePools.map((p) => formatDisplayAddress(p, remoteFamily)),
       outbound: prettyRateLimiter(remote.outboundRateLimiterState, info),
       inbound: prettyRateLimiter(remote.inboundRateLimiterState, info),
       ...('fastOutboundRateLimiterState' in remote && {
@@ -254,6 +274,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
         'fastInboundRateLimiterState',
       ),
     })
+  }
 }
 
 async function listTokens(
@@ -303,7 +324,7 @@ async function listTokens(
   if (argv.interactive === false) {
     // Non-interactive: print all tokens, skip search prompt
     for (const info of infos) {
-      output.write(info.token, '=', info)
+      output.write(formatDisplayAddress(info.token, source.network.family), '=', info)
     }
     return
   }
@@ -322,9 +343,9 @@ async function listTokens(
       const symbolPad = Math.min(Math.max(...filtered.map(({ symbol }) => symbol.length)), 10)
       const decimalsPad = Math.max(...filtered.map(({ decimals }) => decimals.toString().length))
       return filtered.map((info, i) => ({
-        name: `${info.token}\t[${info.decimals.toString().padStart(decimalsPad)}] ${info.symbol.padEnd(symbolPad)}\t${info.name ?? ''}`,
+        name: `${formatDisplayAddress(info.token, source.network.family)}\t[${info.decimals.toString().padStart(decimalsPad)}] ${info.symbol.padEnd(symbolPad)}\t${info.name ?? ''}`,
         value: info,
-        short: `${info.token} [${info.symbol}]`,
+        short: `${formatDisplayAddress(info.token, source.network.family)} [${info.symbol}]`,
         description: `${i + 1} / ${filtered.length} / ${tokens.length}`,
       }))
     },

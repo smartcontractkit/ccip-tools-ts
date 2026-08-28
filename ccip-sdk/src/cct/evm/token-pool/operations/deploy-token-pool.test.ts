@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, makeError } from 'ethers'
 
-import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -12,6 +11,7 @@ import BURN_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-from-min
 import BURN_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)

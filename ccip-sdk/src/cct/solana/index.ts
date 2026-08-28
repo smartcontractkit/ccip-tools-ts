@@ -13,37 +13,6 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
-  type ExecuteApproveTokenParams,
-  type ExecuteApproveTokenResult,
-  type ExecuteCreateTokenAccountParams,
-  type ExecuteCreateTokenAccountResult,
-  type ExecuteDeployTokenParams,
-  type ExecuteDeployTokenResult,
-  type ExecuteMintTokensParams,
-  type ExecuteMintTokensResult,
-  type ExecuteSetTokenAuthorityParams,
-  type ExecuteSetTokenAuthorityResult,
-  type ExecuteUpdateMetadataAuthorityParams,
-  type ExecuteUpdateMetadataAuthorityResult,
-  type GenerateApproveTokenParams,
-  type GenerateApproveTokenResult,
-  type GenerateCreateTokenAccountParams,
-  type GenerateCreateTokenAccountResult,
-  type GenerateDeployTokenParams,
-  type GenerateDeployTokenResult,
-  type GenerateMintTokensParams,
-  type GenerateMintTokensResult,
-  type GenerateSetTokenAuthorityParams,
-  type GenerateSetTokenAuthorityResult,
-  type GenerateUpdateMetadataAuthorityParams,
-  type GenerateUpdateMetadataAuthorityResult,
-  ApproveToken,
-  CreateTokenAccount,
-  MintTokens,
-  SetTokenAuthority,
-  UpdateMetadataAuthority,
-} from './token/operations/index.ts'
-import {
   type ExecuteAcceptAdminParams,
   type ExecuteAcceptAdminResult,
   type ExecuteAppendToLookupTableParams,
@@ -178,6 +147,37 @@ import {
   TransferOwnership,
   WithdrawLiquidity,
 } from './token-pool/operations/index.ts'
+import {
+  type ExecuteApproveTokenParams,
+  type ExecuteApproveTokenResult,
+  type ExecuteCreateTokenAccountParams,
+  type ExecuteCreateTokenAccountResult,
+  type ExecuteDeployTokenParams,
+  type ExecuteDeployTokenResult,
+  type ExecuteMintTokensParams,
+  type ExecuteMintTokensResult,
+  type ExecuteSetTokenAuthorityParams,
+  type ExecuteSetTokenAuthorityResult,
+  type ExecuteUpdateMetadataAuthorityParams,
+  type ExecuteUpdateMetadataAuthorityResult,
+  type GenerateApproveTokenParams,
+  type GenerateApproveTokenResult,
+  type GenerateCreateTokenAccountParams,
+  type GenerateCreateTokenAccountResult,
+  type GenerateDeployTokenParams,
+  type GenerateDeployTokenResult,
+  type GenerateMintTokensParams,
+  type GenerateMintTokensResult,
+  type GenerateSetTokenAuthorityParams,
+  type GenerateSetTokenAuthorityResult,
+  type GenerateUpdateMetadataAuthorityParams,
+  type GenerateUpdateMetadataAuthorityResult,
+  ApproveToken,
+  CreateTokenAccount,
+  MintTokens,
+  SetTokenAuthority,
+  UpdateMetadataAuthority,
+} from './token/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
@@ -2212,7 +2212,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
    */
   getTokenPoolState(
-    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
+    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & {
+      tokenAddress: string
+    },
   ): Promise<BaseGetTokenPoolStateResult>
   /**
    * Reads a pool state account whose program is not known statically; narrow the result on the

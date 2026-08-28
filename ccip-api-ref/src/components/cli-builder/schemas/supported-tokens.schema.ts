@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli get-supported-tokens` command.
  */
 
-import { outputOptions, rpcOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions, rpcOptions } from './common.ts'
 
 export const supportedTokensSchema: CommandSchema<'get-supported-tokens'> = {
   name: 'get-supported-tokens',

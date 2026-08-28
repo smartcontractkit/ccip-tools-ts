@@ -30,30 +30,32 @@ function metadataData(authority = AUTHORITY, isMutable = true): Buffer {
   ])
 }
 
+function metadataAccount(metadata = metadataData()) {
+  return {
+    data: metadata,
+    executable: false,
+    lamports: 0,
+    owner: METAPLEX_PROGRAM_ID,
+    rentEpoch: 0,
+  }
+}
+
 function chain(metadata: Buffer | null = metadataData()): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
       rpcEndpoint: 'http://localhost:8899',
-      getAccountInfo: async () =>
-        metadata
-          ? {
-              data: metadata,
-              executable: false,
-              lamports: 0,
-              owner: METAPLEX_PROGRAM_ID,
-              rentEpoch: 0,
-            }
-          : null,
+      getAccountInfo: async () => (metadata ? metadataAccount(metadata) : null),
     },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return {
-    ...chain(),
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
-      ...chain().connection,
+      rpcEndpoint: 'http://localhost:8899',
+      getAccountInfo: async () => metadataAccount(),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),

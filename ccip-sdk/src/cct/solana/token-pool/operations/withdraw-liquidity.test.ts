@@ -98,8 +98,7 @@ function submitChain(): SolanaChain {
   const state = deriveTokenPoolConfigPda(poolProgram, mint)
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, mint)
   const poolTokenAccount = getAssociatedTokenAddressSync(mint, poolSigner, true)
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
@@ -115,7 +114,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

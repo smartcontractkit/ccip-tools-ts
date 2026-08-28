@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { GetTokenPoolRemotes } from './get-token-pool-remotes.ts'
 import type { TokenPoolRemote } from '../../../../chain.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { GetTokenPoolRemotes } from './get-token-pool-remotes.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const SELECTOR = 5009297550715157269n

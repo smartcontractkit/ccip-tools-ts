@@ -3,6 +3,11 @@ import { describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
 
+import { SolanaChain } from '../../solana/index.ts'
+import type {
+  GetTokenPoolStateParams,
+  GetTokenPoolStateResult,
+} from './token-pool/operations/index.ts'
 import {
   type RegisterAdminMethod,
   type TokenAuthorityType,
@@ -11,11 +16,6 @@ import {
   SolanaTokenManager,
   TOKEN_AUTHORITY_TYPES,
 } from './index.ts'
-import type {
-  GetTokenPoolStateParams,
-  GetTokenPoolStateResult,
-} from './token-pool/operations/index.ts'
-import { SolanaChain } from '../../solana/index.ts'
 
 function stubChain(): SolanaChain {
   return {

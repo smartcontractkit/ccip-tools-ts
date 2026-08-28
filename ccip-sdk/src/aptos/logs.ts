@@ -9,7 +9,7 @@ import {
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
-import type { Chain, LogFilter } from '../chain.ts'
+import { type Chain, type LogFilter, withSinceStart } from '../chain.ts'
 import {
   CCIPAptosAddressModuleRequiredError,
   CCIPAptosTransactionTypeUnexpectedError,
@@ -121,12 +121,55 @@ async function binarySearchFirst(
  */
 const missingHandles = new WeakMap<Aptos, Set<string>>()
 
+/**
+ * The resume cursor derivable from a LogFilter.since hint. Two independently usable
+ * coordinates: `seq` (the hint's `index` — the emitting handle's event
+ * sequence_number) is an exact cursor, but each event handle owns an INDEPENDENT
+ * sequence space, so it is only attributable on single-handle streams; `block` (the
+ * hint's `blockNumber` — a ledger version) is global and can floor every handle of a
+ * multi-handle stream (see fetchEventsForward).
+ */
+type AptosResumeHint = { seq?: number; block?: number; timestamp?: number; topic?: string }
+
+/** Parses and validates opts.since; undefined when absent, malformed, or
+ * foreign-addressed (the emitted log carries opts.address verbatim, so an equal-form
+ * or absent address is expected — anything else is not this stream's hint). */
+function parseResumeHint(opts: LeanNumbers<LogFilter>): AptosResumeHint | undefined {
+  const hint = opts.since
+  if (!hint) return undefined
+  if (hint.address && hint.address.toLowerCase() !== opts.address!.toLowerCase()) return undefined
+  const seq = Number(hint.index)
+  const block = Number(hint.blockNumber)
+  const timestamp = Number(hint.blockTimestamp)
+  const parsed: AptosResumeHint = {
+    block: Number.isFinite(block) && block > 0 ? block : undefined,
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined,
+  }
+  if (Number.isSafeInteger(seq) && seq >= 0) parsed.seq = seq
+  const topic = hint.topics?.[0]
+  if (typeof topic === 'string' && topic) parsed.topic = topic
+  if (parsed.seq == null && parsed.block == null) return undefined
+  return parsed
+}
+
+/**
+ * Best-effort topic → event-handle mapping: raw `Struct/field` handle paths pass
+ * through, known event names map via eventToHandler; anything else (notably a struct
+ * name emitted into a log's topics[0] for a raw-path stream) is unresolvable offline.
+ */
+function handleForTopic(topic: unknown): string | undefined {
+  if (typeof topic !== 'string' || !topic) return undefined
+  if (topic.includes('/')) return topic
+  return (eventToHandler as Record<string, string>)[topic]
+}
+
 async function initHandleState(
   { provider }: { provider: Aptos },
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   eventHandlerField: string,
   stateAddr: string,
   limit: number,
+  hint?: AptosResumeHint & { seq: number },
 ) {
   const fetchBatch = memoize(
     async (start?: number) => {
@@ -173,27 +216,55 @@ async function initHandleState(
   if (!initialBatch.length) return undefined
   const end = +initialBatch[initialBatch.length - 1]!.sequence_number
 
-  let start
-  if (
-    opts.startTime != null &&
-    (opts.startBlock == null || Number(opts.startBlock) < +initialBatch[0]!.version) &&
-    Number(opts.startTime) < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
-  ) {
-    const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
-      const batch = await fetchBatch(end - (i + 1) * limit + 1)
-      const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
-      return firstTimestamp > Number(opts.startTime!)
-    })
-    start = Math.max(end - (i + 1) * limit + 1, 0)
-  } else if (
-    opts.startTime == null &&
-    opts.startBlock != null &&
-    Number(opts.startBlock) <= +initialBatch[0]!.version
-  ) {
-    start = 0
-  } else {
-    start = Math.max(end - limit + 1, 0)
+  // Every event handle owns an INDEPENDENT sequence space: the hint's seq is an
+  // exact cursor for THIS handle only when the hinted event is of this handle's own
+  // type (a log's topics[0] is its event's struct name). A cursor captured from
+  // another handle's topic would silently skip this handle's events — drop it; the
+  // merged block/timestamp floors are global (ledger versions), not per-handle, and
+  // still apply.
+  let cursorHint = hint
+  if (hint?.topic != null) {
+    const eventType = initialBatch[0]!.type
+    const structName = eventType.slice(eventType.lastIndexOf('::') + 2)
+    if (hint.topic !== structName) cursorHint = undefined
   }
+
+  // The hint covers the floor when it sits past every requested start bound —
+  // resuming at seq+1 then IS the floor, so the floor computation (and its binary
+  // search / timestamp lookups) is skipped entirely.
+  const hintCoversFloor =
+    cursorHint != null &&
+    (opts.startBlock == null ||
+      (cursorHint.block != null && cursorHint.block >= Number(opts.startBlock))) &&
+    (opts.startTime == null ||
+      (cursorHint.timestamp != null && cursorHint.timestamp >= Number(opts.startTime)))
+
+  let start: number | undefined
+  if (!hintCoversFloor) {
+    if (
+      opts.startTime != null &&
+      (opts.startBlock == null || Number(opts.startBlock) < +initialBatch[0]!.version) &&
+      Number(opts.startTime) < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
+    ) {
+      const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
+        const batch = await fetchBatch(end - (i + 1) * limit + 1)
+        const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
+        return firstTimestamp > Number(opts.startTime!)
+      })
+      start = Math.max(end - (i + 1) * limit + 1, 0)
+    } else if (
+      opts.startTime == null &&
+      opts.startBlock != null &&
+      Number(opts.startBlock) <= +initialBatch[0]!.version
+    ) {
+      start = 0
+    } else {
+      start = Math.max(end - limit + 1, 0)
+    }
+  }
+  // Exclusive resume (matching the SVM `until` / TON lt cursors): the hinted event
+  // itself is not re-emitted. The hint can only ever RAISE the computed floor.
+  if (cursorHint != null) start = Math.max(cursorHint.seq + 1, start ?? 0)
 
   const notAfter =
     typeof opts.endBlock !== 'number' && typeof opts.endBlock !== 'bigint'
@@ -212,9 +283,11 @@ async function initHandleState(
   return {
     fetchBatch,
     end,
-    start,
+    start: start!,
     notAfter,
     first: true,
+    hintCoversFloor,
+    limit,
     catchedUp: false,
     // Events fetched but withheld from a previous round because they were
     // above that round's version ceiling (see fetchEventsForward). Released
@@ -224,6 +297,9 @@ async function initHandleState(
 }
 
 type HandleState = NonNullable<Awaited<ReturnType<typeof initHandleState>>>
+
+// fetchHandleRound reads state.hintCoversFloor: when the resume hint already satisfies
+// the startTime floor, the first-batch timestamp check below is pure overhead.
 
 /**
  * Fetches and processes ONE round's worth of events for a single handle,
@@ -245,6 +321,8 @@ async function fetchHandleRound(
   if (
     state.first &&
     opts.startTime != null &&
+    !state.hintCoversFloor && // the resume hint already satisfies the startTime floor
+    data.length > 0 && // a hint past the tip can make the first batch empty
     (await getVersionTimestamp(provider, +data[0]!.version)) < Number(opts.startTime)
   ) {
     // the first batch may have some head which is not in the range
@@ -287,19 +365,31 @@ async function fetchHandleRound(
     // own tail to skip past, independent of how far any other handle has advanced this round.
     state.start = +data[data.length - 1]!.sequence_number + 1
   }
-  state.catchedUp ||= state.start >= state.end
+  // `end` is the last EXISTING sequence number (from the tip fetch) and `start`
+  // the next one to fetch, so drained means start > end — with `>=`, a handle
+  // whose remaining events exactly fill the final batch would be declared caught
+  // up while the event AT seq `end` is still unfetched, and it would never be
+  // emitted (its version's logs would be delivered incomplete).
+  state.catchedUp ||= state.start > state.end
 
-  // This handle's safe ceiling contribution for the round: a version bound
-  // below which we're sure this handle will never later produce something
-  // even lower (which would break global ascending order once merged with
-  // other handles — see fetchEventsForward).
+  // This handle's safe ceiling contribution for the round, as an EXCLUSIVE
+  // version bound: versions strictly below it are provably complete in this
+  // handle's pending queue (a handle's sequence numbers, and hence versions,
+  // only increase), while the batch's TAIL version may still be incomplete —
+  // batches are sequence-number windows, and one version (one transaction) can
+  // own enough events to straddle the boundary into the next batch. Releasing
+  // only strictly-below-ceiling versions (see fetchEventsForward) is what makes
+  // every version atomic in the output: a getLogs call never emits a version
+  // partially, so a resume hint taken from any emitted log can floor at
+  // blockNumber + 1 without skipping that version's stragglers.
   //
-  // - Drained (catchedUp): nothing more can EVER come from this handle below
-  //   the current chain tip, so it can't hold the merge back — contribute
-  //   +Infinity. This holds even in watch mode: "caught up" means this
-  //   handle's cursor has reached the tip as of now, so anything it produces
-  //   later happened after now, i.e. at or after that tip — which is already
-  //   >= anything a still-behind handle could be catching up on from history.
+  // - Drained (catchedUp) and not mid-burst: nothing more can come from this
+  //   handle right now, so it can't hold the merge back — contribute +Infinity.
+  //   In watch mode a FULL last batch (== limit) means more events may exist
+  //   immediately past it, so even a caught-up handle keeps contributing its
+  //   tail version until a short/empty batch proves the burst over. (Non-watch
+  //   must flush with Infinity instead: the loop exits once every handle is
+  //   drained, and held events would never be released.)
   // - Otherwise, use the highest version in the RAW fetched batch (`data`),
   //   not just the events actually returned in `out`: a startBlock skip can
   //   filter every event out of a batch while the handle is still deep in
@@ -307,21 +397,22 @@ async function fetchHandleRound(
   //   empty for several rounds. Since a handle's sequence numbers (and their
   //   versions) only increase, `data`'s tail is still a valid lower bound on
   //   anything this handle could produce from here on.
-  // - `data` should never be empty here while !catchedUp (start < end means
+  // - `data` should never be empty here while !catchedUp (start <= end means
   //   there's known history left to return), but if some flaky/pruned
   //   fullnode response ever violates that, fall back to +Infinity rather
   //   than pin the ceiling to a phantom low value and stall every other
   //   handle indefinitely.
-  const ceiling = state.catchedUp
-    ? Infinity
-    : data.length
-      ? +data[data.length - 1]!.version
-      : Infinity
+  const ceiling =
+    state.catchedUp && !(opts.watch && data.length === state.limit)
+      ? Infinity
+      : data.length
+        ? +data[data.length - 1]!.version
+        : Infinity
   return { events: out, ceiling }
 }
 
 async function* fetchEventsForward(
-  ctx: { provider: Aptos },
+  ctx: { provider: Aptos } & WithLogger,
   opts: LeanNumbers<LogFilter> & { pollInterval?: number },
   eventHandlerFields: string[],
   stateAddr: string,
@@ -335,9 +426,36 @@ async function* fetchEventsForward(
     throw new CCIPLogsWatchRequiresFinalityError(Number(opts.endBlock))
   opts.endBlock ??= 'latest'
 
+  const hint = parseResumeHint(opts)
+  if (opts.since && hint == null) ctx.logger?.warn('Invalid `since` hint: ', opts)
+
+  // Single-handle: the hint's `index` is attributable to the one handle's sequence
+  // space — an exact cursor. Multi-handle: a lone `index` can't be attributed (each
+  // handle's sequence space is independent), but the hint's blockNumber is a global
+  // ledger version — and a ledger version carries exactly ONE transaction, whose
+  // events a getLogs call always emits COMPLETE (see the version-atomic ceiling
+  // merge below). The hinted version was therefore fully delivered, and the floor
+  // resumes strictly past it: blockNumber + 1, exclusive, no redelivery slack.
+  let seqHint: (AptosResumeHint & { seq: number }) | undefined
+  let opts_ = opts
+  if (hint != null) {
+    if (eventHandlerFields.length === 1 && hint.seq != null) {
+      // The seq is attributable to the one handle ONLY IF the hinted event is of this
+      // handle's own type — verified against the handle's events in initHandleState
+      // (handles at one address own independent sequence spaces; the address gate
+      // alone can't tell them apart).
+      seqHint = { seq: hint.seq, block: hint.block, timestamp: hint.timestamp, topic: hint.topic }
+    } else if (hint.block != null) {
+      const versionFloor = hint.block + 1
+      if (opts.startBlock == null || versionFloor > Number(opts.startBlock))
+        opts_ = { ...opts, startBlock: versionFloor }
+    }
+  }
   const handleStates = (
     await Promise.all(
-      eventHandlerFields.map((field) => initHandleState(ctx, opts, field, stateAddr, limit)),
+      eventHandlerFields.map((field) =>
+        initHandleState(ctx, opts_, field, stateAddr, limit, seqHint),
+      ),
     )
   ).filter((state): state is HandleState => state !== undefined)
 
@@ -359,7 +477,7 @@ async function* fetchEventsForward(
     const ceilings = await Promise.all(
       handleStates.map(async (state) => {
         if (state.catchedUp && !opts.watch) return Infinity
-        const { events, ceiling } = await fetchHandleRound(ctx, opts, state)
+        const { events, ceiling } = await fetchHandleRound(ctx, opts_, state)
         state.pending.push(...events)
         return ceiling
       }),
@@ -377,8 +495,17 @@ async function* fetchEventsForward(
     // or revisited after, a return). Bounding every round to the lowest
     // "safe" version any handle has confirmed prevents that: nothing above
     // the ceiling is released until some later round's ceiling rises past
-    // it. Once every handle is drained the ceiling is +Infinity, so the
-    // final round still flushes everything and the generator terminates.
+    // it.
+    //
+    // The ceiling is EXCLUSIVE (`<`, not `<=`): a handle's ceiling is the
+    // tail version of its current batch, which may still be cut mid-version
+    // (a version is one transaction, but it can own more events than a batch
+    // holds), so events AT the ceiling wait for a later round to prove the
+    // version complete. Every version is therefore emitted in a single round
+    // — atomically per getLogs call — which is exactly what the since
+    // `blockNumber + 1` resume floor above relies on. Once every handle is
+    // drained the ceiling is +Infinity, so the final round still flushes
+    // everything and the generator terminates.
     const ceiling = Math.min(...ceilings)
 
     const roundEvents: { ev: ResEvent; handleIndex: number }[] = []
@@ -386,7 +513,7 @@ async function* fetchEventsForward(
       if (!state.pending.length) continue
       const releasable: ResEvent[] = []
       const held: ResEvent[] = []
-      for (const ev of state.pending) (+ev.version <= ceiling ? releasable : held).push(ev)
+      for (const ev of state.pending) (+ev.version < ceiling ? releasable : held).push(ev)
       state.pending = held
       for (const ev of releasable) roundEvents.push({ ev, handleIndex })
     }
@@ -440,6 +567,30 @@ export async function* streamAptosLogs(
         typeAndVersion: () =>
           Promise.reject(new CCIPNotImplementedError('typeAndVersion in this getLogs context')),
       }
+  // A hint addressed to a different stream is ignored wholesale — no cursor, no
+  // floors. Otherwise `since.blockNumber`/`blockTimestamp` stand in for (or raise)
+  // startBlock/startTime; the event-seq cursor is resolved in fetchEventsForward.
+  // (Merged before the validations below so their narrowing holds afterwards.)
+  if (
+    opts.since?.address &&
+    (!opts.address || opts.since.address.toLowerCase() !== opts.address.toLowerCase())
+  )
+    opts = { ...opts, since: undefined }
+  // A hint bearing a PROVABLY different handle's topic is foreign the same way:
+  // every event handle at an address owns an independent sequence space, so a cursor
+  // (or floor) captured from topic X must not resume a stream of topic Y. Only
+  // offline-resolvable topics are checked here; a struct name emitted for a raw
+  // handle path defers to initHandleState, which checks it against the handle's own
+  // event type before applying the seq cursor.
+  const hintHandle = handleForTopic(opts.since?.topics?.[0])
+  if (
+    hintHandle != null &&
+    opts.topics?.length &&
+    !opts.topics.some((topic) => handleForTopic(topic) === hintHandle)
+  )
+    opts = { ...opts, since: undefined }
+  opts = withSinceStart(opts)
+
   if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
   if (!opts.topics?.length) throw new CCIPTopicsInvalidError(opts.topics!)
   const hasStart = opts.startBlock != null || opts.startTime != null
