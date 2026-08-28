@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey } from '@solana/web3.js'
 
-import type { GenerateAcceptAdminParams } from './accept-admin.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
+import type { GenerateAcceptAdminParams } from './accept-admin.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const ADDRESS = Keypair.generate().publicKey.toBase58()

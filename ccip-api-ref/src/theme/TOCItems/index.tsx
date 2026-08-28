@@ -6,8 +6,8 @@
  */
 
 import type { WrapperProps } from '@docusaurus/types'
-import type TOCItemsType from '@theme/TOCItems'
 import TOCItems from '@theme-original/TOCItems'
+import type TOCItemsType from '@theme/TOCItems'
 import React from 'react'
 
 import { CopyPageButton } from '../../components/copy-page/index.ts'

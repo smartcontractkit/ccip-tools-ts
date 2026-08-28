@@ -6,12 +6,12 @@
  */
 
 import type { WrapperProps } from '@docusaurus/types'
-import type ApiItemType from '@theme/ApiItem'
 import ApiItem from '@theme-original/ApiItem'
+import type ApiItemType from '@theme/ApiItem'
 import React from 'react'
 
-import { ApiCopyButton } from './ApiCopyButton.tsx'
 import { CopyPageErrorBoundary } from '../../components/copy-page/index.ts'
+import { ApiCopyButton } from './ApiCopyButton.tsx'
 
 type Props = WrapperProps<typeof ApiItemType>
 

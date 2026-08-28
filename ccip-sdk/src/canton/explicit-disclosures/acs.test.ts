@@ -3,8 +3,8 @@ import { describe, it } from 'node:test'
 
 import { id as keccak256Utf8 } from 'ethers'
 
-import { AcsDisclosureProvider } from './acs.ts'
 import type { CantonClient, JsGetActiveContractsResponse } from '../client/index.ts'
+import { AcsDisclosureProvider } from './acs.ts'
 
 // ---------------------------------------------------------------------------
 // Fixtures
