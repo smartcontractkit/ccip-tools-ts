@@ -107,6 +107,78 @@ export class BoundedStringCache implements TonStringCache {
   }
 }
 
+/**
+ * Structural alias for dataloader's CacheMap contract, used by `@ton/ton`'s
+ * internal DataLoaders (all cache ops route through `_cacheMap` at call time).
+ */
+export interface LoaderCacheMap<K, V> {
+  get(key: K): V | undefined
+  set(key: K, value: V): unknown
+  delete(key: K): unknown
+  clear(): void
+}
+
+/**
+ * Bounded LRU implementing dataloader's CacheMap contract. `HttpApi` builds a
+ * `shardLoader` per client whose resolved-key map is a plain Map keyed by shard
+ * seqno that NEVER evicts — on long-lived workers it grows one entry per
+ * distinct seqno forever (two ~55k-entry maps observed on a 28h pod). Swapped
+ * into the loaders by {@link boundTonClientCaches}.
+ */
+export class BoundedLoaderCacheMap<K, V> implements LoaderCacheMap<K, V> {
+  /** Maximum number of entries retained (oldest evicted first on overflow). */
+  readonly maxEntries: number
+
+  /** Underlying store. */
+  private map = new Map<K, V>()
+
+  /**
+   * Creates an empty LRU with the given entry budget.
+   *
+   * @param maxEntries - maximum number of entries retained.
+   */
+  constructor(maxEntries: number) {
+    this.maxEntries = maxEntries
+  }
+
+  /** Number of live entries. */
+  get size(): number {
+    return this.map.size
+  }
+
+  /** Fetches a value, refreshing its recency on a hit. */
+  get(key: K): V | undefined {
+    const value = this.map.get(key)
+    if (value === undefined) return undefined
+    // refresh recency: re-inserting appends to the insertion order
+    this.map.delete(key)
+    this.map.set(key, value)
+    return value
+  }
+
+  /** Stores a value, evicting the least-recently used entry when over budget. */
+  set(key: K, value: V): this {
+    if (this.map.has(key)) {
+      this.map.delete(key)
+    } else if (this.map.size >= this.maxEntries) {
+      const oldest = this.map.keys().next()
+      if (!oldest.done) this.map.delete(oldest.value)
+    }
+    this.map.set(key, value)
+    return this
+  }
+
+  /** Removes one entry; returns true when it was present. */
+  delete(key: K): boolean {
+    return this.map.delete(key)
+  }
+
+  /** Removes every entry. */
+  clear(): void {
+    this.map.clear()
+  }
+}
+
 /** Per-cache budgets for {@link boundTonClientCaches}. */
 export interface BoundTonClientCacheLimits {
   /** Entry cap for the shard-list cache (default 10_000). */
@@ -129,13 +201,21 @@ export const TON_CLIENT_CACHE_DEFAULTS: Required<BoundTonClientCacheLimits> = {
 
 type TypedCacheBacking = { cache: TonStringCache }
 type TonClientInternals = {
-  api?: { shardCache?: TypedCacheBacking; shardTransactionsCache?: TypedCacheBacking }
+  api?: {
+    shardCache?: TypedCacheBacking
+    shardTransactionsCache?: TypedCacheBacking
+    shardLoader?: { _cacheMap?: LoaderCacheMap<unknown, unknown> }
+    shardTransactionsLoader?: { _cacheMap?: LoaderCacheMap<unknown, unknown> }
+  }
 }
 
 /**
  * Re-points the TonClient's internal TypedCaches (shard lists and whole shard
  * transaction blocks) at bounded LRU stores, replacing the unbounded
- * InMemoryCache `@ton/ton` hardcodes in `HttpApi`. Unknown layouts are ignored
+ * InMemoryCache `@ton/ton` hardcodes in `HttpApi`, and swaps the DataLoaders'
+ * own resolved-key maps (`_cacheMap`) for the same budgets — those are plain
+ * Maps keyed by shard seqno that never evict, and the TypedCache backings are
+ * only consulted inside the loader batch function. Unknown layouts are ignored
  * defensively (the client falls back to its default cache), so a future
  * `@ton/ton` reshuffle degrades instead of breaking chain construction.
  *
@@ -165,5 +245,14 @@ export function boundTonClientCaches(
       maxEntries: shardTxMaxEntries,
       maxBytes: shardTxMaxBytes,
     })
+  }
+  // The DataLoaders resolve through their OWN `_cacheMap` (a plain Map, never
+  // evicted) BEFORE the TypedCache backings above are consulted — without this
+  // the shard loader alone grows one entry per distinct seqno forever.
+  if (internals.api?.shardLoader) {
+    internals.api.shardLoader._cacheMap = new BoundedLoaderCacheMap(shardMaxEntries)
+  }
+  if (internals.api?.shardTransactionsLoader) {
+    internals.api.shardTransactionsLoader._cacheMap = new BoundedLoaderCacheMap(shardTxMaxEntries)
   }
 }

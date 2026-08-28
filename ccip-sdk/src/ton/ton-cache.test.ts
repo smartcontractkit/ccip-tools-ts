@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import { TonClient } from '@ton/ton'
 
-import { BoundedStringCache, boundTonClientCaches } from './ton-cache.ts'
+import { BoundedLoaderCacheMap, BoundedStringCache, boundTonClientCaches } from './ton-cache.ts'
 
 describe('BoundedStringCache', () => {
   it('stores and retrieves by namespace+key; null deletes', async () => {
@@ -60,6 +60,43 @@ describe('BoundedStringCache', () => {
   })
 })
 
+describe('BoundedLoaderCacheMap', () => {
+  it('stores/retrieves and honors the dataloader delete/clear contract', () => {
+    const c = new BoundedLoaderCacheMap<number, string>(3)
+    assert.equal(c.get(1), undefined)
+    c.set(1, 'a')
+    assert.equal(c.get(1), 'a')
+    assert.equal(c.delete(1), true)
+    assert.equal(c.delete(1), false)
+    assert.equal(c.get(1), undefined)
+    c.set(1, 'a')
+    c.clear()
+    assert.equal(c.size, 0)
+  })
+
+  it('evicts the least-recently used entry once maxEntries is exceeded', () => {
+    const c = new BoundedLoaderCacheMap<number, string>(2)
+    c.set(1, 'a')
+    c.set(2, 'b')
+    c.get(1) // refresh recency
+    c.set(3, 'c') // evicts 2, not 1
+    assert.equal(c.get(2), undefined)
+    assert.equal(c.get(1), 'a')
+    assert.equal(c.get(3), 'c')
+    assert.equal(c.size, 2)
+  })
+
+  it('re-setting an existing key keeps it (no double eviction)', () => {
+    const c = new BoundedLoaderCacheMap<number, string>(2)
+    c.set(1, 'a')
+    c.set(2, 'b')
+    c.set(1, 'a2')
+    assert.equal(c.get(1), 'a2')
+    assert.equal(c.get(2), 'b')
+    assert.equal(c.size, 2)
+  })
+})
+
 describe('boundTonClientCaches', () => {
   it('re-points the TonClient HttpApi TypedCaches at bounded stores', async () => {
     // Constructor makes no network calls; we only touch its runtime internals.
@@ -99,5 +136,29 @@ describe('boundTonClientCaches', () => {
     const stored = await backing.get('ton-shard', '123')
     assert.ok(stored !== null && stored.startsWith('['))
     assert.equal(backing.size, 1)
+  })
+
+  it('bounds the DataLoaders own resolved-key maps (the seqno cache)', () => {
+    const client = new TonClient({ endpoint: 'https://invalid.example/jsonRPC' })
+
+    boundTonClientCaches(client)
+
+    const api = (
+      client as unknown as {
+        api?: {
+          shardLoader?: { _cacheMap?: unknown }
+          shardTransactionsLoader?: { _cacheMap?: unknown }
+        }
+      }
+    ).api
+    const shard = api?.shardLoader
+    const shardTx = api?.shardTransactionsLoader
+    assert.ok(shard && shardTx, 'TonClient exposes its DataLoaders at runtime')
+    assert.ok(shard._cacheMap instanceof BoundedLoaderCacheMap)
+    assert.ok(shardTx._cacheMap instanceof BoundedLoaderCacheMap)
+    assert.equal((shard._cacheMap as BoundedLoaderCacheMap<unknown, unknown>).maxEntries, 10_000)
+    assert.equal((shardTx._cacheMap as BoundedLoaderCacheMap<unknown, unknown>).maxEntries, 2_000)
+    // keys flow through the swapped map: a load lands in the bounded store
+    assert.equal((shard._cacheMap as BoundedLoaderCacheMap<unknown, unknown>).size, 0)
   })
 })
