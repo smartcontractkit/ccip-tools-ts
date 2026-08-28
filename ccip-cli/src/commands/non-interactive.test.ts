@@ -3,8 +3,8 @@ import { describe, it } from 'node:test'
 
 import { type CCIPRequest, CCIPInteractiveRequiredError } from '@chainlink/ccip-sdk/src/index.ts'
 
-import { selectRequest } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
+import { selectRequest } from './utils.ts'
 
 /** Minimal mock CCIPRequest for testing selectRequest behavior. */
 function mockRequest(logIndex: number, messageId: string): CCIPRequest {

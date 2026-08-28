@@ -7,10 +7,10 @@ import { type ChainStatic, jsonStringify, networkInfo } from '@chainlink/ccip-sd
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
-import { type Ctx, Format } from './types.ts'
-import { formatDisplayAddress, getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import { formatDisplayAddress, getCtx, logParsedError, prettyTable } from './utils.ts'
 
 export const command = 'token'
 export const describe = 'Query token balance for an address'

@@ -3,9 +3,16 @@
 const fs = require('fs/promises')
 const path = require('node:path')
 const { globSync } = require('node:fs')
-const prettier = require('prettier')
-
 const ROOT = path.join(__dirname, '..')
+const FORMAT_OPTIONS = { ...require(path.join(ROOT, '.oxfmtrc.json')) }
+delete FORMAT_OPTIONS.$schema
+
+let format
+
+async function formatSource(filepath, source) {
+  format ??= (await import('oxfmt')).format
+  return (await format(filepath, source, FORMAT_OPTIONS)).code
+}
 
 /**
  * `require` for eval'd blocks: bare ids resolve normally, relative ids resolve
@@ -42,6 +49,7 @@ async function generate(filepath) {
     expr = expr.join('\n')
     // Evaluate with eval semantics (completion value of the expression) in a scope
     // whose only injected binding is the root-relative `require` above.
+    // oxlint-disable-next-line typescript/no-implied-eval
     const runExpr = new Function('require', `return eval(${JSON.stringify(expr)})`)
     let res = await runExpr(rootRequire)
     if (typeof res === 'string') res = [res]
@@ -54,8 +62,7 @@ async function generate(filepath) {
     lines.splice(i, endIdx - i, ...res)
     i = endIdx
   }
-  const options = await prettier.resolveConfig(filepath)
-  const newFile = await prettier.format(lines.join('\n'), { ...options, filepath })
+  const newFile = await formatSource(filepath, lines.join('\n'))
   if (!DRY && newFile !== file) await fs.writeFile(filepath, newFile)
   return newFile !== file && (noFail ? true : -1)
 }

@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import { before, describe, it } from 'node:test'
 
 import '../index.ts'
-
-import { CCIPAPIClient } from './index.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import {
   CCIPLaneNotFoundError,
@@ -11,6 +9,7 @@ import {
   CCIPMessageNotFoundInTxError,
 } from '../errors/index.ts'
 import { MessageStatus } from '../types.ts'
+import { CCIPAPIClient } from './index.ts'
 
 // The suite only talks to the staging CCIP API — the selectors below are data, not endpoints.
 await useResource(['api'])

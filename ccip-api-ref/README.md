@@ -378,7 +378,7 @@ npm run lint -w ccip-api-ref
 npm run lint:fix -w ccip-api-ref
 ```
 
-Prettier formats markdown files. Oxlint checks TypeScript configuration files.
+Oxfmt formats markdown files. Oxlint checks TypeScript configuration files.
 
 ## Deployment
 

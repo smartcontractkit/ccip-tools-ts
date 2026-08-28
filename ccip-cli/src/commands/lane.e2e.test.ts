@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 import { useResource } from '../../../scripts/useResource.ts'
+import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 
 // Cross-family lanes make the CLI resolve Aptos/Solana/TON endpoints too.
 await useResource(['sepolia', 'fuji', 'aptos-testnet', 'solana-devnet', 'ton-testnet'])

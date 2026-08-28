@@ -12,9 +12,11 @@ import {
   CCIPMessageNotVerifiedYetError,
   CCIPUnexpectedPaginationError,
 } from '../errors/index.ts'
+import { calculateManualExecProof } from '../execution.ts'
 import { fetchWithTimeout } from '../fetch.ts'
 import { HttpStatus } from '../http-status.ts'
 import { decodeMessageV1 } from '../messages.ts'
+import { type NetworkInfo, ChainFamily, NetworkType } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
@@ -42,8 +44,6 @@ import type {
   RawMessagesResponse,
   RawNetworkInfo,
 } from './types.ts'
-import { calculateManualExecProof } from '../execution.ts'
-import { type NetworkInfo, ChainFamily, NetworkType } from '../networks.ts'
 
 export type {
   APICCIPRequestMetadata,
@@ -63,7 +63,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.13.0-9b351d96'
+export const SDK_VERSION = '1.13.0-418c5812'
 // generate:end
 
 /** SDK telemetry header name */

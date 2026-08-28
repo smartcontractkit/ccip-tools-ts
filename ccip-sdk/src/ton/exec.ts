@@ -1,8 +1,8 @@
 import { type Cell, beginCell } from '@ton/core'
 
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { ExecutionInput } from '../types.ts'
 import { MANUALLY_EXECUTE_OPCODE, serializeExecutionReport } from './types.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 /**
  * Generates an unsigned execute report payload for the TON OffRamp contract.
