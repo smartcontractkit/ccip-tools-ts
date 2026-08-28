@@ -784,7 +784,6 @@ export type {
   ApplyChainUpdatesParamsV1_5_1,
   ChainUpdateV1_5_0,
   ChainUpdateV1_5_1,
-  RateLimitConfig,
   RateLimitConfigInput,
 } from './token-pool/operations/apply-chain-updates.ts'
 /** The lane types `GetTokenPoolRemotesResult` is keyed over; shared with `Chain.getTokenPoolRemotes`. */
