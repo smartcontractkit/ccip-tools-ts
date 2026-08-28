@@ -1,5 +1,6 @@
 import * as oauth from 'oauth4webapi'
 
+import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { discoverAuthorizationServer } from './metadata.ts'
 import {
   type OAuthRequestOptions,
@@ -8,13 +9,7 @@ import {
   toAccessToken,
   wrapOAuthError,
 } from './token-source.ts'
-import type {
-  AccessToken,
-  AuthProvider,
-  ClientCredentialsAuthConfig,
-  TokenSource,
-} from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import type { AccessToken, AuthProvider, ClientCredentialsAuthConfig } from './types.ts'
 
 /**
  * OAuth2 client credentials flow authentication provider (RFC 6749 §4.4).
@@ -26,8 +21,7 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
  * communication. Tokens are fetched on demand via `oauth4webapi` and cached
  * until expiry; refresh is automatic (a new `client_credentials` grant request).
  *
- * Mirrors the Go `chainlink-canton/deployment/authentication/clientcredentials`
- * package, including RFC 8414 metadata discovery and the Auth0-specific
+ * Implements RFC 8414 metadata discovery and the Auth0-specific
  * `audience` extension.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.4
@@ -57,8 +51,8 @@ export type ClientCredentialsProviderOptions = OAuthRequestOptions
 /**
  * Client credentials auth provider.
  *
- * Uses a {@link CachingTokenSource} so the first `tokenSource().token()` call
- * fetches a token and subsequent calls return the cached value until it expires.
+ * Uses a {@link CachingTokenSource} so the first `token()` call fetches a
+ * token and subsequent calls return the cached value until it expires.
  */
 export class ClientCredentialsProvider implements AuthProvider {
   readonly type = 'clientCredentials' as const
@@ -71,9 +65,9 @@ export class ClientCredentialsProvider implements AuthProvider {
     this.tokenSourceImpl = new CachingTokenSource(() => this.doFetch())
   }
 
-  /** Returns the caching token source. */
-  tokenSource(): TokenSource {
-    return this.tokenSourceImpl
+  /** Returns a valid access token, fetching via the client credentials grant if needed. */
+  token(): Promise<AccessToken> {
+    return this.tokenSourceImpl.token()
   }
 
   /** Fetch a fresh access token via the client credentials grant. */

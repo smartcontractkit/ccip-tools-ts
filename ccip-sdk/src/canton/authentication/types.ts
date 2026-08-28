@@ -3,26 +3,20 @@
  *
  * @packageDocumentation
  *
- * This module mirrors the Go `chainlink-canton/deployment/authentication` package,
- * providing OAuth 2.0 authentication for the Canton Ledger API (JSON API / HTTP).
+ * OAuth 2.0 authentication for the Canton Ledger API (JSON API / HTTP).
  *
- * Four auth schemes are supported (matching `commonconfig/auth.go`):
- * - `static`           — a pre-obtained JWT (TLS transport)
- * - `insecureStatic`   — a pre-obtained JWT (no TLS, for local devnet)
+ * Three auth schemes are supported:
+ * - `static`           — a pre-obtained JWT
  * - `clientCredentials`— OAuth2 client credentials grant (RFC 6749 §4.4, machine-to-machine)
  * - `authorizationCode`— OAuth2 authorization code + PKCE (RFC 6749 §4.1 / RFC 7636, interactive browser login)
  */
 
 /**
  * Supported authentication types for Canton participant APIs.
- *
- * Matches the Go `commonconfig.AuthConfig.Type` values.
  */
 export const AuthType = {
-  /** Pre-obtained JWT, TLS transport security. */
+  /** Pre-obtained JWT. */
   Static: 'static',
-  /** Pre-obtained JWT, no TLS (local devnet / testing). */
-  InsecureStatic: 'insecureStatic',
   /** OAuth2 client credentials grant (machine-to-machine, CI/CD). */
   ClientCredentials: 'clientCredentials',
   /** OAuth2 authorization code + PKCE (interactive browser login). */
@@ -35,9 +29,8 @@ export type AuthType = (typeof AuthType)[keyof typeof AuthType]
 /**
  * An OAuth 2.0 access token with optional refresh metadata.
  *
- * Mirrors `golang.org/x/oauth2.Token`. The `expiresAt` field is derived from
- * `expires_in` (seconds) at fetch time so callers can check staleness without
- * re-parsing the JWT.
+ * The `expiresAt` field is derived from `expires_in` (seconds) at fetch time
+ * so callers can check staleness without re-parsing the JWT.
  */
 export interface AccessToken {
   /** The bearer access token (JWT). */
@@ -53,8 +46,9 @@ export interface AccessToken {
 /**
  * A source of {@link AccessToken} values with automatic refresh.
  *
- * Mirrors the Go `oauth2.TokenSource` interface. Implementations cache the
- * current token and re-fetch on demand when it is expired or missing.
+ * Implementations cache the current token and re-fetch on demand when it is
+ * expired or missing. Used internally by {@link CachingTokenSource} and
+ * {@link StaticTokenSource}; {@link AuthProvider} exposes `token()` directly.
  */
 export interface TokenSource {
   /**
@@ -68,25 +62,25 @@ export interface TokenSource {
 /**
  * An authentication provider for the Canton Ledger API.
  *
- * Mirrors the Go `authentication.Provider` interface, adapted for HTTP/JSON
- * API usage (the TS SDK talks to the Canton JSON Ledger API over HTTP/2, not gRPC,
- * so transport/per-RPC credentials collapse into a single token source).
+ * Exposes the auth scheme (`type`) and a `token()` method that returns a valid
+ * bearer JWT, fetching or refreshing as needed.
  */
 export interface AuthProvider {
   /** The auth scheme this provider was built from. */
   readonly type: AuthType
   /**
-   * Returns a token source that yields valid bearer tokens for the
-   * `Authorization: Bearer <token>` header.
+   * Returns a valid (non-expired) access token, fetching or refreshing as needed.
+   *
+   * Safe to call concurrently.
    */
-  tokenSource(): TokenSource
+  token(): Promise<AccessToken>
 }
 
 /**
  * Base configuration shared by all auth schemes.
  *
- * This is the TS analogue of the Go `commonconfig.AuthConfig` struct. Each
- * concrete provider accepts a subset of these fields.
+ * Base configuration shared by all auth schemes. Each concrete provider
+ * accepts a subset of these fields.
  */
 export interface AuthConfigBase {
   /** Auth scheme selector. Defaults to `"static"` when omitted (backward compatible). */
@@ -102,10 +96,10 @@ export interface AuthConfigBase {
 }
 
 /**
- * `static` / `insecureStatic` auth config.
+ * `static` auth config.
  */
 export interface StaticAuthConfig extends AuthConfigBase {
-  type?: typeof AuthType.Static | typeof AuthType.InsecureStatic
+  type?: typeof AuthType.Static
   /** Pre-obtained JWT. Required. */
   jwt: string
 }
@@ -147,11 +141,13 @@ export interface AuthorizationCodeAuthConfig extends AuthConfigBase {
 /**
  * Discriminated union of all auth configs.
  *
- * The `type` field discriminates between the four schemes. When omitted,
+ * The `type` field discriminates between the three schemes. When omitted,
  * `static` is assumed and `jwt` is required.
  */
 export type AuthConfig =
-  StaticAuthConfig | ClientCredentialsAuthConfig | AuthorizationCodeAuthConfig
+  | StaticAuthConfig
+  | ClientCredentialsAuthConfig
+  | AuthorizationCodeAuthConfig
 
 /**
  * Type-guard for {@link AccessToken}.

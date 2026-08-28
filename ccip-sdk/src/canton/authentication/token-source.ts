@@ -1,7 +1,7 @@
 import * as oauth from 'oauth4webapi'
 
-import type { AccessToken, TokenSource } from './types.ts'
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import type { AccessToken, TokenSource } from './types.ts'
 
 /**
  * Shared token-source primitives for the Canton authentication providers.
@@ -11,8 +11,7 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
  * PKCE helpers and token-response conversion delegate to `oauth4webapi` (the
  * spec-compliant OAuth2/OIDC library for JavaScript runtimes), while the
  * {@link CachingTokenSource} and {@link StaticTokenSource} are our own thin
- * abstractions over the `TokenSource` interface — mirroring the caching
- * behaviour of `golang.org/x/oauth2` reusable token sources.
+ * abstractions over the `TokenSource` interface.
  */
 
 /** Skew applied to token expiry so refresh happens slightly before the real expiry. */
@@ -120,8 +119,7 @@ export function buildOAuthRequestOptions(opts: OAuthRequestOptions) {
  * A {@link TokenSource} that caches a token and lazily re-fetches via a
  * caller-supplied `fetcher` when the cached token is expired or missing.
  *
- * Mirrors the caching behaviour of `golang.org/x/oauth2` reusable token sources:
- * the first `token()` call fetches; subsequent calls return the cached value
+ * The first `token()` call fetches; subsequent calls return the cached value
  * until it expires, at which point a new fetch is triggered. Concurrent callers
  * share a single in-flight fetch promise to avoid duplicate token requests.
  */
@@ -175,8 +173,6 @@ export class CachingTokenSource implements TokenSource {
 
 /**
  * A {@link TokenSource} that always returns the same static token (no refresh).
- *
- * Mirrors `oauth2.StaticTokenSource` used by the Go static providers.
  */
 export class StaticTokenSource implements TokenSource {
   private readonly tokenValue: AccessToken

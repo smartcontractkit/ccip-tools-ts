@@ -58,9 +58,7 @@ const config: Config = {
         name: 'webpack-node-fallbacks',
         configureWebpack(_config, isServer) {
           if (isServer) return {}
-          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
           const webpack = require('webpack')
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           const { NormalModuleReplacementPlugin } = webpack
           const nodeMods = ['node:child_process', 'node:http', 'node:url']
           return {
@@ -69,7 +67,6 @@ const config: Config = {
               fallback: { path: false },
             },
             plugins: nodeMods.map((mod) => {
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment
               const plugin = new NormalModuleReplacementPlugin(
                 new RegExp(`^${mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
                 (resource: { request: string }) => {
@@ -79,7 +76,6 @@ const config: Config = {
                     'data:text/javascript,export default {};export const exec=()=>{};export const createServer=()=>{};export const URL=globalThis.URL;export const spawn=()=>{};'
                 },
               )
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-return
               return plugin
             }),
           }

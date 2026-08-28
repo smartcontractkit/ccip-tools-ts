@@ -1,8 +1,7 @@
 /**
  * Unit tests for the Canton authentication providers.
  *
- * Mirrors the Go test patterns in
- * `chainlink-canton/deployment/authentication/{clientcredentials,authorizationcode}/*_test.go`:
+ * Test approach:
  * - Mock token endpoints via a lightweight `http.Server` (no external deps).
  * - Validate request form params (grant_type, scope, audience, code_verifier).
  * - For the authorization code flow, simulate the browser callback.
@@ -12,15 +11,7 @@ import { type Server, createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
 
-import {
-  AuthType,
-  createAuthProvider,
-  createInsecureStaticProvider,
-  createStaticProvider,
-  isAccessToken,
-  isTokenExpired,
-  resolveCantonJwt,
-} from './index.ts'
+import { CCIPError } from '../../errors/index.ts'
 import {
   CachingTokenSource,
   StaticTokenSource,
@@ -28,7 +19,14 @@ import {
   generateCodeVerifier,
   generateState,
 } from './token-source.ts'
-import { CCIPError } from '../../errors/index.ts'
+import {
+  AuthType,
+  createAuthProvider,
+  createStaticProvider,
+  isAccessToken,
+  isTokenExpired,
+  resolveCantonJwt,
+} from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Helpers — mock OAuth2 token + metadata servers
@@ -149,7 +147,6 @@ describe('canton/authentication — types', () => {
 
   it('AuthType constants match Go commonconfig values', () => {
     assert.equal(AuthType.Static, 'static')
-    assert.equal(AuthType.InsecureStatic, 'insecureStatic')
     assert.equal(AuthType.ClientCredentials, 'clientCredentials')
     assert.equal(AuthType.AuthorizationCode, 'authorizationCode')
   })
@@ -250,19 +247,12 @@ describe('canton/authentication — static providers', () => {
   it('createStaticProvider returns a token yielding the JWT', async () => {
     const provider = createStaticProvider('my-jwt-123')
     assert.equal(provider.type, AuthType.Static)
-    assert.equal((await provider.tokenSource().token()).accessToken, 'my-jwt-123')
-  })
-
-  it('createInsecureStaticProvider returns a token yielding the JWT', async () => {
-    const provider = createInsecureStaticProvider('my-jwt-456')
-    assert.equal(provider.type, AuthType.InsecureStatic)
-    assert.equal((await provider.tokenSource().token()).accessToken, 'my-jwt-456')
+    assert.equal((await provider.token()).accessToken, 'my-jwt-123')
   })
 
   it('static providers reject empty JWT', () => {
     assert.throws(() => createStaticProvider(''), CCIPError)
     assert.throws(() => createStaticProvider('   '), CCIPError)
-    assert.throws(() => createInsecureStaticProvider(''), CCIPError)
   })
 })
 
@@ -292,7 +282,7 @@ describe('canton/authentication — client credentials flow', () => {
         },
         { allowInsecureRequests: true },
       )
-      const token = await provider.tokenSource().token()
+      const token = await provider.token()
       assert.equal(token.accessToken, 'test-access-token')
       assert.equal(requests.length, 1)
     } finally {
@@ -319,7 +309,7 @@ describe('canton/authentication — client credentials flow', () => {
         },
         { allowInsecureRequests: true },
       )
-      await provider.tokenSource().token()
+      await provider.token()
       assert.equal(requests.length, 1)
     } finally {
       server.close()
@@ -342,7 +332,7 @@ describe('canton/authentication — client credentials flow', () => {
         },
         { allowInsecureRequests: true },
       )
-      const token = await provider.tokenSource().token()
+      const token = await provider.token()
       assert.equal(token.accessToken, 'test-access-token')
     } finally {
       tokenServer.server.close()
@@ -403,8 +393,8 @@ describe('canton/authentication — client credentials flow', () => {
         },
         { allowInsecureRequests: true },
       )
-      await provider.tokenSource().token()
-      await provider.tokenSource().token()
+      await provider.token()
+      await provider.token()
       assert.equal(requests.length, 1, 'token should be cached')
     } finally {
       server.close()
@@ -464,7 +454,7 @@ describe('canton/authentication — authorization code flow', () => {
       assert.equal(callbackResp.status, 200)
 
       const provider = await providerPromise
-      const token = await provider.tokenSource().token()
+      const token = await provider.token()
       assert.equal(token.accessToken, 'auth-code-token')
     } finally {
       tokenServer.server.close()
@@ -567,18 +557,13 @@ describe('canton/authentication — createAuthProvider / resolveCantonJwt', () =
   it('createAuthProvider defaults to static when type omitted', async () => {
     const provider = await createAuthProvider({ jwt: 'static-jwt' })
     assert.equal(provider.type, AuthType.Static)
-    assert.equal((await provider.tokenSource().token()).accessToken, 'static-jwt')
+    assert.equal((await provider.token()).accessToken, 'static-jwt')
   })
 
   it('createAuthProvider builds a static provider', async () => {
     const provider = await createAuthProvider({ type: AuthType.Static, jwt: 'j1' })
     assert.equal(provider.type, AuthType.Static)
-    assert.equal((await provider.tokenSource().token()).accessToken, 'j1')
-  })
-
-  it('createAuthProvider builds an insecureStatic provider', async () => {
-    const provider = await createAuthProvider({ type: AuthType.InsecureStatic, jwt: 'j2' })
-    assert.equal(provider.type, AuthType.InsecureStatic)
+    assert.equal((await provider.token()).accessToken, 'j1')
   })
 
   it('createAuthProvider rejects unsupported type', async () => {
@@ -604,7 +589,7 @@ describe('canton/authentication — createAuthProvider / resolveCantonJwt', () =
         { allowInsecureRequests: true },
       )
       assert.equal(provider.type, AuthType.ClientCredentials)
-      const token = await provider.tokenSource().token()
+      const token = await provider.token()
       assert.equal(token.accessToken, 'test-access-token')
     } finally {
       tokenServer.server.close()

@@ -223,8 +223,7 @@ export type CantonConfig = {
   /**
    * Optional OAuth 2.0 auth configuration for obtaining a JWT automatically.
    *
-   * Supports `static`, `insecureStatic`, `clientCredentials`, and
-   * `authorizationCode` flows (mirroring the Go `commonconfig.AuthConfig`).
+   * Supports `static`, `clientCredentials`, and `authorizationCode` flows.
    * When set, {@link CantonChain.fromUrl} resolves a JWT via the auth provider
    * unless `jwt` is already present.
    */
@@ -281,7 +280,7 @@ export type CantonConfig = {
 
   /**
    * Transfer-factory preview amount for Canton fee-token payments.
-   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   * Rarely needs changing; defaults to `"1.0"`.
    */
   feeTransferFactoryAmount?: string
 

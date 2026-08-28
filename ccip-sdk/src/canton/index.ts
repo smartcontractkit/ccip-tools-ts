@@ -167,19 +167,16 @@ export {
   type AuthorizationServerMetadata,
   type ClientCredentialsAuthConfig,
   type StaticAuthConfig,
-  type TokenSource,
   AuthType as CantonAuthType,
   AuthorizationCodeProvider,
   CachingTokenSource,
   ClientCredentialsProvider,
-  InsecureStaticProvider,
   StaticProvider,
   StaticTokenSource,
   codeChallengeFromVerifier,
   createAuthProvider,
   createAuthorizationCodeProvider,
   createClientCredentialsProvider,
-  createInsecureStaticProvider,
   createStaticProvider,
   generateCodeVerifier,
   generateState,
@@ -216,7 +213,7 @@ export async function resolveCantonJwtFromConfig(
   if (config.auth) {
     const merged = mergeAuthEnvVars(config.auth)
     const provider = await getOrCreateAuthProvider(merged, options)
-    const token = await provider.tokenSource().token()
+    const token = await provider.token()
     return token.accessToken
   }
 
@@ -1525,7 +1522,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the
-   * indexer attestation (mirrors Go `GetOrCreateReceiver`).
+   * indexer attestation.
    *
    * When a {@link TransactionSigner} is supplied, contract creation/update uses
    * the interactive submission path; otherwise it falls back to direct
@@ -1613,7 +1610,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * The `OffRamp.PrepareExecute` Daml choice rejects messages whose `finality` field does not
    * match the receiver's `minBlockConfirmations`, so each distinct finality value needs its own
    * receiver instance.  This method first searches the ACS; if no match is found it creates a
-   * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
+   * fresh contract.
    *
    * The optional {@link TransactionSigner} selects the submission path
    * (interactive vs. direct); see {@link submitCommands}.
@@ -1928,7 +1925,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Ensure PerPartyRouter + CCIPSender disclosures exist for send (mirrors Go GetOrCreateRouter/Sender).
+   * Ensure PerPartyRouter + CCIPSender disclosures exist for send.
    *
    * Creates missing contracts on demand. Canton authenticates via the ledger
    * JWT (OIDC / static / client-credentials), so an external
@@ -2678,7 +2675,6 @@ function decodeFinalityFromEncodedMessage(encodedHex: string): number {
  * Encode a numeric message finality as a Canton JSON Ledger API variant value for
  * the `receiverFinalityConfig : FinalityConfig` field of `CCIPReceiver`.
  *
- * Mirrors Go's `encodeReceiverFinalityConfig` in ccip/devenv/manual_execution.go:
  *   0         → WaitForFinality  (no block-depth threshold)
  *   0x00010000→ WaitForSafe      (wait for the safe/finalized block)
  *   N (other) → BlockDepth(N)    (wait for N block confirmations)

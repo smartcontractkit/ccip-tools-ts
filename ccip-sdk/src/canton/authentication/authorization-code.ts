@@ -2,6 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 
 import * as oauth from 'oauth4webapi'
 
+import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { discoverAuthorizationServer } from './metadata.ts'
 import {
   type OAuthRequestOptions,
@@ -13,13 +14,7 @@ import {
   toAccessToken,
   wrapOAuthError,
 } from './token-source.ts'
-import type {
-  AccessToken,
-  AuthProvider,
-  AuthorizationCodeAuthConfig,
-  TokenSource,
-} from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import type { AccessToken, AuthProvider, AuthorizationCodeAuthConfig } from './types.ts'
 
 /**
  * OAuth2 authorization code flow with PKCE (S256) authentication provider.
@@ -34,10 +29,9 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
  * The OAuth2 protocol mechanics (PKCE challenge generation, auth-response
  * validation, token exchange, refresh) delegate to `oauth4webapi`; only the
  * local callback HTTP server and browser launching are implemented here
- * (inherently Node-only, mirroring the Go `authorizationcode` provider).
+ * (inherently Node-only).
  *
- * Mirrors the Go `chainlink-canton/deployment/authentication/authorizationcode`
- * package, including RFC 8414 metadata discovery, state validation (CSRF
+ * Implements RFC 8414 metadata discovery, state validation (CSRF
  * protection), and automatic browser opening.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1
@@ -89,7 +83,7 @@ export interface AuthorizationCodeProviderOptions extends OAuthRequestOptions {
  * Authorization code auth provider.
  *
  * The constructor performs the full interactive flow (browser + callback
- * server) and resolves once tokens are obtained. The resulting
+ * server) and resolves once tokens are obtained. The internal
  * {@link CachingTokenSource} refreshes via the `refresh_token` grant when the
  * access token expires.
  */
@@ -105,9 +99,9 @@ export class AuthorizationCodeProvider implements AuthProvider {
 
   private readonly cfg: ResolvedAuthorizationCodeConfig
 
-  /** Returns the caching token source. */
-  tokenSource(): TokenSource {
-    return this.tokenSourceImpl
+  /** Returns a valid access token, refreshing via the refresh_token grant if needed. */
+  token(): Promise<AccessToken> {
+    return this.tokenSourceImpl.token()
   }
 
   /** Refresh the access token using the refresh_token grant (RFC 6749 §6). */

@@ -284,16 +284,18 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 
 \* Either `jwt` or `auth` is required. If both are present, `jwt` takes precedence.
 
+> [!NOTE]
+> The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
+
 ### Canton Authentication {#canton-authentication}
 
-Instead of a static `jwt`, you can provide an `auth` object to obtain a JWT automatically via [OpenID Connect (OIDC)](https://openid.net/connect/). Three flows are supported (mirroring the Go `commonconfig.AuthConfig`):
+The `auth` object supports three flows. The `static` flow wraps a pre-obtained JWT (equivalent to the top-level `jwt` field); `clientCredentials` and `authorizationCode` obtain a JWT automatically via [OpenID Connect (OIDC)](https://openid.net/connect/):
 
-| `auth.type`         | Use case                          | Required `auth` fields                  |
-| ------------------- | --------------------------------- | --------------------------------------- |
-| `static`            | Pre-obtained JWT (TLS)            | `jwt`                                   |
-| `insecureStatic`    | Pre-obtained JWT (no TLS, devnet) | `jwt`                                   |
-| `clientCredentials` | Machine-to-machine (CI/CD)        | `authUrl`, `clientId`†, `clientSecret`† |
-| `authorizationCode` | Interactive browser login (PKCE)  | `authUrl`, `clientId`†                  |
+| `auth.type`         | Use case                         | Required `auth` fields                  |
+| ------------------- | -------------------------------- | --------------------------------------- |
+| `static`            | Pre-obtained JWT                 | `jwt`                                   |
+| `clientCredentials` | Machine-to-machine (CI/CD)       | `authUrl`, `clientId`†, `clientSecret`† |
+| `authorizationCode` | Interactive browser login (PKCE) | `authUrl`, `clientId`†                  |
 
 † `clientId` and `clientSecret` may be omitted from the config file and resolved from `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars instead. **Keep secrets in env vars, not in config files.**
 
@@ -323,6 +325,10 @@ export CANTON_CLIENT_SECRET="my-client-secret"
     "callbackUrl": "http://localhost:8400/callback"
   }
 }
+```
+
+```bash
+export CANTON_CLIENT_ID="my-client-id"
 ```
 
 The `authorizationCode` flow opens a browser for login and starts a local callback server to receive the authorization code. The `callbackUrl` defaults to `http://localhost:8400/callback` — override it if port 8400 is in use or your OIDC provider requires a different redirect URI. PKCE with S256 is required.

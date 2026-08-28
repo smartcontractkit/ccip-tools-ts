@@ -84,8 +84,7 @@ export interface CantonInstrumentId {
 }
 
 /**
- * Input for a single CCV that should verify the outbound send
- * (maps to Go `ccipsender.CCVSendInput`).
+ * Input for a single CCV that should verify the outbound send.
  */
 export interface CantonCCVSendInput {
   ccvCid: string
@@ -94,8 +93,7 @@ export interface CantonCCVSendInput {
 }
 
 /**
- * Token input carrying the Transfer Factory reference and metadata
- * (maps to Go `interfaces.TokenInput`).
+ * Token input carrying the Transfer Factory reference and metadata.
  */
 export interface CantonTokenInput {
   transferFactory: string
@@ -104,8 +102,7 @@ export interface CantonTokenInput {
 }
 
 /**
- * Extra arguments attached to a Canton token input
- * (maps to Go `splice_api_token_metadata_v1.ExtraArgs`).
+ * Extra arguments attached to a Canton token input.
  */
 export interface CantonTokenExtraArgs {
   context: { values: Record<string, unknown> }

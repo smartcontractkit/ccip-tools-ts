@@ -3,12 +3,10 @@
  *
  * @packageDocumentation
  *
- * OAuth 2.0 authentication for the Canton Ledger API, mirroring the Go
- * `chainlink-canton/deployment/authentication` package and the
- * `commonconfig/auth.go` `AuthConfig` selector.
+ * OAuth 2.0 authentication for the Canton Ledger API.
  *
- * Four auth schemes are supported:
- * - **static / insecureStatic** — pre-obtained JWT (no refresh)
+ * Three auth schemes are supported:
+ * - **static** — pre-obtained JWT (no refresh)
  * - **clientCredentials** — OAuth2 client credentials grant (machine-to-machine)
  * - **authorizationCode** — OAuth2 authorization code + PKCE (interactive browser login)
  *
@@ -27,7 +25,7 @@
  *   clientId: process.env.CANTON_CLIENT_ID!,
  *   clientSecret: process.env.CANTON_CLIENT_SECRET!,
  * })
- * const jwt = (await provider.tokenSource().token()).accessToken
+ * const jwt = (await provider.token()).accessToken
  * ```
  *
  * @example
@@ -38,10 +36,11 @@
  *   authUrl: 'https://auth.example.com',
  *   clientId: 'ccip-app',
  * })
- * const jwt = (await provider.tokenSource().token()).accessToken
+ * const jwt = (await provider.token()).accessToken
  * ```
  */
 
+import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import {
   type AuthorizationCodeProvider,
   createAuthorizationCodeProvider,
@@ -50,15 +49,9 @@ import {
   type ClientCredentialsProvider,
   createClientCredentialsProvider,
 } from './client-credentials.ts'
-import {
-  type InsecureStaticProvider,
-  type StaticProvider,
-  createInsecureStaticProvider,
-  createStaticProvider,
-} from './static.ts'
+import { type StaticProvider, createStaticProvider } from './static.ts'
 import type { OAuthRequestOptions } from './token-source.ts'
 import { type AuthConfig, type AuthProvider, AuthType } from './types.ts'
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 
 export { AuthorizationCodeProvider, createAuthorizationCodeProvider } from './authorization-code.ts'
 export { ClientCredentialsProvider, createClientCredentialsProvider } from './client-credentials.ts'
@@ -80,12 +73,7 @@ export {
   toAccessToken,
   wrapOAuthError,
 } from './token-source.ts'
-export {
-  InsecureStaticProvider,
-  StaticProvider,
-  createInsecureStaticProvider,
-  createStaticProvider,
-} from './static.ts'
+export { StaticProvider, createStaticProvider } from './static.ts'
 export {
   type AccessToken,
   type AuthConfig,
@@ -93,7 +81,6 @@ export {
   type AuthorizationCodeAuthConfig,
   type ClientCredentialsAuthConfig,
   type StaticAuthConfig,
-  type TokenSource,
   AuthType,
   isAccessToken,
 } from './types.ts'
@@ -106,13 +93,12 @@ export type AuthProviderOptions = OAuthRequestOptions
 /**
  * Build an {@link AuthProvider} from a discriminated {@link AuthConfig}.
  *
- * This is the TS analogue of the Go `commonconfig.AuthConfig.NewProvider(ctx)`
- * method. The `type` field selects the auth scheme; when omitted, `"static"`
+ * The `type` field selects the auth scheme; when omitted, `"static"`
  * is assumed (backward compatible with the existing `CantonConfig.jwt` field).
  *
  * @param config - Auth config (static, clientCredentials, or authorizationCode).
  * @param options - Optional fetch override and abort signal.
- * @returns An {@link AuthProvider} whose `tokenSource()` yields valid JWTs.
+ * @returns An {@link AuthProvider} whose `token()` yields valid JWTs.
  * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on invalid config or auth failure.
  *
  * @example
@@ -135,9 +121,6 @@ export async function createAuthProvider(
     case AuthType.Static:
       return createStaticProvider((config as { jwt?: string }).jwt ?? '')
 
-    case AuthType.InsecureStatic:
-      return createInsecureStaticProvider((config as { jwt?: string }).jwt ?? '')
-
     case AuthType.ClientCredentials:
       return createClientCredentialsProvider(
         config as Parameters<typeof createClientCredentialsProvider>[0],
@@ -157,7 +140,7 @@ export async function createAuthProvider(
       const t: string = type
       throw new CCIPError(
         CCIPErrorCode.CANTON_AUTH_ERROR,
-        `Unsupported auth type: "${t}" (expected static, insecureStatic, clientCredentials, or authorizationCode)`,
+        `Unsupported auth type: "${t}" (expected static, clientCredentials, or authorizationCode)`,
       )
     }
   }
@@ -190,12 +173,11 @@ export async function resolveCantonJwt(
   options?: AuthProviderOptions,
 ): Promise<string> {
   const provider = await createAuthProvider(config, options)
-  const token = await provider.tokenSource().token()
+  const token = await provider.token()
   return token.accessToken
 }
 
 /**
  * Type alias for the union of concrete provider classes.
  */
-export type AnyAuthProvider =
-  StaticProvider | InsecureStaticProvider | ClientCredentialsProvider | AuthorizationCodeProvider
+export type AnyAuthProvider = StaticProvider | ClientCredentialsProvider | AuthorizationCodeProvider
