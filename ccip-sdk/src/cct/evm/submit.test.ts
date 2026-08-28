@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { makeError } from 'ethers'
 
-import { submit } from './submit.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
+import { submit } from './submit.ts'
 
 const TAR = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)

@@ -8,7 +8,6 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 import type { Chain, LogFilter } from './chain.ts'
 import { CCIPAddressInvalidError, CCIPArgumentInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3 } from './extra-args.ts'
-import { ChainFamily, EVMChain, networkInfo } from './index.ts'
 import {
   buildMessageForDest,
   decodeMessage,
@@ -29,6 +28,7 @@ import {
   CCIPVersion,
 } from './types.ts'
 import { jsonStringify } from './utils.ts'
+import { ChainFamily, EVMChain, networkInfo } from './index.ts'
 
 let rampAddress: string
 
