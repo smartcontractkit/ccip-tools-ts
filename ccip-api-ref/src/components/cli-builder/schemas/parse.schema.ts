@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli parse` command.
  */
 
-import { outputOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions } from './common.ts'
 
 export const parseSchema: CommandSchema<'parse'> = {
   name: 'parse',

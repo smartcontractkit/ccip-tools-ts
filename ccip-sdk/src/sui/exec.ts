@@ -8,6 +8,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPExecutionReportChainMismatchError,
 } from '../errors/index.ts'
+import { ChainFamily } from '../networks.ts'
 import type { ExecutionInput } from '../types.ts'
 import { getCcipStateAddress } from './discovery.ts'
 import {
@@ -22,7 +23,6 @@ import {
   getReceiverModule,
 } from './objects.ts'
 import type { CCIPMessage_V1_6_Sui, UnsignedSuiTx } from './types.ts'
-import { ChainFamily } from '../networks.ts'
 
 /**
  * Builds a Sui manual-execution PTB and returns it as an {@link UnsignedSuiTx}.

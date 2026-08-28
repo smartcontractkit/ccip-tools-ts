@@ -20,10 +20,10 @@ import {
 import type { TypedContract } from 'ethers-abitype'
 import { memoize } from 'micro-memoize'
 
+import { getAddressBytes, getDataBytes } from '../utils.ts'
 import TokenABI from './abi/BurnMintERC677Token.ts'
 import RouterABI from './abi/Router.ts'
 import { defaultAbiCoder, interfaces } from './const.ts'
-import { getAddressBytes, getDataBytes } from '../utils.ts'
 
 const ccipReceive = FunctionFragment.from({
   type: 'function',

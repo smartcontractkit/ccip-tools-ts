@@ -14,68 +14,71 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out repository
-      uses: actions/checkout@v5.0.0
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v6.0.0
-      with:
-        node-version: 24
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
 
-    - name: Install Foundry (anvil for fork tests)
-      uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+      # Older foundry-toolchain pins ran foundryup via `bash` and broke when it became
+      # a compiled binary ("cannot execute binary file"); v1.9.1 executes it directly
+      # and pins the foundryup installer internally, so no vendor script is piped here.
+      - name: Install Foundry (anvil for fork tests)
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
 
-    - name: Verify anvil is available
-      run: anvil --version
+      - name: Verify anvil is available
+        run: anvil --version
 
-    - name: Install Surfpool v1.1.2 (for SVM fork tests)
-      run: |
-        curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.2/surfpool-linux-x64.tar.gz \
-          | tar xz -C /usr/local/bin
+      - name: Install Surfpool v1.1.2 (for SVM fork tests)
+        run: |
+          curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.2/surfpool-linux-x64.tar.gz \
+            | tar xz -C /usr/local/bin
 
-    - name: Verify surfpool is available
-      run: surfpool --version
+      - name: Verify surfpool is available
+        run: surfpool --version
 
-    - name: Install dependencies and build
-      run: npm ci
+      - name: Install dependencies and build
+        run: npm ci
 
-    - name: Run lint
-      run: npm run check
+      - name: Run lint
+        run: npm run check
 
-    - name: Validate package exports
-      working-directory: ccip-sdk
-      run: |
-        # publint - check package.json exports and module format
-        npx publint
+      - name: Validate package exports
+        working-directory: ccip-sdk
+        run: |
+          # publint - check package.json exports and module format
+          npx publint
 
-        # attw - check TypeScript types resolution (informational)
-        # Note: CJS resolution warnings are expected for ESM-only packages
-        npx @arethetypeswrong/cli --pack . --profile esm-only || true
+          # attw - check TypeScript types resolution (informational)
+          # Note: CJS resolution warnings are expected for ESM-only packages
+          npx @arethetypeswrong/cli --pack . --profile esm-only || true
 
-    - name: Run tests with coverage
-      env:
-        # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
-        VERBOSE: '1'
-      run: |
-        set -o pipefail
-        npm test 2>&1 | tee coverage-summary.txt
+      - name: Run tests with coverage
+        env:
+          # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
+          VERBOSE: '1'
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee coverage-summary.txt
 
-    - name: Upload coverage report
-      if: "always() && hashFiles('.coverage/**') != ''"
-      uses: actions/upload-artifact@v5.0.0
-      with:
-        name: coverage-report
-        path: .coverage
+      - name: Upload coverage report
+        if: "always() && hashFiles('.coverage/**') != ''"
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-report
+          path: .coverage
 
-    - name: Upload coverage summary
-      if: always()
-      uses: actions/upload-artifact@v5.0.0
-      with:
-        name: coverage-summary
-        path: coverage-summary.txt
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-summary
+          path: coverage-summary.txt
 
-    - name: Smoke test cli
-      run: npx $PWD/ccip-cli --help
+      - name: Smoke test cli
+        run: npx $PWD/ccip-cli --help
 
   coverage-comment:
     needs: build-and-test
@@ -90,60 +93,65 @@ jobs:
     if: github.event_name == 'pull_request'
 
     steps:
-    - name: Download coverage summary
-      uses: actions/download-artifact@v5.0.0
-      with:
-        name: coverage-summary
-        path: .
+      - name: Download coverage summary
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: coverage-summary
+          path: .
 
-    - name: Post or update PR comment with coverage summary
-      uses: actions/github-script@v8.0.0
-      with:
-        script: |
-          const fs = require('fs');
+      - name: Post or update PR comment with coverage summary
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
 
-          let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
-          coverageSummary = coverageSummary.slice(
-            coverageSummary.findIndex(line => line.match(/^ℹ/))
-          ).join('\n');
+            let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
+            // Only the c8 table belongs in the comment: the teed file starts with the
+            // full node --test output (test logs, [network-locks] lines, per-file `ℹ`
+            // summaries), so slicing on the first `ℹ` would dump all of it into the PR.
+            const tableStart = coverageSummary.findIndex(line => /^\s*File\s+\|/.test(line));
+            coverageSummary = (tableStart >= 0
+              ? coverageSummary.slice(tableStart)
+              : coverageSummary
+            ).join('\n');
 
-          if (coverageSummary.trim().length === 0) {
-            console.log('No coverage data found');
-            process.exit(1);
-          }
+            if (coverageSummary.trim().length === 0) {
+              console.log('No coverage data found');
+              process.exit(1);
+            }
 
-          const prNumber = context.payload.pull_request
-            ? context.payload.pull_request.number
-            : null;
+            const prNumber = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : null;
 
-          if (!prNumber) {
-            console.log('No PR number found, skipping comment.');
-            return;
-          }
+            if (!prNumber) {
+              console.log('No PR number found, skipping comment.');
+              return;
+            }
 
-          const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
 
-          const { data: comments } = await github.rest.issues.listComments({
-            ...context.repo,
-            issue_number: prNumber,
-          });
-
-          const botComment = comments.find(
-            comment =>
-              comment.user.login === 'github-actions[bot]' &&
-              comment.body.includes('## Coverage Report')
-          );
-
-          if (botComment) {
-            await github.rest.issues.updateComment({
-              ...context.repo,
-              comment_id: botComment.id,
-              body: commentBody,
-            });
-          } else {
-            await github.rest.issues.createComment({
+            const { data: comments } = await github.rest.issues.listComments({
               ...context.repo,
               issue_number: prNumber,
-              body: commentBody,
             });
-          }
+
+            const botComment = comments.find(
+              comment =>
+                comment.user.login === 'github-actions[bot]' &&
+                comment.body.includes('## Coverage Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            }

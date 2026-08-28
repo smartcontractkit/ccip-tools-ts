@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -40,8 +40,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "prettier --check ./src && eslint ./src",
-    "lint:fix": "prettier --write ./src && eslint --fix ./src",
+    "test:unit": "node ../scripts/run-tests.mjs src --exclude integration,e2e,fork",
+    "lint": "oxfmt --check ./src && oxlint ./src",
+    "lint:fix": "oxfmt ./src && oxlint --fix ./src",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
@@ -66,11 +67,11 @@
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",
-    "@types/node": "26.1.2",
+    "@types/node": "26.2.0",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.14",
-    "typescript": "6.0.3",
-    "viem": "^2.55.11"
+    "typescript": "7.0.2",
+    "viem": "^2.55.13"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^6.3.1",
@@ -80,8 +81,8 @@
     "@metaplex-foundation/umi-bundle-defaults": "1.5.1",
     "@metaplex-foundation/umi-web3js-adapters": "1.5.1",
     "@mysten/bcs": "^2.1.0",
-    "@mysten/sui": "^2.23.1",
-    "@noble/hashes": "^2.2.0",
+    "@mysten/sui": "^2.23.2",
+    "@noble/hashes": "^2.3.0",
     "@solana/spl-token": "0.4.15",
     "@solana/web3.js": "^1.98.4",
     "@ton/core": "0.63.1",

@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, getAddress, id, makeError } from 'ethers'
 
-import { RegisterAdmin } from './register-admin.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -13,6 +12,7 @@ import {
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
+import { RegisterAdmin } from './register-admin.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const REGISTRY_MODULE = '0x' + '22'.repeat(20)

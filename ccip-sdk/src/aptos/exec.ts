@@ -1,8 +1,8 @@
 import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { ExecutionInput } from '../types.ts'
 import { serializeExecutionReport } from './types.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 
 /**
  * Executes as single message report in offramp

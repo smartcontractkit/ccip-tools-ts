@@ -22,6 +22,11 @@ export const RPCS = [
   process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
 ]
 
+/**
+ * Spawns the CLI in-process as a child of node, capturing its stdout/stderr.
+ * Resolves with the captured output and exit code, or rejects if it hangs past
+ * `timeout` (killing the child).
+ */
 export async function spawnCLI(
   args: string[],
   timeout = 60000,
@@ -32,8 +37,8 @@ export async function spawnCLI(
     let stdout = ''
     let stderr = ''
 
-    child.stdout.on('data', (data) => (stdout += data.toString()))
-    child.stderr.on('data', (data) => (stderr += data.toString()))
+    child.stdout.on('data', (data: Buffer) => (stdout += data.toString()))
+    child.stderr.on('data', (data: Buffer) => (stderr += data.toString()))
 
     const timeoutId = setTimeout(() => {
       child.kill('SIGTERM')
