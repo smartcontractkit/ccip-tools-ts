@@ -159,7 +159,10 @@ export function parseHexBytes(operation: string, param: string, value: unknown):
  * Parses `value` as a plain object, returned as an indexable record so a caller can validate
  * fields one by one before the value has a type. `kind` names the shape in the failure message,
  * e.g. `'chain update'` → `must be a chain update`.
- * @throws {@link CCTParamsInvalidError} if `value` is not a non-null object
+ * @remarks Arrays and class instances (`Date`, `Map`, …) are objects too, but are not valid
+ * here: an array would pass field checks only by accident of key naming, and an instance's
+ * fields live on the prototype, not the record.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a non-null, non-array plain object
  */
 export function parseRecord(
   operation: string,
@@ -167,7 +170,7 @@ export function parseRecord(
   value: unknown,
   kind: string,
 ): { [k: string]: unknown } {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new CCTParamsInvalidError(operation, param, `must be a ${kind}`)
   }
   return value as { [k: string]: unknown }
