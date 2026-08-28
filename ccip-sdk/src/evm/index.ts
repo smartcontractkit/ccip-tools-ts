@@ -296,6 +296,11 @@ export function isTokenOnlyEstimate(message: {
   return dataLength === 0 && receiveGasLimit === 0n
 }
 
+function destroyOnAbort(abort: AbortSignal, provider: JsonRpcApiProvider): void {
+  const ref = new WeakRef(provider)
+  abort.addEventListener('abort', () => ref.deref()?.destroy(), { once: true })
+}
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
@@ -347,12 +352,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
+    destroyOnAbort(this.abort, this.provider)
 
     const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
     this.getBlockInfo = getBlockInfo
@@ -411,7 +417,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       )
     }
 
-    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), { async: true, maxArgs: 1 })
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 600e3,
+    })
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
@@ -423,27 +434,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
     })
     this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this), { async: true })
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this), { async: true })
@@ -451,6 +467,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
@@ -509,26 +526,43 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates a JSON-RPC provider from a URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
-   * @returns A ready JSON-RPC provider.
+   * @returns The ready JSON-RPC provider plus an optional `detach` that removes
+   * its mid-handshake abort listener once the provider is owned by a chain
+   * (the chain's composite abort then owns teardown).
    */
   static async _getProvider(
     url: string,
     ctx?: { abort?: AbortSignal; fetch?: typeof fetch } & Parameters<
       typeof createRateLimitedFetch
     >[1],
-  ): Promise<JsonRpcApiProvider> {
+  ): Promise<[JsonRpcApiProvider, (() => void) | undefined]> {
     const abort = ctx?.abort
-    let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
-      abort?.addEventListener('abort', () => void provider.destroy(), { once: true })
-      providerReady = new Promise((resolve, reject) => {
+      // Destroy the socket when the caller aborts — during the handshake AND
+      // while a hanging request still has no owning chain (e.g. `getNetwork` in
+      // fromProvider). The listener is removed only once the chain is installed
+      // (the detach, in fromUrl's finally) or the handshake fails (below): a
+      // dangling one on a long-lived signal would root the provider — and via
+      // its _wrap* hooks the whole chain — forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      const providerReady = new Promise<JsonRpcApiProvider>((resolve, reject) => {
         provider.websocket.onerror = reject
         provider
           ._waitUntilReady()
           .then(() => resolve(provider))
           .catch(reject)
+      }).catch((err) => {
+        // No chain will own this provider: drop the listener so a long-lived
+        // caller signal does not root the failed provider.
+        abort?.removeEventListener('abort', onAbort)
+        throw err as Error
       })
+      return [
+        await providerReady,
+        abort ? () => abort.removeEventListener('abort', onAbort) : undefined,
+      ]
     } else if (url.startsWith('http')) {
       const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
       const req = new FetchRequest(url)
@@ -550,12 +584,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         staticNetwork: true,
         batchMaxCount: 20,
       })
-      abort?.addEventListener('abort', () => provider.destroy(), { once: true })
-      providerReady = Promise.resolve(provider)
+      // Tear down an unresponsive provider while it has no owning chain yet
+      // (e.g. `getNetwork` hanging during construction) when the caller aborts.
+      // Detached once the chain is installed: from then on the chain's
+      // composite `this.abort` — firing on `destroy()` AND the context abort —
+      // owns teardown, and a listener left on a long-lived signal would root
+      // the provider (and via its _wrap* hooks the whole chain) forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      return [provider, abort ? () => abort.removeEventListener('abort', onAbort) : undefined]
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
     }
-    return providerReady
   }
 
   /**
@@ -591,7 +631,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url, ctx), ctx)
+    const [provider, detach] = await this._getProvider(url, ctx)
+    try {
+      return await this.fromProvider(provider, ctx)
+    } finally {
+      // Chain installed (or construction failed and the provider destroyed):
+      // the chain's composite `this.abort` owns provider teardown from here.
+      detach?.()
+    }
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
@@ -610,10 +657,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     const { timestamp } = await this.getBlockInfo(tx.blockNumber)
     const chainTx = {
-      ...tx,
+      ...tx, // oxlint-disable-line typescript/no-misused-spread
       timestamp,
       logs: [] as ChainLog[],
     }
+    // oxlint-disable-next-line typescript/no-misused-spread
     const logs: ChainLog[] = tx.logs.map((l) => ({ ...l, blockTimestamp: timestamp, tx: chainTx }))
     chainTx.logs = logs
     return chainTx
@@ -703,7 +751,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
         }
         if (message) break
-      } catch (_) {
+      } catch {
         // try next fragment
       }
     }
@@ -737,7 +785,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       let result
       try {
         result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-      } catch (_) {
+      } catch {
         continue
       }
       if (result.length === 1) result = result[0] as Result
@@ -801,7 +849,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...result,
           state: Number(result.state) as ExecutionState,
         } as ExecutionReceipt
-      } catch (_) {
+      } catch {
         // continue
       }
     }
@@ -887,7 +935,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     let contract
     if (type === 'PriceRegistry') {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.PriceRegistry_v1_2,
@@ -904,14 +951,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     }
     if (version < CCIPVersion.V2_0) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v2_0,
@@ -2384,7 +2429,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
                   const filterDynamicConfig = (dynamicConfig: { router: string }) => {
                     return Object.fromEntries(
                       Object.entries(resultToObject(dynamicConfig)).filter(
-                        ([_, v]) => v && v !== ZeroAddress,
+                        ([, v]) => v && v !== ZeroAddress,
                       ),
                     )
                   }

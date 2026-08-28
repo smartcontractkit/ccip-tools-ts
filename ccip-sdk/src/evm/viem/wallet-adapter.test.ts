@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
-import { viemWallet } from './wallet-adapter.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
+import { viemWallet } from './wallet-adapter.ts'
 
 describe('viemWallet', () => {
   it('should create signer from WalletClient with http transport', () => {

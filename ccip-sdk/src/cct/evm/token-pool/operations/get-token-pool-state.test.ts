@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { getAddress, makeError, toBeHex } from 'ethers'
 
-import { GetTokenPoolState } from './get-token-pool-state.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
@@ -12,6 +11,7 @@ import {
   CCTParamsInvalidError,
 } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)

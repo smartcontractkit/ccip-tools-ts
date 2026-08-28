@@ -8,8 +8,8 @@ import {
 } from 'ethers'
 import type { Account, Chain, PublicClient, Transport, WalletClient } from 'viem'
 
-import { ViemTransportProvider } from './client-adapter.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
+import { ViemTransportProvider } from './client-adapter.ts'
 
 /**
  * Adapter that wraps viem WalletClient as ethers Signer.

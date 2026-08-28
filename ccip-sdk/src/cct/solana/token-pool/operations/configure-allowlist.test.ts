@@ -29,8 +29,7 @@ function stubChain(): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...stubChain(),
+  return Object.assign(stubChain(), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -40,7 +39,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

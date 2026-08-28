@@ -116,13 +116,13 @@ export async function getFee(
       { type: 'int', value: destChainSelector },
     ])
     const onRampAddress = onRampStack.readAddress()
-    logger.debug('OnRamp:', onRampAddress.toString())
+    logger.debug('OnRamp:', onRampAddress.toRawString())
 
     const { stack: feeQuoterStack } = await provider.runMethod(onRampAddress, 'feeQuoter', [
       { type: 'int', value: destChainSelector },
     ])
     feeQuoterAddress = feeQuoterStack.readAddress()
-    logger.debug('FeeQuoter:', feeQuoterAddress.toString())
+    logger.debug('FeeQuoter:', feeQuoterAddress.toRawString())
   } catch (e) {
     throw new CCIPError(
       CCIPErrorCode.CONTRACT_TYPE_INVALID,

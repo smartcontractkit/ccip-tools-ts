@@ -24,12 +24,16 @@ import { Instance } from 'prool'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
+import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
 import { getErrorData, parseWithFragment } from './errors.ts'
 import { findBalancesSlot } from './gas.ts'
-import { EVMChain } from './index.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
-import { CCIPDestExecutionRevertError } from '../errors/index.ts'
+import { EVMChain } from './index.ts'
+
+// Forks run atop live Sepolia/Fuji RPCs (anvil fetches state from the upstream lazily).
+await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 
@@ -69,6 +73,26 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
+// Anvil's genesis fetch is a single request to the fork URL, so a public testnet
+// RPC storming the CI egress (429/5xx for minutes) aborts startup with "failed to
+// create genesis" before the per-request fork resilience below can help. Retry the
+// whole start with backoff so a transient storm doesn't down the suite.
+async function startForkWithRetries(instance: ReturnType<typeof Instance.anvil>): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await instance.start()
+      return
+    } catch (err) {
+      await instance.stop().catch(() => {})
+      if (attempt === 4) throw err
+      testLogger.debug(
+        `anvil start failed (attempt ${attempt}/4, retrying in ${10 * attempt}s): ${(err as Error).message}`,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 10_000 * attempt))
+    }
+  }
+}
+
 describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
@@ -86,7 +110,7 @@ describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () =
       { forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8655, ...forkOpts },
       {},
     )
-    await Promise.all([sepoliaInstance.start(), fujiInstance.start()])
+    await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
 
     const sepoliaProvider = new JsonRpcProvider(
       `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,

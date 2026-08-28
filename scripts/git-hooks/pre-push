@@ -1,0 +1,82 @@
+#!/bin/sh
+#
+# Refuse pushes that carry unsigned commits.
+#
+# For every pushed branch ref, every commit in <base>..<local> must carry a valid
+# signature, where <base> is the remote ref's current tip (the commits the push
+# actually adds) — or `main` when the ref is brand new. A force-push that rewrites
+# history is therefore checked across the full rewritten range, so an unsigned
+# commit introduced by the rewrite blocks the push.
+#
+# Install (see CONTRIBUTING.md "Signed commits"):
+#   Option A — symlink into this clone's hooks dir (tracks this file, no drift):
+#     ln -s ../../scripts/git-hooks/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+#     (the hooks dir is shared, so one symlink guards every worktree)
+#   Option B — point core.hooksPath at the directory:
+#     git config core.hooksPath scripts/git-hooks
+#
+# Signature status (%G?): G=good, U=good-but-unverified-key. X/Y/R are signed
+# with an expired/revoked key (warn only). N=none, B=bad, E=uncheckable: refused.
+set -u
+
+refuse=0
+me=pre-push
+
+base_for() {
+  # $1 = remote sha (all-zero for a brand-new ref)
+  case "$1" in
+    0000000000000000000000000000000000000000)
+      git rev-parse --verify -q main 2>/dev/null ||
+        git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null ||
+        {
+          echo "$me: cannot resolve a baseline for a new ref: no local 'main' and no origin/main" >&2
+          echo "$me: pass one explicitly (e.g. main..HEAD are expected to be signed) or skip" >&2
+          return 1
+        }
+      ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# pre-push receives one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_ref" in
+    refs/heads/*) ;;
+    *) continue ;; # only guard branch pushes
+  esac
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;; # ref deletion
+  esac
+  [ "$local_sha" = "$remote_sha" ] && continue
+
+  base=$(base_for "$remote_sha") || { refuse=1; continue; }
+  if ! git rev-parse --verify -q "${base}^{commit}" >/dev/null 2>&1; then
+    echo "$me: baseline $base is not a commit — refusing" >&2
+    refuse=1
+    continue
+  fi
+
+  # Iterate in the current shell (no pipeline) so `refuse` propagates.
+  while read -r sha status; do
+    case "$status" in
+      G | U) ;;
+      X | Y | R)
+        echo "$me: warning: $sha signed with an expired/revoked key ($status)" >&2
+        ;;
+      *)
+        echo "$me: REFUSING push: $sha is not signed (signature status: ${status:-none})" >&2
+        refuse=1
+        ;;
+    esac
+  done <<EOF
+$(git rev-list --format='%H %G?' --no-commit-header "$base..$local_sha" 2>/dev/null)
+EOF
+done
+
+if [ "$refuse" -ne 0 ]; then
+  echo "$me: aborting push with unsigned commit(s) in range" >&2
+  echo "$me: sign them, e.g. git rebase --exec 'git commit --amend --no-edit -S' <base>" >&2
+  exit 1
+fi
+exit 0

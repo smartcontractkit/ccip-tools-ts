@@ -71,17 +71,8 @@ import {
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { getDestTokenAmount } from '../gas.ts'
-import { cleanUpBuffers } from './cleanup.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
-import {
-  decodeSolanaGenericExtraArgsV3,
-  decodeSolanaSuiExtraArgsV1,
-  encodeSolanaExtraArgs,
-} from './extra-args.ts'
-import { estimateExecComputeUnits } from './gas.ts'
-import { getV16SolanaLeafHasher } from './hasher.ts'
+import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -119,6 +110,15 @@ import {
   toLeArray,
   util,
 } from '../utils.ts'
+import { cleanUpBuffers } from './cleanup.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
+import {
+  decodeSolanaGenericExtraArgsV3,
+  decodeSolanaSuiExtraArgsV1,
+  encodeSolanaExtraArgs,
+} from './extra-args.ts'
+import { estimateExecComputeUnits } from './gas.ts'
+import { getV16SolanaLeafHasher } from './hasher.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
@@ -130,11 +130,11 @@ import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import {
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
-import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -257,7 +257,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
@@ -270,16 +271,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
-    // cache account info for 30 seconds
+    // cache account info for 5 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
-      maxSize: 100,
       maxArgs: 2,
+      maxSize: 100,
       expires: 5e3,
       transformKey: ([address, commitment]) =>
         [(address as PublicKey).toString(), commitment] as const,
@@ -310,7 +313,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
       maxArgs: 2,
-      maxSize: 20,
+      maxSize: 10,
     })
   }
 
@@ -522,8 +525,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
+    const since = opts.since
     for await (const tx of this.getTransactionsForAddress({ ...opts, excludeAddresses })) {
       for (const log of tx.logs) {
+        // Per-log resume exclusivity: the hinted tx streams WHOLE (the node's
+        // `until` cursor is transaction-granular and would drop its same-tx
+        // followers), so within the hinted tx logs at/before the hinted index —
+        // which the previous run emitted — are skipped, while later same-tx
+        // logs (batch executions, multi-topic streams) still flow.
+        if (
+          since?.transactionHash != null &&
+          since.index != null &&
+          log.transactionHash === since.transactionHash &&
+          log.index <= since.index
+        )
+          continue
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
           (programs !== true && !programs.includes(log.address)) ||

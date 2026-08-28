@@ -311,6 +311,101 @@ export type LogFilter = {
    * no restriction (default), and costs nothing — `typeAndVersion` is never called.
    */
   typeAndVersions?: readonly (string | RegExp)[]
+  /**
+   * Resume hint: the last log emitted by a previous getLogs call on the same
+   * address/filter. Any subset of fields may be provided; each chain uses what it
+   * can. Two layers of behavior:
+   *
+   * 1. Start floors (ALL chains — see {@link withSinceStart}): `blockNumber` and
+   *    `blockTimestamp` stand in for `startBlock`/`startTime` — each effective floor
+   *    is the LARGER of the explicitly requested bound and the hint's — so a `since`
+   *    carrying either satisfies the start requirement on its own. Blocks/versions
+   *    are always fetched and emitted complete.
+   * 2. Block completeness: all chains implementations must guarantee all logs in
+   *    some block are yielded in the same call before it returns.
+   * 3. Exclusive resume (chains with a native per-log cursor): the hinted log itself
+   *    is NOT re-emitted, and other logs in the same block/tx may also not be;
+   *    some chains may attempt to yield logs in the same block or transaction, but
+   *    from 2., the contract guarantees only that logs from the next block or tx on
+   *    are emitted, so for an hermetic poller, it's safer to only ever pass
+   *    the *last* finalized log in the previous call as `since` hint.
+   *
+   * The hint only ever RAISES the start floors — `startBlock` is the scan floor
+   * (the scan never starts below it) and, when a `startBlock` exists, `startTime`
+   * is evaluated at filter-time just before emitting. A stale, foreign or malformed
+   * hint may be ignored (the usual walk runs). At-least-once is the only guarantee
+   * all families share: dedupe by `(transactionHash, index)`.
+   *
+   * Cursors are FILTER-SCOPED: a hint produced by a NARROWER filter must never be
+   * replayed on a wider one. Where the cursor is a per-block prefix (EVM), the wider
+   * filter's earlier-index logs in the hinted block count as already emitted and are
+   * SKIPPED — a loss, not a duplicate. The SDK cannot validate this: the hint carries
+   * the log's own `topics`, never the breadth of the filter that produced it, so a
+   * wide sweep and a narrow one over the same block hand out a byte-identical hint
+   * while requiring opposite resume behavior (an address mismatch IS detectable and
+   * is rejected; a topic-subset resume is not). Key each cursor by the filter that
+   * produced it, and start a new filter from its own `startBlock`.
+   *
+   * Per-family resume — EVM/Solana/TON: the hinted block/tx streams whole and logs
+   * at/before the hinted `index` are skipped (later same-block/same-tx logs still
+   * flow; TON floors its v3 `/messages` fast path at the hint's created_lt). Aptos:
+   * event `index` on single-topic streams, `blockNumber + 1` on multi-topic ones.
+   * Sui: inclusive checkpoint floors (re-delivered). Canton: unsupported.
+   */
+  since?: Partial<
+    Pick<
+      ChainLog,
+      'address' | 'blockNumber' | 'blockTimestamp' | 'transactionHash' | 'index' | 'topics'
+    >
+  >
+}
+
+/**
+ * Merges a partial {@link LogFilter.since} hint into the requested start bounds:
+ * each floor is the LARGER of the explicitly requested bound and the hint's
+ * (`since.blockNumber` stands in for or raises `startBlock`, `since.blockTimestamp`
+ * for `startTime`), so a `since` carrying either satisfies the start requirement on
+ * its own. Non-finite or absent hint fields contribute nothing.
+ *
+ * The merged `startBlock` is the scan floor — the scan never starts below it — and
+ * `startTime` is then evaluated at filter-time just before emitting (families do
+ * this at their emission points; Sui floors at the max of both instead). Chain
+ * cursor uses of `since` (TON's composite-hash lt, Solana's signature + per-log
+ * index, Aptos's event sequence number, EVM's per-block index exclusion) read
+ * `opts.since` directly and only ever raise these floors further.
+ *
+ * The returned `since` carries the hint minus its `tx` backref — never the full
+ * {@link ChainLog} with its self-referencing transaction (and sibling logs), so a
+ * retained hint doesn't pin whole transactions in memory.
+ */
+export function withSinceStart<
+  T extends {
+    startBlock?: number | bigint
+    startTime?: number | bigint
+    // Callers pass LeanNumbers<LogFilter>, whose mapped numeric fields widen to
+    // number | bigint — the constraint must accept them on every field the
+    // helper reads or writes (plain LogFilter fields would reject the callers).
+    since?: LeanNumbers<LogFilter['since']>
+  },
+>(opts: T): T {
+  if (!opts.since) return opts
+  const { tx: _, ...since } = opts.since as NonNullable<LogFilter['since']> & { tx?: unknown }
+  const block = Number(since.blockNumber)
+  const timestamp = Number(since.blockTimestamp)
+  return {
+    ...opts,
+    since,
+    ...(Number.isFinite(block) &&
+    block > 0 &&
+    (opts.startBlock == null || block > Number(opts.startBlock))
+      ? { startBlock: typeof opts.startBlock === 'bigint' ? BigInt(block) : block }
+      : null),
+    ...(Number.isFinite(timestamp) &&
+    timestamp > 0 &&
+    (opts.startTime == null || timestamp > Number(opts.startTime))
+      ? { startTime: typeof opts.startTime === 'bigint' ? BigInt(timestamp) : timestamp }
+      : null),
+  }
 }
 
 /**
@@ -736,7 +831,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiClient: CCIPAPIClient | null
   /** Retry configuration for API fallback operations (null if API client is disabled) */
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
-  /** Abort signal from ChainContext; fires when the chain should tear down. */
+  /**
+   * Fires when the chain should tear down: either {@link Chain.destroy} was
+   * called, or the ChainContext abort signal fired. Listeners registered with
+   * `{ once: true }` therefore self-unregister on whichever condition happens
+   * first, so no listener ever outlives its chain on a long-lived context.
+   */
   readonly abort: AbortSignal
 
   /**
@@ -758,9 +858,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     this.logger = logger
 
     const ac = new AbortController()
-    this.abort = ac.signal
+    // Composite: `destroy()` aborts the inner controller, the context abort
+    // fires the same signal directly. `once` listeners registered on
+    // `this.abort` (e.g. provider teardown) are unregistered by EITHER path,
+    // so a destroyed chain is not kept alive by a listener on a long-lived
+    // context signal (see the reload-churn retention in ccip-o11y workers).
+    this.abort = abort ? AbortSignal.any([ac.signal, abort]) : ac.signal
     this.destroy = ac.abort.bind(ac)
-    abort?.addEventListener('abort', (r?: unknown) => this.destroy(r), { once: true })
 
     // API client initialization: default enabled, null = explicit opt-out
     if (apiClient === null) {
@@ -889,6 +993,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *        required unless startTime is provided; explicit 0 is allowed
    *   - `startTime`: instead of a startBlock, a start timestamp may be provided;
    *        if either is provided, fetch logs forward from this starting point
+   *   - `since`: a previous log (preferably the *last* finalized from a previous call),
+   *        as log cursor; may be more efficient in some chains for paginating, and may
+   *        replace `startTime` or `startBlock`
    *   - `endBlock`: a fixed block height, finality tag or negative finality depth to stop iteration
    *        at; defaults to `latest`
    *   - `endBefore`: optional hint signature for end of iteration, instead of endBlock
@@ -1920,10 +2027,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     verifications?: CCIPVerifications
   } & Pick<
     LogFilter,
-    'page' | 'watch' | 'startBlock' | 'startTime'
+    'page' | 'watch' | 'startBlock' | 'startTime' | 'since'
   >): AsyncIterableIterator<CCIPExecution> {
     if (verifications && 'log' in verifications) hints.startBlock ??= verifications.log.blockNumber
-    if (hints.startTime == null && hints.startBlock == null) throw new CCIPLogsRequiresStartError()
+    if (hints.startTime == null && hints.startBlock == null && hints.since == null)
+      throw new CCIPLogsRequiresStartError()
     for await (const log of this.getLogs({
       address: offRamp,
       topics: ['ExecutionStateChanged'],
@@ -2433,7 +2541,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
  * const normalized = EVMChain.getAddress('0xABC...')
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export type ChainStatic<F extends ChainFamily = ChainFamily> = Function & {
   readonly family: F
   readonly decimals: number

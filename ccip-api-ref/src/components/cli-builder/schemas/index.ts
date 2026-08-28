@@ -4,6 +4,7 @@
  * Registry of all available command schemas.
  */
 
+import type { CommandSchema } from '../types/index.ts'
 import { laneLatencySchema } from './lane-latency.schema.ts'
 import { manualExecSchema } from './manual-exec.schema.ts'
 import { parseSchema } from './parse.schema.ts'
@@ -11,7 +12,6 @@ import { sendSchema } from './send.schema.ts'
 import { showSchema } from './show.schema.ts'
 import { supportedTokensSchema } from './supported-tokens.schema.ts'
 import { tokenSchema } from './token.schema.ts'
-import type { CommandSchema } from '../types/index.ts'
 
 export { laneLatencySchema } from './lane-latency.schema.ts'
 export { manualExecSchema } from './manual-exec.schema.ts'

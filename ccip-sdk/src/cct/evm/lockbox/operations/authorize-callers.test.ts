@@ -3,11 +3,11 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, getIcapAddress, makeError } from 'ethers'
 
-import { AuthorizeLockboxCallers } from './authorize-callers.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { AuthorizeLockboxCallers } from './authorize-callers.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const LOCKBOX = '0x' + '66'.repeat(20)

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { SuiExtraArgsV1Tag } from '../extra-args.ts'
-import { decodeSolanaSuiExtraArgsV1, encodeSolanaSuiExtraArgsV1 } from './extra-args.ts'
 import { decodeMoveExtraArgs } from '../shared/bcs-codecs.ts'
 import { encodeSuiExtraArgsV1 } from '../sui/types.ts'
+import { decodeSolanaSuiExtraArgsV1, encodeSolanaSuiExtraArgsV1 } from './extra-args.ts'
 
 /**
  * Unit tests for SuiExtraArgsV1 encoding/decoding, validating against the

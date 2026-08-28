@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 
 import { PublicKey } from '@solana/web3.js'
 
+import { CCTParamsInvalidError } from '../errors.ts'
+import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
   parseHexBytes,
   parseNonEmptyHexBytes,
@@ -17,8 +19,6 @@ import {
   validatePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
-import { CCTParamsInvalidError } from '../errors.ts'
-import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 
 describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {

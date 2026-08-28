@@ -237,7 +237,8 @@ async function findOffRampPackageByUpgrades(
   if (content?.dataType !== 'moveObject') return
   const owner = (
     (content.fields as Record<string, unknown>)['ownable_state'] as
-      { fields?: { owner?: unknown } } | undefined
+      | { fields?: { owner?: unknown } }
+      | undefined
   )?.fields?.owner
   if (typeof owner !== 'string') return
 
@@ -398,7 +399,8 @@ async function getRampOwner(ramp: string, client: SuiJsonRpcClient): Promise<str
   const content = obj.data?.content
   if (content?.dataType !== 'moveObject') return
   const ownable = (content.fields as Record<string, unknown>)['ownable_state'] as
-    { fields?: { owner?: unknown } } | undefined
+    | { fields?: { owner?: unknown } }
+    | undefined
   const owner = ownable?.fields?.owner
   return typeof owner === 'string' ? owner : undefined
 }

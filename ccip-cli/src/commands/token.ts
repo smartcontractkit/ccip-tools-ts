@@ -7,10 +7,10 @@ import { type ChainStatic, jsonStringify, networkInfo } from '@chainlink/ccip-sd
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
-import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import { formatDisplayAddress, getCtx, logParsedError, prettyTable } from './utils.ts'
 
 export const command = 'token'
 export const describe = 'Query token balance for an address'
@@ -68,7 +68,8 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 
 async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { output } = ctx
-  const networkName = networkInfo(argv.network).name
+  const network = networkInfo(argv.network)
+  const networkName = network.name
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const chain = await getChain(networkName)
 
@@ -120,8 +121,8 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
     default:
       prettyTable.call(ctx, {
         network: networkName,
-        holder: argv.holder,
-        token: argv.token ?? tokenLabel,
+        holder: formatDisplayAddress(argv.holder, network.family),
+        token: argv.token ? formatDisplayAddress(argv.token, network.family) : tokenLabel,
         balance,
         formatted,
         ...tokenInfo,

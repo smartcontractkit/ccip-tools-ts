@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { GetSupportedTokens } from './get-supported-tokens.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { GetSupportedTokens } from './get-supported-tokens.ts'
 
 const OFF_RAMP = '0x' + '11'.repeat(20)
 const TAR = '0x' + '22'.repeat(20)

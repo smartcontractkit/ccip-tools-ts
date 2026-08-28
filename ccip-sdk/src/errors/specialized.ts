@@ -1,12 +1,12 @@
 import type { BytesLike } from 'ethers'
 
-import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
-import { CCIPErrorCode } from './codes.ts'
 import type { RateLimiterState } from '../chain.ts'
 import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
 import { getAddressBytes, jsonStringify, util } from '../shared/codec.ts'
+import { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
+import { CCIPErrorCode } from './codes.ts'
 
 // Chain/Network
 
@@ -1743,6 +1743,24 @@ export class CCIPLogsWatchRequiresStartError extends CCIPError {
 }
 
 /**
+ * Thrown when two data sources disagree mid-scan (e.g. the TON v3 index's transaction
+ * list and the v2 RPC's transaction pages), or the on-chain transaction chain link
+ * breaks — the block in progress may be incomplete. Transient by nature: callers
+ * should drop the in-progress block and retry/resume from their last known cursor;
+ * the sources converge on their own.
+ */
+export class CCIPLogsStreamInconsistentError extends CCIPError {
+  override readonly name = 'CCIPLogsStreamInconsistentError'
+  /** Creates a logs stream inconsistent error. */
+  constructor(detail: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.LOGS_STREAM_INCONSISTENT, `Logs stream inconsistent: ${detail}`, {
+      ...options,
+      isTransient: true,
+    })
+  }
+}
+
+/**
  * Thrown when querying logs without an explicit start position.
  *
  * @example
@@ -1760,7 +1778,7 @@ export class CCIPLogsRequiresStartError extends CCIPError {
   override readonly name = 'CCIPLogsRequiresStartError'
   /** Creates a logs requires start error. */
   constructor(options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.LOGS_REQUIRES_START, `Logs query requires startBlock or startTime`, {
+    super(CCIPErrorCode.LOGS_REQUIRES_START, `Logs query requires startBlock, startTime or since`, {
       ...options,
       isTransient: false,
     })

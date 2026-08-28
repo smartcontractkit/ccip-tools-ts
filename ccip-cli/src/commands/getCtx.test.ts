@@ -10,9 +10,9 @@ import { getCtx } from './utils.ts'
 function captureStreams(fn: () => void): { stdout: string; stderr: string } {
   const stdoutChunks: string[] = []
   const stderrChunks: string[] = []
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+  // oxlint-disable-next-line typescript/unbound-method
   const origStdoutWrite = process.stdout.write
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+  // oxlint-disable-next-line typescript/unbound-method
   const origStderrWrite = process.stderr.write
 
   process.stdout.write = (chunk: unknown) => {

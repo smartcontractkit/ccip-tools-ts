@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-25
+
+- Tests: networked suites (`*.integration.test.ts`, `*.e2e.test.ts`, `*.fork.test.ts`) take per-network OS locks via the new `useResource` test helper, so concurrent `node --test` file runs never share a live RPC endpoint (suites declare the networks they talk to and wait on each other instead of rate-limiting public gateways); `npm run test:unit` now runs only offline unit tests
+- TON: `getLogs` cold backfills (startTime-only, watermark-less polls) seed from the TonCenter v3 index instead of walking the account's whole tx history: one strictly-filtered `/messages` page (plus a briefly-cached tip for the lag guard), paged `/transactions` meta joins event txs by hash, and raw event txs hydrate from the v2 RPC by `(lt, hash)`
+  - Index calls use a dedicated paced, fail-fast fetch (a caller-provided `fetch` is reused verbatim; override via the TON-local `v3Fetch` context option); index inconsistencies truncate the scan like a chain gap, and the caller resumes from `since`
+  - Deep v2 walks (`startBlock`/`since` over long windows) stamp block numbers via a lazily-engaged index meta oracle after 16 txs — one index page per ~100 txs instead of 2-3 RPCs per tx (24h windows: ~130s → ~17s); shallow polls never touch the index
+  - Fix resume floors skipping the boundary transaction (`to_lt` is exclusive server-side; floors are passed un-incremented), and a TON log's `index` (its message's created_lt) is honored as an exact resume cursor
+  - v3 fast path: page `/messages` by created_at (its native order, with a per-page created_lt re-sort, turning from the page's max created_at so the time cursor never regresses) — an lt-based page cursor could silently skip rows whose lt regresses across the boundary — and join tx meta by hash without forward-only pruning; a boundary second overflowing one page is drained by offset (never cut silently); the scan CLAMPS to the index's ingested tip, sealing `min(cutoff, tip)` and ending as a complete prefix the poller resumes from, and a pinned `endBlock` above the ingested tip declines to the complete v2 walk; truncation is reserved for genuine index self-contradiction (a row missing its tx hash), surfacing as `CCIPLogsStreamInconsistentError` — even with zero emissions for one-shot scans (startTime + topics, no `since`) and pinned windows; only a scan that emitted nothing AND carries a `since` resume position ends quietly, its tail re-scanned from the hint on the next poll
+- SDK: `getLogs` filters accept a partial `since` resume hint (e.g. the last log from a previous call), to resume a stream without re-scanning
+  - `since.blockNumber`/`blockTimestamp` stand in for (or raise) `startBlock`/`startTime` on all chains; a `since` with either satisfies the start requirement on its own
+  - EVM: resumes from `since.blockNumber` + `index`, excluding that block's logs at or before the hinted index (blocks are still fetched whole) — on address-scoped filters and on addressless (topic-/typeAndVersions-only) sweeps alike, where the hint is the sweep's own last emitted log (every log carries an address) and `(blockNumber, index)` is its resume cursor. Cursors are FILTER-SCOPED: never replay a narrower filter's hint on a wider one (the wider filter's earlier-index logs in the hinted block are then skipped, and the SDK cannot detect the mismatch)
+  - Solana: resumes by walking the hint's slot floor and re-streaming the hinted transaction whole, skipping logs at or before the hinted `index` — same-transaction followers (batch executions) are never lost to the transaction-granular `until` cursor
+  - TON: resumes from the `lt` embedded in the composite `transactionHash`; when the hint also carries its per-log `index`, the hinted transaction is re-streamed and its logs at or before the hint are skipped (same-transaction followers kept); a lone lt cursor stays transaction-exclusive
+  - Aptos: single-topic streams resume from the event `index` (handle sequence number) once the hint's topic is verified against the handle's own events; multi-topic streams floor at `blockNumber + 1`
+  - `since` floors: the merged `startBlock` is the scan floor — the scan never starts below it — and `startTime` is then evaluated at filter-time just before emitting
+  - `getMessageById` and `getExecutionReceipts` accept `since` too
+- Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
+- TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory
+
 ## [1.12.0] - 2026-08-19
 
 - SDK: support a new `typeAndVersions?: (string | RegExp)[]` filter option for `getLogs`, emitting only logs from addresses matching type string or typeAndVersion regexp

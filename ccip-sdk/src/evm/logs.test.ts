@@ -191,7 +191,7 @@ describe('getEvmLogs — adaptive range pagination', () => {
     // Explicit page=50 → should use 50-block chunks (not the default 10e3)
     const calls: Array<{ fromBlock: number; toBlock: number }> = []
     const trackingProvider = {
-      ...provider,
+      ...provider, // oxlint-disable-line typescript/no-misused-spread
       getLogs: async (filter: { fromBlock: number; toBlock: number }) => {
         calls.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock })
         return [makeLog(filter.fromBlock)]
@@ -1012,7 +1012,7 @@ describe('getEvmLogs — typeAndVersions filter', () => {
 
   /** Overrides a fake log's address (makeLog's cast type doesn't survive a plain spread). */
   function withAddress(log: Log, address: string): Log {
-    return { ...log, address } as unknown as Log
+    return { ...log, address } as unknown as Log // oxlint-disable-line typescript/no-misused-spread
   }
 
   /** Fake provider that returns a fixed set of logs for any (single-chunk) request. */
@@ -1274,6 +1274,288 @@ describe('getEvmLogs — per-endpoint topic-count cap', () => {
       getEndpointTopicLimit(url),
       undefined,
       'must not learn a cap from an unrelated error',
+    )
+  })
+})
+
+describe('getEvmLogs — since hint', () => {
+  const url = 'https://fake-rpc-since.example.com/rpc'
+
+  // Block 100 has log indexes 0,1,2; block 101 has index 0. The provider serves
+  // exactly the logs intersecting the requested [fromBlock, toBlock] range.
+  const RANGE_LOGS = [makeLog(100, 0), makeLog(100, 1), makeLog(100, 2), makeLog(101, 0)]
+
+  function makeRangeProvider(calls: { fromBlock: number; toBlock: number | string }[]) {
+    return {
+      _getConnection: () => ({ url }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 10_000
+        return { number: num, timestamp: num * 12 }
+      },
+      _getBlockTag: async (tag: string | number) => tag,
+      getLogs: async (filter: { fromBlock: number; toBlock: number }) => {
+        calls.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock })
+        return RANGE_LOGS.filter(
+          (l) => l.blockNumber >= filter.fromBlock && l.blockNumber <= filter.toBlock,
+        )
+      },
+      on: () => {},
+      off: () => {},
+      once: (_event: unknown, cb: () => void) => setTimeout(cb, 0),
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('since alone satisfies the start requirement; the hint block is fetched whole, then filtered by index', async () => {
+    // Address-scoped (the exclusion is only sound there — an addressless sweep
+    // cannot attribute the hint's index; see the B4 test below).
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        {
+          endBlock: 101,
+          address: '0x00000000000000000000000000000000000000aa',
+          since: {
+            address: '0x00000000000000000000000000000000000000aa',
+            blockNumber: 100,
+            index: 1,
+            blockTimestamp: 1200,
+          },
+        },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'queries from the hint block, fetching it whole')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['100:2', '101:0'],
+      'the hinted log (index 1) and earlier same-block logs are excluded; later ' +
+        'same-block followers and later blocks are emitted in full',
+    )
+  })
+
+  it('startBlock + startTime: scans from the floor block, startTime only skips early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        // timestamps are block*12 here: startTime 1212 == block 101's time, one past
+        // the requested floor block 100.
+        { startBlock: 100, endBlock: 101, startTime: 1212 },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'the floor is NOT raised to startTime’s block')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'block 100 (ts 1200 < 1212) is fetched whole but its logs are skipped',
+    )
+  })
+
+  it('since.blockNumber + startTime: startTime still applies to skip early blocks', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        { endBlock: 101, startTime: 1212, since: { blockNumber: 100, index: 0 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'queries from the hint block, fetching it whole')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['101:0'],
+      'the hinted log is excluded by index; the rest of its early block by startTime',
+    )
+  })
+
+  it('takes the larger of startBlock and since.blockNumber', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    await collect(
+      getEvmLogs(
+        { startBlock: 105, endBlock: 106, since: { blockNumber: 100, index: 1 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 105, 'the explicit startBlock wins over the older hint')
+  })
+
+  it('since.blockTimestamp stands in for startTime (resolved to a block)', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    await collect(
+      getEvmLogs(
+        // timestamps are block*12 in this fixture: 1200 resolves to block 100
+        { endBlock: 200, since: { blockTimestamp: 1200 } },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100)
+  })
+
+  it('still requires a start when since carries no usable floor', async () => {
+    await assert.rejects(
+      () =>
+        collect(
+          getEvmLogs(
+            { since: { transactionHash: '0xabc' } },
+            { provider: makeRangeProvider([]), getBlockInfo, logger: console },
+          ),
+        ),
+      { name: 'CCIPLogsRequiresStartError' },
+    )
+  })
+
+  it('ignores a foreign-address hint wholesale', async () => {
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const provider = makeRangeProvider(calls)
+    const logs = await collect(
+      getEvmLogs(
+        {
+          startBlock: 99,
+          endBlock: 101,
+          address: '0x00000000000000000000000000000000000000aa',
+          since: {
+            blockNumber: 101,
+            index: 0,
+            address: '0x00000000000000000000000000000000000000bb',
+          },
+        },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 99, 'the foreign hint does not raise the floor')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      RANGE_LOGS.map((l) => `${l.blockNumber}:${l.index}`),
+      'no index exclusion either',
+    )
+  })
+
+  it('addressless sweeps resume from the full (blockNumber, index) cursor', async () => {
+    // A topic-only sweep's hint is its OWN last emitted log (every log carries
+    // an address), so (blockNumber, index) is the valid resume cursor even when
+    // the filter spans the whole network: the hinted block is fetched whole and
+    // its logs at or before the hinted index — which the previous run of the
+    // same sweep already emitted — are skipped, later same-block logs flow.
+    const calls: { fromBlock: number; toBlock: number | string }[] = []
+    const logs = await collect(
+      getEvmLogs(
+        {
+          endBlock: 101,
+          topics: [['0x' + 'ab'.repeat(32)]],
+          since: {
+            address: '0x00000000000000000000000000000000000000bb',
+            blockNumber: 100,
+            index: 1,
+            blockTimestamp: 1200,
+          },
+        },
+        { provider: makeRangeProvider(calls), getBlockInfo, logger: console },
+      ),
+    )
+    assert.equal(calls[0]!.fromBlock, 100, 'the hint’s blockNumber still raises the floor')
+    assert.deepEqual(
+      logs.map((l) => `${l.blockNumber}:${l.index}`),
+      ['100:2', '101:0'],
+      'the hinted log and earlier same-block logs are excluded; later same-block logs flow',
+    )
+  })
+})
+
+describe('since — topic-scoped cursors are undetectable', () => {
+  const A = '0x' + 'ab'.repeat(32)
+  const B = '0x' + 'cd'.repeat(32)
+
+  function logAt(block: number, index: number, topic: string): Log {
+    return {
+      blockNumber: block,
+      logIndex: index,
+      index,
+      blockHash: `0x${'00'.repeat(31)}${block.toString(16).padStart(2, '0')}`,
+      transactionHash: `0x${'00'.repeat(32)}`,
+      transactionIndex: 0,
+      address: '0x0000000000000000000000000000000000000001',
+      topics: [topic],
+      data: '0x',
+      removed: false,
+    } as unknown as Log
+  }
+
+  /** Provider whose getLogs dispatches on the OR-list of topic0s the SDK sends. */
+  function makeTopicProvider(blockLogs: Record<string, Log[]>): JsonRpcApiProvider {
+    return {
+      _getConnection: () => ({ url: 'https://topic-impossible.example.com/rpc' }),
+      getBlock: async (tag: string | number) => {
+        const num = typeof tag === 'number' ? tag : 10_000
+        return { number: num, timestamp: num * 12 }
+      },
+      _getBlockTag: async (tag: string | number) => tag,
+      getLogs: async (filter: {
+        fromBlock: number
+        toBlock: number
+        topics?: (string | string[])[]
+      }) => {
+        const t0 = Array.isArray(filter.topics?.[0]) ? filter.topics[0] : []
+        return blockLogs[[...t0].sort().join(',')] ?? []
+      },
+      on: () => {},
+      off: () => {},
+      once: (_event: unknown, cb: () => void) => {
+        setTimeout(cb, 0)
+      },
+    } as unknown as JsonRpcApiProvider
+  }
+
+  it('two filter histories over the same block yield byte-identical hints with opposite resumes', async () => {
+    // S1 — previous filter [A, B] over block 100: emitted 100:0(A), 100:1(A), 100:2(B).
+    // S2 — previous filter [B] over block 100: emitted 100:2(B) only.
+    // Both hints are the last emitted log, B@2 — byte-identical. The correct resume
+    // from S1 is to skip 0, 1, 2; from S2 it is to skip 2 and DELIVER 0 and 1. No
+    // predicate over the hint can separate the two: the hint carries the log's own
+    // topics, never the breadth of the filter that produced it, so the
+    // over-exclusion of the wider filter is undetectable by construction (the SDK
+    // docs state cursors are filter-scoped for this reason).
+    const blockLogs = {
+      [`${A},${B}`]: [logAt(100, 0, A), logAt(100, 1, A), logAt(100, 2, B)],
+      [B]: [logAt(100, 2, B)],
+    }
+    const p = makeTopicProvider(blockLogs)
+    const [hintS1, hintS2] = await Promise.all([
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [[A, B]] },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      ).then((logs) => logs.at(-1)),
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [B] },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      ).then((logs) => logs.at(-1)),
+    ])
+    assert.equal(hintS1?.index, 2)
+    assert.deepEqual(hintS1, hintS2, 'the hints are byte-identical')
+    // Both histories DID emit a hint (proven above); fan out the non-null.
+    const resumableHints = [hintS1, hintS2!]
+
+    // Replaying either hint on the WIDE filter skips the whole block prefix:
+    // correct for S1, over-excluding for S2 (logs 0 and 1 were never emitted by
+    // S2). The identical hints make the difference unobservable to the SDK.
+    const resumedWide = async (since: (typeof resumableHints)[number]) =>
+      collect(
+        getEvmLogs(
+          { startBlock: 100, endBlock: 100, topics: [[A, B]], since },
+          { provider: p, getBlockInfo, logger: console },
+        ),
+      )
+    assert.deepEqual(
+      await resumedWide(resumableHints[0]!),
+      [],
+      'S1 resume: skip 0, 1, 2 — complete',
+    )
+    assert.deepEqual(
+      await resumedWide(resumableHints[1]!),
+      [],
+      'S2 resume: same bytes, but logs 0 and 1 were never emitted by S2 and are lost',
     )
   })
 })

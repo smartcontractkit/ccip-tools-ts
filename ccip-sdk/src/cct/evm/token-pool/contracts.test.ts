@@ -4,6 +4,11 @@ import { describe, it } from 'node:test'
 import { Interface } from 'ethers'
 
 import {
+  CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
+  CCTOperationUnsupportedError,
+} from '../../errors.ts'
+import {
   TOKEN_POOL_FAMILIES,
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
@@ -16,11 +21,6 @@ import {
   parseTokenPoolVersion,
   resolveEncoder,
 } from './contracts.ts'
-import {
-  CCTContractTypeInvalidError,
-  CCTContractVersionUnsupportedError,
-  CCTOperationUnsupportedError,
-} from '../../errors.ts'
 
 const ADDR = '0x' + '11'.repeat(20)
 

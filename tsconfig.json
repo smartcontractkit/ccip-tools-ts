@@ -17,6 +17,5 @@
     "resolveJsonModule": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
-    "stableTypeOrdering": true,
   },
 }

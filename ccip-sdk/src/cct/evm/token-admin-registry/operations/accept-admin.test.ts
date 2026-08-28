@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, getAddress, getIcapAddress, id, makeError } from 'ethers'
 
-import { AcceptAdmin } from './accept-admin.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { AcceptAdmin } from './accept-admin.ts'
 
 // SENDER and OTHER carry hex letters so their checksummed and lowercase spellings differ. That
 // difference is what makes the `getAddress()` normalisation in the pending-admin and wallet-binding

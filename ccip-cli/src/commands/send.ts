@@ -40,10 +40,16 @@ import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, parseTokenAmounts } from './utils.ts'
-import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
+import {
+  formatDisplayAddress,
+  formatDisplayTxHash,
+  getCtx,
+  logParsedError,
+  parseTokenAmounts,
+} from './utils.ts'
 
 export const command = 'send'
 export const describe = 'Send a CCIP message from source to destination chain'
@@ -393,7 +399,7 @@ async function sendMessage(
             'Estimated',
             destNetwork.family === ChainFamily.Solana ? 'computeUnits' : 'gasLimit',
             'for sender =',
-            walletAddress,
+            walletAddress && formatDisplayAddress(walletAddress, sourceNetwork.family),
             ':',
             estimated,
             ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
@@ -404,7 +410,7 @@ async function sendMessage(
       // When continuing to send, the estimate is a status message
       logger.info(
         'Estimated gasLimit for sender =',
-        walletAddress,
+        walletAddress && formatDisplayAddress(walletAddress, sourceNetwork.family),
         ':',
         estimated,
         ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', argv.gasLimit] : []),
@@ -524,11 +530,11 @@ async function sendMessage(
   })
   logger.info(
     '🚀 Sending message to',
-    receiver,
+    receiver && formatDisplayAddress(receiver, destNetwork.family),
     '@',
     destNetwork.name,
     ', tx =>',
-    request.tx.hash,
+    formatDisplayTxHash(request.tx.hash, sourceNetwork.family),
     ', messageId =>',
     request.message.messageId,
   )

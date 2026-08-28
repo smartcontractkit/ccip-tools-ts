@@ -44,7 +44,9 @@ export type CustomPoolProgramRef = {
 
 /** Identifies a canonical token pool or a custom pool program. */
 export type PoolProgramRef =
-  BurnMintPoolProgramRef | LockReleasePoolProgramRef | CustomPoolProgramRef
+  | BurnMintPoolProgramRef
+  | LockReleasePoolProgramRef
+  | CustomPoolProgramRef
 
 type TokenPoolStateDecodeContext = {
   tokenPool: string

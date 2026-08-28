@@ -3,9 +3,9 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, getAddress, makeError } from 'ethers'
 
-import { GetTokenAdminRegistry } from './get-token-admin-registry.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { GetTokenAdminRegistry } from './get-token-admin-registry.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const ROUTER = '0x' + '22'.repeat(20)

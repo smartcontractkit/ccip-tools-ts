@@ -17,10 +17,14 @@ import { JsonRpcProvider, hexlify, randomBytes, zeroPadValue } from 'ethers'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
 import { estimateReceiveExecution } from '../gas.ts'
-import { EVMChain } from './index.ts'
 import { simulateReleaseOrMint } from './simulate.ts'
+import { EVMChain } from './index.ts'
+
+// Live RPCs: the isolated v2.0 staging lane (Sepolia → Fuji) and the LBTC prod-testnet lanes.
+await useResource(['sepolia', 'fuji'])
 
 const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
 const SEPOLIA_SELECTOR = 16015286601757825753n

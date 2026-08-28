@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out repository
-      uses: actions/checkout@v5.0.0
+      uses: actions/checkout@v7.0.1
 
     - name: Set up Node.js
-      uses: actions/setup-node@v6.0.0
+      uses: actions/setup-node@v7.0.0
       with:
         node-version: 24
 
@@ -42,11 +42,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish
     steps:
-      - uses: actions/checkout@v5.0.0
-      - uses: actions/setup-node@v6.0.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
+        env:
+          # setup-node v7 no longer exports a placeholder NODE_AUTH_TOKEN when none is
+          # set (v6 did), while the registry npmrc it writes still references
+          # ${NODE_AUTH_TOKEN} — yarn (postman-code-generators deepinstall) then dies on
+          # the unresolved placeholder during npm ci. Restore v6 behavior: the real
+          # token when a secret exists, else the same dummy placeholder the last
+          # successful release (2026-08-19) ran with.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || 'XXXXX-XXXXX-XXXXX-XXXXX' }}
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
@@ -62,11 +70,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish
     steps:
-      - uses: actions/checkout@v5.0.0
-      - uses: actions/setup-node@v6.0.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
+        env:
+          # setup-node v7 no longer exports a placeholder NODE_AUTH_TOKEN when none is
+          # set (v6 did), while the registry npmrc it writes still references
+          # ${NODE_AUTH_TOKEN} — yarn (postman-code-generators deepinstall) then dies on
+          # the unresolved placeholder during npm ci. Restore v6 behavior: the real
+          # token when a secret exists, else the same dummy placeholder the last
+          # successful release (2026-08-19) ran with.
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN || 'XXXXX-XXXXX-XXXXX-XXXXX' }}
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm

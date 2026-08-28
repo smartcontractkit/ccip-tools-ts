@@ -53,8 +53,7 @@ function chain(proposedOwner = AUTHORITY): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(WALLET.publicKey.toBase58()),
+  return Object.assign(chain(WALLET.publicKey.toBase58()), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -68,7 +67,7 @@ function submitChain(): SolanaChain {
         data: stateData(WALLET.publicKey.toBase58()),
       }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

@@ -4,6 +4,8 @@ import { describe, it, mock } from 'node:test'
 import { Address } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
+import { EVMExtraArgsV2Tag } from '../extra-args.ts'
+import type { AnyMessage } from '../types.ts'
 import {
   CCIP_SEND_OPCODE,
   DEFAULT_GAS_BUFFER,
@@ -12,8 +14,6 @@ import {
   generateUnsignedCcipSend,
   getFee,
 } from './send.ts'
-import { EVMExtraArgsV2Tag } from '../extra-args.ts'
-import type { AnyMessage } from '../types.ts'
 
 describe('TON send unit tests', () => {
   const TEST_ROUTER = 'EQDWS-oJCjyrf-6c1wF5eGP7b2qNWn7wUqS3dlNgb_YzKNHG'

@@ -19,6 +19,8 @@ import {
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
+import type { Ctx } from '../commands/index.ts'
+import type { GlobalOpts } from '../index.ts'
 import { loadAptosWallet } from './aptos.ts'
 import {
   loadCantonConfig,
@@ -30,8 +32,6 @@ import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
 import { loadTonWallet } from './ton.ts'
-import type { Ctx } from '../commands/index.ts'
-import type { GlobalOpts } from '../index.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>

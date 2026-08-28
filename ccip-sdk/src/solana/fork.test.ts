@@ -6,11 +6,15 @@ import { after, before, describe, it } from 'node:test'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
+import { networkInfo } from '../index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
 import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
-import { networkInfo } from '../index.ts'
+
+// Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
+await useResource(['solana-mainnet', 'api'])
 
 // ── Constants ──
 

@@ -33,8 +33,7 @@ function chain(): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -44,7 +43,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

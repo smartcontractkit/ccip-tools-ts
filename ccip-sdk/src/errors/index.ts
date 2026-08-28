@@ -21,6 +21,7 @@ export {
   CCIPLogRangeTooLargeError,
   CCIPLogsAddressRequiredError,
   CCIPLogsRequiresStartError,
+  CCIPLogsStreamInconsistentError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
 } from './specialized.ts'

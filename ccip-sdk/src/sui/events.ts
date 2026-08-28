@@ -1,7 +1,7 @@
 import type { EventId, SuiEvent, SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { memoize } from 'micro-memoize'
 
-import type { LogFilter } from '../chain.ts'
+import { type LogFilter, withSinceStart } from '../chain.ts'
 import {
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
@@ -501,6 +501,9 @@ export async function* streamSuiLogs<T>(
     if (typeof topic !== 'string') throw new CCIPTopicsInvalidError(opts.topics!)
     return `${opts.address}::${topic}`
   })
+
+  // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+  opts = withSinceStart(opts)
 
   const hasStart = opts.startBlock != null || opts.startTime != null
   if (!hasStart) throw new CCIPLogsRequiresStartError()

@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli token` command.
  */
 
-import { outputOptions, rpcOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions, rpcOptions } from './common.ts'
 
 export const tokenSchema: CommandSchema<'token'> = {
   name: 'token',

@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, id } from 'ethers'
 
-import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
+import { EVMTokenManager } from './index.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)

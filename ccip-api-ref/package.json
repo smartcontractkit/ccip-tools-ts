@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-api-ref",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
   "description": "API Reference documentation for CCIP SDK and CLI",
   "scripts": {
@@ -11,8 +11,8 @@
     "clean": "docusaurus clear",
     "gen-api": "docusaurus gen-api-docs all && node scripts/post-gen-api.mjs",
     "clean-api": "docusaurus clean-api-docs all",
-    "lint": "prettier --check . && eslint .",
-    "lint:fix": "prettier --write . && eslint --fix .",
+    "lint": "oxfmt --check . && oxlint .",
+    "lint:fix": "oxfmt . && oxlint --fix .",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "test": "node --import tsx --test src/**/*.test.ts",
@@ -28,8 +28,8 @@
     "@easyops-cn/docusaurus-search-local": "^0.55.3",
     "@mdx-js/react": "^3.1.1",
     "clsx": "^2.1.1",
-    "docusaurus-plugin-openapi-docs": "^5.1.3",
-    "docusaurus-theme-openapi-docs": "^5.1.3",
+    "docusaurus-plugin-openapi-docs": "^5.2.0",
+    "docusaurus-theme-openapi-docs": "^5.2.0",
     "focus-trap-react": "^12.0.3",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.2.8",
@@ -40,6 +40,7 @@
     "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/types": "^3.10.2",
     "@types/react-dom": "^19.2.4",
+    "@typescript/native": "npm:typescript@7.0.2",
     "docusaurus-plugin-typedoc": "^1.4.2",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.12.0"

@@ -54,8 +54,7 @@ function chain(owner = OWNER): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -66,7 +65,7 @@ function submitChain(): SolanaChain {
       confirmTransaction: async () => ({ value: { err: null } }),
       getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData() }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {

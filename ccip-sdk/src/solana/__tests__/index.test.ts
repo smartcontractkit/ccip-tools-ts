@@ -6,7 +6,8 @@ import { type Connection, PublicKey } from '@solana/web3.js'
 
 import { CCIPDataFormatUnsupportedError } from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
-import { SolanaChain } from '../index.ts'
+import { type SolanaTransaction, SolanaChain } from '../index.ts'
+import { hexDiscriminator } from '../utils.ts'
 
 // Create mock functions
 const mockGetAccountInfo = mock.fn(() => null as any)
@@ -767,5 +768,87 @@ describe('SolanaChain getExecutionReceipts', () => {
       ((c.arguments as unknown[])[0] as PublicKey).toBase58(),
     )
     assert.ok(addresses.includes(offRamp))
+  })
+})
+
+describe('SolanaChain getLogs — since per-log resume (same-tx followers)', () => {
+  const ADDRESS = '11111111111111111111111111111111' // system program (mock ignores it)
+  const TOPIC = hexDiscriminator('ExecutionStateChanged')
+
+  // A tx with three matching logs at indexes 0, 1, 2 (batch execution), plus a
+  // later tx with one log. HINT = the tx's log at index 1.
+  function makeChainWithTxs(txs: SolanaTransaction[]) {
+    const solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
+    mock.method(solanaChain, 'getTransactionsForAddress', async function* () {
+      yield* txs
+    })
+    return solanaChain
+  }
+
+  const txLog = (index: number, hash: string) => ({
+    address: ADDRESS,
+    topics: [TOPIC],
+    data: '',
+    transactionHash: hash,
+    index,
+    blockNumber: 100,
+    blockTimestamp: 100,
+  })
+
+  it('drops only logs at/before the hinted index; same-tx followers survive (B1)', async () => {
+    const txA = {
+      hash: 'sigA',
+      logs: [txLog(0, 'sigA'), txLog(1, 'sigA'), txLog(2, 'sigA')],
+    } as unknown as SolanaTransaction
+    const txB = { hash: 'sigB', logs: [txLog(0, 'sigB')] } as unknown as SolanaTransaction
+    const chain = makeChainWithTxs([txA, txB])
+
+    const out: { tx: string; index: number }[] = []
+    for await (const l of chain.getLogs({
+      address: ADDRESS,
+      topics: [TOPIC],
+      startBlock: 100,
+      since: {
+        transactionHash: 'sigA',
+        index: 1,
+        blockNumber: 100,
+        blockTimestamp: 100,
+        address: ADDRESS,
+        topics: [TOPIC],
+      },
+    })) {
+      out.push({ tx: l.transactionHash, index: l.index })
+    }
+    assert.deepEqual(out, [
+      { tx: 'sigA', index: 2 },
+      { tx: 'sigB', index: 0 },
+    ])
+  })
+
+  it('does not re-emit the hinted log when the hint is the tx’s last log', async () => {
+    const txA = {
+      hash: 'sigA',
+      logs: [txLog(0, 'sigA'), txLog(1, 'sigA')],
+    } as unknown as SolanaTransaction
+    const txB = { hash: 'sigB', logs: [txLog(0, 'sigB')] } as unknown as SolanaTransaction
+    const chain = makeChainWithTxs([txA, txB])
+    // hint = LAST log of the hinted tx: nothing of that tx may re-emit.
+    const out: string[] = []
+    for await (const l of chain.getLogs({
+      address: ADDRESS,
+      topics: [TOPIC],
+      startBlock: 100,
+      since: {
+        transactionHash: 'sigA',
+        index: 1,
+        blockNumber: 100,
+        blockTimestamp: 100,
+        address: ADDRESS,
+        topics: [TOPIC],
+      },
+    })) {
+      out.push(`${l.transactionHash}:${l.index}`)
+    }
+    assert.deepEqual(out, ['sigB:0'])
   })
 })

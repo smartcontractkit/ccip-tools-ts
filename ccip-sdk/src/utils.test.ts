@@ -6,7 +6,6 @@ import { dataLength } from 'ethers'
 
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
-import { type Logger, ChainFamily } from './index.ts'
 import { networkInfo } from './networks.ts'
 import {
   blockRangeGenerator,
@@ -29,6 +28,7 @@ import {
   toLeArray,
   withRetry,
 } from './utils.ts'
+import { type Logger, ChainFamily } from './index.ts'
 
 describe('getBlockNumberAtOrAfter', () => {
   /** Regular chain: ts(n) = base + n*blockTime. */

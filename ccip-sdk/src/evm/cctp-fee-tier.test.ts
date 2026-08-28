@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes } from 'ethers'
 
-import { interfaces } from './const.ts'
-import { EVMChain } from './index.ts'
 import { ChainFamily, NetworkType } from '../networks.ts'
 import { CCIPVersion } from '../types.ts'
+import { interfaces } from './const.ts'
+import { EVMChain } from './index.ts'
 
 // Regression test: `finality !== 0` breaks on the string form of finality ('finalized'
 // defaults to Fast instead of Standard), because 'finalized' !== 0 is trivially true.

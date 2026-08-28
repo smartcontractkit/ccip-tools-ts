@@ -26,6 +26,7 @@ import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
+import * as poolErrorAbis from './abi/pool-errors.ts'
 import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import RMNProxy_ABI from './abi/RMNProxy.ts'
 import Router_ABI from './abi/Router.ts'
@@ -33,7 +34,6 @@ import TokenAdminRegistry_ABI from './abi/TokenAdminRegistry_1_5.ts'
 import TokenPool_2_0_ABI from './abi/TokenPool_2_0.ts'
 import USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
 import VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
-import * as poolErrorAbis from './abi/pool-errors.ts'
 
 export const defaultAbiCoder = AbiCoder.defaultAbiCoder()
 

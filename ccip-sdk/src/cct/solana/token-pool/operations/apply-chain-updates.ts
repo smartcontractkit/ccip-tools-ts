@@ -6,10 +6,6 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js'
 
-import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
-import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
-import { InitChainRemoteConfig } from './init-chain-remote-config.ts'
-import { type RateLimitConfig, SetChainRateLimit } from './set-chain-rate-limit.ts'
 import { CCIPError, CCIPMethodUnsupportedError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -29,6 +25,10 @@ import {
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
+import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
+import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
+import { InitChainRemoteConfig } from './init-chain-remote-config.ts'
+import { type RateLimitConfig, SetChainRateLimit } from './set-chain-rate-limit.ts'
 
 const MAX_TRANSACTION_SIZE = 1232
 

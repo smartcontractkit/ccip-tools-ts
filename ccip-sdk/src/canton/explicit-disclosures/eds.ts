@@ -1,5 +1,5 @@
-import type { DisclosedContract } from './types.ts'
 import { get, post } from '../client/client.ts'
+import type { DisclosedContract } from './types.ts'
 
 /**
  * Configuration for the EDS-based disclosure provider.

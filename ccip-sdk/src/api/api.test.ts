@@ -4,8 +4,6 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import '../index.ts'
 import { getAddress } from 'ethers'
 
-import { CCIPAPIClient, DEFAULT_API_BASE_URL, SDK_VERSION, SDK_VERSION_HEADER } from './index.ts'
-import type { MessageSearchResult } from './types.ts'
 import {
   CCIPAbortError,
   CCIPApiClientNotAvailableError,
@@ -22,6 +20,8 @@ import { ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { decodeMessage } from '../requests.ts'
 import { CCIPVersion } from '../types.ts'
 import { jsonStringify } from '../utils.ts'
+import type { MessageSearchResult } from './types.ts'
+import { CCIPAPIClient, DEFAULT_API_BASE_URL, SDK_VERSION, SDK_VERSION_HEADER } from './index.ts'
 
 const origFetch = globalThis.fetch
 

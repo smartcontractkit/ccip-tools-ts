@@ -1,6 +1,6 @@
 import type { WrapperProps } from '@docusaurus/types'
-import type CodeBlockType from '@theme/CodeBlock'
 import CodeBlock from '@theme-original/CodeBlock'
+import type CodeBlockType from '@theme/CodeBlock'
 import React from 'react'
 
 import styles from './CodeBlock.module.css'
@@ -45,7 +45,7 @@ function extractLanguage(className?: string): string {
 /** Enhanced CodeBlock wrapper with language badge */
 export default function CodeBlockWrapper(props: Props): React.JSX.Element {
   // Language can come from props.language or from className (may be undefined at runtime from markdown)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- props.language may be undefined at runtime from markdown
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- props.language may be undefined at runtime from markdown
   const language = props.language ?? extractLanguage(props.className) ?? ''
   const languageLabel = LANGUAGE_LABELS[language.toLowerCase()] ?? language.toUpperCase()
   const showBadge = language && language !== 'text' && language !== ''

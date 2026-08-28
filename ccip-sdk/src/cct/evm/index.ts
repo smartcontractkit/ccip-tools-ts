@@ -20,7 +20,6 @@ import {
 } from './lockbox/operations/authorize-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
-import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
   type AcceptAdminParams,
   AcceptAdmin,
@@ -62,6 +61,7 @@ import {
   type TransferOwnershipParams,
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
+import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {

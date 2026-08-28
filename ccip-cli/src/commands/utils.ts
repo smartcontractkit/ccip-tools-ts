@@ -6,12 +6,12 @@ import {
   type CCIPRequest,
   type CCIPVerifications,
   type Chain,
-  type ChainFamily,
   type ChainStatic,
   type Lane,
   CCIPError,
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
+  ChainFamily,
   ExecutionState,
   getCCIPExplorerUrl,
   getDataBytes,
@@ -61,18 +61,22 @@ export async function selectRequest(
   const answer = await select({
     message: `${requests.length} messageIds found; select one${promptSuffix ? ' ' + promptSuffix : ''}`,
     choices: [
-      ...requests.map((req, i) => ({
-        value: i,
-        name: `${req.log.index} => ${req.message.messageId}`,
-        description:
-          `sender =\t\t${req.message.sender}
-receiver =\t\t${req.message.receiver}
+      ...requests.map((req, i) => {
+        const srcFam = networkInfo(req.lane.sourceChainSelector).family
+        const dstFam = networkInfo(req.lane.destChainSelector).family
+        return {
+          value: i,
+          name: `${req.log.index} => ${req.message.messageId}`,
+          description:
+            `sender =\t\t${formatDisplayAddress(req.message.sender, srcFam)}
+receiver =\t\t${formatDisplayAddress(req.message.receiver, dstFam)}
 gasLimit =\t\t${(req.message as { gasLimit: bigint }).gasLimit}
-tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? ta.token : ta.destTokenAddress)).join(',')}]` +
-          ('lane' in req
-            ? `\ndestination =\t\t${networkInfo(req.lane.destChainSelector).name} [${networkInfo(req.lane.destChainSelector).chainId}]`
-            : ''),
-      })),
+tokenTransfers =\t[${req.message.tokenAmounts.map((ta) => ('token' in ta ? formatDisplayAddress(ta.token, srcFam) : formatDisplayAddress(ta.destTokenAddress, dstFam))).join(',')}]` +
+            ('lane' in req
+              ? `\ndestination =\t\t${networkInfo(req.lane.destChainSelector).name} [${networkInfo(req.lane.destChainSelector).chainId}]`
+              : ''),
+        }
+      }),
       {
         value: -1,
         name: 'Exit',
@@ -149,16 +153,90 @@ export function formatDisplayTxHash(hash: string, family: ChainFamily): string {
   return supportedChains[family]?.formatTxHash?.(hash) ?? hash
 }
 
+/** String keys whose values are chain addresses; see {@link prettyFormat}. */
+const ADDRESS_KEYS = new Set<string>([
+  'router',
+  'feeQuoter',
+  'feeAggregator',
+  'allowlistAdmin',
+  'linkToken',
+  'tokenPool',
+  'tokenAdminRegistry',
+  'administrator',
+  'contract',
+  'origin',
+  'address',
+  'sender',
+  'receiver',
+  'onRamp',
+  'offRamp',
+  'onRamps',
+  'offRamps',
+  'offRampAddress',
+  'sourcePoolAddress',
+  'destTokenAddress',
+  'tokenReceiver',
+  'requiredCCVs',
+  'optionalCCVs',
+])
+
+/** String keys whose values are transaction hashes; see {@link prettyFormat}. */
+const TX_HASH_KEYS = new Set<string>([
+  'transactionHash',
+  'receiptTransactionHash',
+  'sendTransactionHash',
+  'txHash',
+])
+
+/**
+ * Recursively formats a record for pretty printing: values under known
+ * address/tx-hash keys go through {@link formatDisplayAddress}/
+ * {@link formatDisplayTxHash}, so TON (and future) user-facing formats are
+ * always friendly addresses and bare tx hashes in pretty output.
+ *
+ * `sameFamily` formats values owned by the printing chain. `familyFor`
+ * overrides the family for specific keys holding *remote*-chain values — e.g.
+ * an EVM OffRampConfig's `onRamps` list, which contains source-chain
+ * addresses and must be formatted with the source family. Only affects pretty
+ * output: json/log formats must keep raw values.
+ */
+export function prettyFormat(
+  value: unknown,
+  sameFamily: ChainFamily,
+  familyFor: Readonly<Record<string, ChainFamily>> = {},
+): unknown {
+  const format = (val: unknown, key?: string): unknown => {
+    if (typeof val === 'string' && key) {
+      const family = key in familyFor ? familyFor[key]! : sameFamily
+      if (ADDRESS_KEYS.has(key)) return formatDisplayAddress(val, family)
+      if (TX_HASH_KEYS.has(key)) return formatDisplayTxHash(val, family)
+    }
+    if (Array.isArray(val)) return val.map((v) => format(v, key))
+    if (val && typeof val === 'object') {
+      return Object.fromEntries(
+        Object.entries(val as Record<string, unknown>).map(([k, v]) => [k, format(v, k)]),
+      )
+    }
+    return val
+  }
+  return format(value)
+}
+
 async function formatToken(
   source: Chain | undefined,
   ta: { amount: bigint } & (
-    { token: string } | { sourceTokenAddress?: string; sourcePoolAddress: string }
+    | { token: string }
+    | { sourceTokenAddress?: string; sourcePoolAddress: string }
   ),
+  family?: ChainFamily,
 ): Promise<string> {
   if ('token' in ta && !ta.token) {
     return ta.amount === 0n ? '0 (paid on-ledger)' : `${ta.amount} (on-ledger)`
   }
-  if (!source) return `${ta.amount} ${'sourcePoolAddress' in ta ? ta.sourcePoolAddress : ta.token}`
+  if (!source) {
+    const addr = 'sourcePoolAddress' in ta ? ta.sourcePoolAddress : ta.token
+    return `${ta.amount} ${formatDisplayAddress(addr, family ?? ChainFamily.EVM)}`
+  }
   let token
   if ('token' in ta) token = ta.token
   else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
@@ -278,7 +356,7 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
   let finalized
   try {
     if (source) finalized = await source.getBlockTimestamp('finalized')
-  } catch (_) {
+  } catch {
     // no finalized tag support
   }
   let nonce
@@ -335,19 +413,38 @@ export async function prettyRequest(this: Ctx, request: CCIPRequest, source?: Ch
       (finalized < request.log.blockTimestamp
         ? formatDuration(request.log.blockTimestamp - finalized) + ' left'
         : true),
-    fee: await formatToken(source, {
-      token: request.message.feeToken,
-      amount: request.message.feeTokenAmount,
-    }),
+    fee: await formatToken(
+      source,
+      {
+        token: request.message.feeToken,
+        amount: request.message.feeTokenAmount,
+      },
+      sourceFamily,
+    ),
     ...formatArray(
       'tokens',
-      await Promise.all(request.message.tokenAmounts.map(formatToken.bind(null, source))),
+      await Promise.all(
+        request.message.tokenAmounts.map((ta) => formatToken(source, ta, sourceFamily)),
+      ),
     ),
     ...formatDataString(request.message.data),
-    ...('accounts' in request.message ? formatArray('accounts', request.message.accounts) : {}),
+    ...('accounts' in request.message
+      ? formatArray(
+          'accounts',
+          request.message.accounts.map((a) => formatDisplayAddress(a, sourceFamily)),
+        )
+      : {}),
     ...('receipts' in request.message ? formatArray('receipts', request.message.receipts) : {}),
-    ...rest,
-    ...(!!request.metadata && omit(request.metadata, 'sourceNetworkInfo', 'destNetworkInfo')),
+    ...(prettyFormat(rest, sourceFamily, { offRampAddress: destFamily }) as Record<
+      string,
+      unknown
+    >),
+    ...(request.metadata
+      ? (prettyFormat(
+          omit(request.metadata, 'sourceNetworkInfo', 'destNetworkInfo'),
+          destFamily,
+        ) as Record<string, unknown>)
+      : {}),
   })
   this.output.write('CCIP Explorer:', getCCIPExplorerUrl('msg', request.message.messageId))
 }
@@ -362,9 +459,13 @@ export async function prettyVerifications(
   this: Ctx,
   dest: Chain,
   verifications: CCIPVerifications,
-  request: PickDeep<CCIPRequest, 'log.blockTimestamp' | 'lane.destChainSelector'>,
+  request: PickDeep<
+    CCIPRequest,
+    'log.blockTimestamp' | 'lane.destChainSelector' | 'lane.sourceChainSelector'
+  >,
 ) {
   const destFamily = networkInfo(request.lane.destChainSelector).family
+  const sourceFamily = networkInfo(request.lane.sourceChainSelector).family
 
   if ('report' in verifications) {
     const timestamp = await dest.getBlockTimestamp(verifications.log.blockNumber)
@@ -387,7 +488,19 @@ export async function prettyVerifications(
       if (timestamp && timestamp > ts) ts = timestamp
 
     prettyTable.call(this, {
-      ...verifications,
+      // sourceAddress lives on the source chain, destAddress/CCVs on dest
+      ...(prettyFormat(
+        {
+          verifications: verifications.verifications.map((v) => ({
+            ccvData: v.ccvData,
+            sourceAddress: formatDisplayAddress(v.sourceAddress, sourceFamily),
+            destAddress: formatDisplayAddress(v.destAddress, destFamily),
+            ...(v.timestamp != null && { timestamp: v.timestamp }),
+          })),
+          verificationPolicy: verifications.verificationPolicy,
+        },
+        destFamily,
+      ) as Record<string, unknown>),
       ...(ts && {
         timestamp: `${formatDate(ts)} (${formatDuration(ts - request.log.blockTimestamp)} after request)`,
       }),

@@ -10,6 +10,7 @@ import {
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 
+import type { Ctx } from '../commands/index.ts'
 import { resolveCliIndexer, resolveCliRouter } from './canton.ts'
 import {
   fetchChainsFromRpcs,
@@ -17,7 +18,6 @@ import {
   isCantonLedgerUrl,
   resolveRouter,
 } from './index.ts'
-import type { Ctx } from '../commands/index.ts'
 
 // ---------------------------------------------------------------------------
 // Shared helpers

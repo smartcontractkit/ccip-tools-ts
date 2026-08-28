@@ -10,8 +10,9 @@ For project overview and architecture, see the [documentation](docs/index.md).
 ## Quick Start
 
 ```bash
-npm ci          # Install dependencies
-npm test        # Run all tests
+npm ci           # Install dependencies
+npm run test:unit  # Unit tests only (no network access; integration/e2e/fork excluded)
+npm test         # Run all tests (unit + integration + e2e + fork)
 npm run check   # Lint + typecheck
 ```
 
@@ -20,13 +21,52 @@ npm run check   # Lint + typecheck
 Run before submitting a PR:
 
 ```bash
-npm run lint        # Prettier + ESLint
+npm run lint        # Oxfmt + Oxlint
 npm run typecheck   # TypeScript validation
+npm run test:unit   # Unit tests only with coverage
 npm run test        # All tests with coverage
 npm run build       # Full build
 ```
 
 CI runs: `npm ci` → `npm run check` → `npm test`
+
+TypeScript 7 provides the `tsc` compiler used by the SDK, CLI, and docs
+typechecks. The root `typescript` alias points to the official TypeScript 6
+compatibility package because TypeDoc still requires TypeScript's classic API;
+this bridge can be removed when TypeDoc supports TypeScript 7.
+
+## Test Suite Layout
+
+Test files are classified by filename suffix:
+
+| Suffix | Category | Included in `test:unit` |
+| --- | --- | --- |
+| `*.test.ts` | Unit — mocked, no network access | ✅ |
+| `*.integration.test.ts` | Integration — live RPCs / staging API | ❌ |
+| `*.e2e.test.ts` | End-to-end — CLI spawned against live networks | ❌ |
+| `*.fork.test.ts` | Fork — anvil/surfpool forking live state | ❌ |
+
+A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized as integration exactly like `logs.integration.test.ts` — the suffix is what matters, and `fork.test.data.ts` is a data helper, not a test.
+
+### Networked tests and the `useResource` lock
+
+`node --test` runs every test file concurrently, so networked suites that share public RPC endpoints would trip their rate limiters. Each networked suite instead declares the networks it talks to with an OS-level lock:
+
+```ts
+import { useResource } from '../../../scripts/useResource.ts'
+
+// Module top-level: the suite's tests do not start before every lock is held.
+await useResource(['sepolia', 'fuji'])
+```
+
+Each network tag is a directory in a well-known lock root (`<tmpdir>/ccip-tools-ts-network-locks`), created atomically with `fs.mkdir`, so exactly one test process holds a tag at a time. The filesystem is the queue: when a suite finishes, its tags release and the next suite waiting on them starts immediately — there is no batch/round scheduling. Locks auto-release on process exit; crashed holders are detected by pid liveness (or owner-file age) and self-heal on the next acquisition.
+
+Locks are per-machine, so all networked suites must run inside a single CI job/runner. Configure via env:
+
+| Variable | Effect |
+| --- | --- |
+| `CCIP_TOOLS_TEST_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
+| `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
 
 ## Fork Tests
 
@@ -96,7 +136,7 @@ To add a new error type:
 1. `recovery.ts` - Add recovery hints (actionable fix suggestions)
 1. `index.ts` - Export the new class
 
-ESLint enforces `CCIPError` usage. Generic `throw new Error()` fails linting.
+Oxlint enforces `CCIPError` usage. Generic `throw new Error()` fails linting.
 
 ## Cross-Platform Portability
 
@@ -445,7 +485,7 @@ This is unconditional. No format-dependent behavior. The type system enforces it
 
 ### Output Rules
 
-1. **Never use `console.*` in command or provider code.** Use `ctx.output` for data, `ctx.logger` for diagnostics. The only exceptions are `index.ts` top-level error and debug handlers (no ctx available). ESLint `no-console` rule enforces this.
+1. **Never use `console.*` in command or provider code.** Use `ctx.output` for data, `ctx.logger` for diagnostics. The only exceptions are `index.ts` top-level error and debug handlers (no ctx available). Oxlint `no-console` rule enforces this.
 
 2. **Data output uses `ctx.output.write()`**, not `ctx.logger.info()`. This includes JSON envelopes, log-format assignments (`'result =', data`), and pretty-mode section headers (`'Lane:'`, `'Fee Tokens:'`).
 
@@ -668,6 +708,46 @@ Use `.check()` for custom validation with helpful error messages:
 1. Write tests for new functionality
 1. Update CHANGELOG.md
 1. Keep commits focused and atomic
+
+## Signed commits
+
+Commits pushed to remote branches must be signed (the pre-push hook enforces it).
+Sign with your SSH key as usual (`git commit -S`), or re-sign existing commits
+with `git rebase --exec 'git commit --amend --no-edit -S' <base>`.
+
+The hook lives at [`scripts/git-hooks/pre-push`](scripts/git-hooks/pre-push) and
+refuses a push when any commit in `<remote-tip>..<pushed>` — or `main..<pushed>`
+for a brand-new branch — carries no valid signature (force-push rewrites are
+checked across the whole rewritten range). Install it locally with either:
+
+```bash
+# Option A — symlink into this clone's hooks dir (tracks the file, no drift;
+# the hooks dir is shared, so one symlink guards every worktree):
+ln -s ../../scripts/git-hooks/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+
+# Option B — point core.hooksPath at the tracked directory:
+git config core.hooksPath scripts/git-hooks
+```
+
+## Signed commits
+
+Commits pushed to remote branches must be signed (the pre-push hook enforces it).
+Sign with your SSH key as usual (`git commit -S`), or re-sign existing commits
+with `git rebase --exec 'git commit --amend --no-edit -S' <base>`.
+
+The hook lives at [`scripts/git-hooks/pre-push`](scripts/git-hooks/pre-push) and
+refuses a push when any commit in `<remote-tip>..<pushed>` — or `main..<pushed>`
+for a brand-new branch — carries no valid signature (force-push rewrites are
+checked across the whole rewritten range). Install it locally with either:
+
+```bash
+# Option A — symlink into this clone's hooks dir (tracks the file, no drift;
+# the hooks dir is shared, so one symlink guards every worktree):
+ln -s ../../scripts/git-hooks/pre-push "$(git rev-parse --git-path hooks)/pre-push"
+
+# Option B — point core.hooksPath at the tracked directory:
+git config core.hooksPath scripts/git-hooks
+```
 
 ## Adding New Chain Support
 
