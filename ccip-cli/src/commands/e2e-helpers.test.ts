@@ -15,7 +15,10 @@ export const RPCS = [
   // per-family race would otherwise let a pruned fullnode win the chain)
   process.env['RPC_APTOS'] || 'https://archive.testnet.aptoslabs.com/v1',
   // raced: first endpoint to resolve wins, so a throttled one doesn't stall
-  // the suite; onfinality keeps the longest tx history but 429s hardest
+  // the suite; retention varies over time (as of 2026-08: onfinality prunes
+  // signature history around ~1 month, api.devnet.solana.com/devnet.rpcpool.com
+  // retain longer but 429 harder from cold starts) — keep fixtures fresher than
+  // the shortest observed retention horizon
   process.env['RPC_SOLANA'] || 'https://solana-devnet.api.onfinality.io/public',
   process.env['RPC_SOLANA_2'] || 'https://devnet.rpcpool.com',
   process.env['RPC_SOLANA_3'] || 'https://api.devnet.solana.com',

@@ -3,7 +3,9 @@ import { beforeEach, describe, it, mock } from 'node:test'
 
 import { type Connection, PublicKey } from '@solana/web3.js'
 
+import { CCIPCommitHistoryPrunedError, CCIPCommitNotFoundError } from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
+import { CCIPVersion } from '../../types.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
 import { hexDiscriminator } from '../utils.ts'
 
@@ -12,13 +14,16 @@ const mockGetAccountInfo = mock.fn(() => null as any)
 const mockGetParsedAccountInfo = mock.fn(() => null as any)
 const mockGetGenesisHash = mock.fn(() => null as any)
 const mockGetSignaturesForAddress = mock.fn(() => null as any)
+const mockGetProgramAccounts = mock.fn(() => [] as any)
 
 // Mock connection for testing
 const mockConnection = {
+  rpcEndpoint: 'test-endpoint',
   getGenesisHash: mockGetGenesisHash,
   getParsedAccountInfo: mockGetParsedAccountInfo,
   getAccountInfo: mockGetAccountInfo,
   getSignaturesForAddress: mockGetSignaturesForAddress,
+  getProgramAccounts: mockGetProgramAccounts,
 } as unknown as Connection
 
 const mockNetworkInfo: NetworkInfo = {
@@ -620,6 +625,7 @@ describe('SolanaChain getExecutionReceipts', () => {
     mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
     mockGetGenesisHash.mock.mockImplementation(async () => 'test-genesis-hash')
     mockGetSignaturesForAddress.mock.mockImplementation(async () => [])
+    mockGetProgramAccounts.mock.mockImplementation(async () => [])
     solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
   })
 
@@ -694,6 +700,69 @@ describe('SolanaChain getExecutionReceipts', () => {
     const addresses = mockGetSignaturesForAddress.mock.calls.map((c) =>
       ((c.arguments as unknown[])[0] as PublicKey).toBase58(),
     )
+    assert.ok(addresses.includes(offRamp))
+  })
+
+  it('narrows v1 scans to the covering commit_report PDA when a sequenceNumber is given without verifications', async () => {
+    solanaChain.typeAndVersion = async () =>
+      ['CCIP 1.6.0', '1.6.0', 'CCIP 1.6.0'] as Awaited<ReturnType<SolanaChain['typeAndVersion']>>
+    const pda = PublicKey.unique()
+    const seqNr = 10726n
+    // commit report account data: discriminator(8) + 1 + sourceChainSelector(8) +
+    // merkleRoot(32) + minSeqNr(8) + maxSeqNr(8); only the seq range offsets are read
+    const data = Buffer.alloc(8 + 1 + 8 + 32 + 8 + 8 + 8)
+    data.writeBigUInt64LE(seqNr, 8 + 1 + 8 + 32 + 8)
+    data.writeBigUInt64LE(seqNr, 8 + 1 + 8 + 32 + 8 + 8)
+    mockGetProgramAccounts.mock.mockImplementation(async () => [{ pubkey: pda, account: { data } }])
+    const callsBefore = mockGetSignaturesForAddress.mock.calls.length
+
+    const execs = []
+    for await (const exec of solanaChain.getExecutionReceipts({
+      offRamp,
+      messageId,
+      sourceChainSelector: 16015286601757825000n,
+      sequenceNumber: seqNr,
+      startTime: 1,
+    })) {
+      execs.push(exec)
+    }
+
+    assert.equal(execs.length, 0)
+    const addresses = mockGetSignaturesForAddress.mock.calls
+      .slice(callsBefore)
+      .map((c) => ((c.arguments as unknown[])[0] as PublicKey).toBase58())
+    assert.ok(
+      addresses.length >= 1,
+      'getSignaturesForAddress should have been called for the covering PDA',
+    )
+    assert.ok(
+      addresses.every((a) => a === pda.toBase58()),
+      `expected all scans against the commit_report PDA ${pda.toBase58()}, got ${addresses.join(',')}`,
+    )
+    assert.ok(!addresses.includes(offRamp)) // never a broad offRamp sweep
+  })
+
+  it('keeps the generic offRamp sweep on v1 offramps when the probe finds no covering PDA', async () => {
+    solanaChain.typeAndVersion = async () =>
+      ['CCIP 1.6.0', '1.6.0', 'CCIP 1.6.0'] as Awaited<ReturnType<SolanaChain['typeAndVersion']>>
+    mockGetProgramAccounts.mock.mockImplementation(async () => [])
+    const callsBefore = mockGetSignaturesForAddress.mock.calls.length
+
+    const execs = []
+    for await (const exec of solanaChain.getExecutionReceipts({
+      offRamp,
+      messageId,
+      sourceChainSelector: 16015286601757825000n,
+      sequenceNumber: 10726n,
+      startTime: 1,
+    })) {
+      execs.push(exec)
+    }
+
+    assert.equal(execs.length, 0)
+    const addresses = mockGetSignaturesForAddress.mock.calls
+      .slice(callsBefore)
+      .map((c) => ((c.arguments as unknown[])[0] as PublicKey).toBase58())
     assert.ok(addresses.includes(offRamp))
   })
 })
@@ -777,5 +846,69 @@ describe('SolanaChain getLogs — since per-log resume (same-tx followers)', () 
       out.push(`${l.transactionHash}:${l.index}`)
     }
     assert.deepEqual(out, ['sigB:0'])
+  })
+})
+
+describe('SolanaChain getVerifications (v1.x commit_report PDA path)', () => {
+  let solanaChain: SolanaChain
+
+  beforeEach(() => {
+    mock.restoreAll()
+    mockGetAccountInfo.mock.mockImplementation(async () => null)
+    mockGetParsedAccountInfo.mock.mockImplementation(async () => null)
+    mockGetGenesisHash.mock.mockImplementation(async () => 'test-genesis-hash')
+    mockGetSignaturesForAddress.mock.mockImplementation(async () => [])
+    mockGetProgramAccounts.mock.mockImplementation(async () => [])
+    solanaChain = new SolanaChain(mockConnection, mockNetworkInfo)
+  })
+
+  const offRamp = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
+  const seqNr = 10726n
+  const request = {
+    lane: { sourceChainSelector: 16015286601757825753n, version: CCIPVersion.V1_6 },
+    message: { sequenceNumber: seqNr, messageId: '0x' + 'ab'.repeat(32) },
+    log: { blockTimestamp: 1753000000 },
+  } as unknown as Parameters<SolanaChain['getVerifications']>[0]['request']
+
+  const commitReportAccount = (min: bigint, max: bigint) => {
+    // layout: discriminator(8) + 1 + sourceChainSelector(8) + merkleRoot(32) +
+    // minSeqNr(8) + maxSeqNr(8); only the seq range offsets are read
+    const data = Buffer.alloc(8 + 1 + 8 + 32 + 8 + 8 + 8)
+    data.writeBigUInt64LE(min, 8 + 1 + 8 + 32 + 8)
+    data.writeBigUInt64LE(max, 8 + 1 + 8 + 32 + 8 + 8)
+    return { pubkey: PublicKey.unique(), account: { data } }
+  }
+
+  it('fails fast with CCIPCommitHistoryPrunedError when the covering PDA has no retained signatures', async () => {
+    mockGetProgramAccounts.mock.mockImplementation(async () => [commitReportAccount(seqNr, seqNr)])
+    // endpoint pruned the PDA's history: account exists, zero signatures retained
+    mockGetSignaturesForAddress.mock.mockImplementation(async () => [])
+    const callsBefore = mockGetSignaturesForAddress.mock.calls.length
+
+    await assert.rejects(solanaChain.getVerifications({ offRamp, request }), (err: unknown) => {
+      assert.ok(err instanceof CCIPCommitHistoryPrunedError)
+      assert.equal(err.context.endpoint, 'test-endpoint')
+      return true
+    })
+    // must not fall back to the generic (unbounded) offRamp sweep
+    const addresses = mockGetSignaturesForAddress.mock.calls
+      .slice(callsBefore)
+      .map((c) => ((c.arguments as unknown[])[0] as PublicKey).toBase58())
+    assert.ok(!addresses.includes(offRamp), 'must not start an offRamp sweep for a pruned commit')
+  })
+
+  it('falls back to the generic offRamp scan when no covering PDA exists (closed or not committed yet)', async () => {
+    mockGetProgramAccounts.mock.mockImplementation(async () => [])
+    const callsBefore = mockGetSignaturesForAddress.mock.calls.length
+
+    // generic scan finds nothing (empty sigs) -> CCIPCommitNotFoundError
+    await assert.rejects(
+      solanaChain.getVerifications({ offRamp, request }),
+      (err: unknown) => err instanceof CCIPCommitNotFoundError,
+    )
+    const addresses = mockGetSignaturesForAddress.mock.calls
+      .slice(callsBefore)
+      .map((c) => ((c.arguments as unknown[])[0] as PublicKey).toBase58())
+    assert.ok(addresses.includes(offRamp), 'should fall back to the generic offRamp scan')
   })
 })
