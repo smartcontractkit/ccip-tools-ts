@@ -660,6 +660,69 @@ describe('createRateLimitedFetch', () => {
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
+  it('merges the caller signal with ctx abort ONCE: every retry attempt shares the same signal object', async () => {
+    // Two 429s then success → 3 attempts through the retry loop.
+    let callCount = 0
+    const seenSignals: (AbortSignal | undefined)[] = []
+    globalThis.fetch = mockedFetch = mock.fn((_input: unknown, init?: RequestInit) => {
+      callCount++
+      seenSignals.push(init?.signal as AbortSignal | undefined)
+      if (callCount <= 2) {
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+
+    // With a per-request signal and a ctx abort: one composite for all attempts.
+    const callerAc = new AbortController()
+    const ctxAc = new AbortController()
+    const result = await createRateLimitedFetch({}, { abort: ctxAc.signal })(
+      'https://rl-test-signal-once.example.com',
+      { signal: callerAc.signal },
+    )
+    assert.equal(result.ok, true)
+    assert.equal(seenSignals.length, 3)
+    // No per-attempt re-wrap: attempts 1..3 must all see the SAME merged signal.
+    assert.ok(seenSignals[0])
+    assert.equal(seenSignals[1], seenSignals[0])
+    assert.equal(seenSignals[2], seenSignals[0])
+    // It must still reflect BOTH sources (composite semantics preserved).
+    assert.equal(seenSignals[0]!.aborted, false)
+    callerAc.abort()
+    assert.equal(seenSignals[0]!.aborted, true)
+
+    // Without a per-request signal, the ctx abort itself is passed through
+    // verbatim (no composite is created at all).
+    seenSignals.length = 0
+    callCount = 0
+    globalThis.fetch = mockedFetch = mock.fn((_input: unknown, init?: RequestInit) => {
+      callCount++
+      seenSignals.push(init?.signal as AbortSignal | undefined)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+    await createRateLimitedFetch(
+      {},
+      { abort: ctxAc.signal },
+    )('https://rl-test-signal-once2.example.com')
+    assert.equal(callCount, 1)
+    assert.equal(seenSignals[0], ctxAc.signal)
+  })
+
   it('should handle network errors with retry logic', async () => {
     let callCount = 0
     globalThis.fetch = mockedFetch = mock.fn(() => {
