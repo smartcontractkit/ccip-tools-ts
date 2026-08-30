@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `getMessageById` and `getExecutionReceipts` accept `since` too
 - Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
 - TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory
+- CLI: a passwordless Foundry keystore (or JSON wallet) can be unlocked with `--no-interactive` by setting the password variable to an empty value; only an unset variable is treated as missing
 
 ## [1.12.0] - 2026-08-19
 

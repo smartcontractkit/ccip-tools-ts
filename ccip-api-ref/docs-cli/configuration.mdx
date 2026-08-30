@@ -164,6 +164,17 @@ Password resolution order:
 
 The keystore directory defaults to `~/.foundry/keystores/` and can be overridden with `$FOUNDRY_DIR`.
 
+A **passwordless** keystore (imported with `cast wallet import --unsafe-password ""`) is unlocked with the
+empty string, which is a real password rather than a missing one. Set the variable to an empty value to use
+one with `--no-interactive`:
+
+```bash
+FOUNDRY_KEYSTORE_PASSWORD="" ccip-cli send ... --wallet foundry:sender --no-interactive
+```
+
+Leaving the variable **unset** is different: with `--no-interactive` there is nothing to unlock with, so the
+command fails with `INTERACTIVE_REQUIRED` instead of guessing.
+
 ### Hardhat Keystore
 
 If you manage keys with [Hardhat's built-in keystore](https://hardhat.org/hardhat-runner/docs/guides/configuration-variables), use `hardhat:<name>`. The CLI runs `node_modules/.bin/hardhat keystore get` directly, so Hardhat must be installed as a dev dependency in your project:
@@ -181,6 +192,9 @@ Password resolution order:
 1. `$HARDHAT_KEYSTORE_PASSWORD` env var (piped silently to Hardhat)
 2. `$USER_KEY_PASSWORD` env var (piped silently to Hardhat)
 3. Interactive prompt (ccip-cli prompts, answer is piped to Hardhat)
+
+Hardhat decrypts the keystore itself and requires a password of at least 8 characters when one is created,
+so there is no passwordless Hardhat keystore. The CLI forwards whatever you set and lets Hardhat judge it.
 
 ### Ledger Hardware Wallet
 
