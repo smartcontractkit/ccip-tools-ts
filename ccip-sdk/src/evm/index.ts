@@ -51,6 +51,7 @@ import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
+  CCIPChainNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
@@ -713,6 +714,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Decoded CCIPMessage or undefined if not a valid CCIP message.
    * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
    * @throws {@link CCIPMessageDecodeError} if message cannot be decoded
+   * @throws {@link CCIPChainNotFoundError} if the message's chain selectors can't be resolved;
+   *   register unbundled chains (e.g. a local devnet) with `registerChains`
    */
   static decodeMessage(log: {
     topics?: readonly string[]
@@ -740,7 +743,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
         }
         if (message) break
-      } catch {
+      } catch (err) {
+        // a selector we can't resolve is a real failure, not a wrong-fragment signal: surfacing it
+        // as-is avoids it resurfacing downstream as a misleading MESSAGE_INVALID
+        if (err instanceof CCIPChainNotFoundError) throw err
+        message = undefined // discard a partial decode from a non-matching fragment
         // try next fragment
       }
     }

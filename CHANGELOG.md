@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK/CLI: support chains missing from the bundled selector table (local devnets, chains newer than the installed release) — `registerChains` in the SDK, `--chain-selectors` / `CCIP_CHAIN_SELECTORS` in the CLI, taking `<chainId>=<selector>`, inline JSON, or a JSON/YAML file (including a `chain-selectors` `selectors:` document)
+- SDK/CLI: support forks served under a different chain id (Tenderly Virtual Environments, `anvil --fork --chain-id`) — `registerChains({ chainId, forkOf })` / `--chain-selectors <chainId>=fork:<chainId|selector|name>` re-keys the forked chain to the fork's chain id, keeping its selector, name and family; the forked chain id then stops resolving, since a selector identifies exactly one chain
+- EVM: `decodeMessage` no longer swallows `CCIPChainNotFoundError` while trying event fragments; an unresolvable chain selector surfaces as `CHAIN_NOT_FOUND` instead of a misleading `MESSAGE_INVALID` downstream
+
 ## [1.13.0] - 2026-08-25
 
 - Tests: networked suites (`*.integration.test.ts`, `*.e2e.test.ts`, `*.fork.test.ts`) take per-network OS locks via the new `useResource` test helper, so concurrent `node --test` file runs never share a live RPC endpoint (suites declare the networks they talk to and wait on each other instead of rate-limiting public gateways); `npm run test:unit` now runs only offline unit tests

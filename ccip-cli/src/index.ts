@@ -24,7 +24,9 @@ import updateNotifier from 'update-notifier'
 import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
+import { registerChainsFromArgs } from './chain-selectors.ts'
 import { Format } from './commands/index.ts'
+import { formatCCIPError } from './commands/utils.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 Error.stackTraceLimit = 50 // show more stack frames for better debugging
@@ -119,6 +121,16 @@ const globalOpts = {
     describe:
       'Additional CCIP v2 indexer base URLs to query for CCV verifications (e.g. https://indexer-1.ccip.chain.link)',
   },
+  'chain-selectors': {
+    type: 'array',
+    string: true,
+    describe:
+      'Register chains missing from the bundled selector table: "<chainId>=<selector>" for a new ' +
+      'chain (local devnet; defaults to family=EVM, networkType=TESTNET), or ' +
+      '"<chainId>=fork:<chainId|selector|name>" for a fork of a known chain served under a ' +
+      'different chain id (Tenderly Virtual Environment, anvil --fork --chain-id). ' +
+      'Also accepts inline JSON or a path to a JSON/YAML file',
+  },
 } as const
 
 /** Type for global CLI options. */
@@ -140,6 +152,10 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
+    .middleware((argv) => {
+      // must run before any command resolves a chain
+      registerChainsFromArgs(argv.chainSelectors)
+    }, true)
     .check((_argv) => {
       const raw = process.argv
       const hasJson = raw.includes('--json')
@@ -170,7 +186,10 @@ if (import.meta.main || wasCalledAsScript()) {
   const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
-      console.error(err)
+      // errors thrown before a command handler runs (e.g. --chain-selectors parsing, in middleware)
+      // never reach the per-command Ctx logger, so format them here too
+      const verbose = process.argv.includes('-v') || process.argv.includes('--verbose')
+      console.error(formatCCIPError(err, verbose) ?? err)
       throw err
     })
     .finally(() => {
