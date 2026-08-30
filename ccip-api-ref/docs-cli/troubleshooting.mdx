@@ -78,6 +78,32 @@ Solutions:
    ```
 3. Use archive node for old transactions
 
+### Chain not found
+
+```
+error[CHAIN_NOT_FOUND]: Chain not found: 12922642891491394802
+```
+
+Cause: the chain id or selector is not in the bundled selector table. Typical for a local devnet, or
+for a network added to the [chain-selectors](https://github.com/smartcontractkit/chain-selectors)
+registry after your CLI release.
+
+Solutions:
+
+1. Update the CLI, if the chain is a public network
+2. Register the chain yourself:
+   ```bash
+   ccip-cli show 0x... --chain-selectors 2337=12922642891491394802 --rpc http://localhost:8545 --no-api
+   ```
+3. If the RPC is a **fork** served under a different chain id (Tenderly Virtual Environment,
+   `anvil --fork --chain-id`), register it as a fork instead, so it keeps the forked chain's
+   selector — otherwise decoding fails later with `RPC_NOT_FOUND`:
+   ```bash
+   ccip-cli show 0x... --chain-selectors 735711155111=fork:ethereum-testnet-sepolia --rpc $FORK_RPC --no-api
+   ```
+
+See [Local Devnets and Forks](/cli/guides/local-testing).
+
 ## Wallet
 
 ### Wallet not configured

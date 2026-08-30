@@ -50,6 +50,7 @@ import {
 import {
   CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
+  CCIPChainNotFoundError,
   CCIPContractNotRouterError,
   CCIPContractTypeInvalidError,
   CCIPDataFormatUnsupportedError,
@@ -742,6 +743,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Decoded CCIPMessage or undefined if not a valid CCIP message.
    * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
    * @throws {@link CCIPMessageDecodeError} if message cannot be decoded
+   * @throws {@link CCIPChainNotFoundError} if the message's chain selectors can't be resolved;
+   *   register unbundled chains (e.g. a local devnet) with `registerChains`
    */
   static decodeMessage(log: {
     topics?: readonly string[]
@@ -769,7 +772,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
         }
         if (message) break
-      } catch {
+      } catch (err) {
+        // a selector we can't resolve is a real failure ONLY when this fragment definitely matched
+        // (topic-selected, so `fragments` holds exactly it): surfacing it as-is avoids it resurfacing
+        // downstream as a misleading MESSAGE_INVALID. On the topic-less path we try every fragment,
+        // so a garbage decode yielding an unresolvable selector must fall through to the next one.
+        if (err instanceof CCIPChainNotFoundError && fragments.length === 1) throw err
+        message = undefined // discard a partial decode from a non-matching fragment
         // try next fragment
       }
     }

@@ -46,6 +46,11 @@ const sidebars: SidebarsConfig = {
           id: 'guides/reading-json-output',
           label: 'Reading JSON Output',
         },
+        {
+          type: 'doc',
+          id: 'guides/local-testing',
+          label: 'Local Devnets and Forks',
+        },
       ],
     },
     {
