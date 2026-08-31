@@ -181,7 +181,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   private readonly senderInstanceId: string
 
   /** DAR package names for CCIP template IDs (from canton-config `packages`). */
-  private readonly ccipPackages: { perPartyRouter: string; ccipSender: string }
+  private readonly ccipPackages: {
+    perPartyRouter: string
+    ccipSender: string
+    ccipReceiver: string
+  }
 
   /** Transfer-factory preview amount for fee payments (`canton-config.feeTransferFactoryAmount`). */
   private readonly feeTransferFactoryAmount: string
@@ -234,6 +238,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.ccipPackages = {
       perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-perpartyrouter',
       ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender',
+      ccipReceiver: ctx?.cantonConfig?.packages?.ccipReceiver ?? 'ccip-receiver',
     }
     this.feeTransferFactoryAmount = resolveFeeTransferFactoryAmount(ctx?.cantonConfig)
     this.defaultSendGasLimit = ctx?.cantonConfig?.defaultSendGasLimit
@@ -1212,17 +1217,34 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         : undefined
     const finality = decodeFinalityFromEncodedMessage(encodedMessageHex)
     const receiverHint = typeof opts.receiver === 'string' ? opts.receiver.trim() : ''
+
+    // The indexer/canton-config may carry the CCV as a keccak256 InstanceAddress hash
+    // (32 bytes), but the Daml CCIPReceiver.requiredCCVs field expects the raw
+    // RawInstanceAddress.unpack string (e.g. "committeeverifier-…@ccvOwner::1220…").
+    // Resolve the raw form via EDS before creating/updating the receiver so that
+    // requiredCCVs matches the CCV contract's instance address at Execute time.
+    let attestationCcvRawResolved = attestationCcvRaw
+    if (attestationCcvRaw && !attestationCcvRaw.includes('@')) {
+      const ccvAddress = resolveExecuteCcvAddress(verifications[0]!.destAddress)
+      const ccvDisclosure = await this.edsDisclosureProvider.fetchCcvExecuteDisclosure(
+        ccvAddress,
+        encodedMessageHex,
+        wallet.party,
+      )
+      attestationCcvRawResolved = ccvDisclosure.rawInstanceAddress || attestationCcvRaw
+    }
+
     this.logger.debug(
       `CantonChain.execute: message finality=${finality}, resolving CCIPReceiver` +
         (receiverHint ? ` (hint=${receiverHint})` : '') +
-        (attestationCcvRaw ? ` (attestation CCV=${attestationCcvRaw})` : '') +
+        (attestationCcvRawResolved ? ` (attestation CCV=${attestationCcvRawResolved})` : '') +
         '...',
     )
 
     const receiverCid = await this.ensureReceiverForExecute(
       wallet.party,
       finality,
-      attestationCcvRaw,
+      attestationCcvRawResolved,
       wallet.signer,
       receiverHint || undefined,
     )
@@ -1427,7 +1449,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       commands: [
         {
           ExerciseCommand: {
-            templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+            templateId: `#${this.ccipPackages.ccipReceiver}:CCIP.CCIPReceiver:CCIPReceiver`,
             contractId: receiverCid,
             choice: 'UpdateRequiredCCVs',
             choiceArgument: {
@@ -1477,7 +1499,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         commands: [
           {
             CreateCommand: {
-              templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+              templateId: `#${this.ccipPackages.ccipReceiver}:CCIP.CCIPReceiver:CCIPReceiver`,
               createArguments: {
                 instanceId,
                 owner: payer,
