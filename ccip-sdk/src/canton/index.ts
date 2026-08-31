@@ -236,9 +236,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.senderInstanceId =
       ctx?.cantonConfig?.senderInstanceId?.trim() || DEFAULT_CANTON_SENDER_INSTANCE_ID
     this.ccipPackages = {
-      perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-perpartyrouter',
-      ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender',
-      ccipReceiver: ctx?.cantonConfig?.packages?.ccipReceiver ?? 'ccip-receiver',
+      perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-runtime-v2',
+      ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender-v2',
+      ccipReceiver: ctx?.cantonConfig?.packages?.ccipReceiver ?? 'ccip-receiver-v2',
     }
     this.feeTransferFactoryAmount = resolveFeeTransferFactoryAmount(ctx?.cantonConfig)
     this.defaultSendGasLimit = ctx?.cantonConfig?.defaultSendGasLimit
