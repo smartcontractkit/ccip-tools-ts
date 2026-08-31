@@ -11,6 +11,7 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { deriveMetadataAddress } from '../../programs/token.ts'
 import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 import { METADATA_PROGRAM_ID } from '../constants.ts'
@@ -34,16 +35,13 @@ type ParsedUpdateMetadataAuthorityParams = {
 function validateMetadataAuthority(
   operation: string,
   metadata: MetadataAccountData,
-  { tokenAddress, authority }: ParsedUpdateMetadataAuthorityParams,
+  { authority }: ParsedUpdateMetadataAuthorityParams,
 ): void {
-  if (!new PublicKey(metadata.mint).equals(tokenAddress)) {
-    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'does not have Metaplex metadata')
-  }
   if (!new PublicKey(metadata.updateAuthority).equals(authority)) {
     throw new CCTParamsInvalidError(
       operation,
       'authority',
-      'does not match the metadata update authority',
+      `${authority.toBase58()} is not the current metadata update authority (${metadata.updateAuthority})`,
     )
   }
   if (!metadata.isMutable) {
@@ -91,19 +89,23 @@ async function getMetadata(
   tokenAddress: PublicKey,
   metaplex: Awaited<ReturnType<typeof loadMetaplex>>,
 ): Promise<MetadataAccountData> {
-  const [metadataAddress] = PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), tokenAddress.toBuffer()],
-    METADATA_PROGRAM_ID,
-  )
-  const metadata = await chain.connection.getAccountInfo(metadataAddress)
+  const metadata = await chain.connection.getAccountInfo(deriveMetadataAddress(tokenAddress))
   if (!metadata || !metadata.owner.equals(METADATA_PROGRAM_ID)) {
-    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'does not have Metaplex metadata')
+    throw new CCTParamsInvalidError(
+      operation,
+      'tokenAddress',
+      'mint not found or does not have Metaplex metadata',
+    )
   }
 
   try {
     return metaplex.getMetadataAccountDataSerializer().deserialize(metadata.data)[0]
   } catch {
-    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'does not have Metaplex metadata')
+    throw new CCTParamsInvalidError(
+      operation,
+      'tokenAddress',
+      'mint not found or does not have Metaplex metadata',
+    )
   }
 }
 

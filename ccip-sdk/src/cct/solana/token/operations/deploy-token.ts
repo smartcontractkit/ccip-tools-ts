@@ -19,9 +19,9 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { deriveMetadataAddress } from '../../programs/token.ts'
 import { submit } from '../../submit.ts'
 import { validateOptionalPublicKey, validatePublicKey } from '../../validate.ts'
-import { METADATA_PROGRAM_ID } from '../constants.ts'
 
 type BaseDeployTokenParams = {
   /** Mint decimals. Must be an integer between 0 and 255. */
@@ -79,13 +79,6 @@ export type ExecuteDeployTokenResult = TransactionResult & {
 
 function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length
-}
-
-function deriveMetadataAddress(mint: PublicKey): string {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-    METADATA_PROGRAM_ID,
-  )[0].toBase58()
 }
 
 async function loadMetaplex() {
@@ -318,7 +311,7 @@ export class DeployToken extends SolanaOperation<
     const lamports = await chain.connection.getMinimumBalanceForRentExemption(getMintLen([]))
     const instructions = createMintInstructions(mint, lamports, params.decimals, config)
 
-    const metadataAddress = params.withMetaplex ? deriveMetadataAddress(mint) : undefined
+    const metadataAddress = params.withMetaplex ? deriveMetadataAddress(mint).toBase58() : undefined
     if (params.withMetaplex)
       instructions.push(
         ...(await createMetadataInstructions(
