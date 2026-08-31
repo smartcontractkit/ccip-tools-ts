@@ -263,10 +263,12 @@ describe('e2e command show EVM', () => {
     'should show complete CCIP transaction details EVM to Solana',
     { timeout: 120000 },
     async () => {
-      // Test transaction hash (refreshed periodically; devnet prunes old history)
-      const TX_HASH = '0xe46dfcaddb6305cc416120bd188293f5693348ae8f94079dcde932163a2b039e'
-      const MESSAGE_ID = '0xea49c8cc2b802612e91f30e045baff610ec23d98bd66b7f2070f137a777ffc65'
-      const SENDER = '0x90656946eb4065D9FC2a0c0B9aF7Ff37c02F52a2'
+      // Fixture seeded from CCIP API v2 messages (sourceChainSelector=16015286601757825753,
+      // destChainSelector=16423721717087811551); refreshed periodically, as devnet public
+      // endpoints prune old transaction history (onfinality ~1 month at the time of writing)
+      const TX_HASH = '0xc1bc97181e39c0fe4c0c958da4e6b591a6cc3939c2b309b37c437373c4557ca4'
+      const MESSAGE_ID = '0xe509cd3333ddc2b3236a71125d1638a411e91e072ea601b3ba584fb62a7b1364'
+      const SENDER = '0x4444638F73a73977098f364533dFaD6A274f1e88'
       const RECEIVER = '11111111111111111111111111111111'
       const TOKEN_RECEIVER = 'HNgbNNzP7YLXLhEkaFcD3PhtBWtaBfxSCNRTCsnGyPNx'
       const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
@@ -289,7 +291,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*10726n?/)
+      assert.match(output, /sequenceNumber.*11045n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
       assert.doesNotMatch(output, /gasLimit/)
       assert.match(output, /computeUnits.*0n?/)
@@ -302,15 +304,15 @@ describe('e2e command show EVM', () => {
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x67fab9e3b47f247924f4cec9671a99685e4abc07909d8bcf676bb5d990cc437f/i,
+        /merkleRoot.*0x08af05184148ee8773d0782afc59ae408ea45316725c5aedf615799891f575f3/i,
       )
-      assert.match(output, /min.*10726/)
-      assert.match(output, /max.*10726/)
-      assert.match(output, /origin.*4BSJuForbUiKb5Y2unK6vrrdjQN9a6Fz5epnPrrU6Je6/i)
+      assert.match(output, /min.*11045/)
+      assert.match(output, /max.*11045/)
+      assert.match(output, /origin.*8VQdpu9a4vmBrj9EpcCw2R1mKVTM2W6Sdc43GtEHBSxk/i)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*5uVS6SjKKrvP6khfA9hiRk68pwuNVjZXCJQNxwwp1MXs9cozT3q8dkfAhPPKcGheiBqbKnfZaf8yznxJ7pvrLgMM/i,
+        /transactionHash.*53RHWi9YuayvhWaPEzzwcjPaMyagFmHChPYg6qFxoV4hALQY81zdkLjhmD2qx2vhq6anXdnmrGq1UXQrrruogBiU/i,
       )
 
       // Receipts information
@@ -318,7 +320,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*32kjERFwLcmaJskvJUjWQncyrhdoLxnzPgKTT33nKmhKaLeguELxXQ4BKL3hHo8wnvz4vu5UzQztEi7u5G43cgiD/i,
+        /transactionHash.*oWsmkUusRXFemG85NYMLTvo4Q2Y3rtapC43vYrD6X7LCm4pm8Mq95TKFNGrmD7cBxG1twJQeVRMzwJ1cjspxZbA/i,
       )
     },
   )
@@ -355,12 +357,14 @@ describe('e2e command show EVM', () => {
 })
 
 describe('e2e command show Solana', () => {
-  // Test transaction hash (refreshed periodically; devnet prunes old history)
+  // Fixture seeded from CCIP API v2 messages (sourceChainSelector=16423721717087811551,
+  // destChainSelector=16015286601757825753); refreshed periodically, as devnet public
+  // endpoints prune old transaction history (onfinality ~1 month at the time of writing)
   const TX_HASH =
-    '4FXDDtNsz2X9QNYiUAm1KnYSYPSrRWjderx4PpPaMtuTVpdGAJBWWD2d6NxAYCGmefRhr63QwMnRoVdm6rLdfSfV'
-  const MESSAGE_ID = '0x2192fb7b3728623ce2b6830859b8cbc3146f70d3529469a7ecd21a37dd9a5f68'
-  const SENDER = '6XS768SMgF7iEt7ZX8iJBgu7mXHewc95aqAz6XAj1hu3'
-  const RECEIVER = '0x2840D88F9c3E018544aaD8f9275DCCf12cB35160'
+    '2C9MV381HRk9McBkDtTiviinq8XBD4XEn8LHJFc6MJMRZPgimmQEEmF3AXTboe2u6KJH8seCw7z3MVNuv9tGQS8D'
+  const MESSAGE_ID = '0xa8733c341bbaab40b2fae5cc06195450515aea2b9f602436d9ae05b9aa6ce6ba'
+  const SENDER = 'DWGBy9ZqkXnbiyLzSSy4qymE3P3aDBQMFGPAmSiffkA8'
+  const RECEIVER = '0x4444638F73a73977098f364533dFaD6A274f1e88'
   const ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
   const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 
@@ -385,12 +389,12 @@ describe('e2e command show Solana', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
-      assert.match(output, /sequenceNumber.*322[6-9]/)
+      assert.match(output, /sequenceNumber.*3399n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
-      assert.match(output, /gasLimit.*200000n?/)
+      assert.match(output, /gasLimit.*0n?/)
       assert.match(output, /finalized.*true/)
       assert.match(output, /fee.*\bSOL/)
-      assert.match(output, /tokens.*0\.0001 MNT/)
+      assert.match(output, /tokens.*0\.1 tFRNT/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
       assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
@@ -402,30 +406,25 @@ describe('e2e command show Solana', () => {
         assert.match(output, /Commit.*dest/i)
         assert.match(
           output,
-          /merkleRoot.*0x8081a0af0284d8925b4f6ee63e6e21c10477e48f301a2c3d6c8064664b9bbe47/i,
+          /merkleRoot.*0x357f41e09ea7c7ddae192ccf9b340e0cc77f2f851a8a5c76b4bb1885aa6c064f/i,
         )
-        assert.match(output, /min.*3226/)
-        assert.match(output, /max.*3229/)
+        assert.match(output, /min.*3399/)
+        assert.match(output, /max.*3399/)
         assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
         assert.match(
           output,
-          /transactionHash.*0xb9cf0464382371b41b00a5aea0d6f7e1357cc5a9aad4a8c17fa0904df2dea383/i,
+          /transactionHash.*0x296003094714bf5eb53ab8a28a55fae917a38d214f285b7a93517ddbd23cf711/i,
         )
       }
 
-      // Receipts information: this message had a failed execution attempt
-      // before succeeding; provider lag can surface no rows at all — pin the
-      // known hashes only when rows are actually rendered
-      assert.match(output, /Receipts.*dest|No execution receipt/i)
-      const failedMatches = output.match(/failed/gi) || []
-      const successMatches = output.match(/success/gi) || []
-      if (failedMatches.length || successMatches.length) {
-        assert.ok(failedMatches.length >= 1 || successMatches.length >= 1)
-        assert.match(
-          output,
-          /transactionHash.*0x3c352c2b5ac5f11b31e876ccb6b97b819a8946a4227f2fef9f62677dbfd2240a/i,
-        )
-      }
+      // Receipts information: destination is sepolia, whose public nodes retain full
+      // log history, so the receipt deterministically renders for this fixture
+      assert.match(output, /Receipts.*dest/i)
+      assert.match(output, /state.*success/i)
+      assert.match(
+        output,
+        /transactionHash.*0x18258e9875a64b8b2a77d967963eaf4a8e3593d58224ccaa24cf1b1fa892331c/i,
+      )
     },
   )
 })

@@ -44,6 +44,7 @@ import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
+  CCIPCommitHistoryPrunedError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
@@ -1731,41 +1732,24 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       })
       return { verificationPolicy, verifications }
     }
-    const commitsAroundSeqNum = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
-      filters: [
-        {
-          // commit report account discriminator filter
-          memcmp: {
-            offset: 0,
-            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
-          },
-        },
-        {
-          // sourceChainSelector filter
-          memcmp: {
-            offset: 8 + 1,
-            bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
-          },
-        },
-        // memcmp report.min with msg.sequenceNumber's without least-significant byte;
-        // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
-        {
-          memcmp: {
-            offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
-            bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
-          },
-        },
-      ],
-    })
-    for (const acc of commitsAroundSeqNum) {
-      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
-      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
-      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (
-        BigInt(request.message.sequenceNumber) < minSeqNr ||
-        maxSeqNr < BigInt(request.message.sequenceNumber)
-      )
+    const coveringPdas = await this._getCommitReportPdaAccounts(
+      offRamp,
+      request.lane.sourceChainSelector,
+      BigInt(request.message.sequenceNumber),
+    )
+    let coveringPdaPruned = false
+    for (const acc of coveringPdas) {
+      // The PDA's creating tx is the commit itself, i.e. its oldest signature; an existing
+      // account with no retained signatures means this endpoint pruned that tx. The generic
+      // fallback below walks the offRamp's whole retained signature history fetching each tx
+      // individually, which can never surface a pruned commit — it would just crawl for minutes
+      // under public-endpoint rate limits. Fail fast instead; a longer-retention endpoint can
+      // still resolve the same PDA.
+      const sigs = await this.connection.getSignaturesForAddress(acc.pubkey, { limit: 1000 })
+      if (sigs.length === 0) {
+        coveringPdaPruned = true
         continue
+      }
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({
         startTime: 1, // just to force getting the oldest log first
@@ -1781,15 +1765,68 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         if (report) return { report, log }
       }
     }
+    if (coveringPdaPruned)
+      throw new CCIPCommitHistoryPrunedError(BigInt(request.message.sequenceNumber), {
+        context: { offRamp, endpoint: this.connection.rpcEndpoint },
+      })
     // in case we can't find it, fallback to generic iterating txs
     return super.getVerifications(opts)
+  }
+
+  /**
+   * Locates open `commit_report` PDAs on a v1.x offRamp covering `sequenceNumber`, via a
+   * single `getProgramAccounts` probe filtered by account discriminator, source chain
+   * selector and a ~around-seqNum memcmp. Returns the covering accounts (usually zero or
+   * one); empty when the message is not committed yet or the PDA was closed by cleanup —
+   * commit report PDAs are only retained while unexecuted/retryable.
+   */
+  private async _getCommitReportPdaAccounts(
+    offRamp: string,
+    sourceChainSelector: bigint,
+    sequenceNumber: bigint,
+  ): Promise<{ pubkey: PublicKey; account: { data: Uint8Array } }[]> {
+    const accounts = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
+      filters: [
+        {
+          // commit report account discriminator filter
+          memcmp: {
+            offset: 0,
+            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
+          },
+        },
+        {
+          // sourceChainSelector filter
+          memcmp: {
+            offset: 8 + 1,
+            bytes: encodeBase58(toLeArray(sourceChainSelector, 8)),
+          },
+        },
+        // memcmp report.min with msg.sequenceNumber's without least-significant byte;
+        // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
+        {
+          memcmp: {
+            offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
+            bytes: encodeBase58(toLeArray(sequenceNumber, 8).slice(1)),
+          },
+        },
+      ],
+    })
+    const covering: { pubkey: PublicKey; account: { data: Uint8Array } }[] = []
+    for (const acc of accounts) {
+      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
+      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
+      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
+      if (sequenceNumber < minSeqNr || maxSeqNr < sequenceNumber) continue
+      covering.push(acc)
+    }
+    return covering
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, verifications, messageId } = opts
+    const { offRamp, sourceChainSelector, sequenceNumber, verifications, messageId } = opts
     const [, version] = await this.typeAndVersion(offRamp)
     const topics = [
       version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
@@ -1828,6 +1865,35 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         topics,
         programs: [offRamp],
         address: commitReportPda.toBase58(),
+      }
+    } else if (sourceChainSelector && sequenceNumber) {
+      // Without verifications (e.g. the commit scan failed or was skipped), the covering
+      // `commit_report` PDA can still be located by probing accounts around the sequence
+      // number. Narrowing to it bounds the scan to this report's own txs (commit +
+      // executions) instead of a full offRamp-address sweep — one getTransaction per tx in
+      // the start window, which is unbounded under public-endpoint rate limits. When the
+      // probe finds nothing (not committed yet, or PDA closed by cleanup) or itself fails
+      // (e.g. rate-limited), fall through to the generic sweep as before. A pruned PDA
+      // simply yields no logs and ends the scan.
+      let covering:
+        | Awaited<ReturnType<SolanaChain['_getCommitReportPdaAccounts']>>[number]
+        | undefined
+      try {
+        ;[covering] = await this._getCommitReportPdaAccounts(
+          offRamp,
+          sourceChainSelector,
+          sequenceNumber,
+        )
+      } catch (_err) {
+        // probing is best-effort; never let it fail the receipts scan itself
+      }
+      if (covering) {
+        opts_ = {
+          ...opts,
+          topics,
+          programs: [offRamp],
+          address: covering.pubkey.toBase58(),
+        }
       }
     }
     yield* super.getExecutionReceipts(opts_)

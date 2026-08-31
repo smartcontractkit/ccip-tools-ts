@@ -604,7 +604,16 @@ export async function waitFinalized<C extends Chain>(
     ])
     if (tx.timestamp <= finalized.timestamp) return latest
   }
-  const watch = abort ? AbortSignal.any([chain.abort, abort]) : chain.abort
+  // Owned handle on the watch composite: aborted in the `finally` below so
+  // `watch` — and the whole getLogs watch chain derived from `combinedWatch` —
+  // aborts and drops its listeners on EVERY exit path, including success.
+  // Without it, teardown of the derived composites relies on the deadline
+  // abort / their own poll timers, and a still-attached once-listener keeps
+  // the composite in Node's gcPersistentSignals until a source finally fires.
+  const watchAc = new AbortController()
+  const watch = abort
+    ? AbortSignal.any([chain.abort, abort, watchAc.signal])
+    : AbortSignal.any([chain.abort, watchAc.signal])
 
   // Block-height deadline: poll finalized block height and abort if tx is gone
   const deadlineAc = new AbortController()
@@ -676,9 +685,12 @@ export async function waitFinalized<C extends Chain>(
     throw err
   } finally {
     deadlineAc.abort() // stop the poller if getLogs resolved first
+    watchAc.abort() // release the watch chain (derived composites + listeners) now
     await blockHeightPoller // clean up
   }
-  // getLogs ended without matching the tx; if we were cancelled, don't report a reorg
-  if (watch.aborted) return undefined
+  // getLogs ended without matching the tx; if we were cancelled, don't report a reorg.
+  // NB: `watch` is ALWAYS aborted by now (watchAc fires in `finally`), so check the
+  // external signals directly — never the composite.
+  if (chain.abort.aborted || abort?.aborted) return undefined
   throw new CCIPTransactionNotFinalizedError(log.transactionHash)
 }

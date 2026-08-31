@@ -661,6 +661,18 @@ export function createRateLimitedFetch(
       opts_.keyBy,
     )
 
+    // Merge the caller's per-request signal with the context abort ONCE, before
+    // the retry loop: wrapping per attempt would nest a fresh composite over the
+    // previous attempt's (depth = retry count), and every wrapper that never
+    // aborts keeps its abort listener registered (Node holds such composites in
+    // its gcPersistentSignals set for as long as any source lives). One composite
+    // per request keeps undici's listener attach/detach churn flat too.
+    if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
+    else if (abort) {
+      if (!init) init = {}
+      init.signal = abort
+    }
+
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):
       // don't burn further attempts/backoff/pacing under a dead signal. The waits
@@ -688,11 +700,6 @@ export function createRateLimitedFetch(
         // the slot so a backing-off request doesn't occupy a slot.
         await ep.sem.acquire()
         try {
-          if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
-          else if (abort) {
-            if (!init) init = {}
-            init.signal = abort
-          }
           abort?.throwIfAborted()
           response = await globalThis.fetch(input instanceof Request ? input.clone() : input, init)
 

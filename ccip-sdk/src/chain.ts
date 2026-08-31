@@ -2036,17 +2036,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async *getExecutionReceipts({
     offRamp,
-    messageId,
     sourceChainSelector,
+    messageId,
+    sequenceNumber,
     verifications,
     ...hints
   }: {
     /** address of OffRamp contract */
     offRamp: string
-    /** filter: yield only executions for this message */
-    messageId?: string
     /** filter: yield only executions for this source chain */
     sourceChainSelector?: bigint
+    /** filter: yield only executions for this message */
+    messageId?: string
+    /** filter: narrow the scan to this message's own commit batch; used by SVM chains to
+     *  locate the `commit_report` PDA without prior verifications */
+    sequenceNumber?: bigint
     /** optional commit associated with the request, can be used for optimizations in some families */
     verifications?: CCIPVerifications
   } & Pick<
@@ -2066,6 +2070,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (
         !receipt ||
         (messageId && receipt.messageId !== messageId) ||
+        (sequenceNumber != null && receipt.sequenceNumber !== sequenceNumber) ||
         (sourceChainSelector &&
           receipt.sourceChainSelector &&
           receipt.sourceChainSelector !== sourceChainSelector)
