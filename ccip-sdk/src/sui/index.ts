@@ -26,28 +26,8 @@ import {
   type TokenPoolRemote,
   type TokenTransferFeeOpts,
   Chain,
+  withSinceStart,
 } from '../chain.ts'
-import {
-  getCcipStateAddress,
-  getOffRampsForCcip,
-  getOffRampsFromRampOwner,
-  getOnRampForSelectorFromRouterState,
-  getOnRampsForCcip,
-  moduleOfPackage,
-  resolveCcipStateAddress,
-} from './discovery.ts'
-import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
-import { getSuiLeafHasher } from './hasher.ts'
-import {
-  deriveObjectID,
-  getDynamicFieldIds,
-  getLatestPackageId,
-  getObjectFields,
-  getObjectRef,
-  getPackageDisassembly,
-  getTableEntryFields,
-  parseSuiNumbers,
-} from './objects.ts'
 import {
   CCIPArgumentInvalidError,
   CCIPDataFormatUnsupportedError,
@@ -95,7 +75,28 @@ import {
   passesTypeAndVersion,
   util,
 } from '../utils.ts'
+import {
+  getCcipStateAddress,
+  getOffRampsForCcip,
+  getOffRampsFromRampOwner,
+  getOnRampForSelectorFromRouterState,
+  getOnRampsForCcip,
+  moduleOfPackage,
+  resolveCcipStateAddress,
+} from './discovery.ts'
+import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
+import { getSuiLeafHasher } from './hasher.ts'
+import {
+  deriveObjectID,
+  getDynamicFieldIds,
+  getLatestPackageId,
+  getObjectFields,
+  getObjectRef,
+  getPackageDisassembly,
+  getTableEntryFields,
+  parseSuiNumbers,
+} from './objects.ts'
 import type {
   CCIPMessage_V1_6_Sui,
   SuiFeeQuoterConfig,
@@ -151,16 +152,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getRegistryTokenConfig = memoize(this.getRegistryTokenConfig.bind(this), {
       async: true,
@@ -262,6 +266,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       this.client.getCoinMetadata = memoize(this.client.getCoinMetadata.bind(this.client), {
         async: true,
         maxSize: 100, // coin metadata is immutable per coin type
+        expires: 600e3,
         transformKey: ([args]: Parameters<typeof this.client.getCoinMetadata>) => [args.coinType],
       })
   }
@@ -791,7 +796,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, messageId, sourceChainSelector, ...hints } = opts
+    const { offRamp, messageId, sourceChainSelector, ...restHints } = opts
+    // `since` floors stand in for (or raise) startBlock/startTime here too — this
+    // override scans the indexer directly instead of going through getLogs.
+    const hints = withSinceStart(restHints)
     // executions target the LATEST offramp package (older versions are
     // version-gated and revert), so the indexer filter must too
     const offRampPkg = normalizeSuiAddress(
@@ -1205,7 +1213,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // offload massaging to generic decodeJsonMessage
     try {
       return decodeMessage(data)
-    } catch (_) {
+    } catch {
       // return undefined
     }
   }
@@ -2066,7 +2074,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
 
     const tokenPoolState = (content.fields as Record<string, unknown>)['token_pool_state'] as
-      { fields?: { remote_chain_configs?: { fields?: { contents?: unknown[] } } } } | undefined
+      | { fields?: { remote_chain_configs?: { fields?: { contents?: unknown[] } } } }
+      | undefined
     const contents = tokenPoolState?.fields?.remote_chain_configs?.fields?.contents ?? []
 
     const remotes: Record<string, TokenPoolRemote> = {}

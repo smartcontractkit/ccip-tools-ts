@@ -4,13 +4,14 @@ import { describe, it, mock } from 'node:test'
 import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
+import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
+import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { ChainFamily, networkInfo } from '../index.ts'
 import type { ExecutionInput } from '../types.ts'
-import { TONChain } from './index.ts'
+import { util } from '../utils.ts'
 import { type TONWallet, MANUALLY_EXECUTE_OPCODE } from './types.ts'
 import { crc32 } from './utils.ts'
-import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { util } from '../utils.ts'
+import { TONChain } from './index.ts'
 
 // Mock fetch for TON tests that handles lookupBlock (getMCSeqNoByLt) calls
 async function mockTonFetch(
@@ -631,6 +632,34 @@ describe('TON index unit tests', () => {
       assert.equal(result, raw)
     })
 
+    it('should pass through raw format with workchain -1', () => {
+      const raw = `-1:${'ab'.repeat(32)}`
+      const result = TONChain.getAddress(raw)
+      assert.equal(result, raw)
+    })
+
+    it('should canonicalize non-bounceable user-friendly address to raw', () => {
+      const raw = `0:${'ab'.repeat(32)}`
+      const friendly = Address.parseRaw(raw).toString({ bounceable: false })
+      const result = TONChain.getAddress(friendly)
+      assert.equal(result, raw)
+    })
+
+    it('should canonicalize test-only user-friendly address to raw', () => {
+      const raw = `0:${'cd'.repeat(32)}`
+      const friendly = Address.parseRaw(raw).toString({
+        bounceable: true,
+        testOnly: true,
+        urlSafe: true,
+      })
+      const result = TONChain.getAddress(friendly)
+      assert.equal(result, raw)
+    })
+
+    it('should reject strings that look like raw format but are not valid addresses', () => {
+      assert.throws(() => TONChain.getAddress('foo:bar'), /Unsupported data format/)
+    })
+
     it('should throw for invalid length', () => {
       assert.throws(
         () => TONChain.getAddress('0x' + 'ab'.repeat(10)),
@@ -782,16 +811,28 @@ describe('TON index unit tests', () => {
         tx.prevTransactionHash = 0n
       })
 
-      let callCount = 0
       return {
         parameters: { endpoint: 'http://mock-ton-api' },
         ...mockMasterchain,
-        getTransactions: async () => {
-          // First call returns all transactions, subsequent calls return empty (end of history)
-          if (callCount++ === 0) {
-            return sortedTxs.map((t) => t.tx)
-          }
-          return []
+        // Stateless pagination over the fixture, honoring TonClient semantics: a
+        // (lt, hash) anchor is EXCLUSIVE unless `inclusive: true`; to_lt exclusive;
+        // newest first. (The first-call-only version broke when getLogs started
+        // probing the account tip to age-gate the index-driven walk.)
+        getTransactions: async (
+          _addr: unknown,
+          opts?: { lt?: string; to_lt?: string; limit?: number; inclusive?: boolean },
+        ) => {
+          const toLt = opts?.to_lt != null ? BigInt(opts.to_lt) : 0n
+          const topBound =
+            opts?.lt == null
+              ? undefined
+              : opts.inclusive === true
+                ? BigInt(opts.lt)
+                : BigInt(opts.lt) - 1n
+          return sortedTxs
+            .filter((t) => t.tx.lt > toLt && (topBound == null || t.tx.lt <= topBound))
+            .slice(0, opts?.limit ?? 99)
+            .map((t) => t.tx)
         },
       } as unknown as TonClient
     }
@@ -931,139 +972,6 @@ describe('TON index unit tests', () => {
     })
   })
 
-  describe('getTransactions cache', () => {
-    const mockNetworkInfo = networkInfo('ton-testnet')
-    const ADDR = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
-
-    // Build `n` transactions for one account, newest first (descending lt), each
-    // linked to its predecessor via prevTransactionLt/Hash — the on-chain chain the
-    // cache uses to prove a cached page is contiguous. lt = (i+1)*1000.
-    function makeLinkedTxs(n: number) {
-      const txs = [] as {
-        lt: bigint
-        prevTransactionLt: bigint
-        prevTransactionHash: bigint
-        now: number
-        hash: () => Buffer
-        outMessages: Map<number, unknown>
-      }[]
-      for (let i = n; i >= 1; i--) {
-        const lt = BigInt(i * 1000)
-        const h = Buffer.alloc(32, i % 256)
-        txs.push({
-          lt,
-          prevTransactionLt: i > 1 ? BigInt((i - 1) * 1000) : 0n, // 0 => account genesis
-          prevTransactionHash: 0n,
-          now: 100 + i,
-          hash: () => h,
-          outMessages: new Map(),
-        })
-      }
-      return txs // descending lt (newest first), like the TON API
-    }
-
-    // A TonClient whose getTransactions faithfully models the (lt, hash, to_lt, limit)
-    // cursor semantics against a fixed account history, counting real RPC round-trips.
-    function makeCountingClient(all: ReturnType<typeof makeLinkedTxs>) {
-      const state = { rpc: 0 }
-      const client = {
-        parameters: { endpoint: 'http://mock-ton-api' },
-        getTransactions: async (
-          _addr: Address,
-          opts: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
-        ) => {
-          state.rpc++
-          let start = 0
-          if (opts.lt != null) {
-            const at = all.findIndex((t) => t.lt === BigInt(opts.lt!))
-            start = at < 0 ? all.length : opts.inclusive ? at : at + 1 // older than cursor
-          }
-          let page = all.slice(start, start + opts.limit)
-          if (opts.to_lt != null) page = page.filter((t) => t.lt >= BigInt(opts.to_lt!)) // lower bound
-          return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
-        },
-      } as unknown as TonClient
-      return { client, state }
-    }
-
-    it('serves a contiguous cursor page from cache without an RPC call', async () => {
-      const all = makeLinkedTxs(30)
-      const { client, state } = makeCountingClient(all)
-      const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
-      const addr = Address.parse(ADDR)
-
-      await chain.provider.getTransactions(addr, { limit: 30 }) // populate head window
-      const afterHead = state.rpc
-      // Cursor at all[5]; all[6..15] are cached and contiguous → cache hit.
-      const page = await chain.provider.getTransactions(addr, {
-        limit: 10,
-        lt: all[5]!.lt.toString(),
-        hash: all[5]!.hash().toString('base64'),
-      })
-      assert.equal(state.rpc - afterHead, 0, 'cursor page must be served from cache (no RPC)')
-      assert.equal(page.length, 10)
-      assert.equal(page[0]!.lt, all[6]!.lt, 'served page starts right after the cursor')
-      assert.ok(
-        page.every((t, i) => i === 0 || page[i - 1]!.prevTransactionLt === t.lt),
-        'served page is contiguous',
-      )
-    })
-
-    it('does not treat a bounded (to_lt) short fetch as end-of-history', async () => {
-      // Regression: a poll-style to_lt fetch returns few txs; that must NOT cap a
-      // later backward scan (the txDepleted bug that hid older transactions).
-      const all = makeLinkedTxs(30)
-      const { client, state } = makeCountingClient(all)
-      const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
-      const addr = Address.parse(ADDR)
-
-      // Bounded recent window: only the newest tx (lt 30000) is >= to_lt → short batch.
-      const bounded = await chain.provider.getTransactions(addr, { limit: 99, to_lt: '30000' })
-      assert.equal(bounded.length, 1, 'bounded window returns a short batch')
-
-      // Now walk backward past the freshest page; the old txs must still be fetched.
-      const head = await chain.provider.getTransactions(addr, { limit: 5 }) // newest 5
-      const older = await chain.provider.getTransactions(addr, {
-        limit: 5,
-        lt: head[head.length - 1]!.lt.toString(),
-        hash: head[head.length - 1]!.hash().toString('base64'),
-      })
-      assert.equal(older.length, 5, 'older page must be reachable, not capped by the bounded fetch')
-      assert.equal(older[0]!.lt, all[5]!.lt, 'pagination continues past the freshest window')
-      assert.ok(
-        state.rpc >= 3,
-        'the older page was actually fetched from RPC, not a stale cache slice',
-      )
-    })
-
-    it('drops the cache after the 5s TTL', async () => {
-      const all = makeLinkedTxs(30)
-      const { client, state } = makeCountingClient(all)
-      // Enable the mocked clock up front so every Date.now() the cache reads is on the
-      // same (advanceable) timeline.
-      mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
-      try {
-        const chain = new TONChain(client, mockNetworkInfo, { fetch: mockTonFetch })
-        const addr = Address.parse(ADDR)
-
-        await chain.provider.getTransactions(addr, { limit: 30 })
-        const cursor = {
-          limit: 10,
-          lt: all[5]!.lt.toString(),
-          hash: all[5]!.hash().toString('base64'),
-        }
-        await chain.provider.getTransactions(addr, cursor) // cache hit, within TTL
-        const beforeExpiry = state.rpc
-
-        mock.timers.tick(5_001) // advance past the 5s TTL
-        await chain.provider.getTransactions(addr, cursor)
-        assert.ok(state.rpc > beforeExpiry, 'a stale (>5s) cache must be refetched, not served')
-      } finally {
-        mock.timers.reset()
-      }
-    })
-  })
-
   describe('getLogs completeness (only whole, sealed masterchain blocks)', () => {
     const mockNetworkInfo = networkInfo('ton-testnet')
     const OFFRAMP = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'
@@ -1111,36 +1019,141 @@ describe('TON index unit tests', () => {
     // on-chain (its successor still links to it via prevTransactionLt) but isn't indexed yet —
     // i.e. a gap. lookupBlock deliberately UNDER-assigns (returns block-1) to exercise the
     // committingSeqno climb. getTransactions honours the (lt, hash, to_lt, limit) cursor.
-    function makeChain(latest: number, all: number[], missing: number[] = []) {
+    function makeChain(
+      latest: number,
+      all: number[],
+      missing: number[] = [],
+      {
+        underAssign = true,
+        txOf = tx,
+        v3,
+      }: {
+        underAssign?: boolean
+        txOf?: (lt: number) => ReturnType<typeof tx>
+        v3?: {
+          /** Indexed masterchain tip (default: latest). */
+          tip?: number
+          /** Every v3 request 500s (probe failure → v2 fallback). */
+          fail?: boolean
+          /** Explicit `/messages` rows in the order the index serves them (its native
+           * created_at order) — lets tests inject created_lt disorder. Each row's tx
+           * must be one of `all`; `out_msg_tx_hash` is derived from `txLt`. */
+          rows?: { txLt: number; createdLt: string; createdAt: string; noHash?: boolean }[]
+        }
+      } = {},
+    ) {
       const asc = [...all].sort((a, b) => a - b)
       // Link each lt to its true on-chain predecessor (over the FULL history).
       const prevLt = new Map<bigint, bigint>()
       asc.forEach((lt, i) => prevLt.set(BigInt(lt), i > 0 ? BigInt(asc[i - 1]!) : 0n))
       const present = asc.filter((lt) => !missing.includes(lt))
       const linked = present
-        .map(tx)
+        .map((lt) => txOf(lt))
         .reverse()
         .map((t) => ({ ...t, prevTransactionLt: prevLt.get(t.lt)!, prevTransactionHash: 0n }))
 
-      const fetchImpl = (async (_url: unknown, opts?: { body?: string }) => {
-        const body = JSON.parse(opts?.body ?? '{}') as { method?: string; params?: { lt?: string } }
+      const byLt = new Map(asc.map((lt) => [BigInt(lt), txOf(lt)] as const))
+      const hashB64 = (lt: number) => (byLt.get(BigInt(lt))!.hash() as Buffer).toString('base64')
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+      // The v3 index: one row per account out-message. Default rows are derived
+      // lt-ascending (created_at = 100 + lt, matching every tx builder); explicit
+      // `rows` are served verbatim, in the given order.
+      const v3Rows: {
+        hash: string
+        source: string | null
+        destination: string | null
+        created_lt: string
+        created_at: string
+        out_msg_tx_hash?: string | null
+      }[] =
+        v3?.rows?.map((r) => ({
+          hash: `${hashB64(r.txLt)}#${r.createdLt}`,
+          source: OFFRAMP,
+          destination: null,
+          created_lt: r.createdLt,
+          created_at: r.createdAt,
+          out_msg_tx_hash: r.noHash ? null : hashB64(r.txLt),
+        })) ??
+        asc.flatMap((lt) => {
+          const t = byLt.get(BigInt(lt))!
+          return [...t.outMessages.values()].map((msg) => ({
+            hash: `${hashB64(lt)}#${String(msg.info.createdLt)}`,
+            source: OFFRAMP,
+            destination: null,
+            created_lt: String(msg.info.createdLt),
+            created_at: String(t.now),
+            out_msg_tx_hash: hashB64(lt),
+          }))
+        })
+
+      const calls = { v3Messages: 0, v3Reqs: [] as Record<string, string>[], v2Walk: 0 }
+      const fetchImpl = (async (input: unknown, opts?: { body?: string }) => {
+        const url = String(input instanceof Request ? input.url : input)
+        if (url.includes('/api/v3/')) {
+          if (!v3) throw new Error(`unexpected v3 url (harness has no v3): ${url}`)
+          calls.v3Messages++
+          const req = Object.fromEntries(new URL(url).searchParams.entries())
+          if (url.includes('/messages')) {
+            if (v3.fail) return new Response('v3 down', { status: 500 })
+            calls.v3Reqs.push(req)
+            const startUtime = Number(req.start_utime ?? 0)
+            // start_lt is INCLUSIVE on the index (verified live).
+            const startLt = req.start_lt != null ? BigInt(req.start_lt) : undefined
+            const limit = Number(req.limit ?? 10)
+            const offset = Number(req.offset ?? 0)
+            let msgs = v3Rows.filter((m) => Number(m.created_at) >= startUtime)
+            if (startLt != null) msgs = msgs.filter((m) => BigInt(m.created_lt) >= startLt)
+            return json({ messages: msgs.slice(offset, offset + limit) })
+          }
+          if (url.includes('/transactions')) {
+            if (v3.fail) return new Response('v3 down', { status: 500 })
+            // List mode (the meta oracle) pages lt-ascending with INCLUSIVE start_lt;
+            // a `hash` param narrows to a single tx.
+            const startLt = req.start_lt != null ? BigInt(req.start_lt) : undefined
+            let txs = asc
+              .filter((lt) => startLt == null || BigInt(lt) >= startLt)
+              .map((lt) => ({
+                account: OFFRAMP,
+                hash: hashB64(lt),
+                lt: String(lt),
+                now: 100 + lt,
+                mc_block_seqno: blockOf(BigInt(lt)),
+              }))
+            if (req.hash != null) txs = txs.filter((t) => t.hash === req.hash)
+            return json({ transactions: txs.slice(0, Number(req.limit ?? 100)) })
+          }
+          if (url.includes('/masterchainInfo')) return json({ last: { seqno: v3.tip ?? latest } })
+          throw new Error(`unexpected v3 url ${url}`)
+        }
+        const body = JSON.parse(opts?.body ?? '{}') as {
+          method?: string
+          params?: { lt?: string; unixtime?: number }
+        }
         if (body.method === 'lookupBlock') {
-          const seqno = Math.max(1, blockOf(BigInt(body.params!.lt!)) - 1) // under-assign by 1
-          return new Response(JSON.stringify({ result: { seqno } }), {
-            headers: { 'Content-Type': 'application/json' },
-          })
+          // TonCenter lookupBlock takes `lt` OR `unixtime`; both map to the same
+          // deliberately under-assigned seqno (blockOf(param) - 1).
+          const param = body.params?.unixtime ?? body.params?.lt
+          const block = blockOf(BigInt(param ?? 0))
+          const seqno = underAssign ? Math.max(1, block - 1) : block // under-assign by 1
+          return json({ result: { seqno } })
         }
         throw new Error(`unexpected fetch method=${body.method}`)
       }) as unknown as typeof fetch
 
       const client = {
-        parameters: { endpoint: 'http://mock-ton-api' },
+        parameters: {
+          // With v3 the endpoint carries the /api/v2 path so tonV3BaseUrl derives
+          // the harness's own /api/v3 base; without it the public index would be hit.
+          endpoint: v3 ? 'http://mock-ton-api/api/v2/jsonRPC' : 'http://mock-ton-api',
+        },
         getMasterchainInfo: async () => ({ workchain: -1, shard: ROOT_SHARD, latestSeqno: latest }),
         getWorkchainShards: async (seqno: number) => [{ workchain: 0, shard: ROOT_SHARD, seqno }],
         getTransactions: async (
           _a: Address,
           o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
         ) => {
+          calls.v2Walk++
           let start = 0
           if (o.lt != null) {
             const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
@@ -1150,6 +1163,10 @@ describe('TON index unit tests', () => {
           if (o.to_lt != null) page = page.filter((t) => t.lt >= BigInt(o.to_lt!))
           return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
         },
+        // Fast-path hydration fetches raw txs by (lt, hash) straight from the client;
+        // the LINKED copy carries prevTransactionLt, which buildChainTransaction reads.
+        getTransaction: async (_a: Address, lt: string, _hash: string) =>
+          linked.find((t) => t.lt === BigInt(lt)) ?? null,
       } as unknown as TonClient
 
       const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
@@ -1160,7 +1177,7 @@ describe('TON index unit tests', () => {
           getShardBlockEndLt: (w: number, s: string, n: number) => Promise<bigint>
         }
       ).getShardBlockEndLt = async (_w, _s, seqno) => SHARD_END(seqno)
-      return chain
+      return Object.assign(chain, { calls })
     }
 
     async function collect(chain: TONChain, opts: Record<string, unknown>) {
@@ -1250,6 +1267,520 @@ describe('TON index unit tests', () => {
         chain as unknown as { committingSeqno: (lt: bigint, a: Address) => Promise<number> }
       ).committingSeqno = async () => 10
       assert.deepEqual(await collect(chain, { startBlock: 11 }), [])
+    })
+
+    // The composite hash getTransaction stamps: "workchain:address:lt:hash" — the lt in
+    // position 2 is the exact per-account cursor a since hint resumes from.
+    const hintFor = (lt: number, block = blockOf(BigInt(lt)), address = OFFRAMP) => ({
+      address,
+      blockNumber: block,
+      blockTimestamp: 100 + lt,
+      transactionHash: `${address}:${lt}:${'ab'.repeat(32)}`,
+      index: lt,
+    })
+
+    describe('since resume hint', () => {
+      it('resumes strictly after the hinted tx, raising a stale startBlock floor', async () => {
+        // startBlock 1 walks from genesis; the hint at 11_001 lifts the floor so block 10
+        // is never scanned. The floor goes INCLUSIVE of the hinted tx (sinceLt - 1) and
+        // the emit loop drops its logs at/before the hint's index — same-tx and
+        // same-block followers still flow (see the multi-log tests below).
+        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
+        const logs = await collect(chain, { startBlock: 1, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'block 10 skipped; the hinted log excluded, its same-block follower emitted',
+        )
+      })
+
+      it('skips the shard floor lookup when the hint block covers startBlock', async () => {
+        // No lookupBlock under-assignment here, so committingSeqno only touches each tx's
+        // own block; the floor lookup for startBlock-1 (=10) is then observable directly.
+        const chain = makeChain(13, [11_001, 11_002, 12_001], [], { underAssign: false })
+        const shardCalls: number[] = []
+        const orig = chain.provider.getWorkchainShards.bind(chain.provider)
+        chain.provider.getWorkchainShards = async (seqno: number) => {
+          shardCalls.push(seqno)
+          return orig(seqno)
+        }
+        const logs = await collect(chain, { startBlock: 11, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+        )
+        assert.ok(
+          !shardCalls.includes(10),
+          `startBlock-1 shard lookup must be skipped, got calls: ${shardCalls.join(',')}`,
+        )
+      })
+
+      it('runs the floor lookup when the hint is older than startBlock', async () => {
+        const chain = makeChain(13, [10_001, 11_001, 12_001], [], { underAssign: false })
+        const shardCalls: number[] = []
+        const orig = chain.provider.getWorkchainShards.bind(chain.provider)
+        chain.provider.getWorkchainShards = async (seqno: number) => {
+          shardCalls.push(seqno)
+          return orig(seqno)
+        }
+        const logs = await collect(chain, { startBlock: 11, since: hintFor(10_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+          'hint below startBlock has no effect on the results',
+        )
+        assert.ok(
+          shardCalls.includes(10),
+          `startBlock-1 shard lookup must still run, got calls: ${shardCalls.join(',')}`,
+        )
+      })
+
+      it('ignores a malformed or foreign-address hint', async () => {
+        const chain = makeChain(13, [11_001, 12_001])
+        const bad = await collect(chain, {
+          startBlock: 11,
+          since: { transactionHash: 'not-a-composite-hash' },
+        })
+        assert.deepEqual(
+          bad.map((l) => l.block),
+          [11, 12],
+        )
+        const foreign = await collect(chain, {
+          startBlock: 11,
+          since: hintFor(11_001, 11, '0:' + '2'.repeat(64)),
+        })
+        assert.deepEqual(
+          foreign.map((l) => l.block),
+          [11, 12],
+        )
+      })
+
+      it('provides the floor directly on startTime-only scans', async () => {
+        const chain = makeChain(13, [10_001, 11_001, 12_001])
+        const logs = await collect(chain, { startTime: 1, since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [12],
+          'no startBlock conversion needed: the hint lt is already the floor (exclusive)',
+        )
+      })
+
+      it('a block/time-only hint satisfies the start requirement on its own', async () => {
+        // No explicit startBlock/startTime: the hint's blockNumber (merged via
+        // withSinceStart) stands in for startBlock and its composite lt is the cursor.
+        const chain = makeChain(13, [10_001, 11_001, 11_002, 12_001])
+        const logs = await collect(chain, { since: hintFor(11_001) })
+        assert.deepEqual(
+          logs.map((l) => l.block),
+          [11, 12],
+          'hint blockNumber floors the scan; hinted tx excluded, same-block follower emitted',
+        )
+      })
+
+      it('a rejected hint contributes no floor (start-less query errors)', async () => {
+        const chain = makeChain(13, [11_001, 12_001])
+        await assert.rejects(
+          collect(chain, { since: hintFor(11_001, 11, '0:' + '2'.repeat(64)) }),
+          /requires startBlock/,
+          'a foreign-account hint must not raise startBlock via withSinceStart',
+        )
+      })
+
+      it('keeps same-transaction followers after the hinted log (multi-log tx)', async () => {
+        // Batch execution: the hinted tx emits TWO matching logs (createdLt
+        // 11_001 and 11_002). The tx-granular `to_lt` floor must not lose the
+        // follower: the hint floors INCLUSIVE of the tx (sinceLt - 1) and the
+        // emit loop drops only its logs at/before the hint's index.
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(11_001) }) // hint = first log
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'the hinted log is excluded; its same-tx follower and later txs are emitted',
+        )
+      })
+
+      it('re-emits nothing when the hint is the hinted tx’s last log', async () => {
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: { ...hintFor(11_001), index: 11_002 } })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['12001'],
+          'the whole hinted tx stays behind the cursor (no re-emission)',
+        )
+      })
+    })
+
+    describe('v3 fast path', () => {
+      it('hint scan runs on the index: message-granular floor, same-tx followers kept', async () => {
+        // The hint's `index` (its log's created_lt) seeds /messages at index + 1
+        // (`start_lt` inclusive): the hinted log's own row is excluded, the hinted
+        // tx's later messages (same-tx) and later blocks still flow — with NO v2
+        // tx-chain pagination.
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [11_001, 12_001], [], {
+          v3: {},
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(11_001) }) // hint = first log
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11002', '12001'],
+          'hinted log excluded; its same-tx follower and later txs emitted via the fast path',
+        )
+        const { calls } = chain
+        assert.equal(calls.v2Walk, 0, 'no v2 tx-chain pagination on the fast path')
+      })
+
+      it('completes without truncation when the indexed tip covers the cutoff', async () => {
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: {} })
+        const logs = await collect(chain, { startTime: 1 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '12001'],
+        )
+      })
+
+      it('created_lt disorder never skips rows or truncates (time-ordered paging, hash join)', async () => {
+        // The index orders /messages by created_at; created_lt can regress across
+        // rows of the same second, and a later-time row can carry a LOWER lt. With
+        // page=2 the boundary cuts after txA: a created_lt page cursor would drop
+        // txC (lt below the boundary), and a forward-only meta prune would lose
+        // txB to truncation. The fast path must emit all three, in lt order.
+        const chain = makeChain(13, [10_005, 10_002, 10_001], [], {
+          v3: {
+            rows: [
+              { txLt: 10_005, createdLt: '10005', createdAt: '10105' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10105' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10106' },
+            ],
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt).sort(),
+          ['10001', '10002', '10005'],
+          'no silent skip (lt cursor) and no truncation (forward-only prune)',
+        )
+      })
+
+      it('clamps to the ingested tip and ends as a complete prefix', async () => {
+        // The index ingested only up to block 11 while the scan's cutoff is 12:
+        // within the lag tolerance the probe passes, but rows past the tip aren't
+        // in the index. The scan seals at min(cutoff, tip) = 11 and ends CLEANLY —
+        // a complete prefix whose bounded claim the poller resumes from (its
+        // watermark is its last emitted log, so the tail is fetched next poll).
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: { tip: 11 } })
+        const logs = await collect(chain, { startTime: 1 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001'],
+          'the sealed prefix up to the ingested tip is delivered, no truncation error',
+        )
+      })
+
+      it('clamped scan that emits nothing ends quietly (dormant address)', async () => {
+        // An EMPTY fast-path scan (dormant address / nothing matching) over a
+        // window whose far edge sits past the index tip is the ordinary near-tip
+        // shape — the index tip always trails `latest - 1` by a few blocks. The
+        // clamp bounds the claim (this scan's prefix is empty), the stream ends
+        // cleanly, and no watermark can have moved; staying on the index (no v2
+        // walk) keeps the dormant poll at one /messages call.
+        const chain = makeChain(13, [11_001], [], { v3: { tip: 11 } })
+        const logs = await collect(chain, { startTime: 1, topics: ['Unrelated'] })
+        assert.deepEqual(logs, [], 'an empty clamped scan completes quietly')
+        assert.equal(chain.calls.v2Walk, 0, 'the index answered "no events" without a v2 walk')
+      })
+
+      it('declines the fast path when a pinned endBlock sits above the ingested tip', async () => {
+        // A caller requesting a DEFINITE [startTime, endBlock] window can't be
+        // served a bounded prefix — clamping would silently under-deliver the
+        // pinned range. The fast path must decline (after its one-/messages
+        // probe, which also supplies the tip) and the complete v2 walk serves it.
+        const chain = makeChain(13, [11_001, 12_001], [], { v3: { tip: 11 } })
+        const logs = await collect(chain, { startTime: 1, endBlock: 12 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '12001'],
+          'the v2 walk delivers the whole pinned window',
+        )
+        assert.ok(chain.calls.v2Walk >= 1, 'v2 walked')
+        assert.equal(chain.calls.v3Reqs.length, 1, 'the fast path declined after its probe')
+      })
+
+      it('drains a boundary second that overflows the page (offset probe), never cutting it', async () => {
+        // Three rows in ONE second with page=2: page 1 covers rows 0-1; the turn
+        // re-sees them (all repeats, full page) — the offset drain must reach row 2
+        // instead of advancing past it.
+        const chain = makeChain(13, [10_001, 10_002, 10_003], [], {
+          v3: {
+            rows: [10_001, 10_002, 10_003].map((lt) => ({
+              txLt: lt,
+              createdLt: String(lt),
+              createdAt: '10100',
+            })),
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10001', '10002', '10003'],
+        )
+        assert.ok(
+          chain.calls.v3Reqs.some((r) => r.offset === '2'),
+          'the boundary second was drained by offset',
+        )
+      })
+
+      it('truncates loudly once the scan has emitted logs (row with no tx hash)', async () => {
+        // A `/messages` row missing its producing tx hash mid-stream is an index
+        // inconsistency: the block in progress is dropped and, once the scan has
+        // EMITTED logs, the truncation must surface loudly — the poller's watermark
+        // could otherwise be trusted past the gap. Blocks 10 (drained when 11
+        // arrives) and 11 precede the corrupted 12, so this scan has emitted data
+        // before the marker.
+        const chain = makeChain(13, [10_001, 11_001, 12_001], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 11_001, createdLt: '11001', createdAt: '10101' },
+              { txLt: 12_001, createdLt: '12001', createdAt: '10102', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a row missing its tx hash truncates loudly once data was emitted',
+        )
+      })
+
+      it('truncation before emission ends quietly for a RESUMABLE (since-hinted) poll', async () => {
+        // The marker (a row without its tx hash) arrives before any block was
+        // drained, with nothing emitted. Silence is only legal when the caller can
+        // recover on its own: a scan carrying a `since` resume position (and no
+        // pinned endBlock) re-polls from the same hint, so the truncated tail is
+        // picked up and the ordinary near-tip "nothing new" answer never becomes
+        // a transient-error storm. One-shot readers have no next poll and always
+        // get the error (see the following tests).
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        const logs = await collect(chain, { since: hintFor(10_001) })
+        assert.deepEqual(
+          logs,
+          [],
+          'a pre-emission truncation completes quietly for a since-hinted scan',
+        )
+        assert.equal(chain.calls.v2Walk, 0, 'stayed on the index; no v2 fallback')
+      })
+
+      it('truncation surfaces on a one-shot startTime scan that emitted nothing', async () => {
+        // getMessageById / getExecutionReceipts / ccip-cli show drive the v3 path
+        // as startTime + topics with NO since: they emit nothing until they find
+        // their log, have no next poll, and nothing to resume from — a quiet end
+        // would make "not in this window" indistinguishable from "the index bailed
+        // halfway", so the truncation must surface even with zero emissions.
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a one-shot scan with nothing to resume from never answers "empty" on a truncated stream',
+        )
+      })
+
+      it('truncation inside a PINNED window surfaces even before anything was emitted', async () => {
+        // A pinned endBlock is a DEFINITE window: its caller cannot tell a quiet
+        // early stop from "no logs in the window", and there is no next poll even
+        // with a hint. openV3EventStream declines pinned windows above the index
+        // tip; a mid-stream truncation must stay loud here.
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_001, createdLt: '10001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101', noHash: true },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1, endBlock: 12 }),
+          (err: unknown) => err instanceof CCIPLogsStreamInconsistentError,
+          'a pinned-window scan surfaces truncation even with zero emissions',
+        )
+      })
+
+      it('drains a seed second whose below-floor prefix fills a page', async () => {
+        // The offset drain skips rowsSeenAt(second) — the rows THIS stream counted
+        // — while an un-floored page turn re-serves the below-floor rows first, so
+        // the drain under-skips by their count B. With B >= the page size the
+        // drained page is still all repeats, the turn advances the second, and the
+        // seed second's remaining above-floor rows are dropped with no warning.
+        // Carrying the CONSTANT seed floor on turns (not a moving lt cursor) keeps
+        // every query's result set identical to the seed's, so the counted rows
+        // are always a prefix of it and the drain is exact. B = 2 (rows '10000' +
+        // the hinted '10001') fills the page-2 drain over the seed second. NB the
+        // tx builder stamps its message with createdLt == tx lt, so txs 10003 /
+        // 10004 (not 10002 / 10003) carry the above-floor rows' logs.
+        const multi = tx(10_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 10_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [10_000, 10_001, 10_003, 10_004], [], {
+          v3: {
+            rows: [
+              { txLt: 10_000, createdLt: '10000', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10002', createdAt: '10101' },
+              { txLt: 10_003, createdLt: '10003', createdAt: '10101' },
+              { txLt: 10_004, createdLt: '10004', createdAt: '10101' },
+            ],
+          },
+          txOf: (lt) => (lt === 10_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(10_001), page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10002', '10003', '10004'],
+          'the seed second drains past its below-floor prefix exactly once',
+        )
+      })
+
+      it('keeps the since seed across page turns (boundary-second rows below the hint)', async () => {
+        // Turn queries carry start_utime only, so the boundary second re-serves
+        // rows BELOW the hint's seed floor (the hinted tx's own row and earlier
+        // rows of the same second, parallel shards). They must be counted for the
+        // offset drain but never hydrated — hydrating them re-reads an EARLIER
+        // block and trips a mid-stream rewind — and the hinted tx's followers
+        // (same out_msg_tx_hash) must still flow. The rows sit AT the hint's own
+        // block time (hintFor's blockTimestamp = 100 + lt, which withSinceStart
+        // merges into startTime and floors the seed query with).
+        const multi = tx(11_001)
+        multi.outMessages.set(1, {
+          info: {
+            type: 'external-out' as const,
+            src: Address.parse(OFFRAMP),
+            dest: { value: BigInt(crc32('ExecutionStateChanged')) },
+            createdLt: 11_002n,
+          },
+          body: beginCell().storeUint(1, 1).endCell(),
+        })
+        const chain = makeChain(13, [10_001, 11_001], [], {
+          v3: {
+            rows: [
+              { txLt: 11_001, createdLt: '11001', createdAt: '10101' },
+              { txLt: 11_001, createdLt: '11002', createdAt: '10101' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10101' },
+            ],
+          },
+          txOf: (lt) => (lt === 11_001 ? multi : tx(lt)),
+        })
+        const logs = await collect(chain, { since: hintFor(10_001), page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['11001', '11002'],
+          'the hinted log stays excluded and its same-tx followers flow past the turn ' +
+            're-serving the seed second',
+        )
+      })
+
+      it('reports the block rewind with both block numbers', async () => {
+        // Same-second created_lt disorder across a page boundary (the accepted N1
+        // residual): a later-time page re-serves an EARLIER block, which the
+        // consumer reads as a mid-stream rewind. The error must name both blocks —
+        // a regression test for the diagnostic printing `undefined` after the
+        // cursor was reset before the template literal.
+        const chain = makeChain(13, [10_002, 11_001, 12_001], [], {
+          v3: {
+            rows: [
+              { txLt: 11_001, createdLt: '11001', createdAt: '10100' },
+              { txLt: 12_001, createdLt: '12001', createdAt: '10100' },
+              { txLt: 10_002, createdLt: '10002', createdAt: '10101' },
+            ],
+          },
+        })
+        await assert.rejects(
+          collect(chain, { startTime: 1, page: 2 }),
+          (err: unknown) =>
+            err instanceof CCIPLogsStreamInconsistentError &&
+            /block rewind 12 -> 10/.test(err.message),
+          'the rewind diagnostic names both the current and the rewound block',
+        )
+      })
+
+      it("turns pages from the page's max created_at, never regressing under lt disorder", async () => {
+        // Row A (lt 10002) sits at second 10100, row B (lt 10001) at 10105. After the
+        // per-page lt re-sort, B comes first and A last — the turn floor must be the
+        // page's max created_at (10105), not the lt-max row's (10100).
+        const chain = makeChain(13, [10_001, 10_002], [], {
+          v3: {
+            rows: [
+              { txLt: 10_002, createdLt: '10002', createdAt: '10100' },
+              { txLt: 10_001, createdLt: '10001', createdAt: '10105' },
+            ],
+          },
+        })
+        const logs = await collect(chain, { startTime: 1, page: 2 })
+        assert.deepEqual(
+          logs.map((l) => l.lt),
+          ['10001', '10002'],
+        )
+        assert.equal(
+          chain.calls.v3Reqs[1]?.start_utime,
+          '10105',
+          "the turn cursor is the page's max created_at, not its lt-max row's",
+        )
+      })
     })
   })
 
