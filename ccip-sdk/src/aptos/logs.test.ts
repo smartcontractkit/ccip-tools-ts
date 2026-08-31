@@ -40,10 +40,14 @@ type FakeAptosEvent = {
  * `sequence_number` for each handle's event list, mirroring how Aptos's real
  * "events by creation number" endpoint indexes a handle.
  */
-function makeFakeClient(eventsByHandleSuffix: Record<string, FakeAptosEvent[]>): Client {
+function makeFakeClient(
+  eventsByHandleSuffix: Record<string, FakeAptosEvent[]>,
+  calls?: { url: string; params: unknown }[],
+): Client {
   return {
     async provider<Req, Res>(req: ClientRequest<Req>) {
       const url = decodeURIComponent(req.url)
+      calls?.push({ url, params: req.params })
       for (const [suffix, data] of Object.entries(eventsByHandleSuffix)) {
         if (url.includes(suffix)) {
           const { start, limit = 100 } = (req.params ?? {}) as { start?: number; limit?: number }
@@ -68,8 +72,11 @@ function makeFakeClient(eventsByHandleSuffix: Record<string, FakeAptosEvent[]>):
   }
 }
 
-function makeFakeProvider(eventsByHandleSuffix: Record<string, FakeAptosEvent[]>): Aptos {
-  const client = makeFakeClient(eventsByHandleSuffix)
+function makeFakeProvider(
+  eventsByHandleSuffix: Record<string, FakeAptosEvent[]>,
+  calls?: { url: string; params: unknown }[],
+): Aptos {
+  const client = makeFakeClient(eventsByHandleSuffix, calls)
   const config = new AptosConfig({
     network: Network.MAINNET,
     fullnode: 'https://fake.aptos.internal',
@@ -420,6 +427,376 @@ void describe('streamAptosLogs missing handles', () => {
           },
         ),
       ),
+    )
+  })
+})
+
+void describe('streamAptosLogs since hint', () => {
+  // One handle, four events: seq 0..3 at versions 100..103 (mock timestamps = version).
+  const FOUR_EVENTS = {
+    ccip_message_sent_events: [0, 1, 2, 3].map((i) => ({
+      version: String(100 + i),
+      sequence_number: String(i),
+      type: `${ADDRESS}::on_ramp::CCIPMessageSent`,
+      data: { i: `A${i}` },
+    })),
+  }
+  const singleTopic = {
+    address: ADDRESS,
+    topics: ['CCIPMessageSent'],
+    startBlock: 0,
+    versionAsHash: true,
+  }
+
+  void it('resumes strictly after the hint index on single-handle streams', async () => {
+    const calls: { url: string; params: unknown }[] = []
+    const provider = makeFakeProvider(FOUR_EVENTS, calls)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+      'events at seq 2,3 only — the hinted event (seq 1) itself is not re-emitted',
+    )
+    const starts = calls
+      .filter((c) => c.url.includes('events/'))
+      .map((c) => (c.params as { start?: number }).start)
+    assert.deepEqual(
+      starts,
+      [undefined, 2],
+      'tip fetch, then pagination resumes directly at the hint cursor (seq+1)',
+    )
+  })
+
+  void it('skips the startTime floor search when the hint covers it', async () => {
+    const calls: { url: string; params: unknown }[] = []
+    const provider = makeFakeProvider(FOUR_EVENTS, calls)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent'],
+          startTime: 100.5, // floor inside the head page; would normally probe timestamps
+          versionAsHash: true,
+          since: {
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+    )
+    const tsLookups = (
+      provider.getTransactionByVersion as unknown as ReturnType<typeof mock.fn>
+    ).mock.calls.map((c) => (c.arguments[0] as { ledgerVersion: number }).ledgerVersion)
+    assert.deepEqual(
+      [...tsLookups].sort((a, b) => a - b),
+      [102, 103],
+      'no floor-search probes — only the yielded logs’ own blockTimestamp lookups',
+    )
+    const starts = calls
+      .filter((c) => c.url.includes('events/'))
+      .map((c) => (c.params as { start?: number }).start)
+    assert.deepEqual(starts, [undefined, 2])
+  })
+
+  void it('still applies the floor when the hint is older than startTime', async () => {
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent'],
+          startTime: 102.5, // newer than the hint (seq 1, version 101): floor wins
+          versionAsHash: true,
+          since: {
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+      'same as the no-hint baseline: the startTime splice still runs (it keeps one ' +
+        'below-floor event — pre-existing behavior), unaffected by the stale hint',
+    )
+    const tsLookups = (
+      provider.getTransactionByVersion as unknown as ReturnType<typeof mock.fn>
+    ).mock.calls.map((c) => (c.arguments[0] as { ledgerVersion: number }).ledgerVersion)
+    assert.ok(
+      tsLookups.some((v) => v <= 102),
+      'the first-batch timestamp check still runs when the hint does not cover the floor',
+    )
+  })
+
+  void it('ignores a hint from a different topic (handles own independent sequence spaces)', async () => {
+    // A hint captured from ExecutionStateChanged (off_ramp handle) replayed on a
+    // single-topic CCIPMessageSent stream must not resume from the on_ramp handle's
+    // seq — and its floors must not merge either (ignored wholesale).
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            topics: ['ExecutionStateChanged'],
+            index: 1,
+            blockNumber: 103, // a floor leak would skip everything below 103
+            blockTimestamp: 103,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100, 101, 102, 103],
+      'a hint from another handle is ignored wholesale: no seq cursor, no floors',
+    )
+  })
+
+  void it('uses the seq cursor when the hint topic matches the handle', async () => {
+    const calls: { url: string; params: unknown }[] = []
+    const provider = makeFakeProvider(FOUR_EVENTS, calls)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            topics: ['CCIPMessageSent'],
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+    )
+    const starts = calls
+      .filter((c) => c.url.includes('events/'))
+      .map((c) => (c.params as { start?: number }).start)
+    assert.deepEqual(starts, [undefined, 2], 'resumes directly at the hint cursor (seq+1)')
+  })
+
+  void it("drops an unattributable seq cursor against the handle's own event type (raw-path topic)", async () => {
+    // The stream's topic is a raw handle path, so the wholesale gate can't resolve
+    // the hint's (unmapped, pathless) struct name offline: initHandleState checks it
+    // against the handle's own event type — 'NotThisHandle' != 'CCIPMessageSent'.
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['OnRampState/ccip_message_sent_events'],
+          startBlock: 0,
+          versionAsHash: true,
+          since: {
+            topics: ['NotThisHandle'],
+            index: 3, // would skip everything if applied to this handle
+            blockNumber: 0,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100, 101, 102, 103],
+      "seq 3 belongs to some other handle's sequence space — nothing is skipped",
+    )
+  })
+
+  void it('multi-handle streams resume past the hint blockNumber, exclusively', async () => {
+    const provider = makeFakeProvider({
+      ...FOUR_EVENTS,
+      commit_report_accepted_events: [0, 1].map((i) => ({
+        version: String(100 + i),
+        sequence_number: String(i),
+        type: `${ADDRESS}::off_ramp::CommitReportAccepted`,
+        data: { i: `B${i}` },
+      })),
+    })
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent', 'CommitReportAccepted'],
+          startBlock: 0,
+          versionAsHash: true,
+          // index 99 is bogus for EITHER handle (sequence spaces are per-handle) and
+          // must be ignored; blockNumber 102 is a global ledger version — and a
+          // version carries exactly one transaction, whose events every getLogs
+          // call emits complete (see the batch-boundary test below) — so the floor
+          // is 102 + 1 = 103, exclusive, with no redelivery slack.
+          since: {
+            index: 99,
+            blockNumber: 102,
+            blockTimestamp: 102,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => (l.data as { i: string }).i),
+      ['A3'],
+      'floor at hint.blockNumber + 1 = 103: only strictly-later versions are emitted',
+    )
+  })
+
+  void it('emits a version complete even when it straddles a batch boundary', async () => {
+    // 101 events on one handle ALL at version 100 (a version is one tx, but a tx
+    // can own more events than one 100-event batch holds): the first batch is cut
+    // mid-version. The whole version must still be released in a single round —
+    // a resume hint taken from any of these logs floors at 101 and must never
+    // skip the stragglers.
+    const provider = makeFakeProvider({
+      ccip_message_sent_events: Array.from({ length: 101 }, (_, i) => ({
+        version: '100',
+        sequence_number: String(i),
+        type: `${ADDRESS}::on_ramp::CCIPMessageSent`,
+        data: { i: `A${i}` },
+      })),
+      commit_report_accepted_events: [
+        {
+          version: '100',
+          sequence_number: '0',
+          type: `${ADDRESS}::off_ramp::CommitReportAccepted`,
+          data: { i: 'B0' },
+        },
+      ],
+    })
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent', 'CommitReportAccepted'],
+          startBlock: 0,
+          versionAsHash: true,
+        },
+      ),
+    )
+    const flat = logs.map((l) => (l.data as { i: string }).i)
+    assert.equal(flat.length, 102, 'no event past a full batch boundary is lost')
+    assert.ok(
+      flat.indexOf('A100') < flat.indexOf('B0'),
+      'the whole version releases in one round: the global sort keeps handle A’s ' +
+        'straggler (A100) before handle B’s event (B0)',
+    )
+  })
+
+  void it('since alone satisfies the start requirement', async () => {
+    // No startBlock/startTime: the hint's index is the exact cursor and its
+    // blockNumber/timestamp the merged floors.
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CCIPMessageSent'],
+          versionAsHash: true,
+          since: {
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+    )
+  })
+
+  void it('takes the larger of startBlock and since.blockNumber', async () => {
+    // startBlock 103 is newer than the hint's block 101: the explicit floor wins,
+    // and the seq cursor only ever raises it further (it doesn't here).
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          startBlock: 103,
+          since: {
+            index: 1,
+            blockNumber: 101,
+            blockTimestamp: 101,
+            address: ADDRESS,
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [103],
+    )
+  })
+
+  void it('ignores a foreign-address hint', async () => {
+    const provider = makeFakeProvider(FOUR_EVENTS)
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          ...singleTopic,
+          since: {
+            index: 99,
+            blockNumber: 103,
+            blockTimestamp: 103,
+            address: '0xbeef::other',
+            transactionHash: '0xabc',
+          },
+        },
+      ),
+    )
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [100, 101, 102, 103],
     )
   })
 })

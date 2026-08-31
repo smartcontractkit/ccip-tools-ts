@@ -43,8 +43,7 @@ function chain(mintOwner: PublicKey | null = TOKEN_PROGRAM_ID): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(165) }),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
@@ -55,7 +54,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | null) {
