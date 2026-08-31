@@ -7,13 +7,14 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolSignerPda } from '../../programs/token-pool.ts'
+import { CreateTokenMultisig } from './create-token-multisig.ts'
 
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const MINT = Keypair.generate().publicKey.toBase58()
 const POOL_PROGRAM = '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB'
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -55,7 +56,7 @@ function stubChain(mintAuthority?: PublicKey | null): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedCreateTokenMultisig({
+  return new CreateTokenMultisig().generate(stubChain(), {
     tokenAddress: MINT,
     poolType: 'burn-mint',
     threshold: 2,
@@ -107,9 +108,45 @@ describe('CreateTokenMultisig (cct/solana)', () => {
 
       assert.ok(unsigned.instructions[1]!.keys.some((key) => key.pubkey.equals(signer)))
     })
+
+    it('generates a seed when none is supplied', async () => {
+      assert.ok((await generate({ threshold: 1, seed: undefined })).multisigAddress)
+    })
+
+    it('deduplicates a signer that matches the mint authority', async () => {
+      const unsigned = await generate({ threshold: 1, additionalSigners: [AUTHORITY] })
+
+      assert.equal(
+        unsigned.instructions[1]!.keys.filter((key) => key.pubkey.equals(new PublicKey(AUTHORITY)))
+          .length,
+        1,
+      )
+    })
   })
 
   describe('validation', () => {
+    it('rejects non-array additional signers', async () => {
+      await assert.rejects(
+        () => generate({ additionalSigners: 'not-an-array' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'additionalSigners',
+      )
+    })
+
+    it('rejects too many multisig signers', async () => {
+      await assert.rejects(
+        () =>
+          generate({
+            threshold: 1,
+            additionalSigners: Array.from({ length: 10 }, () =>
+              Keypair.generate().publicKey.toBase58(),
+            ),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'additionalSigners',
+      )
+    })
+
     it('rejects invalid pool type', async () => {
       await assert.rejects(
         () => generate({ poolType: 'custom' }),
@@ -133,7 +170,7 @@ describe('CreateTokenMultisig (cct/solana)', () => {
     it('rejects mint without mint authority', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain(null)).generateUnsignedCreateTokenMultisig({
+          new CreateTokenMultisig().generate(stubChain(null), {
             tokenAddress: MINT,
             poolType: 'burn-mint',
             threshold: 2,
@@ -148,10 +185,42 @@ describe('CreateTokenMultisig (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the multisig address', async () => {
+      const result = await new CreateTokenMultisig().execute(
+        Object.assign(stubChain(new PublicKey(AUTHORITY)), {
+          connection: {
+            getAccountInfo: async () => ({
+              owner: TOKEN_PROGRAM_ID,
+              data: mintData(new PublicKey(AUTHORITY)),
+              executable: false,
+              lamports: 1,
+            }),
+            getMinimumBalanceForRentExemption: async () => 123,
+            simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+            getLatestBlockhash: async () => ({
+              blockhash: PublicKey.default.toBase58(),
+              lastValidBlockHeight: 1,
+            }),
+            sendTransaction: async () => HASH,
+            confirmTransaction: async () => ({ value: { err: null } }),
+          },
+        }),
+        {
+          tokenAddress: MINT,
+          poolType: 'burn-mint',
+          threshold: 1,
+          wallet: { ...WALLET, publicKey: new PublicKey(AUTHORITY) },
+        },
+      )
+
+      assert.equal(result.hash, HASH)
+      assert.ok(result.multisigAddress)
+    })
+
     it('rejects signed execute when wallet is not mint authority', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).createTokenMultisig({
+          new CreateTokenMultisig().execute(stubChain(), {
             tokenAddress: MINT,
             poolType: 'burn-mint',
             threshold: 2,

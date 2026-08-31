@@ -6,7 +6,7 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import { UpdateMetadataAuthority } from './update-metadata-authority.ts'
 
 const METAPLEX_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -19,11 +19,11 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
-function metadataData(authority = AUTHORITY, isMutable = true): Buffer {
+function metadataData(authority = AUTHORITY, isMutable = true, mint = TOKEN): Buffer {
   return Buffer.concat([
     Buffer.from([4]), // MetadataV1
     new PublicKey(authority).toBuffer(),
-    new PublicKey(TOKEN).toBuffer(),
+    new PublicKey(mint).toBuffer(),
     Buffer.alloc(12), // Empty name, symbol, and URI strings.
     Buffer.alloc(2), // Seller fee basis points.
     Buffer.from([0, 0, isMutable ? 1 : 0, 0, 0, 0, 0, 0]),
@@ -68,7 +68,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts: Record<string, unknown> = {}, metadata?: Buffer | null) {
-  return SolanaTokenManager.fromChain(chain(metadata)).generateUnsignedUpdateMetadataAuthority({
+  return new UpdateMetadataAuthority().generate(chain(metadata), {
     tokenAddress: TOKEN,
     payer: PAYER,
     authority: AUTHORITY,
@@ -114,7 +114,9 @@ describe('UpdateMetadataAuthority (cct/solana)', () => {
     it('requires Metaplex metadata with the current authority', async () => {
       for (const [metadata, param] of [
         [null, 'tokenAddress'],
+        [metadataData(AUTHORITY, true, PAYER), 'tokenAddress'],
         [metadataData(PAYER), 'authority'],
+        [Buffer.alloc(0), 'tokenAddress'],
       ] as const) {
         await assert.rejects(
           () => generate({}, metadata),
@@ -134,7 +136,7 @@ describe('UpdateMetadataAuthority (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).updateMetadataAuthority({
+      const result = await new UpdateMetadataAuthority().execute(submitChain(), {
         tokenAddress: TOKEN,
         newAuthority: NEW_AUTHORITY,
         wallet: WALLET,
@@ -146,7 +148,7 @@ describe('UpdateMetadataAuthority (cct/solana)', () => {
     it('rejects a non-wallet authority for signed updates', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).updateMetadataAuthority({
+          new UpdateMetadataAuthority().execute(chain(), {
             tokenAddress: TOKEN,
             newAuthority: NEW_AUTHORITY,
             authority: PAYER,
