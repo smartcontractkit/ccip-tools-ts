@@ -37,7 +37,7 @@ type ProvideLiquidityParams = PoolProgramRef & {
   tokenAddress: string
   /** Amount to deposit in base units. Must be a positive u64. */
   amount: bigint
-  /** Pool rebalancer that provides liquidity. Defaults to `payer` for single-signer transactions. */
+  /** Pool rebalancer whose ATA for `tokenAddress` must hold `amount` and delegate it to the pool signer. Defaults to `payer`. */
   authority?: string
 }
 
