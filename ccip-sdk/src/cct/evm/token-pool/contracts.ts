@@ -1,11 +1,11 @@
 /**
- * EVM token-pool contract metadata for CCT, and the reads that resolve it. Families, types and
- * versions; the cached {@link Interface}s built from the vendored ABIs; on-chain type/version
- * resolution ({@link resolveTokenPool}, {@link parseTokenPoolVersion},
- * {@link getTokenPoolInterface}); the deployable pools' creation artifacts
- * ({@link getTokenPoolArtifact}); the version dispatch the write ops encode through
- * ({@link resolveEncoder}); and the owner pre-flight they share ({@link assertPoolOwner}).
- * Mirrors `token/contracts.ts`.
+ * EVM token-pool contract layer for CCT: cached {@link Interface}s + on-chain type/version
+ * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
+ * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
+ * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
+ * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}) plus the
+ * owner-only guard built on the first of them ({@link assertPoolOwner}). The write-side
+ * rate-limit shape lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
@@ -143,10 +143,7 @@ export async function resolveTokenPool(
   return parseTokenPoolVersion({ address, contractType, version })
 }
 
-/**
- * `Ownable2Step.owner()`, declared identically by every supported pool type and version — so one
- * vendored ABI reads the owner of any of them, with no per-generation dispatch.
- */
+/** `Ownable2Step.owner()`, identical across all supported pool types and versions. */
 type PoolOwnerGetter = Pick<TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>, 'owner'>
 
 /**
@@ -172,12 +169,7 @@ export async function assertPoolOwner(
   poolAddress: string,
   sender: string,
 ): Promise<void> {
-  const pool: PoolOwnerGetter = getTypedContract(
-    chain,
-    poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
-  )
-  const owner = getAddress(resultToObject(await pool.owner()))
+  const owner = await readTokenPoolOwner(chain, poolAddress)
   if (getAddress(sender) === owner) return
   throw new CCTParamsInvalidError(
     operation,
@@ -213,6 +205,75 @@ export const TOKEN_POOL_INTERFACES: Record<TokenPoolFamily, Record<TokenPoolVers
  */
 export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVersion): Interface {
   return TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
+}
+
+/**
+ * Reads a token pool's Ownable2Step `owner()` in a single `eth_call`. The one owner read every
+ * owner-gated pool write op pre-flights `sender` against.
+ *
+ * @remarks No `version` parameter and no family dispatch: `owner()` is declared identically —
+ * same selector, same `address` return — by both {@link TOKEN_POOL_FAMILIES} at all four
+ * supported versions, so the v1.5.0 `BurnMint` interface types the call for every pool.
+ * @remarks **Deliberately not routed through the `getTokenPoolState` query op, and must not be
+ * "simplified" back to it.** Two reasons, the first of which is a correctness bug and not just a
+ * cost concern:
+ *
+ * 1. `getTokenPoolState` throws {@link CCTContractTypeInvalidError} for a v2.0.0
+ *    `SiloedLockReleaseTokenPool`, because that pool escrows per remote chain
+ *    (`getLockBox(uint64)`) and so has no single `lockBox` field for the query's result shape to
+ *    report. `SiloedLockReleaseTokenPool` is nonetheless a supported {@link TokenPoolType}, and
+ *    the write ops' calldata is perfectly valid against it. Gating an owner check through that
+ *    query would therefore make every one of those ops permanently unusable on siloed pools —
+ *    failing on an unrelated result-shape limitation while `generateUnsigned*` works fine.
+ * 2. It costs 6–8 `eth_call`s (token, router, RMN proxy, rate-limit admin, supported chains,
+ *    dynamic config, finality config, lockbox) plus a `getTokenInfo` round trip, and re-resolves
+ *    `typeAndVersion`, all to obtain one address.
+ *
+ * This mirrors `token-admin-registry/operations/transfer-admin.ts`, which likewise does its own
+ * narrow pre-tx read rather than going through a read op.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool contract to read `owner()` from.
+ * @returns The current owner, checksummed.
+ */
+export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): Promise<string> {
+  const pool: PoolOwnerGetter = getTypedContract(
+    chain,
+    poolAddress,
+    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+  )
+  return getAddress(resultToObject(await pool.owner()))
+}
+
+/**
+ * Reads a token pool's `rateLimitAdmin` — the delegated role the pools accept for rate-limit
+ * writes alongside the owner — in a single `eth_call`.
+ *
+ * @remarks Same rationale as {@link readTokenPoolOwner} for not routing through
+ * `getTokenPoolState`.
+ * @remarks Version-dispatched, unlike `owner()`: v1.5.0–v1.6.1 expose a standalone
+ * `getRateLimitAdmin()`, while v2.0.0 folded the role into `getDynamicConfig()`'s
+ * `(router, rateLimitAdmin, feeAdmin)` triple.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool contract to read from.
+ * @param version - Pool version, as resolved by {@link resolveTokenPool}; selects the getter.
+ * @returns The current rate-limit admin, checksummed. The zero address when the role is unset —
+ * callers must treat that as "matches nobody" rather than comparing it directly.
+ */
+export async function readTokenPoolRateLimitAdmin(
+  chain: EVMChain,
+  poolAddress: string,
+  version: TokenPoolVersion,
+): Promise<string> {
+  if (version === TokenPoolVersion.V2_0_0) {
+    const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+    // getDynamicConfig returns (router, rateLimitAdmin, feeAdmin); index the raw Result rather
+    // than resultToObject it, which would turn the named tuple into an object (see
+    // get-token-pool-state.ts).
+    const dynamicConfig = await pool.getDynamicConfig()
+    return getAddress(dynamicConfig[1] as string)
+  }
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+  return getAddress(resultToObject(await pool.getRateLimitAdmin()))
 }
 
 /**
@@ -254,10 +315,8 @@ export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtif
  * A table entry says one of two things:
  * - **absent key** — the calldata did not change here, so it *inherits* the closest lower entry.
  *   One entry per calldata change therefore covers every higher version.
- * - **explicit `null`** — the function is gone from this version up. The walk stops instead of
- *   inheriting downwards, and the op is reported unsupported. Floor-match alone is only sound for
- *   functions that survive; without a ceiling, a removed function's older encoder would emit
- *   calldata for a selector the pool does not implement.
+ * - **explicit `null`** — the function was removed at this version, so the op is reported
+ *   unsupported rather than emitting calldata for a selector the pool does not implement.
  *
  * @param encoders - Sparse table keyed by {@link TokenPoolVersion}; `null` marks a removal ceiling.
  * @param version - The resolved on-chain pool version to encode for.

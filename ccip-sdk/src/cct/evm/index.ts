@@ -67,6 +67,10 @@ import {
   type RemoveRemotePoolParams,
   RemoveRemotePool,
 } from './token-pool/operations/remove-remote-pool.ts'
+import {
+  type SetChainRateLimiterConfigsParams,
+  SetChainRateLimiterConfigs,
+} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
   type TransferOwnershipParams,
@@ -96,6 +100,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #addRemotePool = new AddRemotePool()
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
+  readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
@@ -386,6 +391,102 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned pool rate-limit tx (for multisig / offline signing): sets the inbound and
+   * outbound limits of one or more already-configured lanes, in a single transaction. Probes the
+   * pool's on-chain `typeAndVersion` to resolve its interface + encoder.
+   * @remarks **v1.5.0 pools set one lane per transaction.** v1.5.1/v1.6.1 encode the batch
+   * `setChainRateLimiterConfigs(uint64[], Config[], Config[])` and v2.0.0 the reshaped
+   * `setRateLimitConfig(RateLimitConfigArgs[])`, but v1.5.0 ships only the singular
+   * `setChainRateLimiterConfig(uint64, Config, Config)`. To keep the one-op-one-transaction
+   * contract every CCT write holds, a v1.5.0 pool therefore accepts only a single-element
+   * `updates`; a multi-lane batch is rejected with {@link CCTParamsInvalidError} rather than
+   * fanned out into N transactions.
+   *
+   * `fastFinality` is **v2.0.0-only** — the flag does not exist in the earlier ABIs, so setting it
+   * (to either value) on an older pool is rejected rather than silently dropped. It defaults to
+   * `false` on v2.0.0.
+   *
+   * This op *updates* limits on lanes that already exist; it does not add one. An unconfigured
+   * selector reverts on-chain (`NonExistentChain`).
+   *
+   * The tx must ultimately be signed by the pool `owner` **or** its `rateLimitAdmin` — both are
+   * reported by {@link getTokenPoolState}. When `opts.sender` is supplied it is pre-flighted
+   * against *both* roles (two extra `eth_call`s — the pool's `owner()` and whichever getter
+   * reports `rateLimitAdmin` on that version), so a
+   * `sender` holding neither fails at build time rather than reverting at signing. Omit `sender`
+   * to build the calldata without any role read, when the eventual signer is not yet known.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid: `updates` empty, a repeated
+   * `remoteChainSelector`, a non-`uint64` selector, a rate above its capacity while enabled, a
+   * non-zero amount while disabled, `fastFinality` set on a pre-2.0.0 pool, or `sender` given and
+   * being neither the pool `owner` nor its (set) `rateLimitAdmin`. On a **v1.5.1** pool the
+   * enabled-bucket bound is stricter still (`0 < rate < capacity`), so a `rate` of `0n` or a
+   * `rate` equal to `capacity` is also rejected there — v1.6.1 and v2.0.0 allow both. A
+   * **v1.5.0** pool accepts only a single-element `updates`.
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedSetChainRateLimiterConfigs({
+   *   poolAddress: '0xPool...',
+   *   updates: [
+   *     {
+   *       remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   *       // amounts are in the local token's smallest unit (18 decimals here)
+   *       outboundRateLimiterConfig: { enabled: true, capacity: 10_000n * 10n ** 18n, rate: 100n * 10n ** 18n },
+   *       inboundRateLimiterConfig: { enabled: false }, // capacity/rate default to 0n
+   *     },
+   *   ],
+   *   sender: '0xOwnerOrRateLimitAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedSetChainRateLimiterConfigs(
+    opts: SetChainRateLimiterConfigsParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#setChainRateLimiterConfigs.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets the inbound and outbound rate limits of one or more already-configured lanes in a single
+   * transaction, signing + submitting with `opts.wallet`.
+   * @remarks Gated on **either** the pool `owner` or its `rateLimitAdmin` — rate limits are the one
+   * pool write that accepts a delegated role, so this check is a disjunction where
+   * {@link transferOwnership}'s is owner-only. Both roles are reported by
+   * {@link getTokenPoolState}; `rateLimitAdmin` is the zero address when unset, and an unset role
+   * matches nobody.
+   *
+   * Same version rules as {@link generateUnsignedSetChainRateLimiterConfigs}: **v1.5.0 pools set
+   * one lane per transaction**, and `fastFinality` is v2.0.0-only.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is given and is
+   * not the wallet's address, or the signer is neither the pool `owner` nor its (set)
+   * `rateLimitAdmin`. On a **v1.5.1** pool an enabled rate limiter must additionally satisfy
+   * `0 < rate < capacity`, so a `rate` of `0n` or a `rate` equal to `capacity` is rejected there —
+   * v1.6.1 and v2.0.0 allow both. A **v1.5.0** pool accepts only a single-element `updates`.
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setChainRateLimiterConfigs({
+   *   poolAddress: '0xPool...',
+   *   updates: [
+   *     {
+   *       remoteChainSelector: 16015286601757825753n, // ethereum-testnet-sepolia
+   *       outboundRateLimiterConfig: { enabled: true, capacity: 1_000n * 10n ** 18n, rate: 10n * 10n ** 18n },
+   *       inboundRateLimiterConfig: { enabled: true, capacity: 1_000n * 10n ** 18n, rate: 10n * 10n ** 18n },
+   *       // fastFinality: true, // v2.0.0 pools only — targets the fast-finality buckets
+   *     },
+   *   ],
+   *   wallet, // the pool owner or its rateLimitAdmin
+   * })
+   * ```
+   */
+  setChainRateLimiterConfigs(
+    opts: EVMExecuteParams<SetChainRateLimiterConfigsParams>,
+  ): Promise<TransactionResult> {
+    return this.#setChainRateLimiterConfigs.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress, verification }`.
@@ -618,21 +719,39 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * chain, the `remoteToken`, the `remotePools` authorized to mint/release against it, and the
    * inbound/outbound rate-limiter buckets. Keyed by remote network name.
    * @remarks Omit `remoteChainSelector` to scan every lane the pool reports through
-   * `getSupportedChains()`; pass one to read a single lane. `inboundRateLimiterState` /
-   * `outboundRateLimiterState` are `null` when that direction is unlimited, and their amounts are
-   * in the *local* token's smallest unit; v2.0.0 pools add `fast*RateLimiterState` for
-   * Faster-Than-Finality and safe-finality (FCR) transfers.
+   * `getSupportedChains()`; provide it to read one, which is the cheaper call by far on a pool with
+   * many lanes. Passing a selector the pool has no config for surfaces as
+   * {@link CCIPTokenPoolChainConfigNotFoundError} rather than an empty result.
+   *
+   * A lane's rate limiter is nullable: `inboundRateLimiterState` / `outboundRateLimiterState` are
+   * `null` when that direction is unlimited, so check for `null` before reading `.capacity`.
+   * Amounts are in the *local* token's smallest unit. On v2.0.0 pools each entry additionally
+   * carries `fastInboundRateLimiterState` / `fastOutboundRateLimiterState`, the separate buckets
+   * applied to Faster-Than-Finality and safe-finality (FCR) transfers.
+   * @remarks Every pool-version difference is handled for you — v1.5.0's singular `getRemotePool`
+   * vs v1.5.1+'s `getRemotePools`, and a `USDCTokenPoolProxy`'s indirection through its underlying
+   * pools. Reads only; to change a lane use the lane-configuration write ops.
+   * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolRemotes`, returns this same
+   * {@link TokenPoolRemote} shape, but is addressed differently: it takes the token `mint` plus a
+   * pool program, where this takes the pool contract address directly.
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address, or
    * `remoteChainSelector` is given and is not a `uint64`
-   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if a lane read has no remote token
-   * configured — including a `remoteChainSelector` the pool knows nothing about
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if a scanned lane has no remote token
+   * configured
    * @example
    * ```typescript
+   * // every configured lane
    * const remotes = await cct.getTokenPoolRemotes({ poolAddress: '0xPool...' })
    * for (const [network, lane] of Object.entries(remotes)) {
-   *   // inboundRateLimiterState is null when inbound transfers are unlimited
-   *   console.log(network, lane.remoteToken, lane.inboundRateLimiterState?.capacity)
+   *   const inbound = lane.inboundRateLimiterState
+   *   console.log(network, lane.remoteToken, lane.remotePools, inbound?.capacity ?? 'unlimited')
    * }
+   *
+   * // or just one, avoiding a full scan
+   * const one = await cct.getTokenPoolRemotes({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   * })
    * ```
    */
   getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
@@ -975,10 +1094,18 @@ export type {
   ApplyChainUpdatesParamsV1_5_1,
   ChainUpdateV1_5_0,
   ChainUpdateV1_5_1,
-  RateLimitConfigInput,
 } from './token-pool/operations/apply-chain-updates.ts'
-/** The lane types `GetTokenPoolRemotesResult` is keyed over; shared with `Chain.getTokenPoolRemotes`. */
+/**
+ * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
+ * single lane's type without these. Declared in `../../chain.ts` (shared with the core
+ * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
+ */
 export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export type {
+  ChainRateLimitUpdate,
+  SetChainRateLimiterConfigsParams,
+} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
+export type { RateLimitConfig } from './token-pool/rate-limit.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export type {

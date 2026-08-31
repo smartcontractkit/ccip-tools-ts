@@ -23,7 +23,6 @@ import {
   validateArray,
   validateBoolean,
   validateNonZeroAddress,
-  validateUint128,
   validateUint64,
 } from '../../validate.ts'
 import {
@@ -33,6 +32,11 @@ import {
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
+import {
+  type ParsedRateLimitConfig,
+  type RateLimitConfig,
+  parseRateLimitConfig,
+} from '../rate-limit.ts'
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -46,92 +50,6 @@ import {
 export type ApplyChainUpdatesParamVersion =
   typeof TokenPoolVersion.V1_5_0 | typeof TokenPoolVersion.V1_5_1
 
-/**
- * One direction of a token pool rate limiter, as callers write it. Amounts are in the token's
- * smallest unit: at 6 decimals, `1_000_000n` is one token.
- *
- * @remarks Field-for-field the Solana `RateLimitConfig` in
- * `cct/solana/token-pool/operations/set-chain-rate-limit.ts`, so cross-family callers write one
- * shape; only the bound differs (EVM `uint128`, Solana `u64`). Hence the discriminant is spelled
- * **`enabled`** rather than the ABI's `isEnabled`; {@link parseRateLimitConfig} resolves it to
- * {@link RateLimitConfig}. Distinct from the read-side `RateLimiterState` in `chain.ts`, which also
- * reports the live `tokens` balance.
- */
-export type RateLimitConfigInput =
-  | {
-      /** Whether this directional rate limit is enforced. */
-      enabled: true
-      /** Maximum token amount in the bucket (`uint128`); must be at least `rate`. */
-      capacity: bigint
-      /**
-       * Token amount restored to the bucket per second (`uint128`); at most `capacity`, which
-       * v1.5.0/v1.5.1 tighten to `0 < rate < capacity`.
-       */
-      rate: bigint
-    }
-  | {
-      /** Whether this directional rate limit is enforced. */
-      enabled: false
-      /** Must be zero when provided; defaults to zero. */
-      capacity?: bigint
-      /** Must be zero when provided; defaults to zero. */
-      rate?: bigint
-    }
-
-/**
- * One direction of a rate limiter as the ABI spells it: a {@link RateLimitConfigInput} with its
- * optional amounts resolved to concrete `bigint`s and its discriminant re-keyed. A parsed lane is
- * therefore a `ChainUpdate` struct verbatim, so the encoders need no re-keying pass.
- */
-export type RateLimitConfig = {
-  /** Whether this directional rate limit is enforced (the ABI's spelling of `enabled`). */
-  isEnabled: boolean
-  /** Maximum token amount in the bucket (`uint128`); zero when disabled. */
-  capacity: bigint
-  /** Token amount restored to the bucket per second (`uint128`); zero when disabled. */
-  rate: bigint
-}
-
-/**
- * Validates one direction of a rate limiter and fills in its omitted amounts. Every rule here is
- * version-independent, so it runs before the first RPC; the version-conditional
- * `0 < rate < capacity` bound waits for {@link ApplyChainUpdates.assertRateBounds}. `direction` is
- * this direction's param path, so failures report as `${direction}.rate`.
- * @throws {@link CCTParamsInvalidError} if `config` is not a valid rate-limit configuration
- */
-function parseRateLimitConfig(
-  operation: string,
-  direction: string,
-  config: unknown,
-): RateLimitConfig {
-  const input = parseRecord(operation, direction, config, 'rate-limit configuration')
-  const { enabled } = input
-  validateBoolean(operation, `${direction}.enabled`, enabled)
-
-  // Only a disabled direction defaults: an enabled one must state both amounts, so an omitted
-  // amount stays `undefined` and is rejected by the uint128 check below, under its own path.
-  const capacity = !enabled && input.capacity === undefined ? 0n : input.capacity
-  const rate = !enabled && input.rate === undefined ? 0n : input.rate
-  validateUint128(operation, `${direction}.capacity`, capacity)
-  validateUint128(operation, `${direction}.rate`, rate)
-
-  if (enabled && rate > capacity) {
-    throw new CCTParamsInvalidError(
-      operation,
-      `${direction}.rate`,
-      'must not exceed capacity when enabled',
-    )
-  }
-  if (!enabled && (capacity !== 0n || rate !== 0n)) {
-    throw new CCTParamsInvalidError(
-      operation,
-      direction,
-      'must have zero capacity and rate when disabled',
-    )
-  }
-  return { isEnabled: enabled, capacity, rate }
-}
-
 /** The lane fields both parameter shapes share, and which encode identically. */
 type ChainUpdateCommon = {
   /** CCIP selector of the remote chain (`uint64`). */
@@ -139,9 +57,9 @@ type ChainUpdateCommon = {
   /** Hex-encoded remote token address, `0x` prefix optional; must be non-empty whole bytes. */
   remoteTokenAddress: string
   /** Rate limit for tokens received from the remote chain. */
-  inboundRateLimiterConfig: RateLimitConfigInput
+  inboundRateLimiterConfig: RateLimitConfig
   /** Rate limit for tokens sent to the remote chain. */
-  outboundRateLimiterConfig: RateLimitConfigInput
+  outboundRateLimiterConfig: RateLimitConfig
 }
 
 /** The top-level parameters both shapes share; each version adds its own lane arrays. */
@@ -158,8 +76,8 @@ type ApplyChainUpdatesBaseParams = {
 
 /** A lane with its rate limits resolved — derived, so the parsed and public shapes cannot drift. */
 type WithParsedRateLimits<T> = Omit<T, 'inboundRateLimiterConfig' | 'outboundRateLimiterConfig'> & {
-  inboundRateLimiterConfig: RateLimitConfig
-  outboundRateLimiterConfig: RateLimitConfig
+  inboundRateLimiterConfig: ParsedRateLimitConfig
+  outboundRateLimiterConfig: ParsedRateLimitConfig
 }
 
 /**
@@ -199,7 +117,7 @@ function parseLaneSelector(
   return selector
 }
 
-/** Parses the lane fields both shapes share, in the order failures should be reported. */
+/** Parses the lane fields both shapes share. */
 function parseLaneCommon(
   operation: string,
   path: string,
@@ -224,11 +142,13 @@ function parseLaneCommon(
       operation,
       `${path}.inboundRateLimiterConfig`,
       update.inboundRateLimiterConfig,
+      null,
     ),
     outboundRateLimiterConfig: parseRateLimitConfig(
       operation,
       `${path}.outboundRateLimiterConfig`,
       update.outboundRateLimiterConfig,
+      null,
     ),
   }
 }
@@ -285,7 +205,7 @@ function parseChainsV1_5_0(operation: string, chains: unknown) {
     const stillEnabled =
       !allowed &&
       (['inboundRateLimiterConfig', 'outboundRateLimiterConfig'] as const).find(
-        (direction) => lane[direction].isEnabled,
+        (direction) => lane[direction].enabled,
       )
     if (stillEnabled) {
       throw new CCTParamsInvalidError(
@@ -298,12 +218,30 @@ function parseChainsV1_5_0(operation: string, chains: unknown) {
   })
 }
 
-/** Encodes the v1.5.0 signature: one `chains` array, each lane carrying its own `allowed` bit. */
+/** Encodes the v1.5.0 signature. */
 const encodeV1_5_0 = (
   iface: Interface,
   params: ParsedApplyChainUpdatesParamsV1_5_0,
 ): UnsignedEVMTx =>
-  callTx(params.poolAddress, iface.encodeFunctionData('applyChainUpdates', [params.chains]))
+  callTx(
+    params.poolAddress,
+    iface.encodeFunctionData('applyChainUpdates', [
+      params.chains.map((lane) => ({
+        ...lane,
+        // re-key the shared `enabled` to the ABI's `isEnabled`
+        inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
+          isEnabled,
+          capacity,
+          rate,
+        }))(lane.inboundRateLimiterConfig),
+        outboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
+          isEnabled,
+          capacity,
+          rate,
+        }))(lane.outboundRateLimiterConfig),
+      })),
+    ]),
+  )
 
 // ---------------------------------------------------------------------------
 // v1.5.1+
@@ -370,7 +308,7 @@ function parseChainsV1_5_1(
   return { chainsToAdd: adds, remoteChainSelectorsToRemove: removals }
 }
 
-/** Encodes the v1.5.1+ signature: removals first, then the lanes to add. */
+/** Encodes the v1.5.1+ signature. */
 const encodeV1_5_1 = (
   iface: Interface,
   params: ParsedApplyChainUpdatesParamsV1_5_1,
@@ -379,7 +317,20 @@ const encodeV1_5_1 = (
     params.poolAddress,
     iface.encodeFunctionData('applyChainUpdates', [
       params.remoteChainSelectorsToRemove,
-      params.chainsToAdd,
+      params.chainsToAdd.map((lane) => ({
+        ...lane,
+        // re-key the shared `enabled` to the ABI's `isEnabled`
+        inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
+          isEnabled,
+          capacity,
+          rate,
+        }))(lane.inboundRateLimiterConfig),
+        outboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
+          isEnabled,
+          capacity,
+          rate,
+        }))(lane.outboundRateLimiterConfig),
+      })),
     ]),
   )
 
@@ -422,10 +373,8 @@ export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
 }
 
 /**
- * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.parse} leaves it: selectors
- * range-checked, remote addresses normalised to lower-case `0x` hex, and rate limits resolved to
- * concrete amounts keyed as the ABI spells them. The encoders add no validation of their own — a
- * parsed lane is already a `ChainUpdate` struct, so they only choose the argument order.
+ * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.parse} leaves it. The encoders add
+ * no validation of their own — a parsed lane is already a `ChainUpdate` struct.
  */
 type ParsedApplyChainUpdatesParams =
   ParsedApplyChainUpdatesParamsV1_5_0 | ParsedApplyChainUpdatesParamsV1_5_1
@@ -449,10 +398,7 @@ export class ApplyChainUpdates extends EVMOperation<
 > {
   readonly name = 'applyChainUpdates'
 
-  /**
-   * Encoder per pool version, floor-matched; v1.6.1 and v2.0.0 inherit v1.5.1's. The cast holds
-   * only while {@link buildUnsigned} checks `shape` against `params.version` before encoding.
-   */
+  /** Encoder per pool version, floor-matched; v1.6.1 and v2.0.0 inherit v1.5.1's. */
   private readonly encoders = {
     [TokenPoolVersion.V1_5_0]: { shape: TokenPoolVersion.V1_5_0, encode: encodeV1_5_0 },
     [TokenPoolVersion.V1_5_1]: { shape: TokenPoolVersion.V1_5_1, encode: encodeV1_5_1 },
@@ -485,16 +431,10 @@ export class ApplyChainUpdates extends EVMOperation<
   }
 
   /**
-   * Applies the version-conditional rate bound — the only lane rule outside {@link parse}, because
-   * it needs the version `resolveTokenPool` has just reported.
-   *
-   * @remarks On v1.5.0/v1.5.1, `RateLimiter._validateTokenBucketConfig` reverts
-   * `InvalidRateLimitRate` on `rate >= capacity || rate == 0`, so an enabled bucket needs
-   * `0 < rate < capacity`. v1.6.1 and v2.0.0 reject only `rate > capacity`, so there
-   * `rate === capacity` and a zero rate are legitimate and must NOT be rejected.
+   * Applies the version-conditional rate bound, which needs the version `resolveTokenPool` has
+   * just reported, via the shared {@link parseRateLimitConfig}.
    */
   private assertRateBounds(params: ParsedApplyChainUpdatesParams, version: TokenPoolVersion): void {
-    if (version !== TokenPoolVersion.V1_5_0 && version !== TokenPoolVersion.V1_5_1) return
     const lanes =
       params.version === TokenPoolVersion.V1_5_0
         ? params.chains.map((lane, i) => [`chains[${i}]`, lane] as const)
@@ -502,13 +442,9 @@ export class ApplyChainUpdates extends EVMOperation<
 
     for (const [path, lane] of lanes) {
       for (const direction of ['inboundRateLimiterConfig', 'outboundRateLimiterConfig'] as const) {
-        const { isEnabled, capacity, rate } = lane[direction]
-        if (!isEnabled || (rate > 0n && rate < capacity)) continue
-        throw new CCTParamsInvalidError(
-          this.name,
-          `${path}.${direction}.rate`,
-          `must be greater than zero and strictly less than capacity when enabled on a v${version} pool, which reverts InvalidRateLimitRate otherwise (v1.6.1 and later allow rate == capacity and a zero rate)`,
-        )
+        // already parsed to the shared `enabled` shape; re-running with the resolved version
+        // applies the version-conditional bound
+        parseRateLimitConfig(this.name, `${path}.${direction}`, lane[direction], version)
       }
     }
   }
