@@ -2,8 +2,8 @@
  * setRateLimitConfig — set the rate-limit config for a remote chain on a token
  * pool via the `SetRateLimitConfig` choice (delegates to `RateLimiterV2`).
  *
- * The Daml choice takes `{ caller, rateLimiterCid, newIsEnabled, newCapacity,
- * newRate }` — the rate limiter is addressed by CONTRACT ID, so this op
+ * The Daml choice takes
+ * `{ caller, rateLimiterCid, newIsEnabled, newCapacity, newRate }` — the rate limiter is addressed by CONTRACT ID, so this op
  * resolves the limiter's `InstanceAddress` to a CID (+ disclosure blob) via
  * the ACS first. One choice per direction; each direction has its own
  * RateLimiter contract (they must be distinct — `ApplyChainUpdates` enforces
@@ -12,17 +12,22 @@
  * @packageDocumentation
  */
 
+import type { SetRateLimitConfig as SetRateLimitConfigArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import type { JsCommands } from '../../../../canton/client/index.ts'
-import type { CantonTransactionResult } from '../../types.ts'
-import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
-  buildPoolExercise,
+  type CantonExecuteParams,
+  type CantonGenerateParams,
+  CantonOperation,
+} from '../../operation.ts'
+import type { CantonTransactionResult } from '../../types.ts'
+import {
   BURN_MINT_POOL_TEMPLATE_ID,
   LOCK_RELEASE_POOL_TEMPLATE_ID,
   RATE_LIMITER_TEMPLATE_ID,
+  buildPoolExercise,
   resolvePoolRef,
   resolveRateLimiterRef,
 } from '../shared.ts'
@@ -75,7 +80,11 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
   /** Validates the pool target and rate-limiter addresses. */
   protected override validate(p: GenerateSetRateLimitConfigParams): void {
     if (!p.poolInstanceAddress) {
-      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        'pool InstanceAddress is required',
+      )
     }
     if (!p.inbound && !p.outbound) {
       throw new CCTParamsInvalidError(
@@ -114,7 +123,18 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
     // choice body exercises it).
     const commands: JsCommands[] = []
     const buildOne = async (cfg: RateLimitConfig): Promise<JsCommands> => {
-      const rateLimiter = await resolveRateLimiterRef(chain, p.sender, cfg.rateLimiterInstanceAddress)
+      const rateLimiter = await resolveRateLimiterRef(
+        chain,
+        p.sender,
+        cfg.rateLimiterInstanceAddress,
+      )
+      const choiceArgument: SetRateLimitConfigArg = {
+        caller: p.sender,
+        rateLimiterCid: rateLimiter.contractId,
+        newIsEnabled: cfg.enabled,
+        newCapacity: cfg.capacity.toString(),
+        newRate: cfg.rate.toString(),
+      }
       return buildPoolExercise({
         choice: 'SetRateLimitConfig',
         templateId,
@@ -124,13 +144,7 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
         extraDisclosedContracts: [
           { templateId: rateLimiter.templateId ?? RATE_LIMITER_TEMPLATE_ID, ...rateLimiter },
         ],
-        choiceArgument: {
-          caller: p.sender,
-          rateLimiterCid: rateLimiter.contractId,
-          newIsEnabled: cfg.enabled,
-          newCapacity: cfg.capacity.toString(),
-          newRate: cfg.rate.toString(),
-        },
+        choiceArgument,
         actAs: [p.sender],
         commandIdPrefix: 'cct-set-rate-limit-config',
       })

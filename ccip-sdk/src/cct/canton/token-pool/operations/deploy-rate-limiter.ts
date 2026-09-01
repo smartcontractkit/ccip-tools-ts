@@ -10,17 +10,27 @@
  * Record mirrors `mkRateLimiterContract` in `CCIP.FactoryV2`: `tokens`
  * initialized to `capacity`, `lastUpdated` to now.
  *
+ * This deploys a STANDALONE `RateLimiter`, for lanes added after a pool's
+ * initial `Initialize` call (see `deploy-token-pool.ts`, which deploys the
+ * first lanes' rate limiters atomically). Registry-pool `RateLimiter`s require
+ * a non-empty `observers`, same as the pool itself.
+ *
  * @packageDocumentation
  */
 
+import type { RateLimiter as RateLimiterArg } from '../../../../canton/bindings/ccip-registry-rate-limiter-v2-2.0.1/lib/CCIP/Registry/RateLimiterV2/module.js'
+import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import type { JsCommands } from '../../../../canton/client/index.ts'
-import type { CantonDeployResult } from '../../types.ts'
-import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { parsePartyId } from '../../validate.ts'
 import { damlTimeNow, encodeRateLimitDirection, encodeRateLimitMode } from '../../encoding.ts'
+import {
+  type CantonExecuteParams,
+  type CantonGenerateParams,
+  CantonOperation,
+} from '../../operation.ts'
+import type { CantonDeployResult } from '../../types.ts'
+import { parsePartyId } from '../../validate.ts'
 import { RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 
 /** Parameters shared by `deployRateLimiter` generation and execution. */
@@ -43,6 +53,11 @@ export interface DeployRateLimiterParams {
   capacity: bigint
   /** Refill rate (tokens per second). */
   rate: bigint
+  /**
+   * Observer parties for EDS auto-detection. Mandatory — the on-ledger
+   * `ensure` clause rejects an empty list.
+   */
+  observers: string[]
 }
 
 /** Parameters for unsigned `deployRateLimiter` generation. */
@@ -64,15 +79,31 @@ export class DeployRateLimiter extends CantonOperation<DeployRateLimiterParams> 
   /** Validates IDs, parties, and numeric config. */
   protected override validate(p: GenerateDeployRateLimiterParams): void {
     if (!p.instanceId) {
-      throw new CCTParamsInvalidError(this.name, 'instanceId', 'rate-limiter instance ID is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'instanceId',
+        'rate-limiter instance ID is required',
+      )
     }
     if (!p.poolInstanceId) {
       throw new CCTParamsInvalidError(this.name, 'poolInstanceId', 'pool instance ID is required')
     }
     parsePartyId(this.name, 'poolOwner', p.poolOwner)
     if (p.capacity < 0n || p.rate < 0n) {
-      throw new CCTParamsInvalidError(this.name, 'capacity', 'capacity and rate must be non-negative')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'capacity',
+        'capacity and rate must be non-negative',
+      )
     }
+    if (!p.observers || p.observers.length === 0) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'observers',
+        'at least one observer is required (the on-ledger ensure clause rejects an empty list)',
+      )
+    }
+    p.observers.forEach((o, i) => parsePartyId(this.name, `observers[${i}]`, o))
   }
 
   /**
@@ -83,25 +114,28 @@ export class DeployRateLimiter extends CantonOperation<DeployRateLimiterParams> 
     chain: CantonChain,
     p: CantonGenerateParams<DeployRateLimiterParams>,
   ): Promise<JsCommands> {
+    // Mirrors mkRateLimiterContract: tokens = capacity, lastUpdated = now.
+    const createArguments: RateLimiterArg = {
+      instanceId: p.instanceId,
+      poolInstanceId: p.poolInstanceId,
+      poolOwner: p.poolOwner,
+      remoteChainSelector: p.remoteChainSelector.toString(),
+      direction: encodeRateLimitDirection(p.direction),
+      mode: encodeRateLimitMode(p.mode ?? 'defaultFinality'),
+      isEnabled: p.isEnabled,
+      capacity: p.capacity.toString(),
+      rate: p.rate.toString(),
+      tokens: p.capacity.toString(),
+      lastUpdated: damlTimeNow(),
+      observers: p.observers,
+    }
+
     return {
       commands: [
         {
           CreateCommand: {
             templateId: RATE_LIMITER_TEMPLATE_ID,
-            // Mirrors mkRateLimiterContract: tokens = capacity, lastUpdated = now.
-            createArguments: {
-              instanceId: p.instanceId,
-              poolInstanceId: p.poolInstanceId,
-              poolOwner: p.poolOwner,
-              remoteChainSelector: p.remoteChainSelector.toString(),
-              direction: encodeRateLimitDirection(p.direction),
-              mode: encodeRateLimitMode(p.mode ?? 'defaultFinality'),
-              isEnabled: p.isEnabled,
-              capacity: p.capacity.toString(),
-              rate: p.rate.toString(),
-              tokens: p.capacity.toString(),
-              lastUpdated: damlTimeNow(),
-            },
+            createArguments,
           },
         },
       ],

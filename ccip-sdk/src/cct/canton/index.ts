@@ -17,21 +17,11 @@
  * @packageDocumentation
  */
 
-import type { ChainContext } from '../../chain.ts'
-import { ChainFamily } from '../../networks.ts'
 import type { CantonChain } from '../../canton/index.ts'
+import type { ChainContext } from '../../chain.ts'
+import type { ChainFamily } from '../../networks.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
-  SetPool,
-  RegisterAdmin,
-  AcceptAdmin,
-  TransferAdmin,
-  GetTokenAdminRegistry,
-  GetSupportedTokens,
-  type SetPoolParams,
-  type GenerateSetPoolParams,
-  type GenerateSetPoolResult,
-  type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
@@ -43,36 +33,35 @@ import {
   type ExecuteAcceptAdminParams,
   type ExecuteAcceptAdminResult,
   type AcceptAdminParams,
-  type GenerateTransferAdminParams,
+  type ExecuteSetPoolParams,
   type GenerateTransferAdminResult,
   type ExecuteTransferAdminParams,
   type ExecuteTransferAdminResult,
-  type TransferAdminParams,
-  type GetTokenAdminRegistryParams,
-  type GetTokenAdminRegistryResult,
+  type GenerateSetPoolParams,
+  type GenerateSetPoolResult,
+  type GenerateTransferAdminParams,
   type GetSupportedTokensParams,
   type GetSupportedTokensResult,
+  type GetTokenAdminRegistryParams,
+  type GetTokenAdminRegistryResult,
+  type SetPoolParams,
+  type TransferAdminParams,
+  AcceptAdmin,
+  GetSupportedTokens,
+  GetTokenAdminRegistry,
+  RegisterAdmin,
+  SetPool,
+  TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
-  DeployTokenPool,
-  DeployRateLimiter,
-  ApplyChainUpdates,
-  SetRateLimitConfig,
-  SetDynamicConfig,
-  GetRequiredCCVs,
-  GetTokenPoolState,
-  type DeployTokenPoolParams,
-  type GenerateDeployTokenPoolParams,
-  type GenerateDeployTokenPoolResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
-  type DeployRateLimiterParams,
   type GenerateDeployRateLimiterParams,
   type GenerateDeployRateLimiterResult,
   type ExecuteDeployRateLimiterParams,
   type ExecuteDeployRateLimiterResult,
   type ApplyChainUpdatesParams,
-  type GenerateApplyChainUpdatesParams,
+  type DeployTokenPoolParams,
   type GenerateApplyChainUpdatesResult,
   type ExecuteApplyChainUpdatesParams,
   type ExecuteApplyChainUpdatesResult,
@@ -86,10 +75,23 @@ import {
   type GenerateSetDynamicConfigResult,
   type ExecuteSetDynamicConfigParams,
   type ExecuteSetDynamicConfigResult,
+  type GenerateApplyChainUpdatesParams,
+  type GenerateDeployTokenPoolParams,
+  type GenerateDeployTokenPoolResult,
+  type GetRateLimiterStateParams,
+  type GetRateLimiterStateResult,
   type GetRequiredCCVsParams,
   type GetRequiredCCVsResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  ApplyChainUpdates,
+  DeployRateLimiter,
+  DeployTokenPool,
+  GetRateLimiterState,
+  GetRequiredCCVs,
+  GetTokenPoolState,
+  SetDynamicConfig,
+  SetRateLimitConfig,
 } from './token-pool/operations/index.ts'
 
 /**
@@ -117,6 +119,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   readonly #getSupportedTokens = new GetSupportedTokens()
   readonly #getRequiredCCVs = new GetRequiredCCVs()
   readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #getRateLimiterState = new GetRateLimiterState()
 
   /** Creates a Canton CCT manager for an existing chain. */
   constructor(chain: CantonChain) {
@@ -205,14 +208,19 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   // ─── Pool: deployTokenPool ──────────────────────────────────────────────
 
-  /** Builds unsigned `deployTokenPool` (CCIPFactory.DeployBurnMint/LockRelease) commands. */
+  /**
+   * Builds unsigned `deployTokenPool` commands — a single `CreateAndExercise`
+   * that creates the registry-pools `BurnMintTokenPool`/`LockReleaseTokenPool`
+   * and atomically calls `Initialize` on it (TAR registration + lane rate
+   * limiters).
+   */
   async generateUnsignedDeployTokenPool(
     opts: GenerateDeployTokenPoolParams,
   ): Promise<GenerateDeployTokenPoolResult> {
     return this.#deployTokenPool.generate(this.chain, opts)
   }
 
-  /** Deploys a `BurnMintTokenPool` or `LockReleaseTokenPool` via the CCIPFactory. */
+  /** Atomically deploys and initializes a `BurnMintTokenPool`/`LockReleaseTokenPool` (registry-pools family). */
   async deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts) as Promise<ExecuteDeployTokenPoolResult>
   }
@@ -230,7 +238,10 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async deployRateLimiter(
     opts: ExecuteDeployRateLimiterParams,
   ): Promise<ExecuteDeployRateLimiterResult> {
-    return this.#deployRateLimiter.execute(this.chain, opts) as Promise<ExecuteDeployRateLimiterResult>
+    return this.#deployRateLimiter.execute(
+      this.chain,
+      opts,
+    ) as Promise<ExecuteDeployRateLimiterResult>
   }
 
   // ─── Pool: applyChainUpdates ────────────────────────────────────────────
@@ -246,7 +257,10 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async applyChainUpdates(
     opts: ExecuteApplyChainUpdatesParams,
   ): Promise<ExecuteApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.execute(this.chain, opts) as Promise<ExecuteApplyChainUpdatesResult>
+    return this.#applyChainUpdates.execute(
+      this.chain,
+      opts,
+    ) as Promise<ExecuteApplyChainUpdatesResult>
   }
 
   // ─── Pool: setRateLimitConfig ───────────────────────────────────────────
@@ -262,7 +276,10 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async setRateLimitConfig(
     opts: ExecuteSetRateLimitConfigParams,
   ): Promise<ExecuteSetRateLimitConfigResult> {
-    return this.#setRateLimitConfig.execute(this.chain, opts) as Promise<ExecuteSetRateLimitConfigResult>
+    return this.#setRateLimitConfig.execute(
+      this.chain,
+      opts,
+    ) as Promise<ExecuteSetRateLimitConfigResult>
   }
 
   // ─── Pool: setDynamicConfig ─────────────────────────────────────────────
@@ -278,7 +295,10 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async setDynamicConfig(
     opts: ExecuteSetDynamicConfigParams,
   ): Promise<ExecuteSetDynamicConfigResult> {
-    return this.#setDynamicConfig.execute(this.chain, opts) as Promise<ExecuteSetDynamicConfigResult>
+    return this.#setDynamicConfig.execute(
+      this.chain,
+      opts,
+    ) as Promise<ExecuteSetDynamicConfigResult>
   }
 
   // ─── Pool: reads ────────────────────────────────────────────────────────
@@ -292,38 +312,46 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
+
+  /** Reads a `RateLimiter` contract's config (capacity/rate/enabled/observers) from the ACS. */
+  async getRateLimiterState(opts: GetRateLimiterStateParams): Promise<GetRateLimiterStateResult> {
+    return this.#getRateLimiterState.query(this.chain, opts)
+  }
 }
 
 // Re-export the operation classes + param/result types for direct use.
 export {
-  SetPool,
-  RegisterAdmin,
   AcceptAdmin,
-  TransferAdmin,
-  GetTokenAdminRegistry,
-  GetSupportedTokens,
-  DeployTokenPool,
   ApplyChainUpdates,
-  SetRateLimitConfig,
-  SetDynamicConfig,
+  DeployTokenPool,
+  GetRateLimiterState,
   GetRequiredCCVs,
+  GetSupportedTokens,
+  GetTokenAdminRegistry,
   GetTokenPoolState,
+  RegisterAdmin,
+  SetDynamicConfig,
+  SetPool,
+  SetRateLimitConfig,
+  TransferAdmin,
 }
 export type {
-  SetPoolParams,
-  RegisterAdminParams,
   AcceptAdminParams,
-  TransferAdminParams,
-  GetTokenAdminRegistryParams,
-  GetTokenAdminRegistryResult,
-  GetSupportedTokensParams,
-  GetSupportedTokensResult,
-  DeployTokenPoolParams,
   ApplyChainUpdatesParams,
-  SetRateLimitConfigParams,
-  SetDynamicConfigParams,
+  DeployTokenPoolParams,
+  GetRateLimiterStateParams,
+  GetRateLimiterStateResult,
   GetRequiredCCVsParams,
   GetRequiredCCVsResult,
+  GetSupportedTokensParams,
+  GetSupportedTokensResult,
+  GetTokenAdminRegistryParams,
+  GetTokenAdminRegistryResult,
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
+  RegisterAdminParams,
+  SetDynamicConfigParams,
+  SetPoolParams,
+  SetRateLimitConfigParams,
+  TransferAdminParams,
 }

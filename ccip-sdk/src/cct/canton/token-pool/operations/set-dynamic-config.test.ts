@@ -5,8 +5,8 @@
  * argument, `actAs`, disclosed contract) against a mocked {@link CantonChain} —
  * no live participant required. The mock stubs
  * `findActiveContractByInstanceAddress` so the disclosure-blob fetch path runs
- * without a ledger. Mirrors the Solana `*.test.ts` idiom (`node:test` + `as
- * unknown as CantonChain`).
+ * without a ledger. Mirrors the Solana `*.test.ts` idiom
+ * (`node:test` + `as unknown as CantonChain`).
  *
  * @packageDocumentation
  */
@@ -14,22 +14,31 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ChainFamily } from '../../../../networks.ts'
 import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 
-const POOL_CID = '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool:00deadbeef'
+const BURN_MINT_TEMPLATE_ID =
+  '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
+const LOCK_RELEASE_TEMPLATE_ID =
+  '#ccip-registry-lock-release-token-pool-v2:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+const POOL_CID = `${BURN_MINT_TEMPLATE_ID}:00deadbeef`
 const POOL_OWNER = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
 const POOL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32) // keccak256 hash form
 const RATE_LIMIT_ADMIN = 'rladmin::1220' + 'a1'.repeat(32)
 const BLOB = 'base64-created-event-blob=='
 const SYNCHRONIZER_ID = 'canton::global::domain-1'
 
-/** A fake active contract returned by the mocked ACS fetch. */
-function fakePoolContract(): CantonActiveContract {
+/**
+ * A fake active contract returned by the mocked ACS fetch — its `templateId`
+ * mirrors whichever concrete template was queried, matching a real ACS
+ * response (so this exercises `buildPoolExercise`'s "prefer the concrete
+ * template from the resolved contract" precedence honestly).
+ */
+function fakePoolContract(templateId: string): CantonActiveContract {
   return {
     contractId: POOL_CID,
-    templateId: '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
+    templateId,
     createdEventBlob: BLOB,
     synchronizerId: SYNCHRONIZER_ID,
     signatories: [POOL_OWNER],
@@ -46,10 +55,10 @@ function mockChain(): CantonChain {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
-      _templateId: string,
+      templateId: string,
       instanceAddress: string,
     ): Promise<CantonActiveContract | null> {
-      return instanceAddress === POOL_INSTANCE_ADDRESS ? fakePoolContract() : null
+      return instanceAddress === POOL_INSTANCE_ADDRESS ? fakePoolContract(templateId) : null
     },
   } as unknown as CantonChain
 }
@@ -68,14 +77,16 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     assert.equal(unsigned.family, ChainFamily.Canton)
 
     const cmd = unsigned.commands.commands[0] as {
-      ExerciseCommand: { templateId: string; contractId: string; choice: string; choiceArgument: Record<string, unknown> }
+      ExerciseCommand: {
+        templateId: string
+        contractId: string
+        choice: string
+        choiceArgument: Record<string, unknown>
+      }
     }
     assert.ok(cmd?.ExerciseCommand, 'expected an ExerciseCommand')
     assert.equal(cmd.ExerciseCommand.choice, 'SetDynamicConfig')
-    assert.equal(
-      cmd.ExerciseCommand.templateId,
-      '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool',
-    )
+    assert.equal(cmd.ExerciseCommand.templateId, BURN_MINT_TEMPLATE_ID)
     assert.equal(cmd.ExerciseCommand.contractId, POOL_CID)
     assert.deepEqual(cmd.ExerciseCommand.choiceArgument, { rateLimitAdmin: RATE_LIMIT_ADMIN })
 
@@ -115,9 +126,6 @@ describe('CantonTokenManager.setDynamicConfig (generate)', () => {
     const cmd = unsigned.commands.commands[0] as {
       ExerciseCommand: { templateId: string }
     }
-    assert.equal(
-      cmd.ExerciseCommand.templateId,
-      '#ccip-lock-release-token-pool-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool',
-    )
+    assert.equal(cmd.ExerciseCommand.templateId, LOCK_RELEASE_TEMPLATE_ID)
   })
 })

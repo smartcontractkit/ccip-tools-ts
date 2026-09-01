@@ -8,18 +8,24 @@
  * @packageDocumentation
  */
 
+import type { ApplyChainUpdates as ApplyChainUpdatesArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import type { JsCommands } from '../../../../canton/client/index.ts'
-import type { CantonTransactionResult } from '../../types.ts'
-import { type CantonExecuteParams, type CantonGenerateParams, CantonOperation } from '../../operation.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type FinalityConfig, encodeFinalityConfig, rawInstanceAddress } from '../../encoding.ts'
 import {
-  encodeFinalityConfig,
-  rawInstanceAddress,
-  type FinalityConfig,
-} from '../../encoding.ts'
-import { buildPoolExercise, BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID, resolvePoolRef } from '../shared.ts'
+  type CantonExecuteParams,
+  type CantonGenerateParams,
+  CantonOperation,
+} from '../../operation.ts'
+import type { CantonTransactionResult } from '../../types.ts'
+import {
+  BURN_MINT_POOL_TEMPLATE_ID,
+  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  buildPoolExercise,
+  resolvePoolRef,
+} from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
 export interface ChainUpdate {
@@ -83,7 +89,11 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
   /** Validates the pool target and that at least one add/remove is specified. */
   protected override validate(p: GenerateApplyChainUpdatesParams): void {
     if (!p.poolInstanceAddress) {
-      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        'pool InstanceAddress is required',
+      )
     }
     if (
       (!p.remoteChainSelectorsToRemove || p.remoteChainSelectorsToRemove.length === 0) &&
@@ -141,7 +151,7 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
 
     // RawInstanceAddress newtypes encode as {unpack: raw}; FinalityConfig is a
     // Daml variant ({tag, value}).
-    const choiceArgument: Record<string, unknown> = {
+    const choiceArgument: ApplyChainUpdatesArg = {
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),
       chainsToAdd: (p.chainsToAdd ?? []).map((c) => ({
         remoteChainSelector: c.remoteChainSelector.toString(),

@@ -55,7 +55,11 @@ export class GetTokenAdminRegistry extends CantonQuery<
   /** Validates the TokenConfig instance address + admin party. */
   protected prepare(p: GetTokenAdminRegistryParams): ParsedGetTokenAdminRegistry {
     if (!p.tokenConfigInstanceAddress) {
-      throw new CCTParamsInvalidError(this.name, 'tokenConfigInstanceAddress', 'TokenConfig InstanceAddress is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenConfigInstanceAddress',
+        'TokenConfig InstanceAddress is required',
+      )
     }
     return {
       tokenConfigInstanceAddress: p.tokenConfigInstanceAddress,
@@ -117,34 +121,41 @@ function decodeBool(value: unknown): boolean {
   return v === true
 }
 
+/**
+ * Recursively strip known envelope wrappers (`Some`/`Sum`/`Record`/`record`/
+ * `value`/`optional`) until we reach a plain object — or bottom out at `None`
+ * (`null`, `{}`, or an explicit `None` key). Compound `Optional Record` fields
+ * (unlike scalars) aren't covered by `extractFieldValue`'s wrapper-stripping,
+ * so this exists specifically for them — see `decodeTokenPool` below.
+ */
+function unwrapEnvelope(value: unknown, depth = 0): Record<string, unknown> | undefined {
+  if (value == null || depth > 6) return undefined
+  if (typeof value !== 'object') return undefined
+  const v = value as Record<string, unknown>
+  if ('None' in v) return undefined
+  for (const key of ['Some', 'Sum', 'Record', 'record', 'optional', 'Optional', 'value']) {
+    if (key in v && v[key] != null) return unwrapEnvelope(v[key], depth + 1)
+  }
+  return v
+}
+
 /** Decode a Daml `Optional PoolRegistration` into `{ poolOwner, poolInstanceId }`.
- *  Handles two encodings:
- *   - JSON Ledger API (natural): `Some` → bare object `{ poolOwner, poolInstanceId }`;
- *     `None` → `null`.
- *   - gRPC JSON: `Some` → `{ Some: { fields: [...] } }`; `None` → `{ None: {} }`. */
+ *  `PoolRegistration` is a compound record, so unlike the scalar decoders above
+ *  (which lean on `extractFieldValue`'s generic wrapper-stripping), this needs
+ *  its own recursive unwrap ({@link unwrapEnvelope}) to reach the actual
+ *  `poolOwner`/`poolInstanceId` fields regardless of how many envelope layers
+ *  (`Some`, `Sum.Record`, `fields[]`, etc.) the ledger/gateway JSON nests them
+ *  under. */
 function decodeTokenPool(
   value: unknown,
 ): { poolOwner: string; poolInstanceId: string } | undefined {
-  if (value == null) return undefined
-  if (typeof value !== 'object') return undefined
-  const v = value as Record<string, unknown>
-  // Natural JSON: a bare object with poolOwner/poolInstanceId fields is `Some`.
-  if ('poolOwner' in v || 'poolInstanceId' in v) {
-    const fields = decodeDamlRecord(v)
-    const poolOwner = extractFieldValue(fields['poolOwner'])
-    const poolInstanceId = extractFieldValue(fields['poolInstanceId'])
-    if (typeof poolOwner === 'string' && typeof poolInstanceId === 'string') {
-      return { poolOwner, poolInstanceId }
-    }
-  }
-  // gRPC JSON: `Some` → { Some: { fields: [...] } }
-  if ('Some' in v && v.Some != null) {
-    const fields = decodeDamlRecord(v.Some)
-    const poolOwner = extractFieldValue(fields['poolOwner'])
-    const poolInstanceId = extractFieldValue(fields['poolInstanceId'])
-    if (typeof poolOwner === 'string' && typeof poolInstanceId === 'string') {
-      return { poolOwner, poolInstanceId }
-    }
+  const unwrapped = unwrapEnvelope(value)
+  if (!unwrapped) return undefined
+  const fields = decodeDamlRecord(unwrapped)
+  const poolOwner = extractFieldValue(fields['poolOwner'])
+  const poolInstanceId = extractFieldValue(fields['poolInstanceId'])
+  if (typeof poolOwner === 'string' && typeof poolInstanceId === 'string') {
+    return { poolOwner, poolInstanceId }
   }
   return undefined
 }

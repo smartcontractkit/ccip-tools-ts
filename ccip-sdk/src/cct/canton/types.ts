@@ -23,21 +23,25 @@ export type CantonTransactionResult = TransactionResult & {
 }
 
 /**
- * Result of `deployTokenPool`: a CCT write that creates contracts. Adds the
- * newly-created pool's contract ID and (when rate limiters are deployed in the
- * same choice) the rate-limiter CID, plus the pool's raw instance address
- * derived from the created-event labels (the ops/EDS handoff reads this).
+ * Result of `deployTokenPool`: an atomic `CreateAndExercise` that creates the
+ * pool AND runs `Initialize` (TAR registration + lane rate limiters) in one
+ * transaction. Adds the created pool's contract ID, the rate-limiter CIDs
+ * deployed for its lanes, the `TokenConfig` CID the inline
+ * `ProposeAdministrator`/`AcceptAdminRole`/`SetPool` calls produced (mirroring
+ * Daml's `InitializeResult`), and the pool's raw instance address derived
+ * from the created-event labels (the ops/EDS handoff reads this).
  *
- * `edsConfig` is intentionally NOT returned here — the CCIPFactory deploy choice
- * does not emit disclosure-service config; it is assembled separately by the
- * EDS-standup pipeline from the pool's instance address. See the CCT Canton
- * implementation plan.
+ * `edsConfig` is intentionally NOT returned here — it is assembled separately
+ * by the EDS-standup pipeline from the pool's instance address. See the CCT
+ * Canton implementation plan.
  */
 export type CantonDeployResult = CantonTransactionResult & {
   /** Created `BurnMintTokenPool` / `LockReleaseTokenPool` contract ID. */
   poolCid: string
-  /** Created `RateLimiterV2` contract ID, when deployed by the same choice. */
-  rateLimiterCid?: string
+  /** `RateLimiterV2` contract IDs deployed for the lanes passed to `Initialize`. */
+  rateLimiterCids?: string[]
+  /** `TokenConfig` contract ID the TAR registered for the instrument. */
+  tokenConfigCid?: string
   /** Raw hex instance address of the deployed pool (`keccak256` of the unpack string). */
   poolInstanceAddress?: string
 }
