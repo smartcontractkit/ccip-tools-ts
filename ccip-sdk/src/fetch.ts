@@ -754,7 +754,7 @@ export function createRateLimitedFetch(
 
       // Slot released — now handle the response (and back off off-slot if retrying).
       if (response.ok) {
-        logger.debug('fetched', response.status, bodyStr(init?.body))
+        logger.debug('fetched', response.status, init?.body ? bodyStr(init.body) : input)
         return response
       }
       if (isTransientHttpStatus(response.status)) {
