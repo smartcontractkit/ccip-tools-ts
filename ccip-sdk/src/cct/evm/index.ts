@@ -46,6 +46,10 @@ import {
 } from './token-admin-registry/operations/transfer-admin.ts'
 import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
 import {
+  type ApplyAllowlistUpdatesParams,
+  ApplyAllowlistUpdates,
+} from './token-pool/operations/apply-allowlist-updates.ts'
+import {
   type ApplyChainUpdatesParams,
   ApplyChainUpdates,
 } from './token-pool/operations/apply-chain-updates.ts'
@@ -108,6 +112,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #addRemotePool = new AddRemotePool()
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
+  readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
@@ -1178,6 +1183,68 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   generateUnsignedApplyChainUpdates(opts: ApplyChainUpdatesParams): Promise<UnsignedEVMTx> {
     return this.#applyChainUpdates.generate(this.chain, opts)
   }
+
+  /**
+   * Builds an unsigned pool `applyAllowlistUpdates` tx (for multisig / offline signing): removes
+   * and adds entries in the pool's sender allowlist in one call. Probes the pool's on-chain
+   * `typeAndVersion` to resolve its interface + encoder.
+   * @remarks **v1.5.0–v1.6.1 only.** The allowlist feature does not exist on a v2.0.0 pool, which
+   * declares neither `applyAllowListUpdates` nor `getAllowList`/`getAllowListEnabled`, so a 2.0.0
+   * pool is reported unsupported rather than emitting calldata for a removed selector.
+   *
+   * `removes` are applied *before* `adds` on-chain. Both arrays must be non-empty in total, hold
+   * no duplicates, and share no address — an address in both would end up allowlisted (removes
+   * run first), which no caller can reasonably have meant.
+   *
+   * Owner-only (`applyAllowListUpdates` is `onlyOwner`). When `sender` is supplied it is checked
+   * against the pool's `owner()` before any calldata is built; omit it and no owner read is made
+   * (nothing to compare against).
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no allowlist
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
+   * address, both arrays are empty, an array holds duplicates, an address appears in both arrays,
+   * or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedApplyAllowlistUpdates({
+   *   poolAddress: '0xPool...',
+   *   removes: ['0xRevoked...'],
+   *   adds: ['0xNewSender...'],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedApplyAllowlistUpdates(opts: ApplyAllowlistUpdatesParams): Promise<UnsignedEVMTx> {
+    return this.#applyAllowlistUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Removes and adds entries in the pool's sender allowlist, signing + submitting with
+   * `opts.wallet`. `sender` defaults to the wallet's address and must equal it — the wallet must
+   * be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no allowlist
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
+   * the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.applyAllowlistUpdates({
+   *   poolAddress: '0xPool...',
+   *   removes: ['0xRevoked...'],
+   *   adds: ['0xNewSender...'],
+   *   wallet,
+   * })
+   * ```
+   */
+  applyAllowlistUpdates(
+    opts: EVMExecuteParams<ApplyAllowlistUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyAllowlistUpdates.execute(this.chain, opts)
+  }
 }
 
 export * from '../errors.ts'
@@ -1224,6 +1291,7 @@ export type {
   ChainUpdateV1_5_0,
   ChainUpdateV1_5_1,
 } from './token-pool/operations/apply-chain-updates.ts'
+export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
