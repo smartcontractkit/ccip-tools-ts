@@ -5,30 +5,55 @@
  * @packageDocumentation
  */
 
-import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
+import type {
+  BurnMintTokenPool,
+  Initialize as InitializeArg,
+} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import type {
+  LaneDeploySpec as LaneDeploySpecArg,
+  RateLimiterDeploySpec as RateLimiterDeploySpecArg,
+} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2Types/module.js'
 import type { JsCommands } from '../../../canton/client/index.ts'
+import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 import {
+  type FinalityConfig,
+  type TransferTimeout,
   EMPTY_CHOICE_CONTEXT,
+  encodeFinalityConfig,
   encodeTransferTimeout,
   rawInstanceAddress,
-  type TransferTimeout,
 } from '../encoding.ts'
+
+/**
+ * Pool receive-context choice-context values. `ChoiceContext.values` is a
+ * `TextMap` → encodes as a JSON object; almost always empty (`{}`).
+ */
+export type PoolReceiveContext = { values: Record<string, unknown> }
 
 /** CCIPFactory template ID. */
 export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
 
-/** BurnMintTokenPool template ID (pools ship in their own packages, not ccip-core). */
+/**
+ * BurnMintTokenPool template ID — the registry-pools family
+ * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool-v2`).
+ * This is the ONLY BurnMintTokenPool family the SDK targets: it adds the
+ * mandatory `observers` field (EDS auto-detection) and the atomic
+ * `Initialize` choice the production-pools family (`CCIP.BurnMintTokenPoolV2`,
+ * pre-registry) lacks. Nothing in this SDK should reference the production
+ * package.
+ */
 export const BURN_MINT_POOL_TEMPLATE_ID =
-  '#ccip-burn-mint-token-pool-v2:CCIP.BurnMintTokenPoolV2:BurnMintTokenPool'
+  '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
 
-/** LockReleaseTokenPool template ID. */
+/** LockReleaseTokenPool template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
 export const LOCK_RELEASE_POOL_TEMPLATE_ID =
-  '#ccip-lock-release-token-pool-v2:CCIP.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+  '#ccip-registry-lock-release-token-pool-v2:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
-/** RateLimiter template ID. */
-export const RATE_LIMITER_TEMPLATE_ID = '#ccip-rate-limiter-v2:CCIP.RateLimiterV2:RateLimiter'
+/** RateLimiter template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
+export const RATE_LIMITER_TEMPLATE_ID =
+  '#ccip-registry-rate-limiter-v2:CCIP.Registry.RateLimiterV2:RateLimiter'
 
 /** A contract reference for the exercise builders: a CID plus its disclosure blob. */
 export interface PoolContractRef {
@@ -42,8 +67,8 @@ export interface PoolContractRef {
    * Concrete package-ID template ID (`<pkg-id>:<Module>:<Entity>`) as returned
    * by the ACS. Preferred over the symbolic `#<pkg-name>:…` form — the
    * participant's interactive-submission path rejects package-name references
-   * (`#…`) in exercise commands (`non expected character 0x23 in Daml-LF
-   * Package ID`). Populated by {@link resolvePoolRef} / {@link toContractRef}.
+   * (`#…`) in exercise commands
+   * (`non expected character 0x23 in Daml-LF Package ID`). Populated by {@link resolvePoolRef} / {@link toContractRef}.
    */
   templateId?: string
 }
@@ -175,8 +200,15 @@ export interface BuildPoolExerciseInput {
  * alongside the command with its real `createdEventBlob` + `synchronizerId`.
  */
 export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
-  const { choice, templateId, poolContract, extraDisclosedContracts, choiceArgument, actAs, commandIdPrefix } =
-    input
+  const {
+    choice,
+    templateId,
+    poolContract,
+    extraDisclosedContracts,
+    choiceArgument,
+    actAs,
+    commandIdPrefix,
+  } = input
   // Prefer the concrete package-ID template from the resolved contract over
   // the symbolic `#<pkg-name>:…` form — the interactive-submission `prepare`
   // step rejects package-name references (`non expected character 0x23 in
@@ -315,21 +347,31 @@ export interface PoolCreateArgsInput {
   decimals: number
   /** Optional rate-limit admin party. */
   rateLimitAdmin?: string
+  /**
+   * Observer parties for EDS auto-detection. Mandatory — the on-ledger
+   * `ensure` clause rejects an empty list. Set at creation or updated later
+   * via the `SetObservers` choice.
+   */
+  observers: string[]
   /** TAR / RMNRemote / FeeQuoter RAW instance addresses (`"instanceId@party"`). */
   deps: { tokenAdminRegistry: string; rmnRemote: string; feeQuoter: string }
   /** Pool receive-context choice-context (default: empty). */
-  poolReceiveContext?: { values: Record<string, unknown> }
+  poolReceiveContext?: PoolReceiveContext
   /** Transfer timeout (default: `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
 }
 
 /**
  * Build the full `BurnMintTokenPool`/`LockReleaseTokenPool` create-arguments
- * record (identical field shape for both). Shared by the factory deploy choice
- * (`{contract: …}`) and the direct bare-create path — the factory `create`s
- * this record verbatim.
+ * record (identical field shape for both — `LockReleaseTokenPool` shares the
+ * same fields). Shared by the `Initialize`-atomic-deploy path
+ * (`deploy-token-pool.ts`) and the standalone bare-create path.
+ *
+ * Typed against the `BurnMintTokenPool` binding; `LockReleaseTokenPool` is a
+ * separate generated package but shares the identical field shape, so this
+ * return type is structurally valid for both.
  */
-export function buildPoolCreateArguments(p: PoolCreateArgsInput): Record<string, unknown> {
+export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenPool {
   return {
     instanceId: p.instanceId,
     poolOwner: p.poolOwner,
@@ -337,14 +379,110 @@ export function buildPoolCreateArguments(p: PoolCreateArgsInput): Record<string,
     instrumentId: p.instrumentId,
     decimals: p.decimals.toString(),
     rateLimitAdmin: p.rateLimitAdmin ?? null,
+    observers: p.observers,
     remoteChainConfigs: [], // GenMap → JSON array
     tokenTransferFeeConfigs: [], // GenMap → JSON array
     poolReceiveContext: p.poolReceiveContext ?? EMPTY_CHOICE_CONTEXT,
-    transferTimeout: encodeTransferTimeout(p.transferTimeout ?? { type: 'RelativeHours', hours: 24 }),
+    transferTimeout: encodeTransferTimeout(
+      p.transferTimeout ?? { type: 'RelativeHours', hours: 24 },
+    ),
     deps: {
       tokenAdminRegistry: rawInstanceAddress(p.deps.tokenAdminRegistry),
       rmnRemote: rawInstanceAddress(p.deps.rmnRemote),
       feeQuoter: rawInstanceAddress(p.deps.feeQuoter),
     },
+  }
+}
+
+/**
+ * One rate limiter to deploy alongside a lane via `Initialize`. Mirrors Daml
+ * `RateLimiterDeploySpec`. Direction/mode are implied by which slot of
+ * {@link LaneDeploySpec} this occupies, not repeated here.
+ */
+export interface RateLimiterDeploySpec {
+  /** Rate-limiter instance ID (unique; derives its instance address as `instanceId@poolOwner`). */
+  instanceId: string
+  /** Whether the limiter starts enabled. */
+  isEnabled: boolean
+  /** Bucket capacity (max tokens). */
+  capacity: bigint
+  /** Refill rate (tokens per second). */
+  rate: bigint
+}
+
+/**
+ * One remote-chain lane to wire up via `Initialize`: routing/CCV/finality
+ * config, plus the three rate limiters deployed alongside it. Mirrors Daml
+ * `LaneDeploySpec`.
+ */
+export interface LaneDeploySpec {
+  /** Remote chain selector. */
+  remoteChainSelector: bigint
+  /** Remote pool addresses (encoded). */
+  remotePools: string[]
+  /** Remote token address (encoded instrument ID). */
+  remoteTokenAddress: string
+  /** Inbound committee-verifier raw instance addresses (`"instanceId@party"`). */
+  inboundCCVs?: string[]
+  /** Outbound committee-verifier raw instance addresses (`"instanceId@party"`). */
+  outboundCCVs?: string[]
+  /** Finality config (default: `WaitForFinality`). */
+  finalityConfig?: FinalityConfig
+  /** Inbound rate limiter to deploy for this lane. */
+  inbound: RateLimiterDeploySpec
+  /** Outbound rate limiter to deploy for this lane. */
+  outbound: RateLimiterDeploySpec
+  /** Inbound custom-block-confirmations rate limiter to deploy for this lane. */
+  inboundCustomFinality: RateLimiterDeploySpec
+}
+
+/** Encode a {@link RateLimiterDeploySpec} for the `Initialize` choice argument. */
+function encodeRateLimiterDeploySpec(s: RateLimiterDeploySpec): RateLimiterDeploySpecArg {
+  return {
+    instanceId: s.instanceId,
+    isEnabled: s.isEnabled,
+    capacity: s.capacity.toString(),
+    rate: s.rate.toString(),
+  }
+}
+
+/** Encode a {@link LaneDeploySpec} for the `Initialize` choice argument. */
+export function encodeLaneDeploySpec(l: LaneDeploySpec): LaneDeploySpecArg {
+  return {
+    remoteChainSelector: l.remoteChainSelector.toString(),
+    remotePools: l.remotePools,
+    remoteTokenAddress: l.remoteTokenAddress,
+    inboundCCVs: (l.inboundCCVs ?? []).map(rawInstanceAddress),
+    outboundCCVs: (l.outboundCCVs ?? []).map(rawInstanceAddress),
+    finalityConfig: encodeFinalityConfig(l.finalityConfig ?? { type: 'WaitForFinality' }),
+    inbound: encodeRateLimiterDeploySpec(l.inbound),
+    outbound: encodeRateLimiterDeploySpec(l.outbound),
+    inboundCustomFinality: encodeRateLimiterDeploySpec(l.inboundCustomFinality),
+  }
+}
+
+/** Inputs to {@link buildInitializeChoiceArgument}. */
+export interface InitializeChoiceArgsInput {
+  /** TAR contract ID (resolved + disclosed by the caller — see `resolveTar`). */
+  tokenAdminRegistryCid: string
+  /**
+   * Existing `TokenConfig` CID, for third-party-admin tokens that already went
+   * through a separate propose/accept flow. Not yet supported by the SDK —
+   * always `null` (fresh `ProposeAdministrator` + `AcceptAdminRole` inline).
+   */
+  existingTokenConfigCid?: string
+  /** Token admin party — authorizes the choice jointly with `poolOwner`. */
+  admin: string
+  /** Remote-chain lanes to wire up atomically with the pool. */
+  lanes: LaneDeploySpec[]
+}
+
+/** Build the `Initialize` choice argument record. */
+export function buildInitializeChoiceArgument(p: InitializeChoiceArgsInput): InitializeArg {
+  return {
+    tokenAdminRegistryCid: p.tokenAdminRegistryCid,
+    existingTokenConfigCid: p.existingTokenConfigCid ?? null,
+    admin: p.admin,
+    lanes: p.lanes.map(encodeLaneDeploySpec),
   }
 }

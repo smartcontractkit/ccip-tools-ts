@@ -1,25 +1,17 @@
 /**
- * End-to-end token-pool deploy + configure on Canton, driven through the CCT
- * SDK (`CantonTokenManager`) with signing via the Wallet Gateway.
+ * End-to-end token-pool deploy on Canton, driven through the CCT SDK
+ * (`CantonTokenManager`) with signing via the Wallet Gateway.
  *
- * Sequence (7 gateway approvals across 3 phases — each step is its own
- * approval because the interactive-submission `prepare` step the gateway uses
- * rejects multi-command submissions):
- *
- *   Phase "tar" (2 approvals — also NOT batchable by CID dependency:
- *   AcceptAdminRole needs the TokenConfig CID that ProposeAdministrator
- *   creates; CIDs are assigned at execution time, and TokenConfig has no
- *   contract key for exerciseByKey):
- *     1. register-admin        ProposeAdministrator (tokenConfigCid=None → creates TokenConfig)
- *     2. accept-admin          AcceptAdminRole (we become TokenConfig admin)
- *   Phase "deploy" (3 approvals — 3 independent Creates, one per approval):
- *     3. deploy-pool           burnMint/lockRelease pool
- *     4. deploy-rl-in          inbound rate limiter
- *     5. deploy-rl-out         outbound rate limiter
- *   Phase "configure" (2 approvals — 2 exercises on pre-existing contracts;
- *   set-pool must precede apply-chain-updates):
- *     6. set-pool              SetPool (register pool in TAR's TokenConfig)
- *     7. apply-chain-updates   wire remote chain (pools, token, rate limiters)
+ * ONE gateway approval: `deployTokenPool` builds a single atomic
+ * `CreateAndExercise` — create the registry-pools BurnMintTokenPool /
+ * LockReleaseTokenPool AND exercise `Initialize` on it in the same
+ * transaction. `Initialize` internally does what used to be 6 separate
+ * approvals in this script: ProposeAdministrator + AcceptAdminRole (TAR
+ * registration), deploying the lane's 3 rate limiters (inbound / outbound /
+ * inbound-custom-finality), ApplyChainUpdates (wiring the lane), and SetPool
+ * (registering the pool in the TAR). Because it's one Daml transaction, it's
+ * all-or-nothing — there's no partial-progress state to resume from
+ * mid-flight, unlike the old 7-step phased flow this script used to drive.
  *
  * No real token contract is needed: TAR registration + pool deploy carry the
  * instrumentId as data only. Use a synthetic instrument whose admin is your
@@ -27,7 +19,7 @@
  *
  * ─── Prereqs ─────────────────────────────────────────────────────────────
  * - Self-hosted wallet gateway running (config.chainlink-testnet.json).
- *   EVERYTHING routes through the wallet gateway — both submissions
+ *   EVERYTHING routes through the wallet gateway — both submission
  *   (`prepareExecute` → human Approve → signing driver signs → execute) AND
  *   ledger reads (the `ledgerApi` proxy, via the network service account). The
  *   script never contacts the Canton participant directly and holds no
@@ -38,9 +30,10 @@
  *       `ensureGatewaySession` at startup to self-provision the gateway session
  *       row that `prepareExecute` + the `ledgerApi` proxy require (the user-API
  *       `addSession` RPC, headless — no browser login needed). Human approves
- *       each tx in the gateway UI. The access token expires ~1h (Okta issues no
+ *       the tx in the gateway UI. The access token expires ~1h (Okta issues no
  *       refresh token without `offline_access`, which isn't configured) —
- *       re-paste + re-run when it does; SKIP_IF_CONFIRMED=1 skips done steps.
+ *       re-paste + re-run when it does; SKIP_IF_CONFIRMED=1 skips a re-run if
+ *       the pool is already deployed.
  *     • OR a gateway **API key** (`ApiKey <key>`, gateway UI /api-keys/ or
  *       `generateApiKey`) — auto-provisions a session + swaps in the network
  *       service account (broad readAs, no TTL) and auto-approves (straight-
@@ -49,94 +42,85 @@
  * ─── Run ─────────────────────────────────────────────────────────────────
  * Minimal: a small config file with just the per-token settings —
  *
- *   CONFIG_JSON=pool.json \
- *     node --experimental-strip-types ccip-sdk/scripts/deploy-pool-e2e.ts
+ * ```
+ * CONFIG_JSON=pool.json node --experimental-strip-types ccip-sdk/scripts/deploy-pool-e2e.ts
+ * ```
  *
- *   pool.json: { "instrumentId": "TESTTOKEN", "decimals": 10,
- *                "remoteChainSelector": "16015286601757825753",
- *                "remoteTokenAddress": "0x…",
- *                "remotePools": "0x…",
- *                "gatewayUrl": "http://localhost:8400/api/v0/dapp",
- *                "gatewayAccessToken": "…" }
+ * pool.json:
+ * ```
+ * {
+ *   "instrumentId": "TESTTOKEN", "decimals": 10,
+ *   "remoteChainSelector": "16015286601757825753",
+ *   "remoteTokenAddress": "0x…",
+ *   "remotePools": "0x…",
+ *   "gatewayUrl": "http://localhost:8400/api/v0/dapp",
+ *   "gatewayAccessToken": "…"
+ * }
+ * ```
  *
  * Everything else auto-derives: owner ← gateway session (getPrimaryAccount),
  * ccipOwner/ledgerUrl/TAR/FeeQuoter/RMNRemote ← well-known network constants
- * for CANTON_CHAIN_ID (default canton:TestNet → CV1). Environment variables
- * (OWNER, CCIP_OWNER, TAR_RAW, FEE_QUOTER_RAW, RMN_REMOTE_RAW, …) override
- * file entries and constants — needed for devnet / synthetic testing.
+ * for CANTON_CHAIN_ID (default canton:TestNet → CV1). `admin` defaults to
+ * `owner` (self-issued instrument: `instrumentId.admin == poolOwner == admin`,
+ * satisfying `ProposeAdministrator`'s `isOwner || isAdmin` check). `observers`
+ * (mandatory on the registry pool template) defaults to `[ccipOwner]`.
+ * Environment variables (OWNER, ADMIN, CCIP_OWNER, TAR_RAW, FEE_QUOTER_RAW,
+ * RMN_REMOTE_RAW, OBSERVERS, …) override file entries and constants — needed
+ * for devnet / synthetic testing.
  *
- * Two run modes:
- * - **Interactive menu** (default): `CONFIG_JSON=pool.json node …deploy-pool-e2e.ts`
- *   → a terminal menu lists the 7 steps with live [done]/[ ] status. Pick a
- *   number to run that step (compose → submit → shows the approve URL → press
- *   Enter after approving in the gateway → confirms on-ledger → returns to
- *   menu). `r` refreshes status; `a` runs all pending in order; `q` quits.
- * - **Batch** (CI / scripted): set `FROM_STEP=<step>` (and optionally
- *   `TO_STEP=<step>`, `SKIP_IF_CONFIRMED=1`) to walk the range linearly with no
- *   menu. Steps: register-admin, accept-admin, deploy-pool, deploy-rl-in,
- *   deploy-rl-out, set-pool, apply-chain-updates. Steps are idempotent-ish:
- *   the ledger rejects duplicates, and SKIP_IF_CONFIRMED=1 skips steps
- *   already on-ledger.
+ * SKIP_IF_CONFIRMED=1 skips the deploy (no-ops) if the pool already exists
+ * on-ledger — safe to re-run after a partial gateway approval timeout.
+ * NO_PROMPT=1 skips the "press Enter after approving" pause (CI / API-key
+ * auto-approve flows, where there's no human to prompt).
  *
  * @packageDocumentation
  */
 
-import * as readline from 'node:readline'
 import { readFileSync } from 'node:fs'
-import { CantonTokenManager } from '../src/cct/canton/index.ts'
-import { type PoolFactoryDeps, RATE_LIMITER_TEMPLATE_ID } from '../src/cct/canton/token-pool/shared.ts'
-import { deriveTokenConfigInstanceAddress } from '../src/cct/canton/token-admin-registry/shared.ts'
+import * as readline from 'node:readline'
+
 import { getCantonNetworkConfig } from '../src/canton/networks.ts'
+import type { UnsignedCantonTx } from '../src/canton/types.ts'
 import {
+  GatewaySubmitError,
   ensureGatewaySession,
   fetchGatewayPrimaryParty,
-  GatewaySubmitError,
   submitViaGateway,
 } from '../src/cct/canton/gateway-submitter.ts'
-import type { UnsignedCantonTx } from '../src/canton/types.ts'
-
-// Phases (each phase = one gateway approval / one atomic tx):
-//   tar       — register-admin + accept-admin  (two exercises on the TAR;
-//               NOT batchable into one tx — AcceptAdminRole needs the TokenConfig
-//               CID that ProposeAdministrator creates, and CIDs are assigned at
-//               execution time, not compose time. TokenConfig has no contract key,
-//               so exerciseByKey intra-tx isn't available either.)
-//   deploy    — pool + inbound RL + outbound RL  (three independent Creates)
-//   configure — set-pool + apply-chain-updates   (two exercises on pre-existing
-//               contracts; the pool is carried as data, not a CID reference)
-const PHASES = ['tar', 'deploy', 'configure'] as const
-type Phase = (typeof PHASES)[number]
-
-// Fine-grained steps within phases, for FROM_STEP / TO_STEP / SKIP_IF_CONFIRMED.
-const STEPS = [
-  'register-admin',
-  'accept-admin',
-  'deploy-pool',
-  'deploy-rl-in',
-  'deploy-rl-out',
-  'set-pool',
-  'apply-chain-updates',
-] as const
-type Step = (typeof STEPS)[number]
-
-/** Map a fine-grained step to its containing phase. */
-const STEP_PHASE: Record<Step, Phase> = {
-  'register-admin': 'tar',
-  'accept-admin': 'tar',
-  'deploy-pool': 'deploy',
-  'deploy-rl-in': 'deploy',
-  'deploy-rl-out': 'deploy',
-  'set-pool': 'configure',
-  'apply-chain-updates': 'configure',
-}
+import { CantonTokenManager } from '../src/cct/canton/index.ts'
+import { deriveTokenConfigInstanceAddress } from '../src/cct/canton/token-admin-registry/shared.ts'
+import {
+  type PoolFactoryDeps,
+  RATE_LIMITER_TEMPLATE_ID,
+} from '../src/cct/canton/token-pool/shared.ts'
 
 async function prompt(question: string): Promise<void> {
   if (process.env['NO_PROMPT'] === '1') return
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-  await new Promise<void>((resolve) => rl.question(question, () => { rl.close(); resolve() }))
+  await new Promise<void>((resolve) =>
+    rl.question(question, () => {
+      rl.close()
+      resolve()
+    }),
+  )
 }
 
-async function pollUntil(label: string, check: () => Promise<boolean>, attempts = 40): Promise<boolean> {
+/** Safely stringify a caught `unknown` value that isn't an `Error` (avoids `[object Object]`). */
+function describeUnknown(value: unknown): string {
+  if (value === undefined) return '(no error — check never returned true)'
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '(unstringifiable error value)'
+  }
+}
+
+async function pollUntil(
+  label: string,
+  check: () => Promise<boolean>,
+  attempts = 40,
+): Promise<boolean> {
   let lastErr: unknown
   for (let i = 0; i < attempts; i++) {
     try {
@@ -152,7 +136,7 @@ async function pollUntil(label: string, check: () => Promise<boolean>, attempts 
     await new Promise((r) => setTimeout(r, 3000))
   }
   process.stderr.write('\n')
-  const detail = lastErr instanceof Error ? lastErr.message : String(lastErr ?? '(no error — check never returned true)')
+  const detail = lastErr instanceof Error ? lastErr.message : describeUnknown(lastErr)
   console.error(`  ⚠ timed out waiting for: ${label}`)
   console.error(`     last poll error: ${detail}`)
   return false
@@ -169,6 +153,7 @@ async function pollUntil(label: string, check: () => Promise<boolean>, attempts 
  */
 interface PoolDeployConfig {
   owner?: string
+  admin?: string
   ccipOwner?: string
   chainId?: string
   ledgerUrl?: string
@@ -185,6 +170,8 @@ interface PoolDeployConfig {
   remotePools?: string
   rlCapacity?: string
   rlRate?: string
+  /** Comma-separated observer parties for EDS auto-detection. Defaults to `[ccipOwner]`. */
+  observers?: string
   deps?: Partial<PoolFactoryDeps>
 }
 
@@ -197,15 +184,22 @@ function loadConfigFile(): PoolDeployConfig {
 async function main(): Promise<void> {
   const file = loadConfigFile()
   /** Resolve a setting: environment variable wins over the config file. */
-  const setting = (envName: string, fileKey: keyof PoolDeployConfig): string | undefined => {
+  const setting = (
+    envName: string,
+    fileKey: Exclude<keyof PoolDeployConfig, 'deps'>,
+  ): string | undefined => {
     const env = process.env[envName]?.trim()
     if (env) return env
     const v = file[fileKey]
     return v == null ? undefined : String(v)
   }
-  const requireSetting = (envName: string, fileKey: keyof PoolDeployConfig): string => {
+  const requireSetting = (
+    envName: string,
+    fileKey: Exclude<keyof PoolDeployConfig, 'deps'>,
+  ): string => {
     const v = setting(envName, fileKey)
-    if (!v) throw new Error(`Missing required setting: ${envName} (env) or ${fileKey} (CONFIG_JSON)`)
+    if (!v)
+      throw new Error(`Missing required setting: ${envName} (env) or ${fileKey} (CONFIG_JSON)`)
     return v
   }
 
@@ -232,8 +226,7 @@ async function main(): Promise<void> {
 
   // Acting party: explicit setting, else the gateway session's primary wallet.
   const owner =
-    setting('OWNER', 'owner') ??
-    (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
+    setting('OWNER', 'owner') ?? (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
   const ccipOwner =
     setting('CCIP_OWNER', 'ccipOwner') ??
     network?.ccipOwner ??
@@ -256,21 +249,35 @@ async function main(): Promise<void> {
     // A real failure here (not a duplicate-session, which is handled inside
     // ensureGatewaySession) means prepareExecute will fail too — surface it so
     // the cause is visible rather than a later opaque "No session found".
-    const msg = err instanceof GatewaySubmitError
-      ? `${err.message}\n   error data: ${JSON.stringify(err.data)}`
-      : String(err)
+    const msg =
+      err instanceof GatewaySubmitError
+        ? `${err.message}\n   error data: ${JSON.stringify(err.data)}`
+        : String(err)
     console.error(`   ⚠ ensureGatewaySession failed: ${msg}`)
-    console.error(`   ⚠ prepareExecute will likely fail too (no session). ` +
-      `Common causes: wrong GATEWAY_NETWORK_ID (got "${gatewayNetworkId}"), ` +
-      `token aud/issuer/scope mismatch with the gateway network config, ` +
-      `or expired token.`)
+    console.error(
+      `   ⚠ prepareExecute will likely fail too (no session). ` +
+        `Common causes: wrong GATEWAY_NETWORK_ID (got "${gatewayNetworkId}"), ` +
+        `token aud/issuer/scope mismatch with the gateway network config, ` +
+        `or expired token.`,
+    )
   }
 
   const instrumentId = { admin: owner, id: requireSetting('INSTRUMENT_ID', 'instrumentId') }
+  // Initialize's controller is `poolOwner, admin` — defaulting admin to owner
+  // matches the self-issued-instrument assumption above (instrumentId.admin ==
+  // poolOwner == admin), which satisfies ProposeAdministrator's internal
+  // `isOwner || isAdmin` check without a separate propose/accept round trip.
+  const admin = setting('ADMIN', 'admin') ?? owner
   const decimals = Number(setting('DECIMALS', 'decimals') ?? '10')
   const poolType = (setting('POOL_TYPE', 'poolType') ?? 'burnMint') as 'burnMint' | 'lockRelease'
   const poolInstanceId =
     setting('POOL_INSTANCE_ID', 'poolInstanceId') ?? `${instrumentId.id.toLowerCase()}-pool-001`
+  // Observers are mandatory on the registry pool template (EDS auto-detection;
+  // the on-ledger ensure clause rejects an empty list). Default to ccipOwner.
+  const observers = (setting('OBSERVERS', 'observers') ?? ccipOwner)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 
   // deps overrides are optional: unset fields fall back to the well-known
   // contracts registered for the chain ID (canton:TestNet → CV1 constants).
@@ -297,16 +304,20 @@ async function main(): Promise<void> {
   const poolInstanceAddress = `${poolInstanceId}@${owner}`
   const rlInInstanceId = `${poolInstanceId}-rl-in-${remoteChainSelector}`
   const rlOutInstanceId = `${poolInstanceId}-rl-out-${remoteChainSelector}`
+  const rlInCustomInstanceId = `${poolInstanceId}-rl-in-custom-${remoteChainSelector}`
   const rlInRaw = `${rlInInstanceId}@${owner}`
   const rlOutRaw = `${rlOutInstanceId}@${owner}`
+  const rlInCustomRaw = `${rlInCustomInstanceId}@${owner}`
 
   console.error('Config:')
   console.error('  chainId             ', chainId)
   console.error('  owner               ', owner)
+  console.error('  admin               ', admin)
+  console.error('  observers           ', observers.join(', '))
   console.error('  instrumentId        ', `${instrumentId.admin}::${instrumentId.id}`)
   console.error('  tokenConfig (derived)', tokenConfigAddress)
   console.error('  pool                 ', poolInstanceAddress)
-  console.error('  rate limiters        ', rlInRaw, '/', rlOutRaw)
+  console.error('  rate limiters        ', rlInRaw, '/', rlOutRaw, '/', rlInCustomRaw)
 
   const { CantonChain } = await import('../src/canton/index.ts')
   const { createGatewayLedgerFetch } = await import('../src/canton/gateway-ledger-fetch.ts')
@@ -337,8 +348,7 @@ async function main(): Promise<void> {
       // for direct calls because the proxy intercepts them.
       jwt: accessToken,
       // EDS provides the TAR disclosure (service-first resolution).
-      edsUrl:
-        setting('EDS_URL', 'edsUrl') ?? network?.edsUrl ?? 'http://unused-here.local',
+      edsUrl: setting('EDS_URL', 'edsUrl') ?? network?.edsUrl ?? 'http://unused-here.local',
       transferInstructionUrl: 'http://unused-here.local',
       // Pin the chain ID (see above) so network detection and well-known
       // deps resolution work despite CV1's generic synchronizer alias.
@@ -347,11 +357,12 @@ async function main(): Promise<void> {
   })
   const manager = CantonTokenManager.fromChain(chain)
 
-  // TAR address for the on-ledger confirmation reads: explicit override,
-  // else the well-known constant for the connected network (mirrors
-  // deployTokenPool's deps resolution).
+  // TAR address, both for `deployTokenPool`'s Initialize and the on-ledger
+  // confirmation reads: explicit override, else the well-known constant for
+  // the connected network (mirrors deployTokenPool's deps resolution).
   const tarInstanceAddressRaw =
-    deps.tokenAdminRegistry ?? getCantonNetworkConfig(String(chain.network.chainId))?.tokenAdminRegistry
+    deps.tokenAdminRegistry ??
+    getCantonNetworkConfig(String(chain.network.chainId))?.tokenAdminRegistry
   if (!tarInstanceAddressRaw) {
     throw new Error('TAR address unknown: set TAR_RAW or use a registered CANTON_CHAIN_ID')
   }
@@ -371,7 +382,8 @@ async function main(): Promise<void> {
     console.error('   prepared. Approve at:', result.approveUrl ?? 'http://localhost:8400/approve/')
     await prompt('   press Enter after approving in the gateway… ')
     const ok = await pollUntil(`${label} on-ledger effect`, confirm)
-    if (!ok) throw new Error(`${label} did not confirm on-ledger; check the gateway Activities page`)
+    if (!ok)
+      throw new Error(`${label} did not confirm on-ledger; check the gateway Activities page`)
     console.error(`   ✓ ${label} confirmed`)
   }
 
@@ -383,56 +395,33 @@ async function main(): Promise<void> {
   async function readTokenConfig() {
     return manager
       .getTokenAdminRegistry({ tokenConfigInstanceAddress: tokenConfigAddress, adminParty: owner })
-      .catch(() => null)
+      .catch((err: unknown) => {
+        // Surface the reason instead of silently reporting "not registered" —
+        // e.g. "multiple active contracts match" (a stale duplicate TokenConfig
+        // from an earlier attempt at this instrumentId) looks identical to "not
+        // registered yet" if swallowed here, which is misleading in the summary.
+        console.error(
+          `   ⚠ readTokenConfig failed: ${err instanceof Error ? err.message : String(err)}`,
+        )
+        return null
+      })
   }
 
-  // ── Per-step run functions (each = one gateway approval) ─────────────
-  // register-admin and accept-admin CANNOT be batched: AcceptAdminRole needs
-  // the TokenConfig CID created by ProposeAdministrator, and CIDs are assigned
-  // at execution time. TokenConfig has no contract key → no exerciseByKey.
-  // Each deploy create is also its own approval: interactive-submission
-  // `prepare` rejects multi-command submissions ("Preparing multiple commands
-  // is currently not supported"). set-pool must precede apply-chain-updates.
-
-  async function runRegisterAdmin(): Promise<void> {
-    const label = `register-admin: ProposeAdministrator ${instrumentId.id}`
-    // register-admin is done if pendingAdmin OR admin is set to owner (the
-    // latter after accept-admin cleared pendingAdmin). Either → skip.
-    const cfg = await readTokenConfig()
-    if (cfg?.pendingAdmin === owner || cfg?.admin === owner) {
-      console.error('── skip register-admin (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedRegisterAdmin({
-      instrumentId,
-      newAdmin: owner,
-      tarInstanceAddress,
-      sender: owner,
-    })
-    // Confirms once pendingAdmin is set (register-admin's on-ledger effect).
-    await submitAndConfirm(label, unsigned, async () =>
-      (await readTokenConfig())?.pendingAdmin === owner)
+  /** Does the pool exist on-ledger? Since `Initialize` is atomic, the pool's
+   *  existence alone proves the ENTIRE transaction succeeded (TAR
+   *  registration, all 3 rate limiters, and the lane wiring included). */
+  async function poolExists(): Promise<boolean> {
+    return manager
+      .getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
+      .then((s) => s !== null)
+      .catch(() => false)
   }
 
-  async function runAcceptAdmin(): Promise<void> {
-    const label = 'accept-admin: AcceptAdminRole'
-    if ((await readTokenConfig())?.admin === owner) {
-      console.error('── skip accept-admin (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedAcceptAdmin({
-      instrumentId,
-      tarInstanceAddress,
-      sender: owner,
-    })
-    await submitAndConfirm(label, unsigned, async () =>
-      (await readTokenConfig())?.admin === owner)
-  }
+  // ── Deploy: one atomic create + Initialize (one gateway approval) ────
 
   async function runDeployPool(): Promise<void> {
-    const label = `deploy: ${poolType} pool`
-    if (await manager.getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
-        .then((s) => s !== null).catch(() => false)) {
+    const label = `deploy: ${poolType} pool (atomic Initialize — TAR registration + lane + 3 rate limiters in one tx)`
+    if (process.env['SKIP_IF_CONFIRMED'] === '1' && (await poolExists())) {
       console.error('── skip deploy-pool (already confirmed)')
       return
     }
@@ -443,234 +432,41 @@ async function main(): Promise<void> {
       ccipOwner,
       instrumentId,
       decimals,
+      observers,
       deps,
-      sender: owner,
-    })
-    await submitAndConfirm(label, unsigned, async () =>
-      manager.getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
-        .then((s) => s !== null).catch(() => false))
-  }
-
-  /** Does the RateLimiter at `rlRaw` exist on-ledger? (Used for skip + confirm.) */
-  async function rlExists(rlRaw: string): Promise<boolean> {
-    return (await chain
-      .findActiveContractByInstanceAddress(RATE_LIMITER_TEMPLATE_ID, rlRaw, [owner])
-      .catch(() => null)) != null
-  }
-
-  async function runDeployRlIn(): Promise<void> {
-    const label = `deploy: inbound rate limiter (chain=${remoteChainSelector})`
-    if (await rlExists(rlInRaw)) {
-      console.error('── skip deploy-rl-in (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedDeployRateLimiter({
-      instanceId: rlInInstanceId,
-      poolInstanceId,
-      poolOwner: owner,
-      remoteChainSelector,
-      direction: 'inbound',
-      isEnabled: true,
-      capacity: rlCapacity,
-      rate: rlRate,
-      sender: owner,
-    })
-    await submitAndConfirm(label, unsigned, () => rlExists(rlInRaw))
-  }
-
-  async function runDeployRlOut(): Promise<void> {
-    const label = `deploy: outbound rate limiter (chain=${remoteChainSelector})`
-    if (await rlExists(rlOutRaw)) {
-      console.error('── skip deploy-rl-out (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedDeployRateLimiter({
-      instanceId: rlOutInstanceId,
-      poolInstanceId,
-      poolOwner: owner,
-      remoteChainSelector,
-      direction: 'outbound',
-      isEnabled: true,
-      capacity: rlCapacity,
-      rate: rlRate,
-      sender: owner,
-    })
-    await submitAndConfirm(label, unsigned, () => rlExists(rlOutRaw))
-  }
-
-  async function runSetPool(): Promise<void> {
-    const label = `configure: set-pool (register pool in TAR)`
-    if (await manager
-        .getTokenAdminRegistry({ tokenConfigInstanceAddress: tokenConfigAddress, adminParty: owner })
-        .then((r) => Boolean(r?.tokenPool?.poolInstanceId === poolInstanceId)).catch(() => false)) {
-      console.error('── skip set-pool (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedSetPool({
-      instrumentId,
-      poolRegistration: { poolOwner: owner, poolInstanceId },
-      tarInstanceAddress,
-      sender: owner,
-    })
-    await submitAndConfirm(label, unsigned, async () =>
-      manager.getTokenAdminRegistry({ tokenConfigInstanceAddress: tokenConfigAddress, adminParty: owner })
-        .then((r) => Boolean(r?.tokenPool?.poolInstanceId === poolInstanceId)).catch(() => false))
-  }
-
-  async function runApplyChainUpdates(): Promise<void> {
-    const label = `configure: apply-chain-updates (chain=${remoteChainSelector})`
-    if (await manager.getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
-        .then((s) => Boolean(s?.remoteChainConfigs?.some(
-          (c) => c.remoteChainSelector === remoteChainSelector.toString()))).catch(() => false)) {
-      console.error('── skip apply-chain-updates (already confirmed)')
-      return
-    }
-    const unsigned = await manager.generateUnsignedApplyChainUpdates({
-      poolInstanceAddress,
-      poolType,
-      chainsToAdd: [
+      tokenAdminRegistryInstanceAddress: tarInstanceAddress,
+      admin,
+      lanes: [
         {
           remoteChainSelector,
           remotePools,
           remoteTokenAddress,
-          inboundRateLimiter: rlInRaw,
-          outboundRateLimiter: rlOutRaw,
+          inbound: {
+            instanceId: rlInInstanceId,
+            isEnabled: true,
+            capacity: rlCapacity,
+            rate: rlRate,
+          },
+          outbound: {
+            instanceId: rlOutInstanceId,
+            isEnabled: true,
+            capacity: rlCapacity,
+            rate: rlRate,
+          },
+          inboundCustomFinality: {
+            instanceId: rlInCustomInstanceId,
+            isEnabled: true,
+            capacity: rlCapacity,
+            rate: rlRate,
+          },
         },
       ],
       sender: owner,
     })
-    await submitAndConfirm(label, unsigned, async () =>
-      manager.getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
-        .then((s) => Boolean(s?.remoteChainConfigs?.some(
-          (c) => c.remoteChainSelector === remoteChainSelector.toString()))).catch(() => false))
+    await submitAndConfirm(label, unsigned, poolExists)
   }
 
-  /** Map each step to its run function. */
-  const RUN: Record<Step, () => Promise<void>> = {
-    'register-admin': runRegisterAdmin,
-    'accept-admin': runAcceptAdmin,
-    'deploy-pool': runDeployPool,
-    'deploy-rl-in': runDeployRlIn,
-    'deploy-rl-out': runDeployRlOut,
-    'set-pool': runSetPool,
-    'apply-chain-updates': runApplyChainUpdates,
-  }
-
-  /** On-ledger status of a step (the same predicate used by submitAndConfirm),
-   *  WITHOUT submitting — powers the menu's [done]/[ ] markers. */
-  async function stepStatus(step: Step): Promise<'done' | 'pending'> {
-    try {
-      switch (step) {
-        case 'register-admin':
-          // pendingAdmin was set by register-admin, then cleared by accept-admin
-          // (which sets admin = owner). Either state proves register-admin ran.
-          {
-            const cfg = await readTokenConfig()
-            return cfg?.pendingAdmin === owner || cfg?.admin === owner ? 'done' : 'pending'
-          }
-        case 'accept-admin':
-          return (await readTokenConfig())?.admin === owner ? 'done' : 'pending'
-        case 'deploy-pool':
-          return (await manager
-            .getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })) != null
-            ? 'done' : 'pending'
-        case 'deploy-rl-in':
-        case 'deploy-rl-out': {
-          // Check the actual RateLimiter contract exists (NOT the pool's
-          // remoteChainConfigs — that's apply-chain-updates' predicate and is
-          // true regardless of whether the RLs were deployed).
-          const rlAddr = step === 'deploy-rl-in' ? rlInRaw : rlOutRaw
-          const rl = await chain
-            .findActiveContractByInstanceAddress(RATE_LIMITER_TEMPLATE_ID, rlAddr, [owner])
-            .catch(() => null)
-          return rl != null ? 'done' : 'pending'
-        }
-        case 'set-pool':
-          return (await manager
-            .getTokenAdminRegistry({ tokenConfigInstanceAddress: tokenConfigAddress, adminParty: owner }))
-            ?.tokenPool?.poolInstanceId === poolInstanceId ? 'done' : 'pending'
-        case 'apply-chain-updates':
-          return Boolean((await manager
-            .getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner }))
-            ?.remoteChainConfigs?.some((c) => c.remoteChainSelector === remoteChainSelector.toString()))
-            ? 'done' : 'pending'
-      }
-    } catch {
-      return 'pending'
-    }
-  }
-
-  // ── Dispatch: batch (FROM_STEP set) or interactive menu ──────────────
-  const fromStep = process.env['FROM_STEP']?.trim() as Step | undefined
-  const toStep = process.env['TO_STEP']?.trim() as Step | undefined
-
-  if (fromStep) {
-    // Linear batch mode (CI / scripted): walk [fromStep, toStep] in order.
-    const skipIfConfirmed = process.env['SKIP_IF_CONFIRMED'] === '1'
-    const from = STEPS.indexOf(fromStep)
-    const to = toStep ? STEPS.indexOf(toStep) : STEPS.length - 1
-    for (let i = from; i <= to; i++) {
-      const step = STEPS[i]
-      if (skipIfConfirmed && (await stepStatus(step)) === 'done') {
-        console.error(`── skip ${step} (already confirmed)`)
-        continue
-      }
-      await RUN[step]()
-    }
-    await printSummary()
-    return
-  }
-
-  // ── Interactive menu mode (default when no FROM_STEP) ────────────────
-  // Print the step menu with live [done]/[ ] status markers.
-  async function printMenu(): Promise<void> {
-    console.error('\n────────────────────────────────────────────────────────────')
-    console.error(' Canton token-pool deploy — interactive')
-    console.error(` Pool: ${poolInstanceAddress}`)
-    console.error(` Instrument: ${instrumentId.admin}::${instrumentId.id}`)
-    console.error(` Remote chain: ${remoteChainSelector.toString()}`)
-    console.error('────────────────────────────────────────────────────────────')
-    for (let i = 0; i < STEPS.length; i++) {
-      const mark = (await stepStatus(STEPS[i])) === 'done' ? '[done]' : '[ ]  '
-      console.error(`  ${i + 1}. ${mark} ${STEPS[i]}`)
-    }
-    console.error('  r. refresh status')
-    console.error('  a. run all pending (in order)')
-    console.error('  q. quit')
-    console.error('────────────────────────────────────────────────────────────')
-  }
-
-  // The REPL: pick a step, run it (compose → submit → approve → confirm),
-  // then return to the menu. `ask` (module-level) reads stdin.
-  while (true) {
-    await printMenu()
-    const choice = await ask('Pick: ')
-    if (!choice || choice === 'q') break
-    if (choice === 'r') continue // reprint (loop re-runs printMenu)
-    if (choice === 'a') {
-      for (const step of STEPS) {
-        if ((await stepStatus(step)) === 'done') continue
-        try {
-          await RUN[step]()
-        } catch (err) {
-          console.error(`Fatal on step ${step}:`, err instanceof Error ? err.message : err)
-          break
-        }
-      }
-      continue
-    }
-    const idx = Number(choice) - 1
-    if (Number.isInteger(idx) && idx >= 0 && idx < STEPS.length) {
-      const step = STEPS[idx]
-      try {
-        await RUN[step]()
-      } catch (err) {
-        console.error(`⚠ ${step} failed:`, err instanceof Error ? err.message : err)
-      }
-    } else {
-      console.error(`  ⚠ invalid choice "${choice}"`)
-    }
-  }
+  await runDeployPool()
 
   /** Final summary of pool deploy state. */
   async function printSummary(): Promise<void> {
@@ -684,30 +480,32 @@ async function main(): Promise<void> {
         (c) => c.remoteChainSelector === remoteChainSelector.toString(),
       ),
     )
+    const rlExists = async (rlRaw: string) =>
+      (await chain
+        .findActiveContractByInstanceAddress(RATE_LIMITER_TEMPLATE_ID, rlRaw, [owner])
+        .catch(() => null)) != null
+    const [rlIn, rlOut, rlInCustom] = await Promise.all([
+      rlExists(rlInRaw),
+      rlExists(rlOutRaw),
+      rlExists(rlInCustomRaw),
+    ])
     console.error('\n════════════════════════════════════════════════════════')
-    console.error(` Pool deployed:        ${finalState ? 'yes' : 'no'}`)
-    console.error(` Pool in TAR (set-pool): ${poolRegistered ? 'yes' : 'no'}`)
-    console.error(` Remote chain wired:    ${remoteConfigured ? 'yes' : 'no'}`)
+    console.error(` Pool deployed:          ${finalState ? 'yes' : 'no'}`)
+    console.error(` Pool in TAR (SetPool):  ${poolRegistered ? 'yes' : 'no'}`)
+    console.error(` Remote chain wired:     ${remoteConfigured ? 'yes' : 'no'}`)
+    console.error(
+      ` Rate limiters deployed: in=${rlIn ? 'yes' : 'no'} out=${rlOut ? 'yes' : 'no'} in-custom=${rlInCustom ? 'yes' : 'no'}`,
+    )
     console.error('   pool:', poolInstanceAddress)
     console.error('   TAR TokenConfig:', tokenConfigAddress)
     console.error('   remote chain:', remoteChainSelector.toString())
-    if (!remoteConfigured) {
-      console.error(' ⚠ Not fully configured yet — run the remaining steps.')
+    if (!finalState || !poolRegistered || !remoteConfigured) {
+      console.error(' ⚠ Not fully deployed — check the gateway Activities page and re-run.')
     }
     console.error('════════════════════════════════════════════════════════')
   }
-}
 
-/** Ask a question on stdin and return the trimmed answer (module-level util). */
-async function ask(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return await new Promise<string>((resolve) =>
-      rl.question(question, (answer) => { resolve(answer.trim()) }),
-    )
-  } finally {
-    rl.close()
-  }
+  await printSummary()
 }
 
 main().catch((err) => {

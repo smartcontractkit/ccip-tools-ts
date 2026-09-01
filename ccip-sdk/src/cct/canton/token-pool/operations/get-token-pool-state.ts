@@ -44,6 +44,8 @@ export interface GetTokenPoolStateResult {
   instrumentId: { admin: string; id: string }
   /** Token decimals. */
   decimals: number
+  /** Observer parties for EDS auto-detection (mandatory on the registry pool template). */
+  observers: string[]
 }
 
 /** Parsed params for {@link GetTokenPoolState.read}. */
@@ -74,7 +76,11 @@ export class GetTokenPoolState extends CantonQuery<
   /** Validates the pool target + owner, and normalizes the pool type into a template ID. */
   protected prepare(p: GetTokenPoolStateParams): ParsedGetTokenPoolState {
     if (!p.poolInstanceAddress) {
-      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        'pool InstanceAddress is required',
+      )
     }
     return {
       poolInstanceAddress: p.poolInstanceAddress,
@@ -106,7 +112,9 @@ export class GetTokenPoolState extends CantonQuery<
     const fields = decodeDamlRecord(contract.createArgument)
     const instrumentId = decodeInstrumentId(fields)
     if (!instrumentId) {
-      throw new Error(`getTokenPoolState: pool ${p.poolInstanceAddress} has no decodable instrumentId`)
+      throw new Error(
+        `getTokenPoolState: pool ${p.poolInstanceAddress} has no decodable instrumentId`,
+      )
     }
 
     return {
@@ -116,6 +124,7 @@ export class GetTokenPoolState extends CantonQuery<
       remoteChainConfigs: decodeRemoteChainConfigs(fields['remoteChainConfigs']),
       instrumentId,
       decimals: decodeInt(fields['decimals']),
+      observers: decodeStringList(fields['observers']),
     }
   }
 }
@@ -146,7 +155,9 @@ function decodeOptionalParty(value: unknown): string | undefined {
 }
 
 /** Decode the pool `instrumentId` (`{ admin, id }`) record from a decoded `createArgument`. */
-function decodeInstrumentId(fields: Record<string, unknown>): { admin: string; id: string } | undefined {
+function decodeInstrumentId(
+  fields: Record<string, unknown>,
+): { admin: string; id: string } | undefined {
   const rec = extractRecordField(fields, 'instrumentId')
   if (!rec) return undefined
   const admin = extractFieldValue(rec['admin'])

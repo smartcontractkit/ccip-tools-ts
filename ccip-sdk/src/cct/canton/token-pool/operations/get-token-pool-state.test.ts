@@ -40,7 +40,10 @@ function remoteChainConfig(opts: {
 }): Record<string, unknown> {
   return {
     fields: [
-      field('remotePools', opts.remotePools.map((s) => sum('Text', s))),
+      field(
+        'remotePools',
+        opts.remotePools.map((s) => sum('Text', s)),
+      ),
       field('remoteTokenAddress', text(opts.remoteTokenAddress)),
       field('inboundCCVs', []),
       field('outboundCCVs', []),
@@ -66,6 +69,7 @@ function poolContract(
   opts: {
     rateLimitAdmin?: string
     remoteChainConfigs?: Record<string, unknown>
+    observers?: string[]
   } = {},
 ): CantonActiveContract {
   return {
@@ -79,15 +83,15 @@ function poolContract(
         field('instanceId', text(POOL_INSTANCE_ID)),
         field('poolOwner', party(POOL_OWNER)),
         field('ccipOwner', party(POOL_OWNER)),
-        field(
-          'instrumentId',
-          { fields: [field('admin', party(INSTRUMENT_ADMIN)), field('id', text('usdc'))] },
-        ),
+        field('instrumentId', {
+          fields: [field('admin', party(INSTRUMENT_ADMIN)), field('id', text('usdc'))],
+        }),
         field('decimals', int(6)),
         field('rateLimitAdmin', opts.rateLimitAdmin ? some(party(opts.rateLimitAdmin)) : none()),
+        field('remoteChainConfigs', opts.remoteChainConfigs ?? remoteChainConfigsMap([])),
         field(
-          'remoteChainConfigs',
-          opts.remoteChainConfigs ?? remoteChainConfigsMap([]),
+          'observers',
+          (opts.observers ?? []).map((p) => party(p)),
         ),
       ],
     },
@@ -123,6 +127,21 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     assert.deepEqual(result.instrumentId, { admin: INSTRUMENT_ADMIN, id: 'usdc' })
     assert.equal(result.rateLimitAdmin, undefined)
     assert.deepEqual(result.remoteChainConfigs, [])
+    assert.deepEqual(result.observers, [])
+  })
+
+  it('decodes observers (mandatory EDS auto-detection field)', async () => {
+    const manager = CantonTokenManager.fromChain(
+      chainWith(poolContract({ observers: [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN] })),
+    )
+
+    const result = await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+      poolType: 'burnMint',
+      poolOwner: POOL_OWNER,
+    })
+
+    assert.deepEqual(result.observers, [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN])
   })
 
   it('decodes the rate-limit admin when set (Optional Party)', async () => {
@@ -197,7 +216,9 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       ],
     ]
     const manager = CantonTokenManager.fromChain(
-      chainWith(poolContract({ remoteChainConfigs: naturalMap as unknown as Record<string, unknown> })),
+      chainWith(
+        poolContract({ remoteChainConfigs: naturalMap as unknown as Record<string, unknown> }),
+      ),
     )
 
     const result = await manager.getTokenPoolState({

@@ -12,12 +12,12 @@
  * @packageDocumentation
  */
 
-import type { CantonChain } from '../../../../canton/index.ts'
-import { decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
-import { CantonQuery } from '../../query.ts'
+import type { GetRequiredCCVs as GetRequiredCCVsArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type FinalityConfig, EMPTY_CHOICE_CONTEXT, encodeFinalityConfig } from '../../encoding.ts'
+import { CantonQuery } from '../../query.ts'
 import { parseNonEmptyString, parsePartyId } from '../../validate.ts'
-import { EMPTY_CHOICE_CONTEXT, encodeFinalityConfig, type FinalityConfig } from '../../encoding.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
 
 /** Transfer direction for `GetRequiredCCVs` (mirrors Daml `TransferDirection`). */
@@ -84,7 +84,11 @@ export class GetRequiredCCVs extends CantonQuery<
   /** Validates inputs and normalizes the pool type into a template ID. */
   protected prepare(p: GetRequiredCCVsParams): ParsedGetRequiredCCVs {
     if (!p.poolInstanceAddress) {
-      throw new CCTParamsInvalidError(this.name, 'poolInstanceAddress', 'pool InstanceAddress is required')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        'pool InstanceAddress is required',
+      )
     }
     return {
       poolInstanceAddress: p.poolInstanceAddress,
@@ -94,7 +98,9 @@ export class GetRequiredCCVs extends CantonQuery<
       caller: parsePartyId(this.name, 'caller', p.caller),
       remoteChainSelector: p.remoteChainSelector.toString(),
       direction: p.direction,
-      sourceAmount: p.sourceAmount ? parseNonEmptyString(this.name, 'sourceAmount', p.sourceAmount) : '0x',
+      sourceAmount: p.sourceAmount
+        ? parseNonEmptyString(this.name, 'sourceAmount', p.sourceAmount)
+        : '0x',
       finality: encodeFinalityConfig(p.finality ?? { type: 'WaitForFinality' }),
       extraData: p.extraData ? parseNonEmptyString(this.name, 'extraData', p.extraData) : '0x',
     }
@@ -105,7 +111,10 @@ export class GetRequiredCCVs extends CantonQuery<
    * non-consuming read choice via {@link CantonChain.submitReadChoice} and
    * decodes the returned `[RawInstanceAddress]` into a list of `unpack` strings.
    */
-  protected async read(chain: CantonChain, p: ParsedGetRequiredCCVs): Promise<GetRequiredCCVsResult> {
+  protected async read(
+    chain: CantonChain,
+    p: ParsedGetRequiredCCVs,
+  ): Promise<GetRequiredCCVsResult> {
     const pool = await chain.findActiveContractByInstanceAddress(
       p.templateId,
       p.poolInstanceAddress,
@@ -118,19 +127,20 @@ export class GetRequiredCCVs extends CantonQuery<
         `pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
       )
     }
+    const choiceArgument: GetRequiredCCVsArg = {
+      remoteChainSelector: p.remoteChainSelector,
+      sourceAmount: p.sourceAmount,
+      finality: p.finality,
+      extraData: p.extraData,
+      direction: { tag: p.direction, value: {} },
+      context: EMPTY_CHOICE_CONTEXT,
+      caller: p.caller,
+    }
     const result = await chain.submitReadChoice(
       p.templateId,
       pool.contractId,
       'GetRequiredCCVs',
-      {
-        remoteChainSelector: p.remoteChainSelector,
-        sourceAmount: p.sourceAmount,
-        finality: p.finality,
-        extraData: p.extraData,
-        direction: { tag: p.direction, value: {} },
-        context: EMPTY_CHOICE_CONTEXT,
-        caller: p.caller,
-      },
+      choiceArgument,
       p.caller,
     )
 
