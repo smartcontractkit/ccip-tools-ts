@@ -68,7 +68,6 @@ import type {
   ExecutionInput,
   ExecutionReceipt,
   Lane,
-  LeanNumbers,
   WithLogger,
 } from '../types.ts'
 import {
@@ -81,7 +80,13 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
-import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
+import {
+  type AptosLogStreamOpts,
+  getAptosExecutionFailureLog,
+  getUserTxByVersion,
+  getVersionTimestamp,
+  streamAptosLogs,
+} from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { getTokenInfo } from './token.ts'
 import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
@@ -344,27 +349,36 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     if (tx.type !== TransactionResponseType.User) throw new CCIPAptosTransactionTypeInvalidError()
 
     const timestamp = +tx.timestamp / 1e6
+    const logs: ChainLog[] = tx.events.map((event, index) => ({
+      address: event.type.slice(0, event.type.lastIndexOf('::')),
+      transactionHash: tx.hash,
+      index,
+      blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
+      blockTimestamp: timestamp,
+      data: event.data as Record<string, unknown>,
+      topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
+    }))
+    const failureLog = getAptosExecutionFailureLog(tx)
+    if (failureLog) logs.push(failureLog)
     return {
       hash: tx.hash,
       blockNumber: +tx.version,
       from: tx.sender,
       timestamp,
-      logs: tx.events.map((event, index) => ({
-        address: event.type.slice(0, event.type.lastIndexOf('::')),
-        transactionHash: tx.hash,
-        index,
-        blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
-        blockTimestamp: timestamp,
-        data: event.data as Record<string, unknown>,
-        topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
-      })),
+      logs,
+      ...(failureLog && {
+        // Same camelCase+bigint shape decodeReceipt gives the receipt's returnData,
+        // so tx.error and the CCIPExecution.error a consumer gets downstream agree.
+        error: convertKeysToCamelCase(
+          (failureLog.data as Record<string, unknown>).return_data,
+          (v) => (typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v),
+        ),
+      }),
     }
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(
-    opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean },
-  ): AsyncIterableIterator<ChainLog> {
+  async *getLogs(opts: AptosLogStreamOpts): AsyncIterableIterator<ChainLog> {
     if (opts.watch) {
       opts = {
         ...opts,
@@ -375,6 +389,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     yield* streamAptosLogs(this, opts)
+  }
+
+  /**
+   * Normalizes the offRamp filter before the base class's exact address match:
+   * Aptos log addresses are the bare contract address (Move event types prefix
+   * with it, module-less), while callers pass either the bare address (the
+   * API's `offramp`, decoded messages) or `<address>::offramp` from discovery —
+   * an exact compare would silently drop every receipt otherwise.
+   */
+  override async getExecutionReceiptsInTx(
+    tx: string | ChainTransaction,
+    filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
+  ): Promise<CCIPExecution[]> {
+    const offRamp = filters?.offRamp
+    return super.getExecutionReceiptsInTx(tx, {
+      ...filters,
+      ...(offRamp && {
+        offRamp: (offRamp.includes('::')
+          ? offRamp.slice(0, offRamp.lastIndexOf('::'))
+          : offRamp
+        ).toLowerCase(),
+      }),
+    })
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -783,7 +820,15 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param data - Raw data to parse.
    * @returns Parsed data or undefined.
    */
-  static parse(data: unknown) {
+  static parse(data: unknown): Record<string, unknown> | undefined {
+    if (
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      !(data instanceof Uint8Array) &&
+      ('vmStatus' in data || 'vm_status' in data)
+    )
+      return data as Record<string, unknown>
     try {
       if (isBytesLike(data)) {
         const parsedExtraArgs = this.decodeExtraArgs(data)

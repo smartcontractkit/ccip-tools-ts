@@ -3,9 +3,11 @@ import {
   type Event as AptosEvent,
   type UserTransactionResponse,
   AptosApiError,
+  Network,
   TransactionResponseType,
   getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
+import { getBytes, hexlify, isHexString } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
@@ -18,16 +20,28 @@ import {
   CCIPNotImplementedError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
-import type { ChainLog, LeanNumbers, WithLogger } from '../types.ts'
+import { type ChainLog, type LeanNumbers, type WithLogger, ExecutionState } from '../types.ts'
 import { passesTypeAndVersion, signalToPromise } from '../utils.ts'
+import { ExecutionReportCodec } from './types.ts'
 
 const DEFAULT_POLL_INTERVAL = 5e3
+
+/** Options of the Aptos log streams: LogFilter with lean numbers, plus Aptos-local extensions. */
+export type AptosLogStreamOpts = LeanNumbers<LogFilter> & {
+  /** Emit `String(version)` as transactionHash instead of fetching the tx hash. */
+  versionAsHash?: boolean
+  /** Delay in ms between watch-mode poll rounds. Default: 5000 */
+  pollInterval?: number
+}
 
 const eventToHandler = {
   CCIPMessageSent: 'OnRampState/ccip_message_sent_events',
   CommitReportAccepted: 'OffRampState/commit_report_accepted_events',
   ExecutionStateChanged: 'OffRampState/execution_state_changed_events',
 } as const
+
+/** OffRamp entry functions that execute CCIP messages (see the Move contract's execute/manually_execute). */
+const APTOS_OFFRAMP_EXECUTE_FUNCTIONS = ['execute', 'manually_execute']
 
 /**
  * Fetches a user transaction by its version number.
@@ -61,6 +75,265 @@ export async function getVersionTimestamp(
   if (version <= 0) version = +(await provider.getLedgerInfo()).ledger_version + version
   const tx = await provider.getTransactionByVersion({ ledgerVersion: version })
   return +(tx as UserTransactionResponse).timestamp / 1e6
+}
+
+type AptosEntryFunction = {
+  function: string
+  arguments: unknown[]
+}
+
+type AptosExecutionReport = {
+  sourceChainSelector: bigint | number | string
+  messageId: unknown
+  destChainSelector: bigint | number | string
+  sequenceNumber: bigint | number | string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isByte(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255
+}
+
+/**
+ * Converts the forms used by Aptos REST payload arguments into bytes.
+ *
+ * Vector<u8> arguments are normally returned as hex strings, but keeping the
+ * other forms here makes this work with SDK mocks and alternate fullnodes too.
+ */
+function toAptosBytes(value: unknown): Uint8Array | undefined {
+  if (value instanceof Uint8Array) return value
+  if (typeof value === 'string') {
+    if (!isHexString(value)) return undefined
+    try {
+      return getBytes(value)
+    } catch {
+      return undefined
+    }
+  }
+  if (Array.isArray(value) && value.every(isByte)) return Uint8Array.from(value)
+  if (isRecord(value) && Array.isArray(value.vec)) {
+    if (value.vec.every(isByte)) return Uint8Array.from(value.vec)
+    const parts = value.vec.map(toAptosBytes)
+    if (parts.every((part) => part?.length === 1))
+      return Uint8Array.from(parts.map((part) => part![0]!))
+    if (parts.length === 1) return parts[0]
+  }
+  return undefined
+}
+
+function isExecutionReport(value: unknown): value is AptosExecutionReport {
+  return (
+    isRecord(value) &&
+    'sourceChainSelector' in value &&
+    'messageId' in value &&
+    'destChainSelector' in value &&
+    'sequenceNumber' in value
+  )
+}
+
+function parseExecutionReport(value: unknown): AptosExecutionReport | undefined {
+  const bytes = toAptosBytes(value)
+  if (bytes) {
+    try {
+      const report = ExecutionReportCodec.parse(bytes)
+      if (isExecutionReport(report)) return report
+    } catch {
+      // Try the next payload argument.
+    }
+  }
+  // Aptos REST uses hex for byte vectors. Base64 is accepted as a small
+  // compatibility fallback for providers that preserve the SDK's encoding.
+  if (typeof value === 'string' && !isHexString(value)) {
+    try {
+      const report = ExecutionReportCodec.fromBase64(value)
+      if (isExecutionReport(report)) return report
+    } catch {
+      // Not an execution report.
+    }
+  }
+  return undefined
+}
+
+function getEntryFunctionPayload(payload: unknown): AptosEntryFunction | undefined {
+  if (!isRecord(payload)) return undefined
+  if (typeof payload.function === 'string' && Array.isArray(payload.arguments))
+    return { function: payload.function, arguments: payload.arguments }
+  // A multisig response can carry the actual entry function one level down.
+  return getEntryFunctionPayload(payload.transaction_payload)
+}
+
+function getOffRampModule(functionName: string): string | undefined {
+  const parts = functionName.split('::')
+  const functionPart = parts.pop()?.toLowerCase()
+  const module = parts.pop()
+  if (!module || !functionPart || !APTOS_OFFRAMP_EXECUTE_FUNCTIONS.includes(functionPart))
+    return undefined
+  if (!parts.length || module.toLowerCase() !== 'offramp') return undefined
+  return `${parts.join('::')}::${module}`
+}
+
+function sameAptosModule(left: string, right: string): boolean {
+  const leftParts = left.split('::')
+  const rightParts = right.split('::')
+  if (leftParts.length < 2 || rightParts.length < 2)
+    return left.toLowerCase() === right.toLowerCase()
+  if (leftParts.slice(1).join('::').toLowerCase() !== rightParts.slice(1).join('::').toLowerCase())
+    return false
+  try {
+    return BigInt(leftParts[0]!) === BigInt(rightParts[0]!)
+  } catch {
+    return leftParts[0]!.toLowerCase() === rightParts[0]!.toLowerCase()
+  }
+}
+
+function getExecutionReport(payload: AptosEntryFunction): AptosExecutionReport | undefined {
+  const module = getOffRampModule(payload.function)
+  if (!module) return undefined
+  const functionName = payload.function.slice(payload.function.lastIndexOf('::') + 2).toLowerCase()
+  // Current execute takes the report after its proof arguments; the SDK's
+  // manually_execute entrypoint takes the report as its first argument.
+  const candidates =
+    functionName === 'execute'
+      ? [payload.arguments[1], ...payload.arguments]
+      : [payload.arguments[0], ...payload.arguments]
+  for (const candidate of candidates) {
+    const report = parseExecutionReport(candidate)
+    if (report) return report
+  }
+  return undefined
+}
+
+function aptosInteger(value: unknown): string | undefined {
+  if (value == null) return undefined
+  try {
+    return BigInt(value as bigint | number | string).toString()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Turns Aptos's VM status into stable, useful return data. Move aborts expose
+ * their module and numeric code in the status string; no ABI is required for
+ * this decoding.
+ */
+function getAptosFailureData(
+  tx: UserTransactionResponse,
+  report: AptosExecutionReport,
+  functionName: string,
+): Record<string, string> {
+  const vmStatus = tx.vm_status
+  const data: Record<string, string> = {
+    vm_status: vmStatus,
+    function: functionName,
+    gas_used: tx.gas_used,
+  }
+  const abort = vmStatus.match(/Move abort in (.+?): code (\d+)/i)
+  if (abort) {
+    data.location = abort[1]!
+    data.abort_code = abort[2]!
+  }
+  const status = vmStatus.match(/Execution failed with status:\s*(.+)$/i)
+  if (status) data.status = status[1]!.trim()
+  const destChainSelector = aptosInteger(report.destChainSelector)
+  if (destChainSelector != null) data.dest_chain_selector = destChainSelector
+  return data
+}
+
+/**
+ * Reconstructs the execution receipt omitted by Aptos when a Move execution
+ * aborts. The transaction payload still contains the BCS ExecutionReport, and
+ * the REST response retains the VM status.
+ */
+export function getAptosExecutionFailureLog(
+  tx: UserTransactionResponse,
+  address?: string,
+  versionAsHash = false,
+): ChainLog | undefined {
+  if (tx.success) return undefined
+  const payload = getEntryFunctionPayload(tx.payload)
+  if (!payload) return undefined
+  const offRampModule = getOffRampModule(payload.function)
+  if (!offRampModule || (address && !sameAptosModule(offRampModule, address))) return undefined
+  if (
+    tx.events.some((event) => {
+      if (typeof event.type !== 'string') return false
+      const eventModule = event.type.slice(0, event.type.lastIndexOf('::'))
+      const eventName = event.type.slice(event.type.lastIndexOf('::') + 2)
+      return eventName === 'ExecutionStateChanged' && sameAptosModule(eventModule, offRampModule)
+    })
+  )
+    return undefined
+  const report = getExecutionReport(payload)
+  if (!report) return undefined
+  const messageId = toAptosBytes(report.messageId)
+  const sequenceNumber = aptosInteger(report.sequenceNumber)
+  const sourceChainSelector = aptosInteger(report.sourceChainSelector)
+  if (!messageId || sequenceNumber == null || sourceChainSelector == null) return undefined
+
+  return {
+    // The OffRamp's bare address — the same form real event logs carry
+    // (Move event types prefix with the bare account address, module-less), so
+    // consumers filtering receipts-in-tx by the OffRamp address (e.g. the CLI's
+    // API-metadata `offramp`, a bare address) match failures exactly like
+    // successes.
+    address: address ?? offRampModule.split('::')[0]!,
+    topics: ['ExecutionStateChanged'],
+    // Failed Aptos executions have no event sequence number, so the synthetic log
+    // borrows index 0 — uint-friendly, like every other family's log indexes.
+    // Resume hints carrying it must not be applied as event-handle sequence
+    // cursors: parseResumeHint ignores index 0 for exactly that reason (see there).
+    index: 0,
+    blockNumber: Number(tx.version),
+    transactionHash: versionAsHash ? String(tx.version) : tx.hash,
+    blockTimestamp: Number(tx.timestamp) / 1e6,
+    data: {
+      message_id: hexlify(messageId),
+      sequence_number: sequenceNumber,
+      source_chain_selector: sourceChainSelector,
+      state: ExecutionState.Failed,
+      gas_used: tx.gas_used,
+      return_data: getAptosFailureData(tx, report, payload.function),
+    },
+  }
+}
+
+/** Converts a user transaction's execution-state events and/or synthetic failure. */
+function getAptosExecutionLogsInTransaction(
+  tx: UserTransactionResponse,
+  address: string,
+  versionAsHash: boolean,
+): ChainLog[] {
+  const failure = getAptosExecutionFailureLog(tx, address, versionAsHash)
+  // A failed Move execution discards its events, so a transaction never carries both —
+  // but keep the synthetic failure ahead of any event regardless, so the failure-first
+  // order holds under any input. Its index (0) never collides with an event's: a
+  // version is one transaction, and a failed one has no events at all.
+  const logs: ChainLog[] = failure ? [failure] : []
+  for (const [index, event] of tx.events.entries()) {
+    if (typeof event.type !== 'string') continue
+    const eventModule = event.type.slice(0, event.type.lastIndexOf('::'))
+    const eventName = event.type.slice(event.type.lastIndexOf('::') + 2)
+    if (eventName !== 'ExecutionStateChanged' || !sameAptosModule(eventModule, address)) continue
+    const seq = Number((event as { sequence_number?: unknown }).sequence_number)
+    logs.push({
+      address,
+      topics: ['ExecutionStateChanged'],
+      // The transaction response carries each event's handle sequence number — the
+      // same value the event-handle stream emits as `index` — so resume hints stay
+      // interchangeable between the two sources. Fall back to the event's position
+      // for SDK-shaped fixtures that omit it.
+      index: Number.isFinite(seq) && seq >= 0 ? seq : index,
+      blockNumber: Number(tx.version),
+      transactionHash: versionAsHash ? String(tx.version) : tx.hash,
+      blockTimestamp: Number(tx.timestamp) / 1e6,
+      data: event.data as Record<string, unknown>,
+    })
+  }
+  return logs
 }
 
 type ResEvent = AptosEvent & { version: string }
@@ -145,7 +418,13 @@ function parseResumeHint(opts: LeanNumbers<LogFilter>): AptosResumeHint | undefi
     block: Number.isFinite(block) && block > 0 ? block : undefined,
     timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined,
   }
-  if (Number.isSafeInteger(seq) && seq >= 0) parsed.seq = seq
+  // An index of 0 is not an exact cursor: a synthetic failure log carries it
+  // without being an event at all, and it is indistinguishable from a handle's
+  // own seq-0 event. Both resume correctly via the block floor instead — a
+  // version's events are always emitted whole, so blockNumber + 1 skips nothing
+  // that a seq-0 hint could have kept (a hint taken from a call's last log at
+  // seq 0 means that version held exactly one event).
+  if (Number.isSafeInteger(seq) && seq > 0) parsed.seq = seq
   const topic = hint.topics?.[0]
   if (typeof topic === 'string' && topic) parsed.topic = topic
   if (parsed.seq == null && parsed.block == null) return undefined
@@ -411,13 +690,20 @@ async function fetchHandleRound(
   return { events: out, ceiling }
 }
 
+/** One merged item of a forward stream: an event-handle event, or a synthetic execution-failure log. */
+type ForwardItem =
+  | { kind: 'event'; ev: ResEvent; handleIndex: number }
+  | { kind: 'failure'; log: ChainLog }
+
 async function* fetchEventsForward(
-  ctx: { provider: Aptos } & WithLogger,
-  opts: LeanNumbers<LogFilter> & { pollInterval?: number },
+  ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
+  opts: AptosLogStreamOpts,
   eventHandlerFields: string[],
   stateAddr: string,
   limit = 100,
-): AsyncGenerator<ResEvent> {
+  /** When set (execution-state filters), a transaction-scan source is merged in that surfaces failed Move executions — see initFailureScanState. */
+  failureScan?: { address: string },
+): AsyncGenerator<ForwardItem> {
   if (
     opts.watch &&
     (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
@@ -451,37 +737,56 @@ async function* fetchEventsForward(
         opts_ = { ...opts, startBlock: versionFloor }
     }
   }
-  const handleStates = (
-    await Promise.all(
+  // The failure scan's init (its startTime positioning can binary-search ledger
+  // versions) runs in parallel with the handle inits fetching their tip batches.
+  const [handleStateResults, scanState] = await Promise.all([
+    Promise.all(
       eventHandlerFields.map((field) =>
         initHandleState(ctx, opts_, field, stateAddr, limit, seqHint),
       ),
-    )
-  ).filter((state): state is HandleState => state !== undefined)
+    ),
+    failureScan ? initFailureScanState(ctx, opts, hint, failureScan.address) : undefined,
+  ])
+  const handleStates = handleStateResults.filter(
+    (state): state is HandleState => state !== undefined,
+  )
 
   // Mirrors the single-handle behaviour: if every handle has no events yet
   // (trivially true for a single topic whose lone handle is empty), end the
-  // stream now instead of entering the loop below.
-  if (!handleStates.length) return
+  // stream now instead of entering the loop below — unless a failure scan keeps
+  // it alive: failed executions exist even when the handle has never emitted a
+  // success, and a watch stream must keep polling for them.
+  if (!handleStates.length && !scanState) return
 
   while (
     (opts.watch && (!(opts.watch instanceof AbortSignal) || !opts.watch.aborted)) ||
-    !handleStates.every((state) => state.catchedUp)
+    !handleStates.every((state) => state.catchedUp) ||
+    (scanState != null && !scanState.catchedUp)
   ) {
     const lastReq = performance.now()
 
     // Fetch this round's new events per handle (skipping handles that are
     // already fully drained when we're not watching), buffering them onto
-    // each handle's own `pending` queue, and collect each handle's ceiling
-    // contribution for the round.
-    const ceilings = await Promise.all(
-      handleStates.map(async (state) => {
+    // each handle's own `pending` queue, and collect each source's ceiling
+    // contribution for the round — the failure scan's pages join in as one
+    // more source: its synthetic logs land on its own `pending` queue and its
+    // ceiling bounds the round exactly like a handle's batch tail.
+    const ceilings = await Promise.all([
+      ...handleStates.map(async (state) => {
         if (state.catchedUp && !opts.watch) return Infinity
         const { events, ceiling } = await fetchHandleRound(ctx, opts_, state)
         state.pending.push(...events)
         return ceiling
       }),
-    )
+      ...(scanState
+        ? [
+            fetchFailureScanRound(ctx, opts, scanState).then(({ logs, ceiling }) => {
+              scanState.pending.push(...logs)
+              return ceiling
+            }),
+          ]
+        : []),
+    ])
 
     // Bound this round to the tightest (lowest) ceiling across handles.
     // Each handle's own batch is ascending by sequence_number, but batches
@@ -508,28 +813,45 @@ async function* fetchEventsForward(
     // everything and the generator terminates.
     const ceiling = Math.min(...ceilings)
 
-    const roundEvents: { ev: ResEvent; handleIndex: number }[] = []
+    const roundItems: ForwardItem[] = []
     for (const [handleIndex, state] of handleStates.entries()) {
       if (!state.pending.length) continue
       const releasable: ResEvent[] = []
       const held: ResEvent[] = []
       for (const ev of state.pending) (+ev.version < ceiling ? releasable : held).push(ev)
       state.pending = held
-      for (const ev of releasable) roundEvents.push({ ev, handleIndex })
+      for (const ev of releasable) roundItems.push({ kind: 'event', ev, handleIndex })
+    }
+    if (scanState?.pending.length) {
+      const releasable: ChainLog[] = []
+      const held: ChainLog[] = []
+      for (const log of scanState.pending) (log.blockNumber < ceiling ? releasable : held).push(log)
+      scanState.pending = held
+      for (const log of releasable) roundItems.push({ kind: 'failure', log })
     }
 
-    // Each handle's own pending queue is already ascending by sequence_number,
-    // but handles interleave by version — sort this round's combined events so
-    // the merged output stays globally ascending, not one-handle-then-the-next.
-    roundEvents.sort(
+    // Each source's own pending queue is already ascending, but sources
+    // interleave by version — sort this round's combined items so the merged
+    // output stays globally ascending, not one-source-then-the-next. A synthetic
+    // failure never shares a version with an event (a failed Move transaction
+    // discards its events), so the event-only tiebreaks below are never reached
+    // against a failure.
+    const itemVersion = (item: ForwardItem) =>
+      item.kind === 'event' ? +item.ev.version : item.log.blockNumber
+    roundItems.sort(
       (a, b) =>
-        +a.ev.version - +b.ev.version ||
-        a.handleIndex - b.handleIndex ||
-        +a.ev.sequence_number - +b.ev.sequence_number,
+        itemVersion(a) - itemVersion(b) ||
+        (a.kind === 'event' && b.kind === 'event'
+          ? a.handleIndex - b.handleIndex || +a.ev.sequence_number - +b.ev.sequence_number
+          : 0),
     )
-    for (const { ev } of roundEvents) yield ev
+    yield* roundItems
 
-    if (opts.watch && handleStates.every((state) => state.catchedUp)) {
+    if (
+      opts.watch &&
+      handleStates.every((state) => state.catchedUp) &&
+      (scanState == null || scanState.catchedUp)
+    ) {
       let delay$ = AbortSignal.timeout(
         Math.max(
           Math.ceil((opts.pollInterval || DEFAULT_POLL_INTERVAL) - (performance.now() - lastReq)),
@@ -545,6 +867,618 @@ async function* fetchEventsForward(
   }
 }
 
+const APTOS_TRANSACTION_PAGE_SIZE = 100
+
+function isExecutionStateTopic(topic: unknown): boolean {
+  return topic === 'ExecutionStateChanged' || topic === eventToHandler.ExecutionStateChanged
+}
+
+async function getAptosLedgerVersion(provider: Aptos): Promise<number | undefined> {
+  if (typeof provider.getLedgerInfo !== 'function') return undefined
+  const version = Number((await provider.getLedgerInfo()).ledger_version)
+  return Number.isFinite(version) ? version : undefined
+}
+
+/**
+ * GraphQL documents against the Aptos Indexer v2 API (the public per-network
+ * endpoint AptosConfig resolves, or a custom one). The fullnode REST has no
+ * per-contract index of transactions — `/transactions` pages the WHOLE ledger —
+ * while the indexer's `user_transactions` table indexes entry-function calls by
+ * contract/module/function. It carries no success status, so it serves as a
+ * CANDIDATE index: every `execute`/`manually_execute` call on the OffRamp module
+ * in a version window, each hydrated (and failure-checked) against the fullnode
+ * RPC. The `transactions` table (which does carry `success`/`vm_status`) is not
+ * exposed by the public GraphQL API at all.
+ */
+const APTOS_INDEXER_USER_TXS_PROCESSOR = 'user_transaction_processor'
+
+const APTOS_INDEXER_OFFRAMP_CALLS_QUERY = `
+  query OffRampExecutions($where: user_transactions_bool_exp!, $limit: Int!) {
+    user_transactions(where: $where, order_by: {version: asc}, limit: $limit) {
+      version
+    }
+  }
+`
+
+const APTOS_INDEXER_PROCESSOR_TIP_QUERY = `
+  query UserTransactionsProcessorTip($processor: String!) {
+    processor_status(where: {processor: {_eq: $processor}}, limit: 1) {
+      last_success_version
+    }
+  }
+`
+
+type AptosIndexerCallsPage = { user_transactions: Array<{ version: number | string }> }
+type AptosIndexerProcessorTip = {
+  processor_status: Array<{ last_success_version: number | string }>
+}
+
+/**
+ * Whether the provider can answer indexer queries: the SDK's `queryIndexer`
+ * method plus a resolvable endpoint. Known networks resolve the public indexer
+ * automatically; a CUSTOM network needs `indexer` set in its AptosConfig —
+ * without it there is no per-contract index, and failure detection is skipped
+ * with a warning (see fetchFailureScanRound) rather than walking the whole chain.
+ */
+function canQueryAptosIndexer(provider: Aptos): boolean {
+  if (typeof provider.queryIndexer !== 'function') return false
+  const config = (provider as unknown as { config?: { network?: Network; indexer?: string } })
+    .config
+  if (!config) return false
+  return config.network !== Network.CUSTOM || config.indexer != null
+}
+
+/**
+ * The `user_transactions` processor's ingested tip: the indexer guarantees the
+ * table is complete through this version (a processing gap panics the processor
+ * rather than leaving holes). Undefined when the processor status row is absent.
+ */
+async function getAptosIndexerUserTxsTip(provider: Aptos): Promise<number | undefined> {
+  const { processor_status } = await provider.queryIndexer<AptosIndexerProcessorTip>({
+    query: {
+      query: APTOS_INDEXER_PROCESSOR_TIP_QUERY,
+      variables: { processor: APTOS_INDEXER_USER_TXS_PROCESSOR },
+    },
+  })
+  const tip = Number(processor_status[0]?.last_success_version)
+  return Number.isFinite(tip) && tip >= 0 ? tip : undefined
+}
+
+/**
+ * Canonical long-form Aptos address (`0x` + 64 lowercase hex) — the form the
+ * indexer's `standardize_address` writes, unlike `AccountAddress.fromString`,
+ * which rejects short hex forms.
+ */
+function toAptosLongAddress(address: string): string {
+  return `0x${address.replace(/^0x/i, '').toLowerCase().padStart(64, '0')}`
+}
+
+/**
+ * Versions of `execute`/`manually_execute` calls on the OffRamp module in
+ * `[fromVersion, toVersionExclusive)`, ascending — the per-contract candidate
+ * index. The indexer stores the contract address in canonical long form.
+ */
+async function getAptosIndexerOffRampCallVersions(
+  provider: Aptos,
+  address: string,
+  fromVersion: number,
+  toVersionExclusive: number,
+  limit: number,
+): Promise<number[]> {
+  const [pkg, module = 'offramp'] = address.split('::')
+  const contract = toAptosLongAddress(pkg!)
+  const { user_transactions } = await provider.queryIndexer<AptosIndexerCallsPage>({
+    query: {
+      query: APTOS_INDEXER_OFFRAMP_CALLS_QUERY,
+      variables: {
+        where: {
+          version: { _gte: fromVersion, _lt: toVersionExclusive },
+          entry_function_contract_address: { _eq: contract },
+          entry_function_module_name: { _eq: module },
+          entry_function_function_name: { _in: APTOS_OFFRAMP_EXECUTE_FUNCTIONS },
+        },
+        limit,
+      },
+    },
+  })
+  return user_transactions
+    .map((row) => Number(row.version))
+    .filter(
+      (version) =>
+        Number.isFinite(version) && version >= fromVersion && version < toVersionExclusive,
+    )
+    .sort((left, right) => left - right)
+}
+
+/** Fetches a committed user transaction by version, tolerating non-user responses. */
+async function hydrateAptosUserTxByVersion(
+  provider: Aptos,
+  version: number,
+): Promise<UserTransactionResponse | undefined> {
+  if (typeof provider.getTransactionByVersion !== 'function') return undefined
+  const tx = await provider.getTransactionByVersion({ ledgerVersion: version })
+  if (tx.type !== TransactionResponseType.User) return undefined
+  return tx as UserTransactionResponse
+}
+
+/**
+ * Fetches one ascending page of committed transactions starting at `startVersion`.
+ *
+ * The REST `/transactions` endpoint takes `start` as a LEDGER VERSION (not an
+ * offset into a list) and returns up to `limit` transactions from it, ascending —
+ * and rejects `start` above the current ledger version with a 400, so callers must
+ * clamp their scan target to the tip (see resolveAptosEndVersion). The endpoint is
+ * called directly (rather than via `Aptos.getTransactions()`), both to pin exactly
+ * one page per call and because SDK-shaped test providers implement the method form.
+ */
+async function getAptosTransactionBatch(
+  provider: Aptos,
+  startVersion: number,
+  limit: number,
+): Promise<unknown[]> {
+  const config = (provider as unknown as { config?: { client?: unknown } }).config
+  const getTransactions = provider.getTransactions
+  if (!config?.client && typeof getTransactions === 'function')
+    return (await getTransactions.call(provider, {
+      options: { offset: startVersion, limit },
+    })) as unknown[]
+
+  const { data }: { data: unknown[] } = await getAptosFullNode({
+    aptosConfig: provider.config,
+    originMethod: 'getTransactions',
+    path: 'transactions',
+    params: { start: startVersion, limit },
+  })
+  return data
+}
+
+/**
+ * Resolves the endBlock filter into a ledger version bound for transaction scans.
+ * Positive numeric ends are clamped to the current ledger version: the endpoint 400s
+ * on any `start` above the tip, and a page that exactly fills to the tip would
+ * otherwise make the next request step past it.
+ */
+async function resolveAptosEndVersion(
+  provider: Aptos,
+  endBlock: number | bigint | 'finalized' | 'latest',
+): Promise<number> {
+  if (typeof endBlock === 'number' || typeof endBlock === 'bigint') {
+    const end = Number(endBlock)
+    if (Number.isFinite(end) && end >= 0) {
+      const latest = await getAptosLedgerVersion(provider)
+      return latest == null ? end : Math.min(end, latest)
+    }
+    const latest = await getAptosLedgerVersion(provider)
+    return latest == null ? Number.MAX_SAFE_INTEGER : Math.max(0, latest + end)
+  }
+  return (await getAptosLedgerVersion(provider)) ?? Number.MAX_SAFE_INTEGER
+}
+
+async function findAptosVersionAtOrAfter(
+  provider: Aptos,
+  timestamp: number,
+  latestVersion: number,
+): Promise<number> {
+  if (!Number.isFinite(timestamp) || latestVersion < 0) return 0
+  if (typeof provider.getTransactionByVersion !== 'function') return 0
+  let low = 0
+  let high = latestVersion
+  let result = latestVersion + 1
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    if ((await getVersionTimestamp(provider, mid)) < timestamp) low = mid + 1
+    else {
+      result = mid
+      high = mid - 1
+    }
+  }
+  return result
+}
+
+/**
+ * Streams execution-state logs from committed transactions — successes AND
+ * failures — without consulting event handles.
+ *
+ * Unlike event-handle queries, the transaction endpoint retains failed user
+ * transactions, including their payload and `vm_status`, even when Move has
+ * discarded all events from the aborted execution. Used as the sole source for
+ * providers that cannot serve event handles (see streamAptosLogs); the handle-
+ * backed stream instead adds a failure-only scan as one more source in
+ * fetchEventsForward's round merge.
+ */
+async function* streamAptosExecutionLogs(
+  ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
+  inputOpts: AptosLogStreamOpts,
+): AsyncGenerator<ChainLog> {
+  let opts = inputOpts
+  if (
+    opts.since?.address &&
+    (!opts.address || opts.since.address.toLowerCase() !== opts.address.toLowerCase())
+  )
+    opts = { ...opts, since: undefined }
+  if (opts.since?.topics?.[0] != null && !isExecutionStateTopic(opts.since.topics[0]))
+    opts = { ...opts, since: undefined }
+  opts = withSinceStart(opts)
+
+  if (!opts.address || !opts.address.includes('::')) throw new CCIPAptosAddressModuleRequiredError()
+  if (!opts.topics?.length || !isExecutionStateTopic(opts.topics[0]))
+    throw new CCIPTopicsInvalidError(opts.topics ?? [])
+  const hasStart = opts.startBlock != null || opts.startTime != null
+  if (!hasStart) throw new CCIPLogsRequiresStartError()
+  const address = opts.address
+  opts.endBlock ??= 'latest'
+  if (
+    opts.watch &&
+    (typeof opts.endBlock === 'number' || typeof opts.endBlock === 'bigint') &&
+    Number(opts.endBlock) > 0
+  )
+    throw new CCIPLogsWatchRequiresFinalityError(Number(opts.endBlock))
+
+  const logger = ctx.logger ?? console
+  const typeAndVersionChain = ctx.typeAndVersion
+    ? (ctx as SetRequired<typeof ctx, 'typeAndVersion'>)
+    : {
+        logger,
+        typeAndVersion: () =>
+          Promise.reject(new CCIPNotImplementedError('typeAndVersion in this getLogs context')),
+      }
+  const endBlock = opts.endBlock as number | bigint | 'finalized' | 'latest'
+  const initialEnd = await resolveAptosEndVersion(ctx.provider, endBlock)
+  let nextVersion = Math.max(0, Number(opts.startBlock ?? 0))
+  const hintedVersion = Number(opts.since?.blockNumber)
+  if (Number.isFinite(hintedVersion) && hintedVersion >= 0)
+    nextVersion = Math.max(nextVersion, hintedVersion + 1)
+  if (opts.startBlock == null && opts.startTime != null && initialEnd < Number.MAX_SAFE_INTEGER)
+    nextVersion = Math.max(
+      nextVersion,
+      await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), initialEnd),
+    )
+
+  const scanTo = async function* (end: number): AsyncGenerator<ChainLog> {
+    while (nextVersion <= end) {
+      const pageStart = nextVersion
+      const rawBatch = await getAptosTransactionBatch(
+        ctx.provider,
+        pageStart,
+        APTOS_TRANSACTION_PAGE_SIZE,
+      )
+      const batch = rawBatch
+        .filter((tx): tx is Record<string, unknown> => isRecord(tx) && tx.version != null)
+        .sort((left, right) => Number(left.version) - Number(right.version))
+      if (!batch.length) return
+
+      let maxVersion = -1
+      let reachedEnd = false
+      for (const rawTx of batch) {
+        const version = Number(rawTx.version)
+        if (!Number.isFinite(version)) continue
+        maxVersion = Math.max(maxVersion, version)
+        if (version < nextVersion) continue
+        if (version > end) {
+          reachedEnd = true
+          break
+        }
+        nextVersion = version + 1
+        if (rawTx.type !== TransactionResponseType.User) continue
+        const tx = rawTx as unknown as UserTransactionResponse
+        if (opts.startTime != null && !(Number(tx.timestamp) / 1e6 >= Number(opts.startTime)))
+          continue
+        const logs = getAptosExecutionLogsInTransaction(tx, address, Boolean(opts.versionAsHash))
+        if (!logs.length) continue
+        if (!(await passesTypeAndVersion(typeAndVersionChain, address, opts.typeAndVersions)))
+          continue
+        yield* logs
+      }
+
+      if (
+        reachedEnd ||
+        maxVersion < pageStart ||
+        rawBatch.length < APTOS_TRANSACTION_PAGE_SIZE ||
+        maxVersion >= end ||
+        nextVersion <= pageStart
+      )
+        return
+    }
+  }
+
+  yield* scanTo(initialEnd)
+  const watch = opts.watch
+  if (!watch) return
+  const pollInterval = Number(opts.pollInterval) || DEFAULT_POLL_INTERVAL
+  while (!(watch instanceof AbortSignal) || !watch.aborted) {
+    const lastReq = performance.now()
+    yield* scanTo(await resolveAptosEndVersion(ctx.provider, endBlock))
+    let delay$ = AbortSignal.timeout(
+      Math.max(Math.ceil(pollInterval - (performance.now() - lastReq)), 1),
+    )
+    if (watch instanceof AbortSignal) {
+      if (watch.aborted) break
+      delay$ = AbortSignal.any([watch, delay$])
+    }
+    await signalToPromise(delay$).catch(() => false)
+  }
+}
+
+/** Candidate/tail pages a failure-scan round walks before handing control back to the round merge (progressive catch-up). */
+const FAILURE_SCAN_PAGES_PER_ROUND = 25
+
+/** Page size for indexer candidate queries (the public API caps anonymous selects at 100). */
+const FAILURE_SCAN_INDEXER_PAGE_SIZE = 100
+
+/**
+ * How far past the indexer's ingested tip a failure scan will walk the fullnode's
+ * unindexed `/transactions` tail before declaring the index too stale: walking
+ * the whole ledger is exactly what the indexer exists to avoid, so beyond this
+ * (small, seconds-of-lag sized) window the scan truncates to the indexed prefix
+ * with a warning — a watch stream picks the rest up as the index advances.
+ */
+const FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS = 10_000
+
+/**
+ * Per-stream state of the failure-scan source merged into fetchEventsForward's rounds.
+ *
+ * Aptos event handles cannot see failed Move executions — an abort discards the
+ * transaction's events — but a failed user transaction is retained by the
+ * fullnode (payload with the BCS ExecutionReport, `vm_status`), so its receipt can
+ * be reconstructed as a synthetic ExecutionStateChanged(state=Failed) log (see
+ * getAptosExecutionFailureLog). FINDING the failures is the problem: the fullnode
+ * has no per-contract index of transactions, so the scan's candidates come from
+ * the Aptos Indexer v2 API — `user_transactions` filtered by the OffRamp's
+ * contract/module/function (see getAptosIndexerOffRampCallVersions) — each
+ * hydrated and failure-checked against the fullnode RPC. Only the indexer's
+ * un-ingested tail (bounded by FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS) is walked
+ * via `/transactions`. Without an indexer there is no per-contract filter at all,
+ * and failure detection is skipped with a warning instead of paging the whole
+ * chain.
+ */
+type FailureScanState = {
+  provider: Aptos
+  /** OffRamp module (`<address>::offramp`) the failed execution must belong to. */
+  address: string
+  versionAsHash: boolean
+  /** opts.startTime, applied per transaction just before producing its log. */
+  startTime: number | undefined
+  /** Next ledger version to scan. */
+  nextVersion: number
+  /**
+   * Scan target as a ledger version, tip-clamped (see resolveAptosEndVersion).
+   * Non-watch streams freeze it at the version known when the stream started —
+   * mirroring the handles' own `end` cursor taken from their tip batch — so a
+   * bounded scan ends instead of chasing the moving tip. Watch streams
+   * re-resolve it every poll interval (memoized like the handles' `notAfter`)
+   * so newly committed versions are picked up.
+   */
+  target: () => Promise<number>
+  /**
+   * The `user_transactions` processor's ingested tip (see
+   * getAptosIndexerUserTxsTip), or undefined when no indexer is available —
+   * frozen like `target` for non-watch, re-resolved per poll interval for watch.
+   */
+  indexerTip: () => Promise<number | undefined>
+  /** Synthetic logs withheld until the round ceiling passes them (see fetchEventsForward). */
+  pending: ChainLog[]
+  /** True once this source is done for the stream's current target: its `catchedUp`. */
+  catchedUp: boolean
+  /** Degradation warnings (no indexer / stale index) fire once per stream, not per round. */
+  warned: boolean
+}
+
+async function initFailureScanState(
+  ctx: { provider: Aptos } & WithLogger,
+  opts: AptosLogStreamOpts,
+  hint: AptosResumeHint | undefined,
+  address: string,
+): Promise<FailureScanState> {
+  const endBlock = (opts.endBlock ?? 'latest') as number | bigint | 'finalized' | 'latest'
+  const pollInterval = Number(opts.pollInterval) || DEFAULT_POLL_INTERVAL
+  const resolve = () => resolveAptosEndVersion(ctx.provider, endBlock)
+  let target: () => Promise<number>
+  if (opts.watch) {
+    target = memoize(resolve, { async: true, maxArgs: 0, expires: pollInterval })
+  } else {
+    const end = await resolve()
+    target = () => Promise.resolve(end)
+  }
+  // Same freezing policy for the indexer tip as for the target. Unavailable
+  // indexers resolve to undefined every time: each round re-checks cheaply, so a
+  // caller that adds an indexer (or a fresh stream) picks it up without restart.
+  let indexerTip: () => Promise<number | undefined>
+  if (!canQueryAptosIndexer(ctx.provider)) {
+    indexerTip = () => Promise.resolve(undefined)
+  } else if (opts.watch) {
+    indexerTip = memoize(getAptosIndexerUserTxsTip.bind(null, ctx.provider), {
+      async: true,
+      maxArgs: 0,
+      expires: pollInterval,
+    })
+  } else {
+    const tip = await getAptosIndexerUserTxsTip(ctx.provider)
+    indexerTip = () => Promise.resolve(tip)
+  }
+
+  // The hint's blockNumber is a global ledger version whose logs were delivered
+  // whole (version-atomic rounds), so the scan resumes strictly past it — whatever
+  // the hint's `index` addresses: a success event's index belongs to the handle's
+  // sequence space (and the hinted version's transaction cannot have ALSO failed),
+  // and a synthetic failure's index (0) is never a handle sequence cursor —
+  // parseResumeHint drops index 0, leaving the block floor.
+  let nextVersion = Math.max(0, Number(opts.startBlock ?? 0))
+  if (hint?.block != null) nextVersion = Math.max(nextVersion, hint.block + 1)
+  if (opts.startBlock == null && opts.startTime != null) {
+    const tip = await getAptosLedgerVersion(ctx.provider)
+    if (tip != null)
+      nextVersion = Math.max(
+        nextVersion,
+        await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), tip),
+      )
+  }
+  return {
+    provider: ctx.provider,
+    address,
+    versionAsHash: Boolean(opts.versionAsHash),
+    startTime: opts.startTime != null ? Number(opts.startTime) : undefined,
+    nextVersion,
+    target,
+    indexerTip,
+    pending: [],
+    catchedUp: false,
+    warned: false,
+  }
+}
+
+/** Emits a degradation warning once per stream (per round would spam watch polls). */
+function warnFailureScanOnce(state: FailureScanState, logger: unknown, message: string) {
+  if (state.warned) return
+  state.warned = true
+  const warn = (logger as { warn?: (msg: string) => void } | undefined)?.warn ?? console.warn
+  warn(message)
+}
+
+/**
+ * One round's worth of the failure scan, returning newly found synthetic failure
+ * logs plus this source's ceiling contribution — an EXCLUSIVE version bound:
+ * every version strictly below it is fully scanned, and +Infinity once this
+ * source is done with the round's target. Candidates below the indexer tip come
+ * from the per-contract index (hydrated and failure-checked against the
+ * fullnode); the un-indexed tail is walked via `/transactions` only as far as
+ * FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS past the tip, truncating with a warning
+ * beyond that (a watch stream picks the rest up as the index advances).
+ */
+async function fetchFailureScanRound(
+  ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
+  opts: LeanNumbers<LogFilter>,
+  state: FailureScanState,
+): Promise<{ logs: ChainLog[]; ceiling: number }> {
+  const target = await state.target()
+  if (state.nextVersion > target) {
+    state.catchedUp = true
+    return { logs: [], ceiling: Infinity }
+  }
+  const typeAndVersionChain = ctx.typeAndVersion
+    ? (ctx as SetRequired<typeof ctx, 'typeAndVersion'>)
+    : {
+        logger: ctx.logger ?? console,
+        typeAndVersion: () =>
+          Promise.reject(new CCIPNotImplementedError('typeAndVersion in this getLogs context')),
+      }
+  const out: ChainLog[] = []
+  // The cursor itself proves every version below it complete, so it is the
+  // round's initial safe ceiling; everything scanned this round only raises it.
+  let ceiling = state.nextVersion
+  const emitFailure = async (tx: UserTransactionResponse) => {
+    if (state.startTime != null && !(Number(tx.timestamp) / 1e6 >= state.startTime)) return
+    const failure = getAptosExecutionFailureLog(tx, state.address, state.versionAsHash)
+    if (!failure) return
+    if (!(await passesTypeAndVersion(typeAndVersionChain, state.address, opts.typeAndVersions)))
+      return
+    out.push(failure)
+  }
+
+  const indexerTip = await state.indexerTip()
+  if (indexerTip == null) {
+    warnFailureScanOnce(
+      state,
+      ctx.logger,
+      'Aptos failed-execution detection requires the Indexer v2 API (there is no per-contract index of transactions on the fullnode RPC). Configure `indexer` in AptosConfig to enable it; streaming successful executions only.',
+    )
+    // No index to scan against: this source is done rather than paging the whole
+    // ledger — an unfiltered chain walk is exactly what the index exists to avoid.
+    state.catchedUp = true
+    return { logs: [], ceiling: Infinity }
+  }
+
+  // A. Indexed candidates: every OffRamp execution call in the remaining window
+  // below the ingested tip, hydrated one by one against the authoritative RPC.
+  const indexEnd = Math.min(target, indexerTip)
+  if (state.nextVersion <= indexEnd) {
+    for (
+      let page = 0;
+      page < FAILURE_SCAN_PAGES_PER_ROUND && state.nextVersion <= indexEnd;
+      page++
+    ) {
+      const versions = await getAptosIndexerOffRampCallVersions(
+        state.provider,
+        state.address,
+        state.nextVersion,
+        indexEnd + 1,
+        FAILURE_SCAN_INDEXER_PAGE_SIZE,
+      )
+      for (const version of versions) {
+        state.nextVersion = version + 1
+        ceiling = Math.max(ceiling, version + 1)
+        const tx = await hydrateAptosUserTxByVersion(state.provider, version)
+        if (tx) await emitFailure(tx)
+      }
+      // An empty or short page covers the whole requested window — the processor
+      // tip guarantees the table is complete through indexEnd — so the window is
+      // done regardless of how few calls it contained.
+      if (versions.length < FAILURE_SCAN_INDEXER_PAGE_SIZE) {
+        state.nextVersion = indexEnd + 1
+        ceiling = Math.max(ceiling, indexEnd + 1)
+        break
+      }
+    }
+  }
+
+  // B. Un-indexed tail: the indexer's ingestion lag, walked via /transactions
+  // (requests range-clamped through the target — the endpoint 400s on any start
+  // above the ledger tip, so a page that exactly fills to the tip must not make
+  // the next request step past it).
+  if (state.nextVersion <= target) {
+    if (target - state.nextVersion + 1 > FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS) {
+      warnFailureScanOnce(
+        state,
+        ctx.logger,
+        `Aptos indexer is more than ${FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS} versions behind the ledger (ingested through ${indexerTip}); ` +
+          `failed-execution detection is truncated to the indexed prefix — the remainder is picked up as the index catches up.`,
+      )
+      state.catchedUp = true
+      return { logs: out, ceiling: Infinity }
+    }
+    for (let page = 0; page < FAILURE_SCAN_PAGES_PER_ROUND && state.nextVersion <= target; page++) {
+      const limit = Math.min(APTOS_TRANSACTION_PAGE_SIZE, target - state.nextVersion + 1)
+      const rawBatch = await getAptosTransactionBatch(state.provider, state.nextVersion, limit)
+      const batch = rawBatch
+        .filter((tx): tx is Record<string, unknown> => isRecord(tx) && tx.version != null)
+        .sort((left, right) => Number(left.version) - Number(right.version))
+      if (!batch.length) {
+        // A range that exists returning nothing is a broken node — stop scanning
+        // rather than spin on it forever (mirrors the handles' flaky-empty fallback).
+        state.catchedUp = true
+        break
+      }
+      for (const rawTx of batch) {
+        const version = Number(rawTx.version)
+        if (!Number.isFinite(version)) continue
+        state.nextVersion = version + 1
+        ceiling = Math.max(ceiling, version + 1)
+        if (rawTx.type !== TransactionResponseType.User) continue
+        await emitFailure(rawTx as unknown as UserTransactionResponse)
+      }
+    }
+  }
+  state.catchedUp ||= state.nextVersion > target
+  return { logs: out, ceiling: state.catchedUp ? Infinity : ceiling }
+}
+
+function hasAptosConfiguredClient(provider: Aptos): boolean {
+  return Boolean((provider as unknown as { config?: { client?: unknown } }).config?.client)
+}
+
+/**
+ * Whether the provider can serve the event-handle stream: a configured client (a
+ * real AptosConfig routes getAptosFullNode through it), a `view` function (the
+ * state-address lookup) and `getLedgerInfo` (the failure scan's tip). SDK-shaped
+ * test providers without them fall back to the pure transaction scan.
+ */
+function canServeAptosEventHandles(provider: Aptos): boolean {
+  return (
+    hasAptosConfiguredClient(provider) &&
+    typeof provider.view === 'function' &&
+    typeof provider.getLedgerInfo === 'function'
+  )
+}
+
 /**
  * Streams logs from the Aptos blockchain based on filter options.
  * @param ctx - Context containing the Aptos provider, and optionally `typeAndVersion` and
@@ -552,9 +1486,11 @@ async function* fetchEventsForward(
  * @param opts - Log filter options.
  * @returns Async generator of log entries.
  */
-export async function* streamAptosLogs(
+async function* streamAptosEventLogs(
   ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
-  opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean },
+  opts: AptosLogStreamOpts,
+  /** When set (execution-state filters), a failure-scan source joins the round merge in fetchEventsForward. */
+  failureScan = false,
 ): AsyncGenerator<ChainLog> {
   const limit = 100
   const logger = ctx.logger ?? console
@@ -616,7 +1552,22 @@ export async function* streamAptosLogs(
     },
   })
 
-  for await (const ev of fetchEventsForward(ctx, opts, eventHandlerFields, stateAddr, limit)) {
+  for await (const item of fetchEventsForward(
+    ctx,
+    opts,
+    eventHandlerFields,
+    stateAddr,
+    limit,
+    failureScan ? { address: opts.address } : undefined,
+  )) {
+    // The failure scan's synthetic logs are already fully formed (they carry the
+    // failed transaction's own hash/timestamp) — only event-handle events need
+    // the per-event hydration below.
+    if (item.kind === 'failure') {
+      yield item.log
+      continue
+    }
+    const ev = item.ev
     // Derive the topic from THIS event's own type. With multiple handles now
     // merged into one stream, hoisting the topic from the first event (as the
     // single-topic code used to do) would stamp every later event — even one
@@ -636,4 +1587,35 @@ export async function* streamAptosLogs(
       blockTimestamp: await getVersionTimestamp(ctx.provider, +ev.version),
     }
   }
+}
+
+/**
+ * Streams Aptos logs. Execution-state queries (the `ExecutionStateChanged` topic,
+ * named or as its raw handle path) add a transaction-scan source to the event-handle
+ * stream so failed Move executions — which Aptos leaves no events for — surface as
+ * synthetic state=Failed logs, alongside the successes, in every mode (watch or not,
+ * single- or multi-topic), without changing the shape or resume cursor of successful
+ * event logs. Providers that cannot serve event handles at all fall back to a pure
+ * transaction scan serving both successes and failures.
+ */
+export async function* streamAptosLogs(
+  ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
+  opts: AptosLogStreamOpts,
+): AsyncGenerator<ChainLog> {
+  const hasExecutionTopic = Boolean(opts.topics?.some(isExecutionStateTopic))
+  if (!hasExecutionTopic) {
+    yield* streamAptosEventLogs(ctx, opts)
+    return
+  }
+
+  if (canServeAptosEventHandles(ctx.provider)) {
+    yield* streamAptosEventLogs(ctx, opts, true)
+    return
+  }
+
+  if (opts.topics?.length === 1 && isExecutionStateTopic(opts.topics[0])) {
+    yield* streamAptosExecutionLogs(ctx, opts)
+    return
+  }
+  yield* streamAptosEventLogs(ctx, opts)
 }
