@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Aptos and Sui now support detecting execution failures
+
 ## [1.13.0] - 2026-08-25
 
 - Tests: networked suites (`*.integration.test.ts`, `*.e2e.test.ts`, `*.fork.test.ts`) take per-network OS locks via the new `useResource` test helper, so concurrent `node --test` file runs never share a live RPC endpoint (suites declare the networks they talk to and wait on each other instead of rate-limiting public gateways); `npm run test:unit` now runs only offline unit tests
