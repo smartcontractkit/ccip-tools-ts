@@ -49,7 +49,8 @@ export type TokenPoolFamily = (typeof TOKEN_POOL_FAMILIES)[number]
 /**
  * Supported on-chain `typeAndVersion` pool types. The burn-* variants are interface-compatible
  * for CCT ops and share the `BurnMint` ABI (see {@link getTokenPoolFamily}); `LockReleaseTokenPool`
- * is distinct. Unsupported values fail in {@link parseTokenPoolVersion}.
+ * is distinct. Unsupported values fail in {@link parseTokenPoolVersion}, which also normalizes
+ * v1.5.0's `*AndProxy` shims onto these base names.
  */
 export const TOKEN_POOL_TYPES = [
   'BurnMintTokenPool',
@@ -108,7 +109,7 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
 
 /**
  * Narrows raw `typeAndVersion` strings to a known {@link TokenPoolType} and
- * {@link TokenPoolVersion}.
+ * {@link TokenPoolVersion}. A v1.5.0 `*AndProxy` type normalizes to its base pool type.
  * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
  * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version
  */
@@ -121,12 +122,16 @@ export function parseTokenPoolVersion({
   contractType: string
   version: string
 }): { type: TokenPoolType; version: TokenPoolVersion } {
-  if (!isTokenPoolType(contractType))
+  // v1.5.0's `*AndProxy` shims override only lockOrBurn/releaseOrMint, so every function a CCT op
+  // encodes is the base pool's — and the vendored v1.5.0 ABIs are the `*_and_proxy` ones already.
+  const type =
+    version === TokenPoolVersion.V1_5_0 ? contractType.replace(/AndProxy$/, '') : contractType
+  if (!isTokenPoolType(type))
     throw new CCTContractTypeInvalidError(address, TOKEN_POOL_TYPES.join(', '), contractType)
   if (!isTokenPoolVersion(version))
     throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
 
-  return { type: contractType, version }
+  return { type, version }
 }
 
 /**

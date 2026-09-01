@@ -822,10 +822,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
-   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC
-   * pools, or v1.5.0 `*AndProxy` pools, use `cct.chain.getTokenPoolConfig()`, the tolerant
-   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is
-   * not readable here.
+   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0
+   * `*AndProxy` pool's `previousPool` (it reads here as its base `type`), use
+   * `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool version exposes a
+   * pending-owner getter, so a proposed owner is not readable here.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its
