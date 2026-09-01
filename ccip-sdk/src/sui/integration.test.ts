@@ -7,6 +7,7 @@ import '../index.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
+import { type ChainLog, ExecutionState } from '../types.ts'
 import {
   findOffRampPackagesByCcipActivity,
   getCcipStateAddress,
@@ -446,5 +447,210 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
 
     const remotes = await chain.getTokenPoolRemotes(CCIP_BNM_POOL)
     assert.equal(remotes['ethereum-testnet-sepolia']?.remoteToken.toLowerCase(), SEPOLIA_BNM)
+  })
+})
+
+describe('Sui failed execution detection integration (sui-testnet)', { skip }, () => {
+  // A live message (bsc-testnet → sui, seq 572) whose first attempt SUCCEEDED
+  // (tx 8gNPcma…, cp 303_556_303, minted) and whose later duplicate
+  // manually_init_execute aborted unwrapping the empty ReceiverParams hot
+  // potato (offramp_state_helper::get_dest_token_transfer_data, abort code 7 =
+  // ETokenTransferDoesNotExist — the skipped-report guard for already-executed
+  // reports). That double-execution attempt is NOT a failed execution: only
+  // the success must surface.
+  const SUCCESS_TX = '8gNPcma69CK9apVP1eqJcBJLcgYz6WX2pT1N6L1aKcSq'
+  const SUCCESS_CHECKPOINT = 303_556_303
+  // the duplicate attempt at cp 303_556_371 (68 checkpoints after the success)
+  const DUPLICATE_TX = 'BGuoDp9oLQexWva6zhiLGW7sUiGMxh38y6KaxB2BaFSQ'
+  const MESSAGE_ID = '0xdaad1218f179b7d52259922f16b66fd0b77fc921f06bc8059a83b37e07d4ca35'
+  const SEQUENCE = 572n
+  const BSC_TESTNET_SELECTOR = 13264668187771770619n
+  // ~100 checkpoints around the attempts, so the merged stream picks them up
+  const DOUBLE_EXEC_RANGE = {
+    startBlock: 303_556_271,
+    endBlock: 303_556_471,
+  }
+
+  // A live message whose BOTH executions FAILED (arbitrum-sepolia → sui,
+  // seq 363): first exec EBKErVqpgo… and last exec GWzobLiuJ… both aborted in
+  // the token's managed_token::validate_mint (abort code 7 — a REAL failure
+  // from another module, not the offramp's skipped-report guard), so the
+  // definitive state is failure and BOTH synthetic receipts must surface.
+  const EFFECTIVE_MESSAGE_ID = '0x779543c63ac83b53a1893dc973d03dfbfd3170322542d629fc6fd156f4d9da86'
+  const EFFECTIVE_SEQUENCE = 363n
+  const FIRST_FAILED_TX = 'EBKErVqpgoewdGD2bApVKmMiFPN7NNVYxYmQ92iASo9K'
+  const LAST_FAILED_TX = 'GWzobLiuJhVtSHDRHuMv866j37JgfaJbpyykXJYA5gPv'
+  const FIRST_FAILED_CHECKPOINT = 291_123_524
+  const LAST_FAILED_CHECKPOINT = 291_123_590
+  const MANAGED_TOKEN = '0x2498ef5418740a8c422b9581cd9b8b56cc372938a2111557c158c46307d916f0'
+  // a range comprising both failed txs, padded ~100 checkpoints each side
+  const EFFECTIVE_FAILURE_RANGE = {
+    startBlock: 291_123_424,
+    endBlock: 291_123_690,
+  }
+
+  // decoded messageId comparisons: real event logs carry message_id as a byte
+  // array in parsedJson, synthetic failure logs as a hex string — decodeReceipt
+  // normalizes both
+  const failuresOf = (logs: ChainLog[], messageId: string) =>
+    logs.filter(
+      (log) =>
+        SuiChain.decodeReceipt(log)?.messageId === messageId &&
+        (log.data as { state?: number }).state === ExecutionState.Failed,
+    )
+  const successesOf = (logs: ChainLog[], messageId: string) =>
+    logs.filter(
+      (log) =>
+        SuiChain.decodeReceipt(log)?.messageId === messageId &&
+        (log.data as { state?: number }).state === ExecutionState.Success,
+    )
+
+  let chain: SuiChain
+  before(async () => {
+    chain = await SuiChain.fromUrl(SUI_TESTNET_RPC)
+  })
+
+  it('getLogs emits the success and skips the double-exec attempt for a message that succeeded', async () => {
+    const logs: ChainLog[] = []
+    for await (const log of chain.getLogs({
+      address: OFFRAMP,
+      topics: ['ExecutionStateChanged'],
+      ...DOUBLE_EXEC_RANGE,
+    })) {
+      logs.push(log)
+    }
+    // the earlier attempt's real success event surfaces; the duplicate
+    // execution attempt left no state event and its guard abort is not a failure
+    assert.equal(successesOf(logs, MESSAGE_ID).length, 1, 'exactly the committed success')
+    assert.equal(failuresOf(logs, MESSAGE_ID).length, 0, 'no failure surfaces for the message')
+    const success = successesOf(logs, MESSAGE_ID)[0]!
+    assert.equal(success.transactionHash, SUCCESS_TX)
+    assert.equal(success.blockNumber, SUCCESS_CHECKPOINT)
+    const receipt = SuiChain.decodeReceipt(success)
+    assert.ok(receipt)
+    assert.equal(receipt.state, ExecutionState.Success)
+    assert.equal(receipt.messageId, MESSAGE_ID)
+    assert.equal(receipt.sequenceNumber, SEQUENCE)
+    assert.equal(success.address, OFFRAMP)
+
+    // the merged stream stays globally ascending (block, then log index)
+    for (let i = 1; i < logs.length; i++)
+      assert.ok(
+        logs[i]!.blockNumber >= logs[i - 1]!.blockNumber,
+        `log ${i} must not precede its predecessor`,
+      )
+    // dedupe keys stay unique across both sources
+    const keys = new Set(logs.map((log) => `${log.transactionHash}:${log.index}`))
+    assert.equal(logs.length, logs.length && keys.size)
+  })
+
+  it('getTransaction does not reconstruct a failure from the skipped double-exec attempt', async () => {
+    const tx = await chain.getTransaction(DUPLICATE_TX)
+    const failure = tx.logs.find((log) => log.topics[0] === 'ExecutionStateChanged')
+    assert.equal(
+      failure,
+      undefined,
+      'the duplicate-execution guard abort is not a failed execution',
+    )
+  })
+
+  it('getExecutionReceipts emits only the success of a double-executed message, breaking on it', async () => {
+    const executions = []
+    for await (const execution of chain.getExecutionReceipts({
+      offRamp: OFFRAMP,
+      messageId: MESSAGE_ID,
+      sourceChainSelector: BSC_TESTNET_SELECTOR,
+      sequenceNumber: SEQUENCE,
+      startBlock: SUCCESS_CHECKPOINT - 100,
+    })) {
+      executions.push(execution)
+    }
+    // the duplicate attempt after the success is skipped; the success ends the
+    // stream — the usual getExecutionReceipts break-on-success contract
+    assert.equal(executions.length, 1)
+    const { receipt, log } = executions[0]!
+    assert.equal(receipt.state, ExecutionState.Success)
+    assert.equal(receipt.messageId, MESSAGE_ID)
+    assert.equal(receipt.sequenceNumber, SEQUENCE)
+    assert.equal(receipt.sourceChainSelector, BSC_TESTNET_SELECTOR)
+    assert.equal(log.address, OFFRAMP)
+    assert.equal(log.blockNumber, SUCCESS_CHECKPOINT)
+    assert.equal(log.transactionHash, SUCCESS_TX)
+  })
+
+  it('getLogs emits BOTH failures of a message whose executions all failed', async () => {
+    const logs: ChainLog[] = []
+    for await (const log of chain.getLogs({
+      address: OFFRAMP,
+      topics: ['ExecutionStateChanged'],
+      ...EFFECTIVE_FAILURE_RANGE,
+    })) {
+      logs.push(log)
+    }
+    // both failed attempts surface as synthetic state=3 logs in the ascending stream
+    const failures = failuresOf(logs, EFFECTIVE_MESSAGE_ID)
+    assert.equal(failures.length, 2, 'both failed executions are picked up')
+    const [first, last] = failures.sort((left, right) => left.blockNumber - right.blockNumber)
+    assert.equal(first!.transactionHash, FIRST_FAILED_TX)
+    assert.equal(first!.blockNumber, FIRST_FAILED_CHECKPOINT)
+    assert.equal(last!.transactionHash, LAST_FAILED_TX)
+    assert.equal(last!.blockNumber, LAST_FAILED_CHECKPOINT)
+    for (const failure of [first!, last!]) {
+      assert.equal(failure.index, 0, 'synthetic failures use uint-friendly index 0')
+      assert.equal(failure.address, OFFRAMP)
+      const receipt = SuiChain.decodeReceipt(failure)
+      assert.ok(receipt)
+      assert.equal(receipt.messageId, EFFECTIVE_MESSAGE_ID)
+      assert.equal(receipt.sequenceNumber, EFFECTIVE_SEQUENCE)
+      assert.equal(receipt.sourceChainSelector, ARB_SEP_SELECTOR)
+      assert.equal(receipt.state, ExecutionState.Failed)
+      // the real abort: managed_token::validate_mint, not the skipped-report guard
+      assert.equal(
+        (receipt.returnData as Record<string, unknown>).location,
+        `${MANAGED_TOKEN}::managed_token`,
+      )
+      assert.equal((receipt.returnData as Record<string, unknown>).abortCode, 7n)
+    }
+
+    // the merged stream stays globally ascending (block, then log index)
+    for (let i = 1; i < logs.length; i++)
+      assert.ok(
+        logs[i]!.blockNumber >= logs[i - 1]!.blockNumber,
+        `log ${i} must not precede its predecessor`,
+      )
+    // dedupe keys stay unique across both sources
+    const keys = new Set(logs.map((log) => `${log.transactionHash}:${log.index}`))
+    assert.equal(logs.length, logs.length && keys.size)
+  })
+
+  it('getExecutionReceipts yields both failures of the definitively-failed message', async () => {
+    const executions = []
+    for await (const execution of chain.getExecutionReceipts({
+      offRamp: OFFRAMP,
+      messageId: EFFECTIVE_MESSAGE_ID,
+      sourceChainSelector: ARB_SEP_SELECTOR,
+      sequenceNumber: EFFECTIVE_SEQUENCE,
+      startBlock: FIRST_FAILED_CHECKPOINT - 100,
+    })) {
+      executions.push(execution)
+    }
+    // both attempts failed and nothing succeeded after them: both surface,
+    // newest first, and the stream ends at the scan end (no success to break on)
+    assert.equal(executions.length, 2)
+    assert.deepEqual(
+      executions.map(({ log }) => log.transactionHash),
+      [LAST_FAILED_TX, FIRST_FAILED_TX],
+    )
+    for (const { receipt, log, error } of executions) {
+      assert.equal(receipt.state, ExecutionState.Failed)
+      assert.equal(receipt.messageId, EFFECTIVE_MESSAGE_ID)
+      assert.equal(receipt.sequenceNumber, EFFECTIVE_SEQUENCE)
+      assert.equal(receipt.sourceChainSelector, ARB_SEP_SELECTOR)
+      assert.equal(log.address, OFFRAMP)
+      assert.match(String(error!.effectsStatus), /MoveAbort/)
+      assert.equal(error!.location, `${MANAGED_TOKEN}::managed_token`)
+      assert.equal(error!.functionName, 'validate_mint')
+      assert.equal(error!.abortCode, 7n)
+    }
   })
 })
