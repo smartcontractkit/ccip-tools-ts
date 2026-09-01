@@ -5,7 +5,7 @@ export { type CCIPErrorOptions, CCIPError } from './CCIPError.ts'
 export { CCIPErrorCode, TRANSIENT_ERROR_CODES, isTransientError } from './codes.ts'
 
 // Specialized errors - Chain/Network
-export { CCIPChainNotFoundError } from './pure.ts'
+export { CCIPChainNotFoundError, CCIPChainRegistrationError } from './pure.ts'
 export {
   CCIPChainFamilyMismatchError,
   CCIPChainFamilyUnsupportedError,

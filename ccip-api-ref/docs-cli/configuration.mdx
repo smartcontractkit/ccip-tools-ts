@@ -84,12 +84,13 @@ The CLI checks these environment variables in order: `PRIVATE_KEY`, `USER_KEY`, 
 
 ### Output Preferences
 
-| Variable       | Description                                                                                                                | Default                                 |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `CCIP_FORMAT`  | Output format (`pretty`, `log`, `json`)                                                                                    | `pretty`                                |
-| `CCIP_VERBOSE` | Enable debug logging (`true`/`false`)                                                                                      | `false`                                 |
-| `CCIP_PAGE`    | Pagination size for `getLogs` queries                                                                                      | -                                       |
-| `CCIP_API`     | CCIP API endpoint URL, or `false`/`no` to disable API calls (decentralized mode). `true`/`yes` to enable with default URL. | Enabled (`https://api.ccip.chain.link`) |
+| Variable               | Description                                                                                                                | Default                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `CCIP_FORMAT`          | Output format (`pretty`, `log`, `json`)                                                                                    | `pretty`                                |
+| `CCIP_VERBOSE`         | Enable debug logging (`true`/`false`)                                                                                      | `false`                                 |
+| `CCIP_PAGE`            | Pagination size for `getLogs` queries                                                                                      | -                                       |
+| `CCIP_API`             | CCIP API endpoint URL, or `false`/`no` to disable API calls (decentralized mode). `true`/`yes` to enable with default URL. | Enabled (`https://api.ccip.chain.link`) |
+| `CCIP_CHAIN_SELECTORS` | Chains to register beyond the bundled selector table (same value as `--chain-selectors`)                                   | -                                       |
 
 **Example .env file:**
 
@@ -200,18 +201,19 @@ ccip-cli send ... --wallet ledger:1  # Uses m/44'/60'/1'/0/0 for EVM
 
 These options are available on all commands:
 
-| Option            | Alias   | Type     | Default                       | Description                                                                                                                          |
-| ----------------- | ------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `--rpcs`          | `--rpc` | string[] | -                             | RPC endpoint URLs                                                                                                                    |
-| `--rpcs-file`     | -       | string   | `./.env`                      | File containing RPC endpoints                                                                                                        |
-| `--format`        | `-f`    | string   | `pretty`                      | Output format: `pretty`, `log`, or `json`                                                                                            |
-| `--verbose`       | `-v`    | boolean  | -                             | Enable debug logging                                                                                                                 |
-| `--page`          | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
-| `--api`           | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
-| `--canton-config` | -       | string   | -                             | Path to Canton config JSON file (required for Canton operations)                                                                     |
-| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton)                                                          |
-| `--help`          | `-h`    | boolean  | -                             | Show help                                                                                                                            |
-| `--version`       | `-V`    | boolean  | -                             | Show version                                                                                                                         |
+| Option              | Alias   | Type     | Default                       | Description                                                                                                                                                                                                      |
+| ------------------- | ------- | -------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--rpcs`            | `--rpc` | string[] | -                             | RPC endpoint URLs                                                                                                                                                                                                |
+| `--rpcs-file`       | -       | string   | `./.env`                      | File containing RPC endpoints                                                                                                                                                                                    |
+| `--format`          | `-f`    | string   | `pretty`                      | Output format: `pretty`, `log`, or `json`                                                                                                                                                                        |
+| `--verbose`         | `-v`    | boolean  | -                             | Enable debug logging                                                                                                                                                                                             |
+| `--page`            | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                                                                                            |
+| `--api`             | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode)                                                                             |
+| `--canton-config`   | -       | string   | -                             | Path to Canton config JSON file (required for Canton operations)                                                                                                                                                 |
+| `--indexer`         | -       | string[] | -                             | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton)                                                                                                                                      |
+| `--chain-selectors` | -       | string[] | -                             | Register chains missing from the bundled selector table: `<chainId>=<selector>`, inline JSON, `<chainId>=fork:<chain>` for a fork, or a JSON/YAML file. See [Local Devnets and Forks](/cli/guides/local-testing) |
+| `--help`            | `-h`    | boolean  | -                             | Show help                                                                                                                                                                                                        |
+| `--version`         | `-V`    | boolean  | -                             | Show version                                                                                                                                                                                                     |
 
 **Output formats:**
 
@@ -234,6 +236,10 @@ Networks can be specified by name, chain ID, or CCIP chain selector. The CLI use
 | Aptos        | Prefixed chain ID   | `aptos:1` (mainnet), `aptos:2` (testnet)            |
 | Sui          | Prefixed chain ID   | `sui:1`                                             |
 | Canton       | Prefixed chain ID   | `canton:TestNet`, `canton:DevNet`, `canton:MainNet` |
+
+That table is bundled at build time. Chains missing from it — a local devnet, or a network added to
+the registry after your CLI release — are registered with `--chain-selectors`. See
+[Local Devnets and Forks](/cli/guides/local-testing).
 
 ## Canton Configuration {#canton-configuration}
 

@@ -1,0 +1,236 @@
+---
+id: local-testing
+title: 'Local Devnets and Forks'
+description: 'Run the CLI against a local devnet or a fork whose chain id is not in the bundled table.'
+sidebar_label: Local Devnets and Forks
+sidebar_position: 6
+---
+
+# Local Devnets and Forks
+
+The CLI resolves chains from a selector table bundled at build time, generated from the public
+[chain-selectors](https://github.com/smartcontractkit/chain-selectors) registry. A chain that is not
+in that table cannot be resolved, and commands fail with `CHAIN_NOT_FOUND`:
+
+```console
+$ ccip-cli send -s 1337 -d 2337 -r 0x5FC8... --rpcs http://localhost:8545 --no-api
+error[CHAIN_NOT_FOUND]: Chain not found: 2337
+```
+
+This affects three cases:
+
+- a local devnet started with an arbitrary chain id (`anvil --chain-id 2337`)
+- a **fork** served under a chain id that differs from the network it forked (a Tenderly Virtual
+  Environment, `anvil --fork-url … --chain-id …`)
+- a public network added to the registry after your installed CLI was released
+
+The first needs a new chain; the second needs a **fork registration**, which is a different thing —
+see [Forks](#forks).
+
+Register those chains with `--chain-selectors`. Everything else — `send`, `show`, `manual-exec` —
+then works on the lane as it would on a bundled chain.
+
+Local networks are never indexed by the hosted CCIP API, so `--no-api` is required for any local
+lane. Pass an RPC for each side of the lane.
+
+## Register a Chain
+
+The shorthand is `<chainId>=<selector>`. It defaults to family `EVM` and network type `TESTNET`:
+
+```bash
+ccip-cli send -s 1337 -d 2337 \
+  -r 0x5FC8d32690cc91D4c39d9d3abcBD16989F875707 \
+  --to 0x2E2Ed0Cfd3AD2f1d34481277b3204d807Ca2F8c2 \
+  --data "hello" \
+  --chain-selectors 2337=12922642891491394802 \
+  --rpcs http://localhost:8545 \
+  --rpcs http://localhost:8555 \
+  --no-api
+```
+
+Track the message the same way, passing the source transaction hash:
+
+```bash
+ccip-cli show 0xc0ac87bc918dd987391814e9353ddc7551c0f3f51dbe41c0cc7acc609c1b3cda \
+  --chain-selectors 2337=12922642891491394802 \
+  --rpcs http://localhost:8545 \
+  --rpcs http://localhost:8555 \
+  --no-api
+```
+
+The flag is repeatable, and reads from `CCIP_CHAIN_SELECTORS` like every other option:
+
+```bash
+export CCIP_CHAIN_SELECTORS=2337=12922642891491394802
+```
+
+## Forks
+
+A fork is not a new chain. Its contracts hold the forked network's state and emit that network's
+chain selector on-chain, so it must keep that identity — giving it a fresh selector breaks message
+decoding, because a decoded message's selector then resolves to the real network rather than to your
+fork's RPC.
+
+Register it with `fork:` and the CLI re-keys the forked chain to the fork's chain id:
+
+```bash
+# a Sepolia fork served at chain id 735711155111
+ccip-cli show 0xSourceTxHash \
+  --chain-selectors 735711155111=fork:ethereum-testnet-sepolia \
+  --rpcs $TENDERLY_VIRTUAL_ENV_RPC \
+  --rpcs https://arb-sepolia.example.com \
+  --no-api
+```
+
+The forked chain can be named by chain id, selector, or name — `fork:11155111`,
+`fork:16015286601757825753`, and `fork:ethereum-testnet-sepolia` are equivalent. Add `name` to label
+the fork:
+
+```json
+[{ "chainId": 735711155111, "forkOf": "ethereum-testnet-sepolia", "name": "tenderly-sepolia" }]
+```
+
+The fork **takes over** the forked chain's identity: `11155111` stops resolving for the rest of the
+process, and the selector, name, and family now point at the fork. That is deliberate — a selector
+identifies exactly one chain, so you cannot address a network and its fork in the same invocation.
+
+A fork may also take over a chain id that is already bundled, as long as it is not a mainnet one.
+`hardhat node --fork` keeps chain id `31337` (bundled as `anvil-devnet`, with a selector that does
+not match the forked network), so a Hardhat fork of Sepolia needs:
+
+```bash
+--chain-selectors 31337=fork:ethereum-testnet-sepolia
+```
+
+Without it the RPC resolves to `anvil-devnet` and decoding later fails with `RPC_NOT_FOUND`, because
+the message carries Sepolia's selector. `anvil --fork-url` inherits the upstream chain id and needs
+nothing.
+
+### Tenderly Virtual Environments
+
+Tenderly does not default a Virtual Environment to its parent's chain id: the REST API **requires**
+`virtual_network_config.chain_config.chain_id`, the dashboard defaults to a custom id, and Tenderly's
+own docs recommend prefixing `7357` to the parent's id (a Sepolia fork becomes `735711155111`). So a
+Virtual Environment almost always needs `fork:`.
+
+Read the id from the environment itself rather than assuming one:
+
+```bash
+cast chain-id --rpc-url $TENDERLY_VIRTUAL_ENV_RPC
+```
+
+Fund a sender with Tenderly's faucet on the **Admin** RPC before sending:
+
+```bash
+cast rpc tenderly_setBalance '["0xYourSender"]' 0xDE0B6B3A7640000 --rpc-url $TENDERLY_ADMIN_RPC
+```
+
+A message sent on a fork is never picked up by CCIP's offchain network — the fork is private. `show`
+reconstructs and decodes it from the fork's RPC, and reports no commit or execution, which is
+expected. Use a fork to exercise sending, fee quoting, and decoding, not delivery.
+
+The Virtual Environment RPC URL embeds a UUID that acts as its credential; keep the Admin RPC secret.
+
+### Chainlink Local
+
+[Chainlink Local](https://docs.chain.link/chainlink-local)'s **non-fork** simulator is not reachable
+from the CLI: it runs inside `forge test` / `hardhat test` with no RPC endpoint, and its
+`MockCCIPRouter` emits `MessageExecuted`, not the real `CCIPSendRequested` / `CCIPMessageSent`, so
+there is nothing for `show` to decode. Its fork helpers are Foundry cheatcodes, equally out of reach.
+
+What does work is forking onto a **standalone node** — `anvil --fork-url …` or
+`hardhat node --fork …` — where the real CCIP contracts are present. `send` and `show`'s source side
+then behave normally. Run one node per lane side and pass both to `--rpcs`, or `show` will fail when
+it reaches the destination chain.
+
+A message sent on a fork is never committed or executed: no CCIP DON watches your fork, and
+`manual-exec` cannot substitute, because it builds a proof against a commit root that will never
+exist there. Chainlink Local sidesteps this by impersonating the OffRamp and calling
+`executeSingleMessage` directly.
+
+## What Works Locally
+
+Verified against a from-scratch devnet, `anvil --fork` (parent and custom chain ids), and a Tenderly
+Virtual Environment. All of it requires `--no-api`.
+
+| Command              | Local devnet | Fork | Notes                                                        |
+| -------------------- | ------------ | ---- | ------------------------------------------------------------ |
+| `show`               | ✅           | ✅   | On a fork, reports no commit/execution — nothing delivers it |
+| `send`               | ✅           | ✅   | Including `--only-get-fee`                                   |
+| `lane`               | ✅           | ✅   |                                                              |
+| `token`              | ✅           | ✅   | Native and ERC-20                                            |
+| `manual-exec`        | ✅           | ❌   | Needs a commit; a fork never gets one (`COMMIT_NOT_FOUND`)   |
+| `parse`              | ✅           | ✅   | Offline, no RPC                                              |
+| `getSupportedTokens` | ⚠️           | ⚠️   | Slow on forks; needs a registry the CLI can probe            |
+| `laneLatency`        | ❌           | ❌   | API-only (`API_CLIENT_NOT_AVAILABLE`)                        |
+| `search`             | ❌           | ❌   | API-only                                                     |
+
+`manual-exec` works on a devnet that runs its own verifier/committee stack, because a commit really
+is produced there. On a fork of a public network no CCIP DON is watching, so the message stays
+unexecuted and `manual-exec` fails with `COMMIT_NOT_FOUND` — that is correct behaviour, not a bug.
+
+## Register from a File
+
+For non-EVM families, mainnet chains, or more than a couple of entries, pass a JSON or YAML file.
+The `selectors:` shape of the `chain-selectors` registry is accepted as-is, so `test_selectors.yml`
+can be used unmodified:
+
+```yaml
+# local-selectors.yml
+selectors:
+  2337:
+    selector: 12922642891491394802
+    name: local-anvil-dst
+    network_type: testnet # family defaults to EVM
+```
+
+```bash
+ccip-cli show 0xc0ac87bc... --chain-selectors ./local-selectors.yml --rpcs ... --no-api
+```
+
+An array of entries and a `chainId -> entry` map both work, in JSON or YAML, inline or from a file:
+
+```json
+[
+  {
+    "chainId": 2337,
+    "chainSelector": "12922642891491394802",
+    "name": "local-anvil-dst",
+    "family": "EVM",
+    "networkType": "TESTNET"
+  }
+]
+```
+
+| Field           | Required | Default       | Notes                                         |
+| --------------- | -------- | ------------- | --------------------------------------------- |
+| `chainId`       | yes      | -             | Map keys are used as the chain id when given  |
+| `chainSelector` | yes      | -             | Also accepted as `selector`                   |
+| `name`          | no       | `custom-<id>` | Usable anywhere a chain name is               |
+| `family`        | no       | `EVM`         | `EVM`, `SVM`, `APTOS`, `SUI`, `TON`, `CANTON` |
+| `networkType`   | no       | `TESTNET`     | Also accepted as `network_type`               |
+
+Registering a chain id that is already bundled overrides it. Registering a selector that another
+chain already owns is rejected.
+
+## From the SDK
+
+The CLI flag is a wrapper around `registerChains`. Call it before any chain resolution:
+
+```typescript
+import { networkInfo, registerChains } from '@chainlink/ccip-sdk'
+
+// a new chain (from-scratch devnet)
+registerChains([{ chainId: 2337, chainSelector: 12922642891491394802n, name: 'local-anvil-dst' }])
+networkInfo(12922642891491394802n).chainId // 2337
+
+// a fork served under a different chain id
+registerChains([{ chainId: 735711155111, forkOf: 'ethereum-testnet-sepolia' }])
+networkInfo(735711155111n).chainSelector // 16015286601757825753n
+```
+
+## See Also
+
+- [Configuration](/cli/configuration) - RPCs, wallets, and global options
+- [send](/cli/send) - Send messages
+- [show](/cli/show) - Track messages

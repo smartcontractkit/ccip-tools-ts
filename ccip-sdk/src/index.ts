@@ -128,7 +128,16 @@ import { AptosChain } from './aptos/index.ts'
 export type { UnsignedAptosTx } from './aptos/index.ts'
 import { CantonChain } from './canton/index.ts'
 import { EVMChain } from './evm/index.ts'
-export { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from './networks.ts'
+export {
+  type ChainRegistration,
+  type ForkChainRegistration,
+  type NetworkInfo,
+  type NewChainRegistration,
+  ChainFamily,
+  NetworkType,
+  networkInfo,
+  registerChains,
+} from './networks.ts'
 import SELECTORS from './selectors.ts'
 export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'

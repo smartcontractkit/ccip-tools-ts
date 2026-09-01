@@ -33,3 +33,36 @@ export class CCIPChainNotFoundError extends CCIPError {
     })
   }
 }
+
+/**
+ * Thrown when a runtime chain registration is invalid (bad selector, family, or a selector
+ * already taken by another chain).
+ *
+ * @example
+ * ```typescript
+ * import { registerChains } from '@chainlink/ccip-sdk'
+ *
+ * try {
+ *   registerChains([{ chainId: 2337, chainSelector: 'not-a-number' }])
+ * } catch (error) {
+ *   if (error instanceof CCIPChainRegistrationError) {
+ *     console.log(error.context.reason)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPChainRegistrationError extends CCIPError {
+  override readonly name = 'CCIPChainRegistrationError'
+  /** Creates a chain registration error. */
+  constructor(chainId: unknown, reason: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.ARGUMENT_INVALID,
+      `Invalid chain registration for "${String(chainId)}": ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, argument: 'chains', chainId: String(chainId), reason },
+      },
+    )
+  }
+}
