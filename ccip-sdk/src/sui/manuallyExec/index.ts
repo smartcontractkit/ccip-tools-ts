@@ -2,10 +2,10 @@ import { Buffer } from 'buffer'
 
 import { Transaction } from '@mysten/sui/transactions'
 
-import { serializeExecutionReport } from './encoder.ts'
 import { CCIPMessageInvalidError } from '../../errors/specialized.ts'
 import type { ExecutionInput } from '../../types.ts'
 import type { CCIPMessage_V1_6_Sui } from '../types.ts'
+import { serializeExecutionReport } from './encoder.ts'
 
 /** Configuration for manually executing a Sui receiver module. */
 export type ManuallyExecuteSuiReceiverConfig = {

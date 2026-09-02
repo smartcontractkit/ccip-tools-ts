@@ -83,7 +83,8 @@ export function parseCantonSendResult(
 
     // Handle both naming conventions for the create arguments object
     const createArgs = (rec.create_arguments ?? rec.createArgument) as
-      Record<string, unknown> | undefined
+      | Record<string, unknown>
+      | undefined
 
     // Try to locate the nested `event` record (CCIPMessageSentEvent)
     const sentEvent = extractCCIPMessageSentEvent(createArgs)
@@ -143,7 +144,8 @@ export function tryParseCantonSendResult(
     if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
 
     const createArgs = (rec.create_arguments ?? rec.createArgument) as
-      Record<string, unknown> | undefined
+      | Record<string, unknown>
+      | undefined
     const sentEvent = extractCCIPMessageSentEvent(createArgs)
 
     if (sentEvent) {
@@ -188,7 +190,8 @@ export function extractCantonSentEventFields(data: unknown): Record<string, unkn
   const rec = data as Record<string, unknown>
   if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
   const createArgs = (rec.create_arguments ?? rec.createArgument) as
-    Record<string, unknown> | undefined
+    | Record<string, unknown>
+    | undefined
   return extractCCIPMessageSentEvent(createArgs)
 }
 

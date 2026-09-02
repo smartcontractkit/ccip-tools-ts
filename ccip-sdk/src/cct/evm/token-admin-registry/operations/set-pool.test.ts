@@ -3,11 +3,11 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError } from 'ethers'
 
-import { type SetPoolParams, SetPool } from './set-pool.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type SetPoolParams, SetPool } from './set-pool.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)

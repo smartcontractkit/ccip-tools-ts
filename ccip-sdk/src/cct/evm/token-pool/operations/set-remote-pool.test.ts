@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
 
-import { type SetRemotePoolParams, SetRemotePool } from './set-remote-pool.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -15,6 +14,7 @@ import {
   TokenPoolVersion,
   getTokenPoolFamily,
 } from '../contracts.ts'
+import { type SetRemotePoolParams, SetRemotePool } from './set-remote-pool.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)

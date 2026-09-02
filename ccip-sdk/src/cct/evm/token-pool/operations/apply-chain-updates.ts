@@ -48,7 +48,8 @@ import {
  * shape for every pool from v1.5.1 up, v1.6.1 and v2.0.0 included.
  */
 export type ApplyChainUpdatesParamVersion =
-  typeof TokenPoolVersion.V1_5_0 | typeof TokenPoolVersion.V1_5_1
+  | typeof TokenPoolVersion.V1_5_0
+  | typeof TokenPoolVersion.V1_5_1
 
 /** The lane fields both parameter shapes share, and which encode identically. */
 type ChainUpdateCommon = {
@@ -377,7 +378,8 @@ export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
  * no validation of their own — a parsed lane is already a `ChainUpdate` struct.
  */
 type ParsedApplyChainUpdatesParams =
-  ParsedApplyChainUpdatesParamsV1_5_0 | ParsedApplyChainUpdatesParamsV1_5_1
+  | ParsedApplyChainUpdatesParamsV1_5_0
+  | ParsedApplyChainUpdatesParamsV1_5_1
 
 /** Encodes parsed params into `applyChainUpdates` calldata, widened over the parsed union. */
 type Encoder = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx

@@ -1,6 +1,5 @@
 import { PublicKey } from '@solana/web3.js'
 
-import { GetTokenPoolState } from './get-token-pool-state.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
@@ -22,6 +21,7 @@ import {
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
+import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 /** Parameters shared by Solana token pool ownership-transfer generation and execution. */
 type TransferOwnershipParams = PoolProgramRef & {

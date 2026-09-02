@@ -3,11 +3,11 @@ import { concat, id, keccak256, zeroPadValue } from 'ethers'
 import { CCIPExtraArgsInvalidError, CCIPHasherVersionUnsupportedError } from '../errors/index.ts'
 import { decodeExtraArgs } from '../extra-args.ts'
 import { type LeafHasher, LEAF_DOMAIN_SEPARATOR } from '../hasher/common.ts'
-import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
-import type { CCIPMessage_V1_6_Sui } from './types.ts'
 import { ChainFamily } from '../networks.ts'
 import { encodeNumber, encodeRawBytes } from '../shared/bcs-codecs.ts'
+import { type CCIPMessage, type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getAddressBytes } from '../utils.ts'
+import type { CCIPMessage_V1_6_Sui } from './types.ts'
 
 /**
  * Creates a leaf hasher for Sui CCIP messages.

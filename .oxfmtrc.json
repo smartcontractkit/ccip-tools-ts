@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "all",
+  "tabWidth": 2,
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 100,
+  "experimentalOperatorPosition": "end",
+  "ignorePatterns": [
+    "ccip-api-ref/.docusaurus/**",
+    "ccip-api-ref/build/**",
+    "ccip-api-ref/docs-sdk/**",
+    "ccip-api-ref/docs-api/**",
+    "ccip-api-ref/test-results/**"
+  ],
+  "sortPackageJson": false,
+  "sortImports": {
+    "groups": [
+      "type-import",
+      ["type-builtin", "value-builtin"],
+      { "newlinesBetween": true },
+      ["type-external", "value-external"],
+      { "newlinesBetween": true },
+      ["type-internal", "value-internal"],
+      "style",
+      ["type-parent", "value-parent"],
+      ["type-sibling", "value-sibling"],
+      ["type-index", "value-index"],
+      "unknown"
+    ],
+    "newlinesBetween": false
+  }
+}

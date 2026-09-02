@@ -1,6 +1,6 @@
+import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
 import type { JsCommands, PartySignatures } from './client/index.ts'
-import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.

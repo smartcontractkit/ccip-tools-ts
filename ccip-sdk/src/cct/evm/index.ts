@@ -20,7 +20,6 @@ import {
 } from './lockbox/operations/authorize-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
-import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
   type AcceptAdminParams,
   AcceptAdmin,
@@ -84,6 +83,7 @@ import {
   type TransferOwnershipParams,
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
+import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
@@ -1196,7 +1196,9 @@ export type {
   GetSupportedTokensParams,
   GetSupportedTokensResult,
 } from './token-admin-registry/operations/get-supported-tokens.ts'
+export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
@@ -1235,8 +1237,10 @@ export type {
   SetChainRateLimiterConfigsParams,
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
+export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export * from './lockbox/contracts.ts'
 export type {
   DeployArtifact,
   DeployResult,
