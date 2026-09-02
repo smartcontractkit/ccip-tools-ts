@@ -195,7 +195,11 @@ describe('Sui failed execution reconstruction', () => {
   it('builds a synthetic state=3 log from a failed manually_init_execute', () => {
     const log = getSuiExecutionFailureLog(failureBlock())
     assert.ok(log, 'expected a failure log')
-    assert.equal(log.address, PKG, 'bare package id, like real event logs in getTransaction')
+    assert.equal(
+      log.address,
+      `${PKG}::offramp`,
+      'module form, like real event logs in getTransaction',
+    )
     assert.equal(log.topics[0], 'ExecutionStateChanged')
     assert.equal(log.index, 0, 'synthetic failures use uint-friendly index 0')
     assert.equal(log.transactionHash, '0xTXFAIL')
@@ -964,5 +968,36 @@ describe('SuiChain.getTransaction failure reconstruction', () => {
       },
       'camelCase+bigint, like tx.error and every other family',
     )
+  })
+
+  it('matches the offRamp filter for SUCCESSFUL receipts in every caller form', async () => {
+    // regression: real event logs are `<package>::<module>` (Move event types are
+    // `<package>::<module>::<Struct>`), so normalizing only the filter — or only
+    // to a bare package id — silently dropped every successful receipt
+    const padded = '0x0' + '7'.repeat(63)
+    const short = '0x' + '7'.repeat(63)
+    const chain = makeChain({
+      digest: '0xTXOK',
+      checkpoint: '101',
+      timestampMs: '101000',
+      events: [
+        {
+          type: `${padded}::offramp::ExecutionStateChanged`,
+          parsedJson: {
+            message_id: MESSAGE_ID,
+            message_hash: '0x' + 'cd'.repeat(32),
+            sequence_number: '7',
+            source_chain_selector: SELECTOR.toString(),
+            state: 2,
+          },
+        },
+      ],
+      effects: { status: { status: 'success' } },
+    })
+    for (const offRamp of [short, padded, `${padded}::offramp`, `${short}::offramp`]) {
+      const execs = await chain.getExecutionReceiptsInTx('0xTXOK', { offRamp })
+      assert.equal(execs.length, 1, `offRamp ${offRamp} should match`)
+      assert.equal(execs[0]!.receipt.state, ExecutionState.Success)
+    }
   })
 })

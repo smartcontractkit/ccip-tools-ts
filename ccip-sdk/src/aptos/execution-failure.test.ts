@@ -389,13 +389,15 @@ describe('Aptos failed execution reconstruction', () => {
     assert.equal((executions[0]!.error as Record<string, unknown>).vmStatus, VM_STATUS)
   })
 
-  it('emits a bare-address synthetic log and matches the offRamp filter in every caller form', async () => {
+  it('emits a module-form synthetic log and matches the offRamp filter in every caller form', async () => {
     // the default (no address) — e.g. getTransaction: the log's address is the
-    // OffRamp's bare address, exactly like real event logs' (event types prefix
-    // with it) — so getExecutionReceiptsInTx filters match failures like successes
+    // OffRamp's `<address>::offramp` module form, exactly like real event logs'
+    // (event types are `<address>::<module>::<Struct>`, and getTransaction slices
+    // only the struct off) — so getExecutionReceiptsInTx filters match failures
+    // like successes
     const log = getAptosExecutionFailureLog(failedTransaction())
     assert.ok(log)
-    assert.equal(log.address, '0xcafe', 'bare address, like real event logs')
+    assert.equal(log.address, '0xcafe::offramp', 'module form, like real event logs')
 
     // callers pass the filter in several forms: bare (the API's offramp / decoded
     // messages), case-variant, and the SDK-discovery module form
@@ -409,6 +411,39 @@ describe('Aptos failed execution reconstruction', () => {
       })
       assert.equal(executions.length, 1, `offRamp ${offRamp} should match`)
       assert.equal(executions[0]!.receipt.state, ExecutionState.Failed)
+    }
+  })
+
+  it('matches the offRamp filter for SUCCESSFUL receipts in every caller form', async () => {
+    // regression: real event logs are `<address>::<module>` (Move event types are
+    // `<address>::<module>::<Struct>`), so normalizing only the filter — or only
+    // to a bare address — silently dropped every successful receipt
+    const tx = failedTransaction()
+    tx.success = true
+    tx.vm_status = 'Executed successfully'
+    tx.events = [
+      {
+        type: `${ADDRESS}::ExecutionStateChanged`,
+        sequence_number: '9',
+        data: {
+          message_id: MESSAGE_ID,
+          sequence_number: '7',
+          source_chain_selector: '123',
+          state: ExecutionState.Success,
+        },
+      },
+    ] as never
+    const { provider } = providerFor(tx)
+    const chain = new AptosChain(provider, networkInfo('aptos:2'))
+    const pkg = ADDRESS.slice(0, ADDRESS.lastIndexOf('::'))
+    const padded = `0x${pkg.slice(2).padStart(64, '0')}`
+    for (const offRamp of [pkg, pkg.toUpperCase(), ADDRESS, padded, `${padded}::offramp`]) {
+      const executions = await chain.getExecutionReceiptsInTx(TX_HASH, {
+        offRamp,
+        messageId: MESSAGE_ID,
+      })
+      assert.equal(executions.length, 1, `offRamp ${offRamp} should match`)
+      assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
     }
   })
 
@@ -737,6 +772,9 @@ describe('Aptos failed execution reconstruction', () => {
           startBlock: 1,
           endBlock: 250,
           versionAsHash: true,
+          // force the indexed path: this window is far under the default budget,
+          // which would otherwise serve it from the fullnode alone
+          failureScanTailVersions: 0,
         },
       ),
     )
@@ -778,6 +816,9 @@ describe('Aptos failed execution reconstruction', () => {
           startBlock: 1,
           endBlock: 500,
           versionAsHash: true,
+          // force the indexed path: this window is far under the default budget,
+          // which would otherwise serve it from the fullnode alone
+          failureScanTailVersions: 0,
         },
       ),
     )
@@ -814,6 +855,10 @@ describe('Aptos failed execution reconstruction', () => {
           startBlock: 100,
           endBlock: 102,
           versionAsHash: true,
+          // budget sized between the two: the 3-version window is over it, so the
+          // indexer is consulted, while the 2-version tail past its tip is under
+          // it and gets walked on the fullnode
+          failureScanTailVersions: 2,
         },
       ),
     )
@@ -886,6 +931,9 @@ describe('Aptos failed execution reconstruction', () => {
           startBlock: 100,
           endBlock: 101,
           versionAsHash: true,
+          // force the indexed path: this window is far under the default budget,
+          // which would otherwise serve it from the fullnode alone
+          failureScanTailVersions: 0,
         },
       ),
     )
@@ -897,6 +945,166 @@ describe('Aptos failed execution reconstruction', () => {
     )
     assert.equal(warnings.length, 1)
     assert.match(warnings[0]!, /Indexer v2/)
+  })
+
+  it('a recents poller (window inside the budget) finds failures without touching the indexer', async () => {
+    // the 1Hz-poller shape: floor a few versions behind the tip, no endBlock. The
+    // whole window fits the default budget, so `/transactions` serves it directly
+    // and the rate-limited indexer is never queried — not even for its tip.
+    const failed = failedTransaction()
+    failed.version = '101'
+    failed.timestamp = '101000000'
+    const indexerQueries: { where: Record<string, any>; limit: number }[] = []
+    const txRequests: { start: number; limit: number }[] = []
+    const provider = handleProvider({
+      events: { execution_state_changed_events: [successEventAt(102, 9)] },
+      txs: [fillerTransaction(100), failed, fillerTransaction(102)],
+      ledgerVersion: 102,
+      indexerTip: 100, // would have hidden the failure at 101 behind the tail walk
+      txRequests,
+      indexerQueries,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['ExecutionStateChanged'],
+          startBlock: 100,
+          versionAsHash: true,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((log) => [log.blockNumber, log.index]),
+      [
+        [101, 0],
+        [102, 9],
+      ],
+      'failure and success merge in ascending order, from the fullnode alone',
+    )
+    assert.deepEqual(indexerQueries, [], 'no indexer request on a within-budget window')
+    assert.deepEqual(txRequests, [{ start: 100, limit: 3 }])
+  })
+
+  it('detects failures with no indexer configured at all, when the window fits the budget', async () => {
+    // the same shape against a provider with no indexer: previously this degraded
+    // to successes-only with a warning; a narrow window needs no index.
+    const failed = failedTransaction()
+    failed.version = '101'
+    failed.timestamp = '101000000'
+    const warnings: string[] = []
+    const provider = handleProvider({
+      events: { execution_state_changed_events: [successEventAt(102, 9)] },
+      txs: [fillerTransaction(100), failed, fillerTransaction(102)],
+      ledgerVersion: 102,
+      noIndexer: true,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider, logger: capturingLogger(warnings) },
+        {
+          address: ADDRESS,
+          topics: ['ExecutionStateChanged'],
+          startBlock: 100,
+          versionAsHash: true,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((log) => [log.blockNumber, log.index]),
+      [
+        [101, 0],
+        [102, 9],
+      ],
+      'no index needed to read a few versions of /transactions',
+    )
+    assert.deepEqual(warnings, [], 'nothing is degraded, so nothing is warned about')
+  })
+
+  it('a backfill (window over the budget) still uses the indexer as the candidate filter', async () => {
+    // the 5-minute-backfill shape: floor hours/days back. Far over the budget, so
+    // candidates come from the per-contract index and only its un-ingested tail is
+    // read locally — the opposite branch from the poller above, same defaults.
+    const failed = failedTransaction()
+    failed.version = '5000'
+    failed.timestamp = '5000000000'
+    const indexerQueries: { where: Record<string, any>; limit: number }[] = []
+    const txRequests: { start: number; limit: number }[] = []
+    const provider = handleProvider({
+      events: { execution_state_changed_events: [] },
+      txs: [failed],
+      ledgerVersion: 20000,
+      indexerTip: 19999, // one version of ingestion lag
+      txRequests,
+      indexerQueries,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['ExecutionStateChanged'],
+          startBlock: 1,
+          endBlock: 20000,
+          versionAsHash: true,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((log) => [log.blockNumber, log.index]),
+      [[5000, 0]],
+      'the deep failure is found through the index, not a 20k-version walk',
+    )
+    assert.deepEqual(
+      indexerQueries.map((query) => query.where.version),
+      [{ _gte: 1, _lt: 20000 }],
+    )
+    assert.deepEqual(
+      txRequests,
+      [{ start: 20000, limit: 1 }],
+      'only the un-ingested tail is walked',
+    )
+  })
+
+  it('raising failureScanTailVersions covers a wider window without the indexer', async () => {
+    const failed = failedTransaction()
+    failed.version = '150'
+    failed.timestamp = '150000000'
+    const indexerQueries: { where: Record<string, any>; limit: number }[] = []
+    const provider = handleProvider({
+      events: { execution_state_changed_events: [] },
+      txs: [...Array.from({ length: 149 }, (_, i) => fillerTransaction(i + 1)), failed],
+      ledgerVersion: 150,
+      indexerTip: 10,
+      indexerQueries,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['ExecutionStateChanged'],
+          startBlock: 1,
+          endBlock: 150,
+          versionAsHash: true,
+          failureScanTailVersions: 150,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((log) => [log.blockNumber, log.index]),
+      [[150, 0]],
+    )
+    assert.deepEqual(indexerQueries, [], 'the raised budget covers the whole window locally')
   })
 
   it('getExecutionReceipts surfaces a failed execution with decoded VM error via the event-handle provider', async () => {

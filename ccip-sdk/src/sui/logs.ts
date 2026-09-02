@@ -1,6 +1,5 @@
 import { bcs } from '@mysten/sui/bcs'
 import type { SuiArgument, SuiCallArg, SuiTransactionBlockResponse } from '@mysten/sui/jsonRpc'
-import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { getBytes, hexlify } from 'ethers'
 
 import type { LogFilter } from '../chain.ts'
@@ -15,6 +14,30 @@ export const SUI_OFFRAMP_MODULE = 'offramp'
  * `release_or_mint`/`ccip_receive`/`finish_execute` steps).
  */
 export const SUI_OFFRAMP_EXECUTE_FUNCTIONS = ['init_execute', 'manually_init_execute'] as const
+
+/**
+ * Short-form Sui address (`0x` + hex, no left padding) — the form the SDK
+ * surfaces addresses in, while the node renders package ids fully padded.
+ */
+export function toSuiShortAddress(address: string): string {
+  const hex = address.replace(/^0x/i, '').toLowerCase().replace(/^0+/, '')
+  return `0x${hex || '0'}`
+}
+
+/**
+ * Canonical comparison/display form of a Sui log/contract address:
+ * `<short-package>::<module>`, the shape real event logs carry (Move event types
+ * are `<package>::<module>::<Struct>`) with the package left-trimmed. Callers
+ * hand OffRamp addresses over in several forms — bare, short (unpadded) from the
+ * API (`show <messageId>`) or a decoded message, `<package>::offramp` from SDK
+ * discovery, fully padded from the node — so both sides of an address comparison
+ * must be put through this before matching.
+ */
+export function canonicalSuiLogAddress(address: string, defaultModule = SUI_OFFRAMP_MODULE) {
+  const [pkg, ...rest] = address.split('::')
+  const module = rest.length ? rest.join('::') : defaultModule
+  return `${toSuiShortAddress(pkg!)}::${module}`
+}
 
 /** {@inheritDoc Chain.getLogs} options accepted by {@link streamSuiLogs}. */
 export type SuiLogStreamOpts = LeanNumbers<LogFilter> & {
@@ -224,7 +247,9 @@ export function getSuiFailureData(
     /MoveAbort\(\s*MoveLocation \{ module: ModuleId \{ address: (?:0x)?([0-9a-f]+), name: (?:Identifier\()?"([^"]+)"\)? \}, function: (\d+)(?:, instruction: (\d+))?(?:, function_name: Some\("([^"]+)"\))? \}, (\d+)\)/i,
   )
   if (abort) {
-    data.location = `${normalizeSuiAddress(abort[1]!)}::${abort[2]!}`
+    // the node renders the module's address padded; surface it short, like the
+    // rest of the SDK's Sui addresses
+    data.location = `${toSuiShortAddress(abort[1]!)}::${abort[2]!}`
     data.function_index = abort[3]!
     if (abort[4]) data.instruction = abort[4]!
     if (abort[5]) data.function_name = abort[5]!
@@ -286,12 +311,14 @@ export function getSuiExecutionFailureLog(
   if (gas != null) data.gas_used = gas.toString()
 
   return {
-    // The emitting package, bare — the same form every real event log carries
-    // in getTransaction (Move event types prefix with the package, module-less),
-    // so consumers filtering receipts-in-tx by the OffRamp address (e.g. the
-    // CLI's API-metadata `offramp`, a bare package id) match failures exactly
-    // like successes.
-    address: offRampAddress ?? normalizeSuiAddress(pkg),
+    // The emitting `<package>::offramp` module form — the same form every real
+    // event log carries in getTransaction (Move event types are
+    // `<package>::<module>::<Struct>`, and getTransaction slices only the struct
+    // off), so consumers filtering receipts-in-tx by the OffRamp address match
+    // failures exactly like successes. Callers pass that address in looser forms
+    // (bare, short, module-suffixed, e.g. the CLI's API-metadata `offramp`);
+    // both sides are canonicalized before comparing — see canonicalSuiLogAddress.
+    address: offRampAddress ?? canonicalSuiLogAddress(pkg),
     topics: ['ExecutionStateChanged'],
     // A failed Sui execution has no ExecutionStateChanged event sequence, so
     // the synthetic log borrows index 0 — uint-friendly, like every other

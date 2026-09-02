@@ -82,6 +82,7 @@ import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import {
   type AptosLogStreamOpts,
+  canonicalAptosLogAddress,
   getAptosExecutionFailureLog,
   getUserTxByVersion,
   getVersionTimestamp,
@@ -392,26 +393,31 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /**
-   * Normalizes the offRamp filter before the base class's exact address match:
-   * Aptos log addresses are the bare contract address (Move event types prefix
-   * with it, module-less), while callers pass either the bare address (the
-   * API's `offramp`, decoded messages) or `<address>::offramp` from discovery —
-   * an exact compare would silently drop every receipt otherwise.
+   * Canonicalizes BOTH sides of the base class's exact `offRamp` address match.
+   *
+   * Aptos log addresses are `<address>::<module>` (Move event types are
+   * `<address>::<module>::<Struct>`; getTransaction slices the struct off) with
+   * the address exactly as the node rendered it, while callers pass the OffRamp
+   * in whatever form their source used — bare and possibly short from the API
+   * (the CLI's `show <messageId>`) or a decoded message, `<address>::offramp`
+   * from SDK discovery, any casing. Both are converted to
+   * `<long-address>::offramp` up front, so an exact compare downstream matches
+   * successes and failures alike instead of silently dropping every receipt.
    */
   override async getExecutionReceiptsInTx(
     tx: string | ChainTransaction,
     filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
   ): Promise<CCIPExecution[]> {
     const offRamp = filters?.offRamp
-    return super.getExecutionReceiptsInTx(tx, {
-      ...filters,
-      ...(offRamp && {
-        offRamp: (offRamp.includes('::')
-          ? offRamp.slice(0, offRamp.lastIndexOf('::'))
-          : offRamp
-        ).toLowerCase(),
-      }),
-    })
+    if (!offRamp) return super.getExecutionReceiptsInTx(tx, filters)
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    return super.getExecutionReceiptsInTx(
+      {
+        ...tx,
+        logs: tx.logs.map((log) => ({ ...log, address: canonicalAptosLogAddress(log.address) })),
+      },
+      { ...filters, offRamp: canonicalAptosLogAddress(offRamp) },
+    )
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */

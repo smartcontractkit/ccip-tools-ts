@@ -32,6 +32,27 @@ export type AptosLogStreamOpts = LeanNumbers<LogFilter> & {
   versionAsHash?: boolean
   /** Delay in ms between watch-mode poll rounds. Default: 5000 */
   pollInterval?: number
+  /**
+   * Ledger versions a failed-execution scan is willing to walk on the fullnode's
+   * `/transactions` instead of consulting the Aptos Indexer v2 API. Default:
+   * {@link FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS}.
+   *
+   * The scan needs a per-contract index to FIND failures, and the fullnode has
+   * none — but over a short enough window it can simply read every transaction
+   * instead. This is the width of "short enough", so it trades one dependency
+   * for the other:
+   *
+   * - A poller whose floor is seconds behind the tip stays under it on every
+   *   round and never touches the indexer at all (it also gets failure
+   *   detection on providers that have no indexer configured).
+   * - A backfill from hours or days back is far over it, so the indexer serves
+   *   the bulk as a candidate filter and only its un-ingested tail is walked.
+   *
+   * Raise it when the fullnode is your own (a wider window stays local); lower
+   * it on a shared or metered node, where the index is the cheaper side. Work
+   * per round is capped either way — see FAILURE_SCAN_PAGES_PER_ROUND.
+   */
+  failureScanTailVersions?: number
 }
 
 const eventToHandler = {
@@ -42,6 +63,9 @@ const eventToHandler = {
 
 /** OffRamp entry functions that execute CCIP messages (see the Move contract's execute/manually_execute). */
 const APTOS_OFFRAMP_EXECUTE_FUNCTIONS = ['execute', 'manually_execute']
+
+/** The OffRamp's Move module; its execution entry functions and events live there. */
+export const APTOS_OFFRAMP_MODULE = 'offramp'
 
 /**
  * Fetches a user transaction by its version number.
@@ -171,7 +195,7 @@ function getOffRampModule(functionName: string): string | undefined {
   const module = parts.pop()
   if (!module || !functionPart || !APTOS_OFFRAMP_EXECUTE_FUNCTIONS.includes(functionPart))
     return undefined
-  if (!parts.length || module.toLowerCase() !== 'offramp') return undefined
+  if (!parts.length || module.toLowerCase() !== APTOS_OFFRAMP_MODULE) return undefined
   return `${parts.join('::')}::${module}`
 }
 
@@ -233,7 +257,10 @@ function getAptosFailureData(
   }
   const abort = vmStatus.match(/Move abort in (.+?): code (\d+)/i)
   if (abort) {
-    data.location = abort[1]!
+    // the VM renders the module's address padded; surface it short, like the
+    // rest of the SDK's Aptos addresses
+    const [locPkg, ...locRest] = abort[1]!.split('::')
+    data.location = [toAptosShortAddress(locPkg!), ...locRest].join('::')
     data.abort_code = abort[2]!
   }
   const status = vmStatus.match(/Execution failed with status:\s*(.+)$/i)
@@ -275,12 +302,14 @@ export function getAptosExecutionFailureLog(
   if (!messageId || sequenceNumber == null || sourceChainSelector == null) return undefined
 
   return {
-    // The OffRamp's bare address — the same form real event logs carry
-    // (Move event types prefix with the bare account address, module-less), so
-    // consumers filtering receipts-in-tx by the OffRamp address (e.g. the CLI's
-    // API-metadata `offramp`, a bare address) match failures exactly like
-    // successes.
-    address: address ?? offRampModule.split('::')[0]!,
+    // The OffRamp's `<address>::offramp` module form — the same form real event
+    // logs carry (Move event types are `<address>::<module>::<Struct>`, and
+    // getTransaction slices only the struct off), so consumers filtering
+    // receipts-in-tx by the OffRamp address match failures exactly like
+    // successes. Callers pass that address in looser forms (bare/short/upper
+    // case, e.g. the CLI's API-metadata `offramp`); both sides are canonicalized
+    // before comparing — see canonicalAptosLogAddress.
+    address: address ?? canonicalAptosLogAddress(offRampModule),
     topics: ['ExecutionStateChanged'],
     // Failed Aptos executions have no event sequence number, so the synthetic log
     // borrows index 0 — uint-friendly, like every other family's log indexes.
@@ -949,8 +978,34 @@ async function getAptosIndexerUserTxsTip(provider: Aptos): Promise<number | unde
  * indexer's `standardize_address` writes, unlike `AccountAddress.fromString`,
  * which rejects short hex forms.
  */
-function toAptosLongAddress(address: string): string {
+export function toAptosLongAddress(address: string): string {
   return `0x${address.replace(/^0x/i, '').toLowerCase().padStart(64, '0')}`
+}
+
+/**
+ * Short-form Aptos address (`0x` + hex, no left padding) — the form the SDK
+ * surfaces addresses in, and the shorter of the two the fullnode mixes (event
+ * types and VM statuses carry the long form, payload functions often the short
+ * one). Only the indexer wants the long form (see toAptosLongAddress).
+ */
+export function toAptosShortAddress(address: string): string {
+  const hex = address.replace(/^0x/i, '').toLowerCase().replace(/^0+/, '')
+  return `0x${hex || '0'}`
+}
+
+/**
+ * Canonical comparison/display form of an Aptos log/contract address:
+ * `<short-address>::<module>`, the shape real event logs carry (Move event types
+ * are `<address>::<module>::<Struct>`) with the address left-trimmed. Callers
+ * hand OffRamp addresses over in several forms — bare and short from the API
+ * (`show <messageId>`) or a decoded message, `<address>::offramp` from SDK
+ * discovery, padded from the node, any casing — so both sides of an address
+ * comparison must be put through this before matching.
+ */
+export function canonicalAptosLogAddress(address: string, defaultModule = APTOS_OFFRAMP_MODULE) {
+  const [pkg, ...rest] = address.split('::')
+  const module = rest.length ? rest.join('::') : defaultModule
+  return `${toAptosShortAddress(pkg!)}::${module.toLowerCase()}`
 }
 
 /**
@@ -965,7 +1020,7 @@ async function getAptosIndexerOffRampCallVersions(
   toVersionExclusive: number,
   limit: number,
 ): Promise<number[]> {
-  const [pkg, module = 'offramp'] = address.split('::')
+  const [pkg, module = APTOS_OFFRAMP_MODULE] = address.split('::')
   const contract = toAptosLongAddress(pkg!)
   const { user_transactions } = await provider.queryIndexer<AptosIndexerCallsPage>({
     query: {
@@ -1206,11 +1261,12 @@ const FAILURE_SCAN_PAGES_PER_ROUND = 25
 const FAILURE_SCAN_INDEXER_PAGE_SIZE = 100
 
 /**
- * How far past the indexer's ingested tip a failure scan will walk the fullnode's
- * unindexed `/transactions` tail before declaring the index too stale: walking
- * the whole ledger is exactly what the indexer exists to avoid, so beyond this
- * (small, seconds-of-lag sized) window the scan truncates to the indexed prefix
- * with a warning — a watch stream picks the rest up as the index advances.
+ * Default {@link AptosLogStreamOpts.failureScanTailVersions}: the width, in
+ * ledger versions, at which a failure scan switches between reading the
+ * fullnode's `/transactions` directly and using the indexer as a candidate
+ * filter. A window at or under it is walked locally and the indexer is never
+ * queried; a wider one consults the index first and walks only its un-ingested
+ * tail. Sized for the seconds-of-lag case at Aptos mainnet rates.
  */
 const FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS = 10_000
 
@@ -1225,10 +1281,14 @@ const FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS = 10_000
  * has no per-contract index of transactions, so the scan's candidates come from
  * the Aptos Indexer v2 API — `user_transactions` filtered by the OffRamp's
  * contract/module/function (see getAptosIndexerOffRampCallVersions) — each
- * hydrated and failure-checked against the fullnode RPC. Only the indexer's
- * un-ingested tail (bounded by FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS) is walked
- * via `/transactions`. Without an indexer there is no per-contract filter at all,
- * and failure detection is skipped with a warning instead of paging the whole
+ * hydrated and failure-checked against the fullnode RPC.
+ *
+ * That only applies to windows too WIDE to read directly, though: a window at or
+ * under {@link AptosLogStreamOpts.failureScanTailVersions} is walked on the
+ * fullnode's `/transactions` alone and never consults the indexer — which is the
+ * whole round for a poller running a few seconds behind the tip, and the
+ * un-ingested tail for a backfill. Only when a wider window has no index behind
+ * it is failure detection skipped (with a warning) instead of paging the whole
  * chain.
  */
 type FailureScanState = {
@@ -1236,6 +1296,12 @@ type FailureScanState = {
   /** OffRamp module (`<address>::offramp`) the failed execution must belong to. */
   address: string
   versionAsHash: boolean
+  /**
+   * {@link AptosLogStreamOpts.failureScanTailVersions}: at or under this many
+   * remaining versions the round reads `/transactions` directly and skips the
+   * indexer entirely.
+   */
+  tailBudget: number
   /** opts.startTime, applied per transaction just before producing its log. */
   startTime: number | undefined
   /** Next ledger version to scan. */
@@ -1251,8 +1317,10 @@ type FailureScanState = {
   target: () => Promise<number>
   /**
    * The `user_transactions` processor's ingested tip (see
-   * getAptosIndexerUserTxsTip), or undefined when no indexer is available —
-   * frozen like `target` for non-watch, re-resolved per poll interval for watch.
+   * getAptosIndexerUserTxsTip), or undefined when no indexer is available.
+   * Resolved LAZILY — a round whose window fits `tailBudget` never calls it, so
+   * a steady-state poller issues no indexer request at all — then frozen for
+   * non-watch, re-resolved per poll interval for watch.
    */
   indexerTip: () => Promise<number | undefined>
   /** Synthetic logs withheld until the round ceiling passes them (see fetchEventsForward). */
@@ -1279,21 +1347,21 @@ async function initFailureScanState(
     const end = await resolve()
     target = () => Promise.resolve(end)
   }
-  // Same freezing policy for the indexer tip as for the target. Unavailable
-  // indexers resolve to undefined every time: each round re-checks cheaply, so a
-  // caller that adds an indexer (or a fresh stream) picks it up without restart.
+  // Same freezing policy for the indexer tip as for the target, but resolved on
+  // FIRST USE rather than here: rounds that fit the tail budget never ask for it,
+  // and eagerly fetching would put an indexer request on every stream regardless.
+  // Unavailable indexers resolve to undefined every time: each round re-checks
+  // cheaply, so a caller that adds an indexer (or a fresh stream) picks it up
+  // without restart.
   let indexerTip: () => Promise<number | undefined>
   if (!canQueryAptosIndexer(ctx.provider)) {
     indexerTip = () => Promise.resolve(undefined)
-  } else if (opts.watch) {
+  } else {
     indexerTip = memoize(getAptosIndexerUserTxsTip.bind(null, ctx.provider), {
       async: true,
       maxArgs: 0,
-      expires: pollInterval,
+      ...(opts.watch ? { expires: pollInterval } : {}),
     })
-  } else {
-    const tip = await getAptosIndexerUserTxsTip(ctx.provider)
-    indexerTip = () => Promise.resolve(tip)
   }
 
   // The hint's blockNumber is a global ledger version whose logs were delivered
@@ -1316,6 +1384,10 @@ async function initFailureScanState(
     provider: ctx.provider,
     address,
     versionAsHash: Boolean(opts.versionAsHash),
+    tailBudget: Math.max(
+      0,
+      Number(opts.failureScanTailVersions ?? FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS),
+    ),
     startTime: opts.startTime != null ? Number(opts.startTime) : undefined,
     nextVersion,
     target,
@@ -1338,17 +1410,33 @@ function warnFailureScanOnce(state: FailureScanState, logger: unknown, message: 
  * One round's worth of the failure scan, returning newly found synthetic failure
  * logs plus this source's ceiling contribution — an EXCLUSIVE version bound:
  * every version strictly below it is fully scanned, and +Infinity once this
- * source is done with the round's target. Candidates below the indexer tip come
- * from the per-contract index (hydrated and failure-checked against the
- * fullnode); the un-indexed tail is walked via `/transactions` only as far as
- * FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS past the tip, truncating with a warning
- * beyond that (a watch stream picks the rest up as the index advances).
+ * source is done with the round's target.
+ *
+ * The remaining window decides where candidates come from. At or under
+ * `state.tailBudget` versions the round reads `/transactions` directly and never
+ * touches the indexer — the steady state of a poller a few seconds behind the
+ * tip, and the only path available when no indexer is configured. Above it, the
+ * per-contract index supplies candidates (hydrated and failure-checked against
+ * the fullnode) up to its ingested tip, and only the un-ingested remainder is
+ * walked locally.
+ *
+ * Work per round is capped at FAILURE_SCAN_PAGES_PER_ROUND pages on either side,
+ * so a round always terminates and always leaves the cursor further along than
+ * it found it — progressive catch-up, never a stall.
  */
 async function fetchFailureScanRound(
   ctx: { provider: Aptos; typeAndVersion?: Chain['typeAndVersion'] } & WithLogger,
   opts: LeanNumbers<LogFilter>,
   state: FailureScanState,
 ): Promise<{ logs: ChainLog[]; ceiling: number }> {
+  // `catchedUp` answers "is this source done for THIS round" — the round merge
+  // reads it to decide the poll sleep and to stop a bounded stream. Left latched
+  // from a previous round it would also keep this source's ceiling contribution
+  // pinned at +Infinity for the rest of a watch stream, so a failure found later
+  // could be emitted after events that are newer than it. Re-arm every round;
+  // the bounded stream still terminates, because the merge reads the flag after
+  // the round rather than before it.
+  state.catchedUp = false
   const target = await state.target()
   if (state.nextVersion > target) {
     state.catchedUp = true
@@ -1374,23 +1462,33 @@ async function fetchFailureScanRound(
     out.push(failure)
   }
 
-  const indexerTip = await state.indexerTip()
-  if (indexerTip == null) {
-    warnFailureScanOnce(
-      state,
-      ctx.logger,
-      'Aptos failed-execution detection requires the Indexer v2 API (there is no per-contract index of transactions on the fullnode RPC). Configure `indexer` in AptosConfig to enable it; streaming successful executions only.',
-    )
-    // No index to scan against: this source is done rather than paging the whole
-    // ledger — an unfiltered chain walk is exactly what the index exists to avoid.
-    state.catchedUp = true
-    return { logs: [], ceiling: Infinity }
-  }
-
   // A. Indexed candidates: every OffRamp execution call in the remaining window
   // below the ingested tip, hydrated one by one against the authoritative RPC.
-  const indexEnd = Math.min(target, indexerTip)
-  if (state.nextVersion <= indexEnd) {
+  //
+  // Consulted ONLY for a window too wide to read off the fullnode directly. A
+  // poller whose floor trails the tip by seconds is always under the budget, so
+  // it issues no indexer request on any round — the dependency (and its rate
+  // limit) applies to backfills, not to steady state.
+  let indexEnd = -1
+  if (target - state.nextVersion + 1 > state.tailBudget) {
+    const indexerTip = await state.indexerTip()
+    if (indexerTip == null) {
+      warnFailureScanOnce(
+        state,
+        ctx.logger,
+        'Aptos failed-execution detection over a window wider than ' +
+          `${state.tailBudget} versions requires the Indexer v2 API (there is no per-contract ` +
+          'index of transactions on the fullnode RPC). Configure `indexer` in AptosConfig, ' +
+          'raise `failureScanTailVersions`, or scan a narrower window; streaming successful ' +
+          'executions only.',
+      )
+      // No index to scan against, and too wide to read directly: this source is
+      // done rather than paging the whole ledger — an unfiltered chain walk is
+      // exactly what the index exists to avoid.
+      state.catchedUp = true
+      return { logs: [], ceiling: Infinity }
+    }
+    indexEnd = Math.min(target, indexerTip)
     for (
       let page = 0;
       page < FAILURE_SCAN_PAGES_PER_ROUND && state.nextVersion <= indexEnd;
@@ -1420,17 +1518,30 @@ async function fetchFailureScanRound(
     }
   }
 
-  // B. Un-indexed tail: the indexer's ingestion lag, walked via /transactions
-  // (requests range-clamped through the target — the endpoint 400s on any start
-  // above the ledger tip, so a page that exactly fills to the tip must not make
-  // the next request step past it).
+  // Still inside the indexed prefix (section A hit its page cap on a busy
+  // contract): hand the round back so A resumes next time, rather than letting B
+  // walk versions the index can filter far more cheaply.
+  if (state.nextVersion <= indexEnd) return { logs: out, ceiling }
+
+  // B. Read `/transactions` directly: the whole window when it fit the budget,
+  // otherwise the indexer's un-ingested tail (requests range-clamped through the
+  // target — the endpoint 400s on any start above the ledger tip, so a page that
+  // exactly fills to the tip must not make the next request step past it).
   if (state.nextVersion <= target) {
-    if (target - state.nextVersion + 1 > FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS) {
+    if (target - state.nextVersion + 1 > state.tailBudget) {
+      // Wider than the budget with the index already exhausted: the indexer is
+      // lagging badly. Truncate to the indexed prefix rather than reading an
+      // arbitrarily long stretch of `/transactions` — the remainder is picked up
+      // on later rounds as the processor ingests it, since section A's window
+      // grows with the tip. `failureScanTailVersions` is the lever for a caller
+      // that would rather pay the local walk than wait for the index.
       warnFailureScanOnce(
         state,
         ctx.logger,
-        `Aptos indexer is more than ${FAILURE_SCAN_INDEXER_TAIL_MAX_VERSIONS} versions behind the ledger (ingested through ${indexerTip}); ` +
-          `failed-execution detection is truncated to the indexed prefix — the remainder is picked up as the index catches up.`,
+        `Aptos indexer is more than ${state.tailBudget} versions behind the ledger; ` +
+          'failed-execution detection is truncated to the indexed prefix — the remainder ' +
+          'is picked up as the index catches up, or immediately if you raise ' +
+          '`failureScanTailVersions` to cover the lag.',
       )
       state.catchedUp = true
       return { logs: out, ceiling: Infinity }

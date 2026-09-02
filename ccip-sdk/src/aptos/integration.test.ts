@@ -26,8 +26,7 @@ describe('Aptos failed execution detection integration (aptos-testnet)', { skip 
   const FAILED_SEQUENCE = 138n
   const SEPOLIA_SELECTOR = 16015286601757825753n
   const DEST_CHAIN_SELECTOR = 743186221051783445n // aptos-testnet, from the report
-  const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
-  const OFFRAMP_MODULE = `${OFFRAMP}::offramp`
+  const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45::offramp'
   // ~100 versions around the failure, so the merged stream picks it up
   const FAILURE_RANGE = {
     startBlock: 8_670_099_486,
@@ -71,7 +70,7 @@ describe('Aptos failed execution detection integration (aptos-testnet)', { skip 
   it('getLogs merges the failed execution into ExecutionStateChanged streams over a bounded range', async () => {
     const logs: ChainLog[] = []
     for await (const log of chain.getLogs({
-      address: OFFRAMP_MODULE,
+      address: OFFRAMP,
       topics: ['ExecutionStateChanged'],
       ...FAILURE_RANGE,
     })) {
@@ -88,7 +87,7 @@ describe('Aptos failed execution detection integration (aptos-testnet)', { skip 
     const failure = failures[0]!
     assert.equal(failure.transactionHash, FAILED_TX)
     assert.equal(failure.index, 0, 'synthetic failures use uint-friendly index 0')
-    assert.equal(failure.address, OFFRAMP_MODULE)
+    assert.equal(failure.address, OFFRAMP)
     assert.equal(failure.blockNumber, FAILED_VERSION)
     const receipt = AptosChain.decodeReceipt(failure)
     assert.ok(receipt)
@@ -115,7 +114,7 @@ describe('Aptos failed execution detection integration (aptos-testnet)', { skip 
   it('getExecutionReceipts reconstructs the failed receipt with the decoded VM error', async () => {
     const executions = []
     for await (const execution of chain.getExecutionReceipts({
-      offRamp: OFFRAMP_MODULE,
+      offRamp: OFFRAMP,
       messageId: FAILED_MESSAGE_ID,
       sourceChainSelector: SEPOLIA_SELECTOR,
       sequenceNumber: FAILED_SEQUENCE,
@@ -132,10 +131,10 @@ describe('Aptos failed execution detection integration (aptos-testnet)', { skip 
     assert.equal(receipt.sourceChainSelector, SEPOLIA_SELECTOR)
     assert.equal(receipt.gasUsed, 9250n)
     assert.equal(error!.vmStatus, 'EXECUTION_LIMIT_REACHED')
-    assert.equal(error!.function, `${OFFRAMP}::offramp::execute`)
+    assert.equal(error!.function, `${OFFRAMP}::execute`)
     assert.equal(error!.destChainSelector, DEST_CHAIN_SELECTOR)
     // the log surfaces with the caller's offRamp form, at the failed version
-    assert.equal(log.address, OFFRAMP_MODULE)
+    assert.equal(log.address, OFFRAMP)
     assert.equal(log.blockNumber, FAILED_VERSION)
   })
 })

@@ -89,6 +89,8 @@ import { getSuiLeafHasher } from './hasher.ts'
 import {
   type SuiLogStreamOpts,
   SUI_OFFRAMP_EXECUTE_FUNCTIONS,
+  SUI_OFFRAMP_MODULE,
+  canonicalSuiLogAddress,
   getSuiExecutionFailureLog,
 } from './logs.ts'
 import {
@@ -863,18 +865,27 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // `since` floors stand in for (or raise) startBlock/startTime here too — this
     // override scans the indexer directly instead of going through getLogs.
     const hints = withSinceStart(restHints)
-    // scan the package the CALLER scoped: Move event types (and this scan's
-    // MoveFunction filter) prefix with the package the execution actually ran
-    // on — the latest at execution time, which differs from the current latest
-    // for historical windows — unlike view calls, which must target the latest
-    const offRampPkg = normalizeSuiAddress(offRamp.split('::')[0]!)
+    // The MoveFunction filter matches the package the execution actually RAN on —
+    // the latest at execution time. That is the CALLER's package for a historical
+    // window (which may predate an upgrade), but the CURRENT latest for anything
+    // executed since the caller's id was minted (the API/config commonly carries
+    // the original package id, whose functions are version-gated after an
+    // upgrade). Neither alone covers both, so scan both, deduped; `yielded`
+    // already keys on digest, so an overlap costs nothing.
+    const callerPkg = normalizeSuiAddress(offRamp.split('::')[0]!)
+    const latestPkg = await getLatestPackageId(offRamp, this.client)
+      .then((id) => normalizeSuiAddress(id.split('::')[0]!))
+      .catch(() => undefined)
+    const offRampPkgs = [...new Set([callerPkg, ...(latestPkg ? [latestPkg] : [])])]
     const startTimeMs = hints.startTime != null ? Number(hints.startTime) * 1000 : 0
     const startCheckpoint = hints.startBlock != null ? Number(hints.startBlock) : 0
     const yielded = new Set<string>()
 
     for (;;) {
       let found = 0
-      for (const fn of SUI_OFFRAMP_EXECUTE_FUNCTIONS) {
+      for (const [offRampPkg, fn] of offRampPkgs.flatMap((pkg) =>
+        SUI_OFFRAMP_EXECUTE_FUNCTIONS.map((fn) => [pkg, fn] as const),
+      )) {
         let cursor: string | null | undefined
         let outOfWindow = false
         for (;;) {
@@ -882,7 +893,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           const res = await withLookupRetry(() =>
             this.client.queryTransactionBlocks({
               filter: {
-                MoveFunction: { package: offRampPkg, module: 'offramp', function: fn },
+                MoveFunction: { package: offRampPkg, module: SUI_OFFRAMP_MODULE, function: fn },
               },
               options: { showEvents: true, showEffects: true, showInput: true },
               limit: 50,
@@ -974,21 +985,32 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   }
 
   /**
-   * Normalizes the offRamp filter before the base class's exact address match:
-   * Sui addresses have several caller-facing forms (bare package id in short or
-   * padded form from the API/decoded messages, `<pkg>::offramp` from discovery)
-   * while log addresses are the node's full padded package id — an exact string
-   * compare would silently drop every receipt otherwise, successes included.
+   * Canonicalizes BOTH sides of the base class's exact `offRamp` address match.
+   *
+   * Sui log addresses are `<package>::<module>` (Move event types are
+   * `<package>::<module>::<Struct>`; getTransaction slices the struct off) with
+   * the node's full padded package id, while callers pass the OffRamp in
+   * whatever form their source used — a bare package id, short (unpadded) from
+   * the API (the CLI's `show <messageId>`) or a decoded message,
+   * `<package>::offramp` from SDK discovery. Both are converted to
+   * `<normalized-package>::offramp` up front, so an exact compare downstream
+   * matches successes and failures alike instead of silently dropping every
+   * receipt.
    */
   override async getExecutionReceiptsInTx(
     tx: string | ChainTransaction,
     filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
   ): Promise<CCIPExecution[]> {
     const offRamp = filters?.offRamp
-    return super.getExecutionReceiptsInTx(tx, {
-      ...filters,
-      ...(offRamp && { offRamp: normalizeSuiAddress(offRamp.split('::')[0]!) }),
-    })
+    if (!offRamp) return super.getExecutionReceiptsInTx(tx, filters)
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    return super.getExecutionReceiptsInTx(
+      {
+        ...tx,
+        logs: tx.logs.map((log) => ({ ...log, address: canonicalSuiLogAddress(log.address) })),
+      },
+      { ...filters, offRamp: canonicalSuiLogAddress(offRamp) },
+    )
   }
 
   /**
@@ -1428,15 +1450,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       ...(eventData.message_hash
         ? { messageHash: hexlify(getDataBytes(eventData.message_hash)) }
         : {}),
-      ...(eventData.message_hash
-        ? { messageHash: hexlify(getDataBytes(eventData.message_hash)) }
-        : {}),
       ...(eventData.return_data && {
         // camelCase+bigint — the same shape getTransaction's tx.error and the
         // failure log's return_data decode to, so every consumer surface agrees.
+        // numeric strings become bigints, so the record is not Record<string, string>
         returnData: convertKeysToCamelCase(eventData.return_data, (v) =>
           typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v,
-        ) as Record<string, string>,
+        ) as Record<string, unknown>,
       }),
       ...(eventData.gas_used ? { gasUsed: BigInt(eventData.gas_used) } : {}),
     }

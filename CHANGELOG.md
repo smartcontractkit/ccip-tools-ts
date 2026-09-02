@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Aptos and Sui now support detecting execution failures
+  - Aptos failure scans read the fullnode's `/transactions` directly for windows at or under the new `failureScanTailVersions` getLogs option (default 10000 versions), consulting the Indexer v2 API only for wider ones — a poller running seconds behind the tip issues no indexer request at all, and gets failure detection even where no indexer is configured, while a backfill still uses the per-contract index as its candidate filter
+  - `offRamp` filters on `getExecutionReceiptsInTx` match Aptos/Sui receipts in every caller form (bare, short, padded, `::offramp`-suffixed, any casing): both the filter and the log address are canonicalized to a short `<address>::offramp` before comparing, instead of only the filter — which silently dropped every successful receipt
 
 ## [1.13.0] - 2026-08-25
 
