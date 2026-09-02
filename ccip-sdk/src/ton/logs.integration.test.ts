@@ -225,6 +225,26 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     return v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
   }
 
+  /**
+   * Skip when a fast-path property degraded WHILE the index was throttling us.
+   *
+   * The public index is keyless, so a CI runner's shared egress gets 429-stormed;
+   * under that the scan legitimately falls back to the v2 walk, which is the same
+   * hostile-network condition the `before` hook's probe already self-skips for —
+   * it just started mid-run rather than before it. Degradation with NO 429 is a
+   * real shape regression and still fails.
+   */
+  function skipIfThrottled(
+    t: { skip: (msg?: string) => void },
+    degraded: boolean,
+    rateLimited: number,
+    what: string,
+  ): boolean {
+    if (!degraded || !rateLimited) return false
+    t.skip(`${what}: index rate-limited ${rateLimited}x mid-scan, fast path degraded`)
+    return true
+  }
+
   /** Skip the test when the live index probe failed (see before hook). */
   function guard(t: { skip: (msg?: string) => void }): boolean {
     if (indexHealthy) return false
@@ -277,6 +297,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         v3tipCalls += calls.v3tip
         elapsed = Date.now() - t0
         if (!lastTruncated && calls.walkPages === 0) break
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (lastTruncated) {
@@ -294,6 +317,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       }
       assert.ok(calls.v3messages >= 1, 'v3 messages index queried')
       assert.ok(v3tipCalls >= 1, 'v3 index tip consulted (lag guard)')
+      if (skipIfThrottled(t, calls.walkPages > 0, calls.rateLimited, 'v2 tx-chain pagination'))
+        return
       assert.equal(
         calls.walkPages,
         0,
@@ -348,6 +373,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         }
         calls = spy.calls
         if (logs.length >= 1 && calls.walkPages === 0) break
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (logs.length === 0) {
@@ -368,6 +396,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'blocks non-decreasing',
       )
       assert.ok(calls.v3messages >= 1, 'v3 messages index seeded the scan')
+      if (skipIfThrottled(t, calls.walkPages > 0, calls.rateLimited, 'v2 tx-chain pagination'))
+        return
       assert.equal(
         calls.walkPages,
         0,
@@ -420,6 +450,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         }
         calls = spy.calls
         if (calls.v3transactions >= 1) break // oracle engaged
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (calls.v3transactions === 0) {
@@ -511,6 +544,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
               v3transactions <= Math.max(3, walkPages + 1)))
         )
           break
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (spy.calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (logs.length === 0) {
@@ -536,6 +572,15 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.calls.v3transactions <= Math.max(3, spy.calls.walkPages + 1),
           `lt list seeded in pages proportionate to the walk (saw ${spy.calls.v3transactions} seed pages for ${spy.calls.walkPages} walk pages)`,
         )
+        if (
+          skipIfThrottled(
+            t,
+            spy.calls.v2SeqnoLookups > 8,
+            spy.calls.rateLimited,
+            'per-tx seqno resolution',
+          )
+        )
+          return
         assert.ok(
           spy.calls.v2SeqnoLookups <= 8,
           `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups}${spy.calls.rateLimited ? `, rate-limited ${spy.calls.rateLimited}×` : ''})`,
@@ -589,6 +634,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.restore()
         }
         if (logs.length >= 1 && spy.calls.walkPages === 0) break
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (spy.calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (logs.length === 0) {
@@ -602,6 +650,10 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'resumes strictly past the cursor',
       )
       assert.ok(spy.calls.v3messages >= 1, 'the /messages fast path served the hint scan')
+      if (
+        skipIfThrottled(t, spy.calls.walkPages > 0, spy.calls.rateLimited, 'v2 tx-chain pagination')
+      )
+        return
       assert.equal(
         spy.calls.walkPages,
         0,
@@ -642,6 +694,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         // A degraded/lagging index falls back to the v2 walk — the fast-path shape
         // this test asserts never ran on that attempt; retry with spacing.
         if (calls.walkPages === 0) break
+        // Throttled: further attempts only add load to an endpoint already
+        // refusing us, and the degraded result skips below rather than failing.
+        if (calls.rateLimited) break
         await sleep(retrySpacingMs(attempt))
       }
       if (calls.walkPages > 0) {
