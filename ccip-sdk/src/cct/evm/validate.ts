@@ -6,11 +6,11 @@
  * @packageDocumentation
  */
 
-import { ZeroAddress, getAddress, isAddress } from 'ethers'
+import { ZeroAddress, getAddress, isAddress } from "ethers";
 
-import { CCIPAddressInvalidError } from '../../errors/index.ts'
-import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError } from '../errors.ts'
+import { CCIPAddressInvalidError } from "../../errors/index.ts";
+import { ChainFamily } from "../../networks.ts";
+import { CCTParamsInvalidError } from "../errors.ts";
 
 /**
  * Asserts `value` is a valid EVM address, narrowing it to `string` for callers. Links the
@@ -23,7 +23,7 @@ export function validateAddress(
   param: string,
   value: unknown,
 ): asserts value is string {
-  if (typeof value === 'string' && isAddress(value)) return
+  if (typeof value === "string" && isAddress(value)) return;
   throw new CCTParamsInvalidError(
     operation,
     param,
@@ -31,7 +31,7 @@ export function validateAddress(
     {
       cause: new CCIPAddressInvalidError(String(value), ChainFamily.EVM),
     },
-  )
+  );
 }
 
 /**
@@ -40,23 +40,35 @@ export function validateAddress(
  * spelling, and a tx to `0x0` hits no code, so it mines as a successful no-op.
  * @throws {@link CCTParamsInvalidError} if `value` is not a valid address, or is the zero address
  */
-export function validateNonZeroAddress(operation: string, param: string, value: unknown): void {
-  validateAddress(operation, param, value)
+export function validateNonZeroAddress(
+  operation: string,
+  param: string,
+  value: unknown,
+): void {
+  validateAddress(operation, param, value);
   if (getAddress(value) === ZeroAddress)
-    throw new CCTParamsInvalidError(operation, param, 'must not be the zero address')
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      "must not be the zero address",
+    );
 }
 
 /**
  * Asserts `value` is a non-empty (non-blank) string.
  * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty string
  */
-export function validateNonEmptyString(operation: string, param: string, value: unknown): void {
-  if (typeof value === 'string' && value.trim().length > 0) return
+export function validateNonEmptyString(
+  operation: string,
+  param: string,
+  value: unknown,
+): void {
+  if (typeof value === "string" && value.trim().length > 0) return;
   throw new CCTParamsInvalidError(
     operation,
     param,
     `must be a non-empty string, got ${String(value)}`,
-  )
+  );
 }
 
 /**
@@ -68,21 +80,31 @@ export function validateBoolean(
   param: string,
   value: unknown,
 ): asserts value is boolean {
-  if (typeof value !== 'boolean')
-    throw new CCTParamsInvalidError(operation, param, 'must be a boolean')
+  if (typeof value !== "boolean")
+    throw new CCTParamsInvalidError(operation, param, "must be a boolean");
 }
 
 /**
  * Asserts `value` is an integer in `[0, 255]` (a Solidity `uint8`).
  * @throws {@link CCTParamsInvalidError} if `value` is not such an integer
  */
-export function validateUint8(operation: string, param: string, value: unknown): void {
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255) return
+export function validateUint8(
+  operation: string,
+  param: string,
+  value: unknown,
+): void {
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 255
+  )
+    return;
   throw new CCTParamsInvalidError(
     operation,
     param,
     `must be an integer in [0, 255], got ${String(value)}`,
-  )
+  );
 }
 
 /**
@@ -90,21 +112,35 @@ export function validateUint8(operation: string, param: string, value: unknown):
  * so the comparison itself lives here once.
  * @throws {@link CCTParamsInvalidError} if `value` is not a `bigint` in `[0, 2^bits − 1]`
  */
-function assertUintBits(operation: string, param: string, value: unknown, bits: number): void {
-  if (typeof value === 'bigint' && value >= 0n && value <= (1n << BigInt(bits)) - 1n) return
+function assertUintBits(
+  operation: string,
+  param: string,
+  value: unknown,
+  bits: number,
+): void {
+  if (
+    typeof value === "bigint" &&
+    value >= 0n &&
+    value <= (1n << BigInt(bits)) - 1n
+  )
+    return;
   throw new CCTParamsInvalidError(
     operation,
     param,
     `must be a bigint in [0, 2^${bits} − 1], got ${String(value)}`,
-  )
+  );
 }
 
 /**
  * Asserts `value` is a `bigint` in `[0, 2^256 − 1]` (a Solidity `uint256`).
  * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
  */
-export function validateUint256(operation: string, param: string, value: unknown): void {
-  assertUintBits(operation, param, value, 256)
+export function validateUint256(
+  operation: string,
+  param: string,
+  value: unknown,
+): void {
+  assertUintBits(operation, param, value, 256);
 }
 
 /**
@@ -117,7 +153,7 @@ export function validateUint128(
   param: string,
   value: unknown,
 ): asserts value is bigint {
-  assertUintBits(operation, param, value, 128)
+  assertUintBits(operation, param, value, 128);
 }
 
 /**
@@ -130,7 +166,7 @@ export function validateUint64(
   param: string,
   value: unknown,
 ): asserts value is bigint {
-  assertUintBits(operation, param, value, 64)
+  assertUintBits(operation, param, value, 64);
 }
 
 /**
@@ -148,16 +184,21 @@ export function validateUint64(
  * @returns The value as `0x`-prefixed lower-case hex.
  * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty whole-byte hex string
  */
-export function parseHexBytes(operation: string, param: string, value: unknown): string {
-  const hex = typeof value === 'string' ? value.replace(/^0x/i, '').toLowerCase() : ''
-  if (typeof value !== 'string' || !/^(?:[\da-f]{2})+$/.test(hex)) {
+export function parseHexBytes(
+  operation: string,
+  param: string,
+  value: unknown,
+): string {
+  const hex =
+    typeof value === "string" ? value.replace(/^0x/i, "").toLowerCase() : "";
+  if (typeof value !== "string" || !/^(?:[\da-f]{2})+$/.test(hex)) {
     throw new CCTParamsInvalidError(
       operation,
       param,
       `must be a non-empty hex string of whole bytes, got ${String(value)}`,
-    )
+    );
   }
-  return `0x${hex}`
+  return `0x${hex}`;
 }
 
 /**
@@ -175,10 +216,10 @@ export function parseRecord(
   value: unknown,
   kind: string,
 ): { [k: string]: unknown } {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new CCTParamsInvalidError(operation, param, `must be a ${kind}`)
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new CCTParamsInvalidError(operation, param, `must be a ${kind}`);
   }
-  return value as { [k: string]: unknown }
+  return value as { [k: string]: unknown };
 }
 
 /**
@@ -198,15 +239,15 @@ export function validateArray(
     throw new CCTParamsInvalidError(
       operation,
       param,
-      minLength > 0 ? `must be a non-empty array` : 'must be an array',
-    )
+      minLength > 0 ? `must be a non-empty array` : "must be an array",
+    );
   for (let i = 0; i < value.length; i++)
     if (!(i in value))
       throw new CCTParamsInvalidError(
         operation,
         `${param}[${i}]`,
-        'must not be a hole — the array is sparse, and a missing element cannot be encoded',
-      )
+        "must not be a hole — the array is sparse, and a missing element cannot be encoded",
+      );
 }
 
 /**
@@ -222,20 +263,20 @@ export function parseUniqueHexBytesArray(
   param: string,
   value: unknown,
 ): string[] {
-  validateArray(operation, param, value, 1)
-  const seen = new Set<string>()
+  validateArray(operation, param, value, 1);
+  const seen = new Set<string>();
   return value.map((entry, i) => {
-    const hex = parseHexBytes(operation, `${param}[${i}]`, entry)
+    const hex = parseHexBytes(operation, `${param}[${i}]`, entry);
     if (seen.has(hex)) {
       throw new CCTParamsInvalidError(
         operation,
         `${param}[${i}]`,
-        'must not duplicate an earlier entry in the same array',
-      )
+        "must not duplicate an earlier entry in the same array",
+      );
     }
-    seen.add(hex)
-    return hex
-  })
+    seen.add(hex);
+    return hex;
+  });
 }
 
 /**
@@ -262,8 +303,8 @@ export function assertDenseArray(
       throw new CCTParamsInvalidError(
         operation,
         `${param}[${i}]`,
-        'must not be a hole — the array is sparse, and a missing element cannot be encoded',
-      )
+        "must not be a hole — the array is sparse, and a missing element cannot be encoded",
+      );
     }
   }
 }
