@@ -12,7 +12,6 @@ import type { TypedContract } from 'ethers-abitype'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { resultToObject } from '../../../../evm/types.ts'
 import { decodeFinalityAllowed } from '../../../../extra-args.ts'
-import { CCTContractTypeInvalidError } from '../../../errors.ts'
 import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
@@ -88,10 +87,20 @@ export type LockReleaseTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
 }
 
 /**
- * State of a v2.0.0 pool: `type === 'LockReleaseTokenPool'` adds the `lockBox`, the one field the
- * two families do not share.
+ * State of a v2.0.0 *siloed* lock/release pool — every field its non-siloed sibling reports
+ * **except** `lockBox`: it escrows per remote chain, so it declares `getLockBox(uint64)` and no
+ * no-arg `getLockBox()`. Read a lane's escrow with `getLockBox(remoteChainSelector)` against the
+ * pool directly; this query does not enumerate them.
  */
-export type TokenPoolStateV2_0_0 = BurnMintTokenPoolStateV2_0_0 | LockReleaseTokenPoolStateV2_0_0
+export type SiloedLockReleaseTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
+  type: 'SiloedLockReleaseTokenPool'
+}
+
+/** State of a v2.0.0 pool. Only `type === 'LockReleaseTokenPool'` reports a `lockBox`. */
+export type TokenPoolStateV2_0_0 =
+  | BurnMintTokenPoolStateV2_0_0
+  | LockReleaseTokenPoolStateV2_0_0
+  | SiloedLockReleaseTokenPoolStateV2_0_0
 
 /**
  * Admin state of a token pool: `version === '2.0.0'` gates the roles and finality window that
@@ -208,25 +217,19 @@ async function readBurnMintTokenPoolV2_0_0(
   return { ...(await readTokenPoolV2_0_0(pool, poolAddress)), type }
 }
 
-/**
- * Reads a v2.0.0 lock/release pool: the shared state plus the lockbox escrowing its liquidity.
- * @throws {@link CCTContractTypeInvalidError} for a siloed pool — it escrows per remote chain
- * (`getLockBox(uint64)`), so no single `lockBox` describes it
- */
+/** Reads a v2.0.0 lock/release pool: the shared state, plus `lockBox` for the non-siloed variant. */
 async function readLockReleaseTokenPoolV2_0_0(
   chain: EVMChain,
   poolAddress: string,
   type: LockReleaseTokenPoolType,
-): Promise<LockReleaseTokenPoolStateV2_0_0> {
-  if (type !== 'LockReleaseTokenPool')
-    throw new CCTContractTypeInvalidError(
-      poolAddress,
-      'LockReleaseTokenPool',
-      type,
-      'siloed pools escrow per remote chain; read per-lane lockboxes via getLockBox(remoteChainSelector)',
-    )
-
+): Promise<LockReleaseTokenPoolStateV2_0_0 | SiloedLockReleaseTokenPoolStateV2_0_0> {
+  // the non-siloed ABI reads a siloed pool too — every shared getter is declared identically, and
+  // `getLockBox()` is only ever called on the variant that declares it
   const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+
+  if (type === 'SiloedLockReleaseTokenPool')
+    return { ...(await readTokenPoolV2_0_0(pool, poolAddress)), type }
+
   const [state, lockBox] = await Promise.all([
     readTokenPoolV2_0_0(pool, poolAddress),
     resultToObject(pool.getLockBox()),
@@ -255,9 +258,9 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
    * as the literal that discriminates {@link GetTokenPoolStateResult}. Floor-matching would make a
    * newer pool misreport itself and silently drop any admin field its version added, so a new
    * {@link TokenPoolVersion} fails to compile here until it is pointed at a reader.
-   * @throws {@link CCTContractTypeInvalidError} if the pool is a v2.0.0 lock/release variant other
-   * than `LockReleaseTokenPool` — a siloed pool escrows per remote chain (`getLockBox(uint64)`),
-   * so no single `lockBox` describes it
+   * @remarks Type only narrows the v2.0.0 result; the legacy getters are declared by `TokenPool`
+   * itself, so pre-v2.0.0 needs no per-type case.
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not a supported one
    * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known one
    */
   protected async read(
@@ -267,7 +270,6 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
     const { type, version } = await resolveTokenPool(chain, poolAddress)
 
     switch (version) {
-      // pre-v2.0.0 has no lockbox at all, so both families read the same way
       case TokenPoolVersion.V1_5_0:
       case TokenPoolVersion.V1_5_1:
       case TokenPoolVersion.V1_6_1:

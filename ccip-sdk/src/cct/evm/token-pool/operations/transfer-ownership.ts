@@ -45,7 +45,7 @@ export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {
   }
 
   /** Validates the pool and new-owner addresses before any RPC. */
-  protected validate({ poolAddress, newOwner }: TransferOwnershipParams): void {
+  protected override validate({ poolAddress, newOwner }: TransferOwnershipParams): void {
     validateAddress(this.name, 'poolAddress', poolAddress)
     validateAddress(this.name, 'newOwner', newOwner)
   }
