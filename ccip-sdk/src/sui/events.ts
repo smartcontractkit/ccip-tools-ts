@@ -61,6 +61,30 @@ type TxMeta = { checkpoint: number; timestampMs: number; status?: 'success' | 'f
 const MULTI_GET_CHUNK = 50
 
 /**
+ * How far below the tip a start floor must sit before the stream probes it with
+ * ascending checkpoint slices instead of walking events down from the tip. Under
+ * this, the descending `queryEvents` walk reaches the floor in a page or two and
+ * is the cheaper source.
+ */
+const FLOOR_PROBE_MIN_DISTANCE = 10_000
+
+/**
+ * Checkpoints per probe slice. The walk hydrates EVERY transaction in a slice
+ * (~8 per checkpoint on Sui testnet) before the round can yield, so the slice is
+ * sized to the answer's expected distance — a commit trails its message by ~100
+ * checkpoints — not to throughput: a bigger slice only delays the first yield,
+ * and the caller usually stops on it.
+ */
+const FLOOR_PROBE_SLICE_CHECKPOINTS = 250
+
+/**
+ * Probe slices before falling back to the descending walk. Bounds what a wide
+ * backfill (which the checkpoint walk serves expensively, reading every
+ * transaction in range) pays for a probe that finds nothing.
+ */
+const FLOOR_PROBE_SLICES = 8
+
+/**
  * Load-balanced RPC proxies may route lookups to a backend whose store hasn't
  * caught up (or is partially synced): event cursor lookups answer -32603
  * "Could not find the referenced transaction ...", object reads come back
@@ -411,6 +435,29 @@ async function* fetchEventsForward<T>(
   // markers a failed PTB can leave behind, so metas carry it for such streams.
   const hasExecutionStateTopic = types.some((type) => isExecutionStateEvent(type))
   let failureScanWarned = false
+  // Sui's JSON-RPC has no checkpoint-ranged per-contract event query: `queryEvents`
+  // filters by MoveEventType but pages only from one END of the history, and the
+  // `All` combinator that would pair it with `TimeRange` is accepted-but-ignored by
+  // current nodes (it answers empty). So a floor deep in the past leaves the
+  // descending walk traversing every event since — for a months-old lookup that is
+  // hours of paging, and because a round spans floor..latest, nothing is yielded
+  // until it finishes, defeating a caller that only wants the first match.
+  //
+  // Checkpoints, unlike events, ARE addressable by number. Probe the floor first:
+  // walk a few bounded slices ascending from it, yielding each slice so an
+  // early-exiting caller (getOnchainCommitReport returns on the first covering
+  // report) stops right there. A commit follows its message by ~100 checkpoints,
+  // so it lands in the first slice. If the probe finds nothing the stream falls
+  // back to the descending walk below, so a genuine wide backfill — which the walk
+  // would serve far more expensively, reading every transaction in the range —
+  // pays only the bounded probe.
+  const probeSlices =
+    !opts.watch &&
+    typeof ctx.client.getCheckpoints === 'function' &&
+    (await getLatest()) - startCheckpoint > FLOOR_PROBE_MIN_DISTANCE
+      ? FLOOR_PROBE_SLICES
+      : 0
+  let probesLeft = probeSlices
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
   let softRounds = 0 // consecutive rounds lost to transient backend lag
@@ -423,34 +470,50 @@ async function* fetchEventsForward<T>(
     const lastReq = performance.now()
 
     // Determine the range for this batch
-    let batchEndCheckpoint: number
+    let windowEnd: number
     if (endCheckpoint !== undefined && !opts.watch) {
-      batchEndCheckpoint = endCheckpoint
+      windowEnd = endCheckpoint
     } else {
-      batchEndCheckpoint = await getLatest()
+      windowEnd = await getLatest()
       if (endCheckpoint !== undefined) {
-        batchEndCheckpoint = Math.min(batchEndCheckpoint, endCheckpoint)
+        windowEnd = Math.min(windowEnd, endCheckpoint)
       }
     }
+    // A probe round covers only its slice; `windowEnd` stays the real end, so
+    // finishing a slice never marks the stream caught up.
+    const probing = probesLeft > 0
+    if (probing) probesLeft--
+    const batchEndCheckpoint = probing
+      ? Math.min(windowEnd, currentCheckpoint + FLOOR_PROBE_SLICE_CHECKPOINTS)
+      : windowEnd
 
     // Fetch events for this checkpoint range
     if (currentCheckpoint <= batchEndCheckpoint) {
       const collected: EventNode<T>[] = []
       let roundTransientErr: unknown
 
-      if (walkMode) {
-        // The node's queryEvents is unusable: walk checkpoints and read each
-        // tx's events, which serves whatever the node still retains
-        collected.push(
-          ...(await collectByCheckpointWalk<T>(
-            ctx.client,
-            types,
-            currentCheckpoint,
-            batchEndCheckpoint,
-            txMetas,
-            hasExecutionStateTopic,
-          )),
-        )
+      if (walkMode || probing) {
+        // Checkpoints are addressable by number, so this serves both the floor
+        // probe and the fallback for a node whose queryEvents is unusable: walk
+        // the range and read each tx's events.
+        try {
+          collected.push(
+            ...(await collectByCheckpointWalk<T>(
+              ctx.client,
+              types,
+              currentCheckpoint,
+              batchEndCheckpoint,
+              txMetas,
+              hasExecutionStateTopic,
+            )),
+          )
+        } catch (err) {
+          // A probe is an optimization, not a requirement: a node that cannot
+          // serve the walk just gives up on probing and takes the event path.
+          if (!probing || walkMode) throw err
+          probesLeft = 0
+          continue
+        }
       } else {
         // Each type runs its own descending-paginated query with its own cursor
         // and early-exit (`done`) — a quiet type walking past the window must
@@ -618,7 +681,7 @@ async function* fetchEventsForward<T>(
       }
     }
 
-    catchedUp ||= currentCheckpoint > batchEndCheckpoint
+    catchedUp ||= currentCheckpoint > windowEnd
 
     // soft rounds (backend store lag) also need a poll pause when watching,
     // otherwise the loop would hot-spin a lagging proxy backend

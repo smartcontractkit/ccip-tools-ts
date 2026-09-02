@@ -233,6 +233,23 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         args.options?.showInput,
       ],
     })
+    // Checkpoint/timestamp lookups for a page of event digests. Immutable once
+    // committed, and the same digests recur whenever two scans' windows overlap
+    // (a re-run, or a second lane sharing the offramp), so they are worth keeping
+    // — a single scan's pages carry disjoint digests and see no benefit.
+    if (typeof this.client.multiGetTransactionBlocks === 'function')
+      this.client.multiGetTransactionBlocks = memoize(
+        this.client.multiGetTransactionBlocks.bind(this.client),
+        {
+          async: true,
+          maxSize: 100,
+          expires: 60e3,
+          transformKey: ([args]: Parameters<typeof this.client.multiGetTransactionBlocks>) => [
+            args.digests.join(','),
+            JSON.stringify(args.options ?? null),
+          ],
+        },
+      )
     // Partial/mock clients (unit tests) may not carry every method; skip those
     if (typeof this.client.getObject === 'function')
       this.client.getObject = memoize(this.client.getObject.bind(this.client), {
@@ -246,28 +263,48 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       })
     if (typeof this.client.getOwnedObjects === 'function') {
       const getOwnedObjects = this.client.getOwnedObjects.bind(this.client)
+      // Packages a probe simply does not own the pointer of are the COMMON case
+      // during discovery (candidates are tried in turn), so a genuine empty must
+      // stay cheap. Remember it for the same window as a hit: the memo drops
+      // rejections, so without this every re-probe of the same package would
+      // re-run the whole retry ladder below.
+      const missedPointers = new Map<string, number>()
       // Load-balanced Sui proxies (cldev-style) round-robin across backends whose
       // object indexes may be stale: a by-struct-type getOwnedObjects lookup can
       // answer 200 `data: []` even though the pointer exists. Quick retries
-      // usually land on a synced backend — and a persistent empty on a
-      // *Pointer lookup is thrown (matching the TRANSIENT_LOOKUP_ERROR message
-      // withLookupRetry retries on, and keeping the rejection out of the memo
-      // cache so every outer retry re-arms with fresh requests).
+      // usually land on a synced backend.
+      //
+      // This ladder is the ONLY retry layer for that empty. The error it ends on
+      // is deliberately worded to fall OUTSIDE TRANSIENT_LOOKUP_ERROR: while it
+      // matched, an outer withLookupRetry re-ran the whole ladder, so one package
+      // that owns no pointer cost 5x5 requests and ~30s of backoff instead of 5
+      // and ~4s — enough to look like a hang across a handful of candidates.
       this.client.getOwnedObjects = memoize(
         async (args: Parameters<SuiJsonRpcClient['getOwnedObjects']>[0]) => {
           const pointerType =
             args.filter != null && 'StructType' in args.filter ? args.filter.StructType : undefined
           const pointerLookup = typeof pointerType === 'string' && pointerType.includes('Pointer')
+          const missKey = pointerLookup ? `${String(args.owner)}|${pointerType}` : undefined
+          const noPointer = () =>
+            new CCIPDataFormatUnsupportedError(
+              `Sui package ${String(args.owner)} owns no ${pointerType} object`,
+              { context: { structType: pointerType } },
+            )
+          if (missKey) {
+            const missedAt = missedPointers.get(missKey)
+            if (missedAt != null && Date.now() - missedAt < 30e3) throw noPointer()
+            missedPointers.delete(missKey)
+          }
           for (let attempt = 0; ; attempt++) {
             const res = await getOwnedObjects(args)
             if (!pointerLookup || res.data.length !== 0) return res
-            if (attempt >= 4)
-              throw new CCIPDataFormatUnsupportedError(
-                'No CCIP ObjectRef Pointer found for the given packageId ' +
-                  `(empty response after ${attempt + 1} attempts, ` +
-                  `type ${pointerType})`,
-                { context: { structType: pointerType } },
-              )
+            if (attempt >= 4) {
+              if (missKey) {
+                if (missedPointers.size > 200) missedPointers.clear()
+                missedPointers.set(missKey, Date.now())
+              }
+              throw noPointer()
+            }
             // plain timer: AbortSignal-based sleep can resolve out from under a
             // process with no other handles (its timeout is unref'd)
             await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt))
