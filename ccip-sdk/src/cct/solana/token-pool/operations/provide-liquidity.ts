@@ -37,7 +37,7 @@ type ProvideLiquidityParams = PoolProgramRef & {
   tokenAddress: string
   /** Amount to deposit in base units. Must be a positive u64. */
   amount: bigint
-  /** Pool rebalancer that provides liquidity. Defaults to `payer` for single-signer transactions. */
+  /** Pool rebalancer whose ATA for `tokenAddress` must hold `amount` and delegate it to the pool signer. Defaults to `payer`. */
   authority?: string
 }
 
@@ -114,7 +114,9 @@ export class ProvideLiquidity extends SolanaOperation<
     if (remoteTokenAccountInfo.amount < opts.amount)
       throw new CCTTxFailedError(
         this.name,
-        `source token account ${remoteTokenAccount.toBase58()} has ${remoteTokenAccountInfo.amount}, but ${opts.amount} is required; mint or transfer tokens first`,
+        `source token account ${remoteTokenAccount.toBase58()} has ${
+          remoteTokenAccountInfo.amount
+        }, but ${opts.amount} is required; mint or transfer tokens first`,
       )
 
     // The pool signer transfers from the rebalancer ATA as its SPL Token delegate.
@@ -147,9 +149,17 @@ export class ProvideLiquidity extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, amount = ${opts.amount}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, amount = ${
+        opts.amount
+      }`,
     )
-    return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
+    return {
+      family: ChainFamily.Solana,
+      instructions: [instruction],
+      mainIndex: 0,
+    }
   }
 
   /** Generate, sign, simulate, send, and confirm with the rebalancer wallet. */

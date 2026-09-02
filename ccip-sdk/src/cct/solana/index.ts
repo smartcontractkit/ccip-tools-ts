@@ -1234,11 +1234,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * defaults to `payer`. `amount` is a positive u64 in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
-   * to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
+   * and delegate at least `amount` to the pool signer PDA; use {@link generateUnsignedApproveToken}.
    *
    * @see {@link provideLiquidity}
    * @see {@link generateUnsignedApproveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
@@ -1286,6 +1288,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link generateUnsignedProvideLiquidity}
    * @see {@link approveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
