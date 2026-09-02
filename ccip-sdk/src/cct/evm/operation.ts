@@ -1,10 +1,11 @@
 /**
- * EVM {@link Operation} lifecycle: validate → encode → submit.
- * Concrete ops implement {@link EVMOperation.buildUnsigned}; the base wires
- * {@link generate} and {@link execute}. Deployment ops instead extend
- * {@link EVMDeployOperation}, supplying a {@link DeployArtifact} and constructor-arg
- * encoding while inheriting a deploy-aware {@link execute} that also returns the
- * deployed address, reusing {@link submit}.
+ * EVM {@link Operation} lifecycle: prepare (validate → parse) → encode → submit, plus the shared
+ * wallet-sender pre-flight ({@link EVMOperation.resolveWalletSender}). Deployment ops extend
+ * {@link EVMDeployOperation}, which also resolves the deployed address.
+ *
+ * @remarks The pool-owner pre-flight lives in the token-pool layer as a free helper
+ * (`assertPoolOwner` in `token-pool/contracts.ts`), so this generic base
+ * carries no dependency on a specific operation.
  *
  * @packageDocumentation
  */
@@ -79,27 +80,28 @@ export type DeployResult = TransactionResult & {
 }
 
 /**
- * EVM CCT write base. Subclasses supply {@link validate} and {@link buildUnsigned};
- * {@link execute} signs and submits, returning the confirmed tx hash. Ops that
- * resolve to more (e.g. a deployed address) extend {@link EVMDeployOperation}.
+ * EVM CCT write base. Subclasses supply {@link parse} (or {@link validate}) and
+ * {@link buildUnsigned}; {@link execute} signs and submits, returning the confirmed tx hash. Ops
+ * that resolve to more (e.g. a deployed address) extend {@link EVMDeployOperation}.
  */
-export abstract class EVMOperation<P extends { sender?: string }> extends Operation<
+export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> extends Operation<
   EVMChain,
   P,
   UnsignedEVMTx,
-  TransactionResult
+  TransactionResult,
+  Parsed
 > {
   /** Build calldata into an unsigned tx; versioned ops resolve their encoder here. */
   protected abstract buildUnsigned(
     chain: EVMChain,
-    params: P,
+    params: Parsed,
   ): Promise<UnsignedEVMTx> | UnsignedEVMTx
 
-  /** Run {@link validate} and {@link buildUnsigned}, applying optional `sender`; no signing. */
+  /** Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing. */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {
-    this.validate(params)
+    const parsed = this.prepare(params)
     if (params.sender !== undefined) validateAddress(this.name, 'sender', params.sender)
-    const unsigned = await this.buildUnsigned(chain, params)
+    const unsigned = await this.buildUnsigned(chain, parsed)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
     return unsigned
   }
@@ -115,7 +117,7 @@ export abstract class EVMOperation<P extends { sender?: string }> extends Operat
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
    */
-  protected async senderBoundToWallet(wallet: unknown, sender?: string): Promise<string> {
+  protected async resolveWalletSender(wallet: unknown, sender?: string): Promise<string> {
     if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
     const walletAddress = await wallet.getAddress()
     if (sender === undefined) return walletAddress
