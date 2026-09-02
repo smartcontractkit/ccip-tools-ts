@@ -6,115 +6,130 @@
  * @packageDocumentation
  */
 
-import type { JsonRpcApiProvider } from 'ethers'
+import type { JsonRpcApiProvider } from "ethers";
 
-import type { ChainContext } from '../../chain.ts'
-import { EVMChain } from '../../evm/index.ts'
-import type { UnsignedEVMTx } from '../../evm/types.ts'
-import type { ChainFamily } from '../../networks.ts'
-import type { TransactionResult } from '../operation.ts'
-import { TokenManager } from '../token-manager.ts'
+import type { ChainContext } from "../../chain.ts";
+import { EVMChain } from "../../evm/index.ts";
+import type { UnsignedEVMTx } from "../../evm/types.ts";
+import type { ChainFamily } from "../../networks.ts";
+import type { TransactionResult } from "../operation.ts";
+import { TokenManager } from "../token-manager.ts";
 import {
   type AuthorizeLockboxCallersParams,
   AuthorizeLockboxCallers,
-} from './lockbox/operations/authorize-callers.ts'
-import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
-import type { DeployResult, EVMExecuteParams } from './operation.ts'
-import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
+} from "./lockbox/operations/authorize-callers.ts";
+import {
+  type DeployLockboxParams,
+  DeployLockbox,
+} from "./lockbox/operations/deploy-lockbox.ts";
+import type { DeployResult, EVMExecuteParams } from "./operation.ts";
 import {
   type AcceptAdminParams,
   AcceptAdmin,
-} from './token-admin-registry/operations/accept-admin.ts'
+} from "./token-admin-registry/operations/accept-admin.ts";
 import {
   type GetSupportedTokensParams,
   type GetSupportedTokensResult,
   GetSupportedTokens,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
+} from "./token-admin-registry/operations/get-supported-tokens.ts";
 import {
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
   GetTokenAdminRegistry,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
+} from "./token-admin-registry/operations/get-token-admin-registry.ts";
 import {
   type RegisterAdminParams,
   RegisterAdmin,
-} from './token-admin-registry/operations/register-admin.ts'
-import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
+} from "./token-admin-registry/operations/register-admin.ts";
+import {
+  type SetPoolParams,
+  SetPool,
+} from "./token-admin-registry/operations/set-pool.ts";
 import {
   type TransferAdminParams,
   TransferAdmin,
-} from './token-admin-registry/operations/transfer-admin.ts'
-import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
+} from "./token-admin-registry/operations/transfer-admin.ts";
+import {
+  type AddRemotePoolParams,
+  AddRemotePool,
+} from "./token-pool/operations/add-remote-pool.ts";
 import {
   type ApplyChainUpdatesParams,
   ApplyChainUpdates,
-} from './token-pool/operations/apply-chain-updates.ts'
+} from "./token-pool/operations/apply-chain-updates.ts";
 import {
   type DeployTokenPoolParams,
   DeployTokenPool,
-} from './token-pool/operations/deploy-token-pool.ts'
+} from "./token-pool/operations/deploy-token-pool.ts";
 import {
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   GetTokenPoolRemotes,
-} from './token-pool/operations/get-token-pool-remotes.ts'
+} from "./token-pool/operations/get-token-pool-remotes.ts";
 import {
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   GetTokenPoolState,
-} from './token-pool/operations/get-token-pool-state.ts'
+} from "./token-pool/operations/get-token-pool-state.ts";
 import {
   type RemoveRemotePoolParams,
   RemoveRemotePool,
-} from './token-pool/operations/remove-remote-pool.ts'
+} from "./token-pool/operations/remove-remote-pool.ts";
 import {
   type SetChainRateLimiterConfigsParams,
   SetChainRateLimiterConfigs,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
-import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
+} from "./token-pool/operations/set-chain-rate-limiter-configs.ts";
+import {
+  type SetRemotePoolParams,
+  SetRemotePool,
+} from "./token-pool/operations/set-remote-pool.ts";
 import {
   type TransferOwnershipParams,
   TransferOwnership,
-} from './token-pool/operations/transfer-ownership.ts'
+} from "./token-pool/operations/transfer-ownership.ts";
+import {
+  type DeployTokenParams,
+  DeployToken,
+} from "./token/operations/deploy-token.ts";
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
-  readonly chain: EVMChain
+  readonly chain: EVMChain;
   // Token operations
-  readonly #deployToken = new DeployToken()
+  readonly #deployToken = new DeployToken();
 
   // Token admin registry operations
-  readonly #registerAdmin = new RegisterAdmin()
-  readonly #setPool = new SetPool()
-  readonly #transferAdmin = new TransferAdmin()
-  readonly #acceptAdmin = new AcceptAdmin()
-  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
-  readonly #getSupportedTokens = new GetSupportedTokens()
+  readonly #registerAdmin = new RegisterAdmin();
+  readonly #setPool = new SetPool();
+  readonly #transferAdmin = new TransferAdmin();
+  readonly #acceptAdmin = new AcceptAdmin();
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry();
+  readonly #getSupportedTokens = new GetSupportedTokens();
 
   // Token pool operations
-  readonly #deployTokenPool = new DeployTokenPool()
-  readonly #transferOwnership = new TransferOwnership()
-  readonly #getTokenPoolState = new GetTokenPoolState()
-  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
-  readonly #setRemotePool = new SetRemotePool()
-  readonly #addRemotePool = new AddRemotePool()
-  readonly #removeRemotePool = new RemoveRemotePool()
-  readonly #applyChainUpdates = new ApplyChainUpdates()
-  readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
+  readonly #deployTokenPool = new DeployTokenPool();
+  readonly #transferOwnership = new TransferOwnership();
+  readonly #getTokenPoolState = new GetTokenPoolState();
+  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes();
+  readonly #setRemotePool = new SetRemotePool();
+  readonly #addRemotePool = new AddRemotePool();
+  readonly #removeRemotePool = new RemoveRemotePool();
+  readonly #applyChainUpdates = new ApplyChainUpdates();
+  readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs();
 
   // Lockbox operations
-  readonly #deployLockbox = new DeployLockbox()
-  readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
+  readonly #deployLockbox = new DeployLockbox();
+  readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers();
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
-    super()
-    this.chain = chain
+    super();
+    this.chain = chain;
   }
 
   /** Wraps an existing {@link EVMChain}. */
   static fromChain(chain: EVMChain): EVMTokenManager {
-    return new EVMTokenManager(chain)
+    return new EVMTokenManager(chain);
   }
 
   /** Creates from an ethers provider. */
@@ -122,17 +137,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     provider: JsonRpcApiProvider,
     ctx?: ChainContext,
   ): Promise<EVMTokenManager> {
-    return new EVMTokenManager(await EVMChain.fromProvider(provider, ctx))
+    return new EVMTokenManager(await EVMChain.fromProvider(provider, ctx));
   }
 
   /** Creates from an RPC URL. */
-  static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMTokenManager> {
-    return new EVMTokenManager(await EVMChain.fromUrl(url, ctx))
+  static async fromUrl(
+    url: string,
+    ctx?: ChainContext,
+  ): Promise<EVMTokenManager> {
+    return new EVMTokenManager(await EVMChain.fromUrl(url, ctx));
   }
 
   /** Provider of the underlying chain. */
   get provider(): JsonRpcApiProvider {
-    return this.chain.provider
+    return this.chain.provider;
   }
 
   /**
@@ -165,8 +183,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedRegisterAdmin(opts: RegisterAdminParams): Promise<UnsignedEVMTx> {
-    return this.#registerAdmin.generate(this.chain, opts)
+  generateUnsignedRegisterAdmin(
+    opts: RegisterAdminParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#registerAdmin.generate(this.chain, opts);
   }
 
   /**
@@ -194,8 +214,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  registerAdmin(opts: EVMExecuteParams<RegisterAdminParams>): Promise<TransactionResult> {
-    return this.#registerAdmin.execute(this.chain, opts)
+  registerAdmin(
+    opts: EVMExecuteParams<RegisterAdminParams>,
+  ): Promise<TransactionResult> {
+    return this.#registerAdmin.execute(this.chain, opts);
   }
 
   /**
@@ -214,7 +236,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```
    */
   generateUnsignedSetPool(opts: SetPoolParams): Promise<UnsignedEVMTx> {
-    return this.#setPool.generate(this.chain, opts)
+    return this.#setPool.generate(this.chain, opts);
   }
 
   /**
@@ -235,7 +257,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```
    */
   setPool(opts: EVMExecuteParams<SetPoolParams>): Promise<TransactionResult> {
-    return this.#setPool.execute(this.chain, opts)
+    return this.#setPool.execute(this.chain, opts);
   }
 
   /**
@@ -256,8 +278,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedTransferAdmin(opts: TransferAdminParams): Promise<UnsignedEVMTx> {
-    return this.#transferAdmin.generate(this.chain, opts)
+  generateUnsignedTransferAdmin(
+    opts: TransferAdminParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#transferAdmin.generate(this.chain, opts);
   }
 
   /**
@@ -282,8 +306,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  transferAdmin(opts: EVMExecuteParams<TransferAdminParams>): Promise<TransactionResult> {
-    return this.#transferAdmin.execute(this.chain, opts)
+  transferAdmin(
+    opts: EVMExecuteParams<TransferAdminParams>,
+  ): Promise<TransactionResult> {
+    return this.#transferAdmin.execute(this.chain, opts);
   }
 
   /**
@@ -305,7 +331,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```
    */
   generateUnsignedAcceptAdmin(opts: AcceptAdminParams): Promise<UnsignedEVMTx> {
-    return this.#acceptAdmin.generate(this.chain, opts)
+    return this.#acceptAdmin.generate(this.chain, opts);
   }
 
   /**
@@ -326,8 +352,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  acceptAdmin(opts: EVMExecuteParams<AcceptAdminParams>): Promise<TransactionResult> {
-    return this.#acceptAdmin.execute(this.chain, opts)
+  acceptAdmin(
+    opts: EVMExecuteParams<AcceptAdminParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptAdmin.execute(this.chain, opts);
   }
 
   /**
@@ -351,8 +379,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * }
    * ```
    */
-  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
-    return this.#getTokenAdminRegistry.query(this.chain, opts)
+  getTokenAdminRegistry(
+    opts: GetTokenAdminRegistryParams,
+  ): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts);
   }
 
   /**
@@ -366,8 +396,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
    * ```
    */
-  getSupportedTokens(opts: GetSupportedTokensParams): Promise<GetSupportedTokensResult> {
-    return this.#getSupportedTokens.query(this.chain, opts)
+  getSupportedTokens(
+    opts: GetSupportedTokensParams,
+  ): Promise<GetSupportedTokensResult> {
+    return this.#getSupportedTokens.query(this.chain, opts);
   }
 
   /**
@@ -376,8 +408,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * calldata is stable across pool versions, so the resolved encoding is version/type-independent.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
-  generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {
-    return this.#transferOwnership.generate(this.chain, opts)
+  generateUnsignedTransferOwnership(
+    opts: TransferOwnershipParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#transferOwnership.generate(this.chain, opts);
   }
 
   /**
@@ -386,8 +420,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  transferOwnership(opts: EVMExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
-    return this.#transferOwnership.execute(this.chain, opts)
+  transferOwnership(
+    opts: EVMExecuteParams<TransferOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#transferOwnership.execute(this.chain, opts);
   }
 
   /**
@@ -441,7 +477,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   generateUnsignedSetChainRateLimiterConfigs(
     opts: SetChainRateLimiterConfigsParams,
   ): Promise<UnsignedEVMTx> {
-    return this.#setChainRateLimiterConfigs.generate(this.chain, opts)
+    return this.#setChainRateLimiterConfigs.generate(this.chain, opts);
   }
 
   /**
@@ -483,7 +519,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   setChainRateLimiterConfigs(
     opts: EVMExecuteParams<SetChainRateLimiterConfigsParams>,
   ): Promise<TransactionResult> {
-    return this.#setChainRateLimiterConfigs.execute(this.chain, opts)
+    return this.#setChainRateLimiterConfigs.execute(this.chain, opts);
   }
 
   /**
@@ -506,7 +542,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```
    */
   generateUnsignedDeployToken(opts: DeployTokenParams): Promise<UnsignedEVMTx> {
-    return this.#deployToken.generate(this.chain, opts)
+    return this.#deployToken.generate(this.chain, opts);
   }
 
   /**
@@ -531,8 +567,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployToken(opts: EVMExecuteParams<DeployTokenParams>): Promise<DeployResult> {
-    return this.#deployToken.execute(this.chain, opts)
+  deployToken(
+    opts: EVMExecuteParams<DeployTokenParams>,
+  ): Promise<DeployResult> {
+    return this.#deployToken.execute(this.chain, opts);
   }
 
   /**
@@ -560,8 +598,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedDeployTokenPool(opts: DeployTokenPoolParams): Promise<UnsignedEVMTx> {
-    return this.#deployTokenPool.generate(this.chain, opts)
+  generateUnsignedDeployTokenPool(
+    opts: DeployTokenPoolParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#deployTokenPool.generate(this.chain, opts);
   }
 
   /**
@@ -592,8 +632,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
-    return this.#deployTokenPool.execute(this.chain, opts)
+  deployTokenPool(
+    opts: EVMExecuteParams<DeployTokenPoolParams>,
+  ): Promise<DeployResult> {
+    return this.#deployTokenPool.execute(this.chain, opts);
   }
 
   /**
@@ -612,8 +654,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedDeployLockbox(opts: DeployLockboxParams): Promise<UnsignedEVMTx> {
-    return this.#deployLockbox.generate(this.chain, opts)
+  generateUnsignedDeployLockbox(
+    opts: DeployLockboxParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#deployLockbox.generate(this.chain, opts);
   }
 
   /**
@@ -634,8 +678,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployLockbox(opts: EVMExecuteParams<DeployLockboxParams>): Promise<DeployResult> {
-    return this.#deployLockbox.execute(this.chain, opts)
+  deployLockbox(
+    opts: EVMExecuteParams<DeployLockboxParams>,
+  ): Promise<DeployResult> {
+    return this.#deployLockbox.execute(this.chain, opts);
   }
 
   /**
@@ -656,7 +702,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   generateUnsignedAuthorizeLockboxCallers(
     opts: AuthorizeLockboxCallersParams,
   ): Promise<UnsignedEVMTx> {
-    return this.#authorizeLockboxCallers.generate(this.chain, opts)
+    return this.#authorizeLockboxCallers.generate(this.chain, opts);
   }
 
   /**
@@ -678,7 +724,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   authorizeLockboxCallers(
     opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
   ): Promise<TransactionResult> {
-    return this.#authorizeLockboxCallers.execute(this.chain, opts)
+    return this.#authorizeLockboxCallers.execute(this.chain, opts);
   }
 
   /**
@@ -710,8 +756,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * }
    * ```
    */
-  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
-    return this.#getTokenPoolState.query(this.chain, opts)
+  getTokenPoolState(
+    opts: GetTokenPoolStateParams,
+  ): Promise<GetTokenPoolStateResult> {
+    return this.#getTokenPoolState.query(this.chain, opts);
   }
 
   /**
@@ -754,8 +802,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
-    return this.#getTokenPoolRemotes.query(this.chain, opts)
+  getTokenPoolRemotes(
+    opts: GetTokenPoolRemotesParams,
+  ): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts);
   }
 
   /**
@@ -785,8 +835,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedSetRemotePool(opts: SetRemotePoolParams): Promise<UnsignedEVMTx> {
-    return this.#setRemotePool.generate(this.chain, opts)
+  generateUnsignedSetRemotePool(
+    opts: SetRemotePoolParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#setRemotePool.generate(this.chain, opts);
   }
 
   /**
@@ -813,8 +865,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setRemotePool(opts: EVMExecuteParams<SetRemotePoolParams>): Promise<TransactionResult> {
-    return this.#setRemotePool.execute(this.chain, opts)
+  setRemotePool(
+    opts: EVMExecuteParams<SetRemotePoolParams>,
+  ): Promise<TransactionResult> {
+    return this.#setRemotePool.execute(this.chain, opts);
   }
 
   /**
@@ -845,8 +899,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedAddRemotePool(opts: AddRemotePoolParams): Promise<UnsignedEVMTx> {
-    return this.#addRemotePool.generate(this.chain, opts)
+  generateUnsignedAddRemotePool(
+    opts: AddRemotePoolParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#addRemotePool.generate(this.chain, opts);
   }
 
   /**
@@ -873,8 +929,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  addRemotePool(opts: EVMExecuteParams<AddRemotePoolParams>): Promise<TransactionResult> {
-    return this.#addRemotePool.execute(this.chain, opts)
+  addRemotePool(
+    opts: EVMExecuteParams<AddRemotePoolParams>,
+  ): Promise<TransactionResult> {
+    return this.#addRemotePool.execute(this.chain, opts);
   }
 
   /**
@@ -905,8 +963,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedRemoveRemotePool(opts: RemoveRemotePoolParams): Promise<UnsignedEVMTx> {
-    return this.#removeRemotePool.generate(this.chain, opts)
+  generateUnsignedRemoveRemotePool(
+    opts: RemoveRemotePoolParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#removeRemotePool.generate(this.chain, opts);
   }
 
   /**
@@ -933,8 +993,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  removeRemotePool(opts: EVMExecuteParams<RemoveRemotePoolParams>): Promise<TransactionResult> {
-    return this.#removeRemotePool.execute(this.chain, opts)
+  removeRemotePool(
+    opts: EVMExecuteParams<RemoveRemotePoolParams>,
+  ): Promise<TransactionResult> {
+    return this.#removeRemotePool.execute(this.chain, opts);
   }
 
   /**
@@ -971,8 +1033,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  applyChainUpdates(opts: EVMExecuteParams<ApplyChainUpdatesParams>): Promise<TransactionResult> {
-    return this.#applyChainUpdates.execute(this.chain, opts)
+  applyChainUpdates(
+    opts: EVMExecuteParams<ApplyChainUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyChainUpdates.execute(this.chain, opts);
   }
 
   /**
@@ -1046,32 +1110,36 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedApplyChainUpdates(opts: ApplyChainUpdatesParams): Promise<UnsignedEVMTx> {
-    return this.#applyChainUpdates.generate(this.chain, opts)
+  generateUnsignedApplyChainUpdates(
+    opts: ApplyChainUpdatesParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#applyChainUpdates.generate(this.chain, opts);
   }
 }
 
-export * from '../errors.ts'
-export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
+export * from "../errors.ts";
+export type { AcceptAdminParams } from "./token-admin-registry/operations/accept-admin.ts";
 export type {
   RegisterAdminMethod,
   RegisterAdminParams,
-} from './token-admin-registry/operations/register-admin.ts'
+} from "./token-admin-registry/operations/register-admin.ts";
 export type {
   GetTokenAdminRegistryParams,
   GetTokenAdminRegistryResult,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
-export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
-export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
+} from "./token-admin-registry/operations/get-token-admin-registry.ts";
+export type { SetPoolParams } from "./token-admin-registry/operations/set-pool.ts";
+export type { TransferAdminParams } from "./token-admin-registry/operations/transfer-admin.ts";
 export type {
   GetSupportedTokensParams,
   GetSupportedTokensResult,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
-export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+} from "./token-admin-registry/operations/get-supported-tokens.ts";
+export * from "./token-admin-registry/contracts.ts";
+export type { DeployTokenParams } from "./token/operations/deploy-token.ts";
+export * from "./token/contracts.ts";
 export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
-} from './token-pool/operations/deploy-token-pool.ts'
+} from "./token-pool/operations/deploy-token-pool.ts";
 export type {
   BurnMintTokenPoolStateV2_0_0,
   GetTokenPoolStateParams,
@@ -1079,14 +1147,14 @@ export type {
   LegacyTokenPoolState,
   LockReleaseTokenPoolStateV2_0_0,
   TokenPoolStateV2_0_0,
-} from './token-pool/operations/get-token-pool-state.ts'
+} from "./token-pool/operations/get-token-pool-state.ts";
 export type {
   GetTokenPoolRemotesParams,
   GetTokenPoolRemotesResult,
-} from './token-pool/operations/get-token-pool-remotes.ts'
-export type { SetRemotePoolParams } from './token-pool/operations/set-remote-pool.ts'
-export type { AddRemotePoolParams } from './token-pool/operations/add-remote-pool.ts'
-export type { RemoveRemotePoolParams } from './token-pool/operations/remove-remote-pool.ts'
+} from "./token-pool/operations/get-token-pool-remotes.ts";
+export type { SetRemotePoolParams } from "./token-pool/operations/set-remote-pool.ts";
+export type { AddRemotePoolParams } from "./token-pool/operations/add-remote-pool.ts";
+export type { RemoveRemotePoolParams } from "./token-pool/operations/remove-remote-pool.ts";
 export type {
   ApplyChainUpdatesParamVersion,
   ApplyChainUpdatesParams,
@@ -1094,24 +1162,26 @@ export type {
   ApplyChainUpdatesParamsV1_5_1,
   ChainUpdateV1_5_0,
   ChainUpdateV1_5_1,
-} from './token-pool/operations/apply-chain-updates.ts'
+} from "./token-pool/operations/apply-chain-updates.ts";
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
-export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export type { RateLimiterState, TokenPoolRemote } from "../../chain.ts";
 export type {
   ChainRateLimitUpdate,
   SetChainRateLimiterConfigsParams,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
-export type { RateLimitConfig } from './token-pool/rate-limit.ts'
-export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
-export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+} from "./token-pool/operations/set-chain-rate-limiter-configs.ts";
+export type { RateLimitConfig } from "./token-pool/rate-limit.ts";
+export * from "./token-pool/contracts.ts";
+export type { DeployLockboxParams } from "./lockbox/operations/deploy-lockbox.ts";
+export type { AuthorizeLockboxCallersParams } from "./lockbox/operations/authorize-callers.ts";
+export * from "./lockbox/contracts.ts";
 export type {
   DeployArtifact,
   DeployResult,
   EVMExecuteParams,
   ExplorerVerificationInput,
-} from './operation.ts'
-export type { TransactionResult } from '../operation.ts'
+} from "./operation.ts";
+export type { TransactionResult } from "../operation.ts";

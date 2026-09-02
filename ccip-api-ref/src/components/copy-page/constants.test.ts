@@ -4,7 +4,7 @@
  * Tests for the Copy Page constants and utility functions.
  */
 
-/* eslint-disable @typescript-eslint/no-unnecessary-condition -- tests verify constant values */
+/* oxlint-disable typescript/no-unnecessary-condition -- tests verify constant values */
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'

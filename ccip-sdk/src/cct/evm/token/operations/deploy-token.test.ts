@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, makeError } from 'ethers'
 
-import { DeployToken } from './deploy-token.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import crossChainBytecode from '../../artifacts/bytecode/V2_0_0/cross-chain-token.ts'
+import { DeployToken } from './deploy-token.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const OWNER = '0x' + '11'.repeat(20)

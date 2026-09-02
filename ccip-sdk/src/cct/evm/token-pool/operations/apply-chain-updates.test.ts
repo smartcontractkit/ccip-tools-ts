@@ -3,13 +3,13 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
 
-import { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)

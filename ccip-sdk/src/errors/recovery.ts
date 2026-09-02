@@ -160,6 +160,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Logs watch requires endBlock to be a `finalized`, `latest` or finality block depth (negative).',
   LOGS_WATCH_REQUIRES_START: 'Logs watch requires either startBlock or startTime (forward mode).',
   LOGS_REQUIRES_START: 'Logs queries require either startBlock or startTime.',
+  LOGS_STREAM_INCONSISTENT:
+    'Two data sources disagreed mid-scan (or the transaction chain link broke). Drop the in-progress block and retry/resume from the last known-good log cursor; the sources converge on their own.',
   LOGS_ADDRESS_REQUIRED: 'Provide address for logs filtering.',
   TOPICS_INVALID: 'Topics must be strings for event filtering.',
 

@@ -9,9 +9,9 @@ import {
   bytesToBuffer,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import { TonTransport } from '@ton-community/ton-ledger'
 import { keyPairFromSecretKey, mnemonicToPrivateKey } from '@ton/crypto'
 import { type TonClient, Address, SendMode, WalletContractV4, internal, toNano } from '@ton/ton'
-import { TonTransport } from '@ton-community/ton-ledger'
 
 /**
  * Loads a TON wallet from the provided options.

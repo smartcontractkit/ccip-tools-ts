@@ -155,7 +155,7 @@ function buildEd25519Pkcs8Der(seed: Buffer): Buffer {
   //       04 20              — OCTET STRING (32 bytes, the raw seed)
   //         <seed bytes>
   //
-  // prettier-ignore
+  // oxfmt-ignore
   const prefix = Buffer.from([
     0x30, 0x2e,             // SEQUENCE, 46 bytes
     0x02, 0x01, 0x00,       // INTEGER 0 (version)
