@@ -87,6 +87,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
     const pool = Keypair.generate().publicKey.toBase58()
     const account = Keypair.generate().publicKey.toBase58()
     const reader = Keypair.generate().publicKey.toBase58()
+    const overrideAddress = Keypair.generate().publicKey.toBase58()
+    const overrideRouter = Keypair.generate().publicKey.toBase58()
     const remoteChainSelector = 5009297550715157269n
 
     function chain(): SolanaChain {
@@ -190,10 +192,14 @@ describe('SolanaTokenManager (cct/solana)', () => {
           sendTransaction: async () => PublicKey.default.toBase58(),
           confirmTransaction: async () => ({ value: { err: null } }),
         },
-        getTokenAdminRegistryFor: async (address: string) => (address === reader ? pool : account),
+        getTokenAdminRegistryFor: async (address: string) =>
+          address === reader ? pool : address === overrideAddress ? overrideRouter : account,
         getSupportedTokens: async () => [mint],
         getTokenPoolRemotes: async () => ({}),
-        getRegistryTokenConfig: async () => ({ administrator: payer, pendingAdministrator: payer }),
+        getRegistryTokenConfig: async (router: string) =>
+          router === overrideRouter
+            ? { administrator: PublicKey.default.toBase58(), pendingAdministrator: payer }
+            : { administrator: payer, pendingAdministrator: payer },
       } as unknown as SolanaChain
     }
 
@@ -364,8 +370,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
           () =>
             cct.generateUnsignedOwnerOverridePendingAdministrator({
               ...common,
-              address: account,
-              tokenAdminRegistryAdmin: account,
+              address: overrideAddress,
+              newAdmin: account,
             }),
         ],
         ['registerAdmin', () => cct.generateUnsignedRegisterAdmin({ ...common, address: account })],
@@ -615,8 +621,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.ownerOverridePendingAdministrator({
               wallet,
               tokenAddress: mint,
-              address: account,
-              tokenAdminRegistryAdmin: account,
+              address: overrideAddress,
+              newAdmin: account,
             }),
         ],
         [

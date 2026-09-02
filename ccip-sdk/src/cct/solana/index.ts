@@ -1917,17 +1917,19 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that replaces a token's pending registry administrator.
+   * Builds an unsigned instruction that replaces an initial pending registry administrator.
    *
    * @remarks
-   * Only the token owner may authorize this recovery path. It replaces, rather than accepts, the
-   * current pending administrator; the replacement must still call {@link generateUnsignedAcceptAdmin}.
-   * `authority` defaults to `payer`; use this unsigned method for Squads/vault signatures.
+   * Only the mint authority may authorize this recovery path, and only while the registry has no
+   * accepted administrator. It replaces the initial pending administrator; the replacement must
+   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
+   * unsigned method for Squads/vault signatures.
    *
    * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
    * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
    *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
+   * accepted administrator.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    *
    * @example
@@ -1935,8 +1937,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
    *   tokenAddress: mint,
    *   address: router,
-   *   tokenAdminRegistryAdmin: replacementAdmin,
-   *   payer: tokenOwner,
+   *   newAdmin: replacementAdmin,
+   *   payer: mintAuthority,
    * })
    * ```
    */
@@ -1947,28 +1949,30 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Replaces a token's pending registry administrator using the token owner wallet.
+   * Replaces an initial pending registry administrator using the mint authority wallet.
    *
    * @remarks
-   * This recovery path replaces the current pending administrator; it does not make the replacement
-   * an administrator. The replacement must call {@link acceptAdmin} separately. `authority` defaults
-   * to `wallet`; use {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
+   * This recovery path only works while the registry has no accepted administrator. It replaces the
+   * initial pending administrator; it does not make the replacement an administrator. The replacement
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
+   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
    *
    * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
    * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` differs from the wallet.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
+   * administrator, or `authority` differs from the wallet.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCTTxFailedError} If the Router rejects a non-owner authority or invalid registry state.
+   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
    *
    * @example
    * ```ts
    * await cct.ownerOverridePendingAdministrator({
    *   tokenAddress: mint,
    *   address: router,
-   *   tokenAdminRegistryAdmin: replacementAdmin,
-   *   wallet: tokenOwnerWallet,
+   *   newAdmin: replacementAdmin,
+   *   wallet: mintAuthorityWallet,
    * })
    * ```
    */

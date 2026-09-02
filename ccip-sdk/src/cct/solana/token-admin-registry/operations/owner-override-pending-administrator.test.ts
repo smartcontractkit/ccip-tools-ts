@@ -23,7 +23,10 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
-function stubChain(onAddress?: (address: string) => void): SolanaChain {
+function stubChain(
+  administrator = PublicKey.default.toBase58(),
+  onAddress?: (address: string) => void,
+): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
@@ -39,6 +42,7 @@ function stubChain(onAddress?: (address: string) => void): SolanaChain {
       onAddress?.(address)
       return ROUTER
     },
+    getRegistryTokenConfig: async () => ({ administrator }),
   } as unknown as SolanaChain
 }
 
@@ -46,7 +50,7 @@ function generate(opts: Partial<GenerateOwnerOverridePendingAdministratorParams>
   return new OwnerOverridePendingAdministrator().generate(stubChain(), {
     tokenAddress: TOKEN,
     address: ADDRESS,
-    tokenAdminRegistryAdmin: NEW_ADMIN,
+    newAdmin: NEW_ADMIN,
     payer: OWNER,
     authority: OWNER,
     ...opts,
@@ -95,8 +99,8 @@ describe('OwnerOverridePendingAdministrator (cct/solana)', () => {
     it('resolves the router from address', async () => {
       let requestedAddress: string | undefined
       await new OwnerOverridePendingAdministrator().generate(
-        stubChain((address) => (requestedAddress = address)),
-        { tokenAddress: TOKEN, address: ADDRESS, tokenAdminRegistryAdmin: NEW_ADMIN, payer: OWNER },
+        stubChain(PublicKey.default.toBase58(), (address) => (requestedAddress = address)),
+        { tokenAddress: TOKEN, address: ADDRESS, newAdmin: NEW_ADMIN, payer: OWNER },
       )
 
       assert.equal(requestedAddress, ADDRESS)
@@ -104,12 +108,7 @@ describe('OwnerOverridePendingAdministrator (cct/solana)', () => {
   })
 
   describe('validation', () => {
-    for (const param of [
-      'tokenAddress',
-      'address',
-      'tokenAdminRegistryAdmin',
-      'authority',
-    ] as const) {
+    for (const param of ['tokenAddress', 'address', 'newAdmin', 'authority'] as const) {
       it(`rejects an invalid ${param}`, async () => {
         await assert.rejects(
           () => generate({ [param]: 'not-a-public-key' }),
@@ -117,6 +116,23 @@ describe('OwnerOverridePendingAdministrator (cct/solana)', () => {
         )
       })
     }
+
+    it('rejects an accepted registry administrator before building the transaction', async () => {
+      await assert.rejects(
+        () =>
+          new OwnerOverridePendingAdministrator().generate(stubChain(OWNER), {
+            tokenAddress: TOKEN,
+            address: ADDRESS,
+            newAdmin: NEW_ADMIN,
+            payer: OWNER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'tokenAddress' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('The current administrator must use transferAdmin instead'),
+      )
+    })
   })
 
   describe('execute', () => {
@@ -125,20 +141,20 @@ describe('OwnerOverridePendingAdministrator (cct/solana)', () => {
         await new OwnerOverridePendingAdministrator().execute(stubChain(), {
           tokenAddress: TOKEN,
           address: ADDRESS,
-          tokenAdminRegistryAdmin: NEW_ADMIN,
+          newAdmin: NEW_ADMIN,
           wallet: WALLET,
         }),
         { hash: HASH },
       )
     })
 
-    it('requires the token owner to be the executing wallet', async () => {
+    it('requires the mint authority to be the executing wallet', async () => {
       await assert.rejects(
         () =>
           new OwnerOverridePendingAdministrator().execute(stubChain(), {
             tokenAddress: TOKEN,
             address: ADDRESS,
-            tokenAdminRegistryAdmin: NEW_ADMIN,
+            newAdmin: NEW_ADMIN,
             authority: NEW_ADMIN,
             wallet: WALLET,
           }),

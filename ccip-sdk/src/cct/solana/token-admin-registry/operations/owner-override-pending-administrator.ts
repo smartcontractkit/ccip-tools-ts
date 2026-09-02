@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -24,8 +25,8 @@ type OwnerOverridePendingAdministratorParams = {
   /** CCIP contract to resolve the TokenAdminRegistry/Router from — a Router or OffRamp works. */
   address: string
   /** Administrator to propose as the replacement pending administrator. */
-  tokenAdminRegistryAdmin: string
-  /** Token owner. Defaults to `payer` for single-signer transactions. */
+  newAdmin: string
+  /** Mint authority. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
 
@@ -46,12 +47,12 @@ export type ExecuteOwnerOverridePendingAdministratorResult = TransactionResult
 type ParsedOwnerOverridePendingAdministratorParams = {
   tokenMint: PublicKey
   address: PublicKey
-  tokenAdminRegistryAdmin: PublicKey
+  newAdmin: PublicKey
   payer: PublicKey
   authority: PublicKey
 }
 
-/** Replaces a token's pending TokenAdminRegistry administrator using the token owner. */
+/** Replaces an initial pending TokenAdminRegistry administrator using the mint authority. */
 export class OwnerOverridePendingAdministrator extends SolanaOperation<
   OwnerOverridePendingAdministratorParams,
   UnsignedSolanaTx,
@@ -67,11 +68,7 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
     return {
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       address: parsePublicKey(this.name, 'address', params.address),
-      tokenAdminRegistryAdmin: parsePublicKey(
-        this.name,
-        'tokenAdminRegistryAdmin',
-        params.tokenAdminRegistryAdmin,
-      ),
+      newAdmin: parsePublicKey(this.name, 'newAdmin', params.newAdmin),
       payer,
       authority:
         params.authority === undefined
@@ -80,15 +77,24 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
     }
   }
 
-  /** Builds the owner override instruction. The Router verifies the token owner on-chain. */
+  /** Builds the override instruction. The Router verifies the mint authority and initial state on-chain. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedOwnerOverridePendingAdministratorParams,
   ): Promise<UnsignedSolanaTx> {
-    const { tokenMint, payer, authority, tokenAdminRegistryAdmin } = opts
+    const { tokenMint, payer, authority, newAdmin } = opts
     const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
+    const tokenConfig = await chain.getRegistryTokenConfig(router.toBase58(), tokenMint.toBase58())
+    if (!new PublicKey(tokenConfig.administrator).equals(PublicKey.default)) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenAddress',
+        `cannot override the pending administrator because ${tokenConfig.administrator} has already accepted the role; only initial registrations can be overridden. The current administrator must use transferAdmin instead.`,
+      )
+    }
+
     const instruction = await createRouterProgram(chain, router, payer)
-      .methods.ownerOverridePendingAdministrator(tokenAdminRegistryAdmin)
+      .methods.ownerOverridePendingAdministrator(newAdmin)
       .accounts({
         config: deriveRouterConfigPda(router),
         tokenAdminRegistry: deriveTokenAdminRegistryPda(router, tokenMint),
@@ -98,12 +104,18 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: router = ${router.toBase58()}, token = ${tokenMint.toBase58()}, tokenAdminRegistryAdmin = ${tokenAdminRegistryAdmin.toBase58()}`,
+      `${
+        this.name
+      }: router = ${router.toBase58()}, token = ${tokenMint.toBase58()}, newAdmin = ${newAdmin.toBase58()}`,
     )
-    return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
+    return {
+      family: ChainFamily.Solana,
+      instructions: [instruction],
+      mainIndex: 0,
+    }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the token owner wallet. */
+  /** Generate, sign, simulate, send, and confirm with the mint authority wallet. */
   override async execute(
     chain: SolanaChain,
     params: ExecuteOwnerOverridePendingAdministratorParams,
