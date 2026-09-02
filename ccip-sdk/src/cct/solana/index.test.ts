@@ -359,6 +359,15 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         ['acceptAdmin', () => cct.generateUnsignedAcceptAdmin({ ...common, address: account })],
+        [
+          'ownerOverridePendingAdministrator',
+          () =>
+            cct.generateUnsignedOwnerOverridePendingAdministrator({
+              ...common,
+              address: account,
+              tokenAdminRegistryAdmin: account,
+            }),
+        ],
         ['registerAdmin', () => cct.generateUnsignedRegisterAdmin({ ...common, address: account })],
         [
           'removeFromAllowlist',
@@ -600,6 +609,16 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         ['acceptAdmin', () => cct.acceptAdmin({ wallet, tokenAddress: mint, address: account })],
+        [
+          'ownerOverridePendingAdministrator',
+          () =>
+            cct.ownerOverridePendingAdministrator({
+              wallet,
+              tokenAddress: mint,
+              address: account,
+              tokenAdminRegistryAdmin: account,
+            }),
+        ],
         [
           'registerAdmin',
           () => cct.registerAdmin({ wallet, tokenAddress: mint, address: account }),
