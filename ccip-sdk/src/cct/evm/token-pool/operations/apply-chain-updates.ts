@@ -44,7 +44,8 @@ import {
  * shape for every pool from v1.5.1 up, v1.6.1 and v2.0.0 included.
  */
 export type ApplyChainUpdatesParamVersion =
-  typeof TokenPoolVersion.V1_5_0 | typeof TokenPoolVersion.V1_5_1
+  | typeof TokenPoolVersion.V1_5_0
+  | typeof TokenPoolVersion.V1_5_1
 
 /**
  * One direction of a token pool rate limiter, as callers write it. Amounts are in the token's
@@ -428,7 +429,8 @@ export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
  * parsed lane is already a `ChainUpdate` struct, so they only choose the argument order.
  */
 type ParsedApplyChainUpdatesParams =
-  ParsedApplyChainUpdatesParamsV1_5_0 | ParsedApplyChainUpdatesParamsV1_5_1
+  | ParsedApplyChainUpdatesParamsV1_5_0
+  | ParsedApplyChainUpdatesParamsV1_5_1
 
 /** Encodes parsed params into `applyChainUpdates` calldata, widened over the parsed union. */
 type Encoder = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx
