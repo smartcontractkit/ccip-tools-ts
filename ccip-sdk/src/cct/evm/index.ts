@@ -560,20 +560,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned pool `setDynamicConfig` tx (for multisig / offline signing): replaces a
    * **v2.0.0** pool's whole dynamic config — the `router` it accepts ramp calls from, plus the
    * `rateLimitAdmin` and `feeAdmin` delegate roles.
-   * @remarks This is where the pre-2.0.0 `setRouter` / `setRateLimitAdmin` setters went: 2.0.0
-   * removed them and writes all three fields together. Consequently **all three params are
-   * required** — this op deliberately does *not* read `getDynamicConfig()` to fill in what the
-   * caller omitted. The calldata has to be deterministic at build time: a multisig or cold wallet
-   * may sign it days later, and a hidden read would bake a value that has since moved on-chain,
-   * silently reverting an unrelated config change made in the interim.
+   * @remarks 2.0.0 dropped the `setRouter` / `setRateLimitAdmin` setters and writes all three
+   * fields together, so **all three params are required**: read the current triple with
+   * {@link getTokenPoolState} and pass back whatever you are not changing. The op never reads
+   * `getDynamicConfig()` for you, because the calldata must be deterministic at build time — a
+   * hidden read would bake in a value that has moved on-chain by the time a cold signer gets to
+   * it, silently reverting an unrelated config change made in the interim.
    *
-   * Read the current triple with {@link getTokenPoolState} and pass it back explicitly, so what
-   * is signed is exactly what was reviewed. This is also the migration path off
-   * {@link setRateLimitAdmin} for a 2.0.0 pool.
-   *
-   * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin}.
-   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
-   * a zero router detaches the pool from CCIP rather than clearing a privilege.
+   * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin} —
+   * which this replaces on a 2.0.0 pool. Zero `rateLimitAdmin` / `feeAdmin` clears that
+   * delegation; `router` must be non-zero, since a zero router detaches the pool from CCIP
+   * rather than clearing a privilege.
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool, which has no
    * `setDynamicConfig` — use {@link generateUnsignedSetRateLimitAdmin} there
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` or `router` is
@@ -598,6 +595,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Replaces a v2.0.0 pool's dynamic config, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks Writes all three fields in one call, so **all three params are required**: read the
+   * current triple with {@link getTokenPoolState} and pass back whatever you are not changing, as
+   * below. A missing field is a validation error, never "leave that one alone" — nothing is
+   * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
+   * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
@@ -607,11 +609,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    * @example
    * ```typescript
+   * // change only rateLimitAdmin: read the current config and pass the rest back unchanged
+   * const state = await cct.getTokenPoolState({ poolAddress: '0xPool...' })
+   * if (state.version !== '2.0.0') throw new Error('pre-2.0.0 pool: use setRateLimitAdmin')
    * const { hash } = await cct.setDynamicConfig({
    *   poolAddress: '0xPool...',
-   *   router: '0xRouter...',
+   *   router: state.router,
    *   rateLimitAdmin: '0xOpsMultisig...',
-   *   feeAdmin: '0xFeeMultisig...',
+   *   feeAdmin: state.feeAdmin,
    *   wallet,
    * })
    * ```
