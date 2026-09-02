@@ -10,12 +10,12 @@ import {
 import { dataSlice, hexlify } from 'ethers'
 import { memoize } from 'micro-memoize'
 
+import type { WithLogger } from '../types.ts'
 import { sleep } from '../utils.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
-import type { SolanaChain } from './index.ts'
 import type { Wallet } from './types.ts'
 import { simulateAndSendTxs } from './utils.ts'
-import type { WithLogger } from '../types.ts'
+import type { SolanaChain } from './index.ts'
 
 /**
  * Clean up and recycle buffers and Address Lookup Tables owned by wallet.

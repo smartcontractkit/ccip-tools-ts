@@ -3,9 +3,9 @@ import { describe, it } from 'node:test'
 
 import { Keypair } from '@solana/web3.js'
 
-import { GetSupportedTokens } from './get-supported-tokens.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { GetSupportedTokens } from './get-supported-tokens.ts'
 
 const OFF_RAMP = Keypair.generate().publicKey.toBase58()
 const ROUTER = Keypair.generate().publicKey.toBase58()

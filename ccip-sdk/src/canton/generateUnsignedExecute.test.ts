@@ -7,9 +7,9 @@ import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import type { CantonClient, JsGetActiveContractsResponse } from './client/index.ts'
 import { AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
 import type { EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
-import { CantonChain } from './index.ts'
 import type { TokenMetadataClient } from './token-metadata/client.ts'
 import type { TransferInstructionClient } from './transfer-instruction/client.ts'
+import { CantonChain } from './index.ts'
 
 const PARTY = 'party1::aabbcc'
 

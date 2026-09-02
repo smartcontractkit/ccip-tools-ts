@@ -4,15 +4,18 @@ import { before, describe, it } from 'node:test'
 // Register every chain family (notably Solana, for decodeAddress on the pool's
 // SVM remotes) the way SDK consumers do via the package root
 import '../index.ts'
-
+import { useResource } from '../../../scripts/useResource.ts'
+import { EVMChain } from '../evm/index.ts'
+import { discoverOffRamp } from '../execution.ts'
 import {
   findOffRampPackagesByCcipActivity,
   getCcipStateAddress,
   getOffRampForCcip,
 } from './discovery.ts'
 import { SuiChain } from './index.ts'
-import { EVMChain } from '../evm/index.ts'
-import { discoverOffRamp } from '../execution.ts'
+
+// Live RPCs: sui-testnet (BlockVision archival gateway) and Fuji (lane data).
+await useResource(['fuji', 'sui-testnet'])
 
 // Integration tests issue live RPC calls against public endpoints. Sui's public
 // JSON-RPC fullnodes were deprecated; the default is BlockVision's public

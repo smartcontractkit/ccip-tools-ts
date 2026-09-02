@@ -1,5 +1,3 @@
-// For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi.go
-import { ZERO_HASH, hashInternal } from './common.ts'
 import {
   CCIPMerkleFlagsMismatchError,
   CCIPMerkleHashesTooLargeError,
@@ -10,6 +8,8 @@ import {
   CCIPMerkleProofTooLargeError,
   CCIPMerkleTreeEmptyError,
 } from '../errors/index.ts'
+// For reference implementation, see https://github.com/smartcontractkit/ccip/blob/ccip-develop/core/services/ocr2/plugins/ccip/merklemulti/merkle_multi.go
+import { ZERO_HASH, hashInternal } from './common.ts'
 
 export const MAX_NUMBER_TREE_LEAVES = 256
 

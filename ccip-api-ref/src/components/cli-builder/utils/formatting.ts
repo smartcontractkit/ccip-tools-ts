@@ -68,7 +68,7 @@ export function generateCommand(
     const value = values[opt.name]
 
     // Skip empty/undefined values
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive check for null
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- defensive check for null
     if (value === undefined || value === '' || value === null) {
       continue
     }
