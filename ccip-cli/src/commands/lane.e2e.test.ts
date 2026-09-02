@@ -5,7 +5,20 @@ import { useResource } from '../../../scripts/useResource.ts'
 import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 
 // Cross-family lanes make the CLI resolve Aptos/Solana/TON endpoints too.
-await useResource(['sepolia', 'fuji', 'aptos-testnet', 'solana-devnet', 'ton-testnet'])
+// These are pure eth_call lookups, so the lanes were moved onto quiet chains
+// wherever a live deployment allowed it; fuji is gone entirely and sepolia is
+// only kept for the lanes whose counterpart chain has no other live pair.
+await useResource([
+  'sepolia',
+  'gnosis-mainnet',
+  'ethereum-mainnet',
+  'robinhood-testnet',
+  'base-sepolia',
+  'bsc-testnet',
+  'aptos-testnet',
+  'solana-devnet',
+  'ton-testnet',
+])
 
 function buildLaneArgs(
   source: string,
@@ -29,14 +42,17 @@ function buildLaneArgs(
   ]
 }
 
+// Moved off sepolia -> fuji: a lane lookup is call-only, so it does not need a
+// testnet hub at all — this v1.5 lane is live on gnosis -> ethereum and leaves
+// both hub locks to the suites that must scan them.
 describe('e2e command lane EVM v1.5', () => {
-  const ONRAMP = '0x12492154714fBD28F28219f6fc4315d19de1025B'
-  const OFFRAMP = '0x01e3D835b4C4697D7F81B9d7Abc89A6E478E4a2f'
+  const ONRAMP = '0x014abcfdbce9f67d0df34574664a6c0a241ec03a'
+  const OFFRAMP = '0x70C705ff3eCAA04c8c61d581a59a168a1c49c2ec'
 
-  it('should show lane config Sepolia -> Fuji (v1.5) in JSON', { timeout: 120000 }, async () => {
+  it('should show lane config Gnosis -> Ethereum (v1.5) in JSON', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
-      'ethereum-testnet-sepolia',
-      'avalanche-testnet-fuji',
+      'gnosis_chain-mainnet',
+      'ethereum-mainnet',
       ONRAMP,
       '--format',
       'json',
@@ -64,71 +80,83 @@ describe('e2e command lane EVM v1.5', () => {
   })
 
   it(
-    'should show lane config Sepolia -> Fuji (v1.5) in pretty format',
+    'should show lane config Gnosis -> Ethereum (v1.5) in pretty format',
     { timeout: 120000 },
     async () => {
-      const args = buildLaneArgs('ethereum-testnet-sepolia', 'avalanche-testnet-fuji', ONRAMP)
+      const args = buildLaneArgs('gnosis_chain-mainnet', 'ethereum-mainnet', ONRAMP)
       const result = await spawnCLI(args, 120000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-      assert.match(result.stdout, /OnRamp.*ethereum-testnet-sepolia/i)
+      assert.match(result.stdout, /OnRamp.*gnosis_chain-mainnet/i)
       assert.match(result.stdout, new RegExp(ONRAMP, 'i'))
       assert.match(result.stdout, /EVM2EVMOnRamp 1\.5\.0/)
-      assert.match(result.stdout, /OffRamp.*avalanche-testnet-fuji/i)
+      assert.match(result.stdout, /OffRamp.*ethereum-mainnet/i)
       assert.match(result.stdout, new RegExp(OFFRAMP, 'i'))
       assert.match(result.stdout, /EVM2EVMOffRamp 1\.5\.0/)
     },
   )
 })
 
+// Same move as the v1.5 block above, onto the quietest chain pair carrying a live
+// v2.0 lane: no other suite locks robinhood-testnet, so this one queues behind
+// nothing (ink -> arbitrum-sepolia would have re-shared a lock with the SDK's EVM
+// suites).
 describe('e2e command lane EVM v2.0', () => {
-  const ONRAMP = '0xA94E45744553F4B2bea9DfB8979a02962B980732'
+  const ONRAMP = '0xe001b46cd0df94a92fe62220f524d63e4d916ce8'
 
-  it('should show lane config Sepolia -> Fuji (v2.0) in JSON', { timeout: 120000 }, async () => {
-    const args = buildLaneArgs(
-      'ethereum-testnet-sepolia',
-      'avalanche-testnet-fuji',
-      ONRAMP,
-      '--format',
-      'json',
-    )
-    const result = await spawnCLI(args, 120000)
+  it(
+    'should show lane config Robinhood -> Base Sepolia (v2.0) in JSON',
+    { timeout: 120000 },
+    async () => {
+      const args = buildLaneArgs(
+        'robinhood-testnet',
+        'ethereum-testnet-sepolia-base-1',
+        ONRAMP,
+        '--format',
+        'json',
+      )
+      const result = await spawnCLI(args, 120000)
 
-    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
-    const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(ONRAMP, 'i'))
-    assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 2\.0\.0/)
-    assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
-    assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
-    assert.ok(
-      envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
-      'feeQuoterConfig should have typeAndVersion',
-    )
-    assert.ok(envelope.offRamp, 'offRamp should be discovered')
-    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\.0/)
-    assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
-    assert.ok(
-      Array.isArray(envelope.offRampConfig.onRamps),
-      'offRampConfig.onRamps should be an array',
-    )
-    assert.ok(
-      envelope.offRampConfig.onRamps.some((r: string) => r.toLowerCase() === ONRAMP.toLowerCase()),
-      `offRampConfig.onRamps should include ${ONRAMP}`,
-    )
-  })
+      const envelope = JSON.parse(result.stdout)
+      assert.match(envelope.onRamp, new RegExp(ONRAMP, 'i'))
+      assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 2\.0\.0/)
+      assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+      assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
+      assert.ok(
+        envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
+        'feeQuoterConfig should have typeAndVersion',
+      )
+      assert.ok(envelope.offRamp, 'offRamp should be discovered')
+      assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\.0/)
+      assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
+      assert.ok(
+        Array.isArray(envelope.offRampConfig.onRamps),
+        'offRampConfig.onRamps should be an array',
+      )
+      assert.ok(
+        envelope.offRampConfig.onRamps.some(
+          (r: string) => r.toLowerCase() === ONRAMP.toLowerCase(),
+        ),
+        `offRampConfig.onRamps should include ${ONRAMP}`,
+      )
+    },
+  )
 })
 
 describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
-  const EVM_ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
+  // EVM -> Aptos rides the same bsc-testnet lane as the show fixture; the
+  // reverse direction has no live counterpart other than sepolia, so it stays.
+  const BSC_ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
   const APTOS_PACKAGE = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
   const EVM_OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 
-  it('should show lane config Sepolia -> Aptos (v1.6)', { timeout: 120000 }, async () => {
+  it('should show lane config BSC -> Aptos (v1.6)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
-      'ethereum-testnet-sepolia',
+      'binance_smart_chain-testnet',
       'aptos-testnet',
-      EVM_ONRAMP,
+      BSC_ONRAMP,
       '--format',
       'json',
     )
@@ -137,7 +165,7 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
     const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(EVM_ONRAMP, 'i'))
+    assert.match(envelope.onRamp, new RegExp(BSC_ONRAMP, 'i'))
     assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
     assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
@@ -154,9 +182,9 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
     )
     assert.ok(
       envelope.offRampConfig.onRamps.some(
-        (r: string) => r.toLowerCase() === EVM_ONRAMP.toLowerCase(),
+        (r: string) => r.toLowerCase() === BSC_ONRAMP.toLowerCase(),
       ),
-      `offRampConfig.onRamps should include ${EVM_ONRAMP}`,
+      `offRampConfig.onRamps should include ${BSC_ONRAMP}`,
     )
   })
 

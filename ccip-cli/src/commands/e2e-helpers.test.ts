@@ -35,6 +35,35 @@ export const RPCS = [
   // chosen for serving the scan's full ~10k-block range in a single call.
   process.env['RPC_BASE'] || 'https://mainnet.base.org',
   process.env['RPC_POLYGON'] || 'https://gateway.tenderly.co/public/polygon',
+  // bsc-testnet is the source of the EVM->Aptos fixtures (show + lane). NodeReal's
+  // public demo endpoint is the only one found that serves a full ~10k-block
+  // eth_getLogs here; BNB Chain's own data seeds answer `-32005 limit exceeded`
+  // for any getLogs at all (even 1 block) and so trail as call-only fallbacks.
+  // drpc's bsc-testnet endpoint is deliberately absent: it wins the chainId race
+  // and then fails half of every batched eth_call with "Temporary internal
+  // error", which surfaces as a bogus empty-revert.
+  process.env['RPC_BSC_TESTNET'] ||
+    'https://bsc-testnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
+  process.env['RPC_BSC_TESTNET_2'] || 'https://data-seed-prebsc-2-s1.bnbchain.org:8545',
+  process.env['RPC_BSC_TESTNET_3'] || 'https://bsc-testnet-dataseed.bnbchain.org',
+  // base-sepolia: source of the EVM->Solana show fixture and dest of the v2.0
+  // lane fixture. Both serve a full ~10k-block eth_getLogs in one call (verified
+  // against the onRamp), so the scan path stays available if the API-metadata
+  // shortcut ever drops out; tenderly leads only as a tie-break, being the same
+  // keyless gateway already trusted for the sepolia/polygon/mainnet entries.
+  process.env['RPC_BASE_SEPOLIA'] || 'https://gateway.tenderly.co/public/base-sepolia',
+  process.env['RPC_BASE_SEPOLIA_2'] || 'https://sepolia.base.org',
+  // gnosis -> ethereum mainnet v1.5 lane config (call-only, no scanning): the
+  // official Gnosis endpoint plus tenderly's keyless mainnet gateway, both of
+  // which answer eth_call without rate-limiting a handful of requests.
+  process.env['RPC_GNOSIS'] || 'https://rpc.gnosischain.com',
+  process.env['RPC_ETHEREUM'] || 'https://gateway.tenderly.co/public/mainnet',
+  // robinhood-testnet v2.0 lane config (call-only). This chain has exactly one
+  // public endpoint — the operator's own, as published in its chain metadata —
+  // and it is deliberately preferred over busier v2.0 pairs (ink -> arb-sepolia
+  // was the alternative) because no other suite locks robinhood-testnet, so this
+  // lane queues behind nothing.
+  process.env['RPC_ROBINHOOD'] || 'https://rpc.testnet.chain.robinhood.com',
 ]
 
 /**

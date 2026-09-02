@@ -6,14 +6,22 @@ import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
 
 // The CLI is pointed at these endpoints via the shared RPCS list (e2e-helpers.ts), and
 // `show` also resolves 32-byte tx hashes through the default CCIP API (show.ts).
+// Only the chains this suite actually reaches are locked: sepolia and fuji are
+// still here (sepolia is the dest of the Solana->EVM and Aptos->EVM fixtures,
+// fuji the source of the Solana v2 one), but the EVM->EVM, EVM->Aptos and
+// EVM->Solana fixtures have moved off them. ton-testnet is not listed: the TON
+// block is `describe.skip`ped, so holding its lock only blocks the SDK suites.
 await useResource([
   'sepolia',
   'fuji',
+  'base-mainnet',
+  'polygon-mainnet',
   'soneium-mainnet',
   'astar-mainnet',
+  'bsc-testnet',
+  'base-sepolia',
   'aptos-testnet',
   'solana-devnet',
-  'ton-testnet',
   'api',
 ])
 
@@ -241,12 +249,15 @@ describe('e2e command show EVM', () => {
     { timeout: 240000 },
     async () => {
       // Fixture seeded periodically from CCIP API v2 messages
-      // (sourceChainSelector=16015286601757825753, destChainSelector=743186221051783445)
-      const TX_HASH = '0x235e98972c634c6a26eeaa6b591d9efbcdc44f0cc2d973f195298773ab7ef60e'
-      const MESSAGE_ID = '0x38ab716c5d3eacef866a3644bc6cf76a335fa647242d8754d80c0e43b62b1a18'
-      const SENDER = '0x9d087fC03ae39b088326b67fA3C788236645b717'
-      const RECEIVER = '0x275b828b4c4aede0c53b59ec594d12dfb86c5f01f8300395d0ee8a869aacf8cc'
-      const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
+      // (sourceChainSelector=13264668187771770619, destChainSelector=743186221051783445).
+      // Source moved off sepolia onto bsc-testnet: the source side is a single
+      // tx-by-hash read, so it costs nothing to serve and frees the sepolia lock
+      // for the suites that genuinely scan it.
+      const TX_HASH = '0x407ffe6bf58d39e08c786a7b31a407d758effb8657372c330a07a796137816a7'
+      const MESSAGE_ID = '0xac0a5e71cd2e1d637d3b6af558bb255a7f6196cc7954c2b7146b8e055f9a9fe7'
+      const SENDER = '0x89810cb91a5fe67dDf3483182f08e1559A5699De'
+      const RECEIVER = '0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8'
+      const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
       const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
 
       const args = buildShowArgs(TX_HASH)
@@ -256,9 +267,9 @@ describe('e2e command show EVM', () => {
       const output = result.stdout
 
       // Lane information
-      assert.match(output, /name.*ethereum-testnet-sepolia.*aptos-testnet/i)
-      assert.match(output, /chainId.*11155111.*aptos:2/)
-      assert.match(output, /chainSelector.*16015286601757825753n?.*743186221051783445n?/)
+      assert.match(output, /name.*binance_smart_chain-testnet.*aptos-testnet/i)
+      assert.match(output, /chainId.*97.*aptos:2/)
+      assert.match(output, /chainSelector.*13264668187771770619n?.*743186221051783445n?/)
       assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
       // Request information
@@ -266,14 +277,14 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*170n?/)
+      assert.match(output, /sequenceNumber.*2867n?/)
       assert.match(output, /nonce.*0.*allow out-of-order/)
       assert.match(output, /gasLimit.*0n?/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /logIndex.*555/)
-      assert.match(output, /blockNumber.*11478783/)
-      assert.match(output, /fee.*0\.000382550389012856\s+WETH/)
-      assert.match(output, /tokens.*0\.001\s+CCIP-BnM/)
+      assert.match(output, /logIndex.*7\b/)
+      assert.match(output, /blockNumber.*127636236/)
+      assert.match(output, /fee.*0\.000351598679631162\s+WBNB/)
+      assert.match(output, /tokens.*0\.0014\s+CCIP-BnM/)
       assert.match(output, /data.*0x'?/)
       assert.match(output, /allowOutOfOrderExecution.*true\b/)
 
@@ -284,9 +295,9 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`contract.*${OFFRAMP}::offramp`, 'i'))
       assert.match(
         output,
-        /transactionHash.*0xb59d1b56d05190d6caf13e84d27c9c256153c24e06a1050262986713bfc566e1/i,
+        /transactionHash.*0xb6a16526932bbf8401c9e92b0d641ee799556bf613b433eefb5e9631f19d9c11/i,
       )
-      assert.match(output, /blockNumber.*10548144905/)
+      assert.match(output, /blockNumber.*10855148519/)
     },
   )
 
@@ -294,15 +305,17 @@ describe('e2e command show EVM', () => {
     'should show complete CCIP transaction details EVM to Solana',
     { timeout: 120000 },
     async () => {
-      // Fixture seeded from CCIP API v2 messages (sourceChainSelector=16015286601757825753,
+      // Fixture seeded from CCIP API v2 messages (sourceChainSelector=10344971235874465080,
       // destChainSelector=16423721717087811551); refreshed periodically, as devnet public
-      // endpoints prune old transaction history (onfinality ~1 month at the time of writing)
-      const TX_HASH = '0xc1bc97181e39c0fe4c0c958da4e6b591a6cc3939c2b309b37c437373c4557ca4'
-      const MESSAGE_ID = '0xe509cd3333ddc2b3236a71125d1638a411e91e072ea601b3ba584fb62a7b1364'
-      const SENDER = '0x4444638F73a73977098f364533dFaD6A274f1e88'
+      // endpoints prune old transaction history (onfinality ~1 month at the time of writing).
+      // Source is base-sepolia rather than sepolia: only the dest is scanned here,
+      // so the source chain is free to be a quieter one.
+      const TX_HASH = '0xac5c1d0ed9df2e2e403944ea7f92e490254f7ba8ee01599e0d4546ae07731b8e'
+      const MESSAGE_ID = '0x46e394b2700e68d025a632cb2b3097eafea2235e7c6441ba85241194a6400c4c'
+      const SENDER = '0x504f1fCFc4AF3Ae87f1a732f844eE08faBEA1ba6'
       const RECEIVER = '11111111111111111111111111111111'
-      const TOKEN_RECEIVER = 'HNgbNNzP7YLXLhEkaFcD3PhtBWtaBfxSCNRTCsnGyPNx'
-      const ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
+      const TOKEN_RECEIVER = '399FfoqF5rGrh5KXNhzPEWCkDv11fZ4gGsGGU5c9MBYd'
+      const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
       const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
       const args = buildShowArgs(TX_HASH)
@@ -312,9 +325,9 @@ describe('e2e command show EVM', () => {
       const output = result.stdout
 
       // Lane information
-      assert.match(output, /name.*ethereum-testnet-sepolia.*solana-devnet/i)
-      assert.match(output, /chainId.*11155111.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG/)
-      assert.match(output, /chainSelector.*16015286601757825753n?.*16423721717087811551n?/)
+      assert.match(output, /name.*ethereum-testnet-sepolia-base-1.*solana-devnet/i)
+      assert.match(output, /chainId.*84532.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG/)
+      assert.match(output, /chainSelector.*10344971235874465080n?.*16423721717087811551n?/)
       assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
       // Request information
@@ -322,7 +335,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*11045n?/)
+      assert.match(output, /sequenceNumber.*1499n?/)
       assert.match(output, /nonce.*0n?.*allow out-of-order/)
       assert.doesNotMatch(output, /gasLimit/)
       assert.match(output, /computeUnits.*0n?/)
@@ -335,15 +348,15 @@ describe('e2e command show EVM', () => {
       assert.match(output, /Commit.*dest/i)
       assert.match(
         output,
-        /merkleRoot.*0x08af05184148ee8773d0782afc59ae408ea45316725c5aedf615799891f575f3/i,
+        /merkleRoot.*0x86fc0530dc5b01e0f8f72d71c3eb799c3549e35a00c452f3f8d1a0418d582e91/i,
       )
-      assert.match(output, /min.*11045/)
-      assert.match(output, /max.*11045/)
-      assert.match(output, /origin.*8VQdpu9a4vmBrj9EpcCw2R1mKVTM2W6Sdc43GtEHBSxk/i)
+      assert.match(output, /min.*1499/)
+      assert.match(output, /max.*1499/)
+      assert.match(output, /origin.*8zJTVcm3bEAgJfsQPUBxyV5PEWTea81pKQV6uDVHpxjY/i)
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*53RHWi9YuayvhWaPEzzwcjPaMyagFmHChPYg6qFxoV4hALQY81zdkLjhmD2qx2vhq6anXdnmrGq1UXQrrruogBiU/i,
+        /transactionHash.*44Uze89tcZhiNE55P5dPmk4HFkpSUBTg7jAdXYd7Nvemz2MV6wPJZLbmXJcXJtHdaLCYfLvevENeCs3k77SskCj1/i,
       )
 
       // Receipts information
@@ -351,7 +364,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, /state.*success/i)
       assert.match(
         output,
-        /transactionHash.*oWsmkUusRXFemG85NYMLTvo4Q2Y3rtapC43vYrD6X7LCm4pm8Mq95TKFNGrmD7cBxG1twJQeVRMzwJ1cjspxZbA/i,
+        /transactionHash.*5nLiGaRuTwLqe6MQxfgSPWtqq3jLgNMTSwLXH5zGBZbTSdcc6DHbxgQLfo3Pos7jzMhcSpsaohCqo32tP5QmBLS3/i,
       )
     },
   )
@@ -360,19 +373,23 @@ describe('e2e command show EVM', () => {
     'should show EVM to Solana v2 OffRamp execution without verifications',
     { timeout: 30000 },
     async () => {
-      const TX_HASH = '0x94721bc1e04f7c5f6bfad4e479092aaf71efefccaa0babade4c4e7b5b3b24a41'
-      const MESSAGE_ID = '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f'
-      const ONRAMP = '0x99F6Faf45CcfA166781DED7d9A4D9C548F2aA344'
+      // Solana v2 is not indexed by the CCIP API yet, so this fixture (and its
+      // asserted values) come from a real CLI run, not from an API lookup — and
+      // the same gap is why the verification lookup stays unavailable. Source is
+      // fuji: v2 onRamps are not deployed on the quiet lanes used above.
+      const TX_HASH = '0x40868c0b3f07b769c51d64dc8866e3b7c52a03b19232c6acee232acc18f21ab9'
+      const MESSAGE_ID = '0x15e6a1e42b3c8b6d32eed44791910af96bb70bd8b13fd135ae9ae3a9f70df08a'
+      const ONRAMP = '0x656345b769a568138919bF7CA0928fDcaa3964Dc'
       const OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
 
       const result = await spawnCLI(buildShowArgs(TX_HASH), 30000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
       const output = result.stdout
-      assert.match(output, /name.*ethereum-testnet-sepolia.*solana-devnet/i)
+      assert.match(output, /name.*avalanche-testnet-fuji.*solana-devnet/i)
       assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
       assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, /sequenceNumber.*526/)
+      assert.match(output, /sequenceNumber.*27\b/)
       assert.match(output, /data.*0x\b/)
       assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
       assert.match(result.stderr + output, /Verifications unavailable/i)
@@ -381,7 +398,7 @@ describe('e2e command show EVM', () => {
       assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
       assert.match(
         output,
-        /transactionHash.*4qeWX8ELjDt57JLDuDsSW3jYzP915R7wyXLWMshPZJkiDVxt1HAv2DTqmNow64Nxns8PSgrX1vLTYHWTabjFztDM/i,
+        /transactionHash.*sNNt4YwJW6AA8RWyTcXsuPrHSNsmrsB1AwJvPNT8igps9PcADjz1LDL4pjxZfixaX2R1mQg26A835X1ibMiW9QR/i,
       )
     },
   )
