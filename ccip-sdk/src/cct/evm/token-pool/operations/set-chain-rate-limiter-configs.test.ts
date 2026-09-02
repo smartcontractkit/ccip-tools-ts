@@ -3,17 +3,17 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError } from 'ethers'
 
-import {
-  type ChainRateLimitUpdate,
-  type SetChainRateLimiterConfigsParams,
-  SetChainRateLimiterConfigs,
-} from './set-chain-rate-limiter-configs.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type ChainRateLimitUpdate,
+  type SetChainRateLimiterConfigsParams,
+  SetChainRateLimiterConfigs,
+} from './set-chain-rate-limiter-configs.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
