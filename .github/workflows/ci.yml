@@ -10,6 +10,14 @@ on:
       - main
   pull_request: {}
 
+concurrency:
+  # This workflow's live-network suites make a run long, so a rapid push
+  # sequence otherwise leaves several full runs racing each other for the same
+  # rate-limited RPC endpoints. Supersede per ref, but only for pull requests:
+  # runs on main gate the publish workflow and should finish.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -21,6 +29,7 @@ jobs:
         uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
+          cache: 'npm'
 
       # Older foundry-toolchain pins ran foundryup via `bash` and broke when it became
       # a compiled binary ("cannot execute binary file"); v1.9.1 executes it directly
