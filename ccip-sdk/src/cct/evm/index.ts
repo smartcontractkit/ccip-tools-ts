@@ -49,6 +49,10 @@ import {
   ApplyChainUpdates,
 } from './token-pool/operations/apply-chain-updates.ts'
 import {
+  type ApplyChainUpdatesParams,
+  ApplyChainUpdates,
+} from './token-pool/operations/apply-chain-updates.ts'
+import {
   type DeployTokenPoolParams,
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
