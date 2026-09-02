@@ -10,7 +10,7 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
-import { validateAddress } from '../../validate.ts'
+import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
   getTokenPoolInterface,
@@ -46,7 +46,7 @@ export class TransferOwnership extends EVMOperation<TransferOwnershipParams> {
 
   /** Validates the pool and new-owner addresses before any RPC. */
   protected override validate({ poolAddress, newOwner }: TransferOwnershipParams): void {
-    validateAddress(this.name, 'poolAddress', poolAddress)
+    validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateAddress(this.name, 'newOwner', newOwner)
   }
 

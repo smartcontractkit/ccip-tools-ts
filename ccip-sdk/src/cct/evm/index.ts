@@ -43,6 +43,11 @@ import {
   type TransferAdminParams,
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
+import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
+import {
+  type ApplyChainUpdatesParams,
+  ApplyChainUpdates,
+} from './token-pool/operations/apply-chain-updates.ts'
 import {
   type ApplyChainUpdatesParams,
   ApplyChainUpdates,
@@ -61,6 +66,11 @@ import {
   type GetTokenPoolStateResult,
   GetTokenPoolState,
 } from './token-pool/operations/get-token-pool-state.ts'
+import {
+  type RemoveRemotePoolParams,
+  RemoveRemotePool,
+} from './token-pool/operations/remove-remote-pool.ts'
+import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
   type TransferOwnershipParams,
   TransferOwnership,
@@ -86,6 +96,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferOwnership = new TransferOwnership()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
+  readonly #setRemotePool = new SetRemotePool()
+  readonly #addRemotePool = new AddRemotePool()
+  readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
 
   // Lockbox operations
@@ -631,6 +644,185 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned pool `setRemotePool` tx (for multisig / offline signing), replacing the
+   * remote pool a lane accepts.
+   * @remarks **v1.5.0 pools only.** A v1.5.0 pool holds exactly one remote pool per lane, and this
+   * call overwrites it. v1.5.1 replaced it with the additive `addRemotePool` / `removeRemotePool`
+   * pair and dropped `setRemotePool` from the ABI, so a v1.5.1, v1.6.1 or v2.0.0 pool throws
+   * {@link CCTOperationUnsupportedError} — use {@link generateUnsignedAddRemotePool} /
+   * {@link generateUnsignedRemoveRemotePool} there. No emulation is attempted: replacing a set of
+   * unknown size is not one transaction.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
+   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks Owner-gated on-chain. When `sender` is given it is checked against the pool's current
+   * `owner` before any calldata is built; omit it to build for a signer that is not known yet.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
+   * the pool owner
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.1 or newer
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedSetRemotePool({
+   *   poolAddress: '0xPool...', // a v1.5.0 pool
+   *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   *   remotePoolAddress: '0xRemotePool...', // hex bytes; 32 bytes for a non-EVM remote
+   *   sender: '0xPoolOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetRemotePool(opts: SetRemotePoolParams): Promise<UnsignedEVMTx> {
+    return this.#setRemotePool.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces the remote pool a v1.5.0 pool accepts on one lane, signing + submitting with
+   * `opts.wallet`. See {@link generateUnsignedSetRemotePool} for the version range and the
+   * `remotePoolAddress` encoding.
+   * @remarks `sender` defaults to the signing wallet, which must be the pool owner; passing a
+   * different `sender` is rejected rather than signed — build with
+   * {@link generateUnsignedSetRemotePool} for externally-signed flows.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
+   * the wallet's address / the pool owner
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.1 or newer
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setRemotePool({
+   *   poolAddress: '0xPool...', // a v1.5.0 pool
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remotePoolAddress: '0xRemotePool...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  setRemotePool(opts: EVMExecuteParams<SetRemotePoolParams>): Promise<TransactionResult> {
+    return this.#setRemotePool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `addRemotePool` tx (for multisig / offline signing), authorizing one
+   * more remote pool on a lane.
+   * @remarks **v1.5.1, v1.6.1 and v2.0.0 pools.** From v1.5.1 a lane holds a *set* of remote
+   * pools, which is what makes a zero-downtime remote-side pool upgrade possible: add the new
+   * pool, drain the old one, then {@link removeRemotePool}. A v1.5.0 pool has no additive
+   * primitive and throws {@link CCTOperationUnsupportedError} — it only supports the wholesale
+   * {@link setRemotePool}.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
+   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks Pre-checked against the chain: the lane's currently registered remote pools are read
+   * (scoped to `remoteChainSelector`, one call) and an address already among them is rejected
+   * locally instead of reverting on-chain. A lane with no configuration yet counts as having none.
+   * Owner-gated: a given `sender` is checked against the pool's `owner`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
+   * pool owner, or `remotePoolAddress` is already registered on that lane
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedAddRemotePool({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n, // ethereum-testnet-sepolia
+   *   remotePoolAddress: '0xNewRemotePool...',
+   *   sender: '0xPoolOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedAddRemotePool(opts: AddRemotePoolParams): Promise<UnsignedEVMTx> {
+    return this.#addRemotePool.generate(this.chain, opts)
+  }
+
+  /**
+   * Authorizes an additional remote pool on one lane of a v1.5.1+ pool, signing + submitting with
+   * `opts.wallet`. See {@link generateUnsignedAddRemotePool} for the version range, the
+   * `remotePoolAddress` encoding and the duplicate pre-check.
+   * @remarks `sender` defaults to the signing wallet, which must be the pool owner; passing a
+   * different `sender` is rejected rather than signed — build with
+   * {@link generateUnsignedAddRemotePool} for externally-signed flows.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
+   * wallet's address / the pool owner, or `remotePoolAddress` is already registered on that lane
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.addRemotePool({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   remotePoolAddress: '0xNewRemotePool...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  addRemotePool(opts: EVMExecuteParams<AddRemotePoolParams>): Promise<TransactionResult> {
+    return this.#addRemotePool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `removeRemotePool` tx (for multisig / offline signing),
+   * de-authorizing one remote pool on a lane.
+   * @remarks **v1.5.1, v1.6.1 and v2.0.0 pools** — the versions where a lane holds a set of remote
+   * pools. The last step of a remote-side pool upgrade started with {@link addRemotePool}. A
+   * v1.5.0 pool has no removal primitive and throws {@link CCTOperationUnsupportedError}; its
+   * single remote pool can only be overwritten via {@link setRemotePool}.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
+   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks Pre-checked against the chain: the lane's registered remote pools are read (scoped to
+   * `remoteChainSelector`, one call) and an address that is not among them is rejected locally
+   * instead of reverting on-chain. Removing the lane's last remote pool is allowed — the contract
+   * decides — but a lane with no configuration at all has nothing to remove and is rejected.
+   * Owner-gated: a given `sender` is checked against the pool's `owner`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
+   * pool owner, or `remotePoolAddress` is not registered on that lane
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedRemoveRemotePool({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   remotePoolAddress: '0xDrainedRemotePool...',
+   *   sender: '0xPoolOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedRemoveRemotePool(opts: RemoveRemotePoolParams): Promise<UnsignedEVMTx> {
+    return this.#removeRemotePool.generate(this.chain, opts)
+  }
+
+  /**
+   * De-authorizes a remote pool on one lane of a v1.5.1+ pool, signing + submitting with
+   * `opts.wallet`. See {@link generateUnsignedRemoveRemotePool} for the version range, the
+   * `remotePoolAddress` encoding and the membership pre-check.
+   * @remarks `sender` defaults to the signing wallet, which must be the pool owner; passing a
+   * different `sender` is rejected rather than signed — build with
+   * {@link generateUnsignedRemoveRemotePool} for externally-signed flows.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
+   * wallet's address / the pool owner, or `remotePoolAddress` is not registered on that lane
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.removeRemotePool({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   remotePoolAddress: '0xDrainedRemotePool...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  removeRemotePool(opts: EVMExecuteParams<RemoveRemotePoolParams>): Promise<TransactionResult> {
+    return this.#removeRemotePool.execute(this.chain, opts)
+  }
+
+  /**
    * Applies the pool's remote-lane configuration, signing + submitting with `opts.wallet`.
    * @remarks Same version-discriminated params as
    * {@link generateUnsignedApplyChainUpdates} — see there for the v1.5.0 vs v1.5.1 divergence.
@@ -779,6 +971,9 @@ export type {
   GetTokenPoolRemotesParams,
   GetTokenPoolRemotesResult,
 } from './token-pool/operations/get-token-pool-remotes.ts'
+export type { SetRemotePoolParams } from './token-pool/operations/set-remote-pool.ts'
+export type { AddRemotePoolParams } from './token-pool/operations/add-remote-pool.ts'
+export type { RemoveRemotePoolParams } from './token-pool/operations/remove-remote-pool.ts'
 export type {
   ApplyChainUpdatesParamVersion,
   ApplyChainUpdatesParams,
