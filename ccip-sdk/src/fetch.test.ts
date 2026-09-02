@@ -322,6 +322,15 @@ describe('parseLogRangeError', () => {
     assert.equal(result.maxRange, 10000)
   })
 
+  it('parses 1rpc "limited to 0 - 50 blocks range" as the SECOND number', () => {
+    // The span is phrased as a pair, so the naive "first number" reading would
+    // learn a range of 0 and stall the scan outright.
+    const err = new Error('eth_getLogs is limited to 0 - 50 blocks range')
+    const result = parseLogRangeError(err)
+    assert.ok(result !== null)
+    assert.equal(result.maxRange, 50)
+  })
+
   it('parses Alchemy suggested range [0x..., 0x...]', () => {
     const err = new Error('Try with this block range [0x12AB1C, 0x12B9FC].')
     const result = parseLogRangeError(err)

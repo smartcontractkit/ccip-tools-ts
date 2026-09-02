@@ -957,6 +957,9 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     /query returned more than (\d+) results/i,
     // QuickNode
     /eth_getLogs is limited to a (\d+) range/i,
+    // 1rpc: "eth_getLogs is limited to 0 - 50 blocks range" — the span is given as
+    // a pair, so the LIMIT is the second number, not the first.
+    /limited to\s+\d+\s*-\s*(\d+)\s*blocks?\s+range/i,
     /exceeds the range/i,
     // erpc/hyperliquid: "query exceeds max block range 1000"
     // hedera/alchemy: "Exceeded maximum block range: 1000"

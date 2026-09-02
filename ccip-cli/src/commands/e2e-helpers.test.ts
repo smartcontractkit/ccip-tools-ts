@@ -23,6 +23,18 @@ export const RPCS = [
   process.env['RPC_SOLANA_2'] || 'https://devnet.rpcpool.com',
   process.env['RPC_SOLANA_3'] || 'https://api.devnet.solana.com',
   process.env['RPC_TON'] || 'https://testnet.toncenter.com/api/v2',
+  // Quiet mainnet lane (soneium -> astar) used by the show format variants: the
+  // scan-heavy `show` flow costs far less against a low-traffic dest with ~6.7s
+  // blocks than against the testnet hubs, and both endpoints are keyless and
+  // retentive. See show.e2e.test.ts.
+  process.env['RPC_SONEIUM'] || 'https://rpc.soneium.org',
+  process.env['RPC_ASTAR'] || 'https://evm.astar.network',
+  // base -> polygon lane for the EVM->EVM show test. Polygon's public endpoints
+  // vary wildly in eth_getLogs width — 1rpc caps at 50 blocks and then serves a
+  // Cloudflare challenge under the resulting request burst — so this one is
+  // chosen for serving the scan's full ~10k-block range in a single call.
+  process.env['RPC_BASE'] || 'https://mainnet.base.org',
+  process.env['RPC_POLYGON'] || 'https://gateway.tenderly.co/public/polygon',
 ]
 
 /**
