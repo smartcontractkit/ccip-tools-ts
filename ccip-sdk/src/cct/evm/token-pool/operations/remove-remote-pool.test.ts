@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError, toBeHex, zeroPadValue } from 'ethers'
 
-import { type RemoveRemotePoolParams, RemoveRemotePool } from './remove-remote-pool.ts'
 import type { TokenPoolRemote } from '../../../../chain.ts'
 import {
   CCIPExecTxRevertedError,
@@ -20,6 +19,7 @@ import {
   TokenPoolVersion,
   getTokenPoolFamily,
 } from '../contracts.ts'
+import { type RemoveRemotePoolParams, RemoveRemotePool } from './remove-remote-pool.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
