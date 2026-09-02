@@ -186,12 +186,44 @@ async function v3IndexHealthy(base: string, v2Tip?: number): Promise<boolean> {
  * Spacing grows so a storm is ridden out without hammering the index further,
  * while a dead index (every attempt yields nothing) still skips in bounded time. */
 const RETRY_SPACING_MS = [10_000, 20_000, 40_000]
+
+/**
+ * Spacing after an attempt that saw a 429, which is a different problem from an
+ * attempt that merely came back degraded.
+ *
+ * The SDK already paces this endpoint (seed 1 req / 1.5s, see TONChain) and the
+ * fetch layer already jitter-backs-off per request, so a 429 here means the
+ * keyless per-IP budget is being spent by something ELSE on the same egress — a
+ * CI runner shares its IP. Retrying on the normal ladder just burns attempts
+ * inside that window; waiting out the window is what actually clears it.
+ */
+const THROTTLED_SPACING_MS = [20_000, 45_000, 90_000]
+
+/**
+ * Wall-clock a single test will spend retrying before it gives up and asserts on
+ * whatever the last attempt produced. Bounds the suite so it stays a predictable
+ * neighbour now that suites run in parallel rather than queueing on locks.
+ */
+const RETRY_BUDGET_MS = 240_000
 /** Maximum scan attempts per live test; the shapes are asserted on the last one. */
 const MAX_SCAN_ATTEMPTS = RETRY_SPACING_MS.length + 1
 
 /** Growing spacing between scan attempts (caps at the last entry). */
-function retrySpacingMs(attempt: number): number {
-  return RETRY_SPACING_MS[Math.min(attempt, RETRY_SPACING_MS.length - 1)] ?? 30_000
+function retrySpacingMs(attempt: number, throttled = false): number {
+  const ladder = throttled ? THROTTLED_SPACING_MS : RETRY_SPACING_MS
+  return ladder[Math.min(attempt, ladder.length - 1)] ?? (throttled ? 90_000 : 30_000)
+}
+
+/**
+ * Sleeps before the next attempt, unless the test's retry budget is spent — in
+ * which case the caller stops retrying and asserts on what it already has.
+ * Returns false when the budget is exhausted.
+ */
+async function backoff(startedAt: number, attempt: number, throttled: boolean): Promise<boolean> {
+  const wait = retrySpacingMs(attempt, throttled)
+  if (Date.now() - startedAt + wait > RETRY_BUDGET_MS) return false
+  await sleep(wait)
+  return true
 }
 
 describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
@@ -225,26 +257,6 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     return v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
   }
 
-  /**
-   * Skip when a fast-path property degraded WHILE the index was throttling us.
-   *
-   * The public index is keyless, so a CI runner's shared egress gets 429-stormed;
-   * under that the scan legitimately falls back to the v2 walk, which is the same
-   * hostile-network condition the `before` hook's probe already self-skips for —
-   * it just started mid-run rather than before it. Degradation with NO 429 is a
-   * real shape regression and still fails.
-   */
-  function skipIfThrottled(
-    t: { skip: (msg?: string) => void },
-    degraded: boolean,
-    rateLimited: number,
-    what: string,
-  ): boolean {
-    if (!degraded || !rateLimited) return false
-    t.skip(`${what}: index rate-limited ${rateLimited}x mid-scan, fast path degraded`)
-    return true
-  }
-
   /** Skip the test when the live index probe failed (see before hook). */
   function guard(t: { skip: (msg?: string) => void }): boolean {
     if (indexHealthy) return false
@@ -271,6 +283,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // it. Only a mid-stream index self-contradiction (data inconsistency, not
       // transport) on the last attempt skips.
       let lastTruncated = false
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         lastTruncated = false
         const spy = spyFetch()
@@ -297,10 +310,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         v3tipCalls += calls.v3tip
         elapsed = Date.now() - t0
         if (!lastTruncated && calls.walkPages === 0) break
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(calls.rateLimited)))) break
       }
       if (lastTruncated) {
         t.skip('index degraded: no clean attempt, the last scan self-contradicted mid-stream')
@@ -317,8 +329,6 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       }
       assert.ok(calls.v3messages >= 1, 'v3 messages index queried')
       assert.ok(v3tipCalls >= 1, 'v3 index tip consulted (lag guard)')
-      if (skipIfThrottled(t, calls.walkPages > 0, calls.rateLimited, 'v2 tx-chain pagination'))
-        return
       assert.equal(
         calls.walkPages,
         0,
@@ -348,6 +358,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // lagging attempts finish on the v2 walk with the wrong shapes, so retry with
       // growing spacing until the fast path is back, then assert on the clean
       // attempt (the quota refills; the poller spaces its retries the same way).
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         const spy = spyFetch()
         const attemptT0 = Date.now()
@@ -373,10 +384,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         }
         calls = spy.calls
         if (logs.length >= 1 && calls.walkPages === 0) break
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(calls.rateLimited)))) break
       }
       if (logs.length === 0) {
         // Every attempt truncated before the first sealed block: a degraded index is
@@ -396,8 +406,6 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'blocks non-decreasing',
       )
       assert.ok(calls.v3messages >= 1, 'v3 messages index seeded the scan')
-      if (skipIfThrottled(t, calls.walkPages > 0, calls.rateLimited, 'v2 tx-chain pagination'))
-        return
       assert.equal(
         calls.walkPages,
         0,
@@ -427,6 +435,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       let logs: ChainLog[] = []
       let calls!: ReturnType<typeof spyFetch>['calls']
       let firstYieldMs: number | undefined
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         const spy = spyFetch()
         const t0 = Date.now()
@@ -450,10 +459,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         }
         calls = spy.calls
         if (calls.v3transactions >= 1) break // oracle engaged
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(calls.rateLimited)))) break
       }
       if (calls.v3transactions === 0) {
         // The index never answered across attempts; the logs arrived via the legacy
@@ -514,6 +522,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       const hint = { ...OLD_LOG, index: undefined }
       let logs: ChainLog[] = []
       let spy!: ReturnType<typeof spyFetch>
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         spy = spyFetch()
         try {
@@ -544,10 +553,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
               v3transactions <= Math.max(3, walkPages + 1)))
         )
           break
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (spy.calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(spy.calls.rateLimited)))) break
       }
       if (logs.length === 0) {
         t.skip('index degraded: every attempt truncated before the first sealed block')
@@ -572,15 +580,6 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.calls.v3transactions <= Math.max(3, spy.calls.walkPages + 1),
           `lt list seeded in pages proportionate to the walk (saw ${spy.calls.v3transactions} seed pages for ${spy.calls.walkPages} walk pages)`,
         )
-        if (
-          skipIfThrottled(
-            t,
-            spy.calls.v2SeqnoLookups > 8,
-            spy.calls.rateLimited,
-            'per-tx seqno resolution',
-          )
-        )
-          return
         assert.ok(
           spy.calls.v2SeqnoLookups <= 8,
           `no per-tx seqno resolution (saw ${spy.calls.v2SeqnoLookups}${spy.calls.rateLimited ? `, rate-limited ${spy.calls.rateLimited}×` : ''})`,
@@ -614,6 +613,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // fast path is back, then assert on the clean attempt.
       let logs: ChainLog[] = []
       let spy!: ReturnType<typeof spyFetch>
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         spy = spyFetch()
         try {
@@ -634,10 +634,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           spy.restore()
         }
         if (logs.length >= 1 && spy.calls.walkPages === 0) break
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (spy.calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(spy.calls.rateLimited)))) break
       }
       if (logs.length === 0) {
         t.skip('index degraded: every attempt truncated before the first sealed block')
@@ -650,10 +649,6 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         'resumes strictly past the cursor',
       )
       assert.ok(spy.calls.v3messages >= 1, 'the /messages fast path served the hint scan')
-      if (
-        skipIfThrottled(t, spy.calls.walkPages > 0, spy.calls.rateLimited, 'v2 tx-chain pagination')
-      )
-        return
       assert.equal(
         spy.calls.walkPages,
         0,
@@ -674,6 +669,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       let logs: ChainLog[] = []
       let calls!: ReturnType<typeof spyFetch>['calls']
       let elapsedMs = 0
+      const retryStart = Date.now()
       for (let attempt = 0; attempt < MAX_SCAN_ATTEMPTS; attempt++) {
         const spy = spyFetch()
         const t0 = Date.now()
@@ -694,10 +690,9 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         // A degraded/lagging index falls back to the v2 walk — the fast-path shape
         // this test asserts never ran on that attempt; retry with spacing.
         if (calls.walkPages === 0) break
-        // Throttled: further attempts only add load to an endpoint already
-        // refusing us, and the degraded result skips below rather than failing.
-        if (calls.rateLimited) break
-        await sleep(retrySpacingMs(attempt))
+        // A 429'd attempt waits out the rate-limit window rather than burning the
+        // next attempt inside it; the budget stops the test from retrying forever.
+        if (!(await backoff(retryStart, attempt, Boolean(calls.rateLimited)))) break
       }
       if (calls.walkPages > 0) {
         t.skip('v3 probe fell back to the v2 walk (index degraded)')
