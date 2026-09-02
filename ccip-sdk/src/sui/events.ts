@@ -61,12 +61,25 @@ type TxMeta = { checkpoint: number; timestampMs: number; status?: 'success' | 'f
 const MULTI_GET_CHUNK = 50
 
 /**
- * How far below the tip a start floor must sit before the stream probes it with
- * ascending checkpoint slices instead of walking events down from the tip. Under
- * this, the descending `queryEvents` walk reaches the floor in a page or two and
- * is the cheaper source.
+ * Descending `queryEvents` pages sampled before estimating how many more the
+ * round would need to reach the start floor.
+ *
+ * Which source wins depends on how DENSE the requested event type is, not on how
+ * old the floor is. `queryEvents` is type-filtered, so for a rare type (a lane's
+ * CCIPMessageSent) even a months-old floor is a couple of pages — unbeatable. For
+ * a dense one (CommitReportAccepted lands every ~144 checkpoints) the same walk
+ * is thousands of pages. Guessing from the floor's distance gets the sparse case
+ * catastrophically wrong, and a raw page cap punishes a merely-moderate type, so
+ * sample a few pages and extrapolate from the checkpoint span they covered.
  */
-const FLOOR_PROBE_MIN_DISTANCE = 10_000
+const DESCENDING_SAMPLE_PAGES = 4
+
+/**
+ * Estimated remaining descending pages above which the floor probe is cheaper.
+ * A probe slice costs ~40 hydration calls, so switching is only right when the
+ * event walk is pathological — hundreds of pages — not merely longer.
+ */
+const DESCENDING_PAGE_LIMIT = 100
 
 /**
  * Checkpoints per probe slice. The walk hydrates EVERY transaction in a slice
@@ -451,13 +464,8 @@ async function* fetchEventsForward<T>(
   // back to the descending walk below, so a genuine wide backfill — which the walk
   // would serve far more expensively, reading every transaction in the range —
   // pays only the bounded probe.
-  const probeSlices =
-    !opts.watch &&
-    typeof ctx.client.getCheckpoints === 'function' &&
-    (await getLatest()) - startCheckpoint > FLOOR_PROBE_MIN_DISTANCE
-      ? FLOOR_PROBE_SLICES
-      : 0
-  let probesLeft = probeSlices
+  const canProbeFloor = !opts.watch && typeof ctx.client.getCheckpoints === 'function'
+  let probesLeft = 0
   let currentCheckpoint = startCheckpoint
   let catchedUp = false
   let softRounds = 0 // consecutive rounds lost to transient backend lag
@@ -524,6 +532,10 @@ async function* fetchEventsForward<T>(
           let cursor: EventId | null | undefined = undefined
           let cursorResets = 0
           let done = false
+          let pages = 0
+          // checkpoint span this filter's pages have covered, for the estimate below
+          let newestSeen = -1
+          let oldestSeen = -1
 
           while (!done) {
             let page
@@ -589,12 +601,36 @@ async function* fetchEventsForward<T>(
                 continue
               collected.push(toEventNode<T>(event, meta))
             }
+            for (const event of page.data) {
+              const cp = txMetas.get(event.id.txDigest)?.checkpoint
+              if (cp == null) continue
+              if (newestSeen < 0 || cp > newestSeen) newestSeen = cp
+              if (oldestSeen < 0 || cp < oldestSeen) oldestSeen = cp
+            }
 
             if (!page.hasNextPage) break
+            // Sampled enough to extrapolate: at the checkpoint rate these pages
+            // covered, how many more would reaching the floor take? Only a
+            // pathological answer justifies abandoning the type-filtered query
+            // for a walk that reads every transaction in the range. Drop what was
+            // collected and redo the round in slices — the same abandon-and-retry
+            // the retention-boundary failure uses.
+            if (canProbeFloor && ++pages >= DESCENDING_SAMPLE_PAGES && oldestSeen > 0) {
+              const covered = Math.max(1, newestSeen - oldestSeen)
+              const remaining = oldestSeen - currentCheckpoint
+              if (remaining > 0 && (pages * remaining) / covered > DESCENDING_PAGE_LIMIT) {
+                probesLeft = FLOOR_PROBE_SLICES
+                collected.length = 0
+                break
+              }
+            }
             cursor = page.nextCursor
           }
-          if (walkMode) break
+          if (walkMode || probesLeft) break
         }
+        // Round abandoned in favour of the floor probe: rerun it without
+        // advancing the cursor, so nothing in the window is skipped.
+        if (probesLeft) continue
 
         if (walkMode) {
           collected.push(
