@@ -252,6 +252,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds unsigned Solana mint creation instructions, optionally with initial supply.
    * The `payer` defaults as mint, freeze, and metadata update authority.
    *
+   * @see {@link updateMetadataAuthority} To transfer the initial metadata update authority.
+   *
    * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
    *
    * @example
@@ -277,6 +279,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Creates a Solana mint, optionally with initial supply.
    * The wallet public key defaults as mint, freeze, and metadata update authority.
+   *
+   * @see {@link updateMetadataAuthority} To transfer the initial metadata update authority.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
@@ -569,14 +573,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds unsigned instructions to transfer a token's Metaplex metadata update authority.
    *
    * @see {@link updateMetadataAuthority} For wallet-based execution.
+   * @see {@link setTokenAuthority} For SPL mint and freeze authority changes.
+   * @see {@link deployToken} To set the initial metadata update authority.
    *
    * @remarks
    * The mint must have mutable Metaplex Token Metadata and `authority` must match its current
    * update authority. `authority` defaults to `payer`; both the payer and authority must sign if
-   * they differ.
+   * they differ. Use this to hand metadata control to a multisig or DAO after deployment.
    *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the current authority does
-   * not match the metadata.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the mint has no Metaplex
+   * metadata, or `authority` is not its current metadata update authority.
    * @throws {@link CCTTxFailedError} If the metadata is immutable.
    *
    * @example
@@ -599,15 +605,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Transfers a token's Metaplex metadata update authority using the executing wallet.
    *
    * @see {@link generateUnsignedUpdateMetadataAuthority} For externally signed transactions.
+   * @see {@link setTokenAuthority} For SPL mint and freeze authority changes.
+   * @see {@link deployToken} To set the initial metadata update authority.
    *
    * @remarks
    * The mint must have mutable Metaplex Token Metadata and the executing wallet must be its
-   * current update authority. Use {@link generateUnsignedUpdateMetadataAuthority} when payer and
-   * authority differ or external signatures are required.
+   * current update authority. Use this to hand metadata control to a multisig or DAO after
+   * deployment. Use {@link generateUnsignedUpdateMetadataAuthority} when payer and authority
+   * differ or external signatures are required.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
-   * the metadata or executing wallet.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the mint has no Metaplex
+   * metadata, or `authority` does not match the metadata or executing wallet.
    * @throws {@link CCTTxFailedError} If the metadata is immutable, simulation fails, or the Metaplex
    * program rejects the transaction.
    *
@@ -1225,11 +1234,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * defaults to `payer`. `amount` is a positive u64 in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
-   * to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
+   * and delegate at least `amount` to the pool signer PDA; use {@link generateUnsignedApproveToken}.
    *
    * @see {@link provideLiquidity}
    * @see {@link generateUnsignedApproveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
@@ -1277,6 +1288,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link generateUnsignedProvideLiquidity}
    * @see {@link approveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or

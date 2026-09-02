@@ -642,7 +642,9 @@ export type {
   GetSupportedTokensParams,
   GetSupportedTokensResult,
 } from './token-admin-registry/operations/get-supported-tokens.ts'
+export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
@@ -661,8 +663,10 @@ export type {
 } from './token-pool/operations/get-token-pool-remotes.ts'
 /** The lane types `GetTokenPoolRemotesResult` is keyed over; shared with `Chain.getTokenPoolRemotes`. */
 export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export * from './lockbox/contracts.ts'
 export type {
   DeployArtifact,
   DeployResult,

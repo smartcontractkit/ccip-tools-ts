@@ -125,6 +125,16 @@ describe('UpdateMetadataAuthority (cct/solana)', () => {
       }
     })
 
+    it('reports the supplied and current authority on mismatch', async () => {
+      await assert.rejects(
+        () => generate({}, metadataData(PAYER)),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.message.includes(AUTHORITY) &&
+          err.message.includes(PAYER),
+      )
+    })
+
     it('rejects immutable metadata before submission', async () => {
       await assert.rejects(
         () => generate({}, metadataData(AUTHORITY, false)),
