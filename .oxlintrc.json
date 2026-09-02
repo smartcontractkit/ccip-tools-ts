@@ -48,7 +48,7 @@
       "excludeFiles": ["**/*.test.ts", "**/__tests__/**", "**/__mocks__/**"],
       "rules": {
         "ccip/restricted-syntax": "error",
-        "import/no-nodejs-modules": ["error", { "allow": ["buffer", "node:child_process", "node:http"] }]
+        "import/no-nodejs-modules": ["error", { "allow": ["buffer"] }]
       }
     },
     {

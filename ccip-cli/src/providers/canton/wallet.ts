@@ -1,12 +1,8 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
 
-import type {
-  CantonConfig,
-  Logger,
-  PartySignatures,
-  TransactionSigner,
-} from '@chainlink/ccip-sdk/src/index.ts'
+import type { Logger, PartySignatures, TransactionSigner } from '@chainlink/ccip-sdk/src/index.ts'
+
+import { loadCantonConfig } from './config.ts'
 
 /**
  * Wallet object returned by {@link loadCantonWallet}.
@@ -154,90 +150,15 @@ function buildEd25519Pkcs8Der(seed: Buffer): Buffer {
   //
   // oxfmt-ignore
   const prefix = Buffer.from([
-    0x30, 0x2e,             // SEQUENCE, 46 bytes
-    0x02, 0x01, 0x00,       // INTEGER 0 (version)
-    0x30, 0x05,             // SEQUENCE, 5 bytes (AlgorithmIdentifier)
-    0x06, 0x03,             // OID, 3 bytes
-    0x2b, 0x65, 0x70,       // 1.3.101.112 (Ed25519)
-    0x04, 0x22,             // OCTET STRING, 34 bytes
-    0x04, 0x20,             // OCTET STRING, 32 bytes (the seed)
+    0x30, 0x2e, // SEQUENCE, 46 bytes
+    0x02, 0x01, 0x00, // INTEGER 0 (version)
+    0x30, 0x05, // SEQUENCE, 5 bytes (AlgorithmIdentifier)
+    0x06, 0x03, // OID, 3 bytes
+    0x2b, 0x65, 0x70, // 1.3.101.112 (Ed25519)
+    0x04, 0x22, // OCTET STRING, 34 bytes
+    0x04, 0x20, // OCTET STRING, 32 bytes (the seed)
   ])
   return Buffer.concat([prefix, seed])
-}
-
-/**
- * Load and validate a Canton config JSON file.
- *
- * @param configPath - Path to JSON file, or undefined if not provided.
- * @param logger - Logger for debug output.
- * @returns Parsed CantonConfig or undefined.
- */
-export function loadCantonConfig(
-  configPath: string | undefined,
-  logger?: Logger,
-): CantonConfig | undefined {
-  if (!configPath) return undefined
-  if (!existsSync(configPath)) {
-    throw new Error(`Canton config file not found: ${configPath}`)
-  }
-  const raw = readFileSync(configPath, 'utf8')
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-
-  // `jwt` is required unless `auth` is present (OAuth2 provider resolves JWT on demand).
-  const hasAuth = typeof parsed['auth'] === 'object' && parsed['auth'] !== null
-  const required = hasAuth
-    ? (['party', 'ccipParty', 'edsUrl', 'transferInstructionUrl'] as const)
-    : (['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const)
-  for (const field of required) {
-    if (typeof parsed[field] !== 'string' || !parsed[field].length) {
-      throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
-    }
-  }
-
-  if (parsed['chainId'] != null) {
-    if (typeof parsed['chainId'] !== 'string' || !parsed['chainId'].length) {
-      throw new Error('Canton config: "chainId" must be a non-empty string if provided')
-    }
-  }
-
-  logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
-  return parsed as unknown as CantonConfig
-}
-
-/**
- * CCIP v2 indexer URLs for verification lookups.
- * CLI `--indexer` wins when provided; otherwise uses canton-config `indexerUrl`
- * only when the lane involves Canton (EVM-only lanes keep default indexer behavior).
- * Prefer {@link resolveIndexer} from `./index.ts` in CLI commands.
- */
-export function resolveCliIndexer(
-  cliIndexer: readonly string[] | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
-  laneInvolvesCanton: boolean,
-): readonly string[] | undefined {
-  if (cliIndexer?.length) return cliIndexer
-  if (!laneInvolvesCanton) return undefined
-  const url = cantonConfig?.indexerUrl?.trim()
-  return url ? [url] : undefined
-}
-
-/**
- * Router / sender instance id for `ccip-cli send -r`.
- * On Canton source lanes this is the CCIPSender instance id (e.g. `prod-ccipsender`);
- * on EVM it must be the router contract address. CLI `-r` wins when set.
- * Prefer {@link resolveRouter} from `./index.ts` in CLI commands.
- */
-export function resolveCliRouter(
-  cliRouter: string | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
-  sourceIsCanton: boolean,
-): string | undefined {
-  if (cliRouter?.trim()) return cliRouter.trim()
-  if (sourceIsCanton) {
-    const fromConfig = cantonConfig?.senderInstanceId?.trim()
-    if (fromConfig) return fromConfig
-  }
-  return cliRouter
 }
 
 /**

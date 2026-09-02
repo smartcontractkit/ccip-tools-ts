@@ -334,7 +334,10 @@ export CANTON_CLIENT_ID="my-client-id"
 export CANTON_CLIENT_SECRET="my-client-secret"
 ```
 
-When `auth` is set, the CLI resolves a JWT on demand via the SDK's `@chainlink/ccip-sdk` authentication package (backed by [`oauth4webapi`](https://github.com/panva/oauth4webapi)). If both `jwt` and `auth` are present, `jwt` takes precedence.
+When `auth` is set, the CLI resolves a JWT upfront (before connecting to the ledger) via the SDK's runtime-agnostic OAuth 2.0 protocol helpers (backed by [`oauth4webapi`](https://github.com/panva/oauth4webapi)). For `clientCredentials` and `authorizationCode`, the CLI injects a `tokenGetter` so tokens are refreshed automatically per request. If both `jwt` and `auth` are present, `jwt` takes precedence.
+
+> [!NOTE]
+> The `authorizationCode` flow is orchestrated by the CLI: it starts a local callback server (`node:http`) and opens the default browser (`open`/`xdg-open`). These Node-specific steps live in the CLI, not the SDK, so the SDK stays runtime-agnostic (no `node:*` imports) and can be embedded in web/Electron apps. Web embedders compose the SDK's protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling.
 
 #### Example
 

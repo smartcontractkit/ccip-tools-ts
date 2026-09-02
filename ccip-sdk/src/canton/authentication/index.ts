@@ -10,9 +10,18 @@
  * - **clientCredentials** — OAuth2 client credentials grant (machine-to-machine)
  * - **authorizationCode** — OAuth2 authorization code + PKCE (interactive browser login)
  *
+ * The SDK exports only **runtime-agnostic** protocol pieces: types, RFC 8414
+ * metadata discovery, PKCE/token-source primitives, the `clientCredentials`
+ * and `static` providers, and the `authorizationCode` **protocol helpers**
+ * (build-authorize-URL, callback validation, code→token exchange, refresh
+ * grant). No `node:*` modules are imported here — the environment-specific
+ * orchestration (local callback server, browser `open`, env-var resolution)
+ * lives in the CLI (`providers/canton/`).
+ *
  * Use {@link createAuthProvider} to build a provider from a discriminated
- * {@link AuthConfig}, or {@link resolveCantonJwt} to obtain a JWT string
- * directly (convenient for the existing `CantonConfig.jwt` field).
+ * {@link AuthConfig} (for `static` / `clientCredentials`), or compose the
+ * `authorizationCode` protocol helpers with your own callback handling and
+ * wrap the result in {@link createAuthorizationCodeProvider}.
  *
  * @example
  * ```ts
@@ -22,29 +31,38 @@
  * const provider = await createAuthProvider({
  *   type: AuthType.ClientCredentials,
  *   authUrl: 'https://auth.example.com',
- *   clientId: process.env.CANTON_CLIENT_ID!,
- *   clientSecret: process.env.CANTON_CLIENT_SECRET!,
+ *   clientId: 'my-client-id',
+ *   clientSecret: 'my-client-secret',
  * })
  * const jwt = (await provider.token()).accessToken
  * ```
  *
  * @example
  * ```ts
- * // Authorization code (interactive browser login)
- * const provider = await createAuthProvider({
- *   type: AuthType.AuthorizationCode,
+ * // Authorization code (interactive browser login) — protocol pieces only.
+ * // The embedder (CLI / web app) owns the callback server + browser opening.
+ * import {
+ *   buildAuthorizationRequest,
+ *   validateAuthorizationCallback,
+ *   exchangeAuthorizationCode,
+ *   createAuthorizationCodeProvider,
+ * } from '@chainlink/ccip-sdk'
+ *
+ * const req = await buildAuthorizationRequest({
+ *   type: 'authorizationCode',
  *   authUrl: 'https://auth.example.com',
  *   clientId: 'ccip-app',
+ *   callbackUrl: 'http://localhost:8400/callback',
  * })
- * const jwt = (await provider.token()).accessToken
+ * // …redirect user to req.authorizeUrl, receive callback at req.redirectUri…
+ * const { code } = await validateAuthorizationCallback(config, callbackUrl, req.state)
+ * const token = await exchangeAuthorizationCode(config, code, req.verifier, req.redirectUri)
+ * const provider = createAuthorizationCodeProvider(config, token, () => runFlowAgain())
  * ```
  */
 
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
-import {
-  type AuthorizationCodeProvider,
-  createAuthorizationCodeProvider,
-} from './authorization-code.ts'
+import type { AuthorizationCodeProvider } from './authorization-code.ts'
 import {
   type ClientCredentialsProvider,
   createClientCredentialsProvider,
@@ -53,7 +71,18 @@ import { type StaticProvider, createStaticProvider } from './static.ts'
 import type { OAuthRequestOptions } from './token-source.ts'
 import { type AuthConfig, type AuthProvider, AuthType } from './types.ts'
 
-export { AuthorizationCodeProvider, createAuthorizationCodeProvider } from './authorization-code.ts'
+export {
+  type AuthorizationCodeProtocolOptions,
+  type AuthorizationRequest,
+  type ValidatedCallback,
+  AuthorizationCodeProvider,
+  buildAuthorizationRequest,
+  createAuthorizationCodeProvider,
+  exchangeAuthorizationCode,
+  refreshAuthorizationCodeToken,
+  resolveAuthorizationCodeConfig,
+  validateAuthorizationCallback,
+} from './authorization-code.ts'
 export { ClientCredentialsProvider, createClientCredentialsProvider } from './client-credentials.ts'
 export {
   type AuthorizationServer,
@@ -86,17 +115,26 @@ export {
 } from './types.ts'
 
 /**
- * Options for {@link createAuthProvider} and {@link resolveCantonJwt}.
+ * Options for {@link createAuthProvider}.
  */
 export type AuthProviderOptions = OAuthRequestOptions
 
 /**
  * Build an {@link AuthProvider} from a discriminated {@link AuthConfig}.
  *
+ * Supports the `static` and `clientCredentials` schemes — both are fully
+ * runtime-agnostic (pure `fetch` + WebCrypto). The `authorizationCode` scheme
+ * is **not** handled here because it requires environment-specific
+ * orchestration (callback server, browser); use the protocol helpers exported
+ * from this package ({@link buildAuthorizationRequest},
+ * {@link validateAuthorizationCallback}, {@link exchangeAuthorizationCode},
+ * {@link createAuthorizationCodeProvider}) to compose it with your own
+ * callback handling.
+ *
  * The `type` field selects the auth scheme; when omitted, `"static"`
  * is assumed (backward compatible with the existing `CantonConfig.jwt` field).
  *
- * @param config - Auth config (static, clientCredentials, or authorizationCode).
+ * @param config - Auth config (static or clientCredentials).
  * @param options - Optional fetch override and abort signal.
  * @returns An {@link AuthProvider} whose `token()` yields valid JWTs.
  * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on invalid config or auth failure.
@@ -106,8 +144,8 @@ export type AuthProviderOptions = OAuthRequestOptions
  * const provider = await createAuthProvider({
  *   type: AuthType.ClientCredentials,
  *   authUrl: 'https://smartcontract.okta.com/oauth2/austsuml9q2WhPBMM5d7',
- *   clientId: process.env.CANTON_CLIENT_ID!,
- *   clientSecret: process.env.CANTON_CLIENT_SECRET!,
+ *   clientId: 'my-client-id',
+ *   clientSecret: 'my-client-secret',
  * })
  * ```
  */
@@ -128,12 +166,11 @@ export async function createAuthProvider(
       )
 
     case AuthType.AuthorizationCode:
-      return createAuthorizationCodeProvider(
-        config as Parameters<typeof createAuthorizationCodeProvider>[0],
-        {
-          fetch: options?.fetch,
-          allowInsecureRequests: options?.allowInsecureRequests,
-        },
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_AUTH_ERROR,
+        'authorizationCode cannot be built via createAuthProvider — it requires environment-specific ' +
+          'orchestration (callback server, browser). Use buildAuthorizationRequest + ' +
+          'validateAuthorizationCallback + exchangeAuthorizationCode + createAuthorizationCodeProvider.',
       )
 
     default: {
@@ -144,37 +181,6 @@ export async function createAuthProvider(
       )
     }
   }
-}
-
-/**
- * Resolve a JWT string for Canton Ledger API authentication.
- *
- * This is a convenience wrapper around {@link createAuthProvider} that returns
- * the raw access token string (suitable for the existing `CantonConfig.jwt`
- * field) instead of a provider. It fetches a token immediately.
- *
- * @param config - Auth config (static, clientCredentials, or authorizationCode).
- * @param options - Optional fetch override and abort signal.
- * @returns The JWT access token string.
- * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on invalid config or auth failure.
- *
- * @example
- * ```ts
- * const jwt = await resolveCantonJwt({
- *   type: AuthType.ClientCredentials,
- *   authUrl: process.env.CANTON_AUTH_URL!,
- *   clientId: process.env.CANTON_CLIENT_ID!,
- *   clientSecret: process.env.CANTON_CLIENT_SECRET!,
- * })
- * ```
- */
-export async function resolveCantonJwt(
-  config: AuthConfig,
-  options?: AuthProviderOptions,
-): Promise<string> {
-  const provider = await createAuthProvider(config, options)
-  const token = await provider.token()
-  return token.accessToken
 }
 
 /**

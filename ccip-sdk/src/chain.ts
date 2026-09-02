@@ -3,7 +3,6 @@ import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import type { AuthConfig } from './canton/authentication/index.ts'
 import type { UnsignedCantonTx } from './canton/types.ts'
 import { getOnchainCommitReport } from './commits.ts'
 import {
@@ -214,20 +213,23 @@ export type CantonConfig = {
   /**
    * JSON Web Token for authentication with the Canton Ledger API.
    *
-   * When `auth` is provided, `jwt` is optional — the SDK resolves a JWT from
-   * the auth provider on demand. When both are set, `jwt` takes precedence
-   * (explicit override).
+   * When `tokenGetter` is provided, `jwt` is optional — the SDK calls the
+   * getter per request to obtain a fresh JWT (enabling automatic refresh).
+   * When both are set, `jwt` takes precedence as a static override.
    */
   jwt?: string
 
   /**
-   * Optional OAuth 2.0 auth configuration for obtaining a JWT automatically.
+   * Optional token getter invoked per Canton Ledger API request to obtain a
+   * fresh JWT.
    *
-   * Supports `static`, `clientCredentials`, and `authorizationCode` flows.
-   * When set, {@link CantonChain.fromUrl} resolves a JWT via the auth provider
-   * unless `jwt` is already present.
+   * Use this when the token may expire and must be refreshed (e.g. OAuth2
+   * client-credentials or authorization-code flows). The CLI resolves auth
+   * upfront and injects a getter backed by a caching provider; web/Electron
+   * embedders inject their own. When set, this takes precedence over `jwt`
+   * only when `jwt` is absent.
    */
-  auth?: CantonAuthConfig
+  tokenGetter?: () => Promise<string>
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
@@ -292,14 +294,6 @@ export type CantonConfig = {
    */
   ccvs?: string[]
 }
-
-/**
- * OAuth 2.0 auth configuration for a {@link CantonConfig}.
- *
- * Re-exported from the Canton authentication package; see
- * `canton/authentication` for the full provider API.
- */
-export type CantonAuthConfig = AuthConfig
 
 /**
  * Filter options for getLogs queries across chains.

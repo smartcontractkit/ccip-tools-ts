@@ -4,7 +4,10 @@
  * Test approach:
  * - Mock token endpoints via a lightweight `http.Server` (no external deps).
  * - Validate request form params (grant_type, scope, audience, code_verifier).
- * - For the authorization code flow, simulate the browser callback.
+ * - For the authorization code flow, test the runtime-agnostic protocol
+ *   primitives (build-authorize-URL, callback validation, code→token exchange)
+ *   directly — the Node-specific callback server / browser orchestration is
+ *   tested in the CLI (`providers/canton/`).
  */
 import assert from 'node:assert/strict'
 import { type Server, createServer } from 'node:http'
@@ -21,11 +24,14 @@ import {
 } from './token-source.ts'
 import {
   AuthType,
+  buildAuthorizationRequest,
   createAuthProvider,
+  createAuthorizationCodeProvider,
   createStaticProvider,
+  exchangeAuthorizationCode,
   isAccessToken,
   isTokenExpired,
-  resolveCantonJwt,
+  validateAuthorizationCallback,
 } from './index.ts'
 
 // ---------------------------------------------------------------------------
@@ -403,113 +409,88 @@ describe('canton/authentication — client credentials flow', () => {
 })
 
 // ---------------------------------------------------------------------------
-// authorization-code.ts (interactive flow simulated)
+// authorization-code.ts (runtime-agnostic protocol primitives)
 // ---------------------------------------------------------------------------
 
-describe('canton/authentication — authorization code flow', () => {
-  it('fromDirect completes the PKCE flow when callback is hit', async () => {
-    const tokenServer = await startTokenServer({
-      response: { access_token: 'auth-code-token', token_type: 'Bearer', expires_in: 3600 },
-      validate: (req) => {
-        assert.equal(req.body['grant_type'], 'authorization_code')
-        assert.ok(req.body['code'], 'must include code')
-        assert.ok(req.body['code_verifier'], 'must include code_verifier (PKCE)')
-        assert.equal(req.body['client_id'], 'cid')
-      },
-    })
-
-    // Find a free port for the callback server.
-    const portGrabber = createServer()
-    const callbackPort: number = await new Promise((resolve) => {
-      portGrabber.listen(0, '127.0.0.1', () => {
-        const { port } = portGrabber.address() as AddressInfo
-        portGrabber.close(() => resolve(port))
-      })
-    })
-    const callbackUrl = `http://127.0.0.1:${callbackPort}/callback`
-    const knownState = 'known-test-state'
-
+describe('canton/authentication — authorization code protocol primitives', () => {
+  it('buildAuthorizationRequest produces an authorize URL with PKCE + state', async () => {
+    const metaServer = await startMetadataServer({})
     try {
-      const { AuthorizationCodeProvider } = await import('./authorization-code.ts')
-
-      // Start the provider in the background — it blocks waiting for the callback.
-      // Pass a fixed state so we can simulate the browser redirect deterministically.
-      const providerPromise = AuthorizationCodeProvider.fromDirect(
+      const req = await buildAuthorizationRequest(
         {
           type: AuthType.AuthorizationCode,
-          authUrl: `${tokenServer.url}/v1/authorize`,
-          tokenUrl: `${tokenServer.url}/v1/token`,
+          authUrl: metaServer.baseUrl,
           clientId: 'cid',
-          callbackUrl,
-          openBrowser: false,
-          timeoutMs: 5_000,
+          callbackUrl: 'http://127.0.0.1:9999/callback',
         },
-        { fetch: fetch, stateOverride: knownState, allowInsecureRequests: true },
+        {
+          stateOverride: 'known-state',
+          verifierOverride: 'known-verifier',
+          allowInsecureRequests: true,
+        },
       )
-
-      // Wait for the callback server to start listening, then simulate the
-      // browser redirect with the known state and a fake authorization code.
-      await waitForPort(callbackPort, 1_000)
-      const callbackResp = await fetch(`${callbackUrl}?code=test-code&state=${knownState}`)
-      assert.equal(callbackResp.status, 200)
-
-      const provider = await providerPromise
-      const token = await provider.token()
-      assert.equal(token.accessToken, 'auth-code-token')
+      assert.ok(req.authorizeUrl.includes('response_type=code'))
+      assert.ok(req.authorizeUrl.includes('client_id=cid'))
+      assert.ok(req.authorizeUrl.includes('code_challenge_method=S256'))
+      assert.ok(req.authorizeUrl.includes('state=known-state'))
+      assert.ok(req.authorizeUrl.includes('redirect_uri='), 'authorize URL includes redirect_uri')
+      assert.equal(req.state, 'known-state')
+      assert.equal(req.verifier, 'known-verifier')
+      assert.equal(req.codeChallenge.length, 43, 'S256 challenge is 43 chars')
+      assert.equal(req.redirectUri, 'http://127.0.0.1:9999/callback')
     } finally {
-      tokenServer.server.close()
+      metaServer.server.close()
     }
   })
 
-  it('fromDirect rejects on state mismatch', async () => {
-    const tokenServer = await startTokenServer({})
-    const portGrabber = createServer()
-    const callbackPort: number = await new Promise((resolve) => {
-      portGrabber.listen(0, '127.0.0.1', () => {
-        const { port } = portGrabber.address() as AddressInfo
-        portGrabber.close(() => resolve(port))
-      })
-    })
-    const callbackUrl = `http://127.0.0.1:${callbackPort}/callback`
-
+  it('buildAuthorizationRequest includes audience when set', async () => {
+    const metaServer = await startMetadataServer({})
     try {
-      const { AuthorizationCodeProvider } = await import('./authorization-code.ts')
-      const providerPromise = AuthorizationCodeProvider.fromDirect(
+      const req = await buildAuthorizationRequest(
         {
           type: AuthType.AuthorizationCode,
-          authUrl: `${tokenServer.url}/v1/authorize`,
-          tokenUrl: `${tokenServer.url}/v1/token`,
+          authUrl: metaServer.baseUrl,
           clientId: 'cid',
-          callbackUrl,
-          openBrowser: false,
-          timeoutMs: 5_000,
+          callbackUrl: 'http://127.0.0.1:9999/callback',
+          audience: 'https://ledger.example.com',
         },
-        { fetch: fetch, stateOverride: 'correct-state', allowInsecureRequests: true },
+        { allowInsecureRequests: true },
       )
-      // Mark the promise as handled early to avoid unhandledRejection before
-      // assert.rejects gets to await it (the callback may fire synchronously).
-      providerPromise.catch(() => {})
-
-      await waitForPort(callbackPort, 1_000)
-      // Hit with a wrong state → provider should reject.
-      const resp = await fetch(`${callbackUrl}?code=x&state=wrong`)
-      assert.equal(resp.status, 400)
-      await assert.rejects(providerPromise, CCIPError)
+      assert.ok(req.authorizeUrl.includes('audience=https'))
     } finally {
-      tokenServer.server.close()
+      metaServer.server.close()
     }
   })
 
-  it('fromDiscovery requires S256 PKCE support', async () => {
-    const metaServer = await startMetadataServer({ codeChallengeMethods: ['plain'] })
+  it('buildAuthorizationRequest rejects when callbackUrl is missing', async () => {
+    const metaServer = await startMetadataServer({})
     try {
-      const { AuthorizationCodeProvider } = await import('./authorization-code.ts')
       await assert.rejects(
-        AuthorizationCodeProvider.fromDiscovery(
+        buildAuthorizationRequest(
           {
             type: AuthType.AuthorizationCode,
             authUrl: metaServer.baseUrl,
             clientId: 'cid',
+          },
+          { allowInsecureRequests: true },
+        ),
+        CCIPError,
+      )
+    } finally {
+      metaServer.server.close()
+    }
+  })
+
+  it('buildAuthorizationRequest rejects when S256 is unsupported', async () => {
+    const metaServer = await startMetadataServer({ codeChallengeMethods: ['plain'] })
+    try {
+      await assert.rejects(
+        buildAuthorizationRequest(
+          {
+            type: AuthType.AuthorizationCode,
+            authUrl: metaServer.baseUrl,
+            clientId: 'cid',
+            callbackUrl: 'http://127.0.0.1:9999/callback',
           },
           { allowInsecureRequests: true },
         ),
@@ -520,40 +501,178 @@ describe('canton/authentication — authorization code flow', () => {
     }
   })
 
+  it('validateAuthorizationCallback extracts the code when state matches', async () => {
+    const metaServer = await startMetadataServer({})
+    try {
+      const req = await buildAuthorizationRequest(
+        {
+          type: AuthType.AuthorizationCode,
+          authUrl: metaServer.baseUrl,
+          clientId: 'cid',
+          callbackUrl: 'http://127.0.0.1:9999/callback',
+        },
+        { stateOverride: 'known-state', allowInsecureRequests: true },
+      )
+      const callbackUrl = `${req.redirectUri}?code=test-code&state=${req.state}`
+      const { code, state } = await validateAuthorizationCallback(
+        {
+          type: AuthType.AuthorizationCode,
+          authUrl: metaServer.baseUrl,
+          clientId: 'cid',
+          callbackUrl: req.redirectUri,
+        },
+        callbackUrl,
+        req.state,
+        { allowInsecureRequests: true },
+      )
+      assert.equal(code, 'test-code')
+      assert.equal(state, req.state)
+    } finally {
+      metaServer.server.close()
+    }
+  })
+
+  it('validateAuthorizationCallback rejects on state mismatch', async () => {
+    const metaServer = await startMetadataServer({})
+    try {
+      await assert.rejects(
+        validateAuthorizationCallback(
+          {
+            type: AuthType.AuthorizationCode,
+            authUrl: metaServer.baseUrl,
+            clientId: 'cid',
+            callbackUrl: 'http://127.0.0.1:9999/callback',
+          },
+          'http://127.0.0.1:9999/callback?code=x&state=wrong',
+          'correct-state',
+          { allowInsecureRequests: true },
+        ),
+        CCIPError,
+      )
+    } finally {
+      metaServer.server.close()
+    }
+  })
+
+  it('validateAuthorizationCallback rejects on OAuth error redirect', async () => {
+    const metaServer = await startMetadataServer({})
+    try {
+      await assert.rejects(
+        validateAuthorizationCallback(
+          {
+            type: AuthType.AuthorizationCode,
+            authUrl: metaServer.baseUrl,
+            clientId: 'cid',
+            callbackUrl: 'http://127.0.0.1:9999/callback',
+          },
+          'http://127.0.0.1:9999/callback?error=access_denied&error_description=user+denied',
+          'correct-state',
+          { allowInsecureRequests: true },
+        ),
+        /user denied/,
+      )
+    } finally {
+      metaServer.server.close()
+    }
+  })
+
+  it('exchangeAuthorizationCode exchanges the code for tokens', async () => {
+    const tokenServer = await startTokenServer({
+      response: { access_token: 'auth-code-token', token_type: 'Bearer', expires_in: 3600 },
+      validate: (req) => {
+        assert.equal(req.body['grant_type'], 'authorization_code')
+        assert.ok(req.body['code'], 'must include code')
+        assert.ok(req.body['code_verifier'], 'must include code_verifier (PKCE)')
+        assert.equal(req.body['client_id'], 'cid')
+      },
+    })
+    const metaServer = await startMetadataServer({
+      tokenEndpoint: `${tokenServer.url}/v1/token`,
+      authorizationEndpoint: `${tokenServer.url}/v1/authorize`,
+    })
+    try {
+      const config = {
+        type: AuthType.AuthorizationCode,
+        authUrl: metaServer.baseUrl,
+        clientId: 'cid',
+        callbackUrl: 'http://127.0.0.1:9999/callback',
+      }
+      const req = await buildAuthorizationRequest(config, {
+        stateOverride: 'known-state',
+        verifierOverride: 'known-verifier',
+        allowInsecureRequests: true,
+      })
+      const callbackUrl = `${req.redirectUri}?code=test-code&state=${req.state}`
+      const callback = await validateAuthorizationCallback(config, callbackUrl, req.state, {
+        allowInsecureRequests: true,
+      })
+      const token = await exchangeAuthorizationCode(
+        config,
+        callback,
+        req.verifier,
+        req.redirectUri,
+        { allowInsecureRequests: true },
+      )
+      assert.equal(token.accessToken, 'auth-code-token')
+      // oauth4webapi normalizes token_type to lowercase
+      assert.match(token.tokenType ?? '', /^bearer$/i)
+      assert.ok(token.expiresAt, 'expiresAt derived from expires_in')
+    } finally {
+      tokenServer.server.close()
+      metaServer.server.close()
+    }
+  })
+
+  it('createAuthorizationCodeProvider wraps an initial token and refreshes via callback', async () => {
+    const metaServer = await startMetadataServer({})
+    try {
+      const config = {
+        type: AuthType.AuthorizationCode,
+        authUrl: metaServer.baseUrl,
+        clientId: 'cid',
+        callbackUrl: 'http://127.0.0.1:9999/callback',
+      }
+      let fetchCount = 0
+      const initialToken = {
+        accessToken: 'initial-token',
+        expiresAt: Date.now() - 1000, // already expired → triggers refresh
+      }
+      const provider = createAuthorizationCodeProvider(
+        config,
+        initialToken,
+        async () => {
+          fetchCount++
+          return { accessToken: `refetched-${fetchCount}`, expiresAt: Date.now() + 60_000 }
+        },
+        { allowInsecureRequests: true },
+      )
+      // Token is expired → doRefresh falls back to fetchToken (no refresh token).
+      const token = await provider.token()
+      assert.equal(token.accessToken, 'refetched-1')
+      assert.equal(fetchCount, 1)
+    } finally {
+      metaServer.server.close()
+    }
+  })
+
   it('rejects empty config fields', async () => {
-    const { AuthorizationCodeProvider } = await import('./authorization-code.ts')
     await assert.rejects(
-      AuthorizationCodeProvider.fromDiscovery({
+      buildAuthorizationRequest({
         type: AuthType.AuthorizationCode,
         authUrl: '',
         clientId: '',
+        callbackUrl: 'http://127.0.0.1:9999/callback',
       }),
       CCIPError,
     )
   })
 })
 
-/** Poll until a TCP port accepts a connection (callback server is up). */
-function waitForPort(port: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  return new Promise((resolve, reject) => {
-    function attempt() {
-      fetch(`http://127.0.0.1:${port}/__nonexistent__`)
-        .then(() => resolve())
-        .catch(() => {
-          if (Date.now() > deadline) reject(new Error(`port ${port} not ready in ${timeoutMs}ms`))
-          else setTimeout(attempt, 20)
-        })
-    }
-    attempt()
-  })
-}
-
 // ---------------------------------------------------------------------------
-// index.ts — createAuthProvider / resolveCantonJwt
+// index.ts — createAuthProvider
 // ---------------------------------------------------------------------------
 
-describe('canton/authentication — createAuthProvider / resolveCantonJwt', () => {
+describe('canton/authentication — createAuthProvider', () => {
   it('createAuthProvider defaults to static when type omitted', async () => {
     const provider = await createAuthProvider({ jwt: 'static-jwt' })
     assert.equal(provider.type, AuthType.Static)
@@ -597,37 +716,12 @@ describe('canton/authentication — createAuthProvider / resolveCantonJwt', () =
     }
   })
 
-  it('resolveCantonJwt returns the JWT string', async () => {
-    const jwt = await resolveCantonJwt({ jwt: 'raw-jwt-789' })
-    assert.equal(jwt, 'raw-jwt-789')
-  })
-
-  it('resolveCantonJwt fetches via client credentials', async () => {
-    const tokenServer = await startTokenServer({})
-    const metaServer = await startMetadataServer({ tokenEndpoint: `${tokenServer.url}/v1/token` })
-    try {
-      const jwt = await resolveCantonJwt(
-        {
-          type: AuthType.ClientCredentials,
-          authUrl: metaServer.baseUrl,
-          clientId: 'cid',
-          clientSecret: 'secret',
-        },
-        { allowInsecureRequests: true },
-      )
-      assert.equal(jwt, 'test-access-token')
-    } finally {
-      tokenServer.server.close()
-      metaServer.server.close()
-    }
-  })
-
   it('custom fetch is threaded through to discovery + token fetch', async () => {
     const tokenServer = await startTokenServer({})
     const metaServer = await startMetadataServer({ tokenEndpoint: `${tokenServer.url}/v1/token` })
     const { fetch: spyFetch, calls } = makeFetchSpy()
     try {
-      await resolveCantonJwt(
+      const provider = await createAuthProvider(
         {
           type: AuthType.ClientCredentials,
           authUrl: metaServer.baseUrl,
@@ -636,6 +730,7 @@ describe('canton/authentication — createAuthProvider / resolveCantonJwt', () =
         },
         { fetch: spyFetch, allowInsecureRequests: true },
       )
+      await provider.token()
       // At least 2 calls: metadata discovery + token fetch
       assert.ok(calls.length >= 2, `expected >= 2 spy calls, got ${calls.length}`)
       assert.ok(calls.some((u) => u.includes('.well-known')))

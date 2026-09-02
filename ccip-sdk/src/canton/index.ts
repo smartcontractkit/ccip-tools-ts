@@ -2,7 +2,6 @@ import { type BytesLike, dataLength, hexlify, id as keccak256Utf8 } from 'ethers
 
 import {
   type BlockInfo,
-  type CantonConfig,
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
@@ -53,13 +52,6 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
-import {
-  type AuthConfig,
-  type AuthProvider,
-  type AuthProviderOptions,
-  AuthType,
-  createAuthProvider,
-} from './authentication/index.ts'
 import {
   damlRequiredCcvsList,
   decodeCantonVerifierDestAddress,
@@ -155,134 +147,42 @@ export {
   sumCantonHoldingAmounts,
 } from './defaults.ts'
 
-// Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode)
+// Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {
   type AccessToken,
   type AnyAuthProvider,
   type AuthConfig,
   type AuthProvider,
   type AuthProviderOptions,
-  type AuthType,
   type AuthorizationCodeAuthConfig,
+  type AuthorizationCodeProtocolOptions,
+  type AuthorizationRequest,
   type AuthorizationServerMetadata,
   type ClientCredentialsAuthConfig,
   type StaticAuthConfig,
+  type ValidatedCallback,
   AuthType as CantonAuthType,
   AuthorizationCodeProvider,
   CachingTokenSource,
   ClientCredentialsProvider,
   StaticProvider,
   StaticTokenSource,
+  buildAuthorizationRequest,
   codeChallengeFromVerifier,
   createAuthProvider,
   createAuthorizationCodeProvider,
   createClientCredentialsProvider,
   createStaticProvider,
+  exchangeAuthorizationCode,
   generateCodeVerifier,
   generateState,
   getAuthorizationServerMetadata,
   isAccessToken,
   isTokenExpired,
-  resolveCantonJwt,
+  refreshAuthorizationCodeToken,
+  resolveAuthorizationCodeConfig,
+  validateAuthorizationCallback,
 } from './authentication/index.ts'
-
-/**
- * Resolve a JWT from a {@link CantonConfig}.
- *
- * Priority:
- * 1. `config.jwt` (explicit override)
- * 2. `config.auth` (OAuth2 provider — client credentials, authorization code, or static)
- *
- * For `clientCredentials` and `authorizationCode` flows, `clientId` and
- * `clientSecret` may be omitted from the `auth` block and will be resolved
- * from `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars. This keeps
- * secrets out of config files that may be committed to version control.
- *
- * The {@link AuthProvider} is memoized per auth-config fingerprint so repeated
- * calls within one process reuse the same cached token.
- *
- * @throws {@link CCIPError} (CANTON_AUTH_ERROR) when neither `jwt` nor `auth` is set.
- */
-export async function resolveCantonJwtFromConfig(
-  config: CantonConfig,
-  options?: AuthProviderOptions,
-): Promise<string> {
-  const jwtOverride = config.jwt?.trim()
-  if (jwtOverride) return jwtOverride
-
-  if (config.auth) {
-    const merged = mergeAuthEnvVars(config.auth)
-    const provider = await getOrCreateAuthProvider(merged, options)
-    const token = await provider.token()
-    return token.accessToken
-  }
-
-  throw new CCIPError(
-    CCIPErrorCode.CANTON_AUTH_ERROR,
-    'Canton JWT is required. Set cantonConfig.jwt, or set cantonConfig.auth (static, clientCredentials, or authorizationCode).',
-  )
-}
-
-/** Process-wide cache of auth providers, keyed by config fingerprint (avoids re-login). */
-const authProviderCache = new Map<string, AuthProvider>()
-
-/** Stable fingerprint for an {@link AuthConfig}, ignoring volatile fields. */
-function authConfigFingerprint(config: AuthConfig): string {
-  const parts: string[] = [config.type ?? AuthType.Static]
-  if ('authUrl' in config && typeof config.authUrl === 'string')
-    parts.push(`authUrl=${config.authUrl}`)
-  if ('audience' in config && typeof config.audience === 'string')
-    parts.push(`audience=${config.audience}`)
-  if ('scopes' in config && Array.isArray(config.scopes))
-    parts.push(`scopes=${config.scopes.join(',')}`)
-  if ('clientId' in config && typeof config.clientId === 'string')
-    parts.push(`clientId=${config.clientId}`)
-  return parts.join('|')
-}
-
-/** Return a cached {@link AuthProvider} for `config`, or create and cache one. */
-async function getOrCreateAuthProvider(
-  config: AuthConfig,
-  options?: AuthProviderOptions,
-): Promise<AuthProvider> {
-  const key = authConfigFingerprint(config)
-  let provider = authProviderCache.get(key)
-  if (!provider) {
-    provider = await createAuthProvider(config, options)
-    authProviderCache.set(key, provider)
-  }
-  return provider
-}
-
-/**
- * Merge `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars into an {@link AuthConfig}
- * when the `auth` block omits them.
- *
- * This allows config files to specify the non-secret OIDC parameters (`type`,
- * `authUrl`, `audience`, `scopes`) while credentials come from environment
- * variables — keeping secrets out of version-controlled JSON files.
- */
-function mergeAuthEnvVars(auth: AuthConfig): AuthConfig {
-  const envClientId = process.env.CANTON_CLIENT_ID?.trim()
-  const envClientSecret = process.env.CANTON_CLIENT_SECRET?.trim()
-
-  if (auth.type === AuthType.ClientCredentials) {
-    return {
-      ...auth,
-      clientId: auth.clientId || envClientId || '',
-      clientSecret: auth.clientSecret || envClientSecret || '',
-    }
-  }
-
-  if (auth.type === AuthType.AuthorizationCode) {
-    return {
-      ...auth,
-      clientId: auth.clientId || envClientId || '',
-    }
-  }
-
-  return auth
-}
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.
@@ -530,16 +430,25 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    // Resolve the JWT: explicit `jwt` takes precedence; otherwise use `auth`.
-    const jwt = await resolveCantonJwtFromConfig(ctx.cantonConfig, {
-      fetch: ctx.fetch,
-      signal: ctx.abort,
-    })
+    // Resolve authentication: an explicit `jwt` is a static override;
+    // otherwise a `tokenGetter` is threaded through to every client so each
+    // request carries a fresh JWT (enabling automatic refresh). The SDK never
+    // orchestrates an OAuth flow — the caller (CLI / embedder) resolves auth
+    // upfront and hands the result to `cantonConfig`.
+    const jwt = ctx.cantonConfig.jwt?.trim()
+    const tokenGetter = ctx.cantonConfig.tokenGetter
+    if (!jwt && !tokenGetter) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_AUTH_ERROR,
+        'CantonChain.fromUrl: cantonConfig.jwt or cantonConfig.tokenGetter is required for authentication',
+      )
+    }
 
     const fetchFn = ctx.fetch
     const client = createCantonClient({
       baseUrl: url,
       jwt,
+      tokenGetter,
       signal: ctx.abort,
       fetch: fetchFn,
     })
@@ -565,15 +474,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const transferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt,
+      tokenGetter,
     })
     const linkTransferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.edsUrl,
       jwt,
+      tokenGetter,
       useScanProxy: false,
     })
     const tokenMetadataClient = createTokenMetadataClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt,
+      tokenGetter,
     })
     return CantonChain.fromClient(
       client,

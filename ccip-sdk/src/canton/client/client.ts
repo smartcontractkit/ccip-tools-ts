@@ -95,8 +95,22 @@ export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashi
 export interface CantonClientConfig {
   /** Base URL of the Canton JSON Ledger API (e.g., http://localhost:7575) */
   baseUrl: string
-  /** JWT for authentication */
-  jwt: string
+  /**
+   * JWT for authentication.
+   *
+   * Mutually exclusive with `tokenGetter`; when both are set, `jwt` is used as
+   * a static token. Prefer `tokenGetter` when the token may expire and must be
+   * refreshed per request.
+   */
+  jwt?: string
+  /**
+   * Optional token getter invoked per request to obtain a fresh JWT.
+   *
+   * When set, each request awaits the getter and uses the returned JWT in the
+   * `Authorization` header. This enables automatic refresh (e.g. an OAuth2
+   * caching provider) without the caller re-creating the client.
+   */
+  tokenGetter?: () => Promise<string>
   /** Request timeout in milliseconds */
   timeout?: number
   /** Abort signal for cancelling in-flight requests (e.g., from Chain.abort) */
@@ -114,7 +128,8 @@ export interface CantonClientConfig {
  */
 export function createCantonClient(config: CantonClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const headers = buildHeaders(config.jwt)
+  const staticHeaders = buildHeaders(config.jwt)
+  const tokenGetter = config.tokenGetter
   const timeoutMs = config.timeout ?? 30_000
   const signal = config.signal
   // Build a fetch adapter only when the caller explicitly supplies a fetch function.
@@ -123,14 +138,25 @@ export function createCantonClient(config: CantonClientConfig) {
     ? createAxiosFetchAdapter(config.fetch, signal)
     : undefined
 
-  // Internal helpers that capture baseUrl/headers/timeoutMs/signal for
+  /**
+   * Resolve the request headers, awaiting `tokenGetter` when configured so
+   * each request carries a fresh JWT (enabling automatic refresh).
+   */
+  async function resolveHeaders(): Promise<Record<string, string>> {
+    if (!tokenGetter) return staticHeaders
+    const jwt = await tokenGetter()
+    return buildHeaders(jwt)
+  }
+
+  // Internal helpers that capture baseUrl/timeoutMs/signal for
   // cleaner call sites inside createCantonClient.
-  const get2 = <T>(
+  const get2 = async <T>(
     path: string,
     queryParams?: Record<string, string>,
     retries?: number,
-  ): Promise<T> =>
-    request<T>(
+  ): Promise<T> => {
+    const headers = await resolveHeaders()
+    return request<T>(
       'GET',
       baseUrl,
       path,
@@ -142,15 +168,17 @@ export function createCantonClient(config: CantonClientConfig) {
       signal,
       fetchAdapter,
     )
+  }
 
-  const post2 = <T>(
+  const post2 = async <T>(
     path: string,
     body: unknown,
     queryParams?: Record<string, string>,
     retries?: number,
     overrideTimeoutMs?: number,
-  ): Promise<T> =>
-    request<T>(
+  ): Promise<T> => {
+    const headers = await resolveHeaders()
+    return request<T>(
       'POST',
       baseUrl,
       path,
@@ -162,6 +190,7 @@ export function createCantonClient(config: CantonClientConfig) {
       signal,
       fetchAdapter,
     )
+  }
 
   return {
     /**

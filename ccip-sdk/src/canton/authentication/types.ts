@@ -121,6 +121,10 @@ export interface ClientCredentialsAuthConfig extends AuthConfigBase {
 
 /**
  * `authorizationCode` auth config (RFC 6749 §4.1 + PKCE RFC 7636).
+ *
+ * This config describes the **protocol parameters** only. The
+ * environment-specific orchestration (local callback server, browser opening,
+ * flow timeout) is owned by the CLI / embedder, not the SDK.
  */
 export interface AuthorizationCodeAuthConfig extends AuthConfigBase {
   type: typeof AuthType.AuthorizationCode
@@ -130,12 +134,15 @@ export interface AuthorizationCodeAuthConfig extends AuthConfigBase {
   clientId: string
   /** OAuth2 scopes. Defaults to `["openid", "daml_ledger_api"]`. */
   scopes?: string[]
-  /** Local redirect URI. Defaults to `http://localhost:8400/callback`. */
+  /**
+   * Redirect URI the authorization server redirects back to.
+   *
+   * Required by the protocol helpers ({@link buildAuthorizationRequest},
+   * {@link exchangeAuthorizationCode}); the embedder supplies the value that
+   * matches its callback handling (e.g. `http://localhost:8400/callback` for
+   * the CLI's local server).
+   */
   callbackUrl?: string
-  /** Open the browser automatically (default `true`). */
-  openBrowser?: boolean
-  /** Overall flow timeout in ms (default 120_000). */
-  timeoutMs?: number
 }
 
 /**

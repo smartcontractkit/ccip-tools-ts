@@ -290,7 +290,7 @@ Unlike `generateUnsignedSendMessage` (which may return multiple transactions for
 
 ## Canton Execution
 
-Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`. No private key or signer is needed — the JWT from `cantonConfig` (either the static `jwt` field or a token resolved from `auth`) authenticates the submission. The `wallet` parameter only needs a `party` ID (for `actAs` in command submissions) — this is the same `party` already specified in `cantonConfig`:
+Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`. No private key or signer is needed — the JWT from `cantonConfig` authenticates the submission. The `wallet` parameter only needs a `party` ID (for `actAs` in command submissions) — this is the same `party` already specified in `cantonConfig`:
 
 ```typescript
 import { CantonChain, type CantonConfig } from '@chainlink/ccip-sdk'
@@ -298,7 +298,11 @@ import { CantonChain, type CantonConfig } from '@chainlink/ccip-sdk'
 const cantonConfig: CantonConfig = {
   party: 'receiver::1220...',
   ccipParty: 'ccip::1220...',
-  jwt: 'eyJ...', // or use `auth` for OIDC — see Canton Configuration
+  // Either a static JWT, or a tokenGetter for refreshable tokens (OAuth2).
+  // The CLI resolves its `auth` block into one of these upfront — see
+  // Canton Configuration. Web/Electron embedders compose the SDK's OAuth2
+  // protocol helpers and inject a tokenGetter here.
+  jwt: 'eyJ...',
   edsUrl: 'https://eds.example.com',
   transferInstructionUrl: 'https://transfer-instruction.example.com',
   indexerUrl: 'https://indexer.example.com',

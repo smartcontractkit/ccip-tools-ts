@@ -50,34 +50,20 @@ const config: Config = {
     //
     // - `path`: used by bigint-buffer / postman-code-generators (pre-existing)
     // - `undici`: used by @chainlink/ccip-sdk's Canton client (CantonChain → canton/client.ts).
-    // - `node:` scheme URIs: used by the Canton auth-code provider (callback server, browser
-    //   launching). Webpack 5 throws UnhandledSchemeError for `node:` URIs; we use a
-    //   NormalModuleReplacementPlugin to redirect them to an empty stub before resolution.
+    //
+    // The Canton auth-code provider's `node:*` imports (callback server, browser
+    // launching) have been moved to the CLI, so no `node:` scheme stubs are
+    // needed here anymore — the SDK is now runtime-agnostic.
     function webpackNodeFallbacks(): Plugin {
       return {
         name: 'webpack-node-fallbacks',
         configureWebpack(_config, isServer) {
           if (isServer) return {}
-          const webpack = require('webpack')
-          const { NormalModuleReplacementPlugin } = webpack
-          const nodeMods = ['node:child_process', 'node:http', 'node:url']
           return {
             resolve: {
               alias: { undici: false },
               fallback: { path: false },
             },
-            plugins: nodeMods.map((mod) => {
-              const plugin = new NormalModuleReplacementPlugin(
-                new RegExp(`^${mod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
-                (resource: { request: string }) => {
-                  // Redirect node: imports to a stub that exports empty values
-                  // for any named import (exec, createServer, URL, etc.).
-                  resource.request =
-                    'data:text/javascript,export default {};export const exec=()=>{};export const createServer=()=>{};export const URL=globalThis.URL;export const spawn=()=>{};'
-                },
-              )
-              return plugin
-            }),
           }
         },
       }

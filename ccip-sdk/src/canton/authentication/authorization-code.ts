@@ -1,5 +1,3 @@
-import type { IncomingMessage, Server, ServerResponse } from 'node:http'
-
 import * as oauth from 'oauth4webapi'
 
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
@@ -17,22 +15,26 @@ import {
 import type { AccessToken, AuthProvider, AuthorizationCodeAuthConfig } from './types.ts'
 
 /**
- * OAuth2 authorization code flow with PKCE (S256) authentication provider.
+ * OAuth2 authorization code + PKCE protocol primitives (runtime-agnostic).
  *
  * @packageDocumentation
  *
- * Implements the authorization code grant (RFC 6749 §4.1) with PKCE
- * (RFC 7636, S256 challenge method required). Designed for interactive user
- * authentication where a browser login is required: it starts a local callback
- * server to receive the authorization code and exchanges it for tokens.
+ * This module implements **only the protocol pieces** of the authorization
+ * code grant (RFC 6749 §4.1) with PKCE (RFC 7636, S256) that an embedder
+ * cannot safely rewrite: building the authorize URL, validating the callback
+ * (state + PKCE), exchanging the code for tokens, and refreshing via the
+ * `refresh_token` grant.
  *
- * The OAuth2 protocol mechanics (PKCE challenge generation, auth-response
- * validation, token exchange, refresh) delegate to `oauth4webapi`; only the
- * local callback HTTP server and browser launching are implemented here
- * (inherently Node-only).
+ * It is deliberately **runtime-agnostic**: it uses only `fetch` and WebCrypto
+ * (via `oauth4webapi`) and imports no `node:*` modules. The environment-specific
+ * orchestration — spawning a local callback server, opening a browser,
+ * resolving `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` from env vars — lives
+ * in the CLI (`providers/canton/`), which composes these primitives and hands
+ * the resulting JWT (or a `() => Promise<string>` token getter) to
+ * {@link CantonConfig}.
  *
- * Implements RFC 8414 metadata discovery, state validation (CSRF
- * protection), and automatic browser opening.
+ * Web/Electron embedders compose these primitives with their own
+ * redirect/callback handling.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1
  * @see https://datatracker.ietf.org/doc/html/rfc7636
@@ -42,22 +44,6 @@ import type { AccessToken, AuthProvider, AuthorizationCodeAuthConfig } from './t
 /** Default scopes for the authorization code flow. */
 const DEFAULT_AUTHORIZATION_CODE_SCOPES = ['openid', 'daml_ledger_api']
 
-/** Default local redirect URI. */
-const DEFAULT_CALLBACK_URL = 'http://localhost:8400/callback'
-
-/** Default overall flow timeout (2 minutes). */
-const DEFAULT_FLOW_TIMEOUT_MS = 120_000
-
-/** HTML shown to the user in the browser after a successful callback. */
-const CALLBACK_SUCCESS_HTML = `<!DOCTYPE html>
-<html>
-<head><title>Authentication Complete</title></head>
-<body style="font-family: sans-serif; text-align: center; padding: 40px;">
-  <h1>Authentication complete!</h1>
-  <p>You can safely close this window.</p>
-</body>
-</html>`
-
 /**
  * Resolved authorization-code provider configuration (after applying defaults).
  */
@@ -66,164 +52,57 @@ interface ResolvedAuthorizationCodeConfig {
   client: oauth.Client
   scopes: string[]
   audience: string
-  callbackUrl: string
-  openBrowser: boolean
-  timeoutMs: number
+  redirectUri: string
   fetch?: typeof fetch
+  signal?: AbortSignal
   allowInsecureRequests?: boolean
 }
 
-/** Options for {@link AuthorizationCodeProvider.fromDiscovery} and {@link AuthorizationCodeProvider.fromDirect}. */
-export interface AuthorizationCodeProviderOptions extends OAuthRequestOptions {
-  /** Override the PKCE state parameter (for deterministic testing). */
-  stateOverride?: string
+/**
+ * PKCE + state material generated for an authorization request.
+ *
+ * The embedder keeps the `verifier` and `state` secret (server-side / in
+ * process memory) and uses them to validate the callback and exchange the code.
+ * The `codeChallenge` and `authorizeUrl` are safe to send to the browser.
+ */
+export interface AuthorizationRequest {
+  /** The full authorization endpoint URL to redirect the user to. */
+  authorizeUrl: string
+  /** The PKCE code verifier — keep secret; required for the token exchange. */
+  verifier: string
+  /** The S256 code challenge derived from `verifier` (sent in the authorize URL). */
+  codeChallenge: string
+  /** The OAuth2 `state` parameter — keep secret; required to validate the callback. */
+  state: string
+  /** The redirect URI the authorization server will redirect back to. */
+  redirectUri: string
 }
 
 /**
- * Authorization code auth provider.
+ * A validated authorization callback: the code + state extracted from the
+ * redirect URL after {@link validateAuthorizationCallback} succeeds.
  *
- * The constructor performs the full interactive flow (browser + callback
- * server) and resolves once tokens are obtained. The internal
- * {@link CachingTokenSource} refreshes via the `refresh_token` grant when the
- * access token expires.
+ * The `callbackParams` field carries the branded `URLSearchParams` instance
+ * returned by `oauth4webapi.validateAuthResponse`; it MUST be passed to
+ * {@link exchangeAuthorizationCode} (the underlying library brand-checks it).
  */
-export class AuthorizationCodeProvider implements AuthProvider {
-  readonly type = 'authorizationCode' as const
-  private readonly tokenSourceImpl: CachingTokenSource
-
-  /** Creates a provider from resolved config and an initial token (internal). */
-  private constructor(cfg: ResolvedAuthorizationCodeConfig, initialToken: AccessToken) {
-    this.cfg = cfg
-    this.tokenSourceImpl = new CachingTokenSource(() => this.doRefresh(), initialToken)
-  }
-
-  private readonly cfg: ResolvedAuthorizationCodeConfig
-
-  /** Returns a valid access token, refreshing via the refresh_token grant if needed. */
-  token(): Promise<AccessToken> {
-    return this.tokenSourceImpl.token()
-  }
-
-  /** Refresh the access token using the refresh_token grant (RFC 6749 §6). */
-  private async doRefresh(): Promise<AccessToken> {
-    // Read the cached token directly — calling token() here would deadlock
-    // because doRefresh IS the fetcher that token() invokes when the token
-    // is expired.
-    const current = this.tokenSourceImpl.getCachedToken()
-    if (current?.refreshToken) {
-      try {
-        const response = await oauth.refreshTokenGrantRequest(
-          this.cfg.as,
-          this.cfg.client,
-          oauth.None(),
-          current.refreshToken,
-          buildOAuthRequestOptions(this.cfg),
-        )
-        const tokenResponse = await oauth.processRefreshTokenResponse(
-          this.cfg.as,
-          this.cfg.client,
-          response,
-        )
-        return toAccessToken(tokenResponse)
-      } catch {
-        // refresh failed — fall through to re-running the interactive flow
-      }
-    }
-    // No refresh token or refresh failed → re-run the interactive flow.
-    return runAuthorizationCodeFlow(this.cfg)
-  }
-
+export interface ValidatedCallback {
+  /** The authorization code to exchange for tokens. */
+  code: string
+  /** The state echoed back by the server (already verified to match). */
+  state: string
   /**
-   * Create a provider using OAuth2 Authorization Server Metadata discovery
-   * (RFC 8414) to locate the authorization and token endpoints.
-   *
-   * Requires the server to advertise S256 PKCE support.
-   *
-   * @param config - Authorization code config with `authUrl`.
-   * @param options - Optional fetch override.
-   * @returns A {@link AuthorizationCodeProvider}.
-   * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on discovery failure, missing
-   *   S256 support, or callback/flow errors.
-   *
-   * @see https://datatracker.ietf.org/doc/html/rfc8414
+   * The branded `URLSearchParams` from `validateAuthResponse` — pass this to
+   * {@link exchangeAuthorizationCode}. Do not reconstruct it.
    */
-  static async fromDiscovery(
-    config: AuthorizationCodeAuthConfig,
-    options?: AuthorizationCodeProviderOptions,
-  ): Promise<AuthorizationCodeProvider> {
-    validateAuthorizationCodeConfig(config)
-    const as = await discoverAuthorizationServer(config.authUrl, {
-      fetch: options?.fetch,
-      allowInsecureRequests: options?.allowInsecureRequests,
-    })
-    if (!as.code_challenge_methods_supported?.includes('S256')) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_AUTH_ERROR,
-        'Authorization server does not support S256 PKCE challenges',
-      )
-    }
-    if (!as.authorization_endpoint) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_AUTH_ERROR,
-        'Authorization server metadata is missing an authorization_endpoint',
-      )
-    }
-    const resolved: ResolvedAuthorizationCodeConfig = {
-      as,
-      client: { client_id: config.clientId },
-      scopes: config.scopes?.length ? config.scopes : DEFAULT_AUTHORIZATION_CODE_SCOPES,
-      audience: config.audience ?? '',
-      callbackUrl: config.callbackUrl ?? DEFAULT_CALLBACK_URL,
-      openBrowser: config.openBrowser ?? true,
-      timeoutMs: config.timeoutMs ?? DEFAULT_FLOW_TIMEOUT_MS,
-      fetch: options?.fetch,
-      allowInsecureRequests: options?.allowInsecureRequests,
-    }
-    const token = await runAuthorizationCodeFlow(resolved)
-    return new AuthorizationCodeProvider(resolved, token)
-  }
-
-  /**
-   * Create a provider with explicit authorization and token endpoint URLs.
-   *
-   * Performs the full interactive flow (browser + callback server) and resolves
-   * once tokens are obtained. A minimal `oauth4webapi.AuthorizationServer` is
-   * constructed from the provided endpoint URLs.
-   *
-   * @param config - Authorization code config plus a `tokenUrl` endpoint.
-   * @param options - Optional fetch override and `stateOverride` (for testing).
-   * @returns A {@link AuthorizationCodeProvider}.
-   * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on invalid config or flow errors.
-   */
-  static async fromDirect(
-    config: AuthorizationCodeAuthConfig & {
-      tokenUrl: string
-    },
-    options?: AuthorizationCodeProviderOptions,
-  ): Promise<AuthorizationCodeProvider> {
-    validateAuthorizationCodeConfig(config)
-    if (!config.tokenUrl) {
-      throw new CCIPError(CCIPErrorCode.CANTON_AUTH_ERROR, 'tokenUrl cannot be empty')
-    }
-    const resolved: ResolvedAuthorizationCodeConfig = {
-      as: {
-        issuer: config.authUrl,
-        authorization_endpoint: config.authUrl,
-        token_endpoint: config.tokenUrl,
-      },
-      client: { client_id: config.clientId },
-      scopes: config.scopes?.length ? config.scopes : DEFAULT_AUTHORIZATION_CODE_SCOPES,
-      audience: config.audience ?? '',
-      callbackUrl: config.callbackUrl ?? DEFAULT_CALLBACK_URL,
-      openBrowser: config.openBrowser ?? true,
-      timeoutMs: config.timeoutMs ?? DEFAULT_FLOW_TIMEOUT_MS,
-      fetch: options?.fetch,
-      allowInsecureRequests: options?.allowInsecureRequests,
-    }
-    const token = await runAuthorizationCodeFlow(resolved, options?.stateOverride)
-    return new AuthorizationCodeProvider(resolved, token)
-  }
+  callbackParams: URLSearchParams
 }
+
+/**
+ * Options shared by the protocol helpers (fetch override, abort signal,
+ * insecure-requests toggle for testing).
+ */
+export type AuthorizationCodeProtocolOptions = OAuthRequestOptions
 
 /**
  * Validate the shared authorization-code config fields.
@@ -244,236 +123,346 @@ function validateAuthorizationCodeConfig(config: AuthorizationCodeAuthConfig): v
 }
 
 /**
- * Build the authorization URL with PKCE challenge and state.
+ * Resolve an {@link AuthorizationCodeAuthConfig} into a
+ * {@link ResolvedAuthorizationCodeConfig} using RFC 8414 metadata discovery.
  *
- * Uses `oauth4webapi`'s PKCE primitives for the code challenge.
+ * Requires the server to advertise S256 PKCE support and an
+ * `authorization_endpoint`.
+ *
+ * @param config - Authorization code config with `authUrl`.
+ * @param options - Optional fetch override and abort signal.
+ * @returns The resolved config (authorization server metadata + client + defaults).
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on discovery failure, missing
+ *   S256 support, or missing `authorization_endpoint`.
+ *
+ * @see https://datatracker.ietf.org/doc/html/rfc8414
  */
-async function buildAuthorizeUrl(
-  cfg: ResolvedAuthorizationCodeConfig,
-  state: string,
-  verifier: string,
-): Promise<string> {
-  const challenge = await codeChallengeFromVerifier(verifier)
+export async function resolveAuthorizationCodeConfig(
+  config: AuthorizationCodeAuthConfig,
+  options?: AuthorizationCodeProtocolOptions,
+): Promise<ResolvedAuthorizationCodeConfig> {
+  validateAuthorizationCodeConfig(config)
+  const as = await discoverAuthorizationServer(config.authUrl, {
+    fetch: options?.fetch,
+    signal: options?.signal,
+    allowInsecureRequests: options?.allowInsecureRequests,
+  })
+  if (!as.code_challenge_methods_supported?.includes('S256')) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_AUTH_ERROR,
+      'Authorization server does not support S256 PKCE challenges',
+    )
+  }
+  if (!as.authorization_endpoint) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_AUTH_ERROR,
+      'Authorization server metadata is missing an authorization_endpoint',
+    )
+  }
+  return {
+    as,
+    client: { client_id: config.clientId },
+    scopes: config.scopes?.length ? config.scopes : DEFAULT_AUTHORIZATION_CODE_SCOPES,
+    audience: config.audience ?? '',
+    redirectUri: config.callbackUrl ?? '',
+    fetch: options?.fetch,
+    signal: options?.signal,
+    allowInsecureRequests: options?.allowInsecureRequests,
+  }
+}
+
+/**
+ * Build the authorization request: authorize URL + PKCE verifier + state.
+ *
+ * This is the first step of the interactive flow. The embedder redirects the
+ * user's browser to `authorizeUrl` and retains `verifier` and `state` to
+ * validate the callback and exchange the code.
+ *
+ * @param config - Authorization code config (with `authUrl`, `clientId`).
+ * @param options - Optional fetch override, abort signal, and overrides for
+ *   `redirectUri`, `state`, and `verifier` (the latter two for deterministic testing).
+ * @returns The {@link AuthorizationRequest} (authorize URL + PKCE material).
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on discovery failure or invalid config.
+ *
+ * @example
+ * ```ts
+ * const req = await buildAuthorizationRequest({
+ *   type: 'authorizationCode',
+ *   authUrl: 'https://auth.example.com',
+ *   clientId: 'ccip-app',
+ *   callbackUrl: 'http://localhost:8400/callback',
+ * })
+ * // Redirect the user to req.authorizeUrl; keep req.verifier + req.state.
+ * ```
+ */
+export async function buildAuthorizationRequest(
+  config: AuthorizationCodeAuthConfig,
+  options?: AuthorizationCodeProtocolOptions & {
+    /** Override the PKCE state parameter (for deterministic testing). */
+    stateOverride?: string
+    /** Override the PKCE code verifier (for deterministic testing). */
+    verifierOverride?: string
+    /** Override the redirect URI (takes precedence over `config.callbackUrl`). */
+    redirectUri?: string
+  },
+): Promise<AuthorizationRequest> {
+  const cfg = await resolveAuthorizationCodeConfig(config, options)
+  const redirectUri = options?.redirectUri ?? cfg.redirectUri
+  if (!redirectUri) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_AUTH_ERROR,
+      'authorizationCode auth requires a callbackUrl (redirect URI)',
+    )
+  }
+  const state = options?.stateOverride ?? generateState()
+  const verifier = options?.verifierOverride ?? generateCodeVerifier()
+  const codeChallenge = await codeChallengeFromVerifier(verifier)
+
   const params = new URLSearchParams({
     client_id: cfg.client.client_id,
     response_type: 'code',
     scope: cfg.scopes.join(' '),
-    redirect_uri: cfg.callbackUrl,
+    redirect_uri: redirectUri,
     state,
-    code_challenge: challenge,
+    code_challenge: codeChallenge,
     code_challenge_method: 'S256',
   })
   if (cfg.audience) {
     params.set('audience', cfg.audience)
   }
-  return `${cfg.as.authorization_endpoint}?${params.toString()}`
+  const authorizeUrl = `${cfg.as.authorization_endpoint}?${params.toString()}`
+
+  return { authorizeUrl, verifier, codeChallenge, state, redirectUri }
 }
 
 /**
- * Open a URL in the default browser (cross-platform best-effort).
+ * Validate the authorization callback URL and extract the code + state.
  *
- * Uses `execFile` (not `exec`) to avoid spawning a shell, preventing command
- * injection through the URL string.
+ * Checks for an OAuth2 error redirect first (e.g. the user denied consent),
+ * then validates the state parameter (CSRF protection) and the presence of a
+ * code via `oauth4webapi.validateAuthResponse`.
+ *
+ * @param config - Authorization code config (with `authUrl`, `clientId`).
+ * @param callbackUrl - The full redirect URL the browser was sent back to
+ *   (including `?code=…&state=…` or `?error=…`).
+ * @param expectedState - The `state` value from {@link buildAuthorizationRequest}.
+ * @param options - Optional fetch override and abort signal.
+ * @returns The validated {@link ValidatedCallback} (code + state).
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on an OAuth2 error redirect,
+ *   state mismatch, or missing code.
+ *
+ * @example
+ * ```ts
+ * const { code } = await validateAuthorizationCallback(
+ *   config, 'http://localhost:8400/callback?code=abc&state=xyz', req.state,
+ * )
+ * ```
  */
-async function openBrowser(url: string): Promise<void> {
-  const { execFile } = await import('node:child_process')
-  const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open'
-  execFile(cmd, [url], (err) => {
-    if (err) {
-      console.error('Could not open browser — visit this URL manually:\n', url)
-    }
-  })
-}
+export async function validateAuthorizationCallback(
+  config: AuthorizationCodeAuthConfig,
+  callbackUrl: string | URL,
+  expectedState: string,
+  options?: AuthorizationCodeProtocolOptions,
+): Promise<ValidatedCallback> {
+  const cfg = await resolveAuthorizationCodeConfig(config, options)
+  const reqUrl = callbackUrl instanceof URL ? callbackUrl : new URL(callbackUrl)
 
-/**
- * Process a single callback request: validate state, exchange code for tokens.
- *
- * Uses `oauth4webapi.validateAuthResponse` for state/PKCE validation and
- * `oauth4webapi.authorizationCodeGrantRequest` + `processAuthorizationCodeResponse`
- * for the token exchange.
- */
-async function handleCallback(
-  req: IncomingMessage,
-  res: ServerResponse,
-  ctx: {
-    callbackHost: string
-    callbackPort: number
-    callbackPath: string
-    state: string
-    verifier: string
-    cfg: ResolvedAuthorizationCodeConfig
-    finish: (fn: () => void) => void
-    resolve: (token: AccessToken) => void
-    reject: (err: unknown) => void
-  },
-): Promise<void> {
+  // Always validate state + PKCE first (security-critical). The OAuth error
+  // redirect check below is purely informational — it must not run before or
+  // bypass the state validation, so we perform validation unconditionally.
+  let callbackParams: URLSearchParams
   try {
-    const reqUrl = new URL(req.url ?? '/', `http://${ctx.callbackHost}:${ctx.callbackPort}`)
-    if (reqUrl.pathname !== ctx.callbackPath) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
-      res.end('Not found')
-      return
-    }
-
-    // OAuth error redirect (e.g. user denied consent)
+    callbackParams = oauth.validateAuthResponse(cfg.as, cfg.client, reqUrl, expectedState)
+  } catch (e) {
+    // If the authorization server redirected with an OAuth2 error (RFC 6749
+    // §4.1.2.1, e.g. the user denied consent), surface it as a descriptive
+    // error instead of the generic state-mismatch message.
     const oauthError = reqUrl.searchParams.get('error')
     if (oauthError) {
       const desc = reqUrl.searchParams.get('error_description') ?? oauthError
-      res.writeHead(400, { 'Content-Type': 'text/plain' })
-      res.end(`Authentication failed: ${desc}`)
-      ctx.finish(() =>
-        ctx.reject(
-          new CCIPError(CCIPErrorCode.CANTON_AUTH_ERROR, `Authorization failed: ${desc}`, {
-            context: { oauthError },
-          }),
-        ),
-      )
-      return
+      throw new CCIPError(CCIPErrorCode.CANTON_AUTH_ERROR, `Authorization failed: ${desc}`, {
+        context: { oauthError },
+      })
     }
+    throw wrapOAuthError(
+      e,
+      'Authorization callback validation failed (state mismatch or missing code)',
+    )
+  }
+  const code = callbackParams.get('code')
+  if (!code) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_AUTH_ERROR,
+      'Authorization callback is missing the code parameter',
+    )
+  }
+  return { code, state: expectedState, callbackParams }
+}
 
-    // Validate the authorization response (state + PKCE) via oauth4webapi.
-    let callbackParams: URLSearchParams
-    try {
-      callbackParams = oauth.validateAuthResponse(ctx.cfg.as, ctx.cfg.client, reqUrl, ctx.state)
-    } catch (e) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' })
-      res.end('Invalid callback (state mismatch or missing code)')
-      ctx.finish(() => ctx.reject(wrapOAuthError(e, 'Authorization callback validation failed')))
-      return
-    }
-
-    // Exchange the authorization code for tokens (PKCE verifier included).
+/**
+ * Exchange an authorization code for tokens (access + refresh).
+ *
+ * Performs the token endpoint request with the PKCE verifier (RFC 7636) and
+ * returns the parsed {@link AccessToken}. The embedder should persist the
+ * `refreshToken` so {@link refreshAuthorizationCodeToken} can renew the
+ * access token without re-running the interactive flow.
+ *
+ * @param config - Authorization code config (with `authUrl`, `clientId`).
+ * @param callback - The {@link ValidatedCallback} from
+ *   {@link validateAuthorizationCallback} (carries the branded `callbackParams`).
+ * @param verifier - The PKCE code verifier from {@link buildAuthorizationRequest}.
+ * @param redirectUri - The redirect URI used in the authorize request.
+ * @param options - Optional fetch override and abort signal.
+ * @returns The obtained {@link AccessToken} (with `refreshToken` when issued).
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on token exchange failure.
+ *
+ * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3
+ */
+export async function exchangeAuthorizationCode(
+  config: AuthorizationCodeAuthConfig,
+  callback: ValidatedCallback,
+  verifier: string,
+  redirectUri: string,
+  options?: AuthorizationCodeProtocolOptions,
+): Promise<AccessToken> {
+  const cfg = await resolveAuthorizationCodeConfig(config, options)
+  try {
     const response = await oauth.authorizationCodeGrantRequest(
-      ctx.cfg.as,
-      ctx.cfg.client,
+      cfg.as,
+      cfg.client,
       oauth.None(),
-      callbackParams,
-      ctx.cfg.callbackUrl,
-      ctx.verifier,
-      buildOAuthRequestOptions(ctx.cfg),
+      callback.callbackParams,
+      redirectUri,
+      verifier,
+      buildOAuthRequestOptions(cfg),
     )
-    const tokenResponse = await oauth.processAuthorizationCodeResponse(
-      ctx.cfg.as,
-      ctx.cfg.client,
-      response,
-    )
-    const token = toAccessToken(tokenResponse)
-
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(CALLBACK_SUCCESS_HTML)
-    ctx.finish(() => ctx.resolve(token))
+    const tokenResponse = await oauth.processAuthorizationCodeResponse(cfg.as, cfg.client, response)
+    return toAccessToken(tokenResponse)
   } catch (e) {
-    try {
-      res.writeHead(500, { 'Content-Type': 'text/plain' })
-      res.end(e instanceof Error ? e.message : String(e))
-    } catch {
-      // response may already be sent
-    }
-    ctx.finish(() => ctx.reject(wrapOAuthError(e, 'Authorization code flow failed')))
+    throw wrapOAuthError(e, 'Authorization code token exchange failed')
   }
 }
 
 /**
- * Run the full authorization code + PKCE flow: start a local callback server,
- * open the browser, wait for the callback, and exchange the code for tokens.
+ * Refresh an access token using the `refresh_token` grant (RFC 6749 §6).
  *
- * @returns The obtained access token.
- * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on timeout, callback errors,
- *   state mismatch, or token exchange failure.
+ * @param config - Authorization code config (with `authUrl`, `clientId`).
+ * @param refreshToken - The refresh token from a prior {@link exchangeAuthorizationCode}.
+ * @param options - Optional fetch override and abort signal.
+ * @returns A fresh {@link AccessToken} (with a new `refreshToken` when rotated).
+ * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on refresh failure.
+ *
+ * @see https://datatracker.ietf.org/doc/html/rfc6749#section-6
  */
-async function runAuthorizationCodeFlow(
-  cfg: ResolvedAuthorizationCodeConfig,
-  stateOverride?: string,
+export async function refreshAuthorizationCodeToken(
+  config: AuthorizationCodeAuthConfig,
+  refreshToken: string,
+  options?: AuthorizationCodeProtocolOptions,
 ): Promise<AccessToken> {
-  const state = stateOverride ?? generateState()
-  const verifier = generateCodeVerifier()
-  const authorizeUrl = await buildAuthorizeUrl(cfg, state, verifier)
-
-  const callback = new URL(cfg.callbackUrl)
-  const callbackPath = callback.pathname || '/callback'
-  const callbackHost = callback.hostname || '127.0.0.1'
-  const callbackPort = Number(callback.port) || 8400
-
-  const { createServer } = await import('node:http')
-
-  return new Promise<AccessToken>((resolve, reject) => {
-    let settled = false
-
-    const finish = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      server.close()
-      fn()
-    }
-
-    const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      // Wrap the async handler so its promise rejection is always caught —
-      // the outer promise is settled via finish()/reject() inside.
-      handleCallback(req, res, {
-        callbackHost,
-        callbackPort,
-        callbackPath,
-        state,
-        verifier,
-        cfg,
-        finish,
-        resolve,
-        reject,
-      }).catch(() => {
-        // already handled via finish()/reject() inside handleCallback
-      })
-    })
-
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      server.close()
-      reject(
-        new CCIPError(
-          CCIPErrorCode.CANTON_AUTH_ERROR,
-          `Authorization code flow timed out after ${cfg.timeoutMs}ms`,
-          { isTransient: true },
-        ),
-      )
-    }, cfg.timeoutMs)
-
-    server.on('error', (err) => {
-      finish(() =>
-        reject(
-          new CCIPError(CCIPErrorCode.CANTON_AUTH_ERROR, `Callback server error: ${err.message}`, {
-            cause: err,
-          }),
-        ),
-      )
-    })
-
-    server.listen(callbackPort, callbackHost, () => {
-      console.error(`Waiting for authentication on ${cfg.callbackUrl}`)
-      if (cfg.openBrowser) {
-        console.error('Opening browser for login…')
-        console.error('If the browser does not open, visit:\n', authorizeUrl, '\n')
-        openBrowser(authorizeUrl).catch(() => {
-          console.error('Could not open browser — visit this URL manually:\n', authorizeUrl)
-        })
-      } else {
-        console.error('Visit the following URL to authenticate:\n', authorizeUrl, '\n')
-      }
-    })
-  })
+  const cfg = await resolveAuthorizationCodeConfig(config, options)
+  try {
+    const response = await oauth.refreshTokenGrantRequest(
+      cfg.as,
+      cfg.client,
+      oauth.None(),
+      refreshToken,
+      buildOAuthRequestOptions(cfg),
+    )
+    const tokenResponse = await oauth.processRefreshTokenResponse(cfg.as, cfg.client, response)
+    return toAccessToken(tokenResponse)
+  } catch (e) {
+    throw wrapOAuthError(e, 'Authorization code token refresh failed')
+  }
 }
 
 /**
- * Create an authorization code provider using RFC 8414 metadata discovery.
+ * An {@link AuthProvider} backed by caller-supplied token-fetch and
+ * token-refresh callbacks.
  *
- * Convenience wrapper for {@link AuthorizationCodeProvider.fromDiscovery}.
+ * The embedder implements the interactive flow (browser + callback) using
+ * {@link buildAuthorizationRequest}, {@link validateAuthorizationCallback},
+ * and {@link exchangeAuthorizationCode}, then wraps the resulting token in
+ * this provider. Refresh uses {@link refreshAuthorizationCodeToken} when a
+ * refresh token is available; otherwise the initial token is re-fetched
+ * via the `fetchToken` callback.
  *
- * @param config - Authorization code config.
- * @param options - Optional fetch override.
+ * This keeps the SDK runtime-agnostic: no callback server or browser logic
+ * lives here, only the caching/refresh plumbing an embedder would otherwise
+ * have to re-implement.
+ */
+export class AuthorizationCodeProvider implements AuthProvider {
+  readonly type = 'authorizationCode' as const
+  private readonly tokenSourceImpl: CachingTokenSource
+  private readonly cfg: AuthorizationCodeAuthConfig
+  private readonly options: AuthorizationCodeProtocolOptions | undefined
+
+  /**
+   * Creates a provider from an initial token and callbacks.
+   *
+   * @param config - Authorization code config (used for refresh).
+   * @param initialToken - The token obtained from {@link exchangeAuthorizationCode}.
+   * @param fetchToken - Called when the cached token is expired and no refresh
+   *   callback is supplied (or refresh fails). Must return a fresh token.
+   * @param options - Optional fetch override and abort signal (threaded to refresh).
+   */
+  constructor(
+    config: AuthorizationCodeAuthConfig,
+    initialToken: AccessToken,
+    fetchToken: () => Promise<AccessToken>,
+    options?: AuthorizationCodeProtocolOptions,
+  ) {
+    this.cfg = config
+    this.options = options
+    this.tokenSourceImpl = new CachingTokenSource(() => this.doRefresh(fetchToken), initialToken)
+  }
+
+  /** Returns a valid access token, refreshing or re-fetching as needed. */
+  token(): Promise<AccessToken> {
+    return this.tokenSourceImpl.token()
+  }
+
+  /** Returns the currently cached token (possibly expired) without fetching. */
+  getCachedToken(): AccessToken | undefined {
+    return this.tokenSourceImpl.getCachedToken()
+  }
+
+  /**
+   * Refresh via the `refresh_token` grant when a refresh token is available;
+   * otherwise fall back to the caller-supplied `fetchToken` callback.
+   */
+  private async doRefresh(fetchToken: () => Promise<AccessToken>): Promise<AccessToken> {
+    const current = this.tokenSourceImpl.getCachedToken()
+    if (current?.refreshToken) {
+      try {
+        return await refreshAuthorizationCodeToken(this.cfg, current.refreshToken, this.options)
+      } catch {
+        // refresh failed — fall through to the caller-supplied fetcher
+      }
+    }
+    return fetchToken()
+  }
+}
+
+/**
+ * Create an {@link AuthorizationCodeProvider} from an initial token and a
+ * re-fetch callback.
+ *
+ * Convenience wrapper around the {@link AuthorizationCodeProvider} constructor.
+ * The embedder is responsible for obtaining `initialToken` via the protocol
+ * helpers ({@link buildAuthorizationRequest} → {@link validateAuthorizationCallback}
+ * → {@link exchangeAuthorizationCode}).
+ *
+ * @param config - Authorization code config (used for refresh).
+ * @param initialToken - The token obtained from the interactive flow.
+ * @param fetchToken - Called when the cached token expires and refresh fails.
+ * @param options - Optional fetch override and abort signal.
+ * @returns A {@link AuthorizationCodeProvider}.
  */
 export function createAuthorizationCodeProvider(
   config: AuthorizationCodeAuthConfig,
-  options?: AuthorizationCodeProviderOptions,
-): Promise<AuthorizationCodeProvider> {
-  return AuthorizationCodeProvider.fromDiscovery(config, options)
+  initialToken: AccessToken,
+  fetchToken: () => Promise<AccessToken>,
+  options?: AuthorizationCodeProtocolOptions,
+): AuthorizationCodeProvider {
+  return new AuthorizationCodeProvider(config, initialToken, fetchToken, options)
 }
