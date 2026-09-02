@@ -3,10 +3,10 @@ import { describe, it, mock } from 'node:test'
 
 import { AbiCoder, ZeroAddress, getAddress, hexlify, randomBytes } from 'ethers'
 
-import { interfaces } from './const.ts'
-import { EVMChain } from './index.ts'
 import { ChainFamily, NetworkType } from '../networks.ts'
 import { CCIPVersion } from '../types.ts'
+import { interfaces } from './const.ts'
+import { EVMChain } from './index.ts'
 
 // Regression test for a dead guard: `!rmnProxy && rmnProxy === ZeroAddress` can never be true
 // (empty/undefined fails the second check, ZeroAddress fails the first), so getRmn always

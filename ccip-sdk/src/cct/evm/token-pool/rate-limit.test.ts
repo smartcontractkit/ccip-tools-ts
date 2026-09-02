@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { CCTParamsInvalidError } from '../../errors.ts'
 import { TokenPoolVersion } from './contracts.ts'
 import { parseRateLimitConfig } from './rate-limit.ts'
-import { CCTParamsInvalidError } from '../../errors.ts'
 
 describe('parseRateLimitConfig', () => {
   const UINT128_MAX = 2n ** 128n - 1n
