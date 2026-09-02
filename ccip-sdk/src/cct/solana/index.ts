@@ -71,6 +71,8 @@ import {
   type ExecuteEditChainRemoteConfigResult,
   type ExecuteInitChainRemoteConfigParams,
   type ExecuteInitChainRemoteConfigResult,
+  type ExecuteProvideLiquidityParams,
+  type ExecuteProvideLiquidityResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
   type ExecuteSetCanAcceptLiquidityParams,
@@ -83,6 +85,8 @@ import {
   type ExecuteSetRebalancerResult,
   type ExecuteTransferOwnershipParams,
   type ExecuteTransferOwnershipResult,
+  type ExecuteWithdrawLiquidityParams,
+  type ExecuteWithdrawLiquidityResult,
   type GenerateAcceptOwnershipParams,
   type GenerateAcceptOwnershipResult,
   type GenerateAppendRemotePoolAddressesParams,
@@ -101,6 +105,8 @@ import {
   type GenerateEditChainRemoteConfigResult,
   type GenerateInitChainRemoteConfigParams,
   type GenerateInitChainRemoteConfigResult,
+  type GenerateProvideLiquidityParams,
+  type GenerateProvideLiquidityResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
   type GenerateSetCanAcceptLiquidityParams,
@@ -113,6 +119,8 @@ import {
   type GenerateSetRebalancerResult,
   type GenerateTransferOwnershipParams,
   type GenerateTransferOwnershipResult,
+  type GenerateWithdrawLiquidityParams,
+  type GenerateWithdrawLiquidityResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
@@ -130,12 +138,14 @@ import {
   GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainRemoteConfig,
+  ProvideLiquidity,
   RemoveFromAllowlist,
   SetCanAcceptLiquidity,
   SetChainRateLimit,
   SetRateLimitAdmin,
   SetRebalancer,
   TransferOwnership,
+  WithdrawLiquidity,
 } from './token-pool/operations/index.ts'
 import {
   type ExecuteApproveTokenParams,
@@ -195,12 +205,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
+  readonly #provideLiquidity = new ProvideLiquidity()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
   readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity()
   readonly #setChainRateLimit = new SetChainRateLimit()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setRebalancer = new SetRebalancer()
   readonly #transferOwnership = new TransferOwnership()
+  readonly #withdrawLiquidity = new WithdrawLiquidity()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -1140,6 +1152,167 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to deposit a rebalancer's tokens into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. `authority`
+   * defaults to `payer`. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
+   * and delegate at least `amount` to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   *
+   * @see {@link provideLiquidity}
+   * @see {@link generateUnsignedApproveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
+   *
+   * @example Prepare and generate liquidity instructions
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const amount = 1_000_000n
+   * const { config } = await cct.getTokenPoolState({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   * })
+   * const approval = await cct.generateUnsignedApproveToken({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   delegate: config.poolSigner,
+   *   amount,
+   * })
+   * const liquidity = await cct.generateUnsignedProvideLiquidity({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount,
+   * })
+   * ```
+   */
+  generateUnsignedProvideLiquidity(
+    opts: GenerateProvideLiquidityParams,
+  ): Promise<GenerateProvideLiquidityResult> {
+    return this.#provideLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits tokens from the executing rebalancer wallet into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. The wallet's
+   * associated token account must exist and hold the positive u64 `amount` in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
+   * to the pool signer PDA; use {@link approveToken} first.
+   *
+   * @see {@link generateUnsignedProvideLiquidity}
+   * @see {@link approveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
+   * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
+   * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
+   * signer, the pool rejects the rebalancer, liquidity is disabled, the token account lacks funds,
+   * or simulation/submission fails.
+   *
+   * @example Prepare and provide liquidity
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const amount = 1_000_000n
+   * const { config } = await cct.getTokenPoolState({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   * })
+   * await cct.approveToken({ wallet, tokenAddress: mint, delegate: config.poolSigner, amount })
+   * await cct.provideLiquidity({ wallet, tokenAddress: mint, poolType: 'lock-release', amount })
+   * ```
+   */
+  provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
+    return this.#provideLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to withdraw tokens from a lock-release pool to a rebalancer's
+   * associated token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`;
+   * a custom program must have the canonical lock-release `withdrawLiquidity` instruction and account
+   * layout. `authority` defaults to `payer`. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. The rebalancer's associated token account must already exist.
+   *
+   * @see {@link withdrawLiquidity}
+   * @see {@link generateUnsignedSetRebalancer}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example Generate a liquidity withdrawal instruction
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const withdrawal = await cct.generateUnsignedWithdrawLiquidity({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawLiquidity(
+    opts: GenerateWithdrawLiquidityParams,
+  ): Promise<GenerateWithdrawLiquidityResult> {
+    return this.#withdrawLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws tokens from a lock-release pool into the executing rebalancer wallet's associated
+   * token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom
+   * program must have the canonical lock-release `withdrawLiquidity` instruction and account layout.
+   * The wallet's associated token account must exist. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority.
+   *
+   * @see {@link generateUnsignedWithdrawLiquidity}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
+   * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, liquidity is disabled,
+   * lacks liquidity, the token account does not exist, or simulation/submission fails.
+   *
+   * @example Withdraw liquidity
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.withdrawLiquidity({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  withdrawLiquidity(opts: ExecuteWithdrawLiquidityParams): Promise<ExecuteWithdrawLiquidityResult> {
+    return this.#withdrawLiquidity.execute(this.chain, opts)
   }
 
   /**
