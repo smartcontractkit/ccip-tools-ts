@@ -24,6 +24,7 @@ import { Instance } from 'prool'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
@@ -37,11 +38,11 @@ await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 const FUJI_SELECTOR = 14767482510784806043n
 
@@ -93,98 +94,143 @@ async function startForkWithRetries(instance: ReturnType<typeof Instance.anvil>)
   }
 }
 
-describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () => {
-  let sepoliaChain: EVMChain | undefined
-  let fujiChain: EVMChain | undefined
-  let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
-  let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
+describe(
+  'Dest-liquidity preflight fork tests',
+  {
+    skip,
+    // The 300s default was measured-exceeded on CI: one scenario alone took
+    // 283s there (anvil relays every uncached call to the upstream testnet RPC
+    // through the job's throttled egress, each lazy state fetch 1s+), then the
+    // whole suite was cancelled at the parent ceiling. 600s matches the CI
+    // NETWORK_LOCK_TIMEOUT_MS headroom; node --test reports a suite timeout as
+    // `cancelled` (not `fail`), which the PR report counts as not-passed too.
+    timeout: 600_000,
+  },
+  () => {
+    let sepoliaChain: EVMChain | undefined
+    let fujiChain: EVMChain | undefined
+    let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
+    let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
-  before(async () => {
-    const forkOpts = { retries: 8, timeout: 60_000, forkRetryBackoff: 1_000 } as const
-    // ports offset from fork.test.ts so both files can run in the same `node --test` run
-    sepoliaInstance = Instance.anvil(
-      { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },
-      {},
-    )
-    fujiInstance = Instance.anvil(
-      { forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8655, ...forkOpts },
-      {},
-    )
-    await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
+    before(async () => {
+      const forkOpts = { retries: 8, timeout: 60_000, forkRetryBackoff: 1_000 } as const
+      // ports offset from fork.test.ts so both files can run in the same `node --test` run
+      sepoliaInstance = Instance.anvil(
+        { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },
+        {},
+      )
+      fujiInstance = Instance.anvil(
+        { forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8655, ...forkOpts },
+        {},
+      )
+      await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
 
-    const sepoliaProvider = new JsonRpcProvider(
-      `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-    )
-    const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
-    sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
-      apiClient: null,
-      logger: testLogger,
+      const sepoliaProvider = new JsonRpcProvider(
+        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+      )
+      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+      sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: null,
+        logger: testLogger,
+      })
+      fujiChain = await EVMChain.fromProvider(fujiProvider, { apiClient: null, logger: testLogger })
     })
-    fujiChain = await EVMChain.fromProvider(fujiProvider, { apiClient: null, logger: testLogger })
-  })
 
-  after(async () => {
-    sepoliaChain?.provider.destroy()
-    fujiChain?.provider.destroy()
-    await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
-  })
+    after(async () => {
+      sepoliaChain?.provider.destroy()
+      fujiChain?.provider.destroy()
+      await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
+    })
 
-  describe('v2.0 lane state-manipulation scenarios', () => {
-    const receiver = '0x1111111111111111111111111111111111111111'
-    const input = {
-      originalSender: receiver,
-      remoteChainSelector: SEPOLIA_SELECTOR,
-      receiver,
-      sourceDenominatedAmount: 10n ** 18n,
-      localToken: V2_LANE.destToken,
-      sourcePoolAddress: zeroPadValue(V2_LANE.srcPool, 32),
-    }
+    describe('v2.0 lane state-manipulation scenarios', () => {
+      const receiver = '0x1111111111111111111111111111111111111111'
+      const input = {
+        originalSender: receiver,
+        remoteChainSelector: SEPOLIA_SELECTOR,
+        receiver,
+        sourceDenominatedAmount: 10n ** 18n,
+        localToken: V2_LANE.destToken,
+        sourcePoolAddress: zeroPadValue(V2_LANE.srcPool, 32),
+      }
 
-    it('MINTER_ROLE revoked on the fork => classified as authority, checkExecute throws', async () => {
-      assert.ok(fujiChain)
-      const provider = fujiChain.provider as JsonRpcProvider
-      // revoke the pool's MINTER_ROLE on the fork to reproduce a missing-role misconfiguration
-      await provider.send('anvil_impersonateAccount', [V2_LANE.operator])
-      await provider.send('anvil_setBalance', [V2_LANE.operator, '0x1000000000000000000'])
-      const token = new Contract(
-        V2_LANE.destToken,
-        [
-          'function revokeRole(bytes32 role, address account)',
-          'function hasRole(bytes32, address) view returns (bool)',
-        ],
-        await provider.getSigner(V2_LANE.operator),
-      )
-      await (
-        (await token.getFunction('revokeRole')(MINTER_ROLE, V2_LANE.destPool)) as {
-          wait: () => Promise<unknown>
-        }
-      ).wait()
-      assert.equal(await token.getFunction('hasRole')(MINTER_ROLE, V2_LANE.destPool), false)
+      it('MINTER_ROLE revoked on the fork => classified as authority, checkExecute throws', async () => {
+        assert.ok(fujiChain)
+        const provider = fujiChain.provider as JsonRpcProvider
+        // revoke the pool's MINTER_ROLE on the fork to reproduce a missing-role misconfiguration
+        await provider.send('anvil_impersonateAccount', [V2_LANE.operator])
+        await provider.send('anvil_setBalance', [V2_LANE.operator, '0x1000000000000000000'])
+        const token = new Contract(
+          V2_LANE.destToken,
+          [
+            'function revokeRole(bytes32 role, address account)',
+            'function hasRole(bytes32, address) view returns (bool)',
+          ],
+          await provider.getSigner(V2_LANE.operator),
+        )
+        await (
+          (await token.getFunction('revokeRole')(MINTER_ROLE, V2_LANE.destPool)) as {
+            wait: () => Promise<unknown>
+          }
+        ).wait()
+        assert.equal(await token.getFunction('hasRole')(MINTER_ROLE, V2_LANE.destPool), false)
 
-      // the primitive throws the raw revert; the SDK's standard parse names it
-      let revertData: string | undefined
-      await assert.rejects(
-        () =>
-          simulateReleaseOrMint({
-            provider: fujiChain!.provider,
-            pool: V2_LANE.destPool,
-            offRamp: V2_LANE.destOffRamp,
-            input,
-          }),
-        (err) => {
-          revertData = getErrorData(err)
-          return true
-        },
-      )
-      assert.ok(revertData, 'revert data extracted')
-      assert.equal(parseWithFragment(revertData)?.[0].name, 'AccessControlUnauthorizedAccount')
-      // a mint-authority failure needs a role grant, so it must NOT be flagged transient
-      assert.equal(isTransientReleaseOrMintRevert(revertData), false)
+        // the primitive throws the raw revert; the SDK's standard parse names it
+        let revertData: string | undefined
+        await assert.rejects(
+          () =>
+            simulateReleaseOrMint({
+              provider: fujiChain!.provider,
+              pool: V2_LANE.destPool,
+              offRamp: V2_LANE.destOffRamp,
+              input,
+            }),
+          (err) => {
+            revertData = getErrorData(err)
+            return true
+          },
+        )
+        assert.ok(revertData, 'revert data extracted')
+        assert.equal(parseWithFragment(revertData)?.[0].name, 'AccessControlUnauthorizedAccount')
+        // a mint-authority failure needs a role grant, so it must NOT be flagged transient
+        assert.equal(isTransientReleaseOrMintRevert(revertData), false)
 
-      // and checkExecute BLOCKS the send with the generic revert error, carrying the raw revert
-      await assert.rejects(
-        () =>
-          fujiChain!.checkExecute({
+        // and checkExecute BLOCKS the send with the generic revert error, carrying the raw revert
+        await assert.rejects(
+          () =>
+            fujiChain!.checkExecute({
+              offRamp: V2_LANE.destOffRamp,
+              message: {
+                sourceChainSelector: SEPOLIA_SELECTOR,
+                receiver,
+                tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
+              },
+            }),
+          (err: CCIPDestExecutionRevertError) => {
+            assert.ok(err instanceof CCIPDestExecutionRevertError)
+            assert.equal(
+              parseWithFragment(String(err.context['revert']))?.[0].name,
+              'AccessControlUnauthorizedAccount',
+            )
+            assert.equal(err.isTransient, false)
+            return true
+          },
+        )
+        // restore for any later test
+        const signer = await provider.getSigner(V2_LANE.operator)
+        const tokenAdmin = new Contract(
+          V2_LANE.destToken,
+          ['function grantRole(bytes32 role, address account)'],
+          signer,
+        )
+        await (
+          (await tokenAdmin.getFunction('grantRole')(MINTER_ROLE, V2_LANE.destPool)) as {
+            wait: () => Promise<unknown>
+          }
+        ).wait()
+        await provider.send('anvil_stopImpersonatingAccount', [V2_LANE.operator])
+        // recovery: once the role is granted back, the same checkExecute passes again
+        assert.equal(
+          await fujiChain.checkExecute({
             offRamp: V2_LANE.destOffRamp,
             message: {
               sourceChainSelector: SEPOLIA_SELECTOR,
@@ -192,133 +238,101 @@ describe('Dest-liquidity preflight fork tests', { skip, timeout: 300_000 }, () =
               tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
             },
           }),
-        (err: CCIPDestExecutionRevertError) => {
-          assert.ok(err instanceof CCIPDestExecutionRevertError)
-          assert.equal(
-            parseWithFragment(String(err.context['revert']))?.[0].name,
-            'AccessControlUnauthorizedAccount',
-          )
-          assert.equal(err.isTransient, false)
-          return true
-        },
-      )
-      // restore for any later test
-      const signer = await provider.getSigner(V2_LANE.operator)
-      const tokenAdmin = new Contract(
-        V2_LANE.destToken,
-        ['function grantRole(bytes32 role, address account)'],
-        signer,
-      )
-      await (
-        (await tokenAdmin.getFunction('grantRole')(MINTER_ROLE, V2_LANE.destPool)) as {
-          wait: () => Promise<unknown>
-        }
-      ).wait()
-      await provider.send('anvil_stopImpersonatingAccount', [V2_LANE.operator])
-      // recovery: once the role is granted back, the same checkExecute passes again
-      assert.equal(
-        await fujiChain.checkExecute({
-          offRamp: V2_LANE.destOffRamp,
-          message: {
-            sourceChainSelector: SEPOLIA_SELECTOR,
-            receiver,
-            tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
-          },
-        }),
-        true,
-      )
-    })
-
-    it('LockRelease dest drained on the fork => typed transient block (heuristic deferred, sim decides)', async () => {
-      // prod LnM lane: Sepolia dest pool is a LockReleaseTokenPoolAndProxy 1.5.0 holding its
-      // liquidity on the previousPool. Drain the previousPool's token balance on the fork: the
-      // releaseOrMint simulation (the oracle the balance heuristic defers to) must then revert,
-      // blocking with a typed, transient error.
-      assert.ok(sepoliaChain)
-      const provider = sepoliaChain.provider as JsonRpcProvider
-      const LNM = '0x466D489b6d36E7E3b824ef491C225F5830E81cC1'
-      const REGISTRY = '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82'
-      const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-      const { tokenPool } = await sepoliaChain.getRegistryTokenConfig(REGISTRY, LNM)
-      assert.ok(tokenPool)
-      const { previousPool } = await sepoliaChain.getTokenPoolConfig(tokenPool)
-      assert.ok(previousPool, 'LnM AndProxy has a previousPool (holds the liquidity)')
-      const offRamps = await sepoliaChain.getOffRampsForRouter(ROUTER, FUJI_SELECTOR)
-      const offRamp = offRamps.at(-1)!
-      const message = {
-        sourceChainSelector: FUJI_SELECTOR,
-        receiver: '0x1111111111111111111111111111111111111111',
-        tokenAmounts: [{ token: LNM, amount: 10n ** 16n }] as const,
-      }
-      // sanity: with liquidity in place, the (drained-holder-aware) preflight passes
-      assert.equal(await sepoliaChain.checkExecute({ offRamp, message }), true)
-      // drain: zero the previousPool's token balance via storage override
-      const slot = await findBalancesSlot(LNM, provider)
-      await provider.send('anvil_setStorageAt', [
-        LNM,
-        solidityPackedKeccak256(['uint256', 'uint256'], [previousPool, slot]),
-        toBeHex(0n, 32),
-      ])
-      await assert.rejects(
-        () => sepoliaChain!.checkExecute({ offRamp, message }),
-        (err: CCIPDestExecutionRevertError) => {
-          assert.ok(err instanceof CCIPDestExecutionRevertError, String(err))
-          // the raw revert is carried for the caller to parse (legacy pools revert with plain
-          // ERC20 Error(string) reasons here, which read non-transient — same verdict class the
-          // pre-existing CCIPInsufficientBalanceError heuristic produced)
-          assert.ok(err.context['revert'], 'raw revert carried')
-          return true
-        },
-      )
-    })
-
-    it('fee-charging source pool (fee config set on the fork) => post-fee destTokenAmount surfaced', async () => {
-      assert.ok(sepoliaChain)
-      const provider = sepoliaChain.provider as JsonRpcProvider
-      const srcPool = new Contract(
-        V2_LANE.srcPool,
-        interfaces.TokenPool_v2_0,
-        provider,
-      ) as Contract & { owner(): Promise<string> }
-      const owner = await srcPool.owner()
-      await provider.send('anvil_impersonateAccount', [owner])
-      await provider.send('anvil_setBalance', [owner, '0x1000000000000000000'])
-      // configure a 1% finality transfer fee for the Fuji lane, like a fee-charging v2 pool
-      const asOwner = srcPool.connect(await provider.getSigner(owner)) as Contract
-      await (
-        (await asOwner.getFunction('applyTokenTransferFeeConfigUpdates')(
-          [
-            {
-              destChainSelector: FUJI_SELECTOR,
-              tokenTransferFeeConfig: {
-                destGasOverhead: 90_000,
-                destBytesOverhead: 32,
-                finalityFeeUSDCents: 0,
-                fastFinalityFeeUSDCents: 0,
-                finalityTransferFeeBps: 100, // 1%
-                fastFinalityTransferFeeBps: 100,
-                isEnabled: true,
-              },
-            },
-          ],
-          [], // disableTokenTransferFeeConfigs
-        )) as { wait: () => Promise<unknown> }
-      ).wait()
-      await provider.send('anvil_stopImpersonatingAccount', [owner])
-
-      // the OnRamp writes lockOrBurn's post-fee destTokenAmount into the emitted message —
-      // simulateLockOrBurn must surface exactly that
-      const amount = 10n ** 18n
-      const result = await sepoliaChain.simulateLockOrBurn({
-        onRamp: V2_LANE.srcOnRamp,
-        destChainSelector: FUJI_SELECTOR,
-        token: V2_LANE.srcToken,
-        amount,
-        originalSender: V2_LANE.operator,
-        receiver,
+          true,
+        )
       })
-      assert.equal(result.destTokenAmount, (amount * 9900n) / 10000n)
-      assert.equal(result.sourcePoolAddress, V2_LANE.srcPool)
+
+      it('LockRelease dest drained on the fork => typed transient block (heuristic deferred, sim decides)', async () => {
+        // prod LnM lane: Sepolia dest pool is a LockReleaseTokenPoolAndProxy 1.5.0 holding its
+        // liquidity on the previousPool. Drain the previousPool's token balance on the fork: the
+        // releaseOrMint simulation (the oracle the balance heuristic defers to) must then revert,
+        // blocking with a typed, transient error.
+        assert.ok(sepoliaChain)
+        const provider = sepoliaChain.provider as JsonRpcProvider
+        const LNM = '0x466D489b6d36E7E3b824ef491C225F5830E81cC1'
+        const REGISTRY = '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82'
+        const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+        const { tokenPool } = await sepoliaChain.getRegistryTokenConfig(REGISTRY, LNM)
+        assert.ok(tokenPool)
+        const { previousPool } = await sepoliaChain.getTokenPoolConfig(tokenPool)
+        assert.ok(previousPool, 'LnM AndProxy has a previousPool (holds the liquidity)')
+        const offRamps = await sepoliaChain.getOffRampsForRouter(ROUTER, FUJI_SELECTOR)
+        const offRamp = offRamps.at(-1)!
+        const message = {
+          sourceChainSelector: FUJI_SELECTOR,
+          receiver: '0x1111111111111111111111111111111111111111',
+          tokenAmounts: [{ token: LNM, amount: 10n ** 16n }] as const,
+        }
+        // sanity: with liquidity in place, the (drained-holder-aware) preflight passes
+        assert.equal(await sepoliaChain.checkExecute({ offRamp, message }), true)
+        // drain: zero the previousPool's token balance via storage override
+        const slot = await findBalancesSlot(LNM, provider)
+        await provider.send('anvil_setStorageAt', [
+          LNM,
+          solidityPackedKeccak256(['uint256', 'uint256'], [previousPool, slot]),
+          toBeHex(0n, 32),
+        ])
+        await assert.rejects(
+          () => sepoliaChain!.checkExecute({ offRamp, message }),
+          (err: CCIPDestExecutionRevertError) => {
+            assert.ok(err instanceof CCIPDestExecutionRevertError, String(err))
+            // the raw revert is carried for the caller to parse (legacy pools revert with plain
+            // ERC20 Error(string) reasons here, which read non-transient — same verdict class the
+            // pre-existing CCIPInsufficientBalanceError heuristic produced)
+            assert.ok(err.context['revert'], 'raw revert carried')
+            return true
+          },
+        )
+      })
+
+      it('fee-charging source pool (fee config set on the fork) => post-fee destTokenAmount surfaced', async () => {
+        assert.ok(sepoliaChain)
+        const provider = sepoliaChain.provider as JsonRpcProvider
+        const srcPool = new Contract(
+          V2_LANE.srcPool,
+          interfaces.TokenPool_v2_0,
+          provider,
+        ) as Contract & { owner(): Promise<string> }
+        const owner = await srcPool.owner()
+        await provider.send('anvil_impersonateAccount', [owner])
+        await provider.send('anvil_setBalance', [owner, '0x1000000000000000000'])
+        // configure a 1% finality transfer fee for the Fuji lane, like a fee-charging v2 pool
+        const asOwner = srcPool.connect(await provider.getSigner(owner)) as Contract
+        await (
+          (await asOwner.getFunction('applyTokenTransferFeeConfigUpdates')(
+            [
+              {
+                destChainSelector: FUJI_SELECTOR,
+                tokenTransferFeeConfig: {
+                  destGasOverhead: 90_000,
+                  destBytesOverhead: 32,
+                  finalityFeeUSDCents: 0,
+                  fastFinalityFeeUSDCents: 0,
+                  finalityTransferFeeBps: 100, // 1%
+                  fastFinalityTransferFeeBps: 100,
+                  isEnabled: true,
+                },
+              },
+            ],
+            [], // disableTokenTransferFeeConfigs
+          )) as { wait: () => Promise<unknown> }
+        ).wait()
+        await provider.send('anvil_stopImpersonatingAccount', [owner])
+
+        // the OnRamp writes lockOrBurn's post-fee destTokenAmount into the emitted message —
+        // simulateLockOrBurn must surface exactly that
+        const amount = 10n ** 18n
+        const result = await sepoliaChain.simulateLockOrBurn({
+          onRamp: V2_LANE.srcOnRamp,
+          destChainSelector: FUJI_SELECTOR,
+          token: V2_LANE.srcToken,
+          amount,
+          originalSender: V2_LANE.operator,
+          receiver,
+        })
+        assert.equal(result.destTokenAmount, (amount * 9900n) / 10000n)
+        assert.equal(result.sourcePoolAddress, V2_LANE.srcPool)
+      })
     })
-  })
-})
+  },
+)

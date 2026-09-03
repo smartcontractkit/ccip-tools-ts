@@ -2,8 +2,13 @@
  * Integration tests for the destination-liquidity preflight — read-only.
  *
  * The pool-direct `releaseOrMint` simulation is a pure `eth_call`, so these run directly against
- * live testnet RPCs (no anvil fork needed): an isolated v2.0 staging lane (Sepolia → Fuji) with a
- * dedicated test token whose dest pool is a healthy `BurnMintTokenPool 2.0.0`.
+ * live RPCs (no anvil fork needed): a CCIP 2.0 lane (Arbitrum One → Ethereum) whose dest pool is a
+ * healthy `BurnMintTokenPool 2.0.0`, plus the Lombard (LBTC) prod lanes between Ethereum and
+ * Monad.
+ *
+ * Deliberately none of these networks is Sepolia or Fuji: those two are the hubs every other live
+ * suite locks (see `useResource`), so keeping this one off them lets it run in parallel with the
+ * rest of CI instead of queueing behind them.
  *
  * Scenarios that must MUTATE chain state to reproduce (role revocation, fee configs, drained
  * liquidity) live in dest-liquidity.fork.test.ts instead.
@@ -17,31 +22,37 @@ import { JsonRpcProvider, hexlify, randomBytes, zeroPadValue } from 'ethers'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
 import { estimateReceiveExecution } from '../gas.ts'
 import { simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
 
-// Live RPCs: the isolated v2.0 staging lane (Sepolia → Fuji) and the LBTC prod-testnet lanes.
-await useResource(['sepolia', 'fuji'])
+// Live RPCs: the CCIP 2.0 lane (Arbitrum -> Ethereum) and the LBTC prod lanes (Ethereum <-> Monad).
+await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
-const SEPOLIA_SELECTOR = 16015286601757825753n
+const ETHEREUM_RPC = rpcEndpoint('RPC_ETHEREUM_MAINNET')
+const ETHEREUM_SELECTOR = 5009297550715157269n
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+// this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
+// width never bites here.
+const MONAD_RPC = rpcEndpoint('RPC_MONAD_MAINNET')
+const MONAD_SELECTOR = 8481857512324358265n
 
-// ── Isolated v2.0 lane (Sepolia -> Fuji) with a dedicated test token and pools ──
-// (the dest pool holds MINTER_ROLE on the dest token, so the lane is healthy)
+const ARBITRUM_RPC = rpcEndpoint('RPC_ARBITRUM_MAINNET')
+const ARBITRUM_SELECTOR = 4949039107694359620n
+
+// ── CCIP 2.0 lane (Arbitrum One -> Ethereum) with a v2.0 mint/burn test token and pools ──
+// (the dest pool holds mint authority on the dest token, so the lane is healthy)
 const V2_LANE = {
-  srcToken: '0x22C49Ef927eD414aC5B0bEc2b1c2310da9f6DfBb',
-  srcPool: '0x760a96123b405828BaF7700bA4e30983a02Cd6b0',
-  srcRouter: '0x784d49a71BB4C48eB7dA4cD7e6Ecb424f9b5EAB1', // Sepolia v2.0 router
-  srcOnRamp: '0xA94E45744553F4B2bea9DfB8979a02962B980732',
-  destToken: '0x20FF9b951E2E63564122c82F619FDFAD04F41960',
-  destPool: '0xff3d3F625bb7Ca89A7C069573787D87d2b5C2360', // BurnMintTokenPool 2.0.0
-  destOffRamp: '0xE60C1d654283252623e448f53F648663A701CD7b', // OffRamp 2.0.0
-  operator: '0x9d087fC03ae39b088326b67fA3C788236645b717',
+  srcToken: '0x83cB78b9009d48C57F29A453dd5bc774b1545682', // TESTTR on Arbitrum One
+  srcPool: '0xE70aE419e514Dfd12a7413D6CeD75Fc98b588Cf6', // BurnMintTokenPool 2.0.0
+  srcRouter: '0x141fa059441E0ca23ce184B6A78bafD2A517DdE8', // Arbitrum v2.0 Router
+  srcOnRamp: '0x7B73923E101950eFe098C2Eca74C8320b2813f48', // OnRamp 2.0.0
+  destToken: '0x5904eBd0519028ca1550FBE96466B4b226f0C328', // TESTTR on Ethereum
+  destPool: '0x6eC2a0B3E92819A881f30e70478320BCEaAA4FF1', // BurnMintTokenPool 2.0.0
+  destOffRamp: '0x408428bca0e24A25ac8baAc1b70f64AF257717c3', // OffRamp 2.0.0
 }
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
@@ -53,36 +64,42 @@ describe(
   'Dest-liquidity preflight integration (live RPC, read-only)',
   { skip, timeout: 300_000 },
   () => {
-    let sepoliaChain: EVMChain | undefined
-    let fujiChain: EVMChain | undefined
+    let ethereumChain: EVMChain | undefined
+    let monadChain: EVMChain | undefined
+    let arbitrumChain: EVMChain | undefined
 
     before(async () => {
-      sepoliaChain = await EVMChain.fromProvider(new JsonRpcProvider(SEPOLIA_RPC), {
+      ethereumChain = await EVMChain.fromProvider(new JsonRpcProvider(ETHEREUM_RPC), {
         apiClient: null,
         logger: testLogger,
       })
-      fujiChain = await EVMChain.fromProvider(new JsonRpcProvider(FUJI_RPC), {
+      monadChain = await EVMChain.fromProvider(new JsonRpcProvider(MONAD_RPC), {
+        apiClient: null,
+        logger: testLogger,
+      })
+      arbitrumChain = await EVMChain.fromProvider(new JsonRpcProvider(ARBITRUM_RPC), {
         apiClient: null,
         logger: testLogger,
       })
     })
 
     after(() => {
-      sepoliaChain?.provider.destroy()
-      fujiChain?.provider.destroy()
+      ethereumChain?.provider.destroy()
+      monadChain?.provider.destroy()
+      arbitrumChain?.provider.destroy()
     })
 
     const receiver = '0x1111111111111111111111111111111111111111'
 
     it('healthy mint pool => sim passes via the IPoolV2 2-arg branch', async () => {
-      assert.ok(fujiChain)
+      assert.ok(ethereumChain)
       const result = await simulateReleaseOrMint({
-        provider: fujiChain.provider,
+        provider: ethereumChain.provider,
         pool: V2_LANE.destPool,
         offRamp: V2_LANE.destOffRamp,
         input: {
           originalSender: receiver,
-          remoteChainSelector: SEPOLIA_SELECTOR,
+          remoteChainSelector: ARBITRUM_SELECTOR,
           receiver,
           sourceDenominatedAmount: 10n ** 18n,
           localToken: V2_LANE.destToken,
@@ -95,12 +112,12 @@ describe(
     })
 
     it('checkExecute passes end-to-end on the healthy lane', async () => {
-      assert.ok(fujiChain)
+      assert.ok(ethereumChain)
       assert.equal(
-        await fujiChain.checkExecute({
+        await ethereumChain.checkExecute({
           offRamp: V2_LANE.destOffRamp,
           message: {
-            sourceChainSelector: SEPOLIA_SELECTOR,
+            sourceChainSelector: ARBITRUM_SELECTOR,
             receiver,
             sender: receiver,
             tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
@@ -110,33 +127,34 @@ describe(
       )
     })
 
-    // ── Lombard (LBTC) — attestation-consuming pools, BOTH generations, on live prod-testnet ──
-    // LBTC is served on Sepolia by a `LombardTokenPool` and on Fuji by a `LombardTokenPool`;
-    // both sit behind v1.x OffRamps, whose 1-arg releaseOrMint decodes the bridge proof from
-    // offchainTokenData — so pre-send the preflight must report attestation-required (never a
-    // false hard block). Pools/offRamps resolved on-chain.
-    const LBTC = '0x107Fc7d90484534704dD2A9e24c7BD45DB4dD1B5'
+    // ── Lombard (LBTC) — attestation-consuming pools, on the live prod Ethereum <-> Monad lanes ──
+    // LBTC is served on both ends by a `LombardTokenPoolV2`, sitting behind v1.x OffRamps whose
+    // 1-arg releaseOrMint decodes the bridge proof from offchainTokenData — so pre-send the
+    // preflight must report attestation-required (never a false hard block). Pools/offRamps
+    // resolved on-chain.
     const PROD = {
-      sepolia: {
-        registry: '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82',
-        router: '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59',
-        sourceSelector: 14767482510784806043n, // fuji
-        expectPoolType: 'LombardTokenPool', // 2.0.0
+      ethereum: {
+        token: '0x8236a87084f8B84306f72007F36F2618A5634494', // LBTC on Ethereum
+        registry: '0xb22764f98dD05c789929716D677382Df22C05Cb6',
+        router: '0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
+        sourceSelector: MONAD_SELECTOR,
+        expectPoolType: 'LombardTokenPoolV2', // 1.6.1
       },
-      fuji: {
-        registry: '0xA92053a4a3922084d992fD2835bdBa4caC6877e6',
-        router: '0xF694E193200268f9a4868e4Aa017A0118C9a8177',
-        sourceSelector: 16015286601757825753n, // sepolia
-        expectPoolType: 'LombardTokenPool', // 2.0.0, still behind a v1.x OffRamp
+      monad: {
+        token: '0xecAc9C5F704e954931349Da37F60E39f515c11c1', // LBTC on Monad
+        registry: '0x11ACd984DD680363117B310f6ebdf78fD6c0195f',
+        router: '0x33566fE5976AAa420F3d5C64996641Fc3858CaDB',
+        sourceSelector: ETHEREUM_SELECTOR,
+        expectPoolType: 'LombardTokenPoolV2', // 1.6.1
       },
     } as const
 
-    for (const destName of ['sepolia', 'fuji'] as const) {
+    for (const destName of ['ethereum', 'monad'] as const) {
       it(`LBTC dest on ${destName} (${PROD[destName].expectPoolType}) => attestation-required pre-send, not a block`, async () => {
-        const dest = destName === 'sepolia' ? sepoliaChain : fujiChain
+        const dest = destName === 'ethereum' ? ethereumChain : monadChain
         assert.ok(dest)
-        const { registry, router, sourceSelector, expectPoolType } = PROD[destName]
-        const { tokenPool } = await dest.getRegistryTokenConfig(registry, LBTC)
+        const { token, registry, router, sourceSelector, expectPoolType } = PROD[destName]
+        const { tokenPool } = await dest.getRegistryTokenConfig(registry, token)
         assert.ok(tokenPool, 'LBTC pool registered')
         assert.equal((await dest.typeAndVersion(tokenPool))[0], expectPoolType)
         const offRamps = await dest.getOffRampsForRouter(router, sourceSelector)
@@ -149,7 +167,7 @@ describe(
               message: {
                 sourceChainSelector: sourceSelector,
                 receiver,
-                tokenAmounts: [{ token: LBTC, amount: 10n ** 4n }],
+                tokenAmounts: [{ token, amount: 10n ** 4n }],
               },
             }),
           (err: Error) => {
@@ -163,13 +181,13 @@ describe(
     }
 
     it('estimateReceiveExecution wrapper matches the direct dest-side gas estimate', async () => {
-      assert.ok(sepoliaChain && fujiChain)
+      assert.ok(arbitrumChain && ethereumChain)
       const messageId = hexlify(randomBytes(32))
-      const sender = V2_LANE.operator
+      const sender = receiver
       // full wrapper: source-token mapping + source lockOrBurn sim + checkExecute + gas estimate
       const viaWrapper = await estimateReceiveExecution({
-        source: sepoliaChain,
-        dest: fujiChain,
+        source: arbitrumChain,
+        dest: ethereumChain,
         routerOrRamp: V2_LANE.srcRouter,
         message: {
           messageId,
@@ -182,14 +200,14 @@ describe(
         },
       })
       // direct dest-side estimate (the function the wrapper delegates the gas number to)
-      const direct = await fujiChain.estimateReceiveExecution({
+      const direct = await ethereumChain.estimateReceiveExecution({
         offRamp: V2_LANE.destOffRamp,
         message: {
           messageId,
           sender,
           receiver,
           data: '0x',
-          sourceChainSelector: SEPOLIA_SELECTOR,
+          sourceChainSelector: ARBITRUM_SELECTOR,
           tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
         },
       })

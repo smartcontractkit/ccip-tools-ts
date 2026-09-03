@@ -1375,6 +1375,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '127001': {
+    selector: 2988178761202034333n,
+    name: 'gravity-mainnet',
+    network_type: 'MAINNET',
+    family: 'EVM',
+  },
   '128123': {
     selector: 1910019406958449359n,
     name: 'etherlink-testnet',
@@ -1620,6 +1626,12 @@ const SELECTORS: Selectors = {
   '6281971': {
     selector: 7254999290874773717n,
     name: 'dogeos-testnet-chikyu',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
+  '7771625': {
+    selector: 9181335567442030426n,
+    name: 'gravity-testnet-longevity',
     network_type: 'TESTNET',
     family: 'EVM',
   },

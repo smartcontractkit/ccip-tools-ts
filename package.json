@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -12,8 +12,8 @@
     "ccip-api-ref"
   ],
   "scripts": {
-    "test": "npm run clean:coverage && c8 npm test -w ccip-sdk -w ccip-cli",
-    "test:unit": "npm run clean:coverage && c8 npm run test:unit -w ccip-sdk -w ccip-cli",
+    "test": "npm run clean:coverage && c8 node --test --test-concurrency=8 \"ccip-sdk/src/**/*.test.ts\" \"ccip-cli/src/**/*.test.ts\"",
+    "test:unit": "npm run clean:coverage && c8 node --test \"ccip-sdk/src/**/!(*integration|*e2e|*fork).test.ts\" \"ccip-cli/src/**/!(*integration|*e2e|*fork).test.ts\"",
     "lint": "npm run lint --workspaces && npm run generate:lint",
     "lint:fix": "npm run lint:fix --workspaces && npm run generate",
     "typecheck": "npm run typecheck --workspaces",
@@ -26,21 +26,21 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.1",
     "@typescript/native": "npm:typescript@7.0.2",
     "brace-expansion": "5.0.9",
     "c8": "^12.0.0",
-    "oxfmt": "^0.65.0",
-    "oxlint": "^1.80.0",
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "yaml": "2.9.0"
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.19.0",
+    "axios": "1.20.0",
     "tar": "7.5.22",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "@apidevtools/json-schema-ref-parser": {
       "js-yaml": "5.2.3"
     },
@@ -48,16 +48,15 @@
       "js-yaml": "5.2.3"
     },
     "postcss": "8.5.26",
-    "lodash": "4.18.1",
     "uuid": "^11.1.1",
     "yaml@1": "^1.10.3",
     "serialize-javascript": "^7.1.0",
-    "mermaid": "11.16.1",
     "ws": "8.21.3",
     "undici": "8.10.0",
     "joi": "18.2.3",
-    "fast-uri": "3.1.5",
-    "brace-expansion": "5.0.9",
+    "fast-uri": "3.1.6",
+    "image-size": "npm:@localnerve/image-size@2.1.2",
+    "qs": "6.16.0",
     "serve-handler": {
       "brace-expansion": "1.1.18"
     },

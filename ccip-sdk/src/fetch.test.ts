@@ -13,6 +13,7 @@ import {
   parseRateLimitHeaders,
   parseRetryAfter,
   parseTopicLimitError,
+  redactEndpointUrl,
   registerEndpointBase,
   setEndpointLogRange,
   setEndpointTopicLimit,
@@ -320,6 +321,15 @@ describe('parseLogRangeError', () => {
     const result = parseLogRangeError(err)
     assert.ok(result !== null)
     assert.equal(result.maxRange, 10000)
+  })
+
+  it('parses 1rpc "limited to 0 - 50 blocks range" as the SECOND number', () => {
+    // The span is phrased as a pair, so the naive "first number" reading would
+    // learn a range of 0 and stall the scan outright.
+    const err = new Error('eth_getLogs is limited to 0 - 50 blocks range')
+    const result = parseLogRangeError(err)
+    assert.ok(result !== null)
+    assert.equal(result.maxRange, 50)
   })
 
   it('parses Alchemy suggested range [0x..., 0x...]', () => {
@@ -1131,5 +1141,82 @@ describe('endpoint topic limit', () => {
     setEndpointLogRange(a, 1000, 'error')
     assert.equal(getEndpointTopicLimit(a), 5)
     assert.equal(getEndpointLogRange(a), 1000)
+  })
+})
+
+describe('redactEndpointUrl', () => {
+  it('drops the query string, where keyed gateways carry their key', () => {
+    assert.equal(
+      redactEndpointUrl('https://toncenter.com/api/v2?api_key=s3cr3t-key-abcdef1234567890'),
+      'https://toncenter.com/api/v2',
+    )
+  })
+
+  it('masks long path segments, where keyed-path providers embed the key', () => {
+    assert.equal(
+      redactEndpointUrl('https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef'),
+      'https://mainnet.infura.io/v3/***',
+    )
+    assert.equal(
+      redactEndpointUrl(
+        'https://still-silent-mist.eth.quiknode.pro/0123456789abcdef0123456789abcdef/',
+      ),
+      'https://still-silent-mist.eth.quiknode.pro/***/',
+    )
+  })
+
+  it('keeps ordinary public paths intact', () => {
+    assert.equal(
+      redactEndpointUrl('https://gateway.tenderly.co/public/sepolia'),
+      'https://gateway.tenderly.co/public/sepolia',
+    )
+    assert.equal(redactEndpointUrl('https://evm.astar.network'), 'https://evm.astar.network/')
+  })
+
+  it('drops userinfo and degrades non-URL input to ***', () => {
+    assert.equal(
+      redactEndpointUrl('https://user:pass@rpc.example.com/v1'),
+      'https://rpc.example.com/v1',
+    )
+    assert.equal(redactEndpointUrl('not a url'), '***')
+    assert.equal(redactEndpointUrl(undefined), '***')
+    assert.equal(redactEndpointUrl(new URL('https://ok.example/path')), 'https://ok.example/path')
+  })
+
+  it('never logs credentials from the endpoint URL through the fetch logger', async () => {
+    const KEY = 's3cr3t-key-abcdef1234567890'
+    const endpoint = `https://ton-gateway.example.com/api/v2?api_key=${KEY}`
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      calls++
+      if (calls === 1)
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+        } as Response)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+
+    const debugCalls: unknown[][] = []
+    const logger = {
+      debug: (...args: unknown[]) => void debugCalls.push(args),
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    }
+    const rateLimitedFetch = createRateLimitedFetch({}, { logger: logger as any })
+
+    await rateLimitedFetch(endpoint)
+
+    const flat = JSON.stringify(debugCalls)
+    assert.ok(!flat.includes(KEY), 'the endpoint credential must never reach the logger')
+    assert.ok(flat.includes('https://ton-gateway.example.com/api/v2'))
   })
 })

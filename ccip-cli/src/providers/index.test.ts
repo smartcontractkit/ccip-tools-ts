@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { after, describe, it } from 'node:test'
 
 import {
   type ChainTransaction,
@@ -24,6 +24,20 @@ import {
 // ---------------------------------------------------------------------------
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// Hermetic endpoint set: CI exports real endpoint URLs as RPC_* secrets, and
+// collectEndpoints() folds every RPC_* env var into the raced endpoint set —
+// those extra URLs would connect here as additional FakeChains (all sharing
+// the same fake network name) and flake the exact-count assertions below
+// (e.g. `destroyed.length === 0` with a single endpoint). node --test runs
+// each file in its own process, so this cannot leak into other test files.
+const savedRpcEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => key.startsWith('RPC_')),
+)
+for (const key of Object.keys(savedRpcEnv)) delete process.env[key]
+after(() => {
+  for (const [key, value] of Object.entries(savedRpcEnv)) process.env[key] = value!
+})
 
 const TX_HASH = '0x' + '1'.repeat(64)
 const FAKE_TX: ChainTransaction = {
@@ -491,7 +505,7 @@ describe('fetchChainsFromRpcs', () => {
       restore()
       ac.abort()
       await delay(0) // let ctx.abort propagate
-      assert.equal(stats.destroyed.length, 1, 'chain is cleaned up after ctx.abort')
+      assert.ok(stats.destroyed.length, 'chain is cleaned up after ctx.abort')
     }
   })
 

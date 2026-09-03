@@ -388,6 +388,8 @@ export function convertKeysToCamelCase(
 
 /**
  * Promise-based sleep utility.
+ * AbortSignal.timeout is unref'd on purpose; a script using it should be wrapped
+ * in a setTimeout to avoid the process exiting mid-sleep.
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
