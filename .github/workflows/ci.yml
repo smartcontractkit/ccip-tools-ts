@@ -21,6 +21,13 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
+    outputs:
+      # Whether the test step produced output (false when the build failed
+      # before tests ran, e.g. on lint) — gates the coverage-comment job's
+      # artifact download, which cannot succeed when the artifact is absent.
+      tests-ran: ${{ steps.redact.outputs.tests-ran }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -135,6 +142,7 @@ jobs:
 
       - name: Redact RPC secrets from test output
         if: always()
+        id: redact
         run: |
           # The coverage-summary artifact now carries the FULL node --test
           # output: the coverage-comment job builds the PR comment from it
@@ -143,18 +151,25 @@ jobs:
           # to artifacts, nor to comments created via the API — so every
           # RPC_* secret value (and each comma-separated endpoint inside it)
           # is replaced with a placeholder before the file leaves the runner.
-          python3 - <<'EOF'
-          import os
-          path = 'coverage-summary.txt'
-          content = open(path).read()
-          for key, value in os.environ.items():
-              if key.startswith('RPC_') and value:
-                  for part in value.split(','):
-                      part = part.strip()
-                      if part:
-                          content = content.replace(part, '[redacted-rpc]')
-          open(path, 'w').write(content)
-          EOF
+          # The file is absent when the build failed before tests ran (lint,
+          # npm ci, build) — nothing to redact then; report that to the
+          # coverage-comment job so it skips the download instead of failing
+          # on a missing artifact.
+          if [ ! -f coverage-summary.txt ]; then
+            echo "tests-ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tests-ran=true" >> "$GITHUB_OUTPUT"
+          node -e '
+            const fs = require("node:fs");
+            const path = "coverage-summary.txt";
+            let content = fs.readFileSync(path, "utf8");
+            for (const value of Object.entries(process.env).flatMap(([k, v]) => (k.startsWith("RPC_") && v ? v.split(",") : []))) {
+              const endpoint = value.trim();
+              if (endpoint) content = content.replaceAll(endpoint, "[redacted-rpc]");
+            }
+            fs.writeFileSync(path, content);
+          '
 
       - name: Upload coverage report
         if: "always() && hashFiles('.coverage/**') != ''"
@@ -188,9 +203,10 @@ jobs:
 
     steps:
       - name: Download test output
-        # The artifact is absent when the build failed before tests ran; the
-        # comment script below still posts a fallback report for that case.
-        continue-on-error: true
+        # Skipped when tests never ran (the artifact cannot exist), so a
+        # missing-artifact failure annotation never surfaces; the comment
+        # script below posts a fallback report for that case.
+        if: needs.build-and-test.outputs.tests-ran == 'true'
         uses: actions/download-artifact@v8.0.1
         with:
           name: coverage-summary

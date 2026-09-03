@@ -7,11 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Aptos and Sui now support detecting execution failures
-  - Aptos failure scans read the fullnode's `/transactions` directly for windows at or under the new `failureScanTailVersions` getLogs option (default 10000 versions), consulting the Indexer v2 API only for wider ones — a poller running seconds behind the tip issues no indexer request at all, and gets failure detection even where no indexer is configured, while a backfill still uses the per-contract index as its candidate filter
-  - `offRamp` filters on `getExecutionReceiptsInTx` match Aptos/Sui receipts in every caller form (bare, short, padded, `::offramp`-suffixed, any casing): both the filter and the log address are canonicalized to a short `<address>::offramp` before comparing, instead of only the filter — which silently dropped every successful receipt
-- Sui: historical `getLogs` lookups (a `show` of a months-old message) walk ascending checkpoint slices from the start floor instead of paging `queryEvents` down from the tip — `queryEvents` filters by event type but only pages from one end of the history, and the `All` combinator that would pair it with `TimeRange` is accepted-but-ignored by current nodes, so a deep floor left the descending walk traversing every event since, buffering the whole range and never yielding. Slices yield as they complete, so a caller that stops on its first match (`getOnchainCommitReport`) stops the walk; a probe that finds nothing falls back to the descending walk, bounding what a wide backfill pays
-- Sui: a `getOwnedObjects` `*Pointer` lookup that is genuinely empty no longer costs 25 requests and ~30s — its retry ladder ended on an error worded as transient, so an outer `withLookupRetry` re-ran the whole ladder; the ladder is now the only retry layer and a miss is remembered for 30s. `multiGetTransactionBlocks` is memoized like the other immutable-by-digest lookups
+- Tests: the whole suite runs as one parallel `node --test` invocation — networked e2e/integration suites moved to disjoint low-activity lanes/fixtures with per-network endpoint sets configurable via `RPC_*` env vars (one per network, comma-separated lists allowed, wired to CI secrets), so suites never contend on a rate-limited endpoint and the full run finishes in ~5min
+- Aptos and Sui now support detecting execution failures — bundled Sui fixes: deep-history `getLogs` walks ascending checkpoint slices instead of paging from the tip, empty `getOwnedObjects` pointer lookups are memoized instead of retried for ~30s, and `offRamp` receipt filters no longer drop successful Aptos/Sui receipts
 
 ## [1.13.0] - 2026-08-25
 
