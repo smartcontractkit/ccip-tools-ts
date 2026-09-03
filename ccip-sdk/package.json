@@ -32,7 +32,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:unit": "node ../scripts/run-tests.mjs src --exclude integration,e2e,fork",
+    "test:unit": "node --test \"src/**/!(*integration|*e2e|*fork).test.ts\"",
     "lint": "oxfmt --check ./src && oxlint ./src",
     "lint:fix": "oxfmt ./src && oxlint --fix ./src",
     "typecheck": "tsc --noEmit",

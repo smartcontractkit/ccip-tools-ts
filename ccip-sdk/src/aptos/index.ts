@@ -47,7 +47,7 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import { createRateLimitedFetch, fetchProfileForUrl, redactEndpointUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
@@ -68,7 +68,6 @@ import type {
   ExecutionInput,
   ExecutionReceipt,
   Lane,
-  LeanNumbers,
   WithLogger,
 } from '../types.ts'
 import {
@@ -81,7 +80,14 @@ import {
 } from '../utils.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
-import { getUserTxByVersion, getVersionTimestamp, streamAptosLogs } from './logs.ts'
+import {
+  type AptosLogStreamOpts,
+  canonicalAptosLogAddress,
+  getAptosExecutionFailureLog,
+  getUserTxByVersion,
+  getVersionTimestamp,
+  streamAptosLogs,
+} from './logs.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { getTokenInfo } from './token.ts'
 import { type UnsignedAptosTx, isAptosAccount } from './types.ts'
@@ -306,7 +312,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
-    else throw new CCIPAptosNetworkUnknownError(util.inspect(url))
+    else throw new CCIPAptosNetworkUnknownError(util.inspect(redactEndpointUrl(url)))
     // Pass raw AptosSettings (not a pre-built AptosConfig) so fromAptosConfig can
     // detect the absence of an explicit `client` and install the fetch shim.
     const settings: AptosSettings = {
@@ -344,27 +350,36 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     if (tx.type !== TransactionResponseType.User) throw new CCIPAptosTransactionTypeInvalidError()
 
     const timestamp = +tx.timestamp / 1e6
+    const logs: ChainLog[] = tx.events.map((event, index) => ({
+      address: event.type.slice(0, event.type.lastIndexOf('::')),
+      transactionHash: tx.hash,
+      index,
+      blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
+      blockTimestamp: timestamp,
+      data: event.data as Record<string, unknown>,
+      topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
+    }))
+    const failureLog = getAptosExecutionFailureLog(tx)
+    if (failureLog) logs.push(failureLog)
     return {
       hash: tx.hash,
       blockNumber: +tx.version,
       from: tx.sender,
       timestamp,
-      logs: tx.events.map((event, index) => ({
-        address: event.type.slice(0, event.type.lastIndexOf('::')),
-        transactionHash: tx.hash,
-        index,
-        blockNumber: +tx.version, // we use version as Aptos' blockNumber, as blockHeight isn't very useful
-        blockTimestamp: timestamp,
-        data: event.data as Record<string, unknown>,
-        topics: [event.type.slice(event.type.lastIndexOf('::') + 2)],
-      })),
+      logs,
+      ...(failureLog && {
+        // Same camelCase+bigint shape decodeReceipt gives the receipt's returnData,
+        // so tx.error and the CCIPExecution.error a consumer gets downstream agree.
+        error: convertKeysToCamelCase(
+          (failureLog.data as Record<string, unknown>).return_data,
+          (v) => (typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v),
+        ),
+      }),
     }
   }
 
   /** {@inheritDoc Chain.getLogs} */
-  async *getLogs(
-    opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean },
-  ): AsyncIterableIterator<ChainLog> {
+  async *getLogs(opts: AptosLogStreamOpts): AsyncIterableIterator<ChainLog> {
     if (opts.watch) {
       opts = {
         ...opts,
@@ -375,6 +390,34 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       }
     }
     yield* streamAptosLogs(this, opts)
+  }
+
+  /**
+   * Canonicalizes BOTH sides of the base class's exact `offRamp` address match.
+   *
+   * Aptos log addresses are `<address>::<module>` (Move event types are
+   * `<address>::<module>::<Struct>`; getTransaction slices the struct off) with
+   * the address exactly as the node rendered it, while callers pass the OffRamp
+   * in whatever form their source used — bare and possibly short from the API
+   * (the CLI's `show <messageId>`) or a decoded message, `<address>::offramp`
+   * from SDK discovery, any casing. Both are converted to
+   * `<long-address>::offramp` up front, so an exact compare downstream matches
+   * successes and failures alike instead of silently dropping every receipt.
+   */
+  override async getExecutionReceiptsInTx(
+    tx: string | ChainTransaction,
+    filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
+  ): Promise<CCIPExecution[]> {
+    const offRamp = filters?.offRamp
+    if (!offRamp) return super.getExecutionReceiptsInTx(tx, filters)
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    return super.getExecutionReceiptsInTx(
+      {
+        ...tx,
+        logs: tx.logs.map((log) => ({ ...log, address: canonicalAptosLogAddress(log.address) })),
+      },
+      { ...filters, offRamp: canonicalAptosLogAddress(offRamp) },
+    )
   }
 
   /** {@inheritDoc Chain.typeAndVersion} */
@@ -783,7 +826,15 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @param data - Raw data to parse.
    * @returns Parsed data or undefined.
    */
-  static parse(data: unknown) {
+  static parse(data: unknown): Record<string, unknown> | undefined {
+    if (
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      !(data instanceof Uint8Array) &&
+      ('vmStatus' in data || 'vm_status' in data)
+    )
+      return data as Record<string, unknown>
     try {
       if (isBytesLike(data)) {
         const parsedExtraArgs = this.decodeExtraArgs(data)
