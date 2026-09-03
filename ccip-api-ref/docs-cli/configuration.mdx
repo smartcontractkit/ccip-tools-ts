@@ -209,7 +209,7 @@ These options are available on all commands:
 | `--page`          | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
 | `--api`           | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
 | `--canton-config` | -       | string   | -                             | Path to Canton config JSON file (required for Canton operations)                                                                     |
-| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton)                                                          |
+| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution                |
 | `--help`          | `-h`    | boolean  | -                             | Show help                                                                                                                            |
 | `--version`       | `-V`    | boolean  | -                             | Show version                                                                                                                         |
 

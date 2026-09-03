@@ -23,6 +23,7 @@ import {
   type CCIPRequest,
   type Chain,
   CCIPAPIClient,
+  CCIPArgumentInvalidError,
   CCIPDestSimulationUnavailableError,
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
@@ -37,6 +38,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs, loadChainWallet, resolveIndexer } from '../providers/index.ts'
+import { assertCoverage, collectDirectVerifications } from '../verifiers/direct.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
@@ -217,16 +219,79 @@ async function manualExec(
   if (argv.estimateGasLimit != null && !source)
     source = await getChain(request.lane.sourceChainSelector)
 
+  // The verification block below lives under `if (source)`, and a bare messageId positional never
+  // sets `source`. Without this, --verifier/--ccv-data were silently ignored and execution fell
+  // through to `dest.execute({ messageId })` with NO verifications, broadcasting an unverified
+  // execute that reverts RequiredCCVMissing and costs gas. Resolve the source chain so the
+  // verifier fetch and the coverage assert actually run.
+  const verifierEntries = (argv as { verifier?: readonly string[] }).verifier ?? []
+  const ccvDataEntries = (argv as { ccvData?: readonly string[] }).ccvData ?? []
+
+  // A messageId positional does not set `source`, so resolve it here to reach the verifier fetch
+  // and the coverage assert. It is optional: a v2 execution needs only the encoded message and the
+  // OffRamp, both of which the CCIP API returns, so a missing source RPC falls through to the
+  // API-only branch below rather than failing.
+  if (!source && (verifierEntries.length > 0 || ccvDataEntries.length > 0))
+    source = await getChain(request.lane.sourceChainSelector).catch(() => undefined)
+
   let inputs
   if (source) {
     offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
     const indexer = resolveIndexer(argv, dest, logger, source)
-    const verifications = await dest.getVerifications({
-      ...argv,
-      indexer,
-      offRamp,
-      request,
-    })
+
+    // Source order: the managed sources first, then the verifiers themselves. `--verifier` /
+    // `--ccv-data` are a FALLBACK used only when the API/indexer could not cover the required set.
+    // That keeps routine calls off partner infrastructure and only discloses the messageId to a
+    // verifier operator when there is no alternative. For a CCV no indexer has onboarded the
+    // managed sources never cover it, so the fallback always fires.
+    let verifications
+    if (verifierEntries.length > 0 || ccvDataEntries.length > 0) {
+      verifications = await dest
+        .getVerifications({ ...argv, indexer, offRamp, request })
+        .catch(() => undefined)
+      // Only families whose policy is keyed by DEST address can be coverage-checked here.
+      // Canton derives `requiredCCVs` from the source-side `message_ccv_addresses` while its
+      // results carry dest addresses, so comparing them would reject a complete attestation set.
+      const destKeyedPolicy =
+        verifications &&
+        'verificationPolicy' in verifications &&
+        typeof dest.getCCVsForEncodedMessage === 'function'
+      if (verifications && 'verificationPolicy' in verifications && destKeyedPolicy) {
+        try {
+          assertCoverage(verifications.verifications, verifications.verificationPolicy)
+          logger.info('managed sources covered the required CCV set; not contacting verifiers')
+        } catch {
+          logger.info(
+            'managed sources did not cover the required CCV set; falling back to --verifier',
+          )
+          verifications = undefined
+        }
+      } else if (verifications) {
+        // pre-v2 shape carries no policy to check; keep it
+        logger.debug('non-v2 verifications; --verifier not applicable')
+      }
+    }
+
+    if (verifications === undefined && (verifierEntries.length > 0 || ccvDataEntries.length > 0)) {
+      // Direct verifier fetch: read attestations from the verifiers themselves rather than the
+      // indexer. This is the only path available for a CCV that no indexer has onboarded.
+      verifications = await collectDirectVerifications({
+        dest,
+        offRamp,
+        encodedMessage: (request.message as { encodedMessage?: unknown }).encodedMessage,
+        messageId: request.message.messageId,
+        verifierEntries,
+        ccvDataEntries,
+        logger,
+      })
+    } else if (verifications === undefined) {
+      verifications = await dest.getVerifications({
+        ...argv,
+        indexer,
+        offRamp,
+        request,
+      })
+    }
 
     let estimated: number | undefined
     if (argv.estimateGasLimit != null) {
@@ -301,8 +366,55 @@ async function manualExec(
       }
     }
 
+    // Refuse to broadcast `execute(msg, [], [])`: with no attestation for any required CCV the
+    // OffRamp reverts RequiredCCVMissing, costing gas and moving the message to FAILURE. Placed
+    // after the estimate/`--only-estimate` block so a read-only diagnostic is never blocked by a
+    // broadcast-safety check.
+    if (
+      'verificationPolicy' in verifications &&
+      verifications.verificationPolicy.requiredCCVs.length > 0 &&
+      verifications.verifications.length === 0
+    ) {
+      throw new Error(
+        `no attestation was found for any of the ${verifications.verificationPolicy.requiredCCVs.length} ` +
+          `required CCV(s); OffRamp.execute would revert RequiredCCVMissing. Supply them with ` +
+          `--verifier <ccv>=<scheme>://<host>[:port] or --ccv-data <ccv>=<0x-hex>`,
+      )
+    }
+
     const input = await source.getExecutionInput({ ...argv, request, verifications })
     inputs = { input, offRamp }
+  } else if (verifierEntries.length > 0 || ccvDataEntries.length > 0) {
+    // No source chain, but attestations were supplied or can be fetched. A v2 execution needs only
+    // the encoded message and the OffRamp, both of which the CCIP API returns, so the source chain
+    // is not required: `getExecutionInput` on v2 merges the verifications and reads no chain.
+    if (!apiClient) {
+      throw new CCIPArgumentInvalidError(
+        'rpcs',
+        'reading attestations without a source-chain RPC needs the CCIP API; pass --rpcs for the ' +
+          'source chain, or drop --no-api',
+      )
+    }
+    const messageId = request.message.messageId
+    const execInput = await apiClient.getExecutionInput(messageId)
+    offRamp ??= execInput.offRamp
+    if (!('encodedMessage' in execInput)) {
+      throw new CCIPArgumentInvalidError(
+        'txHashOrId',
+        'this message predates CCIP v2.0; manual execution needs a source-chain RPC to build its ' +
+          'merkle proof. Pass --rpcs for the source chain.',
+      )
+    }
+    const collected = await collectDirectVerifications({
+      dest,
+      offRamp,
+      encodedMessage: execInput.encodedMessage,
+      messageId,
+      verifierEntries,
+      ccvDataEntries,
+      logger,
+    })
+    inputs = { input: { encodedMessage: execInput.encodedMessage, ...collected }, offRamp }
   }
 
   const [walletAddr, wallet] = await loadChainWallet(dest, argv, logger)

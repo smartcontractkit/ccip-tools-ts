@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `getMessageById` and `getExecutionReceipts` accept `since` too
 - Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
 - TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory
+- CLI: `manual-exec --verifier [<ccv>=]<scheme>://<host>[:port]` fetches CCV attestations straight from a verifier's aggregator over gRPC, so a message whose CCV is not onboarded in the indexer can still be executed; repeat the flag for one CCV to give it failover endpoints
+- CLI: `manual-exec --ccv-data <ccv>=<0x-hex>` supplies an attestation obtained out of band; either way the collected set is checked against the destination's CCV policy before signing, so a missing verifier fails locally instead of reverting onchain
 
 ## [1.12.0] - 2026-08-19
 
