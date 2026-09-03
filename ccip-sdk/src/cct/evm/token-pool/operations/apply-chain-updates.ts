@@ -382,10 +382,13 @@ type ParsedApplyChainUpdatesParams =
   | ParsedApplyChainUpdatesParamsV1_5_1
 
 /** Encodes parsed params into `applyChainUpdates` calldata, widened over the parsed union. */
-type Encoder = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx
+type EncodeFn = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx
 
-/** One {@link ApplyChainUpdates.encoders} entry: the shape it accepts, and the encoder for it. */
-type EncoderEntry = { shape: ApplyChainUpdatesParamVersion; encode: Encoder }
+/** One {@link ApplyChainUpdates.encoders} entry: the shape it accepts, and the {@link EncodeFn} for it. */
+type Encoder<V extends ApplyChainUpdatesParamVersion> = {
+  shape: V
+  encode: EncodeFn
+}
 
 /**
  * Configures, enables and disables a token pool's remote lanes via `applyChainUpdates`.
@@ -410,7 +413,7 @@ export class ApplyChainUpdates extends EVMOperation<
       shape: TokenPoolVersion.V1_5_1,
       encode: encodeV1_5_1,
     },
-  } as Partial<Record<TokenPoolVersion, EncoderEntry>>
+  } as { [V in ApplyChainUpdatesParamVersion]?: Encoder<V> }
 
   /**
    * Validates the pool address and every lane entry before any RPC, *keeping* what each check
@@ -475,7 +478,12 @@ export class ApplyChainUpdates extends EVMOperation<
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
 
-    const { shape, encode } = resolveEncoder(this.encoders, version, this.name)
+    // explicit type argument: inference would otherwise fix `F` to the first entry's `shape`
+    const { shape, encode } = resolveEncoder<Encoder<ApplyChainUpdatesParamVersion>>(
+      this.encoders,
+      version,
+      this.name,
+    )
     if (params.version !== shape)
       throw new CCTParamsInvalidError(
         this.name,
