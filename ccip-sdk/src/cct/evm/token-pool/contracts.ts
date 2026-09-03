@@ -125,7 +125,9 @@ export function parseTokenPoolVersion({
   if (!isTokenPoolType(contractType))
     throw new CCTContractTypeInvalidError(address, TOKEN_POOL_TYPES.join(', '), contractType)
   if (!isTokenPoolVersion(version))
-    throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
 
   return { type: contractType, version }
 }
