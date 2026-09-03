@@ -48,8 +48,27 @@ jobs:
       - name: Verify surfpool is available
         run: surfpool --version
 
+      - name: Cache node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          # npm ci always deletes node_modules and re-extracts ~2000 packages
+          # (~55s even with a warm download cache, since extraction is the cost).
+          # Caching the installed tree keyed on the lockfile skips that entirely
+          # on hit; a lockfile change or cache eviction falls back to a full
+          # npm ci below (which then repopulates the cache).
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies and build
-        run: npm ci
+        run: |
+          # --no-audit/--no-fund skip the registry round-trips; neither affects
+          # what gets installed. Only run on cache miss — npm ci would delete
+          # the restored node_modules to re-extract the same tree.
+          if [ "${{ steps.node-modules.outputs.cache-hit }}" != "true" ]; then
+            npm ci --prefer-offline --no-audit --no-fund
+          fi
+          npm run build
 
       - name: Run lint
         run: npm run check
