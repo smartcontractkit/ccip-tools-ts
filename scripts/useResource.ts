@@ -32,9 +32,9 @@
  * networked suites must run inside a single CI job/runner.
  *
  * Env overrides:
- *   CCIP_TOOLS_TEST_LOCK_DIR         lock root (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`)
- *   CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS  max total wait for all requested locks (default: 60 min)
- *   CCIP_TOOLS_TEST_LOCK_VERBOSE     force lock diagnostics on in CI (default: local only)
+ *   NETWORK_LOCK_DIR         lock root (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`)
+ *   NETWORK_LOCK_TIMEOUT_MS  max total wait for all requested locks (default: 60 min)
+ *   NETWORK_LOCK_VERBOSE     force lock diagnostics on in CI (default: local only)
  */
 import {
   lstatSync,
@@ -50,9 +50,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before } from 'node:test'
 
-const LOCK_ROOT =
-  process.env['CCIP_TOOLS_TEST_LOCK_DIR'] || join(tmpdir(), 'ccip-tools-ts-network-locks')
-const TIMEOUT_MS = Number(process.env['CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS']) || 3_600_000
+const LOCK_ROOT = process.env['NETWORK_LOCK_DIR'] || join(tmpdir(), 'ccip-tools-ts-network-locks')
+const TIMEOUT_MS = Number(process.env['NETWORK_LOCK_TIMEOUT_MS']) || 3_600_000
 const POLL_MS = 200
 const LOG_INTERVAL_MS = 5_000
 /** A lock directory without a readable owner.json is stolen once this old. */
@@ -64,7 +63,7 @@ const UNOWNED_STALE_MS = 10 * 60_000
  * coverage comment (which captures the full test output).
  */
 const lockLoggingEnabled =
-  !process.env['CI'] || !!process.env['VERBOSE'] || !!process.env['CCIP_TOOLS_TEST_LOCK_VERBOSE']
+  !process.env['CI'] || !!process.env['VERBOSE'] || !!process.env['NETWORK_LOCK_VERBOSE']
 
 const RESOURCE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
@@ -320,7 +319,7 @@ process.on('exit', () => {
  * no timeout on purpose: a `before` hook whose `timeout` fires is silently
  * abandoned and its tests RUN ANYWAY (node:test semantics), which would run
  * them unlocked. Instead the wait is bounded by `useResource`'s own
- * `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS`; when that expires the hook rejects, which
+ * `NETWORK_LOCK_TIMEOUT_MS`; when that expires the hook rejects, which
  * properly cancels the block's tests.
  *
  * ```ts

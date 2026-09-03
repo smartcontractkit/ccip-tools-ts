@@ -82,8 +82,8 @@ Locks are per-machine, so all networked suites must run inside a single CI job/r
 
 | Variable | Effect |
 | --- | --- |
-| `CCIP_TOOLS_TEST_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
-| `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
+| `NETWORK_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
+| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
 
 ### RPC endpoint env vars
 

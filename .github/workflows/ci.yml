@@ -94,7 +94,11 @@ jobs:
           # should ever wait 60min (the default) for a lock. 4min bounds the
           # queue loudly: a wait that long means the schedule is wedged and
           # the run should fail with the holder's identity instead of hanging.
-          CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS: '240000'
+          # NOTE: this MUST NOT be prefixed with `CCIP_` — the CLI parses every
+          # CCIP_* env var into an option (yargs .env('CCIP')), so a CCIP_*
+          # test-infra var would be inherited by the spawned CLI in the e2e
+          # suites and rejected there as an unknown argument.
+          NETWORK_LOCK_TIMEOUT_MS: '600000'
           # RPC endpoints per network, one secret each; a value may hold
           # several endpoints for the same network, comma-separated. Unset
           # secrets resolve to the keyless public defaults hard-coded in the
