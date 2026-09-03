@@ -66,7 +66,7 @@
     "viem": "^2.55.13"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^6.3.1",
+    "@aptos-labs/ts-sdk": "^7.3.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@mysten/bcs": "^2.1.0",
     "@mysten/sui": "^2.23.2",

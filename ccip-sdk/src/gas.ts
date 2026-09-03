@@ -196,8 +196,7 @@ export async function getDestTokenAmount({
   let sourceTokenAddress, sourcePoolAddress, destTokenAddress
   if ('destTokenAddress' in tokenAmount) {
     ;({ destTokenAddress, sourcePoolAddress, sourceTokenAddress } = tokenAmount)
-  } else if (!source)
-    return tokenAmount // if we don't have a source, assume we were already given a dest `{token, amount}`
+  } else if (!source) return tokenAmount // if we don't have a source, assume we were already given a dest `{token, amount}`
   else {
     ;({ destTokenAddress, sourceTokenAddress, sourcePoolAddress } =
       await sourceToDestTokenAddresses({
