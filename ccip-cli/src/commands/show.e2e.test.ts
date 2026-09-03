@@ -1,47 +1,42 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { useResource } from '../../../scripts/useResource.ts'
-import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
+import {
+  APTOS_TESTNET_RPCS,
+  BASE_MAINNET_RPCS,
+  BASE_SEPOLIA_RPCS,
+  BSC_TESTNET_RPCS,
+  FUJI_RPCS,
+  POLYGON_MAINNET_RPCS,
+  SEPOLIA_RPCS,
+  SOLANA_DEVNET_RPCS,
+  TON_TESTNET_RPCS,
+  spawnCLI,
+} from './e2e-helpers.test.ts'
 
-// The CLI is pointed at these endpoints via the shared RPCS list (e2e-helpers.ts), and
-// `show` also resolves 32-byte tx hashes through the default CCIP API (show.ts).
-// Only the chains this suite actually reaches are locked: sepolia and fuji are
-// still here (sepolia is the dest of the Solana->EVM and Aptos->EVM fixtures,
-// fuji the source of the Solana v2 one), but the EVM->EVM, EVM->Aptos and
-// EVM->Solana fixtures have moved off them. ton-testnet is not listed: the TON
-// block is `describe.skip`ped, so holding its lock only blocks the SDK suites.
-await useResource([
-  'sepolia',
-  'fuji',
-  'base-mainnet',
-  'polygon-mainnet',
-  'soneium-mainnet',
-  'astar-mainnet',
-  'bsc-testnet',
-  'base-sepolia',
-  'aptos-testnet',
-  'solana-devnet',
-  'api',
-])
+// Locks are held per describe block (useResourceForDescribe) and each
+// invocation is pointed only at the endpoints of its own lane (see
+// e2e-helpers.test.ts) — so this suite no longer queues other suites on the
+// sepolia/fuji hub locks for its whole file lifetime. It still uses sepolia
+// (dest of the Solana->EVM and Aptos->EVM fixtures) and fuji (source of the
+// Solana v2 one), which have no live alternative counterpart, but only while
+// those blocks actually run. `show` also resolves 32-byte ids through the
+// default CCIP API; it makes one or two calls per invocation, far below any
+// rate limit, so it does not take the `api` lock that the API-heavy SDK
+// suites contend on. The TON block is describe.skip'd, so it locks nothing.
+//
+// Per-test spawn timeouts are kept 30s under the test timeout: spawnCLI's
+// rejection carries the child's captured output, so a hung endpoint surfaces
+// as a diagnosable failure instead of an opaque "test timed out".
 
-function buildShowArgs(txHash: string, ...additionalArgs: string[]): string[] {
-  return [
-    'show',
-    txHash,
-    '--rpc',
-    ...RPCS,
-    '--rpcs-file',
-    '', // Disable rpcs file loading
-    ...additionalArgs,
-  ]
+function buildShowArgs(txHash: string, rpcs: string[], ...additionalArgs: string[]): string[] {
+  return ['show', txHash, '--rpc', ...rpcs, '--rpcs-file', '', ...additionalArgs]
 }
 
 describe('e2e command show EVM', () => {
   // base -> polygon, v1.5. Carries the pair this test exists for: a receipt that
-  // failed with TokenHandlingError followed by a successful re-execution. Moved
-  // off sepolia -> fuji so the whole EVM show block stops holding the two locks
-  // that seven other suites queue on.
+  // failed with TokenHandlingError followed by a successful re-execution.
   const TX_HASH = '0x06a9dc0922e6c0b91b3944df5642a74add3fa76c88be6380652d9c14a5e809c4'
   const MESSAGE_ID = '0x0819adc396d212cd0a01d6ff177e83339707fe6785e4622daee4089ec9592055'
   const SENDER = '0xd7ca08eC1AEe9ccE8a8eDa9365343eF197674e1a'
@@ -51,29 +46,28 @@ describe('e2e command show EVM', () => {
   // origin (the EOA that sent the tx) differs from sender (the CCIP sender).
   const ORIGIN = '0xcF57BFBC6e4aCDa88147634148aB17Cbbe875ee4'
 
-  // The format variants below re-run the SAME scan-heavy `show` flow as the
-  // pretty-format test above, and only assert on output shape — so they run it
-  // against a quiet lane instead of the testnet hubs. soneium -> astar is v1.5
-  // like the fixture above (the generation stays covered either way), but its
-  // dest sees ~100 messages a month against fuji's ~290, on ~6.7s blocks: the
-  // commit/execution scans have far less history to sift. Measured 9.8s end to
-  // end versus ~60s for the hub lane.
-  //
-  // The pretty-format test keeps the sepolia -> fuji fixture: its failed
-  // (TokenHandlingError) plus successful receipt pair is coverage no other
-  // fixture here carries.
-  const QUIET_TX_HASH = '0xf0a6da25d9d99cfff8632bb1ef76c062c2e8e7b39fffd8abdde462f50849a6a0'
-  const QUIET_MESSAGE_ID = '0xc3c483fb2abc6c04b34ffe6713a4b17422db684a6880f4a27169ce8608b811ac'
-  const QUIET_SENDER = '0x464fC339aDD314932920d3e060745bd7Ea3e92AD'
-  const QUIET_RECEIVER = '0x4036a6Ff8C1a29677108Aef299B560f6E4fA5e71'
+  // Quiet lane for the format variants below: they re-run the SAME scan-heavy
+  // `show` flow as the pretty-format test above and only assert on output
+  // shape. bsc-testnet -> base-sepolia is v1.5 like the fixture above (the
+  // generation stays covered either way), sees a steady ~17 messages/day (a
+  // fixture refreshed within days keeps the dest scan tiny), and both sides
+  // ride CI-reachable keyless endpoints. The previous soneium -> astar lane
+  // answered fine from a residential IP but hung outright from CI's egress,
+  // wedging every test that had to hear from it.
+  const QUIET_TX_HASH = '0xc2c2979edde59b8e6d01502450fdf1400add0282da986a6c6001ba192e724ff9'
+  const QUIET_MESSAGE_ID = '0x6aa3968ed2a4500dc9dab2c72efb6a32c3f3f85ad2b37b5aa712d235ff8a9544'
+  const QUIET_SENDER = '0x22D2E5b0324C6360f8934b891FF811Da32EAAcEB'
+  const QUIET_RECEIVER = '0xda7975Ff570fAc84Af328aa34Aa8AB6F049bcC77'
 
   describe('pretty format (default)', () => {
+    useResourceForDescribe(['base-mainnet', 'polygon-mainnet'])
+
     it(
       'should show complete CCIP transaction details EVM to EVM',
       { timeout: 120000 },
       async () => {
-        const args = buildShowArgs(TX_HASH)
-        const result = await spawnCLI(args, 120000)
+        const args = buildShowArgs(TX_HASH, [...BASE_MAINNET_RPCS, ...POLYGON_MAINNET_RPCS])
+        const result = await spawnCLI(args, 90000)
 
         assert.equal(result.exitCode, 0, result.stderr)
         const output = result.stdout
@@ -121,7 +115,7 @@ describe('e2e command show EVM', () => {
         // First receipt - failed with TokenHandlingError
         assert.match(output, /state.*failed/i)
         assert.match(output, /TokenHandlingError/)
-        assert.match(output, /err.*0x/i)
+        assert.match(output, /err.*0x/)
         assert.match(output, /contract.*0xF4a9Dbb7f3FBa02e3a244B464e459C32B63857F1/i)
         assert.match(
           output,
@@ -150,13 +144,18 @@ describe('e2e command show EVM', () => {
     )
   })
 
+  // The three variants below share the quiet lane's locks and endpoints.
+  const QUIET_LANE_RPCS = [...BSC_TESTNET_RPCS, ...BASE_SEPOLIA_RPCS]
+
   describe('json format', () => {
+    useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
+
     it(
       'should output a single valid JSON envelope with all expected fields',
       { timeout: 120000 },
       async () => {
-        const args = buildShowArgs(QUIET_TX_HASH, '--format', 'json')
-        const result = await spawnCLI(args, 120000)
+        const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'json')
+        const result = await spawnCLI(args, 90000)
 
         assert.equal(result.exitCode, 0, result.stderr)
 
@@ -167,14 +166,16 @@ describe('e2e command show EVM', () => {
         assert.ok(envelope.request, 'envelope should contain request')
         assert.ok(envelope.request.message, 'request should have message')
         assert.match(envelope.request.message.messageId, new RegExp(QUIET_MESSAGE_ID, 'i'))
-        assert.ok(envelope.request.message.sender, 'message should have sender')
-        assert.ok(envelope.request.message.receiver, 'message should have receiver')
+        assert.match(envelope.request.message.sender, new RegExp(QUIET_SENDER, 'i'))
+        assert.match(envelope.request.message.receiver, new RegExp(QUIET_RECEIVER, 'i'))
         assert.ok(
           'sequenceNumber' in envelope.request.message,
           'message should have sequenceNumber',
         )
 
-        // Verifications (commit report)
+        // Verifications (commit report) — the fixture is a v1.5 lane, and tx-hash
+        // inputs always resolve through the RPC scan (the API's /v2/messages/{id}
+        // only accepts message ids), which computes them
         assert.ok(envelope.verifications, 'envelope should contain verifications')
         assert.match(JSON.stringify(envelope.verifications), /"merkleRoot"/)
 
@@ -186,9 +187,11 @@ describe('e2e command show EVM', () => {
   })
 
   describe('log format', () => {
+    useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
+
     it('should output in log format with object assignments', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, '--format', 'log')
-      const result = await spawnCLI(args, 120000)
+      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'log')
+      const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
 
@@ -205,9 +208,11 @@ describe('e2e command show EVM', () => {
   })
 
   describe('verbose flag', () => {
+    useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
+
     it('should work with verbose flag enabled', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, '--verbose')
-      const result = await spawnCLI(args, 120000)
+      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--verbose')
+      const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
       assert.ok(result.stdout.length > 0)
@@ -220,21 +225,30 @@ describe('e2e command show EVM', () => {
   })
 
   describe('error handling', () => {
-    it('should handle invalid transaction hash gracefully', { timeout: 120000 }, async () => {
-      const invalidTxHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
-      const args = buildShowArgs(invalidTxHash)
-      const result = await spawnCLI(args, 120000)
+    describe('invalid transaction hash', () => {
+      useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
-      // Should exit with error code
-      assert.notEqual(result.exitCode, 0)
+      it('should handle invalid transaction hash gracefully', { timeout: 90000 }, async () => {
+        const invalidTxHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
+        // Two endpoints are plenty for this path: the CLI must hear "not found"
+        // back from EVERY raced endpoint before it can conclude the tx is
+        // nowhere, so each extra endpoint is another chance to hang on a
+        // dead one (which is exactly how this test used to time out in CI).
+        const args = buildShowArgs(invalidTxHash, [BSC_TESTNET_RPCS[0]!, BASE_SEPOLIA_RPCS[1]!])
+        const result = await spawnCLI(args, 60000)
 
-      // Should have error output
-      assert.ok(result.stderr.length > 0)
+        // Should exit with error code
+        assert.notEqual(result.exitCode, 0)
+
+        // Should have error output
+        assert.ok(result.stderr.length > 0)
+      })
     })
 
     it('should require transaction hash argument', { timeout: 30000 }, async () => {
-      const args = ['show', '--rpc', ...RPCS, '--rpcs-file', '.gitignore']
-      const result = await spawnCLI(args, 30000)
+      // Yargs rejects the missing positional before any RPC endpoint is
+      // touched, so this needs neither endpoints nor locks.
+      const result = await spawnCLI(['show'], 20000)
 
       // Should exit with error code
       assert.notEqual(result.exitCode, 0)
@@ -244,167 +258,183 @@ describe('e2e command show EVM', () => {
     })
   })
 
-  it(
-    'should show complete CCIP transaction details EVM to Aptos',
-    { timeout: 240000 },
-    async () => {
-      // Fixture seeded periodically from CCIP API v2 messages
-      // (sourceChainSelector=13264668187771770619, destChainSelector=743186221051783445).
-      // Source moved off sepolia onto bsc-testnet: the source side is a single
-      // tx-by-hash read, so it costs nothing to serve and frees the sepolia lock
-      // for the suites that genuinely scan it.
-      const TX_HASH = '0x407ffe6bf58d39e08c786a7b31a407d758effb8657372c330a07a796137816a7'
-      const MESSAGE_ID = '0xac0a5e71cd2e1d637d3b6af558bb255a7f6196cc7954c2b7146b8e055f9a9fe7'
-      const SENDER = '0x89810cb91a5fe67dDf3483182f08e1559A5699De'
-      const RECEIVER = '0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8'
-      const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
-      const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
+  describe('EVM to Aptos', () => {
+    useResourceForDescribe(['bsc-testnet', 'aptos-testnet'])
 
-      const args = buildShowArgs(TX_HASH)
-      const result = await spawnCLI(args, 240000)
+    it(
+      'should show complete CCIP transaction details EVM to Aptos',
+      { timeout: 240000 },
+      async () => {
+        // Fixture seeded periodically from CCIP API v2 messages
+        // (sourceChainSelector=13264668187771770619, destChainSelector=743186221051783445).
+        // Source is bsc-testnet: the source side is a single tx-by-hash read,
+        // so it costs nothing to serve and leaves the sepolia endpoints alone.
+        const TX_HASH = '0x407ffe6bf58d39e08c786a7b31a407d758effb8657372c330a07a796137816a7'
+        const MESSAGE_ID = '0xac0a5e71cd2e1d637d3b6af558bb255a7f6196cc7954c2b7146b8e055f9a9fe7'
+        const SENDER = '0x89810cb91a5fe67dDf3483182f08e1559A5699De'
+        const RECEIVER = '0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8'
+        const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
+        const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
 
-      assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
-      const output = result.stdout
+        const args = buildShowArgs(TX_HASH, [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS])
+        const result = await spawnCLI(args, 210000)
 
-      // Lane information
-      assert.match(output, /name.*binance_smart_chain-testnet.*aptos-testnet/i)
-      assert.match(output, /chainId.*97.*aptos:2/)
-      assert.match(output, /chainSelector.*13264668187771770619n?.*743186221051783445n?/)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+        assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
+        const output = result.stdout
 
-      // Request information
-      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*2867n?/)
-      assert.match(output, /nonce.*0.*allow out-of-order/)
-      assert.match(output, /gasLimit.*0n?/)
-      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /logIndex.*7\b/)
-      assert.match(output, /blockNumber.*127636236/)
-      assert.match(output, /fee.*0\.000351598679631162\s+WBNB/)
-      assert.match(output, /tokens.*0\.0014\s+CCIP-BnM/)
-      assert.match(output, /data.*0x'?/)
-      assert.match(output, /allowOutOfOrderExecution.*true\b/)
+        // Lane information
+        assert.match(output, /name.*binance_smart_chain-testnet.*aptos-testnet/i)
+        assert.match(output, /chainId.*97.*aptos:2/)
+        assert.match(output, /chainSelector.*13264668187771770619n?.*743186221051783445n?/)
+        assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
-      // The API-metadata path short-circuits the commit/receipt scans (old
-      // fixtures' event history is pruned on public nodes); the receipt table
-      // itself still prints and stays fully assertable
-      assert.match(output, /state.*success/i)
-      assert.match(output, new RegExp(`contract.*${OFFRAMP}::offramp`, 'i'))
-      assert.match(
-        output,
-        /transactionHash.*0xb6a16526932bbf8401c9e92b0d641ee799556bf613b433eefb5e9631f19d9c11/i,
-      )
-      assert.match(output, /blockNumber.*10855148519/)
-    },
-  )
+        // Request information
+        assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+        assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+        assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+        assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+        assert.match(output, /sequenceNumber.*2867n?/)
+        assert.match(output, /nonce.*0.*allow out-of-order/)
+        assert.match(output, /gasLimit.*0n?/)
+        assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+        assert.match(output, /logIndex.*7\b/)
+        assert.match(output, /blockNumber.*127636236/)
+        assert.match(output, /fee.*0\.000351598679631162\s+WBNB/)
+        assert.match(output, /tokens.*0\.0014\s+CCIP-BnM/)
+        assert.match(output, /data.*0x'?/)
+        assert.match(output, /allowOutOfOrderExecution.*true\b/)
 
-  it(
-    'should show complete CCIP transaction details EVM to Solana',
-    { timeout: 120000 },
-    async () => {
-      // Fixture seeded from CCIP API v2 messages (sourceChainSelector=10344971235874465080,
-      // destChainSelector=16423721717087811551); refreshed periodically, as devnet public
-      // endpoints prune old transaction history (onfinality ~1 month at the time of writing).
-      // Source is base-sepolia rather than sepolia: only the dest is scanned here,
-      // so the source chain is free to be a quieter one.
-      const TX_HASH = '0xac5c1d0ed9df2e2e403944ea7f92e490254f7ba8ee01599e0d4546ae07731b8e'
-      const MESSAGE_ID = '0x46e394b2700e68d025a632cb2b3097eafea2235e7c6441ba85241194a6400c4c'
-      const SENDER = '0x504f1fCFc4AF3Ae87f1a732f844eE08faBEA1ba6'
-      const RECEIVER = '11111111111111111111111111111111'
-      const TOKEN_RECEIVER = '399FfoqF5rGrh5KXNhzPEWCkDv11fZ4gGsGGU5c9MBYd'
-      const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
-      const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
+        // The API-metadata path short-circuits the commit/receipt scans (old
+        // fixtures' event history is pruned on public nodes); the receipt table
+        // itself still prints and stays fully assertable
+        assert.match(output, /state.*success/i)
+        assert.match(output, new RegExp(`contract.*${OFFRAMP}::offramp`, 'i'))
+        assert.match(
+          output,
+          /transactionHash.*0xb6a16526932bbf8401c9e92b0d641ee799556bf613b433eefb5e9631f19d9c11/i,
+        )
+        assert.match(output, /blockNumber.*10855148519/)
+      },
+    )
+  })
 
-      const args = buildShowArgs(TX_HASH)
-      const result = await spawnCLI(args, 120000)
+  describe('EVM to Solana', () => {
+    useResourceForDescribe(['base-sepolia', 'solana-devnet'])
 
-      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-      const output = result.stdout
+    it(
+      'should show complete CCIP transaction details EVM to Solana',
+      { timeout: 120000 },
+      async () => {
+        // Fixture seeded from CCIP API v2 messages (sourceChainSelector=10344971235874465080,
+        // destChainSelector=16423721717087811551); refreshed periodically, as devnet public
+        // endpoints prune old transaction history (onfinality ~1 month at the time of writing).
+        // Source is base-sepolia rather than sepolia: only the dest is scanned here,
+        // so the source chain is free to be a quieter one.
+        const TX_HASH = '0xac5c1d0ed9df2e2e403944ea7f92e490254f7ba8ee01599e0d4546ae07731b8e'
+        const MESSAGE_ID = '0x46e394b2700e68d025a632cb2b3097eafea2235e7c6441ba85241194a6400c4c'
+        const SENDER = '0x504f1fCFc4AF3Ae87f1a732f844eE08faBEA1ba6'
+        const RECEIVER = '11111111111111111111111111111111'
+        const TOKEN_RECEIVER = '399FfoqF5rGrh5KXNhzPEWCkDv11fZ4gGsGGU5c9MBYd'
+        const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
+        const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
-      // Lane information
-      assert.match(output, /name.*ethereum-testnet-sepolia-base-1.*solana-devnet/i)
-      assert.match(output, /chainId.*84532.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG/)
-      assert.match(output, /chainSelector.*10344971235874465080n?.*16423721717087811551n?/)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+        const args = buildShowArgs(TX_HASH, [...BASE_SEPOLIA_RPCS, ...SOLANA_DEVNET_RPCS])
+        const result = await spawnCLI(args, 90000)
 
-      // Request information
-      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-      assert.match(output, /sequenceNumber.*1499n?/)
-      assert.match(output, /nonce.*0n?.*allow out-of-order/)
-      assert.doesNotMatch(output, /gasLimit/)
-      assert.match(output, /computeUnits.*0n?/)
-      assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /data.*0x'?/)
-      assert.match(output, /allowOutOfOrderExecution.*true\b/)
-      assert.match(output, new RegExp(`tokenReceiver.*${TOKEN_RECEIVER}\\b`, 'i'))
+        assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+        const output = result.stdout
 
-      // Commit information
-      assert.match(output, /Commit.*dest/i)
-      assert.match(
-        output,
-        /merkleRoot.*0x86fc0530dc5b01e0f8f72d71c3eb799c3549e35a00c452f3f8d1a0418d582e91/i,
-      )
-      assert.match(output, /min.*1499/)
-      assert.match(output, /max.*1499/)
-      assert.match(output, /origin.*8zJTVcm3bEAgJfsQPUBxyV5PEWTea81pKQV6uDVHpxjY/i)
-      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-      assert.match(
-        output,
-        /transactionHash.*44Uze89tcZhiNE55P5dPmk4HFkpSUBTg7jAdXYd7Nvemz2MV6wPJZLbmXJcXJtHdaLCYfLvevENeCs3k77SskCj1/i,
-      )
+        // Lane information
+        assert.match(output, /name.*ethereum-testnet-sepolia-base-1.*solana-devnet/i)
+        assert.match(output, /chainId.*84532.*EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG/)
+        assert.match(output, /chainSelector.*10344971235874465080n?.*16423721717087811551n?/)
+        assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
 
-      // Receipts information
-      assert.match(output, /Receipts.*dest/i)
-      assert.match(output, /state.*success/i)
-      assert.match(
-        output,
-        /transactionHash.*5nLiGaRuTwLqe6MQxfgSPWtqq3jLgNMTSwLXH5zGBZbTSdcc6DHbxgQLfo3Pos7jzMhcSpsaohCqo32tP5QmBLS3/i,
-      )
-    },
-  )
+        // Request information
+        assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+        assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
+        assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
+        assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+        assert.match(output, /sequenceNumber.*1499n?/)
+        assert.match(output, /nonce.*0n?.*allow out-of-order/)
+        assert.doesNotMatch(output, /gasLimit/)
+        assert.match(output, /computeUnits.*0n?/)
+        assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
+        assert.match(output, /data.*0x'?/)
+        assert.match(output, /allowOutOfOrderExecution.*true\b/)
+        assert.match(output, new RegExp(`tokenReceiver.*${TOKEN_RECEIVER}\\b`, 'i'))
 
-  it(
-    'should show EVM to Solana v2 OffRamp execution without verifications',
-    { timeout: 30000 },
-    async () => {
-      // Solana v2 is not indexed by the CCIP API yet, so this fixture (and its
-      // asserted values) come from a real CLI run, not from an API lookup — and
-      // the same gap is why the verification lookup stays unavailable. Source is
-      // fuji: v2 onRamps are not deployed on the quiet lanes used above.
-      const TX_HASH = '0x40868c0b3f07b769c51d64dc8866e3b7c52a03b19232c6acee232acc18f21ab9'
-      const MESSAGE_ID = '0x15e6a1e42b3c8b6d32eed44791910af96bb70bd8b13fd135ae9ae3a9f70df08a'
-      const ONRAMP = '0x656345b769a568138919bF7CA0928fDcaa3964Dc'
-      const OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
+        // Commit information
+        assert.match(output, /Commit.*dest/i)
+        assert.match(
+          output,
+          /merkleRoot.*0x86fc0530dc5b01e0f8f72d71c3eb799c3549e35a00c452f3f8d1a0418d582e91/i,
+        )
+        assert.match(output, /min.*1499/)
+        assert.match(output, /max.*1499/)
+        assert.match(output, /origin.*8zJTVcm3bEAgJfsQPUBxyV5PEWTea81pKQV6uDVHpxjY/i)
+        assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+        assert.match(
+          output,
+          /transactionHash.*44Uze89tcZhiNE55P5dPmk4HFkpSUBTg7jAdXYd7Nvemz2MV6wPJZLbmXJcXJtHdaLCYfLvevENeCs3k77SskCj1/i,
+        )
 
-      const result = await spawnCLI(buildShowArgs(TX_HASH), 30000)
+        // Receipts information
+        assert.match(output, /Receipts.*dest/i)
+        assert.match(output, /state.*success/i)
+        assert.match(
+          output,
+          /transactionHash.*5nLiGaRuTwLqe6MQxfgSPWtqq3jLgNMTSwLXH5zGBZbTSdcc6DHbxgQLfo3Pos7jzMhcSpsaohCqo32tP5QmBLS3/i,
+        )
+      },
+    )
+  })
 
-      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-      const output = result.stdout
-      assert.match(output, /name.*avalanche-testnet-fuji.*solana-devnet/i)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
-      assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-      assert.match(output, /sequenceNumber.*27\b/)
-      assert.match(output, /data.*0x\b/)
-      assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
-      assert.match(result.stderr + output, /Verifications unavailable/i)
-      assert.match(output, /Receipts.*dest/i)
-      assert.match(output, /state.*success/i)
-      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-      assert.match(
-        output,
-        /transactionHash.*sNNt4YwJW6AA8RWyTcXsuPrHSNsmrsB1AwJvPNT8igps9PcADjz1LDL4pjxZfixaX2R1mQg26A835X1ibMiW9QR/i,
-      )
-    },
-  )
+  describe('EVM to Solana v2', () => {
+    useResourceForDescribe(['fuji', 'solana-devnet'])
+
+    it(
+      'should show EVM to Solana v2 OffRamp execution without verifications',
+      { timeout: 60000 },
+      async () => {
+        // Solana v2 is not indexed by the CCIP API yet, so this fixture (and its
+        // asserted values) come from a real CLI run, not from an API lookup — and
+        // the same gap is why the verification lookup stays unavailable. Source is
+        // fuji: v2 onRamps are not deployed on the quiet lanes used above.
+        const TX_HASH = '0x40868c0b3f07b769c51d64dc8866e3b7c52a03b19232c6acee232acc18f21ab9'
+        const MESSAGE_ID = '0x15e6a1e42b3c8b6d32eed44791910af96bb70bd8b13fd135ae9ae3a9f70df08a'
+        const ONRAMP = '0x656345b769a568138919bF7CA0928fDcaa3964Dc'
+        const OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
+
+        const result = await spawnCLI(
+          buildShowArgs(TX_HASH, [...FUJI_RPCS, ...SOLANA_DEVNET_RPCS]),
+          45000,
+        )
+
+        assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+        const output = result.stdout
+        assert.match(output, /name.*avalanche-testnet-fuji.*solana-devnet/i)
+        assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
+        assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
+        assert.match(output, /sequenceNumber.*27\b/)
+        assert.match(output, /data.*0x\b/)
+        assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
+        assert.match(result.stderr + output, /Verifications unavailable/i)
+        assert.match(output, /Receipts.*dest/i)
+        assert.match(output, /state.*success/i)
+        assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+        assert.match(
+          output,
+          /transactionHash.*sNNt4YwJW6AA8RWyTcXsuPrHSNsmrsB1AwJvPNT8igps9PcADjz1LDL4pjxZfixaX2R1mQg26A835X1ibMiW9QR/i,
+        )
+      },
+    )
+  })
 })
 
 describe('e2e command show Solana', () => {
+  useResourceForDescribe(['solana-devnet', 'sepolia'])
+
   // Fixture seeded from CCIP API v2 messages (sourceChainSelector=16423721717087811551,
   // destChainSelector=16015286601757825753); refreshed periodically, as devnet public
   // endpoints prune old transaction history (onfinality ~1 month at the time of writing)
@@ -420,8 +450,8 @@ describe('e2e command show Solana', () => {
     'should show complete CCIP transaction details Solana to EVM',
     { timeout: 240000 },
     async () => {
-      const args = buildShowArgs(TX_HASH)
-      const result = await spawnCLI(args, 240000)
+      const args = buildShowArgs(TX_HASH, [...SOLANA_DEVNET_RPCS, ...SEPOLIA_RPCS])
+      const result = await spawnCLI(args, 210000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
       const output = result.stdout
@@ -478,6 +508,8 @@ describe('e2e command show Solana', () => {
 })
 
 describe('e2e command show Aptos', () => {
+  useResourceForDescribe(['aptos-testnet', 'sepolia'])
+
   // Fixture seeded periodically from CCIP API v2 messages
   // (sourceChainSelector=743186221051783445, destChainSelector=16015286601757825753)
   const TX_HASH = '0x034540a867b525b4f5b80ee70b964b112277e3bc4f97772e44f29bbd4522d4b1'
@@ -491,8 +523,8 @@ describe('e2e command show Aptos', () => {
     'should show complete CCIP transaction details Aptos to EVM',
     { timeout: 240000 },
     async () => {
-      const args = buildShowArgs(TX_HASH)
-      const result = await spawnCLI(args, 240000)
+      const args = buildShowArgs(TX_HASH, [...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS])
+      const result = await spawnCLI(args, 210000)
 
       assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
       const output = result.stdout
@@ -552,8 +584,8 @@ describe.skip('e2e command show TON', () => {
     const ONRAMP = 'EQDTIBzONmN64tMmLymf0-jtc_AAWfDlXiZcr7ja5ri7ak53'
     const OFFRAMP = '0x93Bb167Ebd91987f9Dff6B954b9Eead469d2b849'
 
-    const args = buildShowArgs(TX_HASH)
-    const result = await spawnCLI(args, 120000)
+    const args = buildShowArgs(TX_HASH, [...TON_TESTNET_RPCS, ...SEPOLIA_RPCS])
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0)
     const output = result.stdout
@@ -598,8 +630,8 @@ describe.skip('e2e command show TON', () => {
     const ONRAMP = '0xa36871bde0f98b84066405462e4a9709fb71c905'
     const OFFRAMP = 'EQBoGLxL52YDV1OwcaDLcNHyGVOxtcHQDxFb0WqVUQeyRHBd'
 
-    const args = buildShowArgs(TX_HASH)
-    const result = await spawnCLI(args, 120000)
+    const args = buildShowArgs(TX_HASH, [...SEPOLIA_RPCS, ...TON_TESTNET_RPCS])
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
     const output = result.stdout
@@ -626,7 +658,7 @@ describe.skip('e2e command show TON', () => {
     assert.match(output, /Commit.*dest/i)
     assert.match(
       output,
-      /merkleRoot.*0xbada41892c6b8c182692dbdb3661acfd9e4096d6db43c4b1ead1f3010fb03197/i,
+      /merkleRoot.*0xbada41892c6b8c182692dbdb3611acfd9e4096d6db43c4b1ead1f3010fb03197/i,
     )
     assert.match(output, /min.*2386/)
     assert.match(output, /max.*2388/)

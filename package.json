@@ -12,8 +12,8 @@
     "ccip-api-ref"
   ],
   "scripts": {
-    "test": "npm run clean:coverage && c8 npm test -w ccip-sdk -w ccip-cli",
-    "test:unit": "npm run clean:coverage && c8 npm run test:unit -w ccip-sdk -w ccip-cli",
+    "test": "npm run clean:coverage && c8 node --test --test-concurrency=8 \"ccip-sdk/src/**/*.test.ts\" \"ccip-cli/src/**/*.test.ts\"",
+    "test:unit": "npm run clean:coverage && c8 node --test \"ccip-sdk/src/**/!(*integration|*e2e|*fork).test.ts\" \"ccip-cli/src/**/!(*integration|*e2e|*fork).test.ts\"",
     "lint": "npm run lint --workspaces && npm run generate:lint",
     "lint:fix": "npm run lint:fix --workspaces && npm run generate",
     "typecheck": "npm run typecheck --workspaces",

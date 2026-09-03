@@ -4,7 +4,7 @@ import { before, describe, it } from 'node:test'
 // Register every chain family (notably Solana, for decodeAddress on the pool's
 // SVM remotes) the way SDK consumers do via the package root
 import '../index.ts'
-import { useResource } from '../../../scripts/useResource.ts'
+import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
 import { type ChainLog, ExecutionState } from '../types.ts'
@@ -15,8 +15,11 @@ import {
 } from './discovery.ts'
 import { SuiChain } from './index.ts'
 
-// Live RPCs: sui-testnet (BlockVision archival gateway) and Fuji (lane data).
-await useResource(['fuji', 'sui-testnet'])
+// Live RPCs: sui-testnet (BlockVision archival gateway) is held for the whole
+// file; fuji is the EVM counterpart of exactly one block (discoverOffRamp), so
+// it is locked only for that block — holding it for the file's whole lifetime
+// would serialize this 3-minute suite against every other fuji user.
+await useResource(['sui-testnet'])
 
 // Integration tests issue live RPC calls against public endpoints. Sui's public
 // JSON-RPC fullnodes were deprecated; the default is BlockVision's public
@@ -280,17 +283,21 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
     assert.deepEqual(arbConfig.onRamps, [ARB_SEP_ONRAMP])
   })
 
-  it('discoverOffRamp pairs lanes in both directions', async () => {
-    const fuji = await EVMChain.fromUrl(FUJI_RPC)
-    try {
-      const toSui = await discoverOffRamp(fuji, chain, FUJI_ONRAMP)
-      assert.equal(toSui, OFFRAMP)
+  describe('EVM counterpart lane (fuji)', () => {
+    useResourceForDescribe(['fuji'])
 
-      const fromSui = await discoverOffRamp(chain, fuji, ONRAMP)
-      assert.equal(fromSui, FUJI_OFFRAMP)
-    } finally {
-      fuji.destroy()
-    }
+    it('discoverOffRamp pairs lanes in both directions', async () => {
+      const fuji = await EVMChain.fromUrl(FUJI_RPC)
+      try {
+        const toSui = await discoverOffRamp(fuji, chain, FUJI_ONRAMP)
+        assert.equal(toSui, OFFRAMP)
+
+        const fromSui = await discoverOffRamp(chain, fuji, ONRAMP)
+        assert.equal(fromSui, FUJI_OFFRAMP)
+      } finally {
+        fuji.destroy()
+      }
+    })
   })
 
   it('getFee quotes a positive SUI fee for a sui→sepolia CCIP BnM transfer', async () => {

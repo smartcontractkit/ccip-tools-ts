@@ -1,29 +1,40 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { useResource } from '../../../scripts/useResource.ts'
-import { RPCS, spawnCLI } from './e2e-helpers.test.ts'
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
+import {
+  APTOS_TESTNET_RPCS,
+  BASE_SEPOLIA_RPCS,
+  BSC_TESTNET_RPCS,
+  ETHEREUM_MAINNET_RPCS,
+  GNOSIS_MAINNET_RPCS,
+  ROBINHOOD_TESTNET_RPCS,
+  SEPOLIA_RPCS,
+  SOLANA_DEVNET_RPCS,
+  TON_TESTNET_RPCS,
+  spawnCLI,
+} from './e2e-helpers.test.ts'
 
 // Cross-family lanes make the CLI resolve Aptos/Solana/TON endpoints too.
 // These are pure eth_call lookups, so the lanes were moved onto quiet chains
 // wherever a live deployment allowed it; fuji is gone entirely and sepolia is
 // only kept for the lanes whose counterpart chain has no other live pair.
-await useResource([
-  'sepolia',
-  'gnosis-mainnet',
-  'ethereum-mainnet',
-  'robinhood-testnet',
-  'base-sepolia',
-  'bsc-testnet',
-  'aptos-testnet',
-  'solana-devnet',
-  'ton-testnet',
-])
+//
+// Locks are held per describe block and each invocation is pointed only at its
+// own lane's endpoints (see e2e-helpers.test.ts), so the blocks of this suite
+// interleave with other suites instead of queueing them all for the whole
+// file lifetime. The ton-testnet block is the only one that contends with the
+// SDK's TON live-scan suites; it waits for them rather than the reverse.
+//
+// Per-test spawn timeouts are kept 30s under the test timeout: spawnCLI's
+// rejection carries the child's captured output, so a hung endpoint surfaces
+// as a diagnosable failure instead of an opaque "test timed out".
 
 function buildLaneArgs(
   source: string,
   dest: string,
   router: string,
+  rpcs: string[],
   ...additionalArgs: string[]
 ): string[] {
   return [
@@ -35,9 +46,9 @@ function buildLaneArgs(
     '--router',
     router,
     '--rpc',
-    ...RPCS,
+    ...rpcs,
     '--rpcs-file',
-    'package.json',
+    '', // Disable rpcs file loading
     ...additionalArgs,
   ]
 }
@@ -46,6 +57,8 @@ function buildLaneArgs(
 // testnet hub at all — this v1.5 lane is live on gnosis -> ethereum and leaves
 // both hub locks to the suites that must scan them.
 describe('e2e command lane EVM v1.5', () => {
+  useResourceForDescribe(['gnosis-mainnet', 'ethereum-mainnet'])
+  const LANE_RPCS = [...GNOSIS_MAINNET_RPCS, ...ETHEREUM_MAINNET_RPCS]
   const ONRAMP = '0x014abcfdbce9f67d0df34574664a6c0a241ec03a'
   const OFFRAMP = '0x70C705ff3eCAA04c8c61d581a59a168a1c49c2ec'
 
@@ -54,10 +67,11 @@ describe('e2e command lane EVM v1.5', () => {
       'gnosis_chain-mainnet',
       'ethereum-mainnet',
       ONRAMP,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -83,8 +97,8 @@ describe('e2e command lane EVM v1.5', () => {
     'should show lane config Gnosis -> Ethereum (v1.5) in pretty format',
     { timeout: 120000 },
     async () => {
-      const args = buildLaneArgs('gnosis_chain-mainnet', 'ethereum-mainnet', ONRAMP)
-      const result = await spawnCLI(args, 120000)
+      const args = buildLaneArgs('gnosis_chain-mainnet', 'ethereum-mainnet', ONRAMP, LANE_RPCS)
+      const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
       assert.match(result.stdout, /OnRamp.*gnosis_chain-mainnet/i)
@@ -102,6 +116,8 @@ describe('e2e command lane EVM v1.5', () => {
 // nothing (ink -> arbitrum-sepolia would have re-shared a lock with the SDK's EVM
 // suites).
 describe('e2e command lane EVM v2.0', () => {
+  useResourceForDescribe(['robinhood-testnet', 'base-sepolia'])
+  const LANE_RPCS = [...ROBINHOOD_TESTNET_RPCS, ...BASE_SEPOLIA_RPCS]
   const ONRAMP = '0xe001b46cd0df94a92fe62220f524d63e4d916ce8'
 
   it(
@@ -112,10 +128,11 @@ describe('e2e command lane EVM v2.0', () => {
         'robinhood-testnet',
         'ethereum-testnet-sepolia-base-1',
         ONRAMP,
+        LANE_RPCS,
         '--format',
         'json',
       )
-      const result = await spawnCLI(args, 120000)
+      const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -146,6 +163,8 @@ describe('e2e command lane EVM v2.0', () => {
 })
 
 describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
+  useResourceForDescribe(['bsc-testnet', 'aptos-testnet', 'sepolia'])
+  const LANE_RPCS = [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS]
   // EVM -> Aptos rides the same bsc-testnet lane as the show fixture; the
   // reverse direction has no live counterpart other than sepolia, so it stays.
   const BSC_ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
@@ -157,10 +176,11 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
       'binance_smart_chain-testnet',
       'aptos-testnet',
       BSC_ONRAMP,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -193,10 +213,11 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
       'aptos-testnet',
       'ethereum-testnet-sepolia',
       APTOS_PACKAGE,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -225,6 +246,8 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
 })
 
 describe('e2e command lane EVM <-> Solana (v1.6)', () => {
+  useResourceForDescribe(['sepolia', 'solana-devnet'])
+  const LANE_RPCS = [...SEPOLIA_RPCS, ...SOLANA_DEVNET_RPCS]
   const EVM_ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
   const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
   const SOLANA_ONRAMP = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
@@ -235,10 +258,11 @@ describe('e2e command lane EVM <-> Solana (v1.6)', () => {
       'ethereum-testnet-sepolia',
       'solana-devnet',
       EVM_ONRAMP,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -271,10 +295,11 @@ describe('e2e command lane EVM <-> Solana (v1.6)', () => {
       'solana-devnet',
       'ethereum-testnet-sepolia',
       SOLANA_ONRAMP,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -301,6 +326,8 @@ describe('e2e command lane EVM <-> Solana (v1.6)', () => {
 })
 
 describe('e2e command lane EVM <-> TON (v1.6)', () => {
+  useResourceForDescribe(['ton-testnet', 'sepolia'])
+  const LANE_RPCS = [...TON_TESTNET_RPCS, ...SEPOLIA_RPCS]
   const TON_ONRAMP = 'EQA-CUZI_USus4w0_Erf-wTj5uhaAR7XldEimU0w0WAJGGod'
   const EVM_ONRAMP_TON = '0xa36871bde0f98b84066405462e4a9709fb71c905'
 
@@ -309,10 +336,11 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
       'ton-testnet',
       'ethereum-testnet-sepolia',
       TON_ONRAMP,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 300000)
+    const result = await spawnCLI(args, 270000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
@@ -351,10 +379,11 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
       'ethereum-testnet-sepolia',
       'ton-testnet',
       EVM_ONRAMP_TON,
+      LANE_RPCS,
       '--format',
       'json',
     )
-    const result = await spawnCLI(args, 120000)
+    const result = await spawnCLI(args, 90000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 

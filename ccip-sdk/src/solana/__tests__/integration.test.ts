@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { useResource } from '../../../../scripts/useResource.ts'
+import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
@@ -17,8 +17,10 @@ import {
 import { SolanaChain } from '../index.ts'
 
 // Live lanes exercised: Solana devnet (send/execute fixtures) and Solana mainnet
-// (getTokenInfo / mainnet CCIP message suites), plus Fuji/Sepolia RPCs for lane data.
-await useResource(['sepolia', 'fuji', 'solana-devnet', 'solana-mainnet'])
+// (getTokenInfo / mainnet CCIP message suites), plus Sepolia/Fuji RPCs as the EVM
+// counterparts of specific blocks. Locks are held per describe block, so the
+// mainnet-only blocks do not queue on sepolia/fuji (and vice versa) — see
+// useResourceForDescribe.
 
 const FUJI_RPC = process.env.FUJI_RPC ?? 'https://api.avax-test.network/ext/bc/C/rpc'
 const SEPOLIA_RPC =
@@ -63,6 +65,7 @@ if (!VERBOSE) testLogger.debug = () => {}
 
 // Integration test for real Solana mainnet token
 describe('SolanaChain getTokenInfo - Mainnet Integration', { skip }, () => {
+  useResourceForDescribe(['solana-mainnet'])
   let solanaChain: SolanaChain
 
   before(async () => {
@@ -233,6 +236,7 @@ describe('SolanaChain getTokenInfo - Mainnet Integration', { skip }, () => {
 
 // Integration tests against real Solana mainnet CCIP messages
 describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () => {
+  useResourceForDescribe(['solana-mainnet'])
   let solanaChain: SolanaChain
 
   before(async () => {
@@ -286,6 +290,8 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
 })
 
 describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => {
+  // Sepolia is the EVM counterpart of several fixtures here (v2 both directions)
+  useResourceForDescribe(['solana-devnet', 'sepolia'])
   let solanaChain: SolanaChain
 
   before(async () => {
@@ -492,6 +498,8 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
 })
 
 describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
+  // The failed-message fixture is fuji -> solana devnet
+  useResourceForDescribe(['solana-devnet', 'fuji'])
   const ESTIMATE_MSG = FUJI_TO_SOLANA[0]!
 
   let chain: SolanaChain | undefined

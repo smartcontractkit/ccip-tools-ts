@@ -555,11 +555,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     } else if (url.startsWith('http')) {
       const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
       const req = new FetchRequest(url)
-      req.getUrlFunc = async (r, _signal) => {
+      req.getUrlFunc = async (r, signal) => {
+        // Bound each logical request (all retry attempts of the rate-limited
+        // fetch included). Without this, an endpoint that accepts the
+        // connection but never responds hangs on undici's 300s headers timeout
+        // per attempt — one black-holed public endpoint could wedge a whole
+        // CLI invocation far past any caller's patience. ethers' cancel
+        // signal (a FetchCancelSignal, not an AbortSignal) is bridged onto an
+        // AbortController so it actually preempts the in-flight fetch.
+        // 90s comfortably exceeds any legitimate slow call (a chunked
+        // eth_getLogs under active pacing).
+        const timeoutSignal = AbortSignal.timeout(90_000)
+        let requestSignal: AbortSignal = timeoutSignal
+        if (signal) {
+          const cancel = new AbortController()
+          try {
+            signal.addListener(() => cancel.abort())
+            requestSignal = AbortSignal.any([cancel.signal, timeoutSignal])
+          } catch {
+            requestSignal = AbortSignal.abort() // already cancelled by ethers
+          }
+        }
         const resp = await fetchFn(r.url, {
           method: r.method || 'POST',
           headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
           body: r.body ?? undefined,
+          signal: requestSignal,
         })
         const headers: Record<string, string> = {}
         resp.headers.forEach((v, k) => {
