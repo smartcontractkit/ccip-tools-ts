@@ -70,6 +70,14 @@ import {
   type SetChainRateLimiterConfigsParams,
   SetChainRateLimiterConfigs,
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
+import {
+  type SetDynamicConfigParams,
+  SetDynamicConfig,
+} from './token-pool/operations/set-dynamic-config.ts'
+import {
+  type SetRateLimitAdminParams,
+  SetRateLimitAdmin,
+} from './token-pool/operations/set-rate-limit-admin.ts'
 import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
   type TransferOwnershipParams,
@@ -101,6 +109,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
+  readonly #setRateLimitAdmin = new SetRateLimitAdmin()
+  readonly #setDynamicConfig = new SetDynamicConfig()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
@@ -484,6 +494,133 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<SetChainRateLimiterConfigsParams>,
   ): Promise<TransactionResult> {
     return this.#setChainRateLimiterConfigs.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setRateLimitAdmin` tx (for multisig / offline signing): assigns the
+   * role allowed to change the pool's rate limits alongside the owner. Probes the pool's on-chain
+   * `typeAndVersion` to resolve its interface + encoder.
+   * @remarks Owner-only, unlike the rate-limit *config* writes the pool also accepts from the
+   * current `rateLimitAdmin` — this call assigns the role itself, so admitting the incumbent
+   * admin would let it reassign or entrench its own privilege. When `sender` is supplied it is
+   * checked against the pool's `owner()` before any calldata is built; omit it and no owner read
+   * is made (nothing to compare against).
+   *
+   * A zero `newRateLimitAdmin` is accepted and clears the delegation, leaving the owner as the
+   * only account that can change rate limits.
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool — 2.0.0 removed the
+   * standalone `setRateLimitAdmin(address)` selector and folded the role into a three-field
+   * dynamic config; use {@link generateUnsignedSetDynamicConfig} / {@link setDynamicConfig} there
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
+   * address, or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedSetRateLimitAdmin({
+   *   poolAddress: '0xPool...',
+   *   newRateLimitAdmin: '0xOpsMultisig...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetRateLimitAdmin(opts: SetRateLimitAdminParams): Promise<UnsignedEVMTx> {
+    return this.#setRateLimitAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Assigns the pool's rate-limit admin role, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — use {@link setDynamicConfig}
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
+   * the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setRateLimitAdmin({
+   *   poolAddress: '0xPool...',
+   *   newRateLimitAdmin: '0xOpsMultisig...',
+   *   wallet,
+   * })
+   * ```
+   */
+  setRateLimitAdmin(opts: EVMExecuteParams<SetRateLimitAdminParams>): Promise<TransactionResult> {
+    return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setDynamicConfig` tx (for multisig / offline signing): replaces a
+   * **v2.0.0** pool's whole dynamic config — the `router` it accepts ramp calls from, plus the
+   * `rateLimitAdmin` and `feeAdmin` delegate roles.
+   * @remarks This is where the pre-2.0.0 `setRouter` / `setRateLimitAdmin` setters went: 2.0.0
+   * removed them and writes all three fields together. Consequently **all three params are
+   * required** — this op deliberately does *not* read `getDynamicConfig()` to fill in what the
+   * caller omitted. The calldata has to be deterministic at build time: a multisig or cold wallet
+   * may sign it days later, and a hidden read would bake a value that has since moved on-chain,
+   * silently reverting an unrelated config change made in the interim.
+   *
+   * Read the current triple with {@link getTokenPoolState} and pass it back explicitly, so what
+   * is signed is exactly what was reviewed. This is also the migration path off
+   * {@link setRateLimitAdmin} for a 2.0.0 pool.
+   *
+   * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin}.
+   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
+   * a zero router detaches the pool from CCIP rather than clearing a privilege.
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool, which has no
+   * `setDynamicConfig` — use {@link generateUnsignedSetRateLimitAdmin} there
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` or `router` is
+   * the zero address, or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedSetDynamicConfig({
+   *   poolAddress: '0xPool...',
+   *   router: '0xRouter...',
+   *   rateLimitAdmin: '0xOpsMultisig...',
+   *   feeAdmin: '0xFeeMultisig...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetDynamicConfig(opts: SetDynamicConfigParams): Promise<UnsignedEVMTx> {
+    return this.#setDynamicConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces a v2.0.0 pool's dynamic config, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks Replaces the config wholesale, so **all three params are required** — this op
+   * deliberately does *not* read `getDynamicConfig()` to fill in what the caller omitted, so an
+   * omitted field is reset rather than left alone. Read the current triple with
+   * {@link getTokenPoolState} and pass back the fields you are not changing, so what is submitted
+   * is exactly what was reviewed.
+   *
+   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
+   * a zero router detaches the pool from CCIP rather than clearing a privilege.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
+   * the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setDynamicConfig({
+   *   poolAddress: '0xPool...',
+   *   router: '0xRouter...',
+   *   rateLimitAdmin: '0xOpsMultisig...',
+   *   feeAdmin: '0xFeeMultisig...',
+   *   wallet,
+   * })
+   * ```
+   */
+  setDynamicConfig(opts: EVMExecuteParams<SetDynamicConfigParams>): Promise<TransactionResult> {
+    return this.#setDynamicConfig.execute(this.chain, opts)
   }
 
   /**
