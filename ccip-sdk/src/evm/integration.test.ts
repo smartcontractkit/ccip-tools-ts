@@ -32,21 +32,13 @@ await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 // defaults point at endpoints verified to (a) be reachable from CI's egress, (b) serve
 // ~10k-block `eth_getLogs` ranges, and (c) retain logs deep enough for the historical
 // messages asserted below. Override via RPC_* env vars.
-const BASE_SEP_RPC = rpcEndpoint(
-  'RPC_BASE_SEPOLIA',
-  'https://gateway.tenderly.co/public/base-sepolia',
-)
+const BASE_SEP_RPC = rpcEndpoint('RPC_BASE_SEPOLIA')
 const BASE_SEP_SELECTOR = 10344971235874465080n
 
-const OP_SEP_RPC = rpcEndpoint(
-  'RPC_OPTIMISM_SEPOLIA',
-  'https://gateway.tenderly.co/public/optimism-sepolia',
-)
+const OP_SEP_RPC = rpcEndpoint('RPC_OPTIMISM_SEPOLIA')
 const OP_SEP_SELECTOR = 5224473277236331295n
 
-// Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
-// Router 1.2.0 from the CCIP Directory (https://docs.chain.link/ccip/directory/testnet)
-const HEDERA_TESTNET_RPC = rpcEndpoint('RPC_HEDERA_TESTNET', 'https://testnet.hashio.io/api')
+const HEDERA_TESTNET_RPC = rpcEndpoint('RPC_HEDERA_TESTNET')
 const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 // ── Routers ──

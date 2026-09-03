@@ -30,11 +30,8 @@ await useResource(['sui-testnet'])
 // prunes tx contents (offramp discovery via MCMS upgrade scan can't enumerate
 // created packages there).
 // Override via RPC_* env vars.
-const SUI_TESTNET_RPC = rpcEndpoint(
-  'RPC_SUI_TESTNET',
-  'https://sui-testnet-endpoint.blockvision.org',
-)
-const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
+const SUI_TESTNET_RPC = rpcEndpoint('RPC_SUI_TESTNET')
+const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 
 // ── Live sui-testnet CCIP deployment (1.6.x) ──
 const SUI_SELECTOR = 9762610643973837292n

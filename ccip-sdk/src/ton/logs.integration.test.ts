@@ -44,7 +44,7 @@ await useResource(['ton-testnet'])
  *   RPC_TON_TESTNET=https://rpc-gateway.example/ton/testnet/node1/jsonRPC node --test …
  *   SKIP_INTEGRATION_TESTS=1 npm test   # CI hermetic runs
  */
-const TON_TESTNET_RPC = rpcEndpoint('RPC_TON_TESTNET', 'https://testnet.toncenter.com/api/v2')
+const TON_TESTNET_RPC = rpcEndpoint('RPC_TON_TESTNET')
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
 

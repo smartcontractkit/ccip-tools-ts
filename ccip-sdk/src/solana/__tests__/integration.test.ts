@@ -23,12 +23,9 @@ import { SolanaChain } from '../index.ts'
 // mainnet-only blocks do not queue on sepolia/fuji (and vice versa) — see
 // useResourceForDescribe.
 
-const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA', 'https://rpc.sepolia.ethpandaops.io')
-// devnet.rpcpool.com: public, holds at least ~1 week of txs and doesn't 429 as
-// aggressively as onfinality's free tier; envs can override (e.g. onfinality,
-// which keeps the longest history but throttles hard)
-const SOLANA_DEVNET_RPC = rpcEndpoint('RPC_SOLANA_DEVNET', 'https://devnet.rpcpool.com')
+const FUJI_RPC = rpcEndpoint('RPC_FUJI')
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
+const SOLANA_DEVNET_RPC = rpcEndpoint('RPC_SOLANA_DEVNET')
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'

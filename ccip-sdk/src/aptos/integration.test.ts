@@ -12,7 +12,7 @@ import { AptosChain } from './index.ts'
 // endpoint retains them, so it is the single default. The indexer GraphQL
 // defaults to the network's official endpoint. Override via RPC_APTOS_TESTNET.
 await useResource(['aptos-testnet'])
-const APTOS_RPC = rpcEndpoint('RPC_APTOS_TESTNET', 'https://archive.testnet.aptoslabs.com/v1')
+const APTOS_RPC = rpcEndpoint('RPC_APTOS_TESTNET')
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 

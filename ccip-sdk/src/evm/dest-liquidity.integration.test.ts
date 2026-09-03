@@ -32,21 +32,15 @@ import { EVMChain } from './index.ts'
 // Live RPCs: the CCIP 2.0 lane (Arbitrum -> Ethereum) and the LBTC prod lanes (Ethereum <-> Monad).
 await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
 
-const ETHEREUM_RPC = rpcEndpoint(
-  'RPC_ETHEREUM_MAINNET',
-  'https://gateway.tenderly.co/public/mainnet',
-)
+const ETHEREUM_RPC = rpcEndpoint('RPC_ETHEREUM_MAINNET')
 const ETHEREUM_SELECTOR = 5009297550715157269n
 
-// Monad has no wide-eth_getLogs public endpoint (tenderly 500 blocks, rpc.monad.xyz 100); this
-// suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the width never bites here.
-const MONAD_RPC = rpcEndpoint('RPC_MONAD_MAINNET', 'https://gateway.tenderly.co/public/monad')
+// this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
+// width never bites here.
+const MONAD_RPC = rpcEndpoint('RPC_MONAD_MAINNET')
 const MONAD_SELECTOR = 8481857512324358265n
 
-const ARBITRUM_RPC = rpcEndpoint(
-  'RPC_ARBITRUM_MAINNET',
-  'https://gateway.tenderly.co/public/arbitrum',
-)
+const ARBITRUM_RPC = rpcEndpoint('RPC_ARBITRUM_MAINNET')
 const ARBITRUM_SELECTOR = 4949039107694359620n
 
 // ── CCIP 2.0 lane (Arbitrum One -> Ethereum) with a v2.0 mint/burn test token and pools ──

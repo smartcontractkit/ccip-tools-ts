@@ -38,11 +38,11 @@ await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA', 'https://rpc.sepolia.ethpandaops.io')
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 
-const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
+const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 const FUJI_SELECTOR = 14767482510784806043n
 
