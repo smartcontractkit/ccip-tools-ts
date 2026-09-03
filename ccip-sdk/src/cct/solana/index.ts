@@ -1934,6 +1934,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
    *   tokenAddress: mint,
    *   address: router,
@@ -1968,6 +1969,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @example
    * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.ownerOverridePendingAdministrator({
    *   tokenAddress: mint,
    *   address: router,
