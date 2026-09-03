@@ -4,10 +4,62 @@ import { describe, it, mock } from 'node:test'
 import { Address } from '@ton/core'
 import type { TonClient, Transaction } from '@ton/ton'
 
+import { NetworkType } from '../networks.ts'
 import type { ChainTransaction } from '../types.ts'
-import { streamTransactionsForAddress } from './logs.ts'
+import { fetchV3IndexedTip, streamTransactionsForAddress, tonV3BaseUrl } from './logs.ts'
 
 describe('TON logs unit tests', () => {
+  describe('tonV3BaseUrl', () => {
+    it('derives the v3 base from a v2 endpoint, carrying its query (api_key)', () => {
+      assert.equal(
+        tonV3BaseUrl('https://testnet.toncenter.com/api/v2?api_key=s3cr3t', NetworkType.Testnet),
+        'https://testnet.toncenter.com/api/v3?api_key=s3cr3t',
+      )
+      assert.equal(
+        tonV3BaseUrl(
+          'https://testnet.toncenter.com/api/v2/jsonRPC?api_key=s3cr3t',
+          NetworkType.Testnet,
+        ),
+        'https://testnet.toncenter.com/api/v3?api_key=s3cr3t',
+      )
+    })
+
+    it('falls back to the network-type default when the endpoint is not a v2 URL', () => {
+      assert.equal(
+        tonV3BaseUrl('https://my-ton-proxy.example/rpc', NetworkType.Testnet),
+        'https://testnet.toncenter.com/api/v3',
+      )
+      assert.equal(
+        tonV3BaseUrl('https://my-ton-proxy.example/rpc', NetworkType.Mainnet),
+        'https://toncenter.com/api/v3',
+      )
+      assert.equal(
+        tonV3BaseUrl('https://testnet.toncenter.com', NetworkType.Testnet),
+        'https://testnet.toncenter.com/api/v3',
+      )
+    })
+  })
+
+  describe('fetchV3IndexedTip', () => {
+    it('carries the base query (api_key) on the request', async () => {
+      const urls: string[] = []
+      const seqno = await fetchV3IndexedTip({
+        rateLimitedFetch: (async (input: Parameters<typeof fetch>[0]) => {
+          urls.push(input instanceof Request ? input.url : String(input))
+          return new Response(JSON.stringify({ last: { seqno: 123 } }), {
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }) as typeof fetch,
+        v3BaseUrl: tonV3BaseUrl(
+          'https://testnet.toncenter.com/api/v2?api_key=s3cr3t',
+          NetworkType.Testnet,
+        ),
+      })
+      assert.equal(seqno, 123)
+      assert.equal(urls[0], 'https://testnet.toncenter.com/api/v3/masterchainInfo?api_key=s3cr3t')
+    })
+  })
+
   const TEST_ADDRESS = '0:' + '1'.repeat(64)
 
   // Helper to create mock Transaction

@@ -261,40 +261,46 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    */
   static async fromUrl(url: string, ctx?: TONChainContext): Promise<TONChain> {
     const { logger = console } = ctx ?? {}
-    if (!url.endsWith('/jsonRPC')) url += '/jsonRPC'
-
-    // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
-    const fetchFn: typeof fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
-    // Same provenance for the v3 index fetch (a TON-local ctx extra): a
-    // caller-supplied fetch is reused verbatim; the default path gets a dedicated
-    // paced, fail-fast instance instead of the v2 endpoint's profile (see v3FetchFor).
-    const v3Fetch: typeof fetch | undefined =
-      ctx?.v3Fetch ??
-      ctx?.fetch ??
-      createRateLimitedFetch(
-        { seed: { limit: 1, windowMs: 1500 }, maxRetries: 2, keyBy: 'origin' },
-        ctx,
-      )
-
-    // For known public providers, detect network from URL to avoid an API call during init
-    // (free-tier endpoints are rate-limited and return transient 5xx errors).
-    let isMainnetHint: boolean | undefined
-
-    if (['toncenter.com', 'tonapi.io'].some((d) => url.includes(d))) {
-      // testnet.toncenter.com / testnet.tonapi.io → testnet; bare domain → mainnet
-      isMainnetHint = !url.includes('testnet.')
-    }
-
-    // Always use the fetch adapter so our fetch function is used for all requests.
-    // Also merges ctx.abort into every request signal so raceAc.abort() cancels in-flight sockets.
-    const httpAdapter = createAxiosFetchAdapter(fetchFn, ctx?.abort)
-
-    const client = new TonClient({ endpoint: url, httpAdapter })
-    // @ton/ton hardcodes a per-client unbounded InMemoryCache for its internal
-    // shard/block caches; swap it for bounded LRUs so long-lived workers with
-    // watch-mode getLogs don't accumulate seqno-keyed entries forever.
-    boundTonClientCaches(client)
     try {
+      // Append the JSON-RPC path while preserving any query string (e.g. a
+      // toncenter `?api_key=`): it must ride along on every request to this
+      // endpoint — the JSON-RPC POSTs below and the derived v3 index calls alike.
+      const u = new URL(url)
+      if (!u.pathname.endsWith('/jsonRPC')) u.pathname = `${u.pathname.replace(/\/+$/, '')}/jsonRPC`
+      url = u.toString()
+
+      // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
+      const fetchFn: typeof fetch =
+        ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+      // Same provenance for the v3 index fetch (a TON-local ctx extra): a
+      // caller-supplied fetch is reused verbatim; the default path gets a dedicated
+      // paced, fail-fast instance instead of the v2 endpoint's profile (see v3FetchFor).
+      const v3Fetch: typeof fetch | undefined =
+        ctx?.v3Fetch ??
+        ctx?.fetch ??
+        createRateLimitedFetch(
+          { seed: { limit: 1, windowMs: 1500 }, maxRetries: 2, keyBy: 'origin' },
+          ctx,
+        )
+
+      // For known public providers, detect network from URL to avoid an API call during init
+      // (free-tier endpoints are rate-limited and return transient 5xx errors).
+      let isMainnetHint: boolean | undefined
+
+      if (['toncenter.com', 'tonapi.io'].some((d) => url.includes(d))) {
+        // testnet.toncenter.com / testnet.tonapi.io → testnet; bare domain → mainnet
+        isMainnetHint = !url.includes('testnet.')
+      }
+
+      // Always use the fetch adapter so our fetch function is used for all requests.
+      // Also merges ctx.abort into every request signal so raceAc.abort() cancels in-flight sockets.
+      const httpAdapter = createAxiosFetchAdapter(fetchFn, ctx?.abort)
+
+      const client = new TonClient({ endpoint: url, httpAdapter })
+      // @ton/ton hardcodes a per-client unbounded InMemoryCache for its internal
+      // shard/block caches; swap it for bounded LRUs so long-lived workers with
+      // watch-mode getLogs don't accumulate seqno-keyed entries forever.
+      boundTonClientCaches(client)
       const chain =
         isMainnetHint !== undefined
           ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
