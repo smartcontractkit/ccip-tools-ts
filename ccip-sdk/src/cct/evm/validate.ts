@@ -109,8 +109,7 @@ export function validateUint256(operation: string, param: string, value: unknown
 
 /**
  * Asserts `value` is a `bigint` in `[0, 2^128 − 1]` (a Solidity `uint128`), narrowing it to
- * `bigint` for callers — where {@link validateUint256} returns `void`, because callers that
- * default an omitted amount to `0n` hold a `bigint | undefined` this has to resolve.
+ * `bigint` for callers.
  * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
  */
 export function validateUint128(
@@ -137,9 +136,15 @@ export function validateUint64(
 /**
  * Parses an optionally `0x`-prefixed hex string of whole, non-empty bytes into the 0x-prefixed
  * lower-case form ethers encodes as `bytes`.
- * @remarks No byte cap, unlike Solana's counterpart: the values this guards are *remote* addresses
- * carried as `bytes`, and a remote may be Solana or Aptos (32 bytes) as easily as EVM (20), so a
- * length ceiling would only reject valid remotes.
+ *
+ * @remarks The EVM counterpart of Solana's `parseHexBytes`/`parseNonEmptyHexBytes`, minus their
+ * byte cap: the values this guards are *remote* addresses carried as `bytes` (a lane's remote
+ * token or remote pool), and a remote may be Solana or Aptos (32 bytes) as easily as EVM (20), so
+ * a length ceiling here would only reject valid remotes. Shared by the remote-pool write ops and
+ * `applyChainUpdates`, which previously each carried their own copy of this parser.
+ * @param operation - Operation name, for the error context.
+ * @param param - Param path to blame, e.g. `remotePoolAddress` or `chains[0].remoteTokenAddress`.
+ * @param value - The caller-supplied value, unvalidated.
  * @returns The value as `0x`-prefixed lower-case hex.
  * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty whole-byte hex string
  */
@@ -231,4 +236,34 @@ export function parseUniqueHexBytesArray(
     seen.add(hex)
     return hex
   })
+}
+
+/**
+ * Asserts `value` — already known to be an array — has no holes.
+ *
+ * @remarks Every array param in this package is validated element-wise with `.forEach`/`.map`,
+ * and both of those **skip holes**. A sparse array (`const a = [x]; a[2] = y`) therefore walks
+ * through element validation untouched, and the hole reaches ABI encoding as `undefined`, where
+ * ethers throws a bare `TypeError` carrying none of the `operation`/`param` context this package
+ * promises — and only *after* the `typeAndVersion` RPC has been spent. Checking density up front
+ * keeps the "fail before RPC, with an indexed param path" contract intact.
+ * @param operation - Operation name, for the error context.
+ * @param param - Param path of the array itself, e.g. `chainsToAdd`; the blamed index is appended.
+ * @param value - The array to check.
+ * @throws {@link CCTParamsInvalidError} naming the first hole, e.g. `chainsToAdd[1]`
+ */
+export function assertDenseArray(
+  operation: string,
+  param: string,
+  value: readonly unknown[],
+): void {
+  for (let i = 0; i < value.length; i++) {
+    if (!(i in value)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not be a hole — the array is sparse, and a missing element cannot be encoded',
+      )
+    }
+  }
 }
