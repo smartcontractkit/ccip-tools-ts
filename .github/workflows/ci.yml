@@ -72,6 +72,7 @@ jobs:
 
       - name: Install dependencies and build
         run: |
+          set -o pipefail
           # --no-audit/--no-fund skip the registry round-trips; neither affects
           # what gets installed. Only run on cache miss — npm ci would delete
           # the restored node_modules to re-extract the same tree.
@@ -102,19 +103,6 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          # VERBOSE: pipe surfpool stdout/stderr to the job log and surface the
-          # [network-locks] acquire/wait/release lines (what makes lock
-          # contention diagnosable after the fact).
-          VERBOSE: '1'
-          # The networked suites run concurrently (both workspaces in one
-          # `node --test` run, per-describe lock holding), so no single suite
-          # should ever wait 60min (the default) for a lock. 4min bounds the
-          # queue loudly: a wait that long means the schedule is wedged and
-          # the run should fail with the holder's identity instead of hanging.
-          # NOTE: this MUST NOT be prefixed with `CCIP_` — the CLI parses every
-          # CCIP_* env var into an option (yargs .env('CCIP')), so a CCIP_*
-          # test-infra var would be inherited by the spawned CLI in the e2e
-          # suites and rejected there as an unknown argument.
           NETWORK_LOCK_TIMEOUT_MS: '600000'
           # RPC endpoints per network, one secret each; a value may hold
           # several endpoints for the same network, comma-separated. Unset
