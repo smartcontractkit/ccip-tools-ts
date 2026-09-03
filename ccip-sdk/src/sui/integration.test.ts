@@ -4,6 +4,7 @@ import { before, describe, it } from 'node:test'
 // Register every chain family (notably Solana, for decodeAddress on the pool's
 // SVM remotes) the way SDK consumers do via the package root
 import '../index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
@@ -29,9 +30,11 @@ await useResource(['sui-testnet'])
 // prunes tx contents (offramp discovery via MCMS upgrade scan can't enumerate
 // created packages there).
 // Override via RPC_* env vars.
-const SUI_TESTNET_RPC =
-  process.env['RPC_SUI_TESTNET'] || 'https://sui-testnet-endpoint.blockvision.org'
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const SUI_TESTNET_RPC = rpcEndpoint(
+  'RPC_SUI_TESTNET',
+  'https://sui-testnet-endpoint.blockvision.org',
+)
+const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
 
 // ── Live sui-testnet CCIP deployment (1.6.x) ──
 const SUI_SELECTOR = 9762610643973837292n

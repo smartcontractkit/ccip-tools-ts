@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import { NetworkType } from '../networks.ts'
@@ -40,10 +41,10 @@ await useResource(['ton-testnet'])
  *
  * Run against any TON v2 endpoint; defaults to the public index (paced, so slow):
  *   node --test src/ton/logs.integration.test.ts
- *   TON_TESTNET_RPC=https://rpc-gateway.example/ton/testnet/node1/jsonRPC node --test …
+ *   RPC_TON_TESTNET=https://rpc-gateway.example/ton/testnet/node1/jsonRPC node --test …
  *   SKIP_INTEGRATION_TESTS=1 npm test   # CI hermetic runs
  */
-const TON_TESTNET_RPC = process.env['TON_TESTNET_RPC'] || 'https://testnet.toncenter.com/api/v2'
+const TON_TESTNET_RPC = rpcEndpoint('RPC_TON_TESTNET', 'https://testnet.toncenter.com/api/v2')
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
 

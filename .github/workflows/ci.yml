@@ -66,11 +66,58 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
+          # VERBOSE: pipe surfpool stdout/stderr to the job log and surface the
+          # [network-locks] acquire/wait/release lines (what makes lock
+          # contention diagnosable after the fact).
           VERBOSE: '1'
+          # The networked suites run concurrently (both workspaces in one
+          # `node --test` run, per-describe lock holding), so no single suite
+          # should ever wait 60min (the default) for a lock. 4min bounds the
+          # queue loudly: a wait that long means the schedule is wedged and
+          # the run should fail with the holder's identity instead of hanging.
+          CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS: '240000'
+          # RPC endpoints per network, one secret each; a value may hold
+          # several endpoints for the same network, comma-separated. Unset
+          # secrets resolve to the keyless public defaults hard-coded in the
+          # suites — set one when a keyed or faster endpoint is wanted (e.g.
+          # RPC_TON_TESTNET with a toncenter key: CI's shared egress IP
+          # exhausts toncenter's keyless per-IP budget, and the TON suites'
+          # backoff ladders turn that throttling into wall time). Values are
+          # masked in the job log by Actions, and the suites redact endpoint
+          # URLs from all debug/error output; the coverage-summary artifact is
+          # trimmed to the c8 table below, so raw output never leaves the
+          # runner (Actions masking does not apply to downloaded artifacts).
+          RPC_SEPOLIA: ${{ secrets.RPC_SEPOLIA }}
+          RPC_BASE_SEPOLIA: ${{ secrets.RPC_BASE_SEPOLIA }}
+          RPC_ARBITRUM_SEPOLIA: ${{ secrets.RPC_ARBITRUM_SEPOLIA }}
+          RPC_OPTIMISM_SEPOLIA: ${{ secrets.RPC_OPTIMISM_SEPOLIA }}
+          RPC_FUJI: ${{ secrets.RPC_FUJI }}
+          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+          RPC_APTOS_TESTNET: ${{ secrets.RPC_APTOS_TESTNET }}
+          RPC_SOLANA_DEVNET: ${{ secrets.RPC_SOLANA_DEVNET }}
+          RPC_TON_TESTNET: ${{ secrets.RPC_TON_TESTNET }}
+          RPC_SUI_TESTNET: ${{ secrets.RPC_SUI_TESTNET }}
+          RPC_HEDERA_TESTNET: ${{ secrets.RPC_HEDERA_TESTNET }}
+          RPC_ROBINHOOD_TESTNET: ${{ secrets.RPC_ROBINHOOD_TESTNET }}
+          RPC_ETHEREUM_MAINNET: ${{ secrets.RPC_ETHEREUM_MAINNET }}
+          RPC_BASE_MAINNET: ${{ secrets.RPC_BASE_MAINNET }}
+          RPC_POLYGON_MAINNET: ${{ secrets.RPC_POLYGON_MAINNET }}
+          RPC_GNOSIS_MAINNET: ${{ secrets.RPC_GNOSIS_MAINNET }}
+          RPC_MONAD_MAINNET: ${{ secrets.RPC_MONAD_MAINNET }}
+          RPC_ARBITRUM_MAINNET: ${{ secrets.RPC_ARBITRUM_MAINNET }}
         run: |
           set -o pipefail
           npm test 2>&1 | tee coverage-summary.txt
+
+      - name: Trim coverage summary to the c8 table
+        if: always()
+        run: |
+          # The teed file starts with the full node --test output; only the c8
+          # table is consumed (by the coverage-comment job below). Uploading
+          # the raw output would bypass Actions' secret masking, which applies
+          # to the job-log view but not to downloaded artifacts.
+          awk '/^[[:space:]]*File[[:space:]]+[|]/{p=1} p' coverage-summary.txt > coverage-summary.trimmed \
+            && mv coverage-summary.trimmed coverage-summary.txt
 
       - name: Upload coverage report
         if: "always() && hashFiles('.coverage/**') != ''"

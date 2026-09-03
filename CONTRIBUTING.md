@@ -85,6 +85,23 @@ Locks are per-machine, so all networked suites must run inside a single CI job/r
 | `CCIP_TOOLS_TEST_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
 | `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
 
+### RPC endpoint env vars
+
+Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to keyless public defaults hard-coded in the suites, so locally you only set what you want to override:
+
+| Variable | Network |
+| --- | --- |
+| `RPC_SEPOLIA` | Ethereum Sepolia |
+| `RPC_BASE_SEPOLIA` / `RPC_ARBITRUM_SEPOLIA` / `RPC_OPTIMISM_SEPOLIA` | L2 Sepolia testnets |
+| `RPC_FUJI` | Avalanche Fuji |
+| `RPC_BSC_TESTNET` | BNB Smart Chain testnet |
+| `RPC_APTOS_TESTNET` / `RPC_SOLANA_DEVNET` / `RPC_SUI_TESTNET` / `RPC_TON_TESTNET` / `RPC_HEDERA_TESTNET` / `RPC_ROBINHOOD_TESTNET` | Non-EVM testnets |
+| `RPC_ETHEREUM_MAINNET` / `RPC_BASE_MAINNET` / `RPC_POLYGON_MAINNET` / `RPC_GNOSIS_MAINNET` / `RPC_MONAD_MAINNET` / `RPC_ARBITRUM_MAINNET` | Mainnets |
+
+In CI these are wired to GitHub secrets of the same names (see the `Run tests with coverage` step in `.github/workflows/ci.yml`). Unset secrets fall back to the public defaults — set one when a keyed or faster endpoint is wanted: CI runners share an egress IP whose keyless per-IP budgets (toncenter, BlockVision) are exhausted quickly, and the suites’ retry ladders turn that throttling into wall time.
+
+Secret hygiene: endpoint URLs are never logged with credentials — the SDK redacts them from all debug/error output (`redactEndpointUrl`: query strings dropped, long path segments masked) — and the uploaded coverage artifact is trimmed to the c8 table before upload, because Actions’ `***` masking covers the job-log view but not downloaded artifacts.
+
 ## Fork Tests
 
 Fork tests exercise the SDK against real chain state. They use [Anvil](https://book.getfoundry.sh/reference/anvil/) (via the `prool` library) to fork live testnets (Sepolia, Fuji) and run SDK methods against real CCIP messages — decoding, fee estimation, sending, manual execution, etc.

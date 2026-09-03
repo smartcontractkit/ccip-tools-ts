@@ -3,15 +3,16 @@ import { before, describe, it } from 'node:test'
 
 // Register every chain family the way SDK consumers do via the package root
 import '../index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { type ChainLog, ExecutionState } from '../types.ts'
 import { AptosChain } from './index.ts'
 
 // Live RPC: aptos-testnet. Fullnodes prune older txs/events; the archival
 // endpoint retains them, so it is the single default. The indexer GraphQL
-// defaults to the network's official endpoint. Override via RPC_APTOS.
+// defaults to the network's official endpoint. Override via RPC_APTOS_TESTNET.
 await useResource(['aptos-testnet'])
-const APTOS_RPC = process.env['RPC_APTOS'] || 'https://archive.testnet.aptoslabs.com/v1'
+const APTOS_RPC = rpcEndpoint('RPC_APTOS_TESTNET', 'https://archive.testnet.aptoslabs.com/v1')
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 

@@ -47,7 +47,7 @@ import {
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import { createRateLimitedFetch, fetchProfileForUrl, redactEndpointUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
@@ -312,7 +312,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     else if (url.includes('mainnet')) network = Network.MAINNET
     else if (url.includes('testnet')) network = Network.TESTNET
     else if (url.includes('local')) network = Network.LOCAL
-    else throw new CCIPAptosNetworkUnknownError(util.inspect(url))
+    else throw new CCIPAptosNetworkUnknownError(util.inspect(redactEndpointUrl(url)))
     // Pass raw AptosSettings (not a pre-built AptosConfig) so fromAptosConfig can
     // detect the absence of an explicit `client` and install the fetch shim.
     const settings: AptosSettings = {

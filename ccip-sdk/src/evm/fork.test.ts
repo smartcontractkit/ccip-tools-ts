@@ -10,6 +10,7 @@ import { createPublicClient, http } from 'viem'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
@@ -26,15 +27,15 @@ await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'api'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA', 'https://rpc.sepolia.ethpandaops.io')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
 const FUJI_CHAIN_ID = 43113
 
-const ARB_SEP_RPC = process.env['RPC_ARB_SEPOLIA'] || 'https://sepolia-rollup.arbitrum.io/rpc'
+const ARB_SEP_RPC = rpcEndpoint('RPC_ARBITRUM_SEPOLIA', 'https://sepolia-rollup.arbitrum.io/rpc')
 const ARB_SEP_CHAIN_ID = 421614
 
 // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP

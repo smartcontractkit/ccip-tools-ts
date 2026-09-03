@@ -33,7 +33,12 @@ import {
 } from '../errors/index.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import { createAxiosFetchAdapter, createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import {
+  createAxiosFetchAdapter,
+  createRateLimitedFetch,
+  fetchProfileForUrl,
+  redactEndpointUrl,
+} from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
@@ -298,11 +303,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
               v3Fetch,
             })
           : await this.fromClient(client, { ...ctx, fetch: fetchFn, v3Fetch })
-      logger.debug(`Connected to TON V2 endpoint: ${url}`)
+      logger.debug(`Connected to TON V2 endpoint: ${redactEndpointUrl(url)}`)
       return chain
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new CCIPHttpError(0, `Failed to connect to TONv2 endpoint ${url}: ${message}`)
+      throw new CCIPHttpError(
+        0,
+        `Failed to connect to TONv2 endpoint ${redactEndpointUrl(url)}: ${message}`,
+      )
     }
   }
 

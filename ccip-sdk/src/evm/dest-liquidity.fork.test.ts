@@ -24,6 +24,7 @@ import { Instance } from 'prool'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
@@ -37,11 +38,11 @@ await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://rpc.sepolia.ethpandaops.io'
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA', 'https://rpc.sepolia.ethpandaops.io')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const FUJI_RPC = rpcEndpoint('RPC_FUJI', 'https://api.avax-test.network/ext/bc/C/rpc')
 const FUJI_CHAIN_ID = 43113
 const FUJI_SELECTOR = 14767482510784806043n
 

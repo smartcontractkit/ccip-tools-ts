@@ -607,6 +607,27 @@ function extractMethod(init?: RequestInit): string | undefined {
 }
 
 /**
+ * Renders an endpoint URL for logs without leaking credentials. The query
+ * string is dropped entirely (keyed gateways carry their key there, e.g.
+ * toncenter's `?api_key=`), path segments of 24+ characters are masked
+ * (keyed-path providers embed the key there, e.g. alchemy/infura/quiknode),
+ * and rebuilding from `origin` drops any userinfo. Non-URL input degrades to
+ * `***` — never echo the raw value back.
+ */
+export function redactEndpointUrl(input: unknown): string {
+  try {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : String(input))
+    const path = url.pathname
+      .split('/')
+      .map((segment) => (segment.length >= 24 ? '***' : segment))
+      .join('/')
+    return url.origin + path
+  } catch {
+    return '***'
+  }
+}
+
+/**
  * Creates a fetch wrapper that runs at full speed by default and adaptively
  * paces only when an endpoint actually rate-limits it. Per (endpoint, method)
  * limiters learn the real limit/window from response headers or observed timing,
@@ -730,7 +751,7 @@ export function createRateLimitedFetch(
           ep.sem.release()
         }
       } catch (error) {
-        logger.debug('fetch errored', attempt, error, input, bodyStr(init?.body))
+        logger.debug('fetch errored', attempt, error, redactEndpointUrl(input), bodyStr(init?.body))
         lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
         // Only retry on retryable network errors (rate-limit pattern); rethrow everything else
@@ -754,7 +775,11 @@ export function createRateLimitedFetch(
 
       // Slot released — now handle the response (and back off off-slot if retrying).
       if (response.ok) {
-        logger.debug('fetched', response.status, init?.body ? bodyStr(init.body) : input)
+        logger.debug(
+          'fetched',
+          response.status,
+          init?.body ? bodyStr(init.body) : redactEndpointUrl(input),
+        )
         return response
       }
       if (isTransientHttpStatus(response.status)) {
@@ -767,7 +792,12 @@ export function createRateLimitedFetch(
         return response
       }
       // Non-transient non-ok (4xx etc): return immediately, no retry.
-      logger.debug('fetch non-retryable status', input, response.status, bodyStr(init?.body))
+      logger.debug(
+        'fetch non-retryable status',
+        redactEndpointUrl(input),
+        response.status,
+        bodyStr(init?.body),
+      )
       return response
     }
 
