@@ -50,7 +50,7 @@ jobs:
 
       - name: Cache node_modules
         id: node-modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           # npm ci always deletes node_modules and re-extracts ~2000 packages
           # (~55s even with a warm download cache, since extraction is the cost).
@@ -107,9 +107,10 @@ jobs:
           # exhausts toncenter's keyless per-IP budget, and the TON suites'
           # backoff ladders turn that throttling into wall time). Values are
           # masked in the job log by Actions, and the suites redact endpoint
-          # URLs from all debug/error output; the coverage-summary artifact is
-          # trimmed to the c8 table below, so raw output never leaves the
-          # runner (Actions masking does not apply to downloaded artifacts).
+          # URLs from all debug/error output; before the coverage-summary
+          # artifact is uploaded, every RPC_* secret value is stripped from it
+          # (Actions masking does not apply to downloaded artifacts, nor to
+          # PR comments created via the API — both are built from this file).
           RPC_SEPOLIA: ${{ secrets.RPC_SEPOLIA }}
           RPC_BASE_SEPOLIA: ${{ secrets.RPC_BASE_SEPOLIA }}
           RPC_ARBITRUM_SEPOLIA: ${{ secrets.RPC_ARBITRUM_SEPOLIA }}
@@ -132,15 +133,28 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee coverage-summary.txt
 
-      - name: Trim coverage summary to the c8 table
+      - name: Redact RPC secrets from test output
         if: always()
         run: |
-          # The teed file starts with the full node --test output; only the c8
-          # table is consumed (by the coverage-comment job below). Uploading
-          # the raw output would bypass Actions' secret masking, which applies
-          # to the job-log view but not to downloaded artifacts.
-          awk '/^[[:space:]]*File[[:space:]]+[|]/{p=1} p' coverage-summary.txt > coverage-summary.trimmed \
-            && mv coverage-summary.trimmed coverage-summary.txt
+          # The coverage-summary artifact now carries the FULL node --test
+          # output: the coverage-comment job builds the PR comment from it
+          # (failure details and counters included, not just the c8 table).
+          # Actions' secret masking applies to the job-log view only — never
+          # to artifacts, nor to comments created via the API — so every
+          # RPC_* secret value (and each comma-separated endpoint inside it)
+          # is replaced with a placeholder before the file leaves the runner.
+          python3 - <<'EOF'
+          import os
+          path = 'coverage-summary.txt'
+          content = open(path).read()
+          for key, value in os.environ.items():
+              if key.startswith('RPC_') and value:
+                  for part in value.split(','):
+                      part = part.strip()
+                      if part:
+                          content = content.replace(part, '[redacted-rpc]')
+          open(path, 'w').write(content)
+          EOF
 
       - name: Upload coverage report
         if: "always() && hashFiles('.coverage/**') != ''"
@@ -168,47 +182,127 @@ jobs:
       contents: read
       pull-requests: write
 
-    # Only run on pull_request events (skip on push to main)
-    if: github.event_name == 'pull_request'
+    # Run on pull_request events even when build-and-test failed: the comment
+    # must also reflect failed runs (failed suites/tests, counters, coverage).
+    if: always() && github.event_name == 'pull_request'
 
     steps:
-      - name: Download coverage summary
+      - name: Download test output
+        # The artifact is absent when the build failed before tests ran; the
+        # comment script below still posts a fallback report for that case.
+        continue-on-error: true
         uses: actions/download-artifact@v8.0.1
         with:
           name: coverage-summary
           path: .
 
-      - name: Post or update PR comment with coverage summary
+      - name: Post or update PR comment with test results
         uses: actions/github-script@v9.0.0
         with:
           script: |
             const fs = require('fs');
 
-            let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
-            // Only the c8 table belongs in the comment: the teed file starts with the
-            // full node --test output (test logs, [network-locks] lines, per-file `ℹ`
-            // summaries), so slicing on the first `ℹ` would dump all of it into the PR.
-            const tableStart = coverageSummary.findIndex(line => /^\s*File\s+\|/.test(line));
-            coverageSummary = (tableStart >= 0
-              ? coverageSummary.slice(tableStart)
-              : coverageSummary
-            ).join('\n');
-
-            if (coverageSummary.trim().length === 0) {
-              console.log('No coverage data found');
-              process.exit(1);
-            }
+            // Hidden marker identifying our comment across runs, regardless of
+            // whether the report shows a success or a failure.
+            const MARKER = '<!-- ci-test-report -->';
 
             const prNumber = context.payload.pull_request
               ? context.payload.pull_request.number
               : null;
-
             if (!prNumber) {
               console.log('No PR number found, skipping comment.');
               return;
             }
 
-            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+            const hasOutput = fs.existsSync('coverage-summary.txt');
+            const lines = hasOutput
+              ? fs.readFileSync('coverage-summary.txt', 'utf8').split('\n')
+              : [];
+
+            // node --test's trailing `ℹ` counter lines; the run is a single
+            // `node --test` invocation, so last occurrence wins.
+            const summary = {};
+            for (const line of lines) {
+              const m = line.match(
+                /^\s*ℹ\s+(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\s+(\S+)/,
+              );
+              if (m) summary[m[1]] = m[2];
+            }
+
+            // c8 coverage table: from its header row to the end of the output.
+            const tableStart = lines.findIndex(line => /^\s*File\s+\|/.test(line));
+            const coverage = tableStart >= 0 ? lines.slice(tableStart).join('\n').trim() : '';
+
+            // Failed-test details: node --test prints the `✖ failing tests:`
+            // section after the `ℹ` counters and before the c8 table. Each
+            // entry is a `test at <file>:<line>` followed by the test name
+            // with its runtime and the assertion error.
+            let failures = '';
+            const failStart = lines.findIndex(line => line.trim().startsWith('✖ failing tests'));
+            if (failStart >= 0) {
+              const failEnd = tableStart > failStart ? tableStart : lines.length;
+              failures = lines.slice(failStart + 1, failEnd).join('\n').trim();
+            }
+
+            // Affected suites: unique test files named in the failure details.
+            const failedSuites = [
+              ...new Set(
+                [...failures.matchAll(/^test at (.+\.test\.ts):\d+:\d+$/gm)].map(m => m[1]),
+              ),
+            ];
+
+            const ms = parseFloat(summary.duration_ms);
+            const duration = isNaN(ms)
+              ? 'unknown duration'
+              : ms >= 60000
+                ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+                : `${(ms / 1000).toFixed(1)}s`;
+
+            let headline;
+            if (!hasOutput) {
+              headline = '⚠️ **Build failed before any test produced output.**';
+            } else if (summary.fail && summary.fail !== '0') {
+              headline =
+                `❌ **${summary.fail} of ${summary.tests} tests failed** ` +
+                `(pass ${summary.pass}, skipped ${summary.skipped}, cancelled ${summary.cancelled}) ` +
+                `in ${duration}`;
+            } else {
+              headline = `✅ **${summary.pass}/${summary.tests} tests passed** (${summary.suites} suites) in ${duration}`;
+            }
+
+            let body = `${MARKER}\n## CI Test Report\n\n${headline}\n`;
+
+            if (failedSuites.length > 0) {
+              body += `\nFailed suites: ${failedSuites.map(s => `\`${s}\``).join(', ')}\n`;
+            }
+
+            if (failures) {
+              // Keep the comment readable; the full log stays in the job log.
+              const MAX = 12000;
+              const truncated = failures.length > MAX;
+              body +=
+                `\n<details${truncated ? ' open' : ''}><summary>Failed tests</summary>\n\n` +
+                '```\n' +
+                (truncated ? failures.slice(0, MAX) + '\n… truncated …' : failures) +
+                '\n```\n\n</details>\n';
+            }
+
+            if (hasOutput) {
+              const counters = [
+                'tests', 'suites', 'pass', 'fail', 'cancelled', 'skipped', 'todo', 'duration_ms',
+              ]
+                .filter(key => summary[key] !== undefined)
+                .map(key => `ℹ ${key} ${summary[key]}`)
+                .join('\n');
+              if (counters) {
+                body += `\n### Summary\n\n\`\`\`\n${counters}\n\`\`\`\n`;
+              }
+              if (coverage) {
+                body +=
+                  '\n<details><summary>Coverage report</summary>\n\n' +
+                  '```\n' + coverage + '\n```\n\n</details>\n';
+              }
+            }
 
             const { data: comments } = await github.rest.issues.listComments({
               ...context.repo,
@@ -218,19 +312,19 @@ jobs:
             const botComment = comments.find(
               comment =>
                 comment.user.login === 'github-actions[bot]' &&
-                comment.body.includes('## Coverage Report')
+                comment.body.includes(MARKER),
             );
 
             if (botComment) {
               await github.rest.issues.updateComment({
                 ...context.repo,
                 comment_id: botComment.id,
-                body: commentBody,
+                body,
               });
             } else {
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: prNumber,
-                body: commentBody,
+                body,
               });
             }
