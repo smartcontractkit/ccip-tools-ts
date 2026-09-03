@@ -303,13 +303,17 @@ jobs:
                 ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
                 : `${(ms / 1000).toFixed(1)}s`;
 
+            // Timed-out suites surface as `cancelled` (their subtests never
+            // report a failure), so both counters must turn the report red.
+            const notPassed = (Number(summary.fail) || 0) + (Number(summary.cancelled) || 0);
+
             let headline;
             if (hasOutput) {
-              if (summary.fail && summary.fail !== '0') {
+              if (notPassed > 0) {
                 headline =
-                  `❌ **${summary.fail} of ${summary.tests} tests failed** ` +
-                  `(pass ${summary.pass}, skipped ${summary.skipped}, cancelled ${summary.cancelled}) ` +
-                  `in ${duration}`;
+                  `❌ **${notPassed} of ${summary.tests} tests did not pass** ` +
+                  `(pass ${summary.pass}, fail ${summary.fail}, cancelled ${summary.cancelled}, ` +
+                  `skipped ${summary.skipped}) in ${duration}`;
               } else {
                 headline = `✅ **${summary.pass}/${summary.tests} tests passed** (${summary.suites} suites) in ${duration}`;
               }
