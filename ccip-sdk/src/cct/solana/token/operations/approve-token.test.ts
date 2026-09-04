@@ -16,8 +16,8 @@ import {
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { U64_MAX } from '../../validate.ts'
+import { ApproveToken } from './approve-token.ts'
 
 const TOKEN = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -60,7 +60,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | null) {
-  return SolanaTokenManager.fromChain(chain(mintOwner)).generateUnsignedApproveToken({
+  return new ApproveToken().generate(chain(mintOwner), {
     payer: PAYER,
     tokenAddress: TOKEN.toBase58(),
     delegate: DELEGATE,
@@ -165,14 +165,12 @@ describe('ApproveToken (cct/solana)', () => {
     it('rejects a missing token account before submission', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain(TOKEN_PROGRAM_ID, false)).generateUnsignedApproveToken(
-            {
-              payer: PAYER,
-              tokenAddress: TOKEN.toBase58(),
-              delegate: DELEGATE,
-              amount: 1n,
-            },
-          ),
+          new ApproveToken().generate(chain(TOKEN_PROGRAM_ID, false), {
+            payer: PAYER,
+            tokenAddress: TOKEN.toBase58(),
+            delegate: DELEGATE,
+            amount: 1n,
+          }),
         (err: unknown) => err instanceof CCIPTokenAccountNotFoundError,
       )
     })
@@ -191,7 +189,7 @@ describe('ApproveToken (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).approveToken({
+      const result = await new ApproveToken().execute(submitChain(), {
         tokenAddress: TOKEN.toBase58(),
         delegate: DELEGATE,
         amount: 1n,
@@ -207,7 +205,7 @@ describe('ApproveToken (cct/solana)', () => {
       ]) {
         await assert.rejects(
           () =>
-            SolanaTokenManager.fromChain(chain()).approveToken({
+            new ApproveToken().execute(chain(), {
               tokenAddress: TOKEN.toBase58(),
               delegate: DELEGATE,
               amount: 1n,

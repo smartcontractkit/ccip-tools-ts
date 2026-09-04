@@ -1,16 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
-import { CCTParamsInvalidError } from '../errors.ts'
+import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
   parseHexBytes,
   parseNonEmptyHexBytes,
   parsePublicKey,
+  resolveExistingTokenAccount,
+  resolveLockReleasePoolProgram,
   resolvePoolProgram,
+  validateAuthorityMatchesWallet,
   validateBigInt,
+  validateDelegation,
   validateInteger,
   validateNonEmptyString,
   validateOptionalPublicKey,
@@ -19,6 +25,23 @@ import {
   validatePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
+
+function mintData() {
+  const data = Buffer.alloc(MINT_SIZE)
+  MintLayout.encode(
+    {
+      mintAuthorityOption: 1,
+      mintAuthority: PublicKey.default,
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthorityOption: 0,
+      freezeAuthority: PublicKey.default,
+    },
+    data,
+  )
+  return data
+}
 
 describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {
@@ -108,6 +131,21 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
+  it('validates the executing authority', () => {
+    const authority = PublicKey.default
+
+    assert.doesNotThrow(() => validateAuthorityMatchesWallet('op', authority, authority))
+    assert.throws(
+      () =>
+        validateAuthorityMatchesWallet(
+          'op',
+          authority,
+          new PublicKey(Uint8Array.from({ length: 32 }, () => 1)),
+        ),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+    )
+  })
+
   it('validates pool types', () => {
     assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'burn-mint'))
     assert.doesNotThrow(() => validatePoolType('op', 'poolType', 'lock-release'))
@@ -156,6 +194,14 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
+  it('resolves lock-release pool programs only', () => {
+    assert.ok(resolveLockReleasePoolProgram('op', { poolType: 'lock-release' }))
+    assert.throws(
+      () => resolveLockReleasePoolProgram('op', { poolType: 'burn-mint' }),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'poolType',
+    )
+  })
+
   it('validates integers', () => {
     assert.doesNotThrow(() => validateInteger('op', 'threshold', 1))
     assert.doesNotThrow(() => validateInteger('op', 'decimals', 255, 0, 255))
@@ -163,6 +209,9 @@ describe('Validate (cct/solana)', () => {
       () => validateInteger('op', 'decimals', 256, 0, 255),
       (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'decimals',
     )
+    assert.throws(() => validateInteger('op', 'threshold', 0, 1), CCTParamsInvalidError)
+    assert.throws(() => validateInteger('op', 'limit', 2, undefined, 1), CCTParamsInvalidError)
+    assert.throws(() => validateInteger('op', 'integer', 1.5), CCTParamsInvalidError)
   })
 
   it('validates bigint bounds with useful errors', () => {
@@ -176,6 +225,57 @@ describe('Validate (cct/solana)', () => {
       () => validateBigInt('op', 'selector', 2n, undefined, 1n),
       (err: unknown) =>
         err instanceof CCTParamsInvalidError && err.context.reason === 'must be a bigint <= 1',
+    )
+  })
+
+  it('validates token delegation', () => {
+    const tokenAccount = PublicKey.default
+    const delegate = new PublicKey(Uint8Array.from({ length: 32 }, () => 1))
+    const otherDelegate = new PublicKey(Uint8Array.from({ length: 32 }, () => 2))
+
+    assert.doesNotThrow(() =>
+      validateDelegation(
+        'op',
+        tokenAccount,
+        { delegate, delegatedAmount: 2n } as never,
+        delegate,
+        2n,
+      ),
+    )
+    for (const account of [
+      { delegate: null, delegatedAmount: 2n },
+      { delegate: otherDelegate, delegatedAmount: 2n },
+      { delegate, delegatedAmount: 1n },
+    ]) {
+      assert.throws(
+        () => validateDelegation('op', tokenAccount, account as never, delegate, 2n),
+        (err: unknown) => err instanceof CCTTxFailedError,
+      )
+    }
+  })
+
+  it('maps missing token accounts and preserves other lookup errors', async () => {
+    const mint = new PublicKey(Uint8Array.from({ length: 32 }, () => 1))
+    const holder = new PublicKey(Uint8Array.from({ length: 32 }, () => 2))
+    const tokenAccount = new PublicKey(Uint8Array.from({ length: 32 }, () => 3))
+    const connection = {
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(mint) ? { owner: TOKEN_PROGRAM_ID, data: mintData() } : null,
+    }
+
+    await assert.rejects(
+      () => resolveExistingTokenAccount(connection as never, mint, holder, tokenAccount),
+      (err: unknown) => err instanceof CCIPTokenAccountNotFoundError,
+    )
+
+    const invalidConnection = {
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(mint)
+          ? { owner: TOKEN_PROGRAM_ID, data: mintData() }
+          : { owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(0) },
+    }
+    await assert.rejects(() =>
+      resolveExistingTokenAccount(invalidConnection as never, mint, holder, tokenAccount),
     )
   })
 

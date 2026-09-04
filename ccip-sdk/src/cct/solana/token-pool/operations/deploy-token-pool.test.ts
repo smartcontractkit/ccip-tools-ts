@@ -6,18 +6,16 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import {
-  SolanaTokenManager,
-  deriveTokenPoolSignerPda,
-  resolveTokenPoolProgram,
-} from '../../index.ts'
+import { deriveTokenPoolSignerPda, resolveTokenPoolProgram } from '../../index.ts'
 import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
+import { DeployTokenPool } from './deploy-token-pool.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const BURN_MINT_POOL_PROGRAM = '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB'
 const LOCK_RELEASE_POOL_PROGRAM = '8eqh8wppT9c5rw4ERqNCffvU6cNFJWff9WmkcYtmGiqC'
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -31,7 +29,7 @@ function stubChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedDeployTokenPool({
+  return new DeployTokenPool().generate(stubChain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -88,6 +86,13 @@ describe('DeployTokenPool (cct/solana)', () => {
   })
 
   describe('validation', () => {
+    it('rejects a non-array allowlist', async () => {
+      await assert.rejects(
+        () => generate({ allowlist: 'not-an-array' }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'allowlist',
+      )
+    })
+
     it('rejects invalid pool types', async () => {
       await assert.rejects(
         () => generate({ poolType: 'custom' }),
@@ -120,10 +125,35 @@ describe('DeployTokenPool (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns pool addresses', async () => {
+      const result = await new DeployTokenPool().execute(
+        Object.assign(stubChain(), {
+          connection: {
+            simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+            getLatestBlockhash: async () => ({
+              blockhash: PublicKey.default.toBase58(),
+              lastValidBlockHeight: 1,
+            }),
+            sendTransaction: async () => HASH,
+            confirmTransaction: async () => ({ value: { err: null } }),
+          },
+        }),
+        {
+          tokenAddress: TOKEN,
+          poolType: 'burn-mint',
+          wallet: { ...WALLET, publicKey: new PublicKey(PAYER) },
+        },
+      )
+
+      assert.equal(result.hash, HASH)
+      assert.ok(result.poolAddress)
+      assert.ok(result.poolSignerAddress)
+    })
+
     it('rejects signed deploy when authority is not the wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).deployTokenPool({
+          new DeployTokenPool().execute(stubChain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             wallet: WALLET,
