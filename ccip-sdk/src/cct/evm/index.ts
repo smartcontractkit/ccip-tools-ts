@@ -611,14 +611,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Replaces a v2.0.0 pool's dynamic config, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
-   * @remarks Replaces the config wholesale, so **all three params are required** — this op
-   * deliberately does *not* read `getDynamicConfig()` to fill in what the caller omitted, so an
-   * omitted field is reset rather than left alone. Read the current triple with
-   * {@link getTokenPoolState} and pass back the fields you are not changing, so what is submitted
-   * is exactly what was reviewed.
-   *
-   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
-   * a zero router detaches the pool from CCIP rather than clearing a privilege.
+   * @remarks Writes all three fields in one call, so **all three params are required**: read the
+   * current triple with {@link getTokenPoolState} and pass back whatever you are not changing, as
+   * below. A missing field is a validation error, never "leave that one alone" — nothing is
+   * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
+   * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
@@ -628,11 +625,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    * @example
    * ```typescript
+   * // change only rateLimitAdmin: read the current config and pass the rest back unchanged
+   * const state = await cct.getTokenPoolState({ poolAddress: '0xPool...' })
+   * if (state.version !== '2.0.0') throw new Error('pre-2.0.0 pool: use setRateLimitAdmin')
    * const { hash } = await cct.setDynamicConfig({
    *   poolAddress: '0xPool...',
-   *   router: '0xRouter...',
+   *   router: state.router,
    *   rateLimitAdmin: '0xOpsMultisig...',
-   *   feeAdmin: '0xFeeMultisig...',
+   *   feeAdmin: state.feeAdmin,
    *   wallet,
    * })
    * ```
@@ -1090,10 +1090,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
-   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC
-   * pools, or v1.5.0 `*AndProxy` pools, use `cct.chain.getTokenPoolConfig()`, the tolerant
-   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is
-   * not readable here.
+   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0
+   * `*AndProxy` pool's `previousPool` (it reads here as its base `type`), use
+   * `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool version exposes a
+   * pending-owner getter, so a proposed owner is not readable here.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its
