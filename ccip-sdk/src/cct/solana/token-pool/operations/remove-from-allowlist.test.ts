@@ -8,8 +8,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { RemoveFromAllowlist } from './remove-from-allowlist.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -44,7 +44,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedRemoveFromAllowlist({
+  return new RemoveFromAllowlist().generate(stubChain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -102,9 +102,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
 
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await SolanaTokenManager.fromChain(
-        stubChain(),
-      ).generateUnsignedRemoveFromAllowlist({
+      const unsigned = await new RemoveFromAllowlist().generate(stubChain(), {
         tokenAddress: TOKEN,
         poolProgramAddress,
         payer: PAYER,
@@ -162,7 +160,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).removeFromAllowlist({
+      const result = await new RemoveFromAllowlist().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         remove: [ALLOWED],
@@ -175,7 +173,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
     it('rejects a non-wallet authority for signed removal', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).removeFromAllowlist({
+          new RemoveFromAllowlist().execute(stubChain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,

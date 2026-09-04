@@ -114,7 +114,9 @@ export class ProvideLiquidity extends SolanaOperation<
     if (remoteTokenAccountInfo.amount < opts.amount)
       throw new CCTTxFailedError(
         this.name,
-        `source token account ${remoteTokenAccount.toBase58()} has ${remoteTokenAccountInfo.amount}, but ${opts.amount} is required; mint or transfer tokens first`,
+        `source token account ${remoteTokenAccount.toBase58()} has ${
+          remoteTokenAccountInfo.amount
+        }, but ${opts.amount} is required; mint or transfer tokens first`,
       )
 
     // The pool signer transfers from the rebalancer ATA as its SPL Token delegate.
@@ -147,9 +149,17 @@ export class ProvideLiquidity extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, amount = ${opts.amount}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, amount = ${
+        opts.amount
+      }`,
     )
-    return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
+    return {
+      family: ChainFamily.Solana,
+      instructions: [instruction],
+      mainIndex: 0,
+    }
   }
 
   /** Generate, sign, simulate, send, and confirm with the rebalancer wallet. */

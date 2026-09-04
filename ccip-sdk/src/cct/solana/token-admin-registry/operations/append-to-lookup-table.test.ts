@@ -7,9 +7,9 @@ import { AddressLookupTableProgram, Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import { TOKEN_POOL_PROGRAMS } from '../../programs/token-pool.ts'
+import { AppendToLookupTable } from './append-to-lookup-table.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const POOL_PROGRAM = Keypair.generate().publicKey.toBase58()
@@ -19,21 +19,24 @@ const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const LOOKUP_TABLE = Keypair.generate().publicKey.toBase58()
 const ALT_EXTEND_ADDRESSES_OFFSET = 12 // 4-byte discriminator + 8-byte address vector length
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
-  publicKey: Keypair.generate().publicKey,
+  publicKey: new PublicKey(AUTHORITY),
   signTransaction: async <T>(tx: T) => tx,
 }
 
 type StubChainOptions = {
   addresses?: PublicKey[]
-  authority?: string
+  authority?: string | null
   onGetLookupTable?: () => void
+  missingLookupTable?: boolean
 }
 
 function stubChain({
   addresses = [],
   authority = AUTHORITY,
   onGetLookupTable,
+  missingLookupTable = false,
 }: StubChainOptions = {}): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -42,14 +45,23 @@ function stubChain({
       getAddressLookupTable: async () => {
         onGetLookupTable?.()
         return {
-          value: {
-            state: {
-              authority: new PublicKey(authority),
-              addresses,
-            },
-          },
+          value: missingLookupTable
+            ? null
+            : {
+                state: {
+                  authority: authority ? new PublicKey(authority) : undefined,
+                  addresses,
+                },
+              },
         }
       },
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
     },
     getTokenPoolConfig: async () => ({
       token: TOKEN,
@@ -61,7 +73,7 @@ function stubChain({
 }
 
 function generate(opts = {}, chain = stubChain()) {
-  return SolanaTokenManager.fromChain(chain).generateUnsignedAppendToLookupTable({
+  return new AppendToLookupTable().generate(chain, {
     lookupTableAddress: LOOKUP_TABLE,
     payer: PAYER,
     authority: AUTHORITY,
@@ -171,6 +183,16 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
+    it('defaults omitted additional addresses to an empty list', async () => {
+      const unsigned = await generate({
+        additionalAddresses: undefined,
+        tokenAddress: TOKEN,
+        poolProgramAddress: POOL_PROGRAM,
+      })
+
+      assert.equal(unsigned.instructions.length, 1)
+    })
+
     it('rejects authority mismatch', async () => {
       await assert.rejects(
         () => generate({}, stubChain({ authority: Keypair.generate().publicKey.toBase58() })),
@@ -178,6 +200,13 @@ describe('AppendToLookupTable (cct/solana)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'appendToLookupTable' &&
           err.context.param === 'authority',
+      )
+    })
+
+    it('rejects an ALT with no authority', async () => {
+      await assert.rejects(
+        () => generate({}, stubChain({ authority: null })),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
       )
     })
 
@@ -195,19 +224,28 @@ describe('AppendToLookupTable (cct/solana)', () => {
   })
 
   describe('validation', () => {
+    it('rejects a missing lookup table', async () => {
+      await assert.rejects(
+        () => generate({}, stubChain({ missingLookupTable: true })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'lookupTableAddress',
+      )
+    })
+
     it('rejects an ambiguous pool reference before the ALT RPC', async () => {
       let getLookupTableCalls = 0
 
       await assert.rejects(
-        SolanaTokenManager.fromChain(
+        new AppendToLookupTable().generate(
           stubChain({ onGetLookupTable: () => getLookupTableCalls++ }),
-        ).generateUnsignedAppendToLookupTable({
-          lookupTableAddress: LOOKUP_TABLE,
-          payer: PAYER,
-          tokenAddress: TOKEN,
-          poolType: 'burn-mint',
-          poolProgramAddress: POOL_PROGRAM,
-        } as never),
+          {
+            lookupTableAddress: LOOKUP_TABLE,
+            payer: PAYER,
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            poolProgramAddress: POOL_PROGRAM,
+          } as never,
+        ),
         CCTParamsInvalidError,
       )
 
@@ -218,14 +256,15 @@ describe('AppendToLookupTable (cct/solana)', () => {
       let getLookupTableCalls = 0
 
       await assert.rejects(
-        SolanaTokenManager.fromChain(
+        new AppendToLookupTable().generate(
           stubChain({ onGetLookupTable: () => getLookupTableCalls++ }),
-        ).generateUnsignedAppendToLookupTable({
-          lookupTableAddress: LOOKUP_TABLE,
-          payer: PAYER,
-          tokenAddress: TOKEN,
-          poolProgramAddress: 'invalid',
-        }),
+          {
+            lookupTableAddress: LOOKUP_TABLE,
+            payer: PAYER,
+            tokenAddress: TOKEN,
+            poolProgramAddress: 'invalid',
+          },
+        ),
         CCTParamsInvalidError,
       )
 
@@ -254,13 +293,24 @@ describe('AppendToLookupTable (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      assert.deepEqual(
+        await new AppendToLookupTable().execute(stubChain(), {
+          lookupTableAddress: LOOKUP_TABLE,
+          wallet: WALLET,
+          additionalAddresses: [Keypair.generate().publicKey.toBase58()],
+        }),
+        { hash: HASH },
+      )
+    })
+
     it('rejects signed append when authority is not the wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).appendToLookupTable({
+          new AppendToLookupTable().execute(stubChain(), {
             lookupTableAddress: LOOKUP_TABLE,
             wallet: WALLET,
-            authority: AUTHORITY,
+            authority: PAYER,
             additionalAddresses: [Keypair.generate().publicKey.toBase58()],
           }),
         (err: unknown) =>

@@ -7,12 +7,12 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import {
   deriveTokenPoolChainConfigPda,
   deriveTokenPoolConfigPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
+import { SetChainRateLimit } from './set-chain-rate-limit.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -46,7 +46,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedSetChainRateLimit({
+  return new SetChainRateLimit().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -193,7 +193,7 @@ describe('SetChainRateLimit (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).setChainRateLimit({
+      const result = await new SetChainRateLimit().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
@@ -208,7 +208,7 @@ describe('SetChainRateLimit (cct/solana)', () => {
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setChainRateLimit({
+          new SetChainRateLimit().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,

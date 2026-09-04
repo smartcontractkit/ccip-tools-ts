@@ -7,11 +7,16 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import { DeployToken } from './deploy-token.ts'
 
 const BLOCKHASH = PublicKey.default.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const METAPLEX_PROGRAM = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s'
+const HASH = Keypair.generate().publicKey.toBase58()
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
 
 function stubChain(): SolanaChain {
   return {
@@ -25,8 +30,21 @@ function stubChain(): SolanaChain {
   } as unknown as SolanaChain
 }
 
-function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedDeployToken({
+function submitChain(): SolanaChain {
+  return Object.assign(stubChain(), {
+    connection: {
+      rpcEndpoint: 'http://localhost:8899',
+      getMinimumBalanceForRentExemption: async () => 123,
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({ blockhash: BLOCKHASH, lastValidBlockHeight: 0 }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  })
+}
+
+function generate(opts: Record<string, unknown> = {}) {
+  return new DeployToken().generate(stubChain(), {
     decimals: 9,
     withMetaplex: false,
     payer: PAYER,
@@ -53,8 +71,8 @@ describe('DeployToken (cct/solana)', () => {
       assert.equal(initializeMintIx.data[0], 20) // InitializeMint2, not legacy InitializeMint
     })
 
-    it('uses caller seed for reproducible mint address', async () => {
-      const a = await generate({ seed: 'mint_seed' })
+    it('uses caller seed for reproducible mint address and supports no freeze authority', async () => {
+      const a = await generate({ seed: 'mint_seed', freezeAuthority: null })
       const b = await generate({ seed: 'mint_seed' })
 
       assert.equal(a.tokenAddress, b.tokenAddress)
@@ -100,31 +118,39 @@ describe('DeployToken (cct/solana)', () => {
     })
   })
 
-  describe('execute', () => {
-    it('rejects execute when preMint needs a non-wallet mintAuthority signer', async () => {
-      const wallet = {
-        publicKey: Keypair.generate().publicKey,
-        signTransaction: async <T>(tx: T) => tx,
-      }
-
-      await assert.rejects(
-        () =>
-          SolanaTokenManager.fromChain(stubChain()).deployToken({
-            wallet,
-            decimals: 9,
-            tokenProgram: 'spl-token',
-            withMetaplex: false,
-            mintAuthority: Keypair.generate().publicKey.toBase58(),
-            preMint: 100n,
-            preMintRecipient: Keypair.generate().publicKey.toBase58(),
-          }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError && err.context.param === 'mintAuthority',
-      )
-    })
-  })
-
   describe('validation', () => {
+    it('rejects invalid base and pre-mint parameters', async () => {
+      for (const [opts, param] of [
+        [{ decimals: 256 }, 'decimals'],
+        [{ tokenProgram: 'invalid' }, 'tokenProgram'],
+        [{ withMetaplex: 'yes' }, 'withMetaplex'],
+        [{ seed: '' }, 'seed'],
+        [{ mintAuthority: 'invalid' }, 'mintAuthority'],
+        [{ freezeAuthority: 'invalid' }, 'freezeAuthority'],
+        [{ preMint: 0n }, 'preMint'],
+        [{ preMint: 1 }, 'preMint'],
+        [{ preMint: 1n }, 'preMintRecipient'],
+        [{ preMint: 1n, preMintRecipient: 'invalid' }, 'preMintRecipient'],
+      ] as const) {
+        await assert.rejects(
+          () => generate(opts),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
+    it('rejects invalid Metaplex name and URI parameters', async () => {
+      for (const [opts, param] of [
+        [{ withMetaplex: true, name: '', symbol: 'MTK' }, 'name'],
+        [{ withMetaplex: true, name: 'My Token', symbol: 'MTK', uri: 1 }, 'uri'],
+      ] as const) {
+        await assert.rejects(
+          () => generate(opts),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
     it('rejects seeds over 32 UTF-8 bytes', async () => {
       await assert.rejects(
         () => generate({ seed: '🚀'.repeat(9) }),
@@ -141,6 +167,54 @@ describe('DeployToken (cct/solana)', () => {
             symbol: '🚀🚀🚀',
           }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'symbol',
+      )
+    })
+  })
+
+  describe('execute', () => {
+    it('signs, submits, and returns the mint address', async () => {
+      const result = await new DeployToken().execute(submitChain(), {
+        wallet: WALLET,
+        decimals: 9,
+        withMetaplex: false,
+      })
+
+      assert.equal(result.hash, HASH)
+      assert.match(result.tokenAddress, /^[1-9A-HJ-NP-Za-km-z]+$/)
+    })
+
+    it('returns the metadata address when creating Metaplex metadata', async () => {
+      const result = await new DeployToken().execute(submitChain(), {
+        wallet: WALLET,
+        decimals: 9,
+        withMetaplex: true,
+        name: 'My Token',
+        symbol: 'MTK',
+      })
+
+      assert.equal(result.hash, HASH)
+      assert.match(result.metadataAddress!, /^[1-9A-HJ-NP-Za-km-z]+$/)
+    })
+
+    it('rejects execute when preMint needs a non-wallet mintAuthority signer', async () => {
+      const wallet = {
+        publicKey: Keypair.generate().publicKey,
+        signTransaction: async <T>(tx: T) => tx,
+      }
+
+      await assert.rejects(
+        () =>
+          new DeployToken().execute(stubChain(), {
+            wallet,
+            decimals: 9,
+            tokenProgram: 'spl-token',
+            withMetaplex: false,
+            mintAuthority: Keypair.generate().publicKey.toBase58(),
+            preMint: 100n,
+            preMintRecipient: Keypair.generate().publicKey.toBase58(),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'mintAuthority',
       )
     })
   })

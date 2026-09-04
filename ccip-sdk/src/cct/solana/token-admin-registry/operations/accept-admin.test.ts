@@ -3,20 +3,21 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey } from '@solana/web3.js'
 
+import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
-import type { GenerateAcceptAdminParams } from './accept-admin.ts'
+import { type GenerateAcceptAdminParams, AcceptAdmin } from './accept-admin.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const ADDRESS = Keypair.generate().publicKey.toBase58()
 const ROUTER = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const PENDING_ADMIN = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
-  publicKey: Keypair.generate().publicKey,
+  publicKey: new PublicKey(PENDING_ADMIN),
   signTransaction: async <T>(tx: T) => tx,
 }
 
@@ -35,8 +36,22 @@ function stubChain(
   } as unknown as SolanaChain
 }
 
+function submitChain(): SolanaChain {
+  return Object.assign(stubChain(), {
+    connection: {
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  })
+}
+
 function generate(opts: Partial<GenerateAcceptAdminParams> = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedAcceptAdmin({
+  return new AcceptAdmin().generate(stubChain(), {
     tokenAddress: TOKEN,
     address: ADDRESS,
     payer: PAYER,
@@ -84,16 +99,15 @@ describe('AcceptAdmin (cct/solana)', () => {
 
     it('resolves the router from address', async () => {
       let requestedAddress: string | undefined
-      const cct = SolanaTokenManager.fromChain(
+      await new AcceptAdmin().generate(
         stubChain(PENDING_ADMIN, (address) => (requestedAddress = address)),
+        {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          payer: PAYER,
+          authority: PENDING_ADMIN,
+        },
       )
-
-      await cct.generateUnsignedAcceptAdmin({
-        tokenAddress: TOKEN,
-        address: ADDRESS,
-        payer: PAYER,
-        authority: PENDING_ADMIN,
-      })
 
       assert.equal(requestedAddress, ADDRESS)
     })
@@ -117,7 +131,7 @@ describe('AcceptAdmin (cct/solana)', () => {
 
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(noPendingChain).generateUnsignedAcceptAdmin({
+          new AcceptAdmin().generate(noPendingChain, {
             tokenAddress: TOKEN,
             address: ADDRESS,
             payer: PAYER,
@@ -132,13 +146,35 @@ describe('AcceptAdmin (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      assert.deepEqual(
+        await new AcceptAdmin().execute(submitChain(), {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          wallet: WALLET,
+        }),
+        { hash: HASH },
+      )
+    })
+
+    it('rejects an invalid wallet before generating instructions', async () => {
+      await assert.rejects(
+        new AcceptAdmin().execute(stubChain(), {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          wallet: {},
+        }),
+        CCIPWalletInvalidError,
+      )
+    })
+
     it('requires the pending admin to be the executing wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).acceptAdmin({
+          new AcceptAdmin().execute(stubChain(), {
             tokenAddress: TOKEN,
             address: ADDRESS,
-            authority: PENDING_ADMIN,
+            authority: PAYER,
             wallet: WALLET,
           }),
         (err: unknown) =>

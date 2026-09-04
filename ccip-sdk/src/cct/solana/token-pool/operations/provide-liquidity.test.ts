@@ -9,12 +9,13 @@ import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import {
   deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
+import { ApproveToken } from '../../token/operations/approve-token.ts'
+import { ProvideLiquidity } from './provide-liquidity.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -113,7 +114,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedProvideLiquidity({
+  return new ProvideLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'lock-release',
     payer: PAYER,
@@ -186,7 +187,7 @@ describe('ProvideLiquidity (cct/solana)', () => {
       ] as const) {
         await assert.rejects(
           () =>
-            SolanaTokenManager.fromChain(pool).generateUnsignedProvideLiquidity({
+            new ProvideLiquidity().generate(pool, {
               tokenAddress: TOKEN,
               poolType: 'lock-release',
               payer: PAYER,
@@ -199,14 +200,15 @@ describe('ProvideLiquidity (cct/solana)', () => {
     })
 
     it('defaults authority to payer', async () => {
-      const unsigned = await SolanaTokenManager.fromChain(
+      const unsigned = await new ProvideLiquidity().generate(
         chain(resolveTokenPoolProgram('lock-release'), new PublicKey(PAYER)),
-      ).generateUnsignedProvideLiquidity({
-        tokenAddress: TOKEN,
-        poolType: 'lock-release',
-        payer: PAYER,
-        amount: 1_000_000n,
-      })
+        {
+          tokenAddress: TOKEN,
+          poolType: 'lock-release',
+          payer: PAYER,
+          amount: 1_000_000n,
+        },
+      )
 
       assert.equal(unsigned.instructions[0]!.keys[6]!.pubkey.toBase58(), PAYER)
     })
@@ -214,7 +216,7 @@ describe('ProvideLiquidity (cct/solana)', () => {
     it('uses a source account that can be delegated to the pool signer', async () => {
       const poolProgram = resolveTokenPoolProgram('lock-release')
       const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
-      const approval = await SolanaTokenManager.fromChain(chain()).generateUnsignedApproveToken({
+      const approval = await new ApproveToken().generate(chain(), {
         payer: AUTHORITY,
         tokenAddress: TOKEN,
         delegate: poolSigner.toBase58(),
@@ -232,15 +234,16 @@ describe('ProvideLiquidity (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await SolanaTokenManager.fromChain(
+      const unsigned = await new ProvideLiquidity().generate(
         chain(new PublicKey(poolProgramAddress)),
-      ).generateUnsignedProvideLiquidity({
-        tokenAddress: TOKEN,
-        poolProgramAddress,
-        payer: PAYER,
-        authority: AUTHORITY,
-        amount: 1_000_000n,
-      })
+        {
+          tokenAddress: TOKEN,
+          poolProgramAddress,
+          payer: PAYER,
+          authority: AUTHORITY,
+          amount: 1_000_000n,
+        },
+      )
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -272,7 +275,7 @@ describe('ProvideLiquidity (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).provideLiquidity({
+      const result = await new ProvideLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'lock-release',
         amount: 1_000_000n,
@@ -285,7 +288,7 @@ describe('ProvideLiquidity (cct/solana)', () => {
     it('rejects a non-wallet authority for signed liquidity provision', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).provideLiquidity({
+          new ProvideLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'lock-release',
             amount: 1_000_000n,

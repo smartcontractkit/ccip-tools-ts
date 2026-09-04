@@ -16,8 +16,8 @@ import {
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { U64_MAX } from '../../validate.ts'
+import { MintTokens } from './mint-tokens.ts'
 
 const TOKEN = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -58,7 +58,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | null) {
-  return SolanaTokenManager.fromChain(chain(mintOwner)).generateUnsignedMintTokens({
+  return new MintTokens().generate(chain(mintOwner), {
     payer: PAYER,
     tokenAddress: TOKEN.toBase58(),
     recipient: RECIPIENT.toBase58(),
@@ -120,7 +120,7 @@ describe('MintTokens (cct/solana)', () => {
 
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(missingAtaChain).generateUnsignedMintTokens({
+          new MintTokens().generate(missingAtaChain, {
             payer: PAYER,
             tokenAddress: TOKEN.toBase58(),
             recipient: RECIPIENT.toBase58(),
@@ -177,7 +177,7 @@ describe('MintTokens (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).mintTokens({
+      const result = await new MintTokens().execute(submitChain(), {
         tokenAddress: TOKEN.toBase58(),
         recipient: RECIPIENT.toBase58(),
         amount: 1n,
@@ -189,7 +189,7 @@ describe('MintTokens (cct/solana)', () => {
     it('requires unsigned generation for SPL multisig authorities', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).mintTokens({
+          new MintTokens().execute(chain(), {
             tokenAddress: TOKEN.toBase58(),
             recipient: RECIPIENT.toBase58(),
             amount: 1n,
@@ -205,7 +205,7 @@ describe('MintTokens (cct/solana)', () => {
     it('rejects a non-wallet authority for signed minting', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).mintTokens({
+          new MintTokens().execute(chain(), {
             tokenAddress: TOKEN.toBase58(),
             recipient: RECIPIENT.toBase58(),
             amount: 1n,

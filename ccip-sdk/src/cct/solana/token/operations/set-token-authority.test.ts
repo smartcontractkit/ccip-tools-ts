@@ -8,7 +8,7 @@ import { CCIPTokenMintInvalidError, CCIPTokenMintNotFoundError } from '../../../
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import { SetTokenAuthority } from './set-token-authority.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -48,7 +48,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts: Record<string, unknown> = {}, mintOwner?: PublicKey | null) {
-  return SolanaTokenManager.fromChain(chain(mintOwner)).generateUnsignedSetTokenAuthority({
+  return new SetTokenAuthority().generate(chain(mintOwner), {
     tokenAddress: TOKEN,
     payer: PAYER,
     authority: AUTHORITY,
@@ -195,7 +195,7 @@ describe('SetTokenAuthority (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).setTokenAuthority({
+      const result = await new SetTokenAuthority().execute(submitChain(), {
         tokenAddress: TOKEN,
         newAuthority: NEW_AUTHORITY,
         authorityTypes: ['mint'],
@@ -208,7 +208,7 @@ describe('SetTokenAuthority (cct/solana)', () => {
     it('requires unsigned generation for SPL multisig authorities', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setTokenAuthority({
+          new SetTokenAuthority().execute(chain(), {
             tokenAddress: TOKEN,
             newAuthority: NEW_AUTHORITY,
             authority: MULTISIG,
@@ -224,7 +224,7 @@ describe('SetTokenAuthority (cct/solana)', () => {
     it('rejects a non-wallet authority for signed updates', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setTokenAuthority({
+          new SetTokenAuthority().execute(chain(), {
             tokenAddress: TOKEN,
             newAuthority: NEW_AUTHORITY,
             authority: AUTHORITY,
