@@ -19,6 +19,8 @@ import {
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
+  type ExecuteOwnerOverridePendingAdministratorParams,
+  type ExecuteOwnerOverridePendingAdministratorResult,
   type ExecuteRegisterAdminParams,
   type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
@@ -31,6 +33,8 @@ import {
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
+  type GenerateOwnerOverridePendingAdministratorParams,
+  type GenerateOwnerOverridePendingAdministratorResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
@@ -45,6 +49,7 @@ import {
   CreateLookupTable,
   GetSupportedTokens,
   GetTokenAdminRegistry,
+  OwnerOverridePendingAdministrator,
   RegisterAdmin,
   SetPool,
   TransferAdmin,
@@ -195,6 +200,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createLookupTable = new CreateLookupTable()
   readonly #getSupportedTokens = new GetSupportedTokens()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #ownerOverridePendingAdministrator = new OwnerOverridePendingAdministrator()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
@@ -1908,6 +1914,76 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
     return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces an initial pending registry administrator.
+   *
+   * @remarks
+   * Only the mint authority may authorize this recovery path, and only while the registry has no
+   * accepted administrator. It replaces the initial pending administrator; the replacement must
+   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
+   * unsigned method for Squads/vault signatures.
+   *
+   * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
+   * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
+   * accepted administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedOwnerOverridePendingAdministrator(
+    opts: GenerateOwnerOverridePendingAdministratorParams,
+  ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initial pending registry administrator using the mint authority wallet.
+   *
+   * @remarks
+   * This recovery path only works while the registry has no accepted administrator. It replaces the
+   * initial pending administrator; it does not make the replacement an administrator. The replacement
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
+   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
+   *
+   * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
+   * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
+   * administrator, or `authority` differs from the wallet.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.ownerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   wallet: mintAuthorityWallet,
+   * })
+   * ```
+   */
+  ownerOverridePendingAdministrator(
+    opts: ExecuteOwnerOverridePendingAdministratorParams,
+  ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
   }
 
   /**
