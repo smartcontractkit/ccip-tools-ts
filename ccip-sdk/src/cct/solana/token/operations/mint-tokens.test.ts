@@ -109,6 +109,32 @@ describe('MintTokens (cct/solana)', () => {
       )
     })
 
+    it('creates a missing recipient ATA when requested', async () => {
+      const missingAtaChain = {
+        logger: { debug() {}, info() {}, warn() {}, error() {} },
+        connection: {
+          getAccountInfo: async (address: PublicKey) =>
+            address.equals(TOKEN) ? { owner: TOKEN_PROGRAM_ID } : null,
+        },
+      } as unknown as SolanaChain
+
+      const unsigned = await new MintTokens().generate(missingAtaChain, {
+        payer: PAYER,
+        tokenAddress: TOKEN.toBase58(),
+        recipient: RECIPIENT.toBase58(),
+        amount: 1n,
+        createRecipientATA: true,
+      })
+
+      const ata = getAssociatedTokenAddressSync(TOKEN, RECIPIENT, true, TOKEN_PROGRAM_ID)
+      assert.equal(unsigned.instructions.length, 2)
+      assert.equal(unsigned.mainIndex, 1)
+      assert.equal(unsigned.instructions[0]!.data[0], 1) // CreateIdempotent
+      assert.equal(unsigned.instructions[0]!.keys[1]!.pubkey.toBase58(), ata.toBase58())
+      assert.equal(unsigned.instructions[1]!.data[0], 7) // MintTo
+      assert.equal(unsigned.instructions[1]!.keys[1]!.pubkey.toBase58(), ata.toBase58())
+    })
+
     it('rejects a missing recipient ATA before simulation', async () => {
       const missingAtaChain = {
         logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -153,6 +179,7 @@ describe('MintTokens (cct/solana)', () => {
         [{ amount: 0n }, 'amount'],
         [{ amount: 1 }, 'amount'],
         [{ amount: U64_MAX + 1n }, 'amount'],
+        [{ createRecipientATA: 'invalid' }, 'createRecipientATA'],
         [{ multisigSigners: 'invalid' }, 'multisigSigners'],
         [{ multisigSigners: ['invalid'] }, 'multisigSigners[0]'],
       ] as const) {
