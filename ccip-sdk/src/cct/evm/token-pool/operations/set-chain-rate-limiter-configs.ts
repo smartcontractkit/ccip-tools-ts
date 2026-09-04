@@ -325,7 +325,11 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
-        `must be the pool owner (${owner})${rateLimitAdmin === ZeroAddress ? ' — this pool has no rateLimitAdmin set' : ` or its rateLimitAdmin (${rateLimitAdmin})`}`,
+        `must be the pool owner (${owner})${
+          rateLimitAdmin === ZeroAddress
+            ? ' — this pool has no rateLimitAdmin set'
+            : ` or its rateLimitAdmin (${rateLimitAdmin})`
+        }`,
       )
     }
   }

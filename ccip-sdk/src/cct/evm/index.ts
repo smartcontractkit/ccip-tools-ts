@@ -560,17 +560,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned pool `setDynamicConfig` tx (for multisig / offline signing): replaces a
    * **v2.0.0** pool's whole dynamic config — the `router` it accepts ramp calls from, plus the
    * `rateLimitAdmin` and `feeAdmin` delegate roles.
-   * @remarks 2.0.0 dropped the `setRouter` / `setRateLimitAdmin` setters and writes all three
-   * fields together, so **all three params are required**: read the current triple with
-   * {@link getTokenPoolState} and pass back whatever you are not changing. The op never reads
-   * `getDynamicConfig()` for you, because the calldata must be deterministic at build time — a
-   * hidden read would bake in a value that has moved on-chain by the time a cold signer gets to
-   * it, silently reverting an unrelated config change made in the interim.
+   * @remarks This is where the pre-2.0.0 `setRouter` / `setRateLimitAdmin` setters went: 2.0.0
+   * removed them and writes all three fields together. Consequently **all three params are
+   * required** — this op deliberately does *not* read `getDynamicConfig()` to fill in what the
+   * caller omitted. The calldata has to be deterministic at build time: a multisig or cold wallet
+   * may sign it days later, and a hidden read would bake a value that has since moved on-chain,
+   * silently reverting an unrelated config change made in the interim.
    *
-   * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin} —
-   * which this replaces on a 2.0.0 pool. Zero `rateLimitAdmin` / `feeAdmin` clears that
-   * delegation; `router` must be non-zero, since a zero router detaches the pool from CCIP
-   * rather than clearing a privilege.
+   * Read the current triple with {@link getTokenPoolState} and pass it back explicitly, so what
+   * is signed is exactly what was reviewed. This is also the migration path off
+   * {@link setRateLimitAdmin} for a 2.0.0 pool.
+   *
+   * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin}.
+   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
+   * a zero router detaches the pool from CCIP rather than clearing a privilege.
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool, which has no
    * `setDynamicConfig` — use {@link generateUnsignedSetRateLimitAdmin} there
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` or `router` is
