@@ -7,8 +7,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { SetCanAcceptLiquidity } from './set-can-accept-liquidity.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -42,7 +42,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedSetCanAcceptLiquidity({
+  return new SetCanAcceptLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'lock-release',
     payer: PAYER,
@@ -122,7 +122,7 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).setCanAcceptLiquidity({
+      const result = await new SetCanAcceptLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'lock-release',
         allow: ALLOW,
@@ -135,7 +135,7 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setCanAcceptLiquidity({
+          new SetCanAcceptLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'lock-release',
             allow: ALLOW,

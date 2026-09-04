@@ -7,12 +7,12 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import {
   deriveTokenPoolChainConfigPda,
   deriveTokenPoolConfigPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
+import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -46,7 +46,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedDeleteChainRemoteConfig({
+  return new DeleteChainRemoteConfig().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -127,7 +127,7 @@ describe('DeleteChainRemoteConfig (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).deleteChainRemoteConfig({
+      const result = await new DeleteChainRemoteConfig().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
@@ -140,7 +140,7 @@ describe('DeleteChainRemoteConfig (cct/solana)', () => {
     it('rejects a non-wallet authority for signed deletion', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).deleteChainRemoteConfig({
+          new DeleteChainRemoteConfig().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,

@@ -10,8 +10,8 @@ import {
 } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenAdminRegistryPda } from '../../programs/router.ts'
+import { GetTokenAdminRegistry } from './get-token-admin-registry.ts'
 
 const ROUTER = Keypair.generate().publicKey
 const TOKEN = Keypair.generate().publicKey
@@ -59,7 +59,7 @@ function stubChain(account: { data: Buffer } | null = registryAccount()): Solana
 describe('GetTokenAdminRegistry (cct/solana)', () => {
   describe('query', () => {
     it('returns configured administrators, lookup table, and writable indexes', async () => {
-      const config = await SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistry({
+      const config = await new GetTokenAdminRegistry().query(stubChain(), {
         address: ROUTER.toBase58(),
         tokenAddress: TOKEN.toBase58(),
       })
@@ -76,9 +76,10 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     })
 
     it('omits optional fields when unset', async () => {
-      const config = await SolanaTokenManager.fromChain(
+      const config = await new GetTokenAdminRegistry().query(
         stubChain(registryAccount(PublicKey.default, PublicKey.default, false, false)),
-      ).getTokenAdminRegistry({ address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() })
+        { address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() },
+      )
 
       assert.deepEqual(config, {
         mint: TOKEN.toBase58(),
@@ -89,17 +90,19 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     })
 
     it('returns disabled auto derivation setting', async () => {
-      const config = await SolanaTokenManager.fromChain(
+      const config = await new GetTokenAdminRegistry().query(
         stubChain(registryAccount(PENDING_ADMINISTRATOR, LOOKUP_TABLE, false)),
-      ).getTokenAdminRegistry({ address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() })
+        { address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() },
+      )
 
       assert.equal(config.supportsAutoDerivation, false)
     })
 
     it('omits the system program as pending administrator', async () => {
-      const config = await SolanaTokenManager.fromChain(
+      const config = await new GetTokenAdminRegistry().query(
         stubChain(registryAccount(SystemProgram.programId)),
-      ).getTokenAdminRegistry({ address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() })
+        { address: ROUTER.toBase58(), tokenAddress: TOKEN.toBase58() },
+      )
 
       assert.equal(config.pendingAdministrator, undefined)
     })
@@ -107,7 +110,7 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     it('rejects malformed registry data', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain({ data: Buffer.alloc(8) })).getTokenAdminRegistry({
+          new GetTokenAdminRegistry().query(stubChain({ data: Buffer.alloc(8) }), {
             address: ROUTER.toBase58(),
             tokenAddress: TOKEN.toBase58(),
           }),
@@ -118,7 +121,7 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     it('rejects unregistered tokens', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain(null)).getTokenAdminRegistry({
+          new GetTokenAdminRegistry().query(stubChain(null), {
             address: ROUTER.toBase58(),
             tokenAddress: TOKEN.toBase58(),
           }),
@@ -131,7 +134,7 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     it('rejects an invalid router address', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistry({
+          new GetTokenAdminRegistry().query(stubChain(), {
             address: 'invalid',
             tokenAddress: TOKEN.toBase58(),
           }),
@@ -143,7 +146,7 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
     it('rejects an invalid token address', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).getTokenAdminRegistry({
+          new GetTokenAdminRegistry().query(stubChain(), {
             address: ROUTER.toBase58(),
             tokenAddress: 'invalid',
           }),
