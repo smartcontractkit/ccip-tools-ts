@@ -298,10 +298,10 @@ import { CantonChain, type CantonConfig } from '@chainlink/ccip-sdk'
 const cantonConfig: CantonConfig = {
   party: 'receiver::1220...',
   ccipParty: 'ccip::1220...',
-  // Either a static JWT, or a tokenGetter for refreshable tokens (OAuth2).
-  // The CLI resolves its `auth` block into one of these upfront — see
-  // Canton Configuration. Web/Electron embedders compose the SDK's OAuth2
-  // protocol helpers and inject a tokenGetter here.
+  // Either a static JWT string, or a () => Promise<string> getter for
+  // refreshable tokens (OAuth2). The CLI resolves its `auth` block into
+  // one of these upfront — see Canton Configuration. Web/Electron embedders
+  // compose the SDK's OAuth2 protocol helpers and inject a getter here.
   jwt: 'eyJ...',
   edsUrl: 'https://eds.example.com',
   transferInstructionUrl: 'https://transfer-instruction.example.com',

@@ -288,17 +288,16 @@ describe('cli/providers/canton/auth — runAuthorizationCodeFlow', () => {
 // ---------------------------------------------------------------------------
 
 describe('cli/providers/canton/auth — resolveCantonTokenGetter', () => {
-  it('returns a static jwt for static auth', async () => {
-    const { jwt, tokenGetter } = await resolveCantonTokenGetter({ jwt: 'static-jwt-123' })
+  it('returns a static jwt string for static auth', async () => {
+    const jwt = await resolveCantonTokenGetter({ jwt: 'static-jwt-123' })
     assert.equal(jwt, 'static-jwt-123')
-    assert.equal(tokenGetter, undefined)
   })
 
-  it('returns a tokenGetter for clientCredentials', async () => {
+  it('returns a token getter function for clientCredentials', async () => {
     const tokenServer = await startTokenServer({})
     const metaServer = await startMetadataServer({ tokenEndpoint: `${tokenServer.url}/v1/token` })
     try {
-      const { jwt, tokenGetter } = await resolveCantonTokenGetter(
+      const jwt = await resolveCantonTokenGetter(
         {
           type: AuthType.ClientCredentials,
           authUrl: metaServer.baseUrl,
@@ -307,9 +306,8 @@ describe('cli/providers/canton/auth — resolveCantonTokenGetter', () => {
         },
         { allowInsecureRequests: true },
       )
-      assert.equal(jwt, undefined)
-      assert.ok(typeof tokenGetter === 'function')
-      const token = await tokenGetter!()
+      assert.ok(typeof jwt === 'function')
+      const token = await (jwt as () => Promise<string>)()
       assert.equal(token, 'test-access-token')
     } finally {
       tokenServer.server.close()

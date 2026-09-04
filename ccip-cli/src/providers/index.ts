@@ -165,8 +165,8 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   let txFoundIn: string | undefined
 
   /**
-   * Resolve the Canton config's `auth` block (if present) into a `jwt` or
-   * `tokenGetter` upfront, so the SDK never orchestrates an OAuth flow. The
+   * Resolve the Canton config's `auth` block (if present) into a `jwt` (string
+   * or getter) upfront, so the SDK never orchestrates an OAuth flow. The
    * resolution is lazy (only awaited when the Canton family is loaded) and
    * memoized so repeated family loads reuse the same resolved config.
    *
@@ -180,11 +180,11 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
     if (!rawCantonConfig.auth) return Promise.resolve(rawCantonConfig as ResolvedCantonConfig)
     return (resolvedCantonConfig$ ??= resolveCantonTokenGetter(rawCantonConfig.auth, {
       signal: ctx.abort,
-    }).then(({ jwt, tokenGetter }) => {
-      // `auth` is consumed here; the SDK receives only `jwt`/`tokenGetter`.
+    }).then((jwt) => {
+      // `auth` is consumed here; the SDK receives only `jwt`.
       const { auth: _auth, ...rest } = rawCantonConfig
       void _auth
-      return { ...rest, jwt: jwt ?? rest.jwt, tokenGetter: tokenGetter ?? rest.tokenGetter }
+      return { ...rest, jwt }
     }))
   }
 
@@ -205,7 +205,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
 
         const chains$: Promise<Chain>[] = []
         const txOnlyRacers = new WeakSet<Chain>()
-        // For Canton, await the upfront auth resolution (auth block → jwt/tokenGetter)
+        // For Canton, await the upfront auth resolution (auth block → jwt)
         // before spawning racers, so the SDK never orchestrates an OAuth flow.
         const cantonConfigForFamily =
           F === ChainFamily.Canton ? await getResolvedCantonConfig() : undefined

@@ -4,12 +4,12 @@ import type { CantonAuthConfig, CantonConfig, Logger } from '@chainlink/ccip-sdk
 
 /**
  * A Canton config as loaded from the CLI's JSON file, before the `auth` block
- * is resolved into a `jwt` / `tokenGetter`.
+ * is resolved into a `jwt` (string or getter).
  *
  * The file may carry either a static `jwt` string or an `auth` block (OIDC:
  * `static` / `clientCredentials` / `authorizationCode`). The CLI resolves
  * `auth` upfront (see {@link resolveCantonTokenGetter}) and hands the SDK a
- * config with only `jwt` / `tokenGetter` — the SDK never sees `auth`.
+ * config with only `jwt` — the SDK never sees `auth`.
  */
 export type CantonCliConfig = CantonConfig & { auth?: CantonAuthConfig }
 
@@ -19,7 +19,7 @@ export type CantonCliConfig = CantonConfig & { auth?: CantonAuthConfig }
  * The config may carry either:
  * - a static `jwt` string, or
  * - an `auth` block (OIDC: `static` / `clientCredentials` / `authorizationCode`),
- *   which the CLI resolves upfront into a `jwt` or `tokenGetter` before handing
+ *   which the CLI resolves upfront into a `jwt` (string or getter) before handing
  *   the config to the SDK.
  *
  * `jwt` (or `auth`) is required: one of them must be present.

@@ -12,7 +12,7 @@
  *   protocol helpers and hands the result to `cantonConfig`.
  *
  * The SDK (`@chainlink/ccip-sdk`) is runtime-agnostic: it consumes only what
- * it's given (`jwt` or `tokenGetter`) and never orchestrates an OAuth flow.
+ * it's given (`jwt`) and never orchestrates an OAuth flow.
  */
 
 export {

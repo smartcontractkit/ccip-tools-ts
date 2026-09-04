@@ -430,17 +430,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    // Resolve authentication: an explicit `jwt` is a static override;
-    // otherwise a `tokenGetter` is threaded through to every client so each
-    // request carries a fresh JWT (enabling automatic refresh). The SDK never
-    // orchestrates an OAuth flow — the caller (CLI / embedder) resolves auth
-    // upfront and hands the result to `cantonConfig`.
-    const jwt = ctx.cantonConfig.jwt?.trim()
-    const tokenGetter = ctx.cantonConfig.tokenGetter
-    if (!jwt && !tokenGetter) {
+    // Authentication: `jwt` is either a static string or a `() => Promise<string>`
+    // getter for refreshable tokens. The SDK never orchestrates an OAuth flow —
+    // the caller (CLI / embedder) resolves auth upfront and hands the result to
+    // `cantonConfig.jwt`. Thread it through to every client so each request
+    // carries a fresh JWT when a getter is supplied.
+    const jwt = ctx.cantonConfig.jwt
+    if (!jwt) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_AUTH_ERROR,
-        'CantonChain.fromUrl: cantonConfig.jwt or cantonConfig.tokenGetter is required for authentication',
+        'CantonChain.fromUrl: cantonConfig.jwt is required for authentication',
       )
     }
 
@@ -448,7 +447,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const client = createCantonClient({
       baseUrl: url,
       jwt,
-      tokenGetter,
       signal: ctx.abort,
       fetch: fetchFn,
     })
@@ -474,18 +472,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const transferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt,
-      tokenGetter,
     })
     const linkTransferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.edsUrl,
       jwt,
-      tokenGetter,
       useScanProxy: false,
     })
     const tokenMetadataClient = createTokenMetadataClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt,
-      tokenGetter,
     })
     return CantonChain.fromClient(
       client,

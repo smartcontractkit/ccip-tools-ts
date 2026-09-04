@@ -213,23 +213,14 @@ export type CantonConfig = {
   /**
    * JSON Web Token for authentication with the Canton Ledger API.
    *
-   * When `tokenGetter` is provided, `jwt` is optional — the SDK calls the
-   * getter per request to obtain a fresh JWT (enabling automatic refresh).
-   * When both are set, `jwt` takes precedence as a static override.
+   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
+   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
+   * getter is supplied, the SDK clients call it per request to obtain a fresh
+   * JWT, enabling automatic refresh. The CLI resolves its `auth` block upfront
+   * and injects either a string or a getter here; web/Electron embedders inject
+   * their own.
    */
-  jwt?: string
-
-  /**
-   * Optional token getter invoked per Canton Ledger API request to obtain a
-   * fresh JWT.
-   *
-   * Use this when the token may expire and must be refreshed (e.g. OAuth2
-   * client-credentials or authorization-code flows). The CLI resolves auth
-   * upfront and injects a getter backed by a caching provider; web/Electron
-   * embedders inject their own. When set, this takes precedence over `jwt`
-   * only when `jwt` is absent.
-   */
-  tokenGetter?: () => Promise<string>
+  jwt?: string | (() => Promise<string>)
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string

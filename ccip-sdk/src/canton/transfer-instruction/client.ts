@@ -76,17 +76,12 @@ export interface TransferInstructionClientConfig {
   /**
    * Optional JWT for authentication.
    *
-   * Mutually exclusive with `tokenGetter`; when both are set, `jwt` is used as
-   * a static token. Prefer `tokenGetter` when the token may expire.
+   * Pass a string for a static token, or a `() => Promise<string>` getter for
+   * a refreshable token. When a getter is supplied, each request awaits it and
+   * uses the returned JWT in the `Authorization` header (enabling automatic
+   * refresh).
    */
-  jwt?: string
-  /**
-   * Optional token getter invoked per request to obtain a fresh JWT.
-   *
-   * When set, each request awaits the getter and uses the returned JWT in the
-   * `Authorization` header (enabling automatic refresh).
-   */
-  tokenGetter?: () => Promise<string>
+  jwt?: string | (() => Promise<string>)
   /** Request timeout in milliseconds (default: 30 000) */
   timeout?: number
   /**
@@ -107,14 +102,13 @@ export interface TransferInstructionClientConfig {
  */
 export function createTransferInstructionClient(config: TransferInstructionClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const staticHeaders = buildHeaders(config.jwt)
-  const tokenGetter = config.tokenGetter
+  const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
 
-  /** Resolve request headers, awaiting `tokenGetter` when configured. */
+  /** Resolve request headers, awaiting `jwt` when it is a function. */
   async function resolveHeaders(): Promise<Record<string, string>> {
-    if (!tokenGetter) return staticHeaders
-    return buildHeaders(await tokenGetter())
+    const token = typeof jwt === 'function' ? await jwt() : jwt
+    return buildHeaders(token)
   }
 
   const apiPath = (path: string) => (config.useScanProxy === false ? path : `/v0/scan-proxy${path}`)

@@ -330,13 +330,14 @@ class CliAuthorizationCodeProvider implements CantonAuthProvider {
 }
 
 /**
- * Resolve a `() => Promise<string>` token getter for a {@link CantonConfig}
- * from an {@link AuthConfig}, suitable for `cantonConfig.tokenGetter`.
+ * Resolve a JWT (or token getter) for a {@link CantonConfig} from an
+ * {@link AuthConfig}, suitable for `cantonConfig.jwt`.
  *
  * The CLI calls this upfront (before `CantonChain.fromUrl`) so auth is resolved
- * once and the SDK clients refresh per request via the returned getter. When
- * the auth config is `static`, a static JWT string is returned instead (no
- * getter needed — the caller can set `cantonConfig.jwt` directly).
+ * once. When the auth config is `static`, a static JWT string is returned; for
+ * refreshable flows (clientCredentials / authorizationCode), a
+ * `() => Promise<string>` getter is returned so the SDK clients refresh per
+ * request.
  *
  * The resolved provider is memoized process-wide by auth-config fingerprint, so
  * repeated calls within one process (e.g. `send` → `showRequests` both calling
@@ -345,14 +346,14 @@ class CliAuthorizationCodeProvider implements CantonAuthProvider {
  *
  * @param auth - Auth config (static, clientCredentials, or authorizationCode).
  * @param options - Optional fetch override, abort signal, and flow controls.
- * @returns A `{ jwt }` for static auth, or a `{ tokenGetter }` for refreshable
- *   flows (clientCredentials / authorizationCode).
+ * @returns A `string` for static auth, or a `() => Promise<string>` getter for
+ *   refreshable flows (clientCredentials / authorizationCode).
  * @throws {@link CCIPError} (CANTON_AUTH_ERROR) on invalid config or auth failure.
  *
  * @example
  * ```ts
- * const { jwt, tokenGetter } = await resolveCantonTokenGetter(auth)
- * const cantonConfig = { ...rest, jwt, tokenGetter }
+ * const jwt = await resolveCantonTokenGetter(auth)
+ * const cantonConfig = { ...rest, jwt }
  * ```
  */
 export async function resolveCantonTokenGetter(
@@ -362,13 +363,13 @@ export async function resolveCantonTokenGetter(
     openBrowser?: boolean
     timeoutMs?: number
   },
-): Promise<{ jwt?: string; tokenGetter?: () => Promise<string> }> {
+): Promise<string | (() => Promise<string>)> {
   const provider = await getOrCreateCliAuthProvider(auth, options)
 
-  // Static tokens never expire → return a plain jwt string (no getter needed).
+  // Static tokens never expire → return a plain jwt string.
   if (provider instanceof CantonStaticProvider) {
     const token = await provider.token()
-    return { jwt: token.accessToken }
+    return token.accessToken
   }
 
   // Refreshable flows (clientCredentials / authorizationCode) → return a
@@ -379,7 +380,7 @@ export async function resolveCantonTokenGetter(
   }
   // Eagerly fetch the first token so connection-time errors surface early.
   await tokenGetter()
-  return { tokenGetter }
+  return tokenGetter
 }
 
 /**
