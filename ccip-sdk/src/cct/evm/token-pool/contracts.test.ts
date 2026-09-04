@@ -146,6 +146,46 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
+  it('normalizes the v1.5.0 *AndProxy shims to their base type', () => {
+    for (const [contractType, type] of [
+      ['BurnMintTokenPoolAndProxy', 'BurnMintTokenPool'],
+      ['BurnFromMintTokenPoolAndProxy', 'BurnFromMintTokenPool'],
+      ['BurnWithFromMintTokenPoolAndProxy', 'BurnWithFromMintTokenPool'],
+      ['LockReleaseTokenPoolAndProxy', 'LockReleaseTokenPool'],
+    ] as const) {
+      assert.deepEqual(parseTokenPoolVersion({ address: ADDR, contractType, version: '1.5.0' }), {
+        type,
+        version: TokenPoolVersion.V1_5_0,
+      })
+    }
+  })
+
+  it('only strips AndProxy at v1.5.0 — the shim exists at no other version', () => {
+    for (const version of ['1.5.1', '1.6.1', '2.0.0']) {
+      assert.throws(
+        () =>
+          parseTokenPoolVersion({
+            address: ADDR,
+            contractType: 'BurnMintTokenPoolAndProxy',
+            version,
+          }),
+        CCTContractTypeInvalidError,
+      )
+    }
+  })
+
+  it('gates the stripped base type, so an unsupported AndProxy name is still rejected', () => {
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'UpgradeableLockReleaseTokenPoolAndProxy',
+          version: '1.5.0',
+        }),
+      CCTContractTypeInvalidError,
+    )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
