@@ -14,7 +14,6 @@ import {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
-import { ApproveToken } from '../../token/operations/approve-token.ts'
 import { ProvideLiquidity } from './provide-liquidity.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -75,6 +74,7 @@ function chain(
   rebalancer = new PublicKey(AUTHORITY),
   acceptsLiquidity = true,
   sourceBalance = 1_000_000n,
+  delegatedAmount = 1_000_000n,
 ): SolanaChain {
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
@@ -84,7 +84,7 @@ function chain(
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
           ? { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
-          : tokenAccount(poolSigner, 1_000_000n, sourceBalance),
+          : tokenAccount(poolSigner, delegatedAmount, sourceBalance),
     },
   } as unknown as SolanaChain
 }
@@ -213,23 +213,29 @@ describe('ProvideLiquidity (cct/solana)', () => {
       assert.equal(unsigned.instructions[0]!.keys[6]!.pubkey.toBase58(), PAYER)
     })
 
-    it('uses a source account that can be delegated to the pool signer', async () => {
+    it('bundles approval before liquidity when requested', async () => {
       const poolProgram = resolveTokenPoolProgram('lock-release')
       const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
-      const approval = await new ApproveToken().generate(chain(), {
-        payer: AUTHORITY,
-        tokenAddress: TOKEN,
-        delegate: poolSigner.toBase58(),
-        amount: 1_000_000n,
-      })
-      const liquidity = await generate()
-
-      assert.equal(approval.instructions[0]!.keys[1]!.pubkey.toBase58(), poolSigner.toBase58())
-      assert.equal(
-        approval.instructions[0]!.keys[0]!.pubkey.toBase58(),
-        liquidity.instructions[0]!.keys[5]!.pubkey.toBase58(),
+      const unsigned = await new ProvideLiquidity().generate(
+        chain(poolProgram, new PublicKey(AUTHORITY), true, 1_000_000n, 0n),
+        {
+          payer: PAYER,
+          tokenAddress: TOKEN,
+          poolType: 'lock-release',
+          authority: AUTHORITY,
+          amount: 1_000_000n,
+          includeApproval: true,
+        },
       )
-      assert.equal(approval.instructions[0]!.data.readBigUInt64LE(1), 1_000_000n)
+
+      assert.equal(unsigned.instructions.length, 2)
+      assert.equal(unsigned.mainIndex, 1)
+      assert.equal(unsigned.instructions[0]!.keys[1]!.pubkey.toBase58(), poolSigner.toBase58())
+      assert.equal(unsigned.instructions[0]!.data.readBigUInt64LE(1), 1_000_000n)
+      assert.equal(
+        lockReleaseTokenPoolCoder.instruction.decode(unsigned.instructions[1]!.data)?.name,
+        'provideLiquidity',
+      )
     })
 
     it('supports a compatible custom pool program', async () => {
