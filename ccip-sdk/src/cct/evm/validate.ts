@@ -237,33 +237,3 @@ export function parseUniqueHexBytesArray(
     return hex
   })
 }
-
-/**
- * Asserts `value` — already known to be an array — has no holes.
- *
- * @remarks Every array param in this package is validated element-wise with `.forEach`/`.map`,
- * and both of those **skip holes**. A sparse array (`const a = [x]; a[2] = y`) therefore walks
- * through element validation untouched, and the hole reaches ABI encoding as `undefined`, where
- * ethers throws a bare `TypeError` carrying none of the `operation`/`param` context this package
- * promises — and only *after* the `typeAndVersion` RPC has been spent. Checking density up front
- * keeps the "fail before RPC, with an indexed param path" contract intact.
- * @param operation - Operation name, for the error context.
- * @param param - Param path of the array itself, e.g. `chainsToAdd`; the blamed index is appended.
- * @param value - The array to check.
- * @throws {@link CCTParamsInvalidError} naming the first hole, e.g. `chainsToAdd[1]`
- */
-export function assertDenseArray(
-  operation: string,
-  param: string,
-  value: readonly unknown[],
-): void {
-  for (let i = 0; i < value.length; i++) {
-    if (!(i in value)) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${param}[${i}]`,
-        'must not be a hole — the array is sparse, and a missing element cannot be encoded',
-      )
-    }
-  }
-}

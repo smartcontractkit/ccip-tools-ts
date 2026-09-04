@@ -293,17 +293,17 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       assert.equal(state.tokenDecimals, 6)
     })
 
-    it('rejects a v1.5.0 AndProxy pool, whose type name is not in the supported set', async () => {
+    it('reads a v1.5.0 AndProxy pool, reporting the normalized base type', async () => {
       const chain = stubChain({
         typeAndVersion: 'BurnMintTokenPoolAndProxy 1.5.0',
         version: TokenPoolVersion.V1_5_0,
         reads: LEGACY_READS,
       })
 
-      await assert.rejects(
-        () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
-      )
+      const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+      assert.equal(state.type, 'BurnMintTokenPool')
+      assert.equal(state.version, '1.5.0')
     })
   })
 

@@ -20,7 +20,7 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
-import { assertDenseArray, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
+import { validateArray, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   getTokenPoolInterface,
@@ -103,10 +103,7 @@ function parseUpdates(
   allowFastFinality: boolean,
   version: TokenPoolVersion | null,
 ): ParsedChainRateLimitUpdate[] {
-  if (!Array.isArray(updates) || updates.length === 0)
-    throw new CCTParamsInvalidError(operation, 'updates', 'must be a non-empty array')
-  // `.map` below skips holes, so reject a sparse array before it can smuggle one past validation
-  assertDenseArray(operation, 'updates', updates)
+  validateArray(operation, 'updates', updates, 1)
 
   const seen = new Set<bigint>()
   return updates.map((update, i) => {
@@ -328,7 +325,11 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
-        `must be the pool owner (${owner})${rateLimitAdmin === ZeroAddress ? ' — this pool has no rateLimitAdmin set' : ` or its rateLimitAdmin (${rateLimitAdmin})`}`,
+        `must be the pool owner (${owner})${
+          rateLimitAdmin === ZeroAddress
+            ? ' — this pool has no rateLimitAdmin set'
+            : ` or its rateLimitAdmin (${rateLimitAdmin})`
+        }`,
       )
     }
   }
