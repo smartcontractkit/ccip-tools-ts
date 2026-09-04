@@ -11,41 +11,41 @@
  * @packageDocumentation
  */
 
-import { Interface, getAddress } from 'ethers';
-import type { TypedContract } from 'ethers-abitype';
+import { Interface, getAddress } from 'ethers'
+import type { TypedContract } from 'ethers-abitype'
 
-import type { EVMChain } from '../../../evm/index.ts';
-import { resultToObject } from '../../../evm/types.ts';
+import type { EVMChain } from '../../../evm/index.ts'
+import { resultToObject } from '../../../evm/types.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-} from '../../errors.ts';
-import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts';
-import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts';
-import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts';
-import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts';
-import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts';
-import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts';
-import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts';
-import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts';
-import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts';
-import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts';
-import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts';
-import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts';
-import type { DeployArtifact } from '../operation.ts';
-import { getTypedContract } from '../query.ts';
+} from '../../errors.ts'
+import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts'
+import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
+import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
+import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
+import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import type { DeployArtifact } from '../operation.ts'
+import { getTypedContract } from '../query.ts'
 
 /**
  * ABI families for pool resolution. The burn-* variants are interface-compatible for CCT
  * ops (identical constructor + `transferOwnership`, shared TokenPool surface), so they share
  * the `BurnMint` ABI; `LockRelease` (with its liquidity functions) is distinct.
  */
-export const TOKEN_POOL_FAMILIES = ['BurnMint', 'LockRelease'] as const;
+export const TOKEN_POOL_FAMILIES = ['BurnMint', 'LockRelease'] as const
 
 /** An ABI family for pool resolution. */
-export type TokenPoolFamily = (typeof TOKEN_POOL_FAMILIES)[number];
+export type TokenPoolFamily = (typeof TOKEN_POOL_FAMILIES)[number]
 
 /**
  * Supported on-chain `typeAndVersion` pool types. The burn-* variants are interface-compatible
@@ -60,23 +60,20 @@ export const TOKEN_POOL_TYPES = [
   'BurnMintWithLockReleaseFlagTokenPool',
   'LockReleaseTokenPool',
   'SiloedLockReleaseTokenPool',
-] as const;
+] as const
 
 /** A supported EVM token-pool contract type. */
-export type TokenPoolType = (typeof TOKEN_POOL_TYPES)[number];
+export type TokenPoolType = (typeof TOKEN_POOL_TYPES)[number]
 
 /** The burn-* mint pool types, which share the `BurnMint` ABI. */
-export type BurnMintTokenPoolType = Extract<TokenPoolType, `Burn${string}`>;
+export type BurnMintTokenPoolType = Extract<TokenPoolType, `Burn${string}`>
 
 /** The lock/release pool types, which share the `LockRelease` ABI. */
-export type LockReleaseTokenPoolType = Exclude<
-  TokenPoolType,
-  BurnMintTokenPoolType
->;
+export type LockReleaseTokenPoolType = Exclude<TokenPoolType, BurnMintTokenPoolType>
 
 /** Type guard for {@link TOKEN_POOL_TYPES}. */
 export function isTokenPoolType(v: string): v is TokenPoolType {
-  return (TOKEN_POOL_TYPES as readonly string[]).includes(v);
+  return (TOKEN_POOL_TYPES as readonly string[]).includes(v)
 }
 
 /**
@@ -86,14 +83,12 @@ export function isTokenPoolType(v: string): v is TokenPoolType {
  * {@link TOKEN_POOL_TYPES} is the gate, so only allowlisted, ABI-compatible names reach here.
  */
 export function getTokenPoolFamily(type: TokenPoolType): TokenPoolFamily {
-  return /^Burn/.test(type) ? 'BurnMint' : 'LockRelease';
+  return /^Burn/.test(type) ? 'BurnMint' : 'LockRelease'
 }
 
 /** Narrows a pool type to the {@link LockReleaseTokenPoolType}s, per {@link getTokenPoolFamily}. */
-export function isLockReleaseTokenPoolType(
-  type: TokenPoolType,
-): type is LockReleaseTokenPoolType {
-  return getTokenPoolFamily(type) === 'LockRelease';
+export function isLockReleaseTokenPoolType(type: TokenPoolType): type is LockReleaseTokenPoolType {
+  return getTokenPoolFamily(type) === 'LockRelease'
 }
 
 /** Known pool versions, low to high. Value order drives floor-match in {@link resolveEncoder}. */
@@ -102,15 +97,14 @@ export const TokenPoolVersion = {
   V1_5_1: '1.5.1',
   V1_6_1: '1.6.1',
   V2_0_0: '2.0.0',
-} as const;
+} as const
 
 /** A known EVM token-pool version. */
-export type TokenPoolVersion =
-  (typeof TokenPoolVersion)[keyof typeof TokenPoolVersion];
+export type TokenPoolVersion = (typeof TokenPoolVersion)[keyof typeof TokenPoolVersion]
 
 /** Type guard for {@link TokenPoolVersion}. */
 export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
-  return Object.values(TokenPoolVersion).some((known) => known === v);
+  return Object.values(TokenPoolVersion).some((known) => known === v)
 }
 
 /**
@@ -124,22 +118,18 @@ export function parseTokenPoolVersion({
   contractType,
   version,
 }: {
-  address: string;
-  contractType: string;
-  version: string;
+  address: string
+  contractType: string
+  version: string
 }): { type: TokenPoolType; version: TokenPoolVersion } {
   if (!isTokenPoolType(contractType))
-    throw new CCTContractTypeInvalidError(
-      address,
-      TOKEN_POOL_TYPES.join(', '),
-      contractType,
-    );
+    throw new CCTContractTypeInvalidError(address, TOKEN_POOL_TYPES.join(', '), contractType)
   if (!isTokenPoolVersion(version))
     throw new CCTContractVersionUnsupportedError(contractType, version, {
       context: { address },
-    });
+    })
 
-  return { type: contractType, version };
+  return { type: contractType, version }
 }
 
 /**
@@ -152,15 +142,12 @@ export async function resolveTokenPool(
   chain: EVMChain,
   address: string,
 ): Promise<{ type: TokenPoolType; version: TokenPoolVersion }> {
-  const [contractType, version] = await chain.typeAndVersion(address);
-  return parseTokenPoolVersion({ address, contractType, version });
+  const [contractType, version] = await chain.typeAndVersion(address)
+  return parseTokenPoolVersion({ address, contractType, version })
 }
 
 /** `Ownable2Step.owner()`, identical across all supported pool types and versions. */
-type PoolOwnerGetter = Pick<
-  TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
-  'owner'
->;
+type PoolOwnerGetter = Pick<TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>, 'owner'>
 
 /**
  * Pre-flights `sender` against the pool's on-chain `owner()` for an owner-gated write, so an
@@ -185,13 +172,13 @@ export async function assertPoolOwner(
   poolAddress: string,
   sender: string,
 ): Promise<void> {
-  const owner = await readTokenPoolOwner(chain, poolAddress);
-  if (getAddress(sender) === owner) return;
+  const owner = await readTokenPoolOwner(chain, poolAddress)
+  if (getAddress(sender) === owner) return
   throw new CCTParamsInvalidError(
     operation,
     'sender',
     `must be the current token pool owner (${owner})`,
-  );
+  )
 }
 
 /**
@@ -199,10 +186,7 @@ export async function assertPoolOwner(
  * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
  * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
  */
-export const TOKEN_POOL_INTERFACES: Record<
-  TokenPoolFamily,
-  Record<TokenPoolVersion, Interface>
-> = {
+export const TOKEN_POOL_INTERFACES: Record<TokenPoolFamily, Record<TokenPoolVersion, Interface>> = {
   BurnMint: {
     [TokenPoolVersion.V1_5_0]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_0_ABI),
     [TokenPoolVersion.V1_5_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI),
@@ -210,31 +194,20 @@ export const TOKEN_POOL_INTERFACES: Record<
     [TokenPoolVersion.V2_0_0]: new Interface(BURN_MINT_TOKEN_POOL_V2_0_0_ABI),
   },
   LockRelease: {
-    [TokenPoolVersion.V1_5_0]: new Interface(
-      LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI,
-    ),
-    [TokenPoolVersion.V1_5_1]: new Interface(
-      LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI,
-    ),
-    [TokenPoolVersion.V1_6_1]: new Interface(
-      LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI,
-    ),
-    [TokenPoolVersion.V2_0_0]: new Interface(
-      LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI,
-    ),
+    [TokenPoolVersion.V1_5_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI),
+    [TokenPoolVersion.V1_5_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI),
+    [TokenPoolVersion.V1_6_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
+    [TokenPoolVersion.V2_0_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
   },
-};
+}
 
 /**
  * Returns the cached pool {@link Interface} for `type` and `version`, selected by the
  * type's {@link TokenPoolFamily}. Never throws when both came from
  * {@link parseTokenPoolVersion}.
  */
-export function getTokenPoolInterface(
-  type: TokenPoolType,
-  version: TokenPoolVersion,
-): Interface {
-  return TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version];
+export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVersion): Interface {
+  return TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
 }
 
 /**
@@ -265,16 +238,13 @@ export function getTokenPoolInterface(
  * @param poolAddress - Token pool contract to read `owner()` from.
  * @returns The current owner, checksummed.
  */
-export async function readTokenPoolOwner(
-  chain: EVMChain,
-  poolAddress: string,
-): Promise<string> {
+export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): Promise<string> {
   const pool: PoolOwnerGetter = getTypedContract(
     chain,
     poolAddress,
     BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
-  );
-  return getAddress(resultToObject(await pool.owner()));
+  )
+  return getAddress(resultToObject(await pool.owner()))
 }
 
 /**
@@ -284,7 +254,7 @@ export async function readTokenPoolOwner(
 type PoolAllowlistGetter = Pick<
   TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
   'getAllowListEnabled' | 'getAllowList'
->;
+>
 
 /**
  * Reads a token pool's sender allowlist and whether the feature is enabled at all, in two
@@ -308,15 +278,12 @@ export async function readTokenPoolAllowlist(
     chain,
     poolAddress,
     BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
-  );
-  const [enabled, entries] = await Promise.all([
-    pool.getAllowListEnabled(),
-    pool.getAllowList(),
-  ]);
+  )
+  const [enabled, entries] = await Promise.all([pool.getAllowListEnabled(), pool.getAllowList()])
   return {
     enabled: resultToObject(enabled),
     entries: resultToObject(entries).map((entry) => getAddress(entry)),
-  };
+  }
 }
 
 /**
@@ -340,23 +307,15 @@ export async function readTokenPoolRateLimitAdmin(
   version: TokenPoolVersion,
 ): Promise<string> {
   if (version === TokenPoolVersion.V2_0_0) {
-    const pool = getTypedContract(
-      chain,
-      poolAddress,
-      BURN_MINT_TOKEN_POOL_V2_0_0_ABI,
-    );
+    const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
     // getDynamicConfig returns (router, rateLimitAdmin, feeAdmin); index the raw Result rather
     // than resultToObject it, which would turn the named tuple into an object (see
     // get-token-pool-state.ts).
-    const dynamicConfig = await pool.getDynamicConfig();
-    return getAddress(dynamicConfig[1] as string);
+    const dynamicConfig = await pool.getDynamicConfig()
+    return getAddress(dynamicConfig[1] as string)
   }
-  const pool = getTypedContract(
-    chain,
-    poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_1_ABI,
-  );
-  return getAddress(resultToObject(await pool.getRateLimitAdmin()));
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+  return getAddress(resultToObject(await pool.getRateLimitAdmin()))
 }
 
 /**
@@ -369,30 +328,26 @@ const TOKEN_POOL_BYTECODE = {
   BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-} satisfies Partial<Record<TokenPoolType, `0x${string}`>>;
+} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
 
 /** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
-export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE;
+export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
 
 /** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
-export function isDeployableTokenPoolType(
-  type: string,
-): type is DeployableTokenPoolType {
-  return Object.hasOwn(TOKEN_POOL_BYTECODE, type);
+export function isDeployableTokenPoolType(type: string): type is DeployableTokenPoolType {
+  return Object.hasOwn(TOKEN_POOL_BYTECODE, type)
 }
 
 /**
  * Deploy artifact for a deployable pool `type` (v2.0.0): contract name (= `type`), the cached
  * constructor {@link Interface}, and the creation bytecode.
  */
-export function getTokenPoolArtifact(
-  type: DeployableTokenPoolType,
-): DeployArtifact {
+export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtifact {
   return {
     contract: type,
     iface: getTokenPoolInterface(type, TokenPoolVersion.V2_0_0),
     bytecode: TOKEN_POOL_BYTECODE[type],
-  };
+  }
 }
 
 /**
@@ -416,12 +371,12 @@ export function resolveEncoder<F>(
   version: TokenPoolVersion,
   op: string,
 ): F {
-  const versions = Object.values(TokenPoolVersion);
+  const versions = Object.values(TokenPoolVersion)
   for (let i = versions.indexOf(version); i >= 0; i--) {
-    const encoder = encoders[versions[i]!];
+    const encoder = encoders[versions[i]!]
     // removed here — do not inherit the lower encoder downward
-    if (encoder === null) break;
-    if (encoder !== undefined) return encoder;
+    if (encoder === null) break
+    if (encoder !== undefined) return encoder
   }
-  throw new CCTOperationUnsupportedError(op, version);
+  throw new CCTOperationUnsupportedError(op, version)
 }
