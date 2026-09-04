@@ -92,10 +92,9 @@ export {
 } from './metadata.ts'
 export {
   type OAuthRequestOptions,
-  CachingTokenSource,
-  StaticTokenSource,
   buildOAuthRequestOptions,
   codeChallengeFromVerifier,
+  createMemoizedTokenFetcher,
   generateCodeVerifier,
   generateState,
   isTokenExpired,

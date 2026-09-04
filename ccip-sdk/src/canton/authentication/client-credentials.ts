@@ -4,8 +4,8 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { discoverAuthorizationServer } from './metadata.ts'
 import {
   type OAuthRequestOptions,
-  CachingTokenSource,
   buildOAuthRequestOptions,
+  createMemoizedTokenFetcher,
   toAccessToken,
   wrapOAuthError,
 } from './token-source.ts'
@@ -51,23 +51,24 @@ export type ClientCredentialsProviderOptions = OAuthRequestOptions
 /**
  * Client credentials auth provider.
  *
- * Uses a {@link CachingTokenSource} so the first `token()` call fetches a
- * token and subsequent calls return the cached value until it expires.
+ * Uses a memoized token fetcher (`micro-memoize` with `{ async: true, expires }`)
+ * so the first `token()` call fetches a token and subsequent calls return the
+ * cached value until it expires.
  */
 export class ClientCredentialsProvider implements AuthProvider {
   readonly type = 'clientCredentials' as const
   private readonly cfg: ResolvedClientCredentialsConfig
-  private readonly tokenSourceImpl: CachingTokenSource
+  private readonly fetchToken: () => Promise<AccessToken>
 
   /** Creates a provider from resolved config (internal — use fromDiscovery). */
   private constructor(cfg: ResolvedClientCredentialsConfig) {
     this.cfg = cfg
-    this.tokenSourceImpl = new CachingTokenSource(() => this.doFetch())
+    this.fetchToken = createMemoizedTokenFetcher(() => this.doFetch())
   }
 
   /** Returns a valid access token, fetching via the client credentials grant if needed. */
   token(): Promise<AccessToken> {
-    return this.tokenSourceImpl.token()
+    return this.fetchToken()
   }
 
   /** Fetch a fresh access token via the client credentials grant. */

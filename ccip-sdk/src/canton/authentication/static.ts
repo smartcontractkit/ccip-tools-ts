@@ -1,5 +1,4 @@
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
-import { StaticTokenSource } from './token-source.ts'
 import { type AccessToken, type AuthProvider, AuthType } from './types.ts'
 
 /**
@@ -7,18 +6,19 @@ import { type AccessToken, type AuthProvider, AuthType } from './types.ts'
  *
  * @packageDocumentation
  *
- * Wraps a pre-obtained JWT in a {@link StaticTokenSource} (no refresh).
+ * Wraps a pre-obtained JWT (no refresh). The `token()` method is a plain async
+ * function that always returns the same JWT.
  */
 
 /**
  * Base class for static JWT providers.
  *
- * Delegates {@link token} to an internal {@link StaticTokenSource} that always
- * yields the configured JWT.
+ * Delegates {@link token} to a simple async function that always yields the
+ * configured JWT.
  */
 abstract class StaticProviderBase implements AuthProvider {
   abstract readonly type: AuthType
-  private readonly source: StaticTokenSource
+  private readonly tokenValue: AccessToken
 
   /** Creates a new static provider wrapping the given JWT. */
   constructor(jwt: string) {
@@ -28,12 +28,12 @@ abstract class StaticProviderBase implements AuthProvider {
         `${this.constructor.name} requires a non-empty JWT token`,
       )
     }
-    this.source = new StaticTokenSource({ accessToken: jwt.trim() })
+    this.tokenValue = { accessToken: jwt.trim() }
   }
 
   /** Returns the static JWT. */
   token(): Promise<AccessToken> {
-    return this.source.token()
+    return Promise.resolve(this.tokenValue)
   }
 }
 

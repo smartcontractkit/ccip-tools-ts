@@ -16,9 +16,8 @@ import { describe, it } from 'node:test'
 
 import { CCIPError } from '../../errors/index.ts'
 import {
-  CachingTokenSource,
-  StaticTokenSource,
   codeChallengeFromVerifier,
+  createMemoizedTokenFetcher,
   generateCodeVerifier,
   generateState,
 } from './token-source.ts'
@@ -181,46 +180,51 @@ describe('canton/authentication — token-source primitives', () => {
     assert.equal(isTokenExpired(future), false)
   })
 
-  it('StaticTokenSource always returns the same token', async () => {
-    const ts = new StaticTokenSource({ accessToken: 'static-abc' })
-    assert.equal((await ts.token()).accessToken, 'static-abc')
-    assert.equal((await ts.token()).accessToken, 'static-abc')
-  })
-
-  it('CachingTokenSource fetches once and caches', async () => {
+  it('createMemoizedTokenFetcher fetches once and caches', async () => {
     let fetchCount = 0
-    const ts = new CachingTokenSource(async () => {
+    const fetchToken = createMemoizedTokenFetcher(async () => {
       fetchCount++
       return { accessToken: `tok-${fetchCount}`, expiresAt: Date.now() + 60_000 }
     })
-    assert.equal((await ts.token()).accessToken, 'tok-1')
-    assert.equal((await ts.token()).accessToken, 'tok-1') // cached
+    assert.equal((await fetchToken()).accessToken, 'tok-1')
+    assert.equal((await fetchToken()).accessToken, 'tok-1') // cached
     assert.equal(fetchCount, 1)
   })
 
-  it('CachingTokenSource re-fetches when expired', async () => {
+  it('createMemoizedTokenFetcher re-fetches when expired', async () => {
     let fetchCount = 0
-    const ts = new CachingTokenSource(async () => {
+    const fetchToken = createMemoizedTokenFetcher(async () => {
       fetchCount++
       return { accessToken: `tok-${fetchCount}`, expiresAt: Date.now() - 1000 } // already expired
     })
-    await ts.token()
-    await ts.token()
+    await fetchToken()
+    await fetchToken()
     assert.equal(fetchCount, 2)
   })
 
-  it('CachingTokenSource coalesces concurrent fetches', async () => {
+  it('createMemoizedTokenFetcher coalesces concurrent fetches', async () => {
     let fetchCount = 0
-    const ts = new CachingTokenSource(async () => {
+    const fetchToken = createMemoizedTokenFetcher(async () => {
       fetchCount++
       // simulate latency
       await new Promise((r) => setTimeout(r, 10))
       return { accessToken: `tok-${fetchCount}`, expiresAt: Date.now() + 60_000 }
     })
-    const [a, b, c] = await Promise.all([ts.token(), ts.token(), ts.token()])
+    const [a, b, c] = await Promise.all([fetchToken(), fetchToken(), fetchToken()])
     assert.equal(fetchCount, 1, 'concurrent calls should share a single fetch')
     assert.equal(a.accessToken, b.accessToken)
     assert.equal(b.accessToken, c.accessToken)
+  })
+
+  it('createMemoizedTokenFetcher uses initial token without fetching', async () => {
+    let fetchCount = 0
+    const initial = { accessToken: 'initial-tok', expiresAt: Date.now() + 60_000 }
+    const fetchToken = createMemoizedTokenFetcher(async () => {
+      fetchCount++
+      return { accessToken: `tok-${fetchCount}`, expiresAt: Date.now() + 60_000 }
+    }, initial)
+    assert.equal((await fetchToken()).accessToken, 'initial-tok')
+    assert.equal(fetchCount, 0, 'should not fetch when initial token is still valid')
   })
 
   it('generateCodeVerifier produces a non-empty base64url string', () => {

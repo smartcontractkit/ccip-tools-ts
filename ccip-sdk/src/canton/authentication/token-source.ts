@@ -1,7 +1,8 @@
+import { memoize } from 'micro-memoize'
 import * as oauth from 'oauth4webapi'
 
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
-import type { AccessToken, TokenSource } from './types.ts'
+import type { AccessToken } from './types.ts'
 
 /**
  * Shared token-source primitives for the Canton authentication providers.
@@ -9,9 +10,9 @@ import type { AccessToken, TokenSource } from './types.ts'
  * @packageDocumentation
  *
  * PKCE helpers and token-response conversion delegate to `oauth4webapi` (the
- * spec-compliant OAuth2/OIDC library for JavaScript runtimes), while the
- * {@link CachingTokenSource} and {@link StaticTokenSource} are our own thin
- * abstractions over the `TokenSource` interface.
+ * spec-compliant OAuth2/OIDC library for JavaScript runtimes). Token caching
+ * with concurrent fetch coalescing and expiry-based invalidation is handled by
+ * `micro-memoize` (`{ async: true }`).
  */
 
 /** Skew applied to token expiry so refresh happens slightly before the real expiry. */
@@ -112,76 +113,71 @@ export function buildOAuthRequestOptions(opts: OAuthRequestOptions) {
 }
 
 // ---------------------------------------------------------------------------
-// Token sources
+// Memoized token fetcher
 // ---------------------------------------------------------------------------
 
 /**
- * A {@link TokenSource} that caches a token and lazily re-fetches via a
- * caller-supplied `fetcher` when the cached token is expired or missing.
+ * Create a memoized async token fetcher that caches the result until the token
+ * expires, coalesces concurrent callers onto a single in-flight promise, and
+ * auto-removes the cache entry on rejection.
  *
- * The first `token()` call fetches; subsequent calls return the cached value
- * until it expires, at which point a new fetch is triggered. Concurrent callers
- * share a single in-flight fetch promise to avoid duplicate token requests.
+ * Uses `micro-memoize` with `{ async: true }` for promise coalescing and
+ * rejection-based cache invalidation. Token expiry is tracked via a
+ * `lastToken` closure variable; when expired, the cache is cleared so the
+ * next call re-fetches.
+ *
+ * @param fetcher - Called when the cached token is missing or expired.
+ *   MUST return a fresh {@link AccessToken}.
+ * @param initial - Optional initial token (returned on the first call without
+ *   fetching, when still valid).
+ * @returns A memoized `() => Promise<AccessToken>` that caches until the
+ *   returned token's `expiresAt` passes (accounting for skew).
  */
-export class CachingTokenSource implements TokenSource {
-  private current: AccessToken | undefined
-  private readonly fetcher: () => Promise<AccessToken>
-  private inFlight: Promise<AccessToken> | undefined
+export function createMemoizedTokenFetcher(
+  fetcher: () => Promise<AccessToken>,
+  initial?: AccessToken,
+): () => Promise<AccessToken> {
+  // Track the last-seen token outside the memoize cache so we can check expiry
+  // without awaiting the cached Promise (which would defeat coalescing).
+  let lastToken: AccessToken | undefined = initial
 
-  /**
-   * Creates a new caching token source.
-   *
-   * @param fetcher - Called when the cached token is missing or expired.
-   *   MUST return a fresh {@link AccessToken}.
-   * @param initial - Optional initial token (skips the first fetch).
-   */
-  constructor(fetcher: () => Promise<AccessToken>, initial?: AccessToken) {
-    this.fetcher = fetcher
-    this.current = initial
-  }
+  const memoized = memoize(
+    async () => {
+      const token = await fetcher()
+      lastToken = token
+      return token
+    },
+    {
+      // `async: true` coalesces concurrent callers onto a single in-flight
+      // promise and auto-removes the cache entry on rejection.
+      async: true,
+    },
+  )
 
-  /** Returns a valid token, fetching if the cached one is expired or missing. */
-  async token(): Promise<AccessToken> {
-    if (!isTokenExpired(this.current)) {
-      return this.current!
+  // When an initial token is provided and still valid, short-circuit the first
+  // call to return it without fetching. Subsequent calls delegate to the
+  // memoized fetcher (which will fetch only if the token has since expired).
+  if (initial && !isTokenExpired(initial)) {
+    let usedInitial = false
+    return async (): Promise<AccessToken> => {
+      if (!usedInitial) {
+        usedInitial = true
+        return initial
+      }
+      if (isTokenExpired(lastToken)) {
+        memoized.cache.clear('token expired')
+      }
+      return memoized()
     }
-    // Coalesce concurrent callers onto a single in-flight fetch.
-    if (!this.inFlight) {
-      this.inFlight = this.fetcher()
-        .then((t) => {
-          this.current = t
-          return t
-        })
-        .finally(() => {
-          this.inFlight = undefined
-        })
+  }
+
+  return async (): Promise<AccessToken> => {
+    // Only clear the cache when we have a previously-fetched token that has
+    // since expired. When lastToken is undefined (never fetched), skip clearing
+    // so concurrent first calls coalesce onto a single in-flight fetch.
+    if (lastToken && isTokenExpired(lastToken)) {
+      memoized.cache.clear('token expired')
     }
-    return this.inFlight
-  }
-
-  /**
-   * Returns the currently cached token (possibly expired) without triggering a fetch.
-   *
-   * Used by refresh callbacks that need to inspect the old token's `refreshToken`
-   * field without recursively calling {@link token} (which would deadlock when
-   * the refresh callback is itself the fetcher).
-   */
-  getCachedToken(): AccessToken | undefined {
-    return this.current
-  }
-}
-
-/**
- * A {@link TokenSource} that always returns the same static token (no refresh).
- */
-export class StaticTokenSource implements TokenSource {
-  private readonly tokenValue: AccessToken
-  /** Creates a static token source that always returns the given token. */
-  constructor(token: AccessToken) {
-    this.tokenValue = token
-  }
-  /** Returns the static token. */
-  async token(): Promise<AccessToken> {
-    return this.tokenValue
+    return memoized()
   }
 }

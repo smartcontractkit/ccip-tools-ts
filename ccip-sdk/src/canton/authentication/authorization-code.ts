@@ -4,9 +4,9 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { discoverAuthorizationServer } from './metadata.ts'
 import {
   type OAuthRequestOptions,
-  CachingTokenSource,
   buildOAuthRequestOptions,
   codeChallengeFromVerifier,
+  createMemoizedTokenFetcher,
   generateCodeVerifier,
   generateState,
   toAccessToken,
@@ -386,15 +386,16 @@ export async function refreshAuthorizationCodeToken(
  * refresh token is available; otherwise the initial token is re-fetched
  * via the `fetchToken` callback.
  *
- * This keeps the SDK runtime-agnostic: no callback server or browser logic
- * lives here, only the caching/refresh plumbing an embedder would otherwise
- * have to re-implement.
+ * The SDK stays runtime-agnostic: this provider holds only the caching/refresh
+ * plumbing an embedder would otherwise have to re-implement.
  */
 export class AuthorizationCodeProvider implements AuthProvider {
   readonly type = 'authorizationCode' as const
-  private readonly tokenSourceImpl: CachingTokenSource
+  private readonly fetchToken: () => Promise<AccessToken>
   private readonly cfg: AuthorizationCodeAuthConfig
   private readonly options: AuthorizationCodeProtocolOptions | undefined
+  /** The last-seen token; updated on each fetch/refresh so doRefresh can read its refreshToken. */
+  private lastToken: AccessToken | undefined
 
   /**
    * Creates a provider from an initial token and callbacks.
@@ -413,17 +414,13 @@ export class AuthorizationCodeProvider implements AuthProvider {
   ) {
     this.cfg = config
     this.options = options
-    this.tokenSourceImpl = new CachingTokenSource(() => this.doRefresh(fetchToken), initialToken)
+    this.lastToken = initialToken
+    this.fetchToken = createMemoizedTokenFetcher(() => this.doRefresh(fetchToken), initialToken)
   }
 
   /** Returns a valid access token, refreshing or re-fetching as needed. */
   token(): Promise<AccessToken> {
-    return this.tokenSourceImpl.token()
-  }
-
-  /** Returns the currently cached token (possibly expired) without fetching. */
-  getCachedToken(): AccessToken | undefined {
-    return this.tokenSourceImpl.getCachedToken()
+    return this.fetchToken()
   }
 
   /**
@@ -431,15 +428,22 @@ export class AuthorizationCodeProvider implements AuthProvider {
    * otherwise fall back to the caller-supplied `fetchToken` callback.
    */
   private async doRefresh(fetchToken: () => Promise<AccessToken>): Promise<AccessToken> {
-    const current = this.tokenSourceImpl.getCachedToken()
-    if (current?.refreshToken) {
+    if (this.lastToken?.refreshToken) {
       try {
-        return await refreshAuthorizationCodeToken(this.cfg, current.refreshToken, this.options)
+        const refreshed = await refreshAuthorizationCodeToken(
+          this.cfg,
+          this.lastToken.refreshToken,
+          this.options,
+        )
+        this.lastToken = refreshed
+        return refreshed
       } catch {
         // refresh failed — fall through to the caller-supplied fetcher
       }
     }
-    return fetchToken()
+    const fetched = await fetchToken()
+    this.lastToken = fetched
+    return fetched
   }
 }
 

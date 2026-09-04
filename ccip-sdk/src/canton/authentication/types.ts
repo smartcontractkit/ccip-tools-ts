@@ -44,22 +44,6 @@ export interface AccessToken {
 }
 
 /**
- * A source of {@link AccessToken} values with automatic refresh.
- *
- * Implementations cache the current token and re-fetch on demand when it is
- * expired or missing. Used internally by {@link CachingTokenSource} and
- * {@link StaticTokenSource}; {@link AuthProvider} exposes `token()` directly.
- */
-export interface TokenSource {
-  /**
-   * Returns a valid (non-expired) access token, fetching or refreshing as needed.
-   *
-   * Implementations MUST be safe to call concurrently.
-   */
-  token(): Promise<AccessToken>
-}
-
-/**
  * An authentication provider for the Canton Ledger API.
  *
  * Exposes the auth scheme (`type`) and a `token()` method that returns a valid

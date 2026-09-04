@@ -10,13 +10,11 @@ import {
   CCIPError,
   CCIPErrorCode,
   CantonAuthType,
-  CantonCachingTokenSource,
-  CantonClientCredentialsProvider,
   CantonStaticProvider,
   buildCantonAuthorizationRequest,
   createCantonAuthProvider,
+  createCantonMemoizedTokenFetcher,
   exchangeCantonAuthorizationCode,
-  isCantonTokenExpired,
   refreshCantonAuthorizationCodeToken,
   validateCantonAuthorizationCallback,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -291,10 +289,12 @@ export async function createCliAuthProvider(
  */
 class CliAuthorizationCodeProvider implements CantonAuthProvider {
   readonly type = 'authorizationCode' as const
-  private readonly tokenSourceImpl: CantonCachingTokenSource
+  private readonly fetchToken: () => Promise<AccessToken>
   private readonly cfg: AuthorizationCodeAuthConfig
   private readonly options: CantonAuthProviderOptions | undefined
-  private readonly fetchToken: () => Promise<AccessToken>
+  private readonly reFetchToken: () => Promise<AccessToken>
+  /** The last-seen token; updated on each fetch/refresh so doRefresh can read its refreshToken. */
+  private lastToken: AccessToken | undefined
 
   constructor(
     cfg: AuthorizationCodeAuthConfig,
@@ -304,28 +304,32 @@ class CliAuthorizationCodeProvider implements CantonAuthProvider {
   ) {
     this.cfg = cfg
     this.options = options
-    this.fetchToken = fetchToken
-    this.tokenSourceImpl = new CantonCachingTokenSource(() => this.doRefresh(), initialToken)
+    this.reFetchToken = fetchToken
+    this.lastToken = initialToken
+    this.fetchToken = createCantonMemoizedTokenFetcher(() => this.doRefresh(), initialToken)
   }
 
   token(): Promise<AccessToken> {
-    return this.tokenSourceImpl.token()
+    return this.fetchToken()
   }
 
   private async doRefresh(): Promise<AccessToken> {
-    const current = this.tokenSourceImpl.getCachedToken()
-    if (current?.refreshToken) {
+    if (this.lastToken?.refreshToken) {
       try {
-        return await refreshCantonAuthorizationCodeToken(
+        const refreshed = await refreshCantonAuthorizationCodeToken(
           this.cfg,
-          current.refreshToken,
+          this.lastToken.refreshToken,
           this.options,
         )
+        this.lastToken = refreshed
+        return refreshed
       } catch {
         // refresh failed — fall through to re-running the interactive flow
       }
     }
-    return this.fetchToken()
+    const fetched = await this.reFetchToken()
+    this.lastToken = fetched
+    return fetched
   }
 }
 
@@ -465,22 +469,4 @@ async function createCliAuthProviderInternal(
   }
 
   return createCantonAuthProvider(merged, options)
-}
-
-/**
- * Returns `true` when the cached token held by `provider` is expired or missing.
- *
- * Convenience wrapper around the SDK's {@link isTokenExpired} for CLI tests.
- */
-export function isProviderTokenExpired(provider: CantonAuthProvider): boolean {
-  if (provider instanceof CantonClientCredentialsProvider) {
-    return isCantonTokenExpired(
-      (
-        provider as unknown as {
-          tokenSourceImpl: { getCachedToken: () => AccessToken | undefined }
-        }
-      ).tokenSourceImpl.getCachedToken(),
-    )
-  }
-  return false
 }
