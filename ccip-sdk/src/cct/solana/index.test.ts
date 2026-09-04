@@ -184,7 +184,9 @@ describe('SolanaTokenManager (cct/solana)', () => {
               },
             },
           }),
-          simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+          simulateTransaction: async () => ({
+            value: { err: null, logs: [], unitsConsumed: 1 },
+          }),
           getLatestBlockhash: async () => ({
             blockhash: PublicKey.default.toBase58(),
             lastValidBlockHeight: 1,
@@ -198,7 +200,10 @@ describe('SolanaTokenManager (cct/solana)', () => {
         getTokenPoolRemotes: async () => ({}),
         getRegistryTokenConfig: async (router: string) =>
           router === overrideRouter
-            ? { administrator: PublicKey.default.toBase58(), pendingAdministrator: payer }
+            ? {
+                administrator: PublicKey.default.toBase58(),
+                pendingAdministrator: payer,
+              }
             : { administrator: payer, pendingAdministrator: payer },
       } as unknown as SolanaChain
     }
@@ -218,11 +223,21 @@ describe('SolanaTokenManager (cct/solana)', () => {
       > = [
         [
           'deployToken',
-          () => cct.generateUnsignedDeployToken({ payer, decimals: 6, withMetaplex: false }),
+          () =>
+            cct.generateUnsignedDeployToken({
+              payer,
+              decimals: 6,
+              withMetaplex: false,
+            }),
         ],
         [
           'approveToken',
-          () => cct.generateUnsignedApproveToken({ ...common, delegate: account, amount: 1n }),
+          () =>
+            cct.generateUnsignedApproveToken({
+              ...common,
+              delegate: account,
+              amount: 1n,
+            }),
         ],
         [
           'createTokenAccount',
@@ -235,7 +250,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'mintTokens',
-          () => cct.generateUnsignedMintTokens({ ...common, recipient: account, amount: 1n }),
+          () =>
+            cct.generateUnsignedMintTokens({
+              ...common,
+              recipient: account,
+              amount: 1n,
+            }),
         ],
         [
           'setTokenAuthority',
@@ -248,7 +268,11 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'updateMetadataAuthority',
-          () => cct.generateUnsignedUpdateMetadataAuthority({ ...common, newAuthority: account }),
+          () =>
+            cct.generateUnsignedUpdateMetadataAuthority({
+              ...common,
+              newAuthority: account,
+            }),
         ],
         [
           'createTokenMultisig',
@@ -263,12 +287,20 @@ describe('SolanaTokenManager (cct/solana)', () => {
         [
           'createLookupTable',
           () =>
-            cct.generateUnsignedCreateLookupTable({ payer, authority: payer, mode: 'createEmpty' }),
+            cct.generateUnsignedCreateLookupTable({
+              payer,
+              authority: payer,
+              mode: 'createEmpty',
+            }),
         ],
         [
           'configureAllowlist',
           () =>
-            cct.generateUnsignedConfigureAllowlist({ ...common, add: [account], enabled: true }),
+            cct.generateUnsignedConfigureAllowlist({
+              ...common,
+              add: [account],
+              enabled: true,
+            }),
         ],
         ['deployTokenPool', () => cct.generateUnsignedDeployTokenPool(common)],
         [
@@ -310,11 +342,19 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'deleteChainRemoteConfig',
-          () => cct.generateUnsignedDeleteChainRemoteConfig({ ...common, remoteChainSelector }),
+          () =>
+            cct.generateUnsignedDeleteChainRemoteConfig({
+              ...common,
+              remoteChainSelector,
+            }),
         ],
         [
           'setRateLimitAdmin',
-          () => cct.generateUnsignedSetRateLimitAdmin({ ...common, newRateLimitAdmin: account }),
+          () =>
+            cct.generateUnsignedSetRateLimitAdmin({
+              ...common,
+              newRateLimitAdmin: account,
+            }),
         ],
         ['provideLiquidity', () => cct.generateUnsignedProvideLiquidity({ ...common, amount: 1n })],
         [
@@ -323,15 +363,27 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'setCanAcceptLiquidity',
-          () => cct.generateUnsignedSetCanAcceptLiquidity({ ...common, allow: true }),
+          () =>
+            cct.generateUnsignedSetCanAcceptLiquidity({
+              ...common,
+              allow: true,
+            }),
         ],
         [
           'setRebalancer',
-          () => cct.generateUnsignedSetRebalancer({ ...common, rebalancer: account }),
+          () =>
+            cct.generateUnsignedSetRebalancer({
+              ...common,
+              rebalancer: account,
+            }),
         ],
         [
           'transferOwnership',
-          () => cct.generateUnsignedTransferOwnership({ ...common, newOwner: account }),
+          () =>
+            cct.generateUnsignedTransferOwnership({
+              ...common,
+              newOwner: account,
+            }),
         ],
         ['acceptOwnership', () => cct.generateUnsignedAcceptOwnership(common)],
         [
@@ -377,7 +429,11 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ['registerAdmin', () => cct.generateUnsignedRegisterAdmin({ ...common, address: account })],
         [
           'removeFromAllowlist',
-          () => cct.generateUnsignedRemoveFromAllowlist({ ...common, remove: [account] }),
+          () =>
+            cct.generateUnsignedRemoveFromAllowlist({
+              ...common,
+              remove: [account],
+            }),
         ],
         [
           'setPool',
@@ -391,7 +447,11 @@ describe('SolanaTokenManager (cct/solana)', () => {
         [
           'transferAdmin',
           () =>
-            cct.generateUnsignedTransferAdmin({ ...common, address: account, newAdmin: account }),
+            cct.generateUnsignedTransferAdmin({
+              ...common,
+              address: account,
+              newAdmin: account,
+            }),
         ],
       ]
 
@@ -406,22 +466,42 @@ describe('SolanaTokenManager (cct/solana)', () => {
 
     it('runs every signed facade operation', async () => {
       const cct = SolanaTokenManager.fromChain(facadeChain)
-      const wallet = { publicKey: new PublicKey(payer), signTransaction: async <T>(tx: T) => tx }
+      const wallet = {
+        publicKey: new PublicKey(payer),
+        signTransaction: async <T>(tx: T) => tx,
+      }
       const signed: Array<
         [string, () => Promise<{ hash: string } | { hash: string }[] | { hashes: string[] }>]
       > = [
         ['deployToken', () => cct.deployToken({ wallet, decimals: 6, withMetaplex: false })],
         [
           'approveToken',
-          () => cct.approveToken({ wallet, tokenAddress: mint, delegate: account, amount: 1n }),
+          () =>
+            cct.approveToken({
+              wallet,
+              tokenAddress: mint,
+              delegate: account,
+              amount: 1n,
+            }),
         ],
         [
           'createTokenAccount',
-          () => cct.createTokenAccount({ wallet, tokenAddress: mint, ownerAddress: account }),
+          () =>
+            cct.createTokenAccount({
+              wallet,
+              tokenAddress: mint,
+              ownerAddress: account,
+            }),
         ],
         [
           'mintTokens',
-          () => cct.mintTokens({ wallet, tokenAddress: mint, recipient: account, amount: 1n }),
+          () =>
+            cct.mintTokens({
+              wallet,
+              tokenAddress: mint,
+              recipient: account,
+              amount: 1n,
+            }),
         ],
         [
           'setTokenAuthority',
@@ -435,7 +515,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'updateMetadataAuthority',
-          () => cct.updateMetadataAuthority({ wallet, tokenAddress: mint, newAuthority: account }),
+          () =>
+            cct.updateMetadataAuthority({
+              wallet,
+              tokenAddress: mint,
+              newAuthority: account,
+            }),
         ],
         [
           'createTokenMultisig',
@@ -461,7 +546,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'deployTokenPool',
-          () => cct.deployTokenPool({ wallet, tokenAddress: mint, poolType: 'lock-release' }),
+          () =>
+            cct.deployTokenPool({
+              wallet,
+              tokenAddress: mint,
+              poolType: 'lock-release',
+            }),
         ],
         [
           'applyChainUpdates',
@@ -578,7 +668,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'acceptOwnership',
-          () => cct.acceptOwnership({ wallet, tokenAddress: mint, poolType: 'lock-release' }),
+          () =>
+            cct.acceptOwnership({
+              wallet,
+              tokenAddress: mint,
+              poolType: 'lock-release',
+            }),
         ],
         [
           'setChainRateLimit',
@@ -652,7 +747,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
         [
           'transferAdmin',
           () =>
-            cct.transferAdmin({ wallet, tokenAddress: mint, address: account, newAdmin: account }),
+            cct.transferAdmin({
+              wallet,
+              tokenAddress: mint,
+              address: account,
+              newAdmin: account,
+            }),
         ],
       ]
 
@@ -681,7 +781,11 @@ describe('SolanaTokenManager (cct/solana)', () => {
         ],
         [
           'getTokenPoolState',
-          () => cct.getTokenPoolState({ tokenAddress: mint, poolType: 'lock-release' }),
+          () =>
+            cct.getTokenPoolState({
+              tokenAddress: mint,
+              poolType: 'lock-release',
+            }),
         ],
         [
           'getTokenAdminRegistry',

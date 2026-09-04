@@ -35,7 +35,7 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
   readonly name = 'authorizeLockboxCallers'
 
   /** Validates the lockbox and every caller address; requires at least one caller. */
-  protected validate({
+  protected override validate({
     lockbox,
     addedCallers = [],
     removedCallers = [],

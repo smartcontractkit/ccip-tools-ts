@@ -1,6 +1,7 @@
 /**
- * Shared parameter validators for EVM CCT operations. Throws
- * {@link CCTParamsInvalidError} before any RPC so invalid inputs fail fast.
+ * Generic parameter primitives for EVM CCT ops — one Solidity type or one JS shape each, no domain
+ * knowledge and no chain access, so every one of them throws {@link CCTParamsInvalidError} before
+ * the first RPC. Op-specific rules (rate limits, lane shapes) live with their op.
  *
  * @packageDocumentation
  */
@@ -59,6 +60,19 @@ export function validateNonEmptyString(operation: string, param: string, value: 
 }
 
 /**
+ * Asserts `value` is a boolean, narrowing it for callers.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a boolean
+ */
+export function validateBoolean(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is boolean {
+  if (typeof value !== 'boolean')
+    throw new CCTParamsInvalidError(operation, param, 'must be a boolean')
+}
+
+/**
  * Asserts `value` is an integer in `[0, 255]` (a Solidity `uint8`).
  * @throws {@link CCTParamsInvalidError} if `value` is not such an integer
  */
@@ -71,13 +85,44 @@ export function validateUint8(operation: string, param: string, value: unknown):
   )
 }
 
-const UINT64_MAX = BigInt(2) ** BigInt(64) - 1n
+/**
+ * Shared `uintN` range check: the three widths below differ only in their bound and their message,
+ * so the comparison itself lives here once.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a `bigint` in `[0, 2^bits − 1]`
+ */
+function assertUintBits(operation: string, param: string, value: unknown, bits: number): void {
+  if (typeof value === 'bigint' && value >= 0n && value <= (1n << BigInt(bits)) - 1n) return
+  throw new CCTParamsInvalidError(
+    operation,
+    param,
+    `must be a bigint in [0, 2^${bits} − 1], got ${String(value)}`,
+  )
+}
 
 /**
- * Asserts `value` is a `bigint` in `[0, 2^64 − 1]` (a Solidity `uint64`), narrowing it to
+ * Asserts `value` is a `bigint` in `[0, 2^256 − 1]` (a Solidity `uint256`).
+ * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
+ */
+export function validateUint256(operation: string, param: string, value: unknown): void {
+  assertUintBits(operation, param, value, 256)
+}
+
+/**
+ * Asserts `value` is a `bigint` in `[0, 2^128 − 1]` (a Solidity `uint128`), narrowing it to
  * `bigint` for callers.
- * @remarks The width of a CCIP chain selector, so this is the check every `remoteChainSelector`
- * param goes through.
+ * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
+ */
+export function validateUint128(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is bigint {
+  assertUintBits(operation, param, value, 128)
+}
+
+/**
+ * Asserts `value` is a `bigint` in `[0, 2^64 − 1]` (a Solidity `uint64`), narrowing it to `bigint`
+ * for callers. The width of a CCIP chain selector, so every `remoteChainSelector` goes through it.
  * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
  */
 export function validateUint64(
@@ -85,26 +130,110 @@ export function validateUint64(
   param: string,
   value: unknown,
 ): asserts value is bigint {
-  if (typeof value === 'bigint' && value >= 0n && value <= UINT64_MAX) return
-  throw new CCTParamsInvalidError(
-    operation,
-    param,
-    `must be a bigint in [0, 2^64 − 1], got ${String(value)}`,
-  )
+  assertUintBits(operation, param, value, 64)
 }
 
-/** Largest value representable by a Solidity `uint256`. */
-const UINT256_MAX = BigInt(2) ** BigInt(256) - 1n
+/**
+ * Parses an optionally `0x`-prefixed hex string of whole, non-empty bytes into the 0x-prefixed
+ * lower-case form ethers encodes as `bytes`.
+ *
+ * @remarks The EVM counterpart of Solana's `parseHexBytes`/`parseNonEmptyHexBytes`, minus their
+ * byte cap: the values this guards are *remote* addresses carried as `bytes` (a lane's remote
+ * token or remote pool), and a remote may be Solana or Aptos (32 bytes) as easily as EVM (20), so
+ * a length ceiling here would only reject valid remotes. Shared by the remote-pool write ops and
+ * `applyChainUpdates`, which previously each carried their own copy of this parser.
+ * @param operation - Operation name, for the error context.
+ * @param param - Param path to blame, e.g. `remotePoolAddress` or `chains[0].remoteTokenAddress`.
+ * @param value - The caller-supplied value, unvalidated.
+ * @returns The value as `0x`-prefixed lower-case hex.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty whole-byte hex string
+ */
+export function parseHexBytes(operation: string, param: string, value: unknown): string {
+  const hex = typeof value === 'string' ? value.replace(/^0x/i, '').toLowerCase() : ''
+  if (typeof value !== 'string' || !/^(?:[\da-f]{2})+$/.test(hex)) {
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      `must be a non-empty hex string of whole bytes, got ${String(value)}`,
+    )
+  }
+  return `0x${hex}`
+}
 
 /**
- * Asserts `value` is a `bigint` in `[0, 2^256 − 1]` (a Solidity `uint256`).
- * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
+ * Parses `value` as a plain object, returned as an indexable record so a caller can validate
+ * fields one by one before the value has a type. `kind` names the shape in the failure message,
+ * e.g. `'chain update'` → `must be a chain update`.
+ * @remarks Arrays and class instances (`Date`, `Map`, …) are objects too, but are not valid
+ * here: an array would pass field checks only by accident of key naming, and an instance's
+ * fields live on the prototype, not the record.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a non-null, non-array plain object
  */
-export function validateUint256(operation: string, param: string, value: unknown): void {
-  if (typeof value === 'bigint' && value >= 0n && value <= UINT256_MAX) return
-  throw new CCTParamsInvalidError(
-    operation,
-    param,
-    `must be a bigint in [0, 2^256 − 1], got ${String(value)}`,
-  )
+export function parseRecord(
+  operation: string,
+  param: string,
+  value: unknown,
+  kind: string,
+): { [k: string]: unknown } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new CCTParamsInvalidError(operation, param, `must be a ${kind}`)
+  }
+  return value as { [k: string]: unknown }
+}
+
+/**
+ * Asserts `value` is a dense array of at least `minLength` entries, narrowing it for callers.
+ * @remarks Holes are rejected explicitly: `forEach`/`map` skip them, so a sparse array would walk
+ * past every element check and reach ABI encoding as `null` (blamed as e.g. `chainsToAdd[1]`).
+ * @throws {@link CCTParamsInvalidError} if `value` is not an array, is shorter than `minLength`,
+ * or is sparse
+ */
+export function validateArray(
+  operation: string,
+  param: string,
+  value: unknown,
+  minLength = 0,
+): asserts value is unknown[] {
+  if (!Array.isArray(value) || value.length < minLength)
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      minLength > 0 ? `must be a non-empty array` : 'must be an array',
+    )
+  for (let i = 0; i < value.length; i++)
+    if (!(i in value))
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not be a hole — the array is sparse, and a missing element cannot be encoded',
+      )
+}
+
+/**
+ * Parses a non-empty list of `bytes` values into 0x-prefixed lower-case hex, rejecting duplicates.
+ * @remarks Duplicates are compared *after* {@link parseHexBytes} normalisation, so `0xAB` and `ab`
+ * collide the way a Solidity `bytes` set would.
+ * @returns The values as 0x-prefixed lower-case hex, in input order.
+ * @throws {@link CCTParamsInvalidError} if the list is empty, not an array, sparse, or holds an
+ * invalid or duplicate value
+ */
+export function parseUniqueHexBytesArray(
+  operation: string,
+  param: string,
+  value: unknown,
+): string[] {
+  validateArray(operation, param, value, 1)
+  const seen = new Set<string>()
+  return value.map((entry, i) => {
+    const hex = parseHexBytes(operation, `${param}[${i}]`, entry)
+    if (seen.has(hex)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not duplicate an earlier entry in the same array',
+      )
+    }
+    seen.add(hex)
+    return hex
+  })
 }
