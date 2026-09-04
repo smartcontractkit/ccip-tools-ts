@@ -142,7 +142,7 @@ Pass directly or specify a file path:
 | Aptos  | Hex private key, or path to text file containing it                                                               |
 | Sui    | Hex or base64 private key                                                                                         |
 | TON    | 64-byte hex private key (`0x`-prefixed), mnemonic phrase (space-separated), path to key file, or `ledger[:index]` |
-| Canton | 64-character hex Ed25519 seed (optional; party ID comes from `--canton-config`)                                   |
+| Canton | Not required — party ID comes from `--canton-config`; transactions submit via JWT                                 |
 
 ### Foundry Cast Keystore
 
@@ -243,33 +243,34 @@ Canton operations require a JSON config file passed via `--canton-config <path>`
 
 ```json
 {
-  "party": "sender::1220...",
-  "ccipParty": "ccip::1220...",
-  "jwt": "eyJ...",
+  "party": "u_7c1f39da042a::1220c250c23c...",
+  "ccipParty": "ccipOwner::1220e382f4e5...",
+  "auth": {
+    "type": "clientCredentials",
+    "authUrl": "https://auth.example.com/oauth2/default"
+  },
   "edsUrl": "https://eds.example.com",
   "transferInstructionUrl": "https://transfer-instruction.example.com",
-  "externalEdsUrlsByOwner": {
-    "owner::1220...": "https://external-eds.example.com"
-  },
   "indexerUrl": "https://indexer.example.com",
   "chainId": "canton:TestNet",
-  "senderInstanceId": "ccipsender",
-  "defaultSendGasLimit": 50000,
-  "feeTransferFactoryAmount": "1.0",
-  "ccvs": ["instanceId@party::1220..."],
   "packages": {
-    "perPartyRouter": "ccip-runtime",
-    "ccipSender": "ccip-sender",
-    "ccipReceiver": "ccip-receiver"
-  }
+    "perPartyRouter": "ccip-runtime-v2",
+    "ccipReceiver": "ccip-receiver-v2",
+    "ccipSender": "ccip-sender-v2"
+  },
+  "senderInstanceId": "prod-ccipsender",
+  "ccvs": ["0x5b92820da106..."]
 }
 ```
+
+Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCredentials` flow, or use `"jwt": "eyJ..."` in place of the `auth` block for a pre-obtained token. See [Canton Authentication](#canton-authentication) for all flows.
 
 | Field                      | Required | Description                                                                      |
 | -------------------------- | -------- | -------------------------------------------------------------------------------- |
 | `party`                    | Yes      | User ledger party for actAs and transaction visibility                           |
 | `ccipParty`                | Yes      | CCIP operator party (CCIPSender signatory / fee recipient)                       |
-| `jwt`                      | Yes      | JSON Web Token for Canton Ledger API authentication                              |
+| `jwt`                      | No\*     | JSON Web Token for Canton Ledger API authentication                              |
+| `auth`                     | No\*     | OIDC auth config (alternative to `jwt` — see [below](#canton-authentication))    |
 | `edsUrl`                   | Yes      | Base URL for the Explicit Disclosure Service (EDS)                               |
 | `transferInstructionUrl`   | Yes      | Base URL for the Transfer Instruction API                                        |
 | `externalEdsUrlsByOwner`   | No       | Map of owner party → external EDS URL                                            |
@@ -281,21 +282,78 @@ Canton operations require a JSON config file passed via `--canton-config <path>`
 | `ccvs`                     | No       | CCV instance addresses for execute disclosures and send defaults                 |
 | `packages`                 | No       | DAR package names for ACS template filters                                       |
 
-### Canton Wallet
+\* Either `jwt` or `auth` is required. If both are present, `jwt` takes precedence.
 
-On Canton, the party ID comes from config. For external signing, pass a 64-character hex Ed25519 seed via `--wallet`:
+> [!NOTE]
+> The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
+
+### Canton Authentication {#canton-authentication}
+
+The `auth` object supports three flows. The `static` flow wraps a pre-obtained JWT (equivalent to the top-level `jwt` field); `clientCredentials` and `authorizationCode` obtain a JWT automatically via [OpenID Connect (OIDC)](https://openid.net/connect/):
+
+| `auth.type`         | Use case                         | Required `auth` fields                  |
+| ------------------- | -------------------------------- | --------------------------------------- |
+| `static`            | Pre-obtained JWT                 | `jwt`                                   |
+| `clientCredentials` | Machine-to-machine (CI/CD)       | `authUrl`, `clientId`†, `clientSecret`† |
+| `authorizationCode` | Interactive browser login (PKCE) | `authUrl`, `clientId`†                  |
+
+† `clientId` and `clientSecret` may be omitted from the config file and resolved from `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars instead. **Keep secrets in env vars, not in config files.**
+
+**Client credentials example** (CI/CD, machine-to-machine):
+
+```json
+{
+  "auth": {
+    "type": "clientCredentials",
+    "authUrl": "https://auth.example.com"
+  }
+}
+```
 
 ```bash
-ccip-cli send canton-testnet ethereum-testnet-sepolia \
+export CANTON_CLIENT_ID="my-client-id"
+export CANTON_CLIENT_SECRET="my-client-secret"
+```
+
+**Authorization code example** (interactive browser login for human users):
+
+```json
+{
+  "auth": {
+    "type": "authorizationCode",
+    "authUrl": "https://auth.example.com",
+    "callbackUrl": "http://localhost:8400/callback"
+  }
+}
+```
+
+```bash
+export CANTON_CLIENT_ID="my-client-id"
+```
+
+The `authorizationCode` flow opens a browser for login and starts a local callback server to receive the authorization code. The `callbackUrl` defaults to `http://localhost:8400/callback` — override it if port 8400 is in use or your OIDC provider requires a different redirect URI. PKCE with S256 is required.
+
+When `auth` is set, the CLI resolves a JWT upfront (before connecting to the ledger) via the SDK's runtime-agnostic OAuth 2.0 protocol helpers (backed by [`oauth4webapi`](https://github.com/panva/oauth4webapi)). The SDK itself never orchestrates an OAuth flow — it only consumes what it's given (`jwt`, which accepts either a string or a `() => Promise<string>` getter). For `clientCredentials` and `authorizationCode`, the CLI injects a getter so tokens are refreshed automatically per request. Optional `auth` fields: `audience` (Auth0-specific), `scopes` (defaults to `daml_ledger_api` for client credentials, `openid daml_ledger_api` for authorization code), `callbackUrl` (authorization code only, defaults to `http://localhost:8400/callback`).
+
+> [!NOTE]
+> The `authorizationCode` flow is orchestrated by the CLI: it starts a local callback server (`node:http`) and opens the default browser (`open`/`xdg-open`). These Node-specific steps live in the CLI, not the SDK, so the SDK stays runtime-agnostic (no `node:*` imports) and can be embedded in web/Electron apps. Web embedders compose the SDK's protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling.
+
+### Canton Wallet
+
+On Canton, the party ID comes from config and transactions are submitted directly using the JWT from config (either the static `jwt` field or a token resolved from `auth`). The `--wallet` flag is not required for Canton operations.
+
+```bash
+ccip-cli send \
+  -s canton-testnet \
+  -d ethereum-testnet-sepolia \
+  -r prod-ccipsender \
   --canton-config ./canton-config.json \
   --rpc https://ledger.example.com/api/json \
   --rpc https://ethereum-sepolia-rpc.example.com \
-  -r ccipsender \
-  -w <64-char-ed25519-seed> \
-  -t link-token=1.0
+  --to 0xReceiverContract \
+  -t link-token=1.0 \
+  --no-estimate-gas-limit
 ```
-
-Without `--wallet`, the CLI submits transactions directly using the JWT from config.
 
 ## Shell Completion
 

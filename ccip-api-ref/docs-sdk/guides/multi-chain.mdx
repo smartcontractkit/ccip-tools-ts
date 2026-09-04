@@ -85,6 +85,9 @@ const chain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
   cantonConfig: {
     party: 'sender::1220...',
     ccipParty: 'ccip::1220...',
+    // Either a static JWT string, or a () => Promise<string> getter for
+    // refreshable tokens (OAuth2). The CLI resolves its `auth` block into
+    // one of these upfront — see Canton Configuration.
     jwt: 'eyJ...',
     edsUrl: 'https://eds.example.com',
     transferInstructionUrl: 'https://transfer-instruction.example.com',
@@ -96,7 +99,7 @@ const chain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
 console.log('Connected to:', chain.network.name)
 ```
 
-Canton requires `cantonConfig` in the second argument to `fromUrl`. See [Canton Configuration](/cli/configuration#canton-configuration) for the full config schema.
+Canton requires `cantonConfig` in the second argument to `fromUrl`. The `jwt` field accepts either a string (pre-obtained token) or a `() => Promise<string>` getter (for refreshable OAuth2 tokens). The SDK is runtime-agnostic — it never orchestrates an OAuth flow; the CLI or embedder resolves auth upfront and injects the result. See [Canton Configuration](/cli/configuration#canton-configuration) for the full config schema.
 
 </TabItem>
 </Tabs>
@@ -293,7 +296,7 @@ const message = {
 import { CantonChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
-  cantonConfig: { /* party, ccipParty, jwt, edsUrl, transferInstructionUrl, ... */ },
+  cantonConfig: { /* party, ccipParty, jwt (string or getter), edsUrl, transferInstructionUrl, ... */ },
 })
 
 const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
@@ -407,7 +410,7 @@ const signature = await sendTransaction(transaction, connection)
 
 ### Configuration
 
-Canton requires a `CantonConfig` object passed via `ChainContext.cantonConfig` when calling `CantonChain.fromUrl`. Required fields: `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`. See [Canton Configuration](/cli/configuration#canton-configuration) for the full schema.
+Canton requires a `CantonConfig` object passed via `ChainContext.cantonConfig` when calling `CantonChain.fromUrl`. Required fields: `party`, `ccipParty`, `edsUrl`, `transferInstructionUrl` — plus `jwt` (a string for a pre-obtained token, or a `() => Promise<string>` getter for refreshable OAuth2 tokens). The SDK is runtime-agnostic and never orchestrates an OAuth flow — the CLI resolves its `auth` block upfront and injects `jwt`; web/Electron embedders compose the SDK's OAuth2 protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling. See [Canton Configuration](/cli/configuration#canton-configuration) for the full schema.
 
 ### Identity and Addresses
 

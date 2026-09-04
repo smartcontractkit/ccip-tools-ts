@@ -50,6 +50,10 @@ const config: Config = {
     //
     // - `path`: used by bigint-buffer / postman-code-generators (pre-existing)
     // - `undici`: used by @chainlink/ccip-sdk's Canton client (CantonChain → canton/client.ts).
+    //
+    // The Canton auth-code provider's `node:*` imports (callback server, browser
+    // launching) have been moved to the CLI, so no `node:` scheme stubs are
+    // needed here anymore — the SDK is now runtime-agnostic.
     function webpackNodeFallbacks(): Plugin {
       return {
         name: 'webpack-node-fallbacks',

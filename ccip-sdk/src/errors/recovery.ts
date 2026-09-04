@@ -218,6 +218,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   CANTON_API_ERROR:
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
+  CANTON_AUTH_ERROR:
+    'Canton authentication failed. Verify the JWT is valid and not expired, or check the OIDC auth_url, client_id, and client_secret (client credentials) or redirect URI (authorization code).',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */

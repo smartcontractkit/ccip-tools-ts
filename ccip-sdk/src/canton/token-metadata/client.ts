@@ -85,8 +85,15 @@ export interface ListInstrumentsOptions {
 export interface TokenMetadataClientConfig {
   /** Base URL of the token registry (e.g. http://localhost:9000) */
   baseUrl: string
-  /** Optional JWT for authentication */
-  jwt?: string
+  /**
+   * Optional JWT for authentication.
+   *
+   * Pass a string for a static token, or a `() => Promise<string>` getter for
+   * a refreshable token. When a getter is supplied, each request awaits it and
+   * uses the returned JWT in the `Authorization` header (enabling automatic
+   * refresh).
+   */
+  jwt?: string | (() => Promise<string>)
   /** Request timeout in milliseconds (default: 30 000) */
   timeout?: number
 }
@@ -102,9 +109,14 @@ export interface TokenMetadataClientConfig {
  */
 export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  console.log('Creating Token Metadata client with base URL:', baseUrl)
-  const headers = buildHeaders(config.jwt)
+  const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
+
+  /** Resolve request headers, awaiting `jwt` when it is a function. */
+  async function resolveHeaders(): Promise<Record<string, string>> {
+    const token = typeof jwt === 'function' ? await jwt() : jwt
+    return buildHeaders(token)
+  }
 
   const appendScanProxyPath = (path: string) => `/v0/scan-proxy${path}`
   return {
@@ -114,6 +126,7 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
      * `GET /registry/metadata/v1/info`
      */
     async getRegistryInfo(): Promise<GetRegistryInfoResponse> {
+      const headers = await resolveHeaders()
       return get<GetRegistryInfoResponse>(
         baseUrl,
         appendScanProxyPath('/registry/metadata/v1/info'),
@@ -128,6 +141,7 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
      * `GET /registry/metadata/v1/instruments`
      */
     async listInstruments(options?: ListInstrumentsOptions): Promise<ListInstrumentsResponse> {
+      const headers = await resolveHeaders()
       const queryParams: Record<string, string> = {}
       if (options?.pageSize !== undefined) {
         queryParams['pageSize'] = String(options.pageSize)
@@ -150,6 +164,7 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
      * `GET /registry/metadata/v1/instruments/{instrumentId}`
      */
     async getInstrument(instrumentId: string): Promise<Instrument> {
+      const headers = await resolveHeaders()
       return get<Instrument>(
         baseUrl,
         appendScanProxyPath(

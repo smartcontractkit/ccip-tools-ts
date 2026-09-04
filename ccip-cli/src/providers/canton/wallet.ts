@@ -1,18 +1,15 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
 
-import type {
-  CantonConfig,
-  Logger,
-  PartySignatures,
-  TransactionSigner,
-} from '@chainlink/ccip-sdk/src/index.ts'
+import type { Logger, PartySignatures, TransactionSigner } from '@chainlink/ccip-sdk/src/index.ts'
+
+import { loadCantonConfig } from './config.ts'
 
 /**
  * Wallet object returned by {@link loadCantonWallet}.
  *
- * `signer` is present only when the caller supplied a private key, enabling the
- * external-signing (prepare → sign → execute) flow.
+ * `signer` is reserved for the external-signing (prepare → sign → execute)
+ * flow, which is not yet enabled in `loadCantonWallet`. Canton sends currently
+ * use JWT-authenticated direct submit.
  */
 export interface CantonWalletWithSigner {
   party: string
@@ -65,10 +62,6 @@ export class Ed25519TransactionSigner implements TransactionSigner {
     })
 
     // Derive the public key and compute the Canton fingerprint.
-    // @types/node@26 dropped the KeyObject overload from createPublicKey's
-    // signature, even though Node itself derives the public key fine from a
-    // private KeyObject (verified at runtime). Cast through Parameters<> until
-    // upstream restores the overload.
     const publicKeyObject = createPublicKey(this.privateKeyObject)
     const publicKeyDer = publicKeyObject.export({ type: 'spki', format: 'der' }) as Buffer
     // Ed25519 SPKI DER is 44 bytes: 12-byte header + 32-byte key.
@@ -157,96 +150,23 @@ function buildEd25519Pkcs8Der(seed: Buffer): Buffer {
   //
   // oxfmt-ignore
   const prefix = Buffer.from([
-    0x30, 0x2e,             // SEQUENCE, 46 bytes
-    0x02, 0x01, 0x00,       // INTEGER 0 (version)
-    0x30, 0x05,             // SEQUENCE, 5 bytes (AlgorithmIdentifier)
-    0x06, 0x03,             // OID, 3 bytes
-    0x2b, 0x65, 0x70,       // 1.3.101.112 (Ed25519)
-    0x04, 0x22,             // OCTET STRING, 34 bytes
-    0x04, 0x20,             // OCTET STRING, 32 bytes (the seed)
+    0x30, 0x2e, // SEQUENCE, 46 bytes
+    0x02, 0x01, 0x00, // INTEGER 0 (version)
+    0x30, 0x05, // SEQUENCE, 5 bytes (AlgorithmIdentifier)
+    0x06, 0x03, // OID, 3 bytes
+    0x2b, 0x65, 0x70, // 1.3.101.112 (Ed25519)
+    0x04, 0x22, // OCTET STRING, 34 bytes
+    0x04, 0x20, // OCTET STRING, 32 bytes (the seed)
   ])
   return Buffer.concat([prefix, seed])
 }
 
 /**
- * Load and validate a Canton config JSON file.
- *
- * @param configPath - Path to JSON file, or undefined if not provided.
- * @param logger - Logger for debug output.
- * @returns Parsed CantonConfig or undefined.
- */
-export function loadCantonConfig(
-  configPath: string | undefined,
-  logger?: Logger,
-): CantonConfig | undefined {
-  if (!configPath) return undefined
-  if (!existsSync(configPath)) {
-    throw new Error(`Canton config file not found: ${configPath}`)
-  }
-  const raw = readFileSync(configPath, 'utf8')
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-
-  const required = ['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const
-  for (const field of required) {
-    if (typeof parsed[field] !== 'string' || !parsed[field].length) {
-      throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
-    }
-  }
-
-  if (parsed['chainId'] != null) {
-    if (typeof parsed['chainId'] !== 'string' || !parsed['chainId'].length) {
-      throw new Error('Canton config: "chainId" must be a non-empty string if provided')
-    }
-  }
-
-  logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
-  return parsed as unknown as CantonConfig
-}
-
-/**
- * CCIP v2 indexer URLs for verification lookups.
- * CLI `--indexer` wins when provided; otherwise uses canton-config `indexerUrl`
- * only when the lane involves Canton (EVM-only lanes keep default indexer behavior).
- * Prefer {@link resolveIndexer} from `./index.ts` in CLI commands.
- */
-export function resolveCliIndexer(
-  cliIndexer: readonly string[] | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
-  laneInvolvesCanton: boolean,
-): readonly string[] | undefined {
-  if (cliIndexer?.length) return cliIndexer
-  if (!laneInvolvesCanton) return undefined
-  const url = cantonConfig?.indexerUrl?.trim()
-  return url ? [url] : undefined
-}
-
-/**
- * Router / sender instance id for `ccip-cli send -r`.
- * On Canton source lanes this is the CCIPSender instance id (e.g. `prod-ccipsender`);
- * on EVM it must be the router contract address. CLI `-r` wins when set.
- * Prefer {@link resolveRouter} from `./index.ts` in CLI commands.
- */
-export function resolveCliRouter(
-  cliRouter: string | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
-  sourceIsCanton: boolean,
-): string | undefined {
-  if (cliRouter?.trim()) return cliRouter.trim()
-  if (sourceIsCanton) {
-    const fromConfig = cantonConfig?.senderInstanceId?.trim()
-    if (fromConfig) return fromConfig
-  }
-  return cliRouter
-}
-
-/**
  * Resolve a Canton wallet from CLI argv.
  *
- * The `party` is sourced from the Canton config file. When a private key is
- * provided (via `--wallet`, `PRIVATE_KEY` env, or rpcsFile — resolved upstream
- * by `loadChainWallet`), an {@link Ed25519TransactionSigner} is attached so
- * `sendMessage` / `execute` use the interactive submission API
- * (prepare → sign → execute).
+ * The `party` is sourced from the Canton config file. Canton sends use
+ * JWT-authenticated direct submit (no external signer); the `--wallet` flag
+ * is accepted but ignored on Canton lanes.
  */
 export function loadCantonWallet(
   argv: { wallet?: unknown; cantonConfig?: string },
@@ -259,15 +179,6 @@ export function loadCantonWallet(
       'Canton wallet requires a party ID: provide --canton-config with a "party" field',
     )
   }
-
-  // Disable external signing for now
-  //
-  // const privateKey = typeof argv.wallet === 'string' ? argv.wallet : undefined
-  // if (privateKey && /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
-  //   const signer = new Ed25519TransactionSigner(privateKey, party)
-  //   logger?.debug(`Canton wallet: external signer created (fingerprint=${signer.getFingerprint()})`)
-  //   return { party, signer }
-  // }
 
   return { party }
 }
