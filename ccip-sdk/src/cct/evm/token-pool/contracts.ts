@@ -3,7 +3,8 @@
  * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
  * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
  * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
- * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}) plus the
+ * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist read
+ * `applyAllowlistUpdates` pre-flights against ({@link readTokenPoolAllowlist}) plus the
  * owner-only guard built on the first of them ({@link assertPoolOwner}). The write-side
  * rate-limit shape lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
@@ -249,6 +250,45 @@ export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): 
     BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
   )
   return getAddress(resultToObject(await pool.owner()))
+}
+
+/**
+ * `TokenPool`'s allowlist getters, identical across v1.5.0–v1.6.1 and both ABI families. Absent
+ * from v2.0.0, which dropped the allowlist — callers must resolve the version first.
+ */
+type PoolAllowlistGetter = Pick<
+  TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
+  'getAllowListEnabled' | 'getAllowList'
+>
+
+/**
+ * Reads a token pool's sender allowlist and whether the feature is enabled at all, in two
+ * parallel `eth_call`s.
+ *
+ * @remarks Same rationale as {@link readTokenPoolOwner} for not routing through
+ * `getTokenPoolState`, which does not expose the allowlist.
+ * @remarks `enabled` is fixed for the pool's lifetime: the contract sets `i_allowlistEnabled`
+ * *immutable* in its constructor, to `allowlist.length > 0`. A pool deployed without an
+ * allowlist can therefore never gain one, and every `applyAllowListUpdates` against it reverts
+ * `AllowListNotEnabled`.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool contract to read from; must be v1.5.0–v1.6.1.
+ * @returns `enabled`, and the current entries checksummed (empty when disabled).
+ */
+export async function readTokenPoolAllowlist(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<{ enabled: boolean; entries: string[] }> {
+  const pool: PoolAllowlistGetter = getTypedContract(
+    chain,
+    poolAddress,
+    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+  )
+  const [enabled, entries] = await Promise.all([pool.getAllowListEnabled(), pool.getAllowList()])
+  return {
+    enabled: resultToObject(enabled),
+    entries: resultToObject(entries).map((entry) => getAddress(entry)),
+  }
 }
 
 /**

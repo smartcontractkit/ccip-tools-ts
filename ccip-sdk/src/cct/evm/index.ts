@@ -1201,16 +1201,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool is reported unsupported rather than emitting calldata for a removed selector.
    *
    * `removes` are applied *before* `adds` on-chain. Both arrays must be non-empty in total, hold
-   * no duplicates, and share no address — an address in both would end up allowlisted (removes
-   * run first), which no caller can reasonably have meant.
+   * no duplicates and no zero address, and share no address — an address in both would end up
+   * allowlisted (removes run first), which no caller can reasonably have meant.
+   *
+   * The pool must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
+   * the call reverts `AllowListNotEnabled` when false), and the update must actually change
+   * state: the current allowlist is read first, and an entry the pool would silently ignore — a
+   * `removes` that is not allowlisted, an `adds` that already is — is rejected here.
    *
    * Owner-only (`applyAllowListUpdates` is `onlyOwner`). When `sender` is supplied it is checked
    * against the pool's `owner()` before any calldata is built; omit it and no owner read is made
    * (nothing to compare against).
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no allowlist
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
-   * address, both arrays are empty, an array holds duplicates, an address appears in both arrays,
-   * or `sender` is given and is not the pool owner
+   * address, both arrays are empty, an array holds duplicates or the zero address, an address
+   * appears in both arrays, the pool has no allowlist enabled, a `removes` entry is not currently
+   * allowlisted, an `adds` entry already is, or `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -1231,10 +1237,18 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Removes and adds entries in the pool's sender allowlist, signing + submitting with
    * `opts.wallet`. `sender` defaults to the wallet's address and must equal it — the wallet must
    * be the pool owner.
+   *
+   * `removes` are applied *before* `adds` on-chain, so an address listed in both would end up
+   * allowlisted; that is rejected, as are duplicates and the zero address. The pool must have an
+   * allowlist enabled (`allowlistEnabled` is immutable — a pool deployed without one can never
+   * gain it), and every entry must change state: the current allowlist is read first, and a
+   * `removes` that is not allowlisted or an `adds` that already is fails here rather than mining
+   * as a no-op.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no allowlist
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, or the wallet is not the pool owner
+   * the wallet's address, the wallet is not the pool owner, the pool has no allowlist enabled, or
+   * an entry would be a no-op (see {@link EVMTokenManager.generateUnsignedApplyAllowlistUpdates})
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time

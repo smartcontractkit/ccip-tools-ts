@@ -41,29 +41,46 @@ const LEGACY_VERSIONS = [
 ] as const
 
 /**
- * EVMChain stub: reports `type version` from `typeAndVersion`, and answers the pool's `owner()`
- * `eth_call` with `owner`. Any other call reverts. `onCall` records that RPC happened at all, so
- * the validation tests can assert nothing was issued.
+ * EVMChain stub: reports `type version` from `typeAndVersion`, and answers the pool's `owner()`,
+ * `getAllowListEnabled()` and `getAllowList()` `eth_call`s. Any other call reverts. `onCall`
+ * records that RPC happened at all, so the validation tests can assert nothing was issued.
+ *
+ * `allowlist` defaults to {@link REMOVES}, the set the default params remove from — leaving
+ * {@link ADDS} absent, so the default case is a real state change on both sides.
  */
 function stubChain({
   family = 'BurnMint',
   version = TokenPoolVersion.V1_5_1,
   owner = OWNER,
+  allowlistEnabled = true,
+  allowlist = REMOVES,
   onCall,
 }: {
   family?: TokenPoolFamily
   version?: TokenPoolVersion
   owner?: string
+  allowlistEnabled?: boolean
+  allowlist?: string[]
   onCall?: () => void
 } = {}): EVMChain {
   const iface = TOKEN_POOL_INTERFACES[family][version]
   const ownerSelector = iface.getFunction('owner')!.selector
+  // v2.0.0 dropped the allowlist getters, so only look them up where they exist
+  const allowlistEnabledSelector = iface.getFunction('getAllowListEnabled')?.selector
+  const allowlistSelector = iface.getFunction('getAllowList')?.selector
   return {
     provider: {
       call: ({ data }: { data: string }) => {
         onCall?.()
-        if (data.slice(0, 10) === ownerSelector)
+        const selector = data.slice(0, 10)
+        if (selector === ownerSelector)
           return Promise.resolve(iface.encodeFunctionResult('owner', [owner]))
+        if (selector === allowlistEnabledSelector)
+          return Promise.resolve(
+            iface.encodeFunctionResult('getAllowListEnabled', [allowlistEnabled]),
+          )
+        if (selector === allowlistSelector)
+          return Promise.resolve(iface.encodeFunctionResult('getAllowList', [allowlist]))
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
           data: '0x',
@@ -139,8 +156,9 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
       const unsigned = await generate(stubChain({ onCall: () => calls++ }), { sender: undefined })
       assert.equal(unsigned.transactions[0]!.from, undefined)
       assert.equal(unsigned.transactions[0]!.data, DATA)
-      // typeAndVersion only — no owner() read without a sender to compare it against
-      assert.equal(calls, 1)
+      // typeAndVersion + the two allowlist reads — no owner() read without a sender to compare
+      // it against; the allowlist pre-flight does not depend on the signer and still runs
+      assert.equal(calls, 3)
     })
 
     it('encodes an empty removes array (adds only)', async () => {
@@ -232,6 +250,18 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
         params: { adds: [ADDS[0]!], removes: [ADDS[0]!] },
       },
       { name: 'an invalid sender', param: 'sender', params: { sender: 'not-an-address' } },
+      // the pool `continue`s past a zero address in adds, and can therefore never hold one:
+      // a silent no-op on either side, so it is rejected locally rather than encoded
+      {
+        name: 'the zero address inside adds',
+        param: 'adds[0]',
+        params: { adds: [ZeroAddress] },
+      },
+      {
+        name: 'the zero address inside removes',
+        param: 'removes[0]',
+        params: { removes: [ZeroAddress] },
+      },
     ]
 
     for (const { name, param, params } of cases) {
@@ -247,13 +277,52 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
         assert.equal(calls, 0)
       })
     }
+  })
 
-    it('rejects the zero address only where the pool would (it is a valid address locally)', async () => {
-      // documents the deliberate choice: entries are checked as addresses, not as non-zero ones
-      const unsigned = await generate(stubChain(), { adds: [ZeroAddress], removes: [] })
+  describe('allowlist pre-flight', () => {
+    it('rejects a pool deployed without an allowlist', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ allowlistEnabled: false, allowlist: [] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'poolAddress',
+      )
+    })
+
+    it('rejects removing an address that is not currently allowlisted', async () => {
+      // the pool's EnumerableSet.remove would return false and the tx would change nothing
+      await assert.rejects(
+        () => generate(stubChain({ allowlist: [ADDS[0]!] }), { adds: [] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'removes',
+      )
+    })
+
+    it('rejects adding an address that is already allowlisted', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ allowlist: [...REMOVES, ADDS[1]!] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'adds',
+      )
+    })
+
+    it('matches the on-chain allowlist case-insensitively', async () => {
+      const unsigned = await generate(
+        stubChain({ allowlist: REMOVES.map((address) => address.toLowerCase()) }),
+      )
+      assert.equal(unsigned.transactions[0]!.data, DATA)
+    })
+
+    it('accepts an empty allowlist when the feature is enabled (adds only)', async () => {
+      const unsigned = await generate(stubChain({ allowlist: [] }), { removes: [] })
       assert.equal(
         unsigned.transactions[0]!.data,
-        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], [ZeroAddress]]),
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
       )
     })
   })
