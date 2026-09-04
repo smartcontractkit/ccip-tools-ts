@@ -598,6 +598,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Replaces a v2.0.0 pool's dynamic config, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks Replaces the config wholesale, so **all three params are required** — this op
+   * deliberately does *not* read `getDynamicConfig()` to fill in what the caller omitted, so an
+   * omitted field is reset rather than left alone. Read the current triple with
+   * {@link getTokenPoolState} and pass back the fields you are not changing, so what is submitted
+   * is exactly what was reviewed.
+   *
+   * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
+   * a zero router detaches the pool from CCIP rather than clearing a privilege.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
