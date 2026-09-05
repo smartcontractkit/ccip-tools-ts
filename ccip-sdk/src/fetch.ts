@@ -7,7 +7,7 @@ import {
   isTransientHttpStatus,
 } from './errors/index.ts'
 import type { WithLogger } from './types.ts'
-import { sleep } from './utils.ts'
+import { linkAbortSignals, sleep } from './utils.ts'
 
 /**
  * Tuning for the rate-limited fetch wrapper.
@@ -628,6 +628,34 @@ export function redactEndpointUrl(input: unknown): string {
 }
 
 /**
+ * Returns a Response whose body runs `onDone` exactly once when it is fully
+ * consumed, errors, or is cancelled — whichever comes first. Used to keep
+ * linked abort signals attached for exactly the body's lifetime: aborts and
+ * timeouts keep propagating while the body streams, and the moment it settles
+ * the sources are detached (see linkAbortSignals). A Response without a body
+ * runs `onDone` immediately and is returned unchanged.
+ */
+export function onResponseBodySettled(response: Response, onDone: () => void): Response {
+  const body = response.body
+  if (!body) {
+    onDone()
+    return response
+  }
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+  // pipeTo resolves on full consumption and rejects on source error or
+  // downstream cancel; all three mean the body no longer needs the signals.
+  void body.pipeTo(writable).then(onDone, onDone)
+  const wrapped = new Response(readable, response)
+  // Wrapping drops url/redirected/type; copy them back.
+  Object.defineProperties(wrapped, {
+    url: { value: response.url },
+    redirected: { value: response.redirected },
+    type: { value: response.type },
+  })
+  return wrapped
+}
+
+/**
  * Creates a fetch wrapper that runs at full speed by default and adaptively
  * paces only when an endpoint actually rate-limits it. Per (endpoint, method)
  * limiters learn the real limit/window from response headers or observed timing,
@@ -683,22 +711,35 @@ export function createRateLimitedFetch(
     )
 
     // Merge the caller's per-request signal with the context abort ONCE, before
-    // the retry loop: wrapping per attempt would nest a fresh composite over the
-    // previous attempt's (depth = retry count), and every wrapper that never
-    // aborts keeps its abort listener registered (Node holds such composites in
-    // its gcPersistentSignals set for as long as any source lives). One composite
-    // per request keeps undici's listener attach/detach churn flat too.
-    if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
-    else if (abort) {
+    // the retry loop: linking per attempt would re-register on the sources per
+    // attempt. The caller's signal may itself be a composite (e.g. ethers'
+    // timeout bundle), so follow rather than compose: a fresh AbortSignal.any
+    // composite over a caller-provided kTimeout composite can pin forever in
+    // Node's gcPersistentSignals, while the link's attach/detach even releases
+    // such caller-created pins (see linkAbortSignals). The link stays attached
+    // while the returned response's body streams (aborts still propagate
+    // mid-read) and detaches when the body settles or the request errors.
+    let link: ReturnType<typeof linkAbortSignals> | null = null
+    if (init?.signal && abort) {
+      link = linkAbortSignals([init.signal, abort])
+      init.signal = link.signal
+    } else if (abort) {
       if (!init) init = {}
       init.signal = abort
     }
+
+    // Returned responses carry the link's cleanup on their body.
+    const finish = (response: Response): Response =>
+      link ? onResponseBodySettled(response, link.unlink) : response
 
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):
       // don't burn further attempts/backoff/pacing under a dead signal. The waits
       // below (pacing + backoff) are also abort-aware so an in-progress one wakes.
-      abort?.throwIfAborted()
+      if (abort?.aborted) {
+        link?.unlink() // terminal exit: no response body will carry the cleanup
+        abort.throwIfAborted()
+      }
       // Resolve the limiter for this request's scope (re-resolved each attempt:
       // methodScoped may flip after the first response).
       const scope = ep.methodScoped && method ? method : '*'
@@ -755,7 +796,10 @@ export function createRateLimitedFetch(
         lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
         // Only retry on retryable network errors (rate-limit pattern); rethrow everything else
-        if (!isRetryableError(lastError)) throw lastError
+        if (!isRetryableError(lastError)) {
+          link?.unlink() // terminal exit: no response body will carry the cleanup
+          throw lastError
+        }
         if (attempt >= opts_.maxRetries) break
         // Treat a rate-limit-flavored network error as a limit signal: narrow the
         // concurrency cap and back off before retrying (no header → no pacing).
@@ -780,7 +824,7 @@ export function createRateLimitedFetch(
           response.status,
           init?.body ? bodyStr(init.body) : redactEndpointUrl(input),
         )
-        return response
+        return finish(response)
       }
       if (isTransientHttpStatus(response.status)) {
         if (attempt < opts_.maxRetries) {
@@ -789,7 +833,7 @@ export function createRateLimitedFetch(
           continue
         }
         logger.debug('fetch transient error, retries exhausted', response.status)
-        return response
+        return finish(response)
       }
       // Non-transient non-ok (4xx etc): return immediately, no retry.
       logger.debug(
@@ -798,9 +842,10 @@ export function createRateLimitedFetch(
         response.status,
         bodyStr(init?.body),
       )
-      return response
+      return finish(response)
     }
 
+    link?.unlink() // retries exhausted: no response body will carry the cleanup
     throw lastError || CCIPError.from('Request failed after all retries', 'HTTP_ERROR')
   }
 }
@@ -811,7 +856,7 @@ export function createRateLimitedFetch(
  *
  * Wraps axios's built-in `'fetch'` adapter so that all HTTP traffic goes through
  * the provided `fetchFn` (e.g. a rate-limited fetch). When `abort` is supplied,
- * it is merged (via `AbortSignal.any`) with any per-request signal already set on
+ * it is linked (see `linkAbortSignals`) with any per-request signal already set on
  * the axios config, so callers don't need to thread the abort signal manually.
  *
  * @param fetchFn - The `fetch` implementation to bind (e.g. from `createRateLimitedFetch`).
@@ -830,11 +875,22 @@ export function createAxiosFetchAdapter(fetchFn: typeof fetch, abort?: AbortSign
     env: { fetch: fetchFn },
   })
   if (!abort) return base
-  return (config) =>
-    base({
-      ...config,
-      signal: config.signal ? AbortSignal.any([config.signal as AbortSignal, abort]) : abort,
-    })
+  return (config) => {
+    if (!config.signal) return base({ ...config, signal: abort })
+    // Link rather than compose with AbortSignal.any (see linkAbortSignals):
+    // axios's fetch adapter consumes the response body before its promise
+    // settles, so unlinking on settle detaches exactly when the request is
+    // done with the signals.
+    const link = linkAbortSignals([config.signal as AbortSignal, abort])
+    let result: ReturnType<AxiosAdapter>
+    try {
+      result = base({ ...config, signal: link.signal })
+    } catch (error) {
+      link.unlink()
+      throw error
+    }
+    return result.finally(link.unlink)
+  }
 }
 
 /**
@@ -863,14 +919,19 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const timeoutMs = opts?.timeoutMs ?? 30_000
   const fetchFn = opts?.fetch ?? globalThis.fetch.bind(globalThis)
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  const combinedSignal = opts?.signal
-    ? AbortSignal.any([timeoutSignal, opts.signal])
-    : timeoutSignal
+  // Follow the caller's signal and bound the request with AbortSignal.timeout
+  // WITHOUT composing them into a fresh AbortSignal.any composite: a composite
+  // over a kTimeout source can pin in Node's gcPersistentSignals long after the
+  // request completed (see linkAbortSignals). The link stays attached while the
+  // body streams and detaches when it settles; the bare timeout signal is
+  // timer-bounded and cleans itself up when it fires.
+  const link = linkAbortSignals([opts?.signal, AbortSignal.timeout(timeoutMs)])
 
   try {
-    return await fetchFn(url, { ...opts?.init, signal: combinedSignal })
+    const response = await fetchFn(url, { ...opts?.init, signal: link.signal })
+    return onResponseBodySettled(response, link.unlink)
   } catch (error) {
+    link.unlink()
     if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
       if (opts?.signal?.aborted) {
         throw new CCIPAbortError(operation)

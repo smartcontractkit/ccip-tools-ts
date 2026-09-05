@@ -115,6 +115,7 @@ import {
   getAddressBytes,
   getBlockNumberAtOrAfter,
   getDataBytes,
+  linkAbortSignals,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -566,21 +567,29 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // 90s comfortably exceeds any legitimate slow call (a chunked
         // eth_getLogs under active pacing).
         const timeoutSignal = AbortSignal.timeout(90_000)
-        let requestSignal: AbortSignal = timeoutSignal
+        // The cancel bridge and the 90s bound are followed through a LINK, not
+        // composed into a fresh AbortSignal.any composite: a composite over a
+        // kTimeout source is never listened to directly (undici attaches to the
+        // downstream merge), so its following never activates and it pins in
+        // Node's gcPersistentSignals for the process's lifetime — one composite
+        // per RPC request. The `using` link detaches on return instead (see
+        // linkAbortSignals).
+        let linkSource: AbortSignal | undefined
         if (signal) {
           const cancel = new AbortController()
           try {
             signal.addListener(() => cancel.abort())
-            requestSignal = AbortSignal.any([cancel.signal, timeoutSignal])
+            linkSource = cancel.signal
           } catch {
-            requestSignal = AbortSignal.abort() // already cancelled by ethers
+            linkSource = AbortSignal.abort() // already cancelled by ethers
           }
         }
+        using link = linkSource ? linkAbortSignals([linkSource, timeoutSignal]) : null
         const resp = await fetchFn(r.url, {
           method: r.method || 'POST',
           headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
           body: r.body ?? undefined,
-          signal: requestSignal,
+          signal: link?.signal ?? timeoutSignal,
         })
         const headers: Record<string, string> = {}
         resp.headers.forEach((v, k) => {

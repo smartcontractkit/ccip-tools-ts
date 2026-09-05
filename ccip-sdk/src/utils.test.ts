@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { describe, it, mock } from 'node:test'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 
 import { NATIVE_MINT } from '@solana/spl-token'
 import { dataLength } from 'ethers'
@@ -20,6 +23,7 @@ import {
   jsonParse,
   jsonStringify,
   leToBigInt,
+  linkAbortSignals,
   parseTypeAndVersion,
   passesTypeAndVersion,
   scaleDecimals,
@@ -1506,5 +1510,111 @@ describe('scaleDecimals', () => {
   it('truncates like the pools do', () => {
     assert.equal(scaleDecimals(1n, 18, 9), 0n)
     assert.equal(scaleDecimals(1_999_999_999n, 18, 9), 1n)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AbortSignal utilities: no gcPersistentSignals pins, deterministic detach
+// ---------------------------------------------------------------------------
+
+/** Exposes V8's GC for this process (node --test does not pass --expose-gc). */
+function forceGc(): () => void {
+  const direct = globalThis.gc as (() => void) | undefined
+  if (direct) return () => void direct()
+  setFlagsFromString('--expose_gc')
+  return runInNewContext('gc') as () => void
+}
+
+describe('linkAbortSignals', () => {
+  it('fires with the source reason when any source aborts', () => {
+    const a = new AbortController()
+    const b = new AbortController()
+    const link = linkAbortSignals([a.signal, b.signal])
+    assert.equal(link.signal.aborted, false)
+    const err = new Error('boom')
+    a.abort(err)
+    assert.equal(link.signal.aborted, true)
+    assert.equal(link.signal.reason, err)
+    // a fired link is terminal: it detaches from the other source immediately
+    assert.equal(getEventListeners(b.signal, 'abort').length, 0)
+  })
+
+  it('stops propagating after unlink and leaves no listeners behind', () => {
+    const a = new AbortController()
+    const link = linkAbortSignals([a.signal])
+    link.unlink()
+    assert.equal(getEventListeners(a.signal, 'abort').length, 0)
+    a.abort()
+    assert.equal(link.signal.aborted, false)
+  })
+
+  it('is aborted from the start when a source already aborted', () => {
+    const a = new AbortController()
+    a.abort()
+    const link = linkAbortSignals([undefined, a.signal])
+    assert.equal(link.signal.aborted, true)
+    assert.ok(link.signal.reason instanceof DOMException)
+    assert.equal((link.signal.reason as DOMException).name, 'AbortError')
+  })
+
+  it('supports manual abort with a custom reason', () => {
+    const link = linkAbortSignals([])
+    link.abort('because')
+    assert.equal(link.signal.aborted, true)
+    assert.equal(link.signal.reason, 'because')
+  })
+})
+
+describe('linkAbortSignals GC behavior', () => {
+  it('releases caller-created pinned composites on unlink', async () => {
+    // The pinned shape (.repro-abort S1): a bare AbortSignal.any composite over
+    // a kTimeout source, never listened to directly. The link's attach/detach
+    // must release even that (S7: listener-count drop is a set exit condition).
+    const gc = forceGc()
+    const N = 20
+    const refs: WeakRef<AbortSignal>[] = []
+    for (let i = 0; i < N; i++) {
+      const caller = AbortSignal.any([new AbortController().signal, AbortSignal.timeout(60_000)])
+      refs.push(new WeakRef(caller))
+      const link = linkAbortSignals([caller])
+      link.unlink()
+    }
+    for (let i = 0; i < 8; i++) gc()
+    await new Promise((resolve) => setImmediate(resolve))
+    for (let i = 0; i < 8; i++) gc()
+    // The final iteration's bindings can stay reachable from the frame.
+    const alive = refs.filter((r) => r.deref()).length
+    assert.ok(alive <= 1, `caller composites still reachable: ${alive}/${N}`)
+  })
+
+  it('is Disposable: `using` disposes the link at scope exit', () => {
+    const a = new AbortController()
+    let linkedSignal!: AbortSignal
+    {
+      using link = linkAbortSignals([a.signal])
+      linkedSignal = link.signal
+      assert.equal(getEventListeners(a.signal, 'abort').length, 1)
+    }
+    assert.equal(getEventListeners(a.signal, 'abort').length, 0)
+    a.abort()
+    assert.equal(linkedSignal.aborted, false)
+  })
+})
+
+describe('sleep abort hygiene', () => {
+  it('leaves no listener on a long-lived signal after waking', async () => {
+    const controller = new AbortController()
+    for (let i = 0; i < 20; i++) await sleep(1, controller.signal)
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
+  })
+
+  it('wakes early on abort and detaches', async () => {
+    const controller = new AbortController()
+    const start = Date.now()
+    const pending = sleep(60_000, controller.signal)
+    setTimeout(() => controller.abort(), 10)
+    await pending
+    assert.ok(Date.now() - start < 5_000, 'sleep returned before its full duration')
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
   })
 })

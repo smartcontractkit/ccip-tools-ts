@@ -388,21 +388,29 @@ export function convertKeysToCamelCase(
 
 /**
  * Promise-based sleep utility.
- * AbortSignal.timeout is unref'd on purpose; a script using it should be wrapped
- * in a setTimeout to avoid the process exiting mid-sleep.
+ * Plain timer + explicit listener detach: allocates no AbortSignal.timeout/any
+ * composites at all, so nothing can pin in Node's gcPersistentSignals, and the
+ * abort listener is removed on both wake paths — no reliance on Node's lazy
+ * composite following, on any runtime. The timer is unref'd on purpose (as
+ * AbortSignal.timeout was); a script using it should hold another handle
+ * (e.g. a setTimeout) to avoid the process exiting mid-sleep.
  * @param ms - Duration in milliseconds.
  * @returns Promise that resolves after the specified duration.
  */
 export const sleep = (ms: number, abort?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (abort?.aborted || !ms) return resolve()
-    let timeout = AbortSignal.timeout(Math.ceil(ms))
-    if (abort) timeout = AbortSignal.any([abort, timeout])
     const onAbort = () => {
-      timeout.removeEventListener('abort', onAbort)
+      clearTimeout(timeout)
       resolve()
     }
-    timeout.addEventListener('abort', onAbort, { once: true })
+    const timeout = setTimeout(() => {
+      // Happy path: detach so a long-lived `abort` retains nothing per sleep.
+      abort?.removeEventListener('abort', onAbort)
+      resolve()
+    }, Math.ceil(ms))
+    timeout.unref()
+    abort?.addEventListener('abort', onAbort, { once: true })
   })
 
 /**
@@ -610,6 +618,63 @@ export async function passesTypeAndVersion(
     // drop this one address's logs, not abort the whole getLogs iteration.
     chain.logger?.debug('passesTypeAndVersion: typeAndVersion failed for', address, err)
     return false
+  }
+}
+
+/**
+ * Follows one or more caller-provided signals with a plain AbortController,
+ * instead of composing them with `AbortSignal.any`. This is the DOWNSTREAM-side
+ * pattern for functions that receive signals of unknown provenance.
+ *
+ * Why not `AbortSignal.any` downstream: a composite over a kTimeout source (an
+ * `AbortSignal.timeout`, or another composite containing one) is pinned
+ * STRONGLY in Node's `gcPersistentSignals` set, and — because composite
+ * following is lazy and only activates when the composite itself gets a
+ * listener — a composite nobody listens to never aborts and never leaves the
+ * set, even after its sources abort or the operation completes (measured:
+ * 500/500 retained on Node 22.23/24.19/26.7; see repro-nested.mjs). Linking
+ * creates no composite at all, and the strong-listener attach + detach even
+ * releases caller-created pinned composites (listener-count drop is an exit
+ * condition of the set), so legacy caller shapes are cleaned up too.
+ *
+ * @param sources - Signals to follow; undefined entries are ignored.
+ * @returns `signal` to hand to fetch & co, `abort` to fire it directly, and
+ *   `unlink` to detach from the sources. Every link MUST be disposed when the
+ *   operation settles: the Disposable contract supports `using` when the
+ *   link's lifetime is lexical; the `unlink` member covers cases where cleanup
+ *   is forwarded elsewhere (e.g. a response body's settle hook).
+ */
+export function linkAbortSignals(sources: readonly (AbortSignal | undefined)[]): {
+  signal: AbortSignal
+  abort: (reason?: unknown) => void
+  unlink: () => void
+} & Disposable {
+  const controller = new AbortController()
+  const linked: AbortSignal[] = []
+  const unlink = (): void => {
+    for (const source of linked) source.removeEventListener('abort', onAbort)
+    linked.length = 0
+  }
+  // `function` so `this` is the firing source. Once the link fires it is
+  // terminal, so detach from the other sources immediately.
+  const onAbort = function (this: AbortSignal): void {
+    unlink()
+    controller.abort(this.reason)
+  }
+  for (const source of sources) {
+    if (!source) continue
+    if (source.aborted) {
+      controller.abort(source.reason)
+      break
+    }
+    source.addEventListener('abort', onAbort, { once: true })
+    linked.push(source)
+  }
+  return {
+    signal: controller.signal,
+    abort: controller.abort.bind(controller),
+    unlink,
+    [Symbol.dispose]: unlink,
   }
 }
 
