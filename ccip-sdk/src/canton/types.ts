@@ -84,6 +84,30 @@ export interface CantonInstrumentId {
 }
 
 /**
+ * An active contract read from the ACS via {@link CantonChain.findActiveContractByTemplate}.
+ *
+ * Carries the fields needed both to resolve a contract by `instanceId` and to
+ * embed it as a disclosed contract in a later submission (`createdEventBlob` +
+ * `synchronizerId`). `createArgument` is the raw Daml record value (gRPC
+ * `{ Sum: { Record: { fields: [...] } } }` form) — decode with the shared
+ * `extractField` / `extractStringField` helpers.
+ */
+export interface CantonActiveContract {
+  /** Daml contract ID (`#...`). */
+  contractId: string
+  /** Full template ID string (`#<pkg>:<Module>:<Entity>`). */
+  templateId: string
+  /** Opaque blob for disclosed-contract submission (from `createdEventBlob`). */
+  createdEventBlob: string
+  /** Synchronizer the contract was read from. */
+  synchronizerId: string
+  /** Contract signatories (from the created event); used for InstanceAddress derivation. */
+  signatories: string[]
+  /** Raw Daml `createArgument` record (decode lazily with field helpers). */
+  createArgument: unknown
+}
+
+/**
  * Input for a single CCV that should verify the outbound send
  * (maps to Go `ccipsender.CCVSendInput`).
  */
