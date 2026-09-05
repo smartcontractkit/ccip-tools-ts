@@ -53,7 +53,10 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['FOUNDRY_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
-      if (!pw && interactive === false) {
+      // A passwordless keystore is unlocked with the empty string (""), which is a valid password,
+      // not a missing one. Only `undefined` (env var unset) is genuinely missing, so gate on that;
+      // `!pw` wrongly rejected "" and made passwordless keystores unusable with --no-interactive.
+      if (pw === undefined && interactive === false) {
         throw new CCIPInteractiveRequiredError(
           'Keystore password required but --no-interactive is set',
           { recovery: 'Set FOUNDRY_KEYSTORE_PASSWORD or USER_KEY_PASSWORD environment variable' },
@@ -74,7 +77,8 @@ const KEYSTORE_PROVIDERS: Record<
         )
       }
       let pw = process.env['HARDHAT_KEYSTORE_PASSWORD'] ?? process.env['USER_KEY_PASSWORD']
-      if (!pw && interactive === false) {
+      // "" is a valid (empty) password; only an unset env var (undefined) is genuinely missing.
+      if (pw === undefined && interactive === false) {
         throw new CCIPInteractiveRequiredError(
           'Keystore password required but --no-interactive is set',
           { recovery: 'Set HARDHAT_KEYSTORE_PASSWORD or USER_KEY_PASSWORD environment variable' },
@@ -152,13 +156,14 @@ export async function loadEvmWallet(
   }
   if (existsSync(walletOpt)) {
     let pw = process.env['USER_KEY_PASSWORD']
-    if (!pw && interactive === false) {
+    // "" is a valid (empty) password; only an unset env var (undefined) is genuinely missing.
+    if (pw === undefined && interactive === false) {
       throw new CCIPInteractiveRequiredError(
         'JSON wallet password required but --no-interactive is set',
         { recovery: 'Set USER_KEY_PASSWORD environment variable' },
       )
     }
-    if (!pw) pw = await password({ message: 'Enter password for json wallet' })
+    if (pw === undefined) pw = await password({ message: 'Enter password for json wallet' })
     return (await Wallet.fromEncryptedJson(await readFile(walletOpt, 'utf8'), pw)).connect(provider)
   }
   return new BaseWallet(
