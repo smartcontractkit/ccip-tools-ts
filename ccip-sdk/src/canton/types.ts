@@ -1,13 +1,13 @@
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
-import type { JsCommands, PartySignatures } from './client/index.ts'
+import type { JsCommands, SinglePartySignatures } from './client/index.ts'
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.
  *
  * Implementations receive the raw hash bytes (decoded from the base64
  * `preparedTransactionHash` returned by the Preparing Participant Node) and
- * must return a fully-assembled {@link PartySignatures} structure.
+ * must return a fully-assembled {@link SinglePartySignatures} structure.
  *
  * @example
  * ```ts
@@ -16,13 +16,10 @@ import type { JsCommands, PartySignatures } from './client/index.ts'
  *     const sig = ed25519.sign(hash, privateKey)
  *     return {
  *       signatures: [{
- *         party: partyId,
- *         signatures: [{
- *           format: 'CRYPTO_KEY_FORMAT_RAW',
- *           signature: Buffer.from(sig).toString('base64'),
- *           signedBy: keyFingerprint,
- *           signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
- *         }],
+ *         format: 'CRYPTO_KEY_FORMAT_RAW',
+ *         signature: Buffer.from(sig).toString('base64'),
+ *         signedBy: keyFingerprint,
+ *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
  *       }],
  *     }
  *   },
@@ -30,7 +27,7 @@ import type { JsCommands, PartySignatures } from './client/index.ts'
  * ```
  */
 export interface TransactionSigner {
-  sign(hash: Uint8Array): Promise<PartySignatures>
+  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
 }
 
 /**

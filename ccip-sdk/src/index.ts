@@ -147,7 +147,7 @@ export type { UnsignedTONTx } from './ton/index.ts'
 export type {
   CantonInstrumentId,
   CantonWallet,
-  PartySignatures,
+  SinglePartySignatures,
   TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
