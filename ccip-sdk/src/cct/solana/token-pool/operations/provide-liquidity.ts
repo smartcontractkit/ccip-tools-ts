@@ -19,6 +19,7 @@ import {
   deriveTokenPoolSignerPda,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
+import { ApproveToken } from '../../token/operations/approve-token.ts'
 import {
   U64_MAX,
   parsePublicKey,
@@ -37,8 +38,10 @@ type ProvideLiquidityParams = PoolProgramRef & {
   tokenAddress: string
   /** Amount to deposit in base units. Must be a positive u64. */
   amount: bigint
-  /** Pool rebalancer whose ATA for `tokenAddress` must hold `amount` and delegate it to the pool signer. Defaults to `payer`. */
+  /** Pool rebalancer whose ATA for `tokenAddress` must hold `amount`. Defaults to `payer`. */
   authority?: string
+  /** Add an SPL Token approval for the pool signer before providing liquidity in the same transaction. */
+  includeApproval?: boolean
 }
 
 type ParsedProvideLiquidityParams = {
@@ -47,6 +50,7 @@ type ParsedProvideLiquidityParams = {
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
+  includeApproval: boolean
 }
 
 /** Parameters for unsigned Solana lock-release pool liquidity provision. */
@@ -85,6 +89,7 @@ export class ProvideLiquidity extends SolanaOperation<
         params.authority === undefined
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
+      includeApproval: params.includeApproval ?? false,
     }
   }
 
@@ -120,13 +125,15 @@ export class ProvideLiquidity extends SolanaOperation<
       )
 
     // The pool signer transfers from the rebalancer ATA as its SPL Token delegate.
-    validateDelegation(
-      this.name,
-      remoteTokenAccount,
-      remoteTokenAccountInfo,
-      poolSigner,
-      opts.amount,
-    )
+    if (!opts.includeApproval) {
+      validateDelegation(
+        this.name,
+        remoteTokenAccount,
+        remoteTokenAccountInfo,
+        poolSigner,
+        opts.amount,
+      )
+    }
 
     // The pool vault ATA must have been created during pool initialization.
     const { tokenAccount: poolTokenAccount } = await resolveExistingTokenAccount(
@@ -135,7 +142,11 @@ export class ProvideLiquidity extends SolanaOperation<
       poolSigner,
     )
 
-    const instruction = await createLockReleaseTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const provideLiquidityInstruction = await createLockReleaseTokenPoolProgram(
+      chain,
+      opts.poolProgram,
+      opts.payer,
+    )
       .methods.provideLiquidity(new BN(opts.amount.toString()))
       .accountsStrict({
         state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
@@ -148,6 +159,16 @@ export class ProvideLiquidity extends SolanaOperation<
       })
       .instruction()
 
+    const approval = opts.includeApproval
+      ? await new ApproveToken().generate(chain, {
+          payer: opts.payer.toBase58(),
+          tokenAddress: opts.tokenAddress.toBase58(),
+          delegate: poolSigner.toBase58(),
+          amount: opts.amount,
+          authority: opts.authority.toBase58(),
+        })
+      : undefined
+
     chain.logger.debug(
       `${
         this.name
@@ -155,10 +176,11 @@ export class ProvideLiquidity extends SolanaOperation<
         opts.amount
       }`,
     )
+
     return {
       family: ChainFamily.Solana,
-      instructions: [instruction],
-      mainIndex: 0,
+      instructions: [...(approval?.instructions ?? []), provideLiquidityInstruction],
+      mainIndex: approval ? 1 : 0,
     }
   }
 

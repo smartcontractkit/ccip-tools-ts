@@ -1241,7 +1241,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
    * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
-   * and delegate at least `amount` to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   * and delegate at least `amount` to the pool signer PDA. Set `includeApproval: true` to bundle
+   * that approval before the liquidity instruction in this transaction.
    *
    * @see {@link provideLiquidity}
    * @see {@link generateUnsignedApproveToken}
@@ -1254,25 +1255,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    *
-   * @example Prepare and generate liquidity instructions
+   * @example Generate bundled approval and liquidity instructions
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const amount = 1_000_000n
-   * const { config } = await cct.getTokenPoolState({
-   *   tokenAddress: mint,
-   *   poolType: 'lock-release',
-   * })
-   * const approval = await cct.generateUnsignedApproveToken({
-   *   payer: rebalancer,
-   *   tokenAddress: mint,
-   *   delegate: config.poolSigner,
-   *   amount,
-   * })
    * const liquidity = await cct.generateUnsignedProvideLiquidity({
    *   payer: rebalancer,
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
-   *   amount,
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
    * })
    * ```
    */
@@ -1290,7 +1281,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
    * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
-   * to the pool signer PDA; use {@link approveToken} first.
+   * to the pool signer PDA, unless `includeApproval: true` bundles that approval in this transaction.
    *
    * @see {@link generateUnsignedProvideLiquidity}
    * @see {@link approveToken}
@@ -1305,19 +1296,19 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
-   * signer, the pool rejects the rebalancer, liquidity is disabled, the token account lacks funds,
-   * or simulation/submission fails.
+   * signer and `includeApproval` is false, the pool rejects the rebalancer, liquidity is disabled,
+   * the token account lacks funds, or simulation/submission fails.
    *
-   * @example Prepare and provide liquidity
+   * @example Approve and provide liquidity in one transaction
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const amount = 1_000_000n
-   * const { config } = await cct.getTokenPoolState({
+   * await cct.provideLiquidity({
+   *   wallet,
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
    * })
-   * await cct.approveToken({ wallet, tokenAddress: mint, delegate: config.poolSigner, amount })
-   * await cct.provideLiquidity({ wallet, tokenAddress: mint, poolType: 'lock-release', amount })
    * ```
    */
   provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
