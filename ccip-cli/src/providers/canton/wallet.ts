@@ -1,8 +1,42 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
 
-import type { Logger, PartySignatures, TransactionSigner } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type Logger,
+  type SinglePartySignatures,
+  type TransactionSigner,
+  CCIPArgumentInvalidError,
+  CCIPInteractiveRequiredError,
+} from '@chainlink/ccip-sdk/src/index.ts'
+import CantonLedger, {
+  type CantonAddress,
+  type CantonSignature,
+  CLA,
+  INS,
+  P2_FIRST,
+  P2_MORE,
+  P2_MSG_END,
+  SIGNATURE_END_BYTE,
+  SIGNATURE_FRAMING_BYTE,
+  STATUS,
+} from '@ledgerhq/hw-app-canton/lib/index'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import { TransportStatusError } from '@ledgerhq/hw-transport/errors'
+// @ts-ignore
+import BIPPath from 'bip32-path'
 
 import { loadCantonConfig } from './config.ts'
+
+// Unexported constants, copied from:
+// https://github.com/LedgerHQ/ledger-live/blob/6651fb6c9687afec979ffc7d8eddb0fcded452a7/libs/ledgerjs/packages/hw-app-canton/src/Canton.ts#L34-L40
+const TLV_SIGNATURE_LENGTH = 131 // bytes: [40][64B main][00][40][64B challenge]
+const TLV_SIGNATURE_START_OFFSET = 1 // After framing byte
+const TLV_SIGNATURE_END_OFFSET = 65 // End of main signature
+const TLV_APPLICATION_SIGNATURE_START_OFFSET = 67 // After [00][40]
+const TLV_APPLICATION_SIGNATURE_END_OFFSET = 131 // End of application signature
+const ED25519_SIGNATURE_BYTE_LENGTH = 64 // bytes
+
+// Missing P1 parameter to sign raw tx hashes, not present in hw-app-canton:
+const P1_SIGN_HASH = 0x00
 
 /**
  * Wallet object returned by {@link loadCantonWallet}.
@@ -13,7 +47,216 @@ import { loadCantonConfig } from './config.ts'
  */
 export interface CantonWalletWithSigner {
   party: string
-  signer?: Ed25519TransactionSigner
+  signer?: TransactionSigner
+}
+
+export class CantonLedgerSigner implements TransactionSigner {
+  private readonly party: string
+  private readonly derivationPath: string
+  private readonly cantonSigner: CantonLedger.default
+  private readonly fingerprint: string
+
+  private constructor(signer: CantonLedger.default, derivationPath: string, party: string) {
+    this.derivationPath = derivationPath
+    this.cantonSigner = signer
+    this.party = party
+    this.fingerprint = derivePartyFingerprint(party)
+  }
+
+  static async create(derivationPath: string, party: string) {
+    const transport = await HIDTransport.default.create()
+    const signer = new CantonLedger.default(transport)
+    const ledgerSigner = new CantonLedgerSigner(signer, derivationPath, party)
+
+    // Validate that the key at the derivation path points to the expected/configured party
+    // by comparing their fingerprints:
+    let addressResponse: CantonAddress
+    try {
+      addressResponse = await ledgerSigner.cantonSigner.getAddress(
+        ledgerSigner.derivationPath,
+        false,
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `Error validating Ledger key for derivation path ${derivationPath}: ${message}`,
+      )
+    }
+
+    const expectedFingerprint = normalizeHex(ledgerSigner.fingerprint)
+    const returnedFingerprint = normalizeHex(
+      computeCantonFingerprint(decodeLedgerPublicKey(addressResponse.publicKey)),
+    )
+    if (returnedFingerprint !== expectedFingerprint) {
+      throw new Error(
+        `Ledger key mismatch for party "${party}" at derivation path ${derivationPath}: expected fingerprint ${expectedFingerprint}, got ${returnedFingerprint}`,
+      )
+    }
+
+    return ledgerSigner
+  }
+
+  async signTxHash(hash: Uint8Array): Promise<SinglePartySignatures> {
+    /*
+    * This should just use:
+        const txHashHex = Buffer.from(hash).toString('hex')
+        const { signature } = await this.cantonSigner.signTransaction(this.derivationPath, txHashHex)
+    * But hw-app-canton currently uses `signUntypedVersionedMessage` behind `signTxHash` which uses
+    * the wrong APDU P1 parameter for raw tx hash signing.
+    * Signing a raw tx hash should use P1_SIGN_HASH = 0x00, not P1_SIGN_UNTYPED_VERSIONED_MESSAGE = 0x01
+    * See reference:
+    * https://github.com/LedgerHQ/app-canton/blob/develop/doc/APDU.md#sign_hash-p1--0x00-example
+    * Therefore, copying some of the logic from hw-app-canton to send the correct APDU commands for
+    * signing a raw tx hash while still keeping the instantiated cantonSigner around in case support
+    * is added in the future.
+    * */
+
+    const txHash = Buffer.from(hash)
+
+    // 1. Send the derivation path
+    const serializedPath = this.serializeBipPath(this.derivationPath)
+
+    const pathResponse = await this.cantonSigner.transport.send(
+      CLA,
+      INS.SIGN,
+      P1_SIGN_HASH,
+      P2_FIRST | P2_MORE,
+      serializedPath,
+    )
+    this.checkTransportResponse(pathResponse)
+
+    // 2. Send the transaction hash as a single transaction
+    const response = await this.cantonSigner.transport.send(
+      CLA,
+      INS.SIGN,
+      P1_SIGN_HASH,
+      P2_MSG_END,
+      txHash,
+    )
+
+    this.checkTransportResponse(response)
+    const responseData = this.extractResponseData(response)
+    const signatureResponse = this.parseSignatureResponse(responseData)
+    const signatureBytes = Buffer.from(signatureResponse.signature, 'hex')
+
+    return {
+      party: this.party,
+      signatures: [
+        {
+          format: 'SIGNATURE_FORMAT_RAW',
+          signature: signatureBytes.toString('base64'),
+          signedBy: this.fingerprint,
+          signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
+        },
+      ],
+    }
+  }
+
+  /**
+   * Check transport response for errors and throw appropriate exceptions
+   * @private
+   */
+  private checkTransportResponse(response: Buffer): void {
+    const statusCode = response.readUInt16BE(response.length - 2)
+
+    if (statusCode !== STATUS.OK) {
+      throw new TransportStatusError(statusCode)
+    }
+  }
+
+  /**
+   * Extract response data from transport response
+   * APDU responses have format: [data][status_code(2_bytes)]
+   * @private
+   */
+  private extractResponseData(response: Buffer): Buffer {
+    return response.slice(0, -2)
+  }
+
+  /**
+   * Parse signature response - handles both TLV format (onboarding) and single signatures
+   * @private
+   */
+  private parseSignatureResponse(response: Buffer, challenge?: string): CantonSignature {
+    // Handle TLV (Type-Length-Value) format: [40][64B main][00][40][64B challenge] = 131 bytes
+    if (
+      response.length === TLV_SIGNATURE_LENGTH &&
+      response.readUInt8(0) === SIGNATURE_FRAMING_BYTE &&
+      response.readUInt8(TLV_SIGNATURE_END_OFFSET) === SIGNATURE_END_BYTE &&
+      response.readUInt8(TLV_APPLICATION_SIGNATURE_START_OFFSET - 1) === SIGNATURE_FRAMING_BYTE
+    ) {
+      const signature = response
+        .slice(TLV_SIGNATURE_START_OFFSET, TLV_SIGNATURE_END_OFFSET)
+        .toString('hex')
+      const applicationSignature = response
+        .slice(TLV_APPLICATION_SIGNATURE_START_OFFSET, TLV_APPLICATION_SIGNATURE_END_OFFSET)
+        .toString('hex')
+
+      // Include applicationSignature only if challenge was provided in the request
+      return {
+        signature,
+        ...(challenge && { applicationSignature }),
+      }
+    }
+
+    // Handle single signature formats - check length before converting to hex
+    if (response.length === ED25519_SIGNATURE_BYTE_LENGTH) {
+      // Pure 64-byte Ed25519 signature = 128 hex chars (64 bytes)
+      return { signature: response.toString('hex') }
+    }
+
+    if (response.length === ED25519_SIGNATURE_BYTE_LENGTH + 2) {
+      // Canton-framed signature: [40][64B Ed25519 sig][00] = 66 bytes (132 hex chars)
+      const cleanedSignature = response.slice(1, -1).toString('hex')
+      return { signature: cleanedSignature }
+    }
+
+    // Fallback: return as hex string
+    return { signature: response.toString('hex') }
+  }
+
+  /**
+   * Serialize a BIP-32 path string to a data buffer for Canton BOLOS
+   * @private
+   */
+  private serializeBipPath(pathString: string): Buffer {
+    const bipPath = BIPPath.fromString(pathString).toPathArray()
+    const data = Buffer.alloc(1 + bipPath.length * 4)
+
+    data.writeUInt8(bipPath.length, 0) // Write path length as first byte
+    bipPath.forEach((segment: any, index: any) => {
+      data.writeUInt32BE(segment, 1 + index * 4) // Write each segment as 32-bit integer
+    })
+
+    return data
+  }
+}
+
+function derivePartyFingerprint(party: string): string {
+  const parts = party.split('::')
+  const fingerprint = parts[parts.length - 1]?.trim()
+  if (!fingerprint) {
+    throw new Error(`Canton party "${party}" does not include a key fingerprint`)
+  }
+  return fingerprint
+}
+
+function decodeLedgerPublicKey(publicKey: string): Buffer {
+  const normalized = publicKey.replace(/^0x/i, '').trim()
+  if (!/^[\da-fA-F]+$/.test(normalized) || normalized.length % 2 !== 0) {
+    throw new Error('Ledger publicKey is not valid hex')
+  }
+  const raw = Buffer.from(normalized, 'hex')
+
+  if (raw.length !== 32) {
+    throw new Error(`Ledger publicKey has invalid length ${raw.length}, expected 32`)
+  }
+
+  return raw
+}
+
+function normalizeHex(value: string): string {
+  return value.trim().replace(/^0x/i, '').toLowerCase()
 }
 
 /**
@@ -73,23 +316,19 @@ export class Ed25519TransactionSigner implements TransactionSigner {
    * Sign a prepared transaction hash.
    *
    * @param hash - Raw hash bytes from the prepare response.
-   * @returns PartySignatures ready for the execute submission request.
+   * @returns SinglePartySignatures ready for the execute submission request.
    */
-  sign(hash: Uint8Array): Promise<PartySignatures> {
+  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures> {
     const signature = sign(null, Buffer.from(hash), this.privateKeyObject)
 
     return Promise.resolve({
+      party: this.party,
       signatures: [
         {
-          party: this.party,
-          signatures: [
-            {
-              format: 'SIGNATURE_FORMAT_RAW',
-              signature: signature.toString('base64'),
-              signedBy: this.fingerprint,
-              signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
-            },
-          ],
+          format: 'SIGNATURE_FORMAT_RAW',
+          signature: signature.toString('base64'),
+          signedBy: this.fingerprint,
+          signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
         },
       ],
     })
@@ -168,16 +407,45 @@ function buildEd25519Pkcs8Der(seed: Buffer): Buffer {
  * JWT-authenticated direct submit (no external signer); the `--wallet` flag
  * is accepted but ignored on Canton lanes.
  */
-export function loadCantonWallet(
-  argv: { wallet?: unknown; cantonConfig?: string },
+export async function loadCantonWallet(
+  {
+    cantonConfig,
+    wallet: walletOpt,
+    interactive,
+  }: {
+    cantonConfig?: string
+    wallet?: unknown
+    interactive?: boolean
+  },
   logger?: Logger,
-): CantonWalletWithSigner {
-  const cantonCfg = loadCantonConfig(argv.cantonConfig, logger)
+): Promise<CantonWalletWithSigner> {
+  const cantonCfg = loadCantonConfig(cantonConfig, logger)
   const party = cantonCfg?.party
   if (!party) {
     throw new Error(
       'Canton wallet requires a party ID: provide --canton-config with a "party" field',
     )
+  }
+
+  if (walletOpt) {
+    if (typeof walletOpt !== 'string')
+      throw new CCIPArgumentInvalidError('wallet', 'expected a string')
+    if (walletOpt.startsWith('ledger')) {
+      if (interactive === false) {
+        throw new CCIPInteractiveRequiredError('Ledger wallet requires USB interaction', {
+          recovery:
+            'Use a private key or keystore wallet with password env var for non-interactive mode',
+        })
+      }
+      let derivationPath = walletOpt.split(':')[1]
+      if (!derivationPath) derivationPath = `m/44'/6767'/0'/0'/0'`
+      else if (!isNaN(Number(derivationPath)))
+        derivationPath = `m/44'/6767'/0'/0'/${derivationPath}'`
+
+      const ledgerSigner = await CantonLedgerSigner.create(derivationPath, party)
+      logger?.info(`Ledger connected for Canton party: ${party}, derivationPath: ${derivationPath}`)
+      return { party, signer: ledgerSigner }
+    }
   }
 
   return { party }
