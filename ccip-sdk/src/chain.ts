@@ -210,8 +210,17 @@ export type CantonConfig = {
   /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
-  /** JSON Web Token for authentication with the Canton Ledger API. */
-  jwt: string
+  /**
+   * JSON Web Token for authentication with the Canton Ledger API.
+   *
+   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
+   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
+   * getter is supplied, the SDK clients call it per request to obtain a fresh
+   * JWT, enabling automatic refresh. The CLI resolves its `auth` block upfront
+   * and injects either a string or a getter here; web/Electron embedders inject
+   * their own.
+   */
+  jwt?: string | (() => Promise<string>)
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
@@ -264,7 +273,7 @@ export type CantonConfig = {
 
   /**
    * Transfer-factory preview amount for Canton fee-token payments.
-   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   * Rarely needs changing; defaults to `"1.0"`.
    */
   feeTransferFactoryAmount?: string
 

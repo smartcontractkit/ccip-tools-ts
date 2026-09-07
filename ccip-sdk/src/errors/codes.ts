@@ -186,6 +186,7 @@ export const CCIPErrorCode = {
 
   // Canton
   CANTON_API_ERROR: 'CANTON_API_ERROR',
+  CANTON_AUTH_ERROR: 'CANTON_AUTH_ERROR',
 } as const
 
 /** Union type of all error codes. */

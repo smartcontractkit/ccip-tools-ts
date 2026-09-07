@@ -11,7 +11,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import type { Ctx } from '../commands/index.ts'
-import { resolveCliIndexer, resolveCliRouter } from './canton.ts'
+import { resolveCliIndexer, resolveCliRouter } from './canton/index.ts'
 import {
   fetchChainsFromRpcs,
   filterEndpointsForFamily,
