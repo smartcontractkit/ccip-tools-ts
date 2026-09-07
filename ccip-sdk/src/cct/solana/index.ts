@@ -822,9 +822,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `generateUnsignedCreateTokenAccount`
-   * before `generateUnsignedSetPool`.
+   * must be allowed to initialize the pool. Set `createPoolSignerATA` to also create the pool signer
+   * PDA's associated token account idempotently; otherwise use the returned `poolSignerAddress` with
+   * `generateUnsignedCreateTokenAccount` before `generateUnsignedSetPool`.
    *
    * @see {@link generateUnsignedCreateTokenAccount}
    * @see {@link generateUnsignedSetPool}
@@ -840,6 +840,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer,
    *   authority,
    *   allowlist: [allowedSender],
+   *   createPoolSignerATA: true,
    * })
    * ```
    */
@@ -855,8 +856,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `createTokenAccount` before `setPool`.
+   * must be allowed to initialize the pool. Set `createPoolSignerATA` to also create the pool signer
+   * PDA's associated token account idempotently; otherwise use the returned `poolSignerAddress` with
+   * `createTokenAccount` before `setPool`.
    *
    * @see {@link createTokenAccount}
    * @see {@link setPool}
@@ -871,6 +873,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.deployTokenPool({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
+   *   createPoolSignerATA: true,
    *   wallet,
    * })
    * ```
