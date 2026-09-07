@@ -88,12 +88,26 @@ import {
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
+import {
+  type GetBurnersParams,
+  type GetBurnersResult,
+  GetBurners,
+} from './token/operations/get-burners.ts'
+import {
+  type GetMintersParams,
+  type GetMintersResult,
+  GetMinters,
+} from './token/operations/get-minters.ts'
+import { type MintParams, Mint } from './token/operations/mint.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
   // Token operations
   readonly #deployToken = new DeployToken()
+  readonly #mint = new Mint()
+  readonly #getMinters = new GetMinters()
+  readonly #getBurners = new GetBurners()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -675,6 +689,96 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   deployToken(opts: EVMExecuteParams<DeployTokenParams>): Promise<DeployResult> {
     return this.#deployToken.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `mint` tx (for multisig / offline signing): mints new supply of a
+   * BurnMintERC677 token to `account`. The manual mint — seeding liquidity, topping up test
+   * supply — not the bridge path, which mints through the pool.
+   * @remarks v1.5.1 / v1.6.2 tokens only; v2.0.0's `CrossChainToken` gates minting through
+   * AccessControl, which ships separately. `sender` is checked against the token's
+   * `isMinter(address)`, **not** its owner: `mint` is `onlyMinter`, and the owner is the role
+   * admin, who need not hold the role. Grant it first with `grantMintRole`.
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and does
+   * not hold the token's mint role
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must hold the mint role.
+   * const unsigned = await cct.generateUnsignedMint({
+   *   tokenAddress: '0xToken...',
+   *   account: '0xRecipient...',
+   *   amount: 1_000_000000000000000000n, // 1000 tokens at 18 decimals
+   *   sender: '0xMinter...',
+   * })
+   * ```
+   */
+  generateUnsignedMint(opts: MintParams): Promise<UnsignedEVMTx> {
+    return this.#mint.generate(this.chain, opts)
+  }
+
+  /**
+   * Mints new supply of a BurnMintERC677 token to `account`, signing + submitting with
+   * `opts.wallet` (an address holding the token's mint role).
+   * @remarks See {@link generateUnsignedMint} for the version and role rules. `sender` defaults
+   * to the wallet's address, so the mint-role check always runs before this submits.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
+   * the wallet's address, or the wallet does not hold the token's mint role
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — e.g. the mint would
+   * exceed the token's `maxSupply`, which is not pre-flighted
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.mint({
+   *   tokenAddress: '0xToken...',
+   *   account: '0xRecipient...',
+   *   amount: 1_000_000000000000000000n,
+   *   wallet, // must hold the mint role
+   * })
+   * ```
+   */
+  mint(opts: EVMExecuteParams<MintParams>): Promise<TransactionResult> {
+    return this.#mint.execute(this.chain, opts)
+  }
+
+  /**
+   * Lists every account holding a BurnMintERC677 token's mint role, via `getMinters()`.
+   * @remarks Informational, for audit and UX. To check *one* address, the token answers directly
+   * with `isMinter(address)` — one call instead of an unbounded set plus a client-side scan.
+   * @remarks v1.5.1 / v1.6.2 tokens only: v2.0.0's `CrossChainToken` uses AccessControl, which
+   * does not enumerate role members, so there is no equivalent read.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @example
+   * ```typescript
+   * const minters = await cct.getMinters({ tokenAddress: '0xToken...' })
+   * console.log(minters) // ['0xPool...', '0xOpsKey...']
+   * ```
+   */
+  getMinters(opts: GetMintersParams): Promise<GetMintersResult> {
+    return this.#getMinters.query(this.chain, opts)
+  }
+
+  /**
+   * Lists every account holding a BurnMintERC677 token's burn role, via `getBurners()`.
+   * @remarks Same shape and caveats as {@link getMinters}; to check one address, use the token's
+   * `isBurner(address)`.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @example
+   * ```typescript
+   * const burners = await cct.getBurners({ tokenAddress: '0xToken...' })
+   * ```
+   */
+  getBurners(opts: GetBurnersParams): Promise<GetBurnersResult> {
+    return this.#getBurners.query(this.chain, opts)
   }
 
   /**
@@ -1287,6 +1391,9 @@ export type {
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { MintParams } from './token/operations/mint.ts'
+export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
+export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
 export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,
