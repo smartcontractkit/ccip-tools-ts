@@ -607,6 +607,27 @@ function extractMethod(init?: RequestInit): string | undefined {
 }
 
 /**
+ * Renders an endpoint URL for logs without leaking credentials. The query
+ * string is dropped entirely (keyed gateways carry their key there, e.g.
+ * toncenter's `?api_key=`), path segments of 24+ characters are masked
+ * (keyed-path providers embed the key there, e.g. alchemy/infura/quiknode),
+ * and rebuilding from `origin` drops any userinfo. Non-URL input degrades to
+ * `***` — never echo the raw value back.
+ */
+export function redactEndpointUrl(input: unknown): string {
+  try {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : String(input))
+    const path = url.pathname
+      .split('/')
+      .map((segment) => (segment.length >= 24 ? '***' : segment))
+      .join('/')
+    return url.origin + path
+  } catch {
+    return '***'
+  }
+}
+
+/**
  * Creates a fetch wrapper that runs at full speed by default and adaptively
  * paces only when an endpoint actually rate-limits it. Per (endpoint, method)
  * limiters learn the real limit/window from response headers or observed timing,
@@ -661,6 +682,18 @@ export function createRateLimitedFetch(
       opts_.keyBy,
     )
 
+    // Merge the caller's per-request signal with the context abort ONCE, before
+    // the retry loop: wrapping per attempt would nest a fresh composite over the
+    // previous attempt's (depth = retry count), and every wrapper that never
+    // aborts keeps its abort listener registered (Node holds such composites in
+    // its gcPersistentSignals set for as long as any source lives). One composite
+    // per request keeps undici's listener attach/detach churn flat too.
+    if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
+    else if (abort) {
+      if (!init) init = {}
+      init.signal = abort
+    }
+
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):
       // don't burn further attempts/backoff/pacing under a dead signal. The waits
@@ -688,11 +721,6 @@ export function createRateLimitedFetch(
         // the slot so a backing-off request doesn't occupy a slot.
         await ep.sem.acquire()
         try {
-          if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
-          else if (abort) {
-            if (!init) init = {}
-            init.signal = abort
-          }
           abort?.throwIfAborted()
           response = await globalThis.fetch(input instanceof Request ? input.clone() : input, init)
 
@@ -723,7 +751,7 @@ export function createRateLimitedFetch(
           ep.sem.release()
         }
       } catch (error) {
-        logger.debug('fetch errored', attempt, error, input, bodyStr(init?.body))
+        logger.debug('fetch errored', attempt, error, redactEndpointUrl(input), bodyStr(init?.body))
         lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
         // Only retry on retryable network errors (rate-limit pattern); rethrow everything else
@@ -747,7 +775,11 @@ export function createRateLimitedFetch(
 
       // Slot released — now handle the response (and back off off-slot if retrying).
       if (response.ok) {
-        logger.debug('fetched', response.status, bodyStr(init?.body))
+        logger.debug(
+          'fetched',
+          response.status,
+          init?.body ? bodyStr(init.body) : redactEndpointUrl(input),
+        )
         return response
       }
       if (isTransientHttpStatus(response.status)) {
@@ -760,7 +792,12 @@ export function createRateLimitedFetch(
         return response
       }
       // Non-transient non-ok (4xx etc): return immediately, no retry.
-      logger.debug('fetch non-retryable status', input, response.status, bodyStr(init?.body))
+      logger.debug(
+        'fetch non-retryable status',
+        redactEndpointUrl(input),
+        response.status,
+        bodyStr(init?.body),
+      )
       return response
     }
 
@@ -950,6 +987,9 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     /query returned more than (\d+) results/i,
     // QuickNode
     /eth_getLogs is limited to a (\d+) range/i,
+    // 1rpc: "eth_getLogs is limited to 0 - 50 blocks range" — the span is given as
+    // a pair, so the LIMIT is the second number, not the first.
+    /limited to\s+\d+\s*-\s*(\d+)\s*blocks?\s+range/i,
     /exceeds the range/i,
     // erpc/hyperliquid: "query exceeds max block range 1000"
     // hedera/alchemy: "Exceeded maximum block range: 1000"
