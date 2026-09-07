@@ -19,6 +19,8 @@ import {
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
+  type ExecuteOwnerOverridePendingAdministratorParams,
+  type ExecuteOwnerOverridePendingAdministratorResult,
   type ExecuteRegisterAdminParams,
   type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
@@ -31,6 +33,8 @@ import {
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
+  type GenerateOwnerOverridePendingAdministratorParams,
+  type GenerateOwnerOverridePendingAdministratorResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
@@ -45,6 +49,7 @@ import {
   CreateLookupTable,
   GetSupportedTokens,
   GetTokenAdminRegistry,
+  OwnerOverridePendingAdministrator,
   RegisterAdmin,
   SetPool,
   TransferAdmin,
@@ -195,6 +200,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createLookupTable = new CreateLookupTable()
   readonly #getSupportedTokens = new GetSupportedTokens()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #ownerOverridePendingAdministrator = new OwnerOverridePendingAdministrator()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
@@ -1235,7 +1241,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
    * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
-   * and delegate at least `amount` to the pool signer PDA; use {@link generateUnsignedApproveToken}.
+   * and delegate at least `amount` to the pool signer PDA. Set `includeApproval: true` to bundle
+   * that approval before the liquidity instruction in this transaction.
    *
    * @see {@link provideLiquidity}
    * @see {@link generateUnsignedApproveToken}
@@ -1248,25 +1255,15 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    *
-   * @example Prepare and generate liquidity instructions
+   * @example Generate bundled approval and liquidity instructions
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const amount = 1_000_000n
-   * const { config } = await cct.getTokenPoolState({
-   *   tokenAddress: mint,
-   *   poolType: 'lock-release',
-   * })
-   * const approval = await cct.generateUnsignedApproveToken({
-   *   payer: rebalancer,
-   *   tokenAddress: mint,
-   *   delegate: config.poolSigner,
-   *   amount,
-   * })
    * const liquidity = await cct.generateUnsignedProvideLiquidity({
    *   payer: rebalancer,
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
-   *   amount,
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
    * })
    * ```
    */
@@ -1284,7 +1281,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
    * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
-   * to the pool signer PDA; use {@link approveToken} first.
+   * to the pool signer PDA, unless `includeApproval: true` bundles that approval in this transaction.
    *
    * @see {@link generateUnsignedProvideLiquidity}
    * @see {@link approveToken}
@@ -1299,19 +1296,19 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
-   * signer, the pool rejects the rebalancer, liquidity is disabled, the token account lacks funds,
-   * or simulation/submission fails.
+   * signer and `includeApproval` is false, the pool rejects the rebalancer, liquidity is disabled,
+   * the token account lacks funds, or simulation/submission fails.
    *
-   * @example Prepare and provide liquidity
+   * @example Approve and provide liquidity in one transaction
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
-   * const amount = 1_000_000n
-   * const { config } = await cct.getTokenPoolState({
+   * await cct.provideLiquidity({
+   *   wallet,
    *   tokenAddress: mint,
    *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
    * })
-   * await cct.approveToken({ wallet, tokenAddress: mint, delegate: config.poolSigner, amount })
-   * await cct.provideLiquidity({ wallet, tokenAddress: mint, poolType: 'lock-release', amount })
    * ```
    */
   provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
@@ -1908,6 +1905,76 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
     return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces an initial pending registry administrator.
+   *
+   * @remarks
+   * Only the mint authority may authorize this recovery path, and only while the registry has no
+   * accepted administrator. It replaces the initial pending administrator; the replacement must
+   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
+   * unsigned method for Squads/vault signatures.
+   *
+   * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
+   * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
+   * accepted administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedOwnerOverridePendingAdministrator(
+    opts: GenerateOwnerOverridePendingAdministratorParams,
+  ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initial pending registry administrator using the mint authority wallet.
+   *
+   * @remarks
+   * This recovery path only works while the registry has no accepted administrator. It replaces the
+   * initial pending administrator; it does not make the replacement an administrator. The replacement
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
+   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
+   *
+   * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
+   * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
+   * administrator, or `authority` differs from the wallet.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.ownerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   wallet: mintAuthorityWallet,
+   * })
+   * ```
+   */
+  ownerOverridePendingAdministrator(
+    opts: ExecuteOwnerOverridePendingAdministratorParams,
+  ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
   }
 
   /**
