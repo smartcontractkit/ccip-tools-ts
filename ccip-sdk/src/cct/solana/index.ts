@@ -177,8 +177,11 @@ import {
   type GenerateSetTokenAuthorityResult,
   type GenerateUpdateMetadataAuthorityParams,
   type GenerateUpdateMetadataAuthorityResult,
+  type GetTokenInfoParams,
+  type GetTokenInfoResult,
   ApproveToken,
   CreateTokenAccount,
+  GetTokenInfo,
   MintTokens,
   SetTokenAuthority,
   UpdateMetadataAuthority,
@@ -190,6 +193,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token operations
   readonly #approveToken = new ApproveToken()
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #getTokenInfo = new GetTokenInfo()
   readonly #mintTokens = new MintTokens()
   readonly #setTokenAuthority = new SetTokenAuthority()
   readonly #updateMetadataAuthority = new UpdateMetadataAuthority()
@@ -2226,6 +2230,29 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
     return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads an SPL token mint's metadata, program, supply, and mint/freeze authorities.
+   *
+   * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
+   * the SPL Token or Token-2022 mint account. Supply is in base units.
+   *
+   * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPSplTokenInvalidError} If the mint is not a valid SPL token.
+   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const info = await cct.getTokenInfo({ tokenAddress: mint })
+   * console.log(`${info.symbol}: ${info.decimals} decimals`)
+   * ```
+   */
+  getTokenInfo(opts: GetTokenInfoParams): Promise<GetTokenInfoResult> {
+    return this.#getTokenInfo.query(this.chain, opts)
   }
 
   /**
