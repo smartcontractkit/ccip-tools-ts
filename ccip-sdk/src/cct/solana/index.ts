@@ -4,17 +4,14 @@
  * @packageDocumentation
  */
 
-import type { Connection } from "@solana/web3.js";
+import type { Connection } from '@solana/web3.js'
 
-import type { ChainContext } from "../../chain.ts";
-import type { ChainFamily } from "../../networks.ts";
-import type { SolanaChain } from "../../solana/index.ts";
-import type { UnsignedSolanaTx } from "../../solana/types.ts";
-import { TokenManager } from "../token-manager.ts";
-import {
-  type SerializedSolanaTxEncoding,
-  serializeUnsignedSolanaTx,
-} from "./serialize.ts";
+import type { ChainContext } from '../../chain.ts'
+import type { ChainFamily } from '../../networks.ts'
+import type { SolanaChain } from '../../solana/index.ts'
+import type { UnsignedSolanaTx } from '../../solana/types.ts'
+import { TokenManager } from '../token-manager.ts'
+import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
   type ExecuteAcceptAdminParams,
   type ExecuteAcceptAdminResult,
@@ -56,7 +53,7 @@ import {
   RegisterAdmin,
   SetPool,
   TransferAdmin,
-} from "./token-admin-registry/operations/index.ts";
+} from './token-admin-registry/operations/index.ts'
 import {
   type BaseGetTokenPoolStateResult,
   type BurnMintPoolProgramRef,
@@ -154,7 +151,7 @@ import {
   SetRebalancer,
   TransferOwnership,
   WithdrawLiquidity,
-} from "./token-pool/operations/index.ts";
+} from './token-pool/operations/index.ts'
 import {
   type ExecuteApproveTokenParams,
   type ExecuteApproveTokenResult,
@@ -185,87 +182,76 @@ import {
   MintTokens,
   SetTokenAuthority,
   UpdateMetadataAuthority,
-} from "./token/operations/index.ts";
+} from './token/operations/index.ts'
 
 /** CCT admin facade for Solana. */
-export class SolanaTokenManager extends TokenManager<
-  typeof ChainFamily.Solana
-> {
-  readonly chain: SolanaChain;
+export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
+  readonly chain: SolanaChain
   // Token operations
-  readonly #approveToken = new ApproveToken();
-  readonly #createTokenAccount = new CreateTokenAccount();
-  readonly #mintTokens = new MintTokens();
-  readonly #setTokenAuthority = new SetTokenAuthority();
-  readonly #updateMetadataAuthority = new UpdateMetadataAuthority();
+  readonly #approveToken = new ApproveToken()
+  readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #mintTokens = new MintTokens()
+  readonly #setTokenAuthority = new SetTokenAuthority()
+  readonly #updateMetadataAuthority = new UpdateMetadataAuthority()
 
   // Token admin registry operations
-  readonly #acceptAdmin = new AcceptAdmin();
-  readonly #appendToLookupTable = new AppendToLookupTable();
-  readonly #createLookupTable = new CreateLookupTable();
-  readonly #getSupportedTokens = new GetSupportedTokens();
-  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry();
-  readonly #ownerOverridePendingAdministrator =
-    new OwnerOverridePendingAdministrator();
-  readonly #registerAdmin = new RegisterAdmin();
-  readonly #setPool = new SetPool();
-  readonly #transferAdmin = new TransferAdmin();
+  readonly #acceptAdmin = new AcceptAdmin()
+  readonly #appendToLookupTable = new AppendToLookupTable()
+  readonly #createLookupTable = new CreateLookupTable()
+  readonly #getSupportedTokens = new GetSupportedTokens()
+  readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #ownerOverridePendingAdministrator = new OwnerOverridePendingAdministrator()
+  readonly #registerAdmin = new RegisterAdmin()
+  readonly #setPool = new SetPool()
+  readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
-  readonly #acceptOwnership = new AcceptOwnership();
-  readonly #appendRemotePoolAddresses = new AppendRemotePoolAddresses();
-  readonly #applyChainUpdates = new ApplyChainUpdates();
-  readonly #configureAllowlist = new ConfigureAllowlist();
-  readonly #createTokenMultisig = new CreateTokenMultisig();
-  readonly #deployTokenPool = new DeployTokenPool();
-  readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig();
-  readonly #editChainRemoteConfig = new EditChainRemoteConfig();
-  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes();
-  readonly #getTokenPoolState = new GetTokenPoolState();
-  readonly #initChainRemoteConfig = new InitChainRemoteConfig();
-  readonly #provideLiquidity = new ProvideLiquidity();
-  readonly #removeFromAllowlist = new RemoveFromAllowlist();
-  readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity();
-  readonly #setChainRateLimit = new SetChainRateLimit();
-  readonly #setRateLimitAdmin = new SetRateLimitAdmin();
-  readonly #setRebalancer = new SetRebalancer();
-  readonly #transferOwnership = new TransferOwnership();
-  readonly #withdrawLiquidity = new WithdrawLiquidity();
+  readonly #acceptOwnership = new AcceptOwnership()
+  readonly #appendRemotePoolAddresses = new AppendRemotePoolAddresses()
+  readonly #applyChainUpdates = new ApplyChainUpdates()
+  readonly #configureAllowlist = new ConfigureAllowlist()
+  readonly #createTokenMultisig = new CreateTokenMultisig()
+  readonly #deployTokenPool = new DeployTokenPool()
+  readonly #deleteChainRemoteConfig = new DeleteChainRemoteConfig()
+  readonly #editChainRemoteConfig = new EditChainRemoteConfig()
+  readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
+  readonly #getTokenPoolState = new GetTokenPoolState()
+  readonly #initChainRemoteConfig = new InitChainRemoteConfig()
+  readonly #provideLiquidity = new ProvideLiquidity()
+  readonly #removeFromAllowlist = new RemoveFromAllowlist()
+  readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity()
+  readonly #setChainRateLimit = new SetChainRateLimit()
+  readonly #setRateLimitAdmin = new SetRateLimitAdmin()
+  readonly #setRebalancer = new SetRebalancer()
+  readonly #transferOwnership = new TransferOwnership()
+  readonly #withdrawLiquidity = new WithdrawLiquidity()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
-    super();
-    this.chain = chain;
+    super()
+    this.chain = chain
   }
 
   /** Wraps an existing {@link SolanaChain}. */
   static fromChain(chain: SolanaChain): SolanaTokenManager {
-    return new SolanaTokenManager(chain);
+    return new SolanaTokenManager(chain)
   }
 
   /** Creates from a Solana web3.js connection. */
-  static async fromProvider(
-    provider: Connection,
-    ctx?: ChainContext,
-  ): Promise<SolanaTokenManager> {
-    const { SolanaChain } = await import("../../solana/index.ts");
-    return new SolanaTokenManager(
-      await SolanaChain.fromConnection(provider, ctx),
-    );
+  static async fromProvider(provider: Connection, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
+    return new SolanaTokenManager(await SolanaChain.fromConnection(provider, ctx))
   }
 
   /** Creates from an RPC URL. */
-  static async fromUrl(
-    url: string,
-    ctx?: ChainContext,
-  ): Promise<SolanaTokenManager> {
-    const { SolanaChain } = await import("../../solana/index.ts");
-    return new SolanaTokenManager(await SolanaChain.fromUrl(url, ctx));
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<SolanaTokenManager> {
+    const { SolanaChain } = await import('../../solana/index.ts')
+    return new SolanaTokenManager(await SolanaChain.fromUrl(url, ctx))
   }
 
   /** Provider of the underlying chain. */
   get provider(): Connection {
-    return this.chain.connection;
+    return this.chain.connection
   }
 
   /**
@@ -292,8 +278,8 @@ export class SolanaTokenManager extends TokenManager<
   async generateUnsignedDeployToken(
     opts: GenerateDeployTokenParams,
   ): Promise<GenerateDeployTokenResult> {
-    const { DeployToken } = await import("./token/operations/index.ts");
-    return new DeployToken().generate(this.chain, opts);
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().generate(this.chain, opts)
   }
 
   /**
@@ -317,11 +303,9 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  async deployToken(
-    opts: ExecuteDeployTokenParams,
-  ): Promise<ExecuteDeployTokenResult> {
-    const { DeployToken } = await import("./token/operations/index.ts");
-    return new DeployToken().execute(this.chain, opts);
+  async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
+    const { DeployToken } = await import('./token/operations/index.ts')
+    return new DeployToken().execute(this.chain, opts)
   }
 
   /**
@@ -356,7 +340,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedApproveToken(
     opts: GenerateApproveTokenParams,
   ): Promise<GenerateApproveTokenResult> {
-    return this.#approveToken.generate(this.chain, opts);
+    return this.#approveToken.generate(this.chain, opts)
   }
 
   /**
@@ -386,10 +370,8 @@ export class SolanaTokenManager extends TokenManager<
    * await cct.approveToken({ wallet, tokenAddress: mint, delegate, amount: 1_000_000n })
    * ```
    */
-  approveToken(
-    opts: ExecuteApproveTokenParams,
-  ): Promise<ExecuteApproveTokenResult> {
-    return this.#approveToken.execute(this.chain, opts);
+  approveToken(opts: ExecuteApproveTokenParams): Promise<ExecuteApproveTokenResult> {
+    return this.#approveToken.execute(this.chain, opts)
   }
 
   /**
@@ -420,7 +402,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedCreateTokenAccount(
     opts: GenerateCreateTokenAccountParams,
   ): Promise<GenerateCreateTokenAccountResult> {
-    return this.#createTokenAccount.generate(this.chain, opts);
+    return this.#createTokenAccount.generate(this.chain, opts)
   }
 
   /**
@@ -448,7 +430,7 @@ export class SolanaTokenManager extends TokenManager<
   createTokenAccount(
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
-    return this.#createTokenAccount.execute(this.chain, opts);
+    return this.#createTokenAccount.execute(this.chain, opts)
   }
 
   /**
@@ -476,10 +458,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  generateUnsignedMintTokens(
-    opts: GenerateMintTokensParams,
-  ): Promise<GenerateMintTokensResult> {
-    return this.#mintTokens.generate(this.chain, opts);
+  generateUnsignedMintTokens(opts: GenerateMintTokensParams): Promise<GenerateMintTokensResult> {
+    return this.#mintTokens.generate(this.chain, opts)
   }
 
   /**
@@ -511,7 +491,7 @@ export class SolanaTokenManager extends TokenManager<
    * ```
    */
   mintTokens(opts: ExecuteMintTokensParams): Promise<ExecuteMintTokensResult> {
-    return this.#mintTokens.execute(this.chain, opts);
+    return this.#mintTokens.execute(this.chain, opts)
   }
 
   /**
@@ -558,7 +538,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedSetTokenAuthority(
     opts: GenerateSetTokenAuthorityParams,
   ): Promise<GenerateSetTokenAuthorityResult> {
-    return this.#setTokenAuthority.generate(this.chain, opts);
+    return this.#setTokenAuthority.generate(this.chain, opts)
   }
 
   /**
@@ -590,10 +570,8 @@ export class SolanaTokenManager extends TokenManager<
    * await cct.setTokenAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
    * ```
    */
-  setTokenAuthority(
-    opts: ExecuteSetTokenAuthorityParams,
-  ): Promise<ExecuteSetTokenAuthorityResult> {
-    return this.#setTokenAuthority.execute(this.chain, opts);
+  setTokenAuthority(opts: ExecuteSetTokenAuthorityParams): Promise<ExecuteSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -625,7 +603,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedUpdateMetadataAuthority(
     opts: GenerateUpdateMetadataAuthorityParams,
   ): Promise<GenerateUpdateMetadataAuthorityResult> {
-    return this.#updateMetadataAuthority.generate(this.chain, opts);
+    return this.#updateMetadataAuthority.generate(this.chain, opts)
   }
 
   /**
@@ -656,7 +634,7 @@ export class SolanaTokenManager extends TokenManager<
   updateMetadataAuthority(
     opts: ExecuteUpdateMetadataAuthorityParams,
   ): Promise<ExecuteUpdateMetadataAuthorityResult> {
-    return this.#updateMetadataAuthority.execute(this.chain, opts);
+    return this.#updateMetadataAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -685,7 +663,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedCreateTokenMultisig(
     opts: GenerateCreateTokenMultisigParams,
   ): Promise<GenerateCreateTokenMultisigResult> {
-    return this.#createTokenMultisig.generate(this.chain, opts);
+    return this.#createTokenMultisig.generate(this.chain, opts)
   }
 
   /**
@@ -714,7 +692,7 @@ export class SolanaTokenManager extends TokenManager<
   createTokenMultisig(
     opts: ExecuteCreateTokenMultisigParams,
   ): Promise<ExecuteCreateTokenMultisigResult> {
-    return this.#createTokenMultisig.execute(this.chain, opts);
+    return this.#createTokenMultisig.execute(this.chain, opts)
   }
 
   /**
@@ -741,7 +719,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedCreateLookupTable(
     opts: GenerateCreateLookupTableParams,
   ): Promise<GenerateCreateLookupTableResult> {
-    return this.#createLookupTable.generate(this.chain, opts);
+    return this.#createLookupTable.generate(this.chain, opts)
   }
 
   /**
@@ -765,10 +743,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  createLookupTable(
-    opts: ExecuteCreateLookupTableParams,
-  ): Promise<ExecuteCreateLookupTableResult> {
-    return this.#createLookupTable.execute(this.chain, opts);
+  createLookupTable(opts: ExecuteCreateLookupTableParams): Promise<ExecuteCreateLookupTableResult> {
+    return this.#createLookupTable.execute(this.chain, opts)
   }
 
   /**
@@ -800,7 +776,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedConfigureAllowlist(
     opts: GenerateConfigureAllowlistParams,
   ): Promise<GenerateConfigureAllowlistResult> {
-    return this.#configureAllowlist.generate(this.chain, opts);
+    return this.#configureAllowlist.generate(this.chain, opts)
   }
 
   /**
@@ -833,7 +809,7 @@ export class SolanaTokenManager extends TokenManager<
   configureAllowlist(
     opts: ExecuteConfigureAllowlistParams,
   ): Promise<ExecuteConfigureAllowlistResult> {
-    return this.#configureAllowlist.execute(this.chain, opts);
+    return this.#configureAllowlist.execute(this.chain, opts)
   }
 
   /**
@@ -866,7 +842,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedDeployTokenPool(
     opts: GenerateDeployTokenPoolParams,
   ): Promise<GenerateDeployTokenPoolResult> {
-    return this.#deployTokenPool.generate(this.chain, opts);
+    return this.#deployTokenPool.generate(this.chain, opts)
   }
 
   /**
@@ -895,10 +871,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  deployTokenPool(
-    opts: ExecuteDeployTokenPoolParams,
-  ): Promise<ExecuteDeployTokenPoolResult> {
-    return this.#deployTokenPool.execute(this.chain, opts);
+  deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
+    return this.#deployTokenPool.execute(this.chain, opts)
   }
 
   /**
@@ -942,7 +916,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedApplyChainUpdates(
     opts: GenerateApplyChainUpdatesParams,
   ): Promise<GenerateApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.generateBatch(this.chain, opts);
+    return this.#applyChainUpdates.generateBatch(this.chain, opts)
   }
 
   /**
@@ -982,10 +956,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  applyChainUpdates(
-    opts: ExecuteApplyChainUpdatesParams,
-  ): Promise<ExecuteApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.executeBatch(this.chain, opts);
+  applyChainUpdates(opts: ExecuteApplyChainUpdatesParams): Promise<ExecuteApplyChainUpdatesResult> {
+    return this.#applyChainUpdates.executeBatch(this.chain, opts)
   }
 
   /**
@@ -1019,7 +991,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedAppendRemotePoolAddresses(
     opts: GenerateAppendRemotePoolAddressesParams,
   ): Promise<GenerateAppendRemotePoolAddressesResult> {
-    return this.#appendRemotePoolAddresses.generate(this.chain, opts);
+    return this.#appendRemotePoolAddresses.generate(this.chain, opts)
   }
 
   /**
@@ -1055,7 +1027,7 @@ export class SolanaTokenManager extends TokenManager<
   appendRemotePoolAddresses(
     opts: ExecuteAppendRemotePoolAddressesParams,
   ): Promise<ExecuteAppendRemotePoolAddressesResult> {
-    return this.#appendRemotePoolAddresses.execute(this.chain, opts);
+    return this.#appendRemotePoolAddresses.execute(this.chain, opts)
   }
 
   /**
@@ -1090,7 +1062,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedInitChainRemoteConfig(
     opts: GenerateInitChainRemoteConfigParams,
   ): Promise<GenerateInitChainRemoteConfigResult> {
-    return this.#initChainRemoteConfig.generate(this.chain, opts);
+    return this.#initChainRemoteConfig.generate(this.chain, opts)
   }
 
   /**
@@ -1125,7 +1097,7 @@ export class SolanaTokenManager extends TokenManager<
   initChainRemoteConfig(
     opts: ExecuteInitChainRemoteConfigParams,
   ): Promise<ExecuteInitChainRemoteConfigResult> {
-    return this.#initChainRemoteConfig.execute(this.chain, opts);
+    return this.#initChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
@@ -1159,7 +1131,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedDeleteChainRemoteConfig(
     opts: GenerateDeleteChainRemoteConfigParams,
   ): Promise<GenerateDeleteChainRemoteConfigResult> {
-    return this.#deleteChainRemoteConfig.generate(this.chain, opts);
+    return this.#deleteChainRemoteConfig.generate(this.chain, opts)
   }
 
   /**
@@ -1194,7 +1166,7 @@ export class SolanaTokenManager extends TokenManager<
   deleteChainRemoteConfig(
     opts: ExecuteDeleteChainRemoteConfigParams,
   ): Promise<ExecuteDeleteChainRemoteConfigResult> {
-    return this.#deleteChainRemoteConfig.execute(this.chain, opts);
+    return this.#deleteChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
@@ -1226,7 +1198,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedSetRateLimitAdmin(
     opts: GenerateSetRateLimitAdminParams,
   ): Promise<GenerateSetRateLimitAdminResult> {
-    return this.#setRateLimitAdmin.generate(this.chain, opts);
+    return this.#setRateLimitAdmin.generate(this.chain, opts)
   }
 
   /**
@@ -1256,10 +1228,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  setRateLimitAdmin(
-    opts: ExecuteSetRateLimitAdminParams,
-  ): Promise<ExecuteSetRateLimitAdminResult> {
-    return this.#setRateLimitAdmin.execute(this.chain, opts);
+  setRateLimitAdmin(opts: ExecuteSetRateLimitAdminParams): Promise<ExecuteSetRateLimitAdminResult> {
+    return this.#setRateLimitAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -1299,7 +1269,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedProvideLiquidity(
     opts: GenerateProvideLiquidityParams,
   ): Promise<GenerateProvideLiquidityResult> {
-    return this.#provideLiquidity.generate(this.chain, opts);
+    return this.#provideLiquidity.generate(this.chain, opts)
   }
 
   /**
@@ -1340,10 +1310,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  provideLiquidity(
-    opts: ExecuteProvideLiquidityParams,
-  ): Promise<ExecuteProvideLiquidityResult> {
-    return this.#provideLiquidity.execute(this.chain, opts);
+  provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
+    return this.#provideLiquidity.execute(this.chain, opts)
   }
 
   /**
@@ -1377,7 +1345,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedWithdrawLiquidity(
     opts: GenerateWithdrawLiquidityParams,
   ): Promise<GenerateWithdrawLiquidityResult> {
-    return this.#withdrawLiquidity.generate(this.chain, opts);
+    return this.#withdrawLiquidity.generate(this.chain, opts)
   }
 
   /**
@@ -1412,10 +1380,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  withdrawLiquidity(
-    opts: ExecuteWithdrawLiquidityParams,
-  ): Promise<ExecuteWithdrawLiquidityResult> {
-    return this.#withdrawLiquidity.execute(this.chain, opts);
+  withdrawLiquidity(opts: ExecuteWithdrawLiquidityParams): Promise<ExecuteWithdrawLiquidityResult> {
+    return this.#withdrawLiquidity.execute(this.chain, opts)
   }
 
   /**
@@ -1448,7 +1414,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedSetCanAcceptLiquidity(
     opts: GenerateSetCanAcceptLiquidityParams,
   ): Promise<GenerateSetCanAcceptLiquidityResult> {
-    return this.#setCanAcceptLiquidity.generate(this.chain, opts);
+    return this.#setCanAcceptLiquidity.generate(this.chain, opts)
   }
 
   /**
@@ -1482,7 +1448,7 @@ export class SolanaTokenManager extends TokenManager<
   setCanAcceptLiquidity(
     opts: ExecuteSetCanAcceptLiquidityParams,
   ): Promise<ExecuteSetCanAcceptLiquidityResult> {
-    return this.#setCanAcceptLiquidity.execute(this.chain, opts);
+    return this.#setCanAcceptLiquidity.execute(this.chain, opts)
   }
 
   /**
@@ -1519,7 +1485,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedSetRebalancer(
     opts: GenerateSetRebalancerParams,
   ): Promise<GenerateSetRebalancerResult> {
-    return this.#setRebalancer.generate(this.chain, opts);
+    return this.#setRebalancer.generate(this.chain, opts)
   }
 
   /**
@@ -1565,10 +1531,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  setRebalancer(
-    opts: ExecuteSetRebalancerParams,
-  ): Promise<ExecuteSetRebalancerResult> {
-    return this.#setRebalancer.execute(this.chain, opts);
+  setRebalancer(opts: ExecuteSetRebalancerParams): Promise<ExecuteSetRebalancerResult> {
+    return this.#setRebalancer.execute(this.chain, opts)
   }
 
   /**
@@ -1598,7 +1562,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedTransferOwnership(
     opts: GenerateTransferOwnershipParams,
   ): Promise<GenerateTransferOwnershipResult> {
-    return this.#transferOwnership.generate(this.chain, opts);
+    return this.#transferOwnership.generate(this.chain, opts)
   }
 
   /**
@@ -1626,10 +1590,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  transferOwnership(
-    opts: ExecuteTransferOwnershipParams,
-  ): Promise<ExecuteTransferOwnershipResult> {
-    return this.#transferOwnership.execute(this.chain, opts);
+  transferOwnership(opts: ExecuteTransferOwnershipParams): Promise<ExecuteTransferOwnershipResult> {
+    return this.#transferOwnership.execute(this.chain, opts)
   }
 
   /**
@@ -1657,7 +1619,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedAcceptOwnership(
     opts: GenerateAcceptOwnershipParams,
   ): Promise<GenerateAcceptOwnershipResult> {
-    return this.#acceptOwnership.generate(this.chain, opts);
+    return this.#acceptOwnership.generate(this.chain, opts)
   }
 
   /**
@@ -1684,10 +1646,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  acceptOwnership(
-    opts: ExecuteAcceptOwnershipParams,
-  ): Promise<ExecuteAcceptOwnershipResult> {
-    return this.#acceptOwnership.execute(this.chain, opts);
+  acceptOwnership(opts: ExecuteAcceptOwnershipParams): Promise<ExecuteAcceptOwnershipResult> {
+    return this.#acceptOwnership.execute(this.chain, opts)
   }
 
   /**
@@ -1721,7 +1681,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedSetChainRateLimit(
     opts: GenerateSetChainRateLimitParams,
   ): Promise<GenerateSetChainRateLimitResult> {
-    return this.#setChainRateLimit.generate(this.chain, opts);
+    return this.#setChainRateLimit.generate(this.chain, opts)
   }
 
   /**
@@ -1753,10 +1713,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  setChainRateLimit(
-    opts: ExecuteSetChainRateLimitParams,
-  ): Promise<ExecuteSetChainRateLimitResult> {
-    return this.#setChainRateLimit.execute(this.chain, opts);
+  setChainRateLimit(opts: ExecuteSetChainRateLimitParams): Promise<ExecuteSetChainRateLimitResult> {
+    return this.#setChainRateLimit.execute(this.chain, opts)
   }
 
   /**
@@ -1789,7 +1747,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedEditChainRemoteConfig(
     opts: GenerateEditChainRemoteConfigParams,
   ): Promise<GenerateEditChainRemoteConfigResult> {
-    return this.#editChainRemoteConfig.generate(this.chain, opts);
+    return this.#editChainRemoteConfig.generate(this.chain, opts)
   }
 
   /**
@@ -1823,7 +1781,7 @@ export class SolanaTokenManager extends TokenManager<
   editChainRemoteConfig(
     opts: ExecuteEditChainRemoteConfigParams,
   ): Promise<ExecuteEditChainRemoteConfigResult> {
-    return this.#editChainRemoteConfig.execute(this.chain, opts);
+    return this.#editChainRemoteConfig.execute(this.chain, opts)
   }
 
   /**
@@ -1853,7 +1811,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedAppendToLookupTable(
     opts: GenerateAppendToLookupTableParams,
   ): Promise<GenerateAppendToLookupTableResult> {
-    return this.#appendToLookupTable.generate(this.chain, opts);
+    return this.#appendToLookupTable.generate(this.chain, opts)
   }
 
   /**
@@ -1883,7 +1841,7 @@ export class SolanaTokenManager extends TokenManager<
   appendToLookupTable(
     opts: ExecuteAppendToLookupTableParams,
   ): Promise<ExecuteAppendToLookupTableResult> {
-    return this.#appendToLookupTable.execute(this.chain, opts);
+    return this.#appendToLookupTable.execute(this.chain, opts)
   }
 
   /**
@@ -1915,10 +1873,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  generateUnsignedAcceptAdmin(
-    opts: GenerateAcceptAdminParams,
-  ): Promise<GenerateAcceptAdminResult> {
-    return this.#acceptAdmin.generate(this.chain, opts);
+  generateUnsignedAcceptAdmin(opts: GenerateAcceptAdminParams): Promise<GenerateAcceptAdminResult> {
+    return this.#acceptAdmin.generate(this.chain, opts)
   }
 
   /**
@@ -1946,10 +1902,8 @@ export class SolanaTokenManager extends TokenManager<
    * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
    * ```
    */
-  acceptAdmin(
-    opts: ExecuteAcceptAdminParams,
-  ): Promise<ExecuteAcceptAdminResult> {
-    return this.#acceptAdmin.execute(this.chain, opts);
+  acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -1983,7 +1937,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedOwnerOverridePendingAdministrator(
     opts: GenerateOwnerOverridePendingAdministratorParams,
   ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
-    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts);
+    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
   }
 
   /**
@@ -2019,7 +1973,7 @@ export class SolanaTokenManager extends TokenManager<
   ownerOverridePendingAdministrator(
     opts: ExecuteOwnerOverridePendingAdministratorParams,
   ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
-    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts);
+    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
   }
 
   /**
@@ -2054,7 +2008,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedRegisterAdmin(
     opts: GenerateRegisterAdminParams,
   ): Promise<GenerateRegisterAdminResult> {
-    return this.#registerAdmin.generate(this.chain, opts);
+    return this.#registerAdmin.generate(this.chain, opts)
   }
 
   /**
@@ -2083,10 +2037,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  registerAdmin(
-    opts: ExecuteRegisterAdminParams,
-  ): Promise<ExecuteRegisterAdminResult> {
-    return this.#registerAdmin.execute(this.chain, opts);
+  registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
+    return this.#registerAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -2118,7 +2070,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedRemoveFromAllowlist(
     opts: GenerateRemoveFromAllowlistParams,
   ): Promise<GenerateRemoveFromAllowlistResult> {
-    return this.#removeFromAllowlist.generate(this.chain, opts);
+    return this.#removeFromAllowlist.generate(this.chain, opts)
   }
 
   /**
@@ -2150,7 +2102,7 @@ export class SolanaTokenManager extends TokenManager<
   removeFromAllowlist(
     opts: ExecuteRemoveFromAllowlistParams,
   ): Promise<ExecuteRemoveFromAllowlistResult> {
-    return this.#removeFromAllowlist.execute(this.chain, opts);
+    return this.#removeFromAllowlist.execute(this.chain, opts)
   }
 
   /**
@@ -2181,10 +2133,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  generateUnsignedSetPool(
-    opts: GenerateSetPoolParams,
-  ): Promise<GenerateSetPoolResult> {
-    return this.#setPool.generate(this.chain, opts);
+  generateUnsignedSetPool(opts: GenerateSetPoolParams): Promise<GenerateSetPoolResult> {
+    return this.#setPool.generate(this.chain, opts)
   }
 
   /**
@@ -2214,7 +2164,7 @@ export class SolanaTokenManager extends TokenManager<
    * ```
    */
   setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
-    return this.#setPool.execute(this.chain, opts);
+    return this.#setPool.execute(this.chain, opts)
   }
 
   /**
@@ -2246,7 +2196,7 @@ export class SolanaTokenManager extends TokenManager<
   generateUnsignedTransferAdmin(
     opts: GenerateTransferAdminParams,
   ): Promise<GenerateTransferAdminResult> {
-    return this.#transferAdmin.generate(this.chain, opts);
+    return this.#transferAdmin.generate(this.chain, opts)
   }
 
   /**
@@ -2276,10 +2226,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  transferAdmin(
-    opts: ExecuteTransferAdminParams,
-  ): Promise<ExecuteTransferAdminResult> {
-    return this.#transferAdmin.execute(this.chain, opts);
+  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -2304,10 +2252,8 @@ export class SolanaTokenManager extends TokenManager<
    * console.log(remotes)
    * ```
    */
-  getTokenPoolRemotes(
-    opts: GetTokenPoolRemotesParams,
-  ): Promise<GetTokenPoolRemotesResult> {
-    return this.#getTokenPoolRemotes.query(this.chain, opts);
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts)
   }
 
   /**
@@ -2339,30 +2285,26 @@ export class SolanaTokenManager extends TokenManager<
    */
   getTokenPoolState(
     opts: LockReleasePoolProgramRef & { tokenAddress: string },
-  ): Promise<LockReleaseGetTokenPoolStateResult>;
+  ): Promise<LockReleaseGetTokenPoolStateResult>
   /**
    * Reads a Burn/Mint or custom token pool's state account; its config carries no liquidity
    * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
    */
   getTokenPoolState(
     opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & {
-      tokenAddress: string;
+      tokenAddress: string
     },
-  ): Promise<BaseGetTokenPoolStateResult>;
+  ): Promise<BaseGetTokenPoolStateResult>
   /**
    * Reads a pool state account whose program is not known statically; narrow the result on the
    * presence of the lock-release-only config fields.
    */
-  getTokenPoolState(
-    opts: GetTokenPoolStateParams,
-  ): Promise<GetTokenPoolStateResult>;
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult>
   /**
    * Implementation for the overloads above; callers always resolve to one of those.
    * */
-  getTokenPoolState(
-    opts: GetTokenPoolStateParams,
-  ): Promise<GetTokenPoolStateResult> {
-    return this.#getTokenPoolState.query(this.chain, opts);
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
+    return this.#getTokenPoolState.query(this.chain, opts)
   }
 
   /**
@@ -2381,10 +2323,8 @@ export class SolanaTokenManager extends TokenManager<
    * })
    * ```
    */
-  getTokenAdminRegistry(
-    opts: GetTokenAdminRegistryParams,
-  ): Promise<GetTokenAdminRegistryResult> {
-    return this.#getTokenAdminRegistry.query(this.chain, opts);
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
   }
 
   /**
@@ -2401,7 +2341,7 @@ export class SolanaTokenManager extends TokenManager<
    * ```
    */
   getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
-    return this.#getSupportedTokens.query(this.chain, opts);
+    return this.#getSupportedTokens.query(this.chain, opts)
   }
 
   /**
@@ -2419,28 +2359,25 @@ export class SolanaTokenManager extends TokenManager<
    * ```
    */
   serializeUnsignedTx(
-    unsigned: Pick<UnsignedSolanaTx, "instructions" | "lookupTables">,
+    unsigned: Pick<UnsignedSolanaTx, 'instructions' | 'lookupTables'>,
     payer: string,
     encoding?: SerializedSolanaTxEncoding,
   ): Promise<string> {
-    return serializeUnsignedSolanaTx(this.provider, unsigned, payer, encoding);
+    return serializeUnsignedSolanaTx(this.provider, unsigned, payer, encoding)
   }
 }
 
-export * from "../errors.ts";
+export * from '../errors.ts'
 export {
   type TokenPoolType,
   TOKEN_POOL_PROGRAMS,
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
-} from "./programs/token-pool.ts";
-export { TOKEN_AUTHORITY_TYPES } from "./token/constants.ts";
-export {
-  DEFAULT_WRITABLE_INDEXES,
-  REGISTRATION_METHODS,
-} from "./token-admin-registry/constants.ts";
-export type { TransactionResult } from "../operation.ts";
-export type { SerializedSolanaTxEncoding } from "./serialize.ts";
-export type * from "./token/operations/index.ts";
-export type * from "./token-pool/operations/index.ts";
-export type * from "./token-admin-registry/operations/index.ts";
+} from './programs/token-pool.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/constants.ts'
+export { DEFAULT_WRITABLE_INDEXES, REGISTRATION_METHODS } from './token-admin-registry/constants.ts'
+export type { TransactionResult } from '../operation.ts'
+export type { SerializedSolanaTxEncoding } from './serialize.ts'
+export type * from './token/operations/index.ts'
+export type * from './token-pool/operations/index.ts'
+export type * from './token-admin-registry/operations/index.ts'
