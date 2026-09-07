@@ -49,6 +49,7 @@ export {
 
 // Specialized errors - Commit & Merkle
 export {
+  CCIPCommitHistoryPrunedError,
   CCIPCommitNotFoundError,
   CCIPMerkleFlagsMismatchError,
   CCIPMerkleHashesTooLargeError,

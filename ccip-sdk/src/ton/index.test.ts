@@ -972,6 +972,49 @@ describe('TON index unit tests', () => {
     })
   })
 
+  describe('fromUrl', () => {
+    it('appends the JSON-RPC path while preserving the query string', async () => {
+      const chain = await TONChain.fromUrl('https://testnet.toncenter.com/api/v2?api_key=s3cr3t')
+      assert.equal(
+        chain.provider.parameters.endpoint,
+        'https://testnet.toncenter.com/api/v2/jsonRPC?api_key=s3cr3t',
+      )
+    })
+
+    it('leaves an endpoint already pointing at the JSON-RPC path alone', async () => {
+      const url = 'https://testnet.toncenter.com/api/v2/jsonRPC?api_key=s3cr3t'
+      const chain = await TONChain.fromUrl(url)
+      assert.equal(chain.provider.parameters.endpoint, url)
+    })
+
+    it('detects the network from toncenter hostnames without an API call', async () => {
+      const testnet = await TONChain.fromUrl('https://testnet.toncenter.com/api/v2?api_key=s3cr3t')
+      assert.equal(testnet.network.name, 'ton-testnet')
+      const mainnet = await TONChain.fromUrl('https://toncenter.com/api/v2?api_key=s3cr3t')
+      assert.equal(mainnet.network.name, 'ton-mainnet')
+    })
+
+    it('sends the JSON-RPC body to the endpoint, with the query string intact', async () => {
+      const urls: string[] = []
+      const bodies: string[] = []
+      const chain = await TONChain.fromUrl('https://testnet.toncenter.com/api/v2?api_key=s3cr3t', {
+        fetch: async (input, init) => {
+          urls.push(input instanceof Request ? input.url : String(input))
+          bodies.push(typeof init?.body === 'string' ? init.body : '')
+          return mockTonFetch(input, init)
+        },
+      })
+      await chain.getMCSeqNoByLt(1n)
+      assert.equal(urls.length, 1)
+      assert.equal(urls[0], 'https://testnet.toncenter.com/api/v2/jsonRPC?api_key=s3cr3t')
+      const body = JSON.parse(bodies[0]!)
+      assert.equal(body.jsonrpc, '2.0')
+      assert.equal(body.method, 'lookupBlock')
+      assert.equal(body.params.workchain, -1)
+      assert.equal(body.params.lt, '1')
+    })
+  })
+
   describe('getLogs completeness (only whole, sealed masterchain blocks)', () => {
     const mockNetworkInfo = networkInfo('ton-testnet')
     const OFFRAMP = '0:9f2e995aebceb97ae094dbe4cf973cbc8a402b4f0ac5287a00be8aca042d51b9'

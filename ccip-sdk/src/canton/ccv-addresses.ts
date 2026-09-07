@@ -22,7 +22,7 @@ export function decodeCantonVerifierDestAddress(destAddress: string): string {
   return trimmed
 }
 
-/** InstanceAddress hex for CCV execute EDS lookups (mirrors Go `InstanceAddress()`). */
+/** InstanceAddress hex for CCV execute EDS lookups. */
 export function resolveExecuteCcvAddress(verifierDestAddress: string): string {
   const raw = decodeCantonVerifierDestAddress(verifierDestAddress)
   if (raw.includes('@')) return `0x${hashedUtf8Hex(raw)}`

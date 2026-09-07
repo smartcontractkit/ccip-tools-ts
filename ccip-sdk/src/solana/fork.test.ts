@@ -163,6 +163,28 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   after(async () => {
+    // Tear down the web3.js websocket BEFORE stopping surfpool. Sends confirm
+    // through it (connection.confirmTransaction), and web3.js hands its client
+    // `max_reconnects: Infinity` — once surfpool is gone the client would retry
+    // the dead socket every second forever, keeping this test process alive
+    // long after every test has passed. There is no public accessor for the
+    // client, so this pokes the private field, but only through its public
+    // CommonClient API (setAutoReconnect/close).
+    const wsClient = (
+      connection as unknown as {
+        _rpcWebSocket?: {
+          setAutoReconnect?: (enable: boolean) => void
+          close?: (code?: number, data?: string) => void
+        }
+      }
+    )._rpcWebSocket
+    wsClient?.setAutoReconnect?.(false)
+    try {
+      wsClient?.close?.(1000, 'fork tests done')
+    } catch {
+      // socket already gone
+    }
+
     await surfpoolInstance?.stop()
   })
 

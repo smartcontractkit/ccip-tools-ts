@@ -322,3 +322,29 @@ void describe('SuiChain.getLogs multi-topic', () => {
     assert.equal(logs[logs.length - 1]!.blockNumber, 5000)
   })
 })
+
+describe('fromUrl', () => {
+  it('posts JSON-RPC to the endpoint verbatim, keeping keyed path segments intact', async () => {
+    // BlockVision-style: the API key is a PATH segment. The JSON-RPC transport
+    // must POST to the url exactly as given — nothing appended or stripped.
+    const urls: string[] = []
+    const chain = await SuiChain.fromUrl('https://sui-testnet.blockvision.org/v1/s3cr3t', {
+      fetch: async (input, init) => {
+        urls.push(input instanceof Request ? input.url : String(input))
+        const req = JSON.parse(init?.body as string) as { id?: unknown; method?: string }
+        // sui_getCheckpoint must return a checkpoint whose base58 digest
+        // round-trips to the testnet chain id (4c78adac) for the network mapping.
+        const result =
+          req.method === 'sui_getCheckpoint'
+            ? { digest: '69WiPdYU2k8bCRNrmBGs1nDLfmeEELuxDZYYJc5PFkMV' }
+            : '4c78adac'
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: req.id ?? null, result }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      },
+    })
+    assert.equal(chain.network.name, 'sui-testnet')
+    assert.ok(urls.length > 0)
+    assert.ok(urls.every((u) => u === 'https://sui-testnet.blockvision.org/v1/s3cr3t'))
+  })
+})

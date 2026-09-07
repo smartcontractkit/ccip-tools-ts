@@ -5,6 +5,7 @@ import { SuiExtraArgsV1Tag } from '../extra-args.ts'
 import { decodeMoveExtraArgs } from '../shared/bcs-codecs.ts'
 import { encodeSuiExtraArgsV1 } from '../sui/types.ts'
 import { decodeSolanaSuiExtraArgsV1, encodeSolanaSuiExtraArgsV1 } from './extra-args.ts'
+import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 
 /**
  * Unit tests for SuiExtraArgsV1 encoding/decoding, validating against the
@@ -182,6 +183,30 @@ describe('SuiExtraArgsV1 Borsh codec (Solana source)', () => {
       receiverObjectIds: [],
     })
     assert.equal(encoded.slice(0, 10), SuiExtraArgsV1Tag)
+  })
+
+  it('FEE_QUOTER IDL SuiExtraArgsV1 schema matches the codec layout', () => {
+    // decodeSolanaSuiExtraArgsV1 is driven by this IDL definition, so a schema
+    // change (field order, widths, types) must fail here first.
+    const def = FEE_QUOTER_IDL.types.find((t) => t.name === 'SuiExtraArgsV1')
+    assert.ok(def, 'SuiExtraArgsV1 must exist in the FEE_QUOTER IDL')
+    assert.deepEqual(
+      def.type.fields.map((f) => [f.name, f.type]),
+      [
+        ['gasLimit', 'u128'],
+        ['allowOutOfOrderExecution', 'bool'],
+        ['tokenReceiver', { array: ['u8', 32] }],
+        ['receiverObjectIds', { vec: { array: ['u8', 32] } }],
+      ],
+    )
+  })
+
+  it('IDL-driven decoder rejects wrong-tag payloads', () => {
+    const bytes = Buffer.from(SYNTHETIC_BORSH_1.slice(2), 'hex')
+    assert.throws(
+      () => decodeSolanaSuiExtraArgsV1(new Uint8Array(bytes.subarray(1))),
+      /unexpected tag/,
+    )
   })
 })
 

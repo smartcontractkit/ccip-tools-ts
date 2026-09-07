@@ -52,6 +52,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'The lane exists but has too little history for this estimate. If a source token was requested, retry without it to get the lane-wide latency.',
 
   COMMIT_NOT_FOUND: 'Wait for the commit report. DON commit typically takes a few minutes.',
+  COMMIT_HISTORY_PRUNED:
+    "The commit exists on-chain but predates this RPC endpoint's retained transaction history. Retry with an endpoint that retains longer history (or query the CCIP API instead).",
   MERKLE_ROOT_MISMATCH:
     'The computed merkle root does not match the committed root. Ensure all messages in the batch are included and ordered correctly.',
   MERKLE_TREE_EMPTY: 'Provide at least one leaf hash.',
@@ -217,6 +219,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   CANTON_API_ERROR:
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
+  CANTON_AUTH_ERROR:
+    'Canton authentication failed. Verify the JWT is valid and not expired, or check the OIDC auth_url, client_id, and client_secret (client credentials) or redirect URI (authorization code).',
 
   // Cross-Chain Token
   CCT_PARAMS_INVALID:

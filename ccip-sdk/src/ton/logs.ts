@@ -330,18 +330,32 @@ export type TonV3Context = {
  * @internal
  */
 export function tonV3BaseUrl(endpoint: string, networkType: NetworkType): string {
-  const base = /^https?:\/\/[^/]+\/api\/v2(?=\/|$)/.exec(endpoint)?.[0]
-  if (base) return base.replace(/\/v2$/, '/v3')
+  try {
+    const u = new URL(endpoint)
+    // The endpoint may carry its own query (e.g. toncenter's `?api_key=`) — it is
+    // carried over to the v3 base so every v3 request honors the same key.
+    if (/^\/api\/v2(?:\/|$)/.test(u.pathname)) return `${u.origin}/api/v3${u.search}`
+  } catch {
+    // not a parseable URL — fall through to the network-type default
+  }
   return networkType === NetworkType.Mainnet
     ? 'https://toncenter.com/api/v3'
     : 'https://testnet.toncenter.com/api/v3'
+}
+
+/** Builds a v3 request URL from the base, preserving the base's query (e.g. toncenter's `?api_key=`). */
+function v3Url(baseUrl: string, path: string): URL {
+  const base = new URL(baseUrl)
+  const url = new URL(`${base.pathname.replace(/\/+$/, '')}/${path.replace(/^\//, '')}`, base)
+  for (const [key, value] of base.searchParams) url.searchParams.append(key, value)
+  return url
 }
 
 async function fetchV3Messages(
   ctx: TonV3Context & { v3BaseUrl: string },
   q: { source: string; startUtime: number; startLt?: bigint; limit: number; offset?: number },
 ): Promise<TonV3Message[]> {
-  const url = new URL(`${ctx.v3BaseUrl}/messages`)
+  const url = v3Url(ctx.v3BaseUrl, '/messages')
   url.searchParams.set('source', q.source)
   url.searchParams.set('destination', 'null') // external-out ("log") messages only
   url.searchParams.set('direction', 'out')
@@ -374,7 +388,7 @@ export async function* streamV3TxMeta(
 ): AsyncGenerator<TonV3Transaction, void, undefined> {
   let startLt: bigint | undefined = afterLt
   for (;;) {
-    const url = new URL(`${ctx.v3BaseUrl}/transactions`)
+    const url = v3Url(ctx.v3BaseUrl, '/transactions')
     url.searchParams.set('account', acct.toRawString())
     if (startUtime > 0) url.searchParams.set('start_utime', String(startUtime))
     url.searchParams.set('sort', 'asc')
@@ -397,7 +411,7 @@ export async function* streamV3TxMeta(
 export async function fetchV3IndexedTip(
   ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
 ): Promise<number> {
-  const res = await ctx.rateLimitedFetch(`${ctx.v3BaseUrl}/masterchainInfo`, {
+  const res = await ctx.rateLimitedFetch(v3Url(ctx.v3BaseUrl, '/masterchainInfo'), {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) {

@@ -56,17 +56,51 @@ A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized 
 import { useResource } from '../../../scripts/useResource.ts'
 
 // Module top-level: the suite's tests do not start before every lock is held.
+// Right for suites that use the same networks throughout.
 await useResource(['sepolia', 'fuji'])
 ```
 
+Suites whose describe blocks touch DIFFERENT networks hold each network only for the block that needs it, so unrelated blocks don't queue other suites on networks they aren't even using:
+
+```ts
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
+
+describe('EVM to Solana', () => {
+  useResourceForDescribe(['base-sepolia', 'solana-devnet'])
+  // tests...
+})
+```
+
+Keep the two rules of the lock system in mind when moving fixtures or adding suites:
+
+- **Lock exactly what you touch.** An e2e CLI invocation races every `--rpc` endpoint of its fixture's chains, so pass only those chains' endpoints and lock only those networks. Overshooting (locking a network you never reach) serializes other suites for nothing; undershooting (reaching a network you never locked) reintroduces the rate-limit contention the locks exist to prevent.
+- **Prefer uncontended chains for new fixtures.** sepolia/fuji are held by several suites; quieter lanes (see `e2e-helpers.test.ts` endpoint groups and the fixtures in the existing suites) keep a suite parallel with everything else. Verify reachability from CI, not just locally — some public gateways answer residential IPs but hang from datacenter egress.
+
 Each network tag is a directory in a well-known lock root (`<tmpdir>/ccip-tools-ts-network-locks`), created atomically with `fs.mkdir`, so exactly one test process holds a tag at a time. The filesystem is the queue: when a suite finishes, its tags release and the next suite waiting on them starts immediately — there is no batch/round scheduling. Locks auto-release on process exit; crashed holders are detected by pid liveness (or owner-file age) and self-heal on the next acquisition.
 
-Locks are per-machine, so all networked suites must run inside a single CI job/runner. Configure via env:
+Locks are per-machine, so all networked suites must run inside a single CI job/runner. The whole tree runs from one root-level `node --test` invocation over both workspaces' globs (see the `test` script in the root `package.json`) — the locks arbitrate across workspaces exactly as they do within one. That script also raises `--test-concurrency` above the default (`availableParallelism - 1`): on CI's 4-vCPU runners the default would be 3 file slots for the entire tree, and a suite waiting on a lock occupies its slot while it waits, so the extra slots are what let lock-queued suites overlap. Configure via env:
 
 | Variable | Effect |
 | --- | --- |
-| `CCIP_TOOLS_TEST_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
-| `CCIP_TOOLS_TEST_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
+| `NETWORK_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
+| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
+
+### RPC endpoint env vars
+
+Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to keyless public defaults hard-coded in the suites, so locally you only set what you want to override:
+
+| Variable | Network |
+| --- | --- |
+| `RPC_SEPOLIA` | Ethereum Sepolia |
+| `RPC_BASE_SEPOLIA` / `RPC_ARBITRUM_SEPOLIA` / `RPC_OPTIMISM_SEPOLIA` | L2 Sepolia testnets |
+| `RPC_FUJI` | Avalanche Fuji |
+| `RPC_BSC_TESTNET` | BNB Smart Chain testnet |
+| `RPC_APTOS_TESTNET` / `RPC_SOLANA_DEVNET` / `RPC_SUI_TESTNET` / `RPC_TON_TESTNET` / `RPC_HEDERA_TESTNET` / `RPC_ROBINHOOD_TESTNET` | Non-EVM testnets |
+| `RPC_ETHEREUM_MAINNET` / `RPC_BASE_MAINNET` / `RPC_POLYGON_MAINNET` / `RPC_GNOSIS_MAINNET` / `RPC_MONAD_MAINNET` / `RPC_ARBITRUM_MAINNET` | Mainnets |
+
+In CI these are wired to GitHub secrets of the same names (see the `Run tests with coverage` step in `.github/workflows/ci.yml`). Unset secrets fall back to the public defaults — set one when a keyed or faster endpoint is wanted: CI runners share an egress IP whose keyless per-IP budgets (toncenter, BlockVision) are exhausted quickly, and the suites’ retry ladders turn that throttling into wall time.
+
+Secret hygiene: endpoint URLs are never logged with credentials — the SDK redacts them from all debug/error output (`redactEndpointUrl`: query strings dropped, long path segments masked) — and the uploaded coverage artifact is trimmed to the c8 table before upload, because Actions’ `***` masking covers the job-log view but not downloaded artifacts.
 
 ## Fork Tests
 

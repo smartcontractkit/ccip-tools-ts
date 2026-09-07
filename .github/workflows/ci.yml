@@ -10,9 +10,27 @@ on:
       - main
   pull_request: {}
 
+concurrency:
+  # This workflow's live-network suites make a run long, so a rapid push
+  # sequence otherwise leaves several full runs racing each other for the same
+  # rate-limited RPC endpoints. Supersede per ref, but only for pull requests:
+  # runs on main gate the publish workflow and should finish.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
+    outputs:
+      # Whether the test step produced output (false when the build failed
+      # before tests ran, e.g. on lint) — gates the coverage-comment job's
+      # artifact download, which cannot succeed when the artifact is absent.
+      tests-ran: ${{ steps.redact.outputs.tests-ran }}
+      # True when lint failed (tests never ran); gates the artifact download
+      # alongside tests-ran, since the lint output is part of the artifact.
+      lint-failed: ${{ steps.redact.outputs.lint-failed }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -21,6 +39,7 @@ jobs:
         uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
+          cache: 'npm'
 
       # Older foundry-toolchain pins ran foundryup via `bash` and broke when it became
       # a compiled binary ("cannot execute binary file"); v1.9.1 executes it directly
@@ -39,11 +58,38 @@ jobs:
       - name: Verify surfpool is available
         run: surfpool --version
 
+      - name: Cache node_modules
+        id: node-modules
+        uses: actions/cache@v6.1.0
+        with:
+          # npm ci always deletes node_modules and re-extracts ~2000 packages
+          # (~55s even with a warm download cache, since extraction is the cost).
+          # Caching the installed tree keyed on the lockfile skips that entirely
+          # on hit; a lockfile change or cache eviction falls back to a full
+          # npm ci below (which then repopulates the cache).
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies and build
-        run: npm ci
+        run: |
+          set -o pipefail
+          # --no-audit/--no-fund skip the registry round-trips; neither affects
+          # what gets installed. Only run on cache miss — npm ci would delete
+          # the restored node_modules to re-extract the same tree.
+          if [ "${{ steps.node-modules.outputs.cache-hit }}" != "true" ]; then
+            npm ci --prefer-offline --no-audit --no-fund
+          fi
+          npm run build
 
       - name: Run lint
-        run: npm run check
+        run: |
+          set -o pipefail
+          # Tee'd for the PR comment: when lint fails, tests never run, and the
+          # coverage-comment job reports this output (files/lines included)
+          # instead of a bare "tests did not run" headline.
+          if npm run check 2>&1 | tee lint-output.txt; then
+            rm lint-output.txt # green run: nothing for the report to show
+          fi
 
       - name: Validate package exports
         working-directory: ccip-sdk
@@ -57,11 +103,79 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          # Temporary: pipe surfpool stdout/stderr to diagnose Solana fork test failures in CI
-          VERBOSE: '1'
+          NETWORK_LOCK_TIMEOUT_MS: '600000'
+          # RPC endpoints per network, one secret each; a value may hold
+          # several endpoints for the same network, comma-separated. Unset
+          # secrets resolve to the keyless public defaults hard-coded in the
+          # suites — set one when a keyed or faster endpoint is wanted (e.g.
+          # RPC_TON_TESTNET with a toncenter key: CI's shared egress IP
+          # exhausts toncenter's keyless per-IP budget, and the TON suites'
+          # backoff ladders turn that throttling into wall time). Values are
+          # masked in the job log by Actions, and the suites redact endpoint
+          # URLs from all debug/error output; before the coverage-summary
+          # artifact is uploaded, every RPC_* secret value is stripped from it
+          # (Actions masking does not apply to downloaded artifacts, nor to
+          # PR comments created via the API — both are built from this file).
+          RPC_SEPOLIA: ${{ secrets.RPC_SEPOLIA }}
+          RPC_BASE_SEPOLIA: ${{ secrets.RPC_BASE_SEPOLIA }}
+          RPC_ARBITRUM_SEPOLIA: ${{ secrets.RPC_ARBITRUM_SEPOLIA }}
+          RPC_OPTIMISM_SEPOLIA: ${{ secrets.RPC_OPTIMISM_SEPOLIA }}
+          RPC_FUJI: ${{ secrets.RPC_FUJI }}
+          RPC_BSC_TESTNET: ${{ secrets.RPC_BSC_TESTNET }}
+          RPC_APTOS_TESTNET: ${{ secrets.RPC_APTOS_TESTNET }}
+          RPC_SOLANA_DEVNET: ${{ secrets.RPC_SOLANA_DEVNET }}
+          RPC_TON_TESTNET: ${{ secrets.RPC_TON_TESTNET }}
+          RPC_SUI_TESTNET: ${{ secrets.RPC_SUI_TESTNET }}
+          RPC_HEDERA_TESTNET: ${{ secrets.RPC_HEDERA_TESTNET }}
+          RPC_ROBINHOOD_TESTNET: ${{ secrets.RPC_ROBINHOOD_TESTNET }}
+          RPC_ETHEREUM_MAINNET: ${{ secrets.RPC_ETHEREUM_MAINNET }}
+          RPC_BASE_MAINNET: ${{ secrets.RPC_BASE_MAINNET }}
+          RPC_POLYGON_MAINNET: ${{ secrets.RPC_POLYGON_MAINNET }}
+          RPC_GNOSIS_MAINNET: ${{ secrets.RPC_GNOSIS_MAINNET }}
+          RPC_MONAD_MAINNET: ${{ secrets.RPC_MONAD_MAINNET }}
+          RPC_ARBITRUM_MAINNET: ${{ secrets.RPC_ARBITRUM_MAINNET }}
         run: |
           set -o pipefail
           npm test 2>&1 | tee coverage-summary.txt
+
+      - name: Redact RPC secrets from report files
+        if: always()
+        id: redact
+        run: |
+          # The coverage-summary artifact now carries the FULL node --test
+          # output: the coverage-comment job builds the PR comment from it
+          # (failure details and counters included, not just the c8 table).
+          # Actions' secret masking applies to the job-log view only — never
+          # to artifacts, nor to comments created via the API — so every
+          # RPC_* secret value (and each comma-separated endpoint inside it)
+          # is replaced with a placeholder before the files leave the runner.
+          # The coverage-summary file is absent when the build failed before
+          # tests ran (lint, npm ci, build); the lint step's teed output is
+          # then what feeds the PR comment instead. The outputs tell the
+          # coverage-comment job which artifact files to expect, so its
+          # download step never runs against a missing artifact.
+          if [ -f coverage-summary.txt ]; then
+            echo "tests-ran=true" >> "$GITHUB_OUTPUT"
+            rm -f lint-output.txt # tests ran: lint output is green noise
+          else
+            echo "tests-ran=false" >> "$GITHUB_OUTPUT"
+            if [ -f lint-output.txt ]; then
+              echo "lint-failed=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          node -e '
+            const fs = require("node:fs");
+            const secrets = Object.entries(process.env)
+              .flatMap(([key, value]) => (key.startsWith("RPC_") && value ? value.split(",") : []))
+              .map((endpoint) => endpoint.trim())
+              .filter(Boolean);
+            for (const file of ["coverage-summary.txt", "lint-output.txt"]) {
+              if (!fs.existsSync(file)) continue;
+              let content = fs.readFileSync(file, "utf8");
+              for (const secret of secrets) content = content.replaceAll(secret, "[redacted-rpc]");
+              fs.writeFileSync(file, content);
+            }
+          '
 
       - name: Upload coverage report
         if: "always() && hashFiles('.coverage/**') != ''"
@@ -70,12 +184,15 @@ jobs:
           name: coverage-report
           path: .coverage
 
-      - name: Upload coverage summary
+      - name: Upload test report inputs
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: coverage-summary
-          path: coverage-summary.txt
+          path: |
+            coverage-summary.txt
+            lint-output.txt
+          if-no-files-found: ignore
 
       - name: Smoke test cli
         run: npx $PWD/ccip-cli --help
@@ -89,47 +206,158 @@ jobs:
       contents: read
       pull-requests: write
 
-    # Only run on pull_request events (skip on push to main)
-    if: github.event_name == 'pull_request'
+    # Run on pull_request events even when build-and-test failed: the comment
+    # must also reflect failed runs (failed suites/tests, counters, coverage).
+    if: always() && github.event_name == 'pull_request'
 
     steps:
-      - name: Download coverage summary
+      - name: Download test output
+        # Only when there is something to download (test output or lint
+        # failure); a download against a missing artifact would otherwise
+        # surface a failure annotation even under continue-on-error.
+        if: needs.build-and-test.outputs.tests-ran == 'true' || needs.build-and-test.outputs.lint-failed == 'true'
         uses: actions/download-artifact@v8.0.1
         with:
           name: coverage-summary
           path: .
 
-      - name: Post or update PR comment with coverage summary
+      - name: Post or update PR comment with test results
         uses: actions/github-script@v9.0.0
         with:
           script: |
             const fs = require('fs');
 
-            let coverageSummary = fs.readFileSync('coverage-summary.txt', 'utf8').split('\n');
-            // Only the c8 table belongs in the comment: the teed file starts with the
-            // full node --test output (test logs, [network-locks] lines, per-file `ℹ`
-            // summaries), so slicing on the first `ℹ` would dump all of it into the PR.
-            const tableStart = coverageSummary.findIndex(line => /^\s*File\s+\|/.test(line));
-            coverageSummary = (tableStart >= 0
-              ? coverageSummary.slice(tableStart)
-              : coverageSummary
-            ).join('\n');
-
-            if (coverageSummary.trim().length === 0) {
-              console.log('No coverage data found');
-              process.exit(1);
-            }
+            // Hidden marker identifying our comment across runs, regardless of
+            // whether the report shows a success or a failure.
+            const MARKER = '<!-- ci-test-report -->';
 
             const prNumber = context.payload.pull_request
               ? context.payload.pull_request.number
               : null;
-
             if (!prNumber) {
               console.log('No PR number found, skipping comment.');
               return;
             }
 
-            const commentBody = `## Coverage Report\n\n\`\`\`\n${coverageSummary}\n\`\`\``;
+            const hasOutput = fs.existsSync('coverage-summary.txt');
+            const lines = hasOutput
+              ? fs.readFileSync('coverage-summary.txt', 'utf8').split('\n')
+              : [];
+
+            // Lint output is present when `npm run check` failed (tests never
+            // ran); it is what the comment reports in that case. ANSI escape
+            // codes are stripped so colored tool output renders as plain text.
+            const hasLint = fs.existsSync('lint-output.txt');
+            const lintOutput = hasLint
+              ? fs.readFileSync('lint-output.txt', 'utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim()
+              : '';
+
+            // node --test's trailing `ℹ` counter lines; the run is a single
+            // `node --test` invocation, so last occurrence wins.
+            const summary = {};
+            for (const line of lines) {
+              const m = line.match(
+                /^\s*ℹ\s+(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\s+(\S+)/,
+              );
+              if (m) summary[m[1]] = m[2];
+            }
+
+            // c8 coverage table: from its header row to the end of the output.
+            const tableStart = lines.findIndex(line => /^\s*File\s+\|/.test(line));
+            const coverage = tableStart >= 0 ? lines.slice(tableStart).join('\n').trim() : '';
+
+            // Failed-test details: node --test prints the `✖ failing tests:`
+            // section after the `ℹ` counters and before the c8 table. Each
+            // entry is a `test at <file>:<line>` followed by the test name
+            // with its runtime and the assertion error.
+            let failures = '';
+            const failStart = lines.findIndex(line => line.trim().startsWith('✖ failing tests'));
+            if (failStart >= 0) {
+              const failEnd = tableStart > failStart ? tableStart : lines.length;
+              failures = lines.slice(failStart + 1, failEnd).join('\n').trim();
+            }
+
+            // Affected suites: unique test files named in the failure details.
+            const failedSuites = [
+              ...new Set(
+                [...failures.matchAll(/^test at (.+\.test\.ts):\d+:\d+$/gm)].map(m => m[1]),
+              ),
+            ];
+
+            const ms = parseFloat(summary.duration_ms);
+            const duration = isNaN(ms)
+              ? 'unknown duration'
+              : ms >= 60000
+                ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+                : `${(ms / 1000).toFixed(1)}s`;
+
+            // Timed-out suites surface as `cancelled` (their subtests never
+            // report a failure), so both counters must turn the report red.
+            const notPassed = (Number(summary.fail) || 0) + (Number(summary.cancelled) || 0);
+
+            let headline;
+            if (hasOutput) {
+              if (notPassed > 0) {
+                headline =
+                  `❌ **${notPassed} of ${summary.tests} tests did not pass** ` +
+                  `(pass ${summary.pass}, fail ${summary.fail}, cancelled ${summary.cancelled}, ` +
+                  `skipped ${summary.skipped}) in ${duration}`;
+              } else {
+                headline = `✅ **${summary.pass}/${summary.tests} tests passed** (${summary.suites} suites) in ${duration}`;
+              }
+            } else if (hasLint) {
+              headline = '❌ **Lint (`npm run check`) failed — tests did not run.**';
+            } else {
+              headline = '⚠️ **Build failed before any test produced output.**';
+            }
+
+            let body = `${MARKER}\n## CI Test Report\n\n${headline}\n`;
+
+            if (lintOutput) {
+              // Keep the comment readable; the full log stays in the job log.
+              // Head and tail are both kept: formatters print a summary at the
+              // end, while the first error often precedes pages of output.
+              const MAX = 10000;
+              const lintText =
+                lintOutput.length > MAX
+                  ? lintOutput.slice(0, MAX / 2) + '\n… middle truncated …\n' + lintOutput.slice(-MAX / 2)
+                  : lintOutput;
+              body +=
+                '\n<details open><summary>Lint failure output (npm run check)</summary>\n\n' +
+                '```\n' + lintText + '\n```\n\n</details>\n';
+            }
+
+            if (failedSuites.length > 0) {
+              body += `\nFailed suites: ${failedSuites.map(s => `\`${s}\``).join(', ')}\n`;
+            }
+
+            if (failures) {
+              // Keep the comment readable; the full log stays in the job log.
+              const MAX = 12000;
+              const truncated = failures.length > MAX;
+              body +=
+                `\n<details${truncated ? ' open' : ''}><summary>Failed tests</summary>\n\n` +
+                '```\n' +
+                (truncated ? failures.slice(0, MAX) + '\n… truncated …' : failures) +
+                '\n```\n\n</details>\n';
+            }
+
+            if (hasOutput) {
+              const counters = [
+                'tests', 'suites', 'pass', 'fail', 'cancelled', 'skipped', 'todo', 'duration_ms',
+              ]
+                .filter(key => summary[key] !== undefined)
+                .map(key => `ℹ ${key} ${summary[key]}`)
+                .join('\n');
+              if (counters) {
+                body += `\n### Summary\n\n\`\`\`\n${counters}\n\`\`\`\n`;
+              }
+              if (coverage) {
+                body +=
+                  '\n<details><summary>Coverage report</summary>\n\n' +
+                  '```\n' + coverage + '\n```\n\n</details>\n';
+              }
+            }
 
             const { data: comments } = await github.rest.issues.listComments({
               ...context.repo,
@@ -139,19 +367,19 @@ jobs:
             const botComment = comments.find(
               comment =>
                 comment.user.login === 'github-actions[bot]' &&
-                comment.body.includes('## Coverage Report')
+                comment.body.includes(MARKER),
             );
 
             if (botComment) {
               await github.rest.issues.updateComment({
                 ...context.repo,
                 comment_id: botComment.id,
-                body: commentBody,
+                body,
               });
             } else {
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: prNumber,
-                body: commentBody,
+                body,
               });
             }

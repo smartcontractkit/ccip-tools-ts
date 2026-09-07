@@ -147,6 +147,42 @@ export {
   sumCantonHoldingAmounts,
 } from './defaults.ts'
 
+// Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
+export {
+  type AccessToken,
+  type AnyAuthProvider,
+  type AuthConfig,
+  type AuthProvider,
+  type AuthProviderOptions,
+  type AuthorizationCodeAuthConfig,
+  type AuthorizationCodeProtocolOptions,
+  type AuthorizationRequest,
+  type AuthorizationServerMetadata,
+  type ClientCredentialsAuthConfig,
+  type StaticAuthConfig,
+  type ValidatedCallback,
+  AuthType as CantonAuthType,
+  AuthorizationCodeProvider,
+  ClientCredentialsProvider,
+  StaticProvider,
+  buildAuthorizationRequest,
+  codeChallengeFromVerifier,
+  createAuthProvider,
+  createAuthorizationCodeProvider,
+  createClientCredentialsProvider,
+  createMemoizedTokenFetcher,
+  createStaticProvider,
+  exchangeAuthorizationCode,
+  generateCodeVerifier,
+  generateState,
+  getAuthorizationServerMetadata,
+  isAccessToken,
+  isTokenExpired,
+  refreshAuthorizationCodeToken,
+  resolveAuthorizationCodeConfig,
+  validateAuthorizationCallback,
+} from './authentication/index.ts'
+
 /**
  * Canton chain implementation supporting Canton Ledger networks.
  *
@@ -181,7 +217,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   private readonly senderInstanceId: string
 
   /** DAR package names for CCIP template IDs (from canton-config `packages`). */
-  private readonly ccipPackages: { perPartyRouter: string; ccipSender: string }
+  private readonly ccipPackages: {
+    perPartyRouter: string
+    ccipSender: string
+    ccipReceiver: string
+  }
 
   /** Transfer-factory preview amount for fee payments (`canton-config.feeTransferFactoryAmount`). */
   private readonly feeTransferFactoryAmount: string
@@ -232,8 +272,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.senderInstanceId =
       ctx?.cantonConfig?.senderInstanceId?.trim() || DEFAULT_CANTON_SENDER_INSTANCE_ID
     this.ccipPackages = {
-      perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-perpartyrouter',
-      ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender',
+      perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-runtime-v2',
+      ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender-v2',
+      ccipReceiver: ctx?.cantonConfig?.packages?.ccipReceiver ?? 'ccip-receiver-v2',
     }
     this.feeTransferFactoryAmount = resolveFeeTransferFactoryAmount(ctx?.cantonConfig)
     this.defaultSendGasLimit = ctx?.cantonConfig?.defaultSendGasLimit
@@ -374,7 +415,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<CantonChain> {
     // Check that ctx has the necessary cantonConfig
-    if (!ctx || !ctx.cantonConfig || typeof ctx.cantonConfig.jwt !== 'string') {
+    if (!ctx || !ctx.cantonConfig) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
         'CantonChain.fromUrl: ctx.cantonConfig is required',
@@ -388,10 +429,23 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    // Authentication: `jwt` is either a static string or a `() => Promise<string>`
+    // getter for refreshable tokens. The SDK never orchestrates an OAuth flow —
+    // the caller (CLI / embedder) resolves auth upfront and hands the result to
+    // `cantonConfig.jwt`. Thread it through to every client so each request
+    // carries a fresh JWT when a getter is supplied.
+    const jwt = ctx.cantonConfig.jwt
+    if (!jwt) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_AUTH_ERROR,
+        'CantonChain.fromUrl: cantonConfig.jwt is required for authentication',
+      )
+    }
+
     const fetchFn = ctx.fetch
     const client = createCantonClient({
       baseUrl: url,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
       signal: ctx.abort,
       fetch: fetchFn,
     })
@@ -416,16 +470,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     })
     const transferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
     })
     const linkTransferInstructionClient = createTransferInstructionClient({
       baseUrl: ctx.cantonConfig.edsUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
       useScanProxy: false,
     })
     const tokenMetadataClient = createTokenMetadataClient({
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt: ctx.cantonConfig.jwt,
+      jwt,
     })
     return CantonChain.fromClient(
       client,
@@ -1212,17 +1266,34 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         : undefined
     const finality = decodeFinalityFromEncodedMessage(encodedMessageHex)
     const receiverHint = typeof opts.receiver === 'string' ? opts.receiver.trim() : ''
+
+    // The indexer/canton-config may carry the CCV as a keccak256 InstanceAddress hash
+    // (32 bytes), but the Daml CCIPReceiver.requiredCCVs field expects the raw
+    // RawInstanceAddress.unpack string (e.g. "committeeverifier-…@ccvOwner::1220…").
+    // Resolve the raw form via EDS before creating/updating the receiver so that
+    // requiredCCVs matches the CCV contract's instance address at Execute time.
+    let attestationCcvRawResolved = attestationCcvRaw
+    if (attestationCcvRaw && !attestationCcvRaw.includes('@')) {
+      const ccvAddress = resolveExecuteCcvAddress(verifications[0]!.destAddress)
+      const ccvDisclosure = await this.edsDisclosureProvider.fetchCcvExecuteDisclosure(
+        ccvAddress,
+        encodedMessageHex,
+        wallet.party,
+      )
+      attestationCcvRawResolved = ccvDisclosure.rawInstanceAddress || attestationCcvRaw
+    }
+
     this.logger.debug(
       `CantonChain.execute: message finality=${finality}, resolving CCIPReceiver` +
         (receiverHint ? ` (hint=${receiverHint})` : '') +
-        (attestationCcvRaw ? ` (attestation CCV=${attestationCcvRaw})` : '') +
+        (attestationCcvRawResolved ? ` (attestation CCV=${attestationCcvRawResolved})` : '') +
         '...',
     )
 
     const receiverCid = await this.ensureReceiverForExecute(
       wallet.party,
       finality,
-      attestationCcvRaw,
+      attestationCcvRawResolved,
       wallet.signer,
       receiverHint || undefined,
     )
@@ -1379,13 +1450,17 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the
-   * indexer attestation (mirrors Go `GetOrCreateReceiver`).
+   * indexer attestation.
+   *
+   * When a {@link TransactionSigner} is supplied, contract creation/update uses
+   * the interactive submission path; otherwise it falls back to direct
+   * `submitAndWaitForTransaction` (JWT-authenticated).
    */
   private async ensureReceiverForExecute(
     payer: string,
     finality: number,
     attestationCcvRaw: string | undefined,
-    signer: TransactionSigner | undefined,
+    signer?: TransactionSigner,
     hint?: string,
   ): Promise<string> {
     const requiredCcvsRaw = attestationCcvRaw ? [attestationCcvRaw] : []
@@ -1416,6 +1491,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Exercise `UpdateRequiredCCVs` on an existing `CCIPReceiver` contract.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async updateReceiverRequiredCCVs(
     receiverCid: string,
@@ -1427,7 +1505,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       commands: [
         {
           ExerciseCommand: {
-            templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+            templateId: `#${this.ccipPackages.ccipReceiver}:CCIP.CCIPReceiver:CCIPReceiver`,
             contractId: receiverCid,
             choice: 'UpdateRequiredCCVs',
             choiceArgument: {
@@ -1460,7 +1538,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * The `OffRamp.PrepareExecute` Daml choice rejects messages whose `finality` field does not
    * match the receiver's `minBlockConfirmations`, so each distinct finality value needs its own
    * receiver instance.  This method first searches the ACS; if no match is found it creates a
-   * fresh contract (mirroring the Go `deployReceiver` helper in the staging script).
+   * fresh contract.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async createReceiverForFinality(
     payer: string,
@@ -1477,7 +1558,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         commands: [
           {
             CreateCommand: {
-              templateId: '#ccip-receiver:CCIP.CCIPReceiver:CCIPReceiver',
+              templateId: `#${this.ccipPackages.ccipReceiver}:CCIP.CCIPReceiver:CCIPReceiver`,
               createArguments: {
                 instanceId,
                 owner: payer,
@@ -1772,8 +1853,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Ensure PerPartyRouter + CCIPSender disclosures exist for send (mirrors Go GetOrCreateRouter/Sender).
-   * Creates missing contracts when `signer` is provided.
+   * Ensure PerPartyRouter + CCIPSender disclosures exist for send.
+   *
+   * Creates missing contracts on demand. Canton authenticates via the ledger
+   * JWT (OIDC / static / client-credentials), so an external
+   * {@link TransactionSigner} is *not* required — when omitted, contract
+   * creation uses the direct `submitAndWaitForTransaction` path. When a
+   * signer is supplied, the interactive (prepare → sign → execute) path is
+   * used instead.
    */
   private async ensureSendDisclosures(
     party: string,
@@ -1782,13 +1869,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     let found = await this.acsDisclosureProvider.findSendDisclosures()
 
     if (!found.perPartyRouter) {
-      if (!signer) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain: no active PerPartyRouter for party "${party}". ` +
-            'Submit via CantonWallet.sendMessage to auto-create, or create one with the Go CLI.',
-        )
-      }
       this.logger.debug(
         `CantonChain.ensureSendDisclosures: creating PerPartyRouter for party ${party}`,
       )
@@ -1800,13 +1880,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     if (!found.ccipSender) {
-      if (!signer) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain: no active CCIPSender for party "${party}". ` +
-            'Submit via CantonWallet.sendMessage to auto-create, or create one with the Go CLI.',
-        )
-      }
       this.logger.debug(`CantonChain.ensureSendDisclosures: creating CCIPSender for party ${party}`)
       await this.createCcipSender(party, signer)
       found = {
@@ -1823,8 +1896,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Create a `PerPartyRouter` for `party` via the EDS factory disclosure.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createPerPartyRouter(party: string, signer: TransactionSigner): Promise<void> {
+  private async createPerPartyRouter(party: string, signer?: TransactionSigner): Promise<void> {
     const factory = await this.edsDisclosureProvider.fetchPerPartyRouterFactoryDisclosures(party)
     const factoryTemplateId = `#${this.ccipPackages.perPartyRouter}:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouterFactory`
     const createCmd: JsCommands = {
@@ -1855,8 +1931,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Create a `CCIPSender` contract for `party` when none exists in ACS.
+   *
+   * The optional {@link TransactionSigner} selects the submission path
+   * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createCcipSender(party: string, signer: TransactionSigner): Promise<void> {
+  private async createCcipSender(party: string, signer?: TransactionSigner): Promise<void> {
     const senderTemplateId = `#${this.ccipPackages.ccipSender}:CCIP.CCIPSender:CCIPSender`
     const createCmd: JsCommands = {
       commands: [
@@ -2524,7 +2603,6 @@ function decodeFinalityFromEncodedMessage(encodedHex: string): number {
  * Encode a numeric message finality as a Canton JSON Ledger API variant value for
  * the `receiverFinalityConfig : FinalityConfig` field of `CCIPReceiver`.
  *
- * Mirrors Go's `encodeReceiverFinalityConfig` in ccip/devenv/manual_execution.go:
  *   0         → WaitForFinality  (no block-depth threshold)
  *   0x00010000→ WaitForSafe      (wait for the safe/finalized block)
  *   N (other) → BlockDepth(N)    (wait for N block confirmations)

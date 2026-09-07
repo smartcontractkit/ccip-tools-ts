@@ -158,19 +158,34 @@ ccip-cli manual-exec 0xabc123... \
   --receiver-object-ids 0xabc... 0xdef...
 ```
 
-### Canton execution by update ID
+### Canton source by update ID
 
-For Canton destinations, pass the ledger update ID from the source send transaction:
+When the **source is Canton**, pass the ledger update ID from the Canton send transaction:
 
 ```bash
 ccip-cli manual-exec 1220a1b2c3d4... \
   --canton-config ./canton-config.json \
   --rpc https://ledger.example.com/api/json \
-  --receiver sender::1220... \
-  --wallet <64-char-ed25519-seed>
+  --rpc https://ethereum-sepolia-rpc.example.com \
+  --wallet ledger
 ```
 
-Canton manual execution requires `--canton-config` with `indexerUrl` (or `--indexer`) for CCV verifications. The `--receiver` flag accepts a CCIPReceiver contract ID, a party ID, or the keccak256 hash from the message receiver field.
+The `--wallet` flag is required when the destination is EVM (or another chain) — to sign the execution transaction. When the destination is Canton, `--wallet` is not needed — the JWT from `--canton-config` (either the static `jwt` field or a token resolved from `auth`) is used instead.
+
+When the source is EVM (or another chain), pass the source transaction hash as usual — the CLI auto-detects the format. You can also use a CCIP message ID (32-byte hex) with `--api` enabled (the default), which fetches execution inputs from the CCIP API without needing source chain RPC access.
+
+Canton manual execution requires `--canton-config` with `indexerUrl` (or `--indexer`) for CCV verifications. When the destination is Canton, use `--receiver` to specify a CCIPReceiver contract ID, party ID (`hint::1220…`), or keccak256(party) hash — it defaults to the message receiver from the original CCIP request.
+
+### Canton destination execution
+
+When the **destination is Canton**, `--wallet` is not needed — the JWT from `--canton-config` (either the static `jwt` field or a token resolved from `auth`) is used to submit the execution transaction. Pass the source transaction hash or CCIP message ID (use [`ccip-cli show`](/cli/show) to find it):
+
+```bash
+ccip-cli manual-exec 0x1234... \
+  --canton-config ./canton-config.json \
+  --rpc https://ledger.example.com/api/json \
+  --rpc https://ethereum-sepolia-rpc.example.com
+```
 
 ## Execution Flow
 
@@ -204,7 +219,7 @@ After successful execution, buffers auto-clear. Lookup tables require a grace pe
 
 ## Canton Considerations
 
-Canton execution uses the ledger's interactive submission flow (prepare → sign → execute) when an external signer is provided via `--wallet`. Without `--wallet`, transactions are submitted directly using the JWT from config.
+Canton execution submits transactions directly using the JWT from config (either the static `jwt` field or a token resolved from `auth`).
 
 | Input     | Format                                                                  |
 | --------- | ----------------------------------------------------------------------- |
