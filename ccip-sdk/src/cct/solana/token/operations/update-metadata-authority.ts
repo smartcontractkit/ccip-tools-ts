@@ -41,7 +41,9 @@ function validateMetadataAuthority(
     throw new CCTParamsInvalidError(
       operation,
       'authority',
-      `${authority.toBase58()} is not the current metadata update authority (${metadata.updateAuthority})`,
+      `${authority.toBase58()} is not the current metadata update authority (${
+        metadata.updateAuthority
+      })`,
     )
   }
   if (!metadata.isMutable) {
@@ -98,8 +100,9 @@ async function getMetadata(
     )
   }
 
+  let parsed: MetadataAccountData
   try {
-    return metaplex.getMetadataAccountDataSerializer().deserialize(metadata.data)[0]
+    parsed = metaplex.getMetadataAccountDataSerializer().deserialize(metadata.data)[0]
   } catch {
     throw new CCTParamsInvalidError(
       operation,
@@ -107,6 +110,14 @@ async function getMetadata(
       'mint not found or does not have Metaplex metadata',
     )
   }
+  if (!new PublicKey(parsed.mint).equals(tokenAddress)) {
+    throw new CCTParamsInvalidError(
+      operation,
+      'tokenAddress',
+      'mint not found or does not have Metaplex metadata',
+    )
+  }
+  return parsed
 }
 
 /** Transfers the Metaplex metadata update authority for an SPL token mint. */
@@ -164,7 +175,9 @@ export class UpdateMetadataAuthority extends SolanaOperation<
       .map(metaplex.toWeb3JsInstruction)
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, newAuthority = ${opts.newAuthority.toBase58()}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, newAuthority = ${opts.newAuthority.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
   }
