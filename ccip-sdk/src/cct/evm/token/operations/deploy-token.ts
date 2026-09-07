@@ -60,7 +60,7 @@ export class DeployToken extends EVMDeployOperation<DeployTokenParams> {
   readonly name = 'deployToken'
 
   /** Validates the constructor params before building init-code. */
-  protected validate(params: DeployTokenParams): void {
+  protected override validate(params: DeployTokenParams): void {
     validateNonEmptyString(this.name, 'name', params.name)
     validateNonEmptyString(this.name, 'symbol', params.symbol)
     validateUint8(this.name, 'decimals', params.decimals)

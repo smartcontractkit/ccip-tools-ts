@@ -1,22 +1,22 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
-import { BorshAccountsCoder } from '@coral-xyz/anchor'
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { Connection, Keypair, PublicKey } from '@solana/web3.js'
+import { BorshAccountsCoder } from "@coral-xyz/anchor";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
-import { SolanaChain } from '../../solana/index.ts'
-import { deriveTokenAdminRegistryPda } from './programs/router.ts'
+import { SolanaChain } from "../../solana/index.ts";
+import { deriveTokenAdminRegistryPda } from "./programs/router.ts";
 import {
   TOKEN_POOL_PROGRAMS,
   deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
-} from './programs/token-pool.ts'
+} from "./programs/token-pool.ts";
 import type {
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
-} from './token-pool/operations/index.ts'
-import { METADATA_PROGRAM_ID } from './token/constants.ts'
+} from "./token-pool/operations/index.ts";
+import { METADATA_PROGRAM_ID } from "./token/constants.ts";
 import {
   type RegisterAdminMethod,
   type TokenAuthorityType,
@@ -24,124 +24,138 @@ import {
   REGISTRATION_METHODS,
   SolanaTokenManager,
   TOKEN_AUTHORITY_TYPES,
-} from './index.ts'
+} from "./index.ts";
 
 function stubChain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {},
-  } as unknown as SolanaChain
+  } as unknown as SolanaChain;
 }
 
-describe('SolanaTokenManager (cct/solana)', () => {
-  it('exports public CCT constants', () => {
-    const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
-    const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER
+describe("SolanaTokenManager (cct/solana)", () => {
+  it("exports public CCT constants", () => {
+    const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT;
+    const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER;
 
-    assert.equal(authorityType, 'mint')
-    assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
-    assert.equal(method, 'owner')
-    assert.equal(REGISTRATION_METHODS.CCIP_ADMIN, 'ccip-admin')
-    assert.deepEqual(DEFAULT_WRITABLE_INDEXES, [3, 4, 7])
-  })
+    assert.equal(authorityType, "mint");
+    assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, "freeze");
+    assert.equal(method, "owner");
+    assert.equal(REGISTRATION_METHODS.CCIP_ADMIN, "ccip-admin");
+    assert.deepEqual(DEFAULT_WRITABLE_INDEXES, [3, 4, 7]);
+  });
 
-  it('creates from a connection provider', async (t) => {
-    const chain = stubChain()
-    const connection = new Connection('http://localhost:8899')
-    t.mock.method(SolanaChain, 'fromConnection', async (provider: Connection) => {
-      assert.equal(provider, connection)
-      return chain
-    })
+  it("creates from a connection provider", async (t) => {
+    const chain = stubChain();
+    const connection = new Connection("http://localhost:8899");
+    t.mock.method(
+      SolanaChain,
+      "fromConnection",
+      async (provider: Connection) => {
+        assert.equal(provider, connection);
+        return chain;
+      },
+    );
 
-    const cct = await SolanaTokenManager.fromProvider(connection)
+    const cct = await SolanaTokenManager.fromProvider(connection);
 
-    assert.equal(cct.chain, chain)
-  })
+    assert.equal(cct.chain, chain);
+  });
 
-  it('creates from an RPC URL', async (t) => {
-    const chain = stubChain()
-    t.mock.method(SolanaChain, 'fromUrl', async (url: string) => {
-      assert.equal(url, 'http://localhost:8899')
-      return chain
-    })
+  it("creates from an RPC URL", async (t) => {
+    const chain = stubChain();
+    t.mock.method(SolanaChain, "fromUrl", async (url: string) => {
+      assert.equal(url, "http://localhost:8899");
+      return chain;
+    });
 
-    const cct = await SolanaTokenManager.fromUrl('http://localhost:8899')
+    const cct = await SolanaTokenManager.fromUrl("http://localhost:8899");
 
-    assert.equal(cct.chain, chain)
-  })
+    assert.equal(cct.chain, chain);
+  });
 
-  it('getTokenPoolState accepts params whose pool program is not known statically', () => {
-    const cct = SolanaTokenManager.fromChain(stubChain())
+  it("getTokenPoolState accepts params whose pool program is not known statically", () => {
+    const cct = SolanaTokenManager.fromChain(stubChain());
     // A parameter is not narrowed to one PoolProgramRef arm the way a const literal is, so this
     // only compiles while a `GetTokenPoolStateParams` overload is declared: TypeScript never
     // exposes the implementation signature to callers.
-    const read = (opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> =>
-      cct.getTokenPoolState(opts)
+    const read = (
+      opts: GetTokenPoolStateParams,
+    ): Promise<GetTokenPoolStateResult> => cct.getTokenPoolState(opts);
 
-    assert.equal(typeof read, 'function')
-  })
+    assert.equal(typeof read, "function");
+  });
 
-  describe('facade operations', () => {
-    const payer = Keypair.generate().publicKey.toBase58()
-    const mint = Keypair.generate().publicKey.toBase58()
-    const pool = Keypair.generate().publicKey.toBase58()
-    const account = Keypair.generate().publicKey.toBase58()
-    const reader = Keypair.generate().publicKey.toBase58()
-    const overrideAddress = Keypair.generate().publicKey.toBase58()
-    const overrideRouter = Keypair.generate().publicKey.toBase58()
-    const remoteChainSelector = 5009297550715157269n
+  describe("facade operations", () => {
+    const payer = Keypair.generate().publicKey.toBase58();
+    const mint = Keypair.generate().publicKey.toBase58();
+    const pool = Keypair.generate().publicKey.toBase58();
+    const account = Keypair.generate().publicKey.toBase58();
+    const reader = Keypair.generate().publicKey.toBase58();
+    const overrideAddress = Keypair.generate().publicKey.toBase58();
+    const overrideRouter = Keypair.generate().publicKey.toBase58();
+    const remoteChainSelector = 5009297550715157269n;
 
     function chain(): SolanaChain {
-      const mintAccount = Buffer.alloc(82)
-      mintAccount.writeUInt32LE(1, 0)
-      new PublicKey(payer).toBuffer().copy(mintAccount, 4)
-      mintAccount[44] = 6
-      mintAccount[45] = 1
-      const tokenAccount = Buffer.alloc(165)
-      new PublicKey(mint).toBuffer().copy(tokenAccount, 0)
-      new PublicKey(payer).toBuffer().copy(tokenAccount, 32)
-      tokenAccount.writeBigUInt64LE(1n, 64)
-      tokenAccount.writeUInt32LE(1, 72)
+      const mintAccount = Buffer.alloc(82);
+      mintAccount.writeUInt32LE(1, 0);
+      new PublicKey(payer).toBuffer().copy(mintAccount, 4);
+      mintAccount[44] = 6;
+      mintAccount[45] = 1;
+      const tokenAccount = Buffer.alloc(165);
+      new PublicKey(mint).toBuffer().copy(tokenAccount, 0);
+      new PublicKey(payer).toBuffer().copy(tokenAccount, 32);
+      tokenAccount.writeBigUInt64LE(1n, 64);
+      tokenAccount.writeUInt32LE(1, 72);
       deriveTokenPoolSignerPda(
-        new PublicKey(TOKEN_POOL_PROGRAMS['lock-release']),
+        new PublicKey(TOKEN_POOL_PROGRAMS["lock-release"]),
         new PublicKey(mint),
       )
         .toBuffer()
-        .copy(tokenAccount, 76)
-      tokenAccount[108] = 1
-      tokenAccount.writeBigUInt64LE(1n, 121)
-      const poolProgram = new PublicKey(TOKEN_POOL_PROGRAMS['lock-release'])
-      const poolStateAddress = deriveTokenPoolConfigPda(poolProgram, new PublicKey(mint))
+        .copy(tokenAccount, 76);
+      tokenAccount[108] = 1;
+      tokenAccount.writeBigUInt64LE(1n, 121);
+      const poolProgram = new PublicKey(TOKEN_POOL_PROGRAMS["lock-release"]);
+      const poolStateAddress = deriveTokenPoolConfigPda(
+        poolProgram,
+        new PublicKey(mint),
+      );
       const registryAddress = deriveTokenAdminRegistryPda(
         new PublicKey(account),
         new PublicKey(mint),
-      )
+      );
       const readerRegistryAddress = deriveTokenAdminRegistryPda(
         new PublicKey(pool),
         new PublicKey(mint),
-      )
-      const registry = Buffer.alloc(170)
-      BorshAccountsCoder.accountDiscriminator('TokenAdminRegistry').copy(registry)
-      registry[8] = 2
-      new PublicKey(payer).toBuffer().copy(registry, 9)
-      new PublicKey(payer).toBuffer().copy(registry, 41)
-      new PublicKey(account).toBuffer().copy(registry, 73)
-      registry[120] = 0x19
-      new PublicKey(mint).toBuffer().copy(registry, 137)
-      registry[169] = 1
+      );
+      const registry = Buffer.alloc(170);
+      BorshAccountsCoder.accountDiscriminator("TokenAdminRegistry").copy(
+        registry,
+      );
+      registry[8] = 2;
+      new PublicKey(payer).toBuffer().copy(registry, 9);
+      new PublicKey(payer).toBuffer().copy(registry, 41);
+      new PublicKey(account).toBuffer().copy(registry, 73);
+      registry[120] = 0x19;
+      new PublicKey(mint).toBuffer().copy(registry, 137);
+      registry[169] = 1;
       const [metadataAddress] = PublicKey.findProgramAddressSync(
-        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), new PublicKey(mint).toBuffer()],
+        [
+          Buffer.from("metadata"),
+          METADATA_PROGRAM_ID.toBuffer(),
+          new PublicKey(mint).toBuffer(),
+        ],
         METADATA_PROGRAM_ID,
-      )
+      );
       const metadata = Buffer.concat([
         Buffer.from([4]),
         new PublicKey(payer).toBuffer(),
         new PublicKey(mint).toBuffer(),
         Buffer.alloc(14),
         Buffer.from([0, 0, 1, 0, 0, 0, 0, 0]),
-      ])
+      ]);
       const poolState = Buffer.concat([
-        BorshAccountsCoder.accountDiscriminator('State'),
+        BorshAccountsCoder.accountDiscriminator("State"),
         Buffer.from([1]),
         poolProgram.toBuffer(),
         new PublicKey(mint).toBuffer(),
@@ -151,23 +165,29 @@ describe('SolanaTokenManager (cct/solana)', () => {
         new PublicKey(payer).toBuffer(),
         new PublicKey(payer).toBuffer(),
         new PublicKey(payer).toBuffer(),
-      ])
+      ]);
       const accounts = new Map([
-        [new PublicKey(mint).toBase58(), { owner: TOKEN_PROGRAM_ID, data: mintAccount }],
-        [metadataAddress.toBase58(), { owner: METADATA_PROGRAM_ID, data: metadata }],
+        [
+          new PublicKey(mint).toBase58(),
+          { owner: TOKEN_PROGRAM_ID, data: mintAccount },
+        ],
+        [
+          metadataAddress.toBase58(),
+          { owner: METADATA_PROGRAM_ID, data: metadata },
+        ],
         [poolStateAddress.toBase58(), { owner: poolProgram, data: poolState }],
         [registryAddress.toBase58(), null],
         [readerRegistryAddress.toBase58(), { data: registry }],
-      ])
-      const defaultAccount = { owner: TOKEN_PROGRAM_ID, data: tokenAccount }
+      ]);
+      const defaultAccount = { owner: TOKEN_PROGRAM_ID, data: tokenAccount };
 
       return {
         logger: { debug() {}, info() {}, warn() {}, error() {} },
         connection: {
-          rpcEndpoint: 'http://localhost:8899',
+          rpcEndpoint: "http://localhost:8899",
           getAccountInfo: async (address: PublicKey) => {
-            const key = address.toBase58()
-            return accounts.has(key) ? accounts.get(key) : defaultAccount
+            const key = address.toBase58();
+            return accounts.has(key) ? accounts.get(key) : defaultAccount;
           },
           getMinimumBalanceForRentExemption: async () => 1,
           getSlot: async () => 1,
@@ -184,7 +204,9 @@ describe('SolanaTokenManager (cct/solana)', () => {
               },
             },
           }),
-          simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+          simulateTransaction: async () => ({
+            value: { err: null, logs: [], unitsConsumed: 1 },
+          }),
           getLatestBlockhash: async () => ({
             blockhash: PublicKey.default.toBase58(),
             lastValidBlockHeight: 1,
@@ -193,39 +215,61 @@ describe('SolanaTokenManager (cct/solana)', () => {
           confirmTransaction: async () => ({ value: { err: null } }),
         },
         getTokenAdminRegistryFor: async (address: string) =>
-          address === reader ? pool : address === overrideAddress ? overrideRouter : account,
+          address === reader
+            ? pool
+            : address === overrideAddress
+            ? overrideRouter
+            : account,
         getSupportedTokens: async () => [mint],
         getTokenPoolRemotes: async () => ({}),
         getRegistryTokenConfig: async (router: string) =>
           router === overrideRouter
-            ? { administrator: PublicKey.default.toBase58(), pendingAdministrator: payer }
+            ? {
+                administrator: PublicKey.default.toBase58(),
+                pendingAdministrator: payer,
+              }
             : { administrator: payer, pendingAdministrator: payer },
-      } as unknown as SolanaChain
+      } as unknown as SolanaChain;
     }
 
-    const facadeChain = chain()
+    const facadeChain = chain();
 
-    it('runs every unsigned facade operation', async () => {
-      const cct = SolanaTokenManager.fromChain(facadeChain)
+    it("runs every unsigned facade operation", async () => {
+      const cct = SolanaTokenManager.fromChain(facadeChain);
       const common = {
         payer,
         tokenAddress: mint,
         authority: payer,
-        poolType: 'lock-release' as const,
-      }
+        poolType: "lock-release" as const,
+      };
       const cases: Array<
-        [string, () => Promise<{ instructions: unknown[] } | { instructions: unknown[] }[]>]
+        [
+          string,
+          () => Promise<
+            { instructions: unknown[] } | { instructions: unknown[] }[]
+          >,
+        ]
       > = [
         [
-          'deployToken',
-          () => cct.generateUnsignedDeployToken({ payer, decimals: 6, withMetaplex: false }),
+          "deployToken",
+          () =>
+            cct.generateUnsignedDeployToken({
+              payer,
+              decimals: 6,
+              withMetaplex: false,
+            }),
         ],
         [
-          'approveToken',
-          () => cct.generateUnsignedApproveToken({ ...common, delegate: account, amount: 1n }),
+          "approveToken",
+          () =>
+            cct.generateUnsignedApproveToken({
+              ...common,
+              delegate: account,
+              amount: 1n,
+            }),
         ],
         [
-          'createTokenAccount',
+          "createTokenAccount",
           () =>
             cct.generateUnsignedCreateTokenAccount({
               payer,
@@ -234,45 +278,62 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'mintTokens',
-          () => cct.generateUnsignedMintTokens({ ...common, recipient: account, amount: 1n }),
+          "mintTokens",
+          () =>
+            cct.generateUnsignedMintTokens({
+              ...common,
+              recipient: account,
+              amount: 1n,
+            }),
         ],
         [
-          'setTokenAuthority',
+          "setTokenAuthority",
           () =>
             cct.generateUnsignedSetTokenAuthority({
               ...common,
               newAuthority: account,
-              authorityTypes: ['mint'],
+              authorityTypes: ["mint"],
             }),
         ],
         [
-          'updateMetadataAuthority',
-          () => cct.generateUnsignedUpdateMetadataAuthority({ ...common, newAuthority: account }),
+          "updateMetadataAuthority",
+          () =>
+            cct.generateUnsignedUpdateMetadataAuthority({
+              ...common,
+              newAuthority: account,
+            }),
         ],
         [
-          'createTokenMultisig',
+          "createTokenMultisig",
           () =>
             cct.generateUnsignedCreateTokenMultisig({
               payer,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               threshold: 1,
             }),
         ],
         [
-          'createLookupTable',
+          "createLookupTable",
           () =>
-            cct.generateUnsignedCreateLookupTable({ payer, authority: payer, mode: 'createEmpty' }),
+            cct.generateUnsignedCreateLookupTable({
+              payer,
+              authority: payer,
+              mode: "createEmpty",
+            }),
         ],
         [
-          'configureAllowlist',
+          "configureAllowlist",
           () =>
-            cct.generateUnsignedConfigureAllowlist({ ...common, add: [account], enabled: true }),
+            cct.generateUnsignedConfigureAllowlist({
+              ...common,
+              add: [account],
+              enabled: true,
+            }),
         ],
-        ['deployTokenPool', () => cct.generateUnsignedDeployTokenPool(common)],
+        ["deployTokenPool", () => cct.generateUnsignedDeployTokenPool(common)],
         [
-          'applyChainUpdates',
+          "applyChainUpdates",
           () =>
             cct.generateUnsignedApplyChainUpdates({
               ...common,
@@ -280,8 +341,8 @@ describe('SolanaTokenManager (cct/solana)', () => {
               chainsToAdd: [
                 {
                   remoteChainSelector,
-                  remoteTokenAddress: '0x01',
-                  remotePoolAddresses: ['0x02'],
+                  remoteTokenAddress: "0x01",
+                  remotePoolAddresses: ["0x02"],
                   remoteTokenDecimals: 6,
                   inboundRateLimiterConfig: { enabled: false },
                   outboundRateLimiterConfig: { enabled: false },
@@ -290,52 +351,76 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'appendRemotePoolAddresses',
+          "appendRemotePoolAddresses",
           () =>
             cct.generateUnsignedAppendRemotePoolAddresses({
               ...common,
               remoteChainSelector,
-              remotePoolAddresses: ['0x01'],
+              remotePoolAddresses: ["0x01"],
             }),
         ],
         [
-          'initChainRemoteConfig',
+          "initChainRemoteConfig",
           () =>
             cct.generateUnsignedInitChainRemoteConfig({
               ...common,
               remoteChainSelector,
-              remoteTokenAddress: '0x01',
+              remoteTokenAddress: "0x01",
               remoteTokenDecimals: 6,
             }),
         ],
         [
-          'deleteChainRemoteConfig',
-          () => cct.generateUnsignedDeleteChainRemoteConfig({ ...common, remoteChainSelector }),
+          "deleteChainRemoteConfig",
+          () =>
+            cct.generateUnsignedDeleteChainRemoteConfig({
+              ...common,
+              remoteChainSelector,
+            }),
         ],
         [
-          'setRateLimitAdmin',
-          () => cct.generateUnsignedSetRateLimitAdmin({ ...common, newRateLimitAdmin: account }),
-        ],
-        ['provideLiquidity', () => cct.generateUnsignedProvideLiquidity({ ...common, amount: 1n })],
-        [
-          'withdrawLiquidity',
-          () => cct.generateUnsignedWithdrawLiquidity({ ...common, amount: 1n }),
-        ],
-        [
-          'setCanAcceptLiquidity',
-          () => cct.generateUnsignedSetCanAcceptLiquidity({ ...common, allow: true }),
+          "setRateLimitAdmin",
+          () =>
+            cct.generateUnsignedSetRateLimitAdmin({
+              ...common,
+              newRateLimitAdmin: account,
+            }),
         ],
         [
-          'setRebalancer',
-          () => cct.generateUnsignedSetRebalancer({ ...common, rebalancer: account }),
+          "provideLiquidity",
+          () => cct.generateUnsignedProvideLiquidity({ ...common, amount: 1n }),
         ],
         [
-          'transferOwnership',
-          () => cct.generateUnsignedTransferOwnership({ ...common, newOwner: account }),
+          "withdrawLiquidity",
+          () =>
+            cct.generateUnsignedWithdrawLiquidity({ ...common, amount: 1n }),
         ],
-        ['acceptOwnership', () => cct.generateUnsignedAcceptOwnership(common)],
         [
-          'setChainRateLimit',
+          "setCanAcceptLiquidity",
+          () =>
+            cct.generateUnsignedSetCanAcceptLiquidity({
+              ...common,
+              allow: true,
+            }),
+        ],
+        [
+          "setRebalancer",
+          () =>
+            cct.generateUnsignedSetRebalancer({
+              ...common,
+              rebalancer: account,
+            }),
+        ],
+        [
+          "transferOwnership",
+          () =>
+            cct.generateUnsignedTransferOwnership({
+              ...common,
+              newOwner: account,
+            }),
+        ],
+        ["acceptOwnership", () => cct.generateUnsignedAcceptOwnership(common)],
+        [
+          "setChainRateLimit",
           () =>
             cct.generateUnsignedSetChainRateLimit({
               ...common,
@@ -345,18 +430,18 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'editChainRemoteConfig',
+          "editChainRemoteConfig",
           () =>
             cct.generateUnsignedEditChainRemoteConfig({
               ...common,
               remoteChainSelector,
-              remoteTokenAddress: '0x01',
-              remotePoolAddresses: ['0x02'],
+              remoteTokenAddress: "0x01",
+              remotePoolAddresses: ["0x02"],
               remoteTokenDecimals: 6,
             }),
         ],
         [
-          'appendToLookupTable',
+          "appendToLookupTable",
           () =>
             cct.generateUnsignedAppendToLookupTable({
               payer,
@@ -364,9 +449,13 @@ describe('SolanaTokenManager (cct/solana)', () => {
               additionalAddresses: [mint],
             }),
         ],
-        ['acceptAdmin', () => cct.generateUnsignedAcceptAdmin({ ...common, address: account })],
         [
-          'ownerOverridePendingAdministrator',
+          "acceptAdmin",
+          () =>
+            cct.generateUnsignedAcceptAdmin({ ...common, address: account }),
+        ],
+        [
+          "ownerOverridePendingAdministrator",
           () =>
             cct.generateUnsignedOwnerOverridePendingAdministrator({
               ...common,
@@ -374,13 +463,21 @@ describe('SolanaTokenManager (cct/solana)', () => {
               newAdmin: account,
             }),
         ],
-        ['registerAdmin', () => cct.generateUnsignedRegisterAdmin({ ...common, address: account })],
         [
-          'removeFromAllowlist',
-          () => cct.generateUnsignedRemoveFromAllowlist({ ...common, remove: [account] }),
+          "registerAdmin",
+          () =>
+            cct.generateUnsignedRegisterAdmin({ ...common, address: account }),
         ],
         [
-          'setPool',
+          "removeFromAllowlist",
+          () =>
+            cct.generateUnsignedRemoveFromAllowlist({
+              ...common,
+              remove: [account],
+            }),
+        ],
+        [
+          "setPool",
           () =>
             cct.generateUnsignedSetPool({
               ...common,
@@ -389,93 +486,138 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'transferAdmin',
+          "transferAdmin",
           () =>
-            cct.generateUnsignedTransferAdmin({ ...common, address: account, newAdmin: account }),
+            cct.generateUnsignedTransferAdmin({
+              ...common,
+              address: account,
+              newAdmin: account,
+            }),
         ],
-      ]
+      ];
 
       for (const [name, operation] of cases) {
-        const result = await operation()
+        const result = await operation();
         assert.ok(
           (Array.isArray(result) ? result[0] : result)?.instructions.length,
           `${name} returns instructions`,
-        )
+        );
       }
-    })
+    });
 
-    it('runs every signed facade operation', async () => {
-      const cct = SolanaTokenManager.fromChain(facadeChain)
-      const wallet = { publicKey: new PublicKey(payer), signTransaction: async <T>(tx: T) => tx }
+    it("runs every signed facade operation", async () => {
+      const cct = SolanaTokenManager.fromChain(facadeChain);
+      const wallet = {
+        publicKey: new PublicKey(payer),
+        signTransaction: async <T>(tx: T) => tx,
+      };
       const signed: Array<
-        [string, () => Promise<{ hash: string } | { hash: string }[] | { hashes: string[] }>]
+        [
+          string,
+          () => Promise<
+            { hash: string } | { hash: string }[] | { hashes: string[] }
+          >,
+        ]
       > = [
-        ['deployToken', () => cct.deployToken({ wallet, decimals: 6, withMetaplex: false })],
         [
-          'approveToken',
-          () => cct.approveToken({ wallet, tokenAddress: mint, delegate: account, amount: 1n }),
+          "deployToken",
+          () => cct.deployToken({ wallet, decimals: 6, withMetaplex: false }),
         ],
         [
-          'createTokenAccount',
-          () => cct.createTokenAccount({ wallet, tokenAddress: mint, ownerAddress: account }),
+          "approveToken",
+          () =>
+            cct.approveToken({
+              wallet,
+              tokenAddress: mint,
+              delegate: account,
+              amount: 1n,
+            }),
         ],
         [
-          'mintTokens',
-          () => cct.mintTokens({ wallet, tokenAddress: mint, recipient: account, amount: 1n }),
+          "createTokenAccount",
+          () =>
+            cct.createTokenAccount({
+              wallet,
+              tokenAddress: mint,
+              ownerAddress: account,
+            }),
         ],
         [
-          'setTokenAuthority',
+          "mintTokens",
+          () =>
+            cct.mintTokens({
+              wallet,
+              tokenAddress: mint,
+              recipient: account,
+              amount: 1n,
+            }),
+        ],
+        [
+          "setTokenAuthority",
           () =>
             cct.setTokenAuthority({
               wallet,
               tokenAddress: mint,
               newAuthority: account,
-              authorityTypes: ['mint'],
+              authorityTypes: ["mint"],
             }),
         ],
         [
-          'updateMetadataAuthority',
-          () => cct.updateMetadataAuthority({ wallet, tokenAddress: mint, newAuthority: account }),
+          "updateMetadataAuthority",
+          () =>
+            cct.updateMetadataAuthority({
+              wallet,
+              tokenAddress: mint,
+              newAuthority: account,
+            }),
         ],
         [
-          'createTokenMultisig',
+          "createTokenMultisig",
           () =>
             cct.createTokenMultisig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               threshold: 1,
             }),
         ],
-        ['createLookupTable', () => cct.createLookupTable({ wallet, mode: 'createEmpty' })],
         [
-          'configureAllowlist',
+          "createLookupTable",
+          () => cct.createLookupTable({ wallet, mode: "createEmpty" }),
+        ],
+        [
+          "configureAllowlist",
           () =>
             cct.configureAllowlist({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               add: [account],
               enabled: true,
             }),
         ],
         [
-          'deployTokenPool',
-          () => cct.deployTokenPool({ wallet, tokenAddress: mint, poolType: 'lock-release' }),
+          "deployTokenPool",
+          () =>
+            cct.deployTokenPool({
+              wallet,
+              tokenAddress: mint,
+              poolType: "lock-release",
+            }),
         ],
         [
-          'applyChainUpdates',
+          "applyChainUpdates",
           () =>
             cct.applyChainUpdates({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelectorsToRemove: [],
               chainsToAdd: [
                 {
                   remoteChainSelector,
-                  remoteTokenAddress: '0x01',
-                  remotePoolAddresses: ['0x02'],
+                  remoteTokenAddress: "0x01",
+                  remotePoolAddresses: ["0x02"],
                   remoteTokenDecimals: 6,
                   inboundRateLimiterConfig: { enabled: false },
                   outboundRateLimiterConfig: { enabled: false },
@@ -484,129 +626,134 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'appendRemotePoolAddresses',
+          "appendRemotePoolAddresses",
           () =>
             cct.appendRemotePoolAddresses({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
-              remotePoolAddresses: ['0x01'],
+              remotePoolAddresses: ["0x01"],
             }),
         ],
         [
-          'initChainRemoteConfig',
+          "initChainRemoteConfig",
           () =>
             cct.initChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
-              remoteTokenAddress: '0x01',
+              remoteTokenAddress: "0x01",
               remoteTokenDecimals: 6,
             }),
         ],
         [
-          'deleteChainRemoteConfig',
+          "deleteChainRemoteConfig",
           () =>
             cct.deleteChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
             }),
         ],
         [
-          'setRateLimitAdmin',
+          "setRateLimitAdmin",
           () =>
             cct.setRateLimitAdmin({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               newRateLimitAdmin: account,
             }),
         ],
         [
-          'provideLiquidity',
+          "provideLiquidity",
           () =>
             cct.provideLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               amount: 1n,
             }),
         ],
         [
-          'withdrawLiquidity',
+          "withdrawLiquidity",
           () =>
             cct.withdrawLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               amount: 1n,
             }),
         ],
         [
-          'setCanAcceptLiquidity',
+          "setCanAcceptLiquidity",
           () =>
             cct.setCanAcceptLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               allow: true,
             }),
         ],
         [
-          'setRebalancer',
+          "setRebalancer",
           () =>
             cct.setRebalancer({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               rebalancer: account,
             }),
         ],
         [
-          'transferOwnership',
+          "transferOwnership",
           () =>
             cct.transferOwnership({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               newOwner: account,
             }),
         ],
         [
-          'acceptOwnership',
-          () => cct.acceptOwnership({ wallet, tokenAddress: mint, poolType: 'lock-release' }),
+          "acceptOwnership",
+          () =>
+            cct.acceptOwnership({
+              wallet,
+              tokenAddress: mint,
+              poolType: "lock-release",
+            }),
         ],
         [
-          'setChainRateLimit',
+          "setChainRateLimit",
           () =>
             cct.setChainRateLimit({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
               inbound: { enabled: false },
               outbound: { enabled: false },
             }),
         ],
         [
-          'editChainRemoteConfig',
+          "editChainRemoteConfig",
           () =>
             cct.editChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
-              remoteTokenAddress: '0x01',
-              remotePoolAddresses: ['0x02'],
+              remoteTokenAddress: "0x01",
+              remotePoolAddresses: ["0x02"],
               remoteTokenDecimals: 6,
             }),
         ],
         [
-          'appendToLookupTable',
+          "appendToLookupTable",
           () =>
             cct.appendToLookupTable({
               wallet,
@@ -614,9 +761,13 @@ describe('SolanaTokenManager (cct/solana)', () => {
               additionalAddresses: [mint],
             }),
         ],
-        ['acceptAdmin', () => cct.acceptAdmin({ wallet, tokenAddress: mint, address: account })],
         [
-          'ownerOverridePendingAdministrator',
+          "acceptAdmin",
+          () =>
+            cct.acceptAdmin({ wallet, tokenAddress: mint, address: account }),
+        ],
+        [
+          "ownerOverridePendingAdministrator",
           () =>
             cct.ownerOverridePendingAdministrator({
               wallet,
@@ -626,21 +777,22 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'registerAdmin',
-          () => cct.registerAdmin({ wallet, tokenAddress: mint, address: account }),
+          "registerAdmin",
+          () =>
+            cct.registerAdmin({ wallet, tokenAddress: mint, address: account }),
         ],
         [
-          'removeFromAllowlist',
+          "removeFromAllowlist",
           () =>
             cct.removeFromAllowlist({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remove: [account],
             }),
         ],
         [
-          'setPool',
+          "setPool",
           () =>
             cct.setPool({
               wallet,
@@ -650,50 +802,66 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'transferAdmin',
+          "transferAdmin",
           () =>
-            cct.transferAdmin({ wallet, tokenAddress: mint, address: account, newAdmin: account }),
+            cct.transferAdmin({
+              wallet,
+              tokenAddress: mint,
+              address: account,
+              newAdmin: account,
+            }),
         ],
-      ]
+      ];
 
       for (const [name, operation] of signed) {
-        const result = await operation()
+        const result = await operation();
         const hashes = Array.isArray(result)
           ? result.map(({ hash }) => hash)
-          : 'hashes' in result
-            ? result.hashes
-            : [result.hash]
-        assert.ok(hashes.length && hashes.every(Boolean), `${name} returns transaction hashes`)
+          : "hashes" in result
+          ? result.hashes
+          : [result.hash];
+        assert.ok(
+          hashes.length && hashes.every(Boolean),
+          `${name} returns transaction hashes`,
+        );
       }
-    })
+    });
 
-    it('runs every read facade operation', async () => {
-      const cct = SolanaTokenManager.fromChain(facadeChain)
+    it("runs every read facade operation", async () => {
+      const cct = SolanaTokenManager.fromChain(facadeChain);
       const reads: Array<[string, () => Promise<object | string[]>]> = [
         [
-          'getTokenPoolRemotes',
+          "getTokenPoolRemotes",
           () =>
             cct.getTokenPoolRemotes({
               tokenAddress: mint,
-              poolType: 'lock-release',
+              poolType: "lock-release",
               remoteChainSelector,
             }),
         ],
         [
-          'getTokenPoolState',
-          () => cct.getTokenPoolState({ tokenAddress: mint, poolType: 'lock-release' }),
+          "getTokenPoolState",
+          () =>
+            cct.getTokenPoolState({
+              tokenAddress: mint,
+              poolType: "lock-release",
+            }),
         ],
         [
-          'getTokenAdminRegistry',
-          () => cct.getTokenAdminRegistry({ tokenAddress: mint, address: reader }),
+          "getTokenAdminRegistry",
+          () =>
+            cct.getTokenAdminRegistry({ tokenAddress: mint, address: reader }),
         ],
-        ['getSupportedTokens', () => cct.getSupportedTokens({ address: reader })],
-      ]
+        [
+          "getSupportedTokens",
+          () => cct.getSupportedTokens({ address: reader }),
+        ],
+      ];
 
       for (const [name, read] of reads) {
-        const result = await read()
-        assert.ok(typeof result === 'object', `${name} returns a result`)
+        const result = await read();
+        assert.ok(typeof result === "object", `${name} returns a result`);
       }
-    })
-  })
-})
+    });
+  });
+});

@@ -612,7 +612,7 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'registerAdmin' &&
           err.context.param === 'sender' &&
-          // pins the builder name senderBoundToWallet derives from `this.name`, so the shared
+          // pins the builder name resolveWalletSender derives from `this.name`, so the shared
           // helper can't start telling registerAdmin callers to use some other method
           typeof err.context.reason === 'string' &&
           err.context.reason.includes('generateUnsignedRegisterAdmin'),
@@ -620,7 +620,7 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
     })
 
     it('rejects a malformed sender with CCTParamsInvalidError, not a raw ethers error', async () => {
-      // senderBoundToWallet validates before getAddress(), which would otherwise throw a raw
+      // resolveWalletSender validates before getAddress(), which would otherwise throw a raw
       // ethers TypeError. That guard runs ahead of generate()'s own validate(), so nothing else
       // covers it — without this test, deleting it leaves the suite green and silently breaks the
       // documented error taxonomy for every op sharing the helper.
