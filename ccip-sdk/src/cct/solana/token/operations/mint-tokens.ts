@@ -1,5 +1,5 @@
 import { createMintToInstruction } from '@solana/spl-token'
-import { type TransactionInstruction, type PublicKey } from '@solana/web3.js'
+import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
