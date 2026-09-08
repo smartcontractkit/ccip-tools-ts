@@ -5,13 +5,16 @@
  * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
  * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist read
  * `applyAllowlistUpdates` pre-flights against ({@link readTokenPoolAllowlist}) plus the
- * owner-only guard built on the first of them ({@link assertPoolOwner}). The write-side
- * rate-limit shape lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
+ * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
+ * liquidity reads with their guards ({@link readTokenPoolRebalancer},
+ * {@link readTokenPoolAcceptsLiquidity}, {@link assertPoolRebalancer},
+ * {@link assertLockReleasePool}). The write-side rate-limit shape lane-config ops share lives in
+ * `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
 
-import { Interface, getAddress } from 'ethers'
+import { Interface, ZeroAddress, getAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
@@ -21,10 +24,12 @@ import {
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
+  CCTTxFailedError,
 } from '../../errors.ts'
 import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts'
 import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts'
+import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
@@ -187,6 +192,30 @@ export async function assertPoolOwner(
 }
 
 /**
+ * Guards a LockRelease-only op: the liquidity and rebalancer functions are absent from the
+ * `BurnMint` ABI, so without this the op would hand that {@link Interface} an unknown function
+ * name and fail as an opaque ethers error instead of naming the real problem.
+ * @param operation - Operation name, for the error's context.
+ * @param poolAddress - Token pool being acted on.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if `type` is not a {@link LockReleaseTokenPoolType}
+ */
+export function assertLockReleasePool(
+  operation: string,
+  poolAddress: string,
+  type: TokenPoolType,
+): void {
+  if (isLockReleaseTokenPoolType(type)) return
+  throw new CCTContractTypeInvalidError(
+    poolAddress,
+    'LockRelease token pool',
+    type,
+    `${operation} is a lock/release liquidity function, which the BurnMint pools do not declare`,
+    { context: { operation } },
+  )
+}
+
+/**
  * Cached pool {@link Interface}s per {@link TokenPoolFamily} and {@link TokenPoolVersion},
  * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
  * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
@@ -321,6 +350,168 @@ export async function readTokenPoolRateLimitAdmin(
   }
   const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
   return getAddress(resultToObject(await pool.getRateLimitAdmin()))
+}
+
+/**
+ * Reads a LockRelease pool's `rebalancer` — the single account the pool accepts
+ * `provideLiquidity` / `withdrawLiquidity` from — in one `eth_call`.
+ *
+ * @remarks No dispatch, but callers must resolve the pool first
+ * ({@link assertLockReleasePool}, plus a v2.0.0 check): `getRebalancer()` is declared identically
+ * at v1.5.0–v1.6.1 by both LockRelease types, and is absent from a `BurnMint` pool and from
+ * v2.0.0, so those cases should report the type or version rather than a bare call failure.
+ * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer, which is what its
+ * plain liquidity entry points gate on; the per-lane `getChainRebalancer(uint64)` governs the
+ * siloed ones, which this SDK does not expose.
+ * @param chain - Chain to read from.
+ * @param poolAddress - LockRelease pool to read `getRebalancer()` from.
+ * @returns The current rebalancer, checksummed; the zero address when none is configured, which
+ * means the pool accepts liquidity calls from nobody.
+ */
+export async function readTokenPoolRebalancer(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  return getAddress(resultToObject(await pool.getRebalancer()))
+}
+
+/**
+ * Pre-flights `sender` against the pool's on-chain `getRebalancer()` for a liquidity write, the
+ * rebalancer-gated counterpart of {@link assertPoolOwner}.
+ *
+ * @remarks Deliberately *not* the owner: `provideLiquidity` and `withdrawLiquidity` compare
+ * `msg.sender` to `s_rebalancer` and revert `Unauthorized` for everyone else, the owner included.
+ * The owner's role is to appoint the rebalancer, not to move liquidity itself.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the rebalancer from.
+ * @param poolAddress - Token pool being written to.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the pool's rebalancer, or no
+ * rebalancer is configured
+ */
+export async function assertPoolRebalancer(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  sender: string,
+): Promise<void> {
+  const rebalancer = await readTokenPoolRebalancer(chain, poolAddress)
+  if (rebalancer !== ZeroAddress && getAddress(sender) === rebalancer) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    rebalancer === ZeroAddress
+      ? `no rebalancer is configured on ${poolAddress}, so it accepts liquidity calls from nobody; the pool owner must appoint one with setRebalancer`
+      : `must be the current pool rebalancer (${rebalancer})`,
+  )
+}
+
+/**
+ * Reads a v1.5.0 / v1.5.1 LockRelease pool's `canAcceptLiquidity()` in one `eth_call`.
+ *
+ * @remarks Only declared at v1.5.0 and v1.5.1, where the constructor fixes `i_acceptLiquidity`
+ * *immutable*: a pool deployed with it `false` rejects every deposit with `LiquidityNotAccepted`
+ * for its whole lifetime, which is why that is worth one call to catch before signing. v1.6.1
+ * dropped the flag and always accepts, so callers must not reach here for it. Same shape as
+ * {@link readTokenPoolAllowlist}'s `enabled`.
+ * @param chain - Chain to read from.
+ * @param poolAddress - LockRelease pool to read from; must be v1.5.0 or v1.5.1.
+ * @returns Whether the pool accepts liquidity deposits at all.
+ */
+export async function readTokenPoolAcceptsLiquidity(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<boolean> {
+  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  return resultToObject(await pool.canAcceptLiquidity())
+}
+
+/**
+ * The token a pool escrows, plus a handle to it. `getToken()` is declared identically by every
+ * pool type and version, so this needs no dispatch.
+ */
+async function readPoolToken(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<{ token: string; erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI> }> {
+  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const token = getAddress(resultToObject(await pool.getToken()))
+  return { token, erc20: getTypedContract(chain, token, FACTORY_BURN_MINT_ERC20_V1_5_1_ABI) }
+}
+
+/**
+ * Pre-flights a `provideLiquidity` deposit against the rebalancer's ERC-20 position: it must hold
+ * `amount` of the pool's token *and* have approved the pool to pull it, since the pool deposits
+ * with `safeTransferFrom`.
+ *
+ * @remarks Cross-family parity with Solana, whose `provideLiquidity` likewise refuses to build
+ * without the SPL delegation (`validateDelegation`) and the balance behind it. Without this the
+ * only signal is an `ERC20InsufficientAllowance` revert at wallet-confirmation time, naming
+ * neither the token to approve nor the pool to approve it to. The error names `approveToken`,
+ * which grants exactly this allowance.
+ * @remarks Advisory, not a guarantee: an allowance can be spent or revoked between building and
+ * signing. It changes only by an explicit `approve` though, so unlike a pool balance — which
+ * every CCIP transfer moves — a build-time reading is stable enough to be worth one round trip.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read from.
+ * @param poolAddress - LockRelease pool being deposited into.
+ * @param account - The depositing rebalancer.
+ * @param amount - Deposit amount, in the token's smallest unit.
+ * @throws {@link CCTTxFailedError} if `account` holds less than `amount`, or has approved the
+ * pool for less than `amount`
+ */
+export async function assertLiquidityFunding(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  account: string,
+  amount: bigint,
+): Promise<void> {
+  const { token, erc20 } = await readPoolToken(chain, poolAddress)
+  const [balance, allowance] = await Promise.all([
+    erc20.balanceOf(account),
+    erc20.allowance(account, poolAddress),
+  ])
+  if (balance < amount)
+    throw new CCTTxFailedError(
+      operation,
+      `${account} holds ${balance} of ${token}, but ${amount} is required; mint or transfer tokens first`,
+    )
+  if (allowance < amount)
+    throw new CCTTxFailedError(
+      operation,
+      `${account} has approved ${allowance} of ${token} to pool ${poolAddress}, but ${amount} is required; the deposit is a transferFrom, so grant the allowance first with approveToken({ tokenAddress: '${token}', spender: '${poolAddress}', amount: ${amount}n })`,
+    )
+}
+
+/**
+ * Pre-flights a `withdrawLiquidity` against the pool's own ERC-20 balance, which is what the pool
+ * pays out of.
+ *
+ * @remarks Also parity with Solana, which checks the pool token account the same way.
+ * @remarks Weaker than {@link assertLiquidityFunding}: a pool's balance moves with every CCIP
+ * transfer through it, so this catches the common "withdraw more than was ever provided" mistake
+ * rather than proving the withdrawal will still fit when the tx mines.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read from.
+ * @param poolAddress - LockRelease pool being withdrawn from.
+ * @param amount - Withdrawal amount, in the token's smallest unit.
+ * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
+ */
+export async function assertPoolLiquidity(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  amount: bigint,
+): Promise<void> {
+  const { token, erc20 } = await readPoolToken(chain, poolAddress)
+  const balance = await erc20.balanceOf(poolAddress)
+  if (balance >= amount) return
+  throw new CCTTxFailedError(
+    operation,
+    `pool ${poolAddress} holds ${balance} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+  )
 }
 
 /**
