@@ -31,7 +31,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.13.1-e6a58224'
+const VERSION = '1.13.1-247aa263'
 // generate:end
 
 const require = createRequire(import.meta.url)

@@ -4,7 +4,11 @@ import { beforeEach, describe, it, mock } from 'node:test'
 import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { CCIPDataFormatUnsupportedError, CCIPCommitHistoryPrunedError, CCIPCommitNotFoundError } from '../../errors/index.ts'
+import {
+  CCIPCommitHistoryPrunedError,
+  CCIPCommitNotFoundError,
+  CCIPDataFormatUnsupportedError,
+} from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
 import { CCIPVersion } from '../../types.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
