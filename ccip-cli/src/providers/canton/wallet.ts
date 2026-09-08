@@ -440,7 +440,7 @@ export async function loadCantonWallet(
       let derivationPath = walletOpt.split(':')[1]
       if (!derivationPath) derivationPath = `m/44'/6767'/0'/0'/0'`
       else if (!isNaN(Number(derivationPath)))
-        derivationPath = `m/44'/6767'/0'/0'/${derivationPath}'`
+        derivationPath = `m/44'/6767'/${derivationPath}'/0'/0'`
 
       const ledgerSigner = await CantonLedgerSigner.create(derivationPath, party)
       logger?.info(`Ledger connected for Canton party: ${party}, derivationPath: ${derivationPath}`)
