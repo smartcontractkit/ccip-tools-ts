@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
@@ -72,6 +77,36 @@ describe('DeployTokenPool (cct/solana)', () => {
       assert.equal(unsigned.instructions[1]!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
     })
 
+    it('creates the pool signer ATA when requested', async () => {
+      const chain = Object.assign(stubChain(), {
+        connection: { getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }) },
+      })
+      const unsigned = await new DeployTokenPool().generate(chain, {
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        payer: PAYER,
+        authority: AUTHORITY,
+        createPoolSignerATA: true,
+      })
+      const poolSigner = deriveTokenPoolSignerPda(
+        resolveTokenPoolProgram('burn-mint'),
+        new PublicKey(TOKEN),
+      )
+      const ata = getAssociatedTokenAddressSync(
+        new PublicKey(TOKEN),
+        poolSigner,
+        true,
+        TOKEN_PROGRAM_ID,
+      )
+      const createATA = unsigned.instructions[1]!
+
+      assert.equal(unsigned.instructions.length, 2)
+      assert.equal(createATA.programId.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58())
+      assert.equal(createATA.data[0], 1) // CreateIdempotent
+      assert.equal(createATA.keys[1]!.pubkey.toBase58(), ata.toBase58())
+      assert.equal(createATA.keys[2]!.pubkey.toBase58(), poolSigner.toBase58())
+    })
+
     it('uses canonical lock-release pool program', async () => {
       const unsigned = await generate({ poolType: 'lock-release' })
 
@@ -90,6 +125,14 @@ describe('DeployTokenPool (cct/solana)', () => {
       await assert.rejects(
         () => generate({ allowlist: 'not-an-array' }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'allowlist',
+      )
+    })
+
+    it('rejects a non-boolean createPoolSignerATA', async () => {
+      await assert.rejects(
+        () => generate({ createPoolSignerATA: 'yes' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'createPoolSignerATA',
       )
     })
 

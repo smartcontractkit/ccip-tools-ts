@@ -177,8 +177,11 @@ import {
   type GenerateSetTokenAuthorityResult,
   type GenerateUpdateMetadataAuthorityParams,
   type GenerateUpdateMetadataAuthorityResult,
+  type GetTokenInfoParams,
+  type GetTokenInfoResult,
   ApproveToken,
   CreateTokenAccount,
+  GetTokenInfo,
   MintTokens,
   SetTokenAuthority,
   UpdateMetadataAuthority,
@@ -190,6 +193,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // Token operations
   readonly #approveToken = new ApproveToken()
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #getTokenInfo = new GetTokenInfo()
   readonly #mintTokens = new MintTokens()
   readonly #setTokenAuthority = new SetTokenAuthority()
   readonly #updateMetadataAuthority = new UpdateMetadataAuthority()
@@ -434,19 +438,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned instructions to mint SPL tokens to a recipient's existing associated token account.
+   * Builds unsigned instructions to mint SPL tokens to a recipient's associated token account.
    *
    * @remarks
-   * `amount` is in base units. The recipient ATA must already exist; use
-   * {@link generateUnsignedCreateTokenAccount} to create it. `authority` defaults to `payer`. For
-   * an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
-   * externally.
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. `authority` defaults to `payer`. For an SPL
+   * Token multisig authority, provide `multisigSigners` and collect member signatures externally.
    *
    * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
-   * with {@link generateUnsignedCreateTokenAccount}.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
    *
    * @example
    * ```ts
@@ -464,20 +467,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Mints SPL tokens to a recipient's existing associated token account using the executing wallet.
+   * Mints SPL tokens to a recipient's associated token account using the executing wallet.
    *
    * @remarks
-   * `amount` is in base units. The recipient ATA must already exist; use {@link createTokenAccount}
-   * to create it. SPL Token multisig authorities require `multisigSigners` and external member
-   * signatures; use {@link generateUnsignedMintTokens}.
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. SPL Token multisig authorities require
+   * `multisigSigners` and external member signatures; use {@link generateUnsignedMintTokens}.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid, or
    * `authority` does not match the executing wallet.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
-   * with {@link createTokenAccount}.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
    * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
    *
    * @example
@@ -819,12 +822,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `generateUnsignedCreateTokenAccount`
-   * before `generateUnsignedSetPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `generateUnsignedCreateTokenAccount` before
+   * `generateUnsignedSetPool`, or transfers fail with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link generateUnsignedCreateTokenAccount}
    * @see {@link generateUnsignedSetPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
@@ -837,6 +853,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer,
    *   authority,
    *   allowlist: [allowedSender],
+   *   createPoolSignerATA: true,
    * })
    * ```
    */
@@ -852,11 +869,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `createTokenAccount` before `setPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `createTokenAccount` before `setPool`, or transfers fail
+   * with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link createTokenAccount}
    * @see {@link setPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
@@ -868,6 +899,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.deployTokenPool({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
+   *   createPoolSignerATA: true,
    *   wallet,
    * })
    * ```
@@ -2229,6 +2261,36 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
     return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
+   * authorities.
+   *
+   * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
+   * the SPL Token or Token-2022 mint account. Supply is in base units. Solana-only; no EVM CCT
+   * equivalent exists.
+   *
+   * @see {@link setTokenAuthority} Sets the mint or freeze authorities returned here.
+   * @see {@link updateMetadataAuthority} Updates the Metaplex metadata associated with this mint.
+   * @see {@link getTokenPoolState} Reads pool configuration rather than mint state.
+   * @see {@link SolanaChain.getTokenInfo} Reads the underlying token metadata.
+   *
+   * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPSplTokenInvalidError} If the token metadata is not a valid SPL token.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const info = await cct.getTokenInfo({ tokenAddress: mint })
+   * console.log(`${info.symbol}: ${info.decimals} decimals`)
+   * ```
+   */
+  getTokenInfo(opts: GetTokenInfoParams): Promise<GetTokenInfoResult> {
+    return this.#getTokenInfo.query(this.chain, opts)
   }
 
   /**

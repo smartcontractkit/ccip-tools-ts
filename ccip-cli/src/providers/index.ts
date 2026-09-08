@@ -10,6 +10,7 @@ import {
   type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
+  CCIPError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
@@ -23,11 +24,13 @@ import type { Ctx } from '../commands/index.ts'
 import type { GlobalOpts } from '../index.ts'
 import { loadAptosWallet } from './aptos.ts'
 import {
+  type CantonCliConfig,
   loadCantonConfig,
   loadCantonWallet,
+  resolveCantonTokenGetter,
   resolveCliIndexer,
   resolveCliRouter,
-} from './canton.ts'
+} from './canton/index.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
@@ -150,7 +153,7 @@ export function fetchChainsFromRpcs(
  * @returns a ChainGetter (if txHash was provided), or a tuple of [ChainGetter, Promise<ChainTransaction>]
  */
 export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: string) {
-  const cantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
+  const rawCantonConfig = loadCantonConfig(argv.cantonConfig, ctx.logger)
   const chains: Record<string, Promise<Chain>> = {}
   const pendingChainsCbs: Record<
     string,
@@ -161,92 +164,144 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   let endpoints$: Promise<Set<string>> | undefined
   let txFoundIn: string | undefined
 
+  /**
+   * Resolve the Canton config's `auth` block (if present) into a `jwt` (string
+   * or getter) upfront, so the SDK never orchestrates an OAuth flow. The
+   * resolution is lazy (only awaited when the Canton family is loaded) and
+   * memoized so repeated family loads reuse the same resolved config.
+   *
+   * When no `auth` block is present, the raw config (with its static `jwt`)
+   * is used as-is.
+   */
+  type ResolvedCantonConfig = Omit<CantonCliConfig, 'auth'> | undefined
+  let resolvedCantonConfig$: Promise<ResolvedCantonConfig> | undefined
+  const getResolvedCantonConfig = (): Promise<ResolvedCantonConfig> => {
+    if (!rawCantonConfig) return Promise.resolve(undefined)
+    if (!rawCantonConfig.auth) return Promise.resolve(rawCantonConfig as ResolvedCantonConfig)
+    return (resolvedCantonConfig$ ??= resolveCantonTokenGetter(rawCantonConfig.auth, {
+      signal: ctx.abort,
+    }).then((jwt) => {
+      // `auth` is consumed here; the SDK receives only `jwt`.
+      const { auth: _auth, ...rest } = rawCantonConfig
+      void _auth
+      return { ...rest, jwt }
+    }))
+  }
+
   const loadChainFamily = (F: ChainFamily, txHash?: string) =>
-    (initFamily$[F] ??= (endpoints$ ??= collectEndpoints.call(ctx, argv)).then((endpoints) => {
-      const C = supportedChains[F]
-      if (!C) throw new CCIPChainFamilyUnsupportedError(F)
-      ctx.abort.throwIfAborted()
-      const familyEndpoints = filterEndpointsForFamily(endpoints, F)
-      ctx.logger.debug(
-        'Racing',
-        familyEndpoints.size,
-        'RPC endpoints for',
-        F,
-        familyEndpoints.size < endpoints.size ? `(filtered from ${endpoints.size})` : '',
-      )
-
-      const chains$: Promise<Chain>[] = []
-      const txOnlyRacers = new WeakSet<Chain>()
-      for (const url of familyEndpoints) {
-        const chain$ = C.fromUrl(url, {
-          ...ctx,
-          abort: ctx.abort,
-          apiClient:
-            argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
-          ...(cantonConfig && F === ChainFamily.Canton && { cantonConfig }),
-        })
-        chains$.push(chain$)
-
-        void chain$.then(
-          (chain) => {
-            endpoints.delete(url) // when resolved, remove from set so it isn't tried for future families
-            // winner: provider cleanup is handled automatically by ctx.abort signal
-            if (!(chain.network.name in chains)) {
-              // chain won for this network, but was not "asked" by getChain (yet?): save
-              chains[chain.network.name] = chain$
-            } else if (chain.network.name in pendingChainsCbs) {
-              // chain detected, and there's a "pending request" by getChain: resolve
-              const [resolve] = pendingChainsCbs[chain.network.name]!
-              resolve(chain)
-            } else if (!txHash || txFoundIn) {
-              chain.destroy() // lost race (either network's or tx's)
-            } else {
-              txOnlyRacers.add(chain) // lost race, but may still find tx before winner and take its place
-            }
-          },
-          () => {},
+    (initFamily$[F] ??= (endpoints$ ??= collectEndpoints.call(ctx, argv)).then(
+      async (endpoints) => {
+        const C = supportedChains[F]
+        if (!C) throw new CCIPChainFamilyUnsupportedError(F)
+        ctx.abort.throwIfAborted()
+        const familyEndpoints = filterEndpointsForFamily(endpoints, F)
+        ctx.logger.debug(
+          'Racing',
+          familyEndpoints.size,
+          'RPC endpoints for',
+          F,
+          familyEndpoints.size < endpoints.size ? `(filtered from ${endpoints.size})` : '',
         )
-      }
-      let txs$
-      if (txHash) {
-        txs$ = Promise.any(
-          chains$.map(async (chain$) => {
-            const chain = await chain$
-            chain.abort.throwIfAborted()
-            try {
-              if (txFoundIn) throw new Error('tx already raced')
-              const tx = await chain.getTransaction(txHash)
-              if (txFoundIn) {
-                if (txFoundIn === chain.network.name) chain.destroy()
-                throw new Error('tx already raced')
+
+        const chains$: Promise<Chain>[] = []
+        const txOnlyRacers = new WeakSet<Chain>()
+        // For Canton, await the upfront auth resolution (auth block → jwt)
+        // before spawning racers, so the SDK never orchestrates an OAuth flow.
+        const cantonConfigForFamily =
+          F === ChainFamily.Canton ? await getResolvedCantonConfig() : undefined
+        for (const url of familyEndpoints) {
+          const chain$ = C.fromUrl(url, {
+            ...ctx,
+            abort: ctx.abort,
+            apiClient:
+              argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
+            ...(cantonConfigForFamily &&
+              F === ChainFamily.Canton && {
+                cantonConfig: cantonConfigForFamily,
+              }),
+          })
+          chains$.push(chain$)
+
+          void chain$.then(
+            (chain) => {
+              endpoints.delete(url) // when resolved, remove from set so it isn't tried for future families
+              // winner: provider cleanup is handled automatically by ctx.abort signal
+              if (!(chain.network.name in chains)) {
+                // chain won for this network, but was not "asked" by getChain (yet?): save
+                chains[chain.network.name] = chain$
+              } else if (chain.network.name in pendingChainsCbs) {
+                // chain detected, and there's a "pending request" by getChain: resolve
+                const [resolve] = pendingChainsCbs[chain.network.name]!
+                resolve(chain)
+              } else if (!txHash || txFoundIn) {
+                chain.destroy() // lost race (either network's or tx's)
+              } else {
+                txOnlyRacers.add(chain) // lost race, but may still find tx before winner and take its place
               }
-              txFoundIn = chain.network.name
-              // in case tx is first found, prefer it over any previously found chain for this network
-              chains[chain.network.name] = chain$
-              return [chain, tx] as const
-            } catch (err) {
-              if (txOnlyRacers.has(chain)) chain.destroy()
-              throw err
-            }
-          }),
-        )
-      }
+            },
+            () => {},
+          )
+        }
+        let txs$
+        if (txHash) {
+          txs$ = Promise.any(
+            chains$.map(async (chain$) => {
+              const chain = await chain$
+              chain.abort.throwIfAborted()
+              try {
+                if (txFoundIn) throw new Error('tx already raced')
+                const tx = await chain.getTransaction(txHash)
+                if (txFoundIn) {
+                  if (txFoundIn === chain.network.name) chain.destroy()
+                  throw new Error('tx already raced')
+                }
+                txFoundIn = chain.network.name
+                // in case tx is first found, prefer it over any previously found chain for this network
+                chains[chain.network.name] = chain$
+                return [chain, tx] as const
+              } catch (err) {
+                if (txOnlyRacers.has(chain)) chain.destroy()
+                throw err
+              }
+            }),
+          )
+        }
 
-      Promise.race([Promise.allSettled(chains$), signalToPromise(ctx.abort)])
-        .finally(() => {
-          if (finished[F]) return
-          finished[F] = true
-          Object.entries(pendingChainsCbs)
-            .filter(([name]) => networkInfo(name).family === F)
-            .forEach(([name, [_, reject]]) => reject(new CCIPRpcNotFoundError(name)))
-        })
-        .catch(() => {
+        Promise.race([
+          Promise.allSettled(chains$).then((results) => {
+            // When all RPCs for a family fail, surface the most specific error
+            // (e.g. CANTON_AUTH_ERROR) instead of a generic RPC_NOT_FOUND.
+            if (finished[F]) return
+            finished[F] = true
+            // Find the most informative rejection reason from the settled results.
+            // Prefer CCIPError with specific codes over generic errors.
+            let bestError: Error | undefined
+            for (const result of results) {
+              if (result.status === 'rejected' && result.reason instanceof Error) {
+                if (!bestError || CCIPError.isCCIPError(result.reason)) {
+                  bestError = result.reason
+                }
+              }
+            }
+            Object.entries(pendingChainsCbs)
+              .filter(([name]) => networkInfo(name).family === F)
+              .forEach(([name, [_, reject]]) => {
+                if (bestError && CCIPError.isCCIPError(bestError)) {
+                  reject(bestError)
+                } else {
+                  reject(new CCIPRpcNotFoundError(name))
+                }
+              })
+          }),
+          signalToPromise(ctx.abort),
+        ]).catch(() => {
           // signalToPromise(ctx.abort) rejects with DOMException when the parent
           // context aborts before all race URLs settle; swallow it here so the
           // void-discarded chain doesn't surface as an unhandled rejection.
         })
-      return txs$
-    }))
+        return txs$
+      },
+    ))
 
   const chainGetter = async (idOrSelectorOrName: number | string | bigint): Promise<Chain> => {
     const network = networkInfo(idOrSelectorOrName)

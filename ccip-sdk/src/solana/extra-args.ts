@@ -1,6 +1,7 @@
+import { BorshCoder } from '@coral-xyz/anchor'
 import { concat, getBytes, hexlify } from 'ethers'
 
-import { CCIPExtraArgsEncodingUnsupportedError } from '../errors/index.ts'
+import { CCIPExtraArgsEncodingUnsupportedError, CCIPExtraArgsParseError } from '../errors/index.ts'
 import {
   type ExtraArgs,
   type GenericExtraArgsV3,
@@ -12,6 +13,7 @@ import {
 } from '../extra-args.ts'
 import { ChainFamily } from '../networks.ts'
 import { decodeAddress, getAddressBytes, toLeArray } from '../utils.ts'
+import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 
 /**
  * Pure Solana extra-args encoder, extracted from `SolanaChain.encodeExtraArgs`
@@ -190,40 +192,46 @@ export function decodeSolanaGenericExtraArgsV3(
 /**
  * Decodes Borsh-encoded `SuiExtraArgsV1` from Solana sources targeting Sui dest.
  *
- * Borsh layout after 4-byte tag:
- * `gasLimit: u128 LE` (16 bytes) + `bool` + `tokenReceiver: [u8;32]` +
- * `receiverObjectIds: Vec<[u8;32]>` (u32 LE count + N×32 bytes).
+ * Decoding is driven by the generated FEE_QUOTER Anchor IDL (`SuiExtraArgsV1`,
+ * added in 1.6.4) via anchor's `BorshTypesCoder`, instead of hand-rolled
+ * offset arithmetic — the IDL is the on-chain source of truth, so an IDL bump
+ * that changes the type is caught by regeneration and the fixture tests, not
+ * silently mis-decoded.
  *
  * @param data - Full extraArgs bytes including the 4-byte tag.
  * @returns Decoded SuiExtraArgsV1 with `_tag`.
- * @throws if the data is too short or malformed.
+ * @throws if the tag is unexpected or the data is too short or malformed.
  */
 export function decodeSolanaSuiExtraArgsV1(
   data: Uint8Array,
 ): SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' } {
-  const buf = Buffer.from(data)
-  let offset = 4 // skip 4-byte tag
-  // u128 LE: read as two u64s (low 8 bytes + high 8 bytes)
-  const gasLimitLow = BigInt(buf.readBigUInt64LE(offset))
-  const gasLimitHigh = BigInt(buf.readBigUInt64LE(offset + 8))
-  const gasLimit = gasLimitLow | (gasLimitHigh << 64n)
-  offset += 16
-  const allowOutOfOrderExecution = buf[offset] === 1
-  offset += 1
-  const tokenReceiver = buf.subarray(offset, offset + 32)
-  offset += 32
-  const objectCount = buf.readUInt32LE(offset)
-  offset += 4
-  const receiverObjectIds: Buffer[] = []
-  for (let i = 0; i < objectCount; i++) {
-    receiverObjectIds.push(buf.subarray(offset, offset + 32))
-    offset += 32
+  // The wire format is `bytes(tag) ++ borsh(SuiExtraArgsV1)`; the IDL describes
+  // the struct only, so the tag is validated and stripped before decoding.
+  const tag = hexlify(data.subarray(0, 4))
+  if (tag !== SuiExtraArgsV1Tag)
+    throw new CCIPExtraArgsParseError(
+      `Solana Borsh SuiExtraArgsV1: unexpected tag ${tag}, expected ${SuiExtraArgsV1Tag}`,
+    )
+  const decoded = FEE_QUOTER_CODER.types.decode(
+    'SuiExtraArgsV1',
+    Buffer.from(data).subarray(4),
+  ) as {
+    gasLimit: { toString: () => string } // anchor returns BN for u128
+    allowOutOfOrderExecution: boolean
+    tokenReceiver: ArrayLike<number>
+    receiverObjectIds: ArrayLike<number>[]
   }
   return {
     _tag: 'SuiExtraArgsV1',
-    gasLimit,
-    allowOutOfOrderExecution,
-    tokenReceiver: hexlify(tokenReceiver),
-    receiverObjectIds: receiverObjectIds.map((id) => hexlify(id)),
+    gasLimit: BigInt(decoded.gasLimit.toString()),
+    allowOutOfOrderExecution: decoded.allowOutOfOrderExecution,
+    tokenReceiver: hexlify(Buffer.from(decoded.tokenReceiver)),
+    receiverObjectIds: decoded.receiverObjectIds.map((id) => hexlify(Buffer.from(id))),
   }
 }
+
+// The IDL (`./idl/*/FEE_QUOTER.ts`) is the on-chain source of truth for
+// extraArgs struct layouts; its coder decodes them without hand-rolled field
+// offsets. GenericExtraArgsV3 is an SDK-side construct with no IDL definition,
+// so it keeps its manual decoder.
+const FEE_QUOTER_CODER = new BorshCoder(FEE_QUOTER_IDL)
