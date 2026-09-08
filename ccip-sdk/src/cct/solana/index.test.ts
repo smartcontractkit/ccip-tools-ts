@@ -197,6 +197,7 @@ describe('SolanaTokenManager (cct/solana)', () => {
         getTokenAdminRegistryFor: async (address: string) =>
           address === reader ? pool : address === overrideAddress ? overrideRouter : account,
         getSupportedTokens: async () => [mint],
+        getTokenInfo: async () => ({ symbol: 'TKN', decimals: 6 }),
         getTokenPoolRemotes: async () => ({}),
         getRegistryTokenConfig: async (router: string) =>
           router === overrideRouter
@@ -779,6 +780,7 @@ describe('SolanaTokenManager (cct/solana)', () => {
               remoteChainSelector,
             }),
         ],
+        ['getTokenInfo', () => cct.getTokenInfo({ tokenAddress: mint })],
         [
           'getTokenPoolState',
           () =>
