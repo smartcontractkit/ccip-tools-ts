@@ -434,19 +434,18 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds unsigned instructions to mint SPL tokens to a recipient's existing associated token account.
+   * Builds unsigned instructions to mint SPL tokens to a recipient's associated token account.
    *
    * @remarks
-   * `amount` is in base units. The recipient ATA must already exist; use
-   * {@link generateUnsignedCreateTokenAccount} to create it. `authority` defaults to `payer`. For
-   * an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
-   * externally.
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. `authority` defaults to `payer`. For an SPL
+   * Token multisig authority, provide `multisigSigners` and collect member signatures externally.
    *
    * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
-   * with {@link generateUnsignedCreateTokenAccount}.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
    *
    * @example
    * ```ts
@@ -464,20 +463,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Mints SPL tokens to a recipient's existing associated token account using the executing wallet.
+   * Mints SPL tokens to a recipient's associated token account using the executing wallet.
    *
    * @remarks
-   * `amount` is in base units. The recipient ATA must already exist; use {@link createTokenAccount}
-   * to create it. SPL Token multisig authorities require `multisigSigners` and external member
-   * signatures; use {@link generateUnsignedMintTokens}.
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. SPL Token multisig authorities require
+   * `multisigSigners` and external member signatures; use {@link generateUnsignedMintTokens}.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid, or
    * `authority` does not match the executing wallet.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing; create it first
-   * with {@link createTokenAccount}.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
    * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
    *
    * @example
