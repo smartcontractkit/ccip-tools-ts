@@ -6,9 +6,8 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
-import type { GenerateTransferAdminParams } from './transfer-admin.ts'
+import { type GenerateTransferAdminParams, TransferAdmin } from './transfer-admin.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const ADDRESS = Keypair.generate().publicKey.toBase58()
@@ -16,6 +15,11 @@ const ROUTER = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const NEW_ADMIN = Keypair.generate().publicKey.toBase58()
 const CURRENT_ADMIN = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
+const SUBMIT_WALLET = {
+  publicKey: new PublicKey(CURRENT_ADMIN),
+  signTransaction: async <T>(tx: T) => tx,
+}
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -28,7 +32,15 @@ function stubChain(
 ): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: {
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
     getTokenAdminRegistryFor: async (address: string) => {
       onAddress?.(address)
       return ROUTER
@@ -38,7 +50,7 @@ function stubChain(
 }
 
 function generate(opts: Partial<GenerateTransferAdminParams> = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedTransferAdmin({
+  return new TransferAdmin().generate(stubChain(), {
     tokenAddress: TOKEN,
     address: ADDRESS,
     newAdmin: NEW_ADMIN,
@@ -88,17 +100,16 @@ describe('TransferAdmin (cct/solana)', () => {
 
     it('resolves the router from address', async () => {
       let requestedAddress: string | undefined
-      const cct = SolanaTokenManager.fromChain(
+      await new TransferAdmin().generate(
         stubChain(CURRENT_ADMIN, (address) => (requestedAddress = address)),
+        {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          newAdmin: NEW_ADMIN,
+          payer: PAYER,
+          authority: CURRENT_ADMIN,
+        },
       )
-
-      await cct.generateUnsignedTransferAdmin({
-        tokenAddress: TOKEN,
-        address: ADDRESS,
-        newAdmin: NEW_ADMIN,
-        payer: PAYER,
-        authority: CURRENT_ADMIN,
-      })
 
       assert.equal(requestedAddress, ADDRESS)
     })
@@ -113,19 +124,18 @@ describe('TransferAdmin (cct/solana)', () => {
     })
 
     it('requires a pending admin to accept the initial registration before transferring', async () => {
-      const cct = SolanaTokenManager.fromChain(
-        stubChain(PublicKey.default.toBase58(), undefined, CURRENT_ADMIN),
-      )
-
       await assert.rejects(
         () =>
-          cct.generateUnsignedTransferAdmin({
-            tokenAddress: TOKEN,
-            address: ADDRESS,
-            newAdmin: NEW_ADMIN,
-            payer: PAYER,
-            authority: CURRENT_ADMIN,
-          }),
+          new TransferAdmin().generate(
+            stubChain(PublicKey.default.toBase58(), undefined, CURRENT_ADMIN),
+            {
+              tokenAddress: TOKEN,
+              address: ADDRESS,
+              newAdmin: NEW_ADMIN,
+              payer: PAYER,
+              authority: CURRENT_ADMIN,
+            },
+          ),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'authority' &&
@@ -136,10 +146,22 @@ describe('TransferAdmin (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      assert.deepEqual(
+        await new TransferAdmin().execute(stubChain(), {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          newAdmin: NEW_ADMIN,
+          wallet: SUBMIT_WALLET,
+        }),
+        { hash: HASH },
+      )
+    })
+
     it('requires the current admin to be the executing wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).transferAdmin({
+          new TransferAdmin().execute(stubChain(), {
             tokenAddress: TOKEN,
             address: ADDRESS,
             newAdmin: NEW_ADMIN,

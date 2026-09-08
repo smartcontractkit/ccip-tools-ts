@@ -340,7 +340,6 @@ export function extractEventsFromTransaction(obj: unknown): unknown[] {
 
 /**
  * Find the contract ID of a newly created template in a ledger transaction.
- * Mirrors Go `extractCreatedReceiverCID` / `cantonops.extractCreatedReceiverCID`.
  */
 export function extractCreatedContractId(
   transaction: unknown,

@@ -8,8 +8,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { AcceptOwnership } from './accept-ownership.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -71,7 +71,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedAcceptOwnership({
+  return new AcceptOwnership().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -112,9 +112,7 @@ describe('AcceptOwnership (cct/solana)', () => {
     })
 
     it('defaults authority to payer', async () => {
-      const unsigned = await SolanaTokenManager.fromChain(
-        chain(PAYER),
-      ).generateUnsignedAcceptOwnership({
+      const unsigned = await new AcceptOwnership().generate(chain(PAYER), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         payer: PAYER,
@@ -143,11 +141,9 @@ describe('AcceptOwnership (cct/solana)', () => {
     })
 
     it('rejects when there is no proposed owner', async () => {
-      const cct = SolanaTokenManager.fromChain(chain(PublicKey.default.toBase58()))
-
       await assert.rejects(
         () =>
-          cct.generateUnsignedAcceptOwnership({
+          new AcceptOwnership().generate(chain(PublicKey.default.toBase58()), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             payer: PAYER,
@@ -174,7 +170,7 @@ describe('AcceptOwnership (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).acceptOwnership({
+      const result = await new AcceptOwnership().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         wallet: WALLET,
@@ -186,7 +182,7 @@ describe('AcceptOwnership (cct/solana)', () => {
     it('rejects a non-wallet authority for signed acceptance', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).acceptOwnership({
+          new AcceptOwnership().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,

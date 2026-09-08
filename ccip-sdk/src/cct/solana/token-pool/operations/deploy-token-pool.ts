@@ -20,6 +20,7 @@ import {
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
+import { CreateTokenAccount } from '../../token/operations/create-token-account.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet, validatePoolType } from '../../validate.ts'
 
 /**
@@ -42,6 +43,17 @@ type DeployTokenPoolParams = {
    * If omitted, the pool is initialized without an allowlist.
    */
   allowlist?: string[]
+  /**
+   * Create the pool signer PDA's associated token account (`pool_token_account`) idempotently.
+   *
+   * @remarks The pool requires a `pool_token_account` (the associated token account owned by the
+   * `pool_signer` PDA) to lock/release or mint on transfers. Without it, a `ccip-send` fails with
+   * `AccountNotInitialized (3012)`. Setting `createPoolSignerATA: true` creates this account in the
+   * deploy transaction; otherwise create it separately before any transfer.
+   *
+   * Defaults to false.
+   */
+  createPoolSignerATA?: boolean
   /** Pool authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
 }
@@ -55,6 +67,7 @@ type ParsedDeployTokenPoolParams = {
   payer: PublicKey
   authority: PublicKey
   allowlist: PublicKey[]
+  createPoolSignerATA: boolean
 }
 
 /** Unsigned Solana token pool deploy result plus derived pool PDAs. */
@@ -86,6 +99,12 @@ export class DeployTokenPool extends SolanaOperation<
     if (params.allowlist !== undefined && !Array.isArray(params.allowlist)) {
       throw new CCTParamsInvalidError(this.name, 'allowlist', 'must be an array')
     }
+    if (
+      params.createPoolSignerATA !== undefined &&
+      typeof params.createPoolSignerATA !== 'boolean'
+    ) {
+      throw new CCTParamsInvalidError(this.name, 'createPoolSignerATA', 'must be a boolean')
+    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -99,6 +118,7 @@ export class DeployTokenPool extends SolanaOperation<
       allowlist: (params.allowlist ?? []).map((address, i) =>
         parsePublicKey(this.name, `allowlist[${i}]`, address),
       ),
+      createPoolSignerATA: params.createPoolSignerATA ?? false,
     }
   }
 
@@ -107,7 +127,7 @@ export class DeployTokenPool extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedDeployTokenPoolParams,
   ): Promise<GenerateDeployTokenPoolResult> {
-    const { tokenMint, poolProgram, payer, authority, allowlist } = opts
+    const { tokenMint, poolProgram, payer, authority, allowlist, createPoolSignerATA } = opts
     const program = createTokenPoolProgram(chain, poolProgram, payer)
     const state = deriveTokenPoolConfigPda(poolProgram, tokenMint)
     const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)
@@ -126,6 +146,19 @@ export class DeployTokenPool extends SolanaOperation<
         })
         .instruction(),
     ]
+
+    if (createPoolSignerATA) {
+      // Append ATA creation after initialize (initialize must be main instruction index 0)
+      instructions.push(
+        ...(
+          await new CreateTokenAccount().generate(chain, {
+            payer: payer.toBase58(),
+            tokenAddress: tokenMint.toBase58(),
+            ownerAddress: poolSigner.toBase58(),
+          })
+        ).instructions,
+      )
+    }
 
     if (allowlist.length) {
       instructions.push(

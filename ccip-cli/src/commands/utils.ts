@@ -295,8 +295,7 @@ function formatDate(timestamp: number) {
  */
 export function formatDuration(secs: number) {
   if (secs < 0) secs = -secs
-  if (secs >= 3540 && Math.floor(secs) % 60 >= 50)
-    secs += 60 - (secs % 60) // round up 50+s
+  if (secs >= 3540 && Math.floor(secs) % 60 >= 50) secs += 60 - (secs % 60) // round up 50+s
   else if (secs >= 118 && Math.floor(secs) % 60 >= 58) secs += 60 - (secs % 60) // round up 58+s
   const time = {
     d: Math.floor(secs / 86400),

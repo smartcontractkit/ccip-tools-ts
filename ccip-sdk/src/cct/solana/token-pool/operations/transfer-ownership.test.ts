@@ -8,8 +8,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { TransferOwnership } from './transfer-ownership.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -69,7 +69,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedTransferOwnership({
+  return new TransferOwnership().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -156,7 +156,7 @@ describe('TransferOwnership (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).transferOwnership({
+      const result = await new TransferOwnership().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         newOwner: NEW_OWNER,
@@ -169,7 +169,7 @@ describe('TransferOwnership (cct/solana)', () => {
     it('rejects a non-wallet authority for signed transfer', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).transferOwnership({
+          new TransferOwnership().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             newOwner: NEW_OWNER,
