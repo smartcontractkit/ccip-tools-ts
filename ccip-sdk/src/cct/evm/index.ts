@@ -105,6 +105,7 @@ import {
   type WithdrawLiquidityParams,
   WithdrawLiquidity,
 } from './token-pool/operations/withdraw-liquidity.ts'
+import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
@@ -112,6 +113,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
   // Token operations
   readonly #deployToken = new DeployToken()
+  readonly #approveToken = new ApproveToken()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -649,6 +651,55 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setDynamicConfig(opts: EVMExecuteParams<SetDynamicConfigParams>): Promise<TransactionResult> {
     return this.#setDynamicConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned ERC-20 `approve` tx (for multisig / offline signing): grants `spender` an
+   * allowance over `sender`'s tokens.
+   * @remarks The prerequisite for {@link generateUnsignedProvideLiquidity} — a pool deposits with
+   * `safeTransferFrom`, so a rebalancer must approve the **pool** for at least the deposit first,
+   * or the deposit reverts `ERC20InsufficientAllowance`. The cross-family counterpart of Solana's
+   * `approveToken`, which delegates SPL spend authority for the same reason.
+   * @remarks Works on **any** ERC-20, not only CCT-deployed tokens: `approve(address,uint256)` is
+   * identical across `FactoryBurnMintERC20` v1.5.1 / v1.6.2 and v2.0.0's `CrossChainToken`, and a
+   * LockRelease pool may escrow a third-party token. No `typeAndVersion` probe and no chain read.
+   * @remarks `amount` **replaces** the current allowance (it does not add to it) and is consumed
+   * as it is spent; `0n` revokes.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `spender` is invalid or zero, or
+   * `amount` is not a `uint256`
+   * @example
+   * ```typescript
+   * // approve a LockRelease pool for a deposit, then deposit
+   * await cct.approveToken({ tokenAddress: token, spender: pool, amount, wallet })
+   * await cct.provideLiquidity({ poolAddress: pool, amount, wallet })
+   * ```
+   */
+  generateUnsignedApproveToken(opts: ApproveTokenParams): Promise<UnsignedEVMTx> {
+    return this.#approveToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Grants an ERC-20 allowance, signing + submitting with `opts.wallet`. `sender` defaults to the
+   * wallet's address and must equal it — the allowance comes out of the signing account's balance,
+   * so approving on behalf of another address is rejected rather than signed.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
+   * the wallet's address
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.approveToken({
+   *   tokenAddress: '0xToken...',
+   *   spender: '0xPool...',
+   *   amount: 1_000000000000000000n,
+   *   wallet, // the rebalancer
+   * })
+   * ```
+   */
+  approveToken(opts: EVMExecuteParams<ApproveTokenParams>): Promise<TransactionResult> {
+    return this.#approveToken.execute(this.chain, opts)
   }
 
   /**
@@ -1568,6 +1619,7 @@ export type {
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { ApproveTokenParams } from './token/operations/approve-token.ts'
 export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,
