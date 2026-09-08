@@ -149,7 +149,7 @@ describe('deployTokenPool command building', () => {
     const tx = await op.generate(mockChain('canton:TestNet'), baseParams())
     const { templateId, createArguments, choice, choiceArgument } = createAndExercise(tx)
 
-    assert.match(templateId, /ccip-registry-burn-mint-token-pool-v2/)
+    assert.match(templateId, /ccip-registry-burn-mint-token-pool/)
     assert.equal(choice, 'Initialize')
     assert.deepEqual(createArguments.observers, [OBSERVER])
     assert.equal(choiceArgument.tokenAdminRegistryCid, TAR_CID)
@@ -179,7 +179,7 @@ describe('deployTokenPool command building', () => {
       mockChain('canton:TestNet'),
       baseParams({ poolType: 'lockRelease' }),
     )
-    assert.match(createAndExercise(tx).templateId, /ccip-registry-lock-release-token-pool-v2/)
+    assert.match(createAndExercise(tx).templateId, /ccip-registry-lock-release-token-pool/)
   })
 })
 

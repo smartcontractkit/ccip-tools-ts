@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import type { ApplyChainUpdates as ApplyChainUpdatesArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import type { ApplyChainUpdates as ApplyChainUpdatesArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'

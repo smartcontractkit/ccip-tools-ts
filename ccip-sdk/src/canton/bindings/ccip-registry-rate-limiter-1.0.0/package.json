@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "@daml.js/ccip-registry-rate-limiter-v2-2.0.1",
+  "name": "@daml.js/ccip-registry-rate-limiter-1.0.0",
   "version": "3.5.2",
   "license": "UNLICENSED",
   "main": "lib/index.js",
