@@ -325,8 +325,12 @@ export type ExecutionReceipt = {
   sourceChainSelector?: bigint
   /** Hash of the message (if available). */
   messageHash?: string
-  /** Return data from the receiver contract (if any). */
-  returnData?: BytesLike | Record<string, string>
+  /**
+   * Return data from the receiver contract (if any). A decoded record's values
+   * are not all strings: families that reconstruct a failure receipt off-chain
+   * (Aptos, Sui) surface numeric fields as bigints, like the rest of the SDK.
+   */
+  returnData?: BytesLike | Record<string, unknown>
   /** Gas consumed by execution (if available). */
   gasUsed?: bigint
 }

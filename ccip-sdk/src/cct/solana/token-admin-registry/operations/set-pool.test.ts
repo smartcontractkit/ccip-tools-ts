@@ -7,7 +7,8 @@ import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { DEFAULT_WRITABLE_INDEXES, SolanaTokenManager } from '../../index.ts'
+import { DEFAULT_WRITABLE_INDEXES } from '../constants.ts'
+import { SetPool } from './set-pool.ts'
 
 const BLOCKHASH = PublicKey.default.toBase58()
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -32,7 +33,7 @@ function stubChain(router = ROUTER, onAddress?: (address: string) => void): Sola
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedSetPool({
+  return new SetPool().generate(stubChain(), {
     tokenAddress: TOKEN,
     address: ADDRESS,
     poolLookupTableAddress: POOL_LOOKUP_TABLE,
@@ -75,16 +76,15 @@ describe('SetPool (cct/solana)', () => {
 
     it('resolves the router from address', async () => {
       let requestedAddress: string | undefined
-      const cct = SolanaTokenManager.fromChain(
+      const unsigned = await new SetPool().generate(
         stubChain(ROUTER, (address) => (requestedAddress = address)),
+        {
+          tokenAddress: TOKEN,
+          address: ADDRESS,
+          poolLookupTableAddress: POOL_LOOKUP_TABLE,
+          payer: PAYER,
+        },
       )
-
-      const unsigned = await cct.generateUnsignedSetPool({
-        tokenAddress: TOKEN,
-        address: ADDRESS,
-        poolLookupTableAddress: POOL_LOOKUP_TABLE,
-        payer: PAYER,
-      })
 
       assert.equal(requestedAddress, ADDRESS)
       assert.equal(unsigned.instructions[0]!.programId.toBase58(), ROUTER)
@@ -102,15 +102,16 @@ describe('SetPool (cct/solana)', () => {
       let routerLookups = 0
 
       await assert.rejects(
-        SolanaTokenManager.fromChain(
+        new SetPool().generate(
           stubChain(ROUTER, () => routerLookups++),
-        ).generateUnsignedSetPool({
-          tokenAddress: TOKEN,
-          address: ADDRESS,
-          poolLookupTableAddress: POOL_LOOKUP_TABLE,
-          payer: PAYER,
-          writableIndexes: [],
-        }),
+          {
+            tokenAddress: TOKEN,
+            address: ADDRESS,
+            poolLookupTableAddress: POOL_LOOKUP_TABLE,
+            payer: PAYER,
+            writableIndexes: [],
+          },
+        ),
         CCTParamsInvalidError,
       )
 
@@ -121,7 +122,7 @@ describe('SetPool (cct/solana)', () => {
   describe('execute', () => {
     it('rejects an invalid wallet before generating instructions', async () => {
       await assert.rejects(
-        SolanaTokenManager.fromChain(stubChain()).setPool({
+        new SetPool().execute(stubChain(), {
           tokenAddress: TOKEN,
           address: ADDRESS,
           poolLookupTableAddress: POOL_LOOKUP_TABLE,

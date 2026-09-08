@@ -8,8 +8,8 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveRouterConfigPda, deriveTokenAdminRegistryPda } from '../../programs/router.ts'
+import { RegisterAdmin } from './register-admin.ts'
 
 const TOKEN = Keypair.generate().publicKey
 const MINT_AUTHORITY = Keypair.generate().publicKey
@@ -20,6 +20,11 @@ const CCIP_ADMIN = Keypair.generate().publicKey
 const ADMINISTRATOR = Keypair.generate().publicKey
 const CONFIG = deriveRouterConfigPda(new PublicKey(ROUTER))
 const TOKEN_ADMIN_REGISTRY = deriveTokenAdminRegistryPda(new PublicKey(ROUTER), TOKEN)
+const HASH = Keypair.generate().publicKey.toBase58()
+const SUBMIT_WALLET = {
+  publicKey: MINT_AUTHORITY,
+  signTransaction: async <T>(tx: T) => tx,
+}
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
@@ -64,15 +69,20 @@ function stubChain(
         context: { slot: 0 },
         value: await getAccountInfo(address),
       }),
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
     },
     getTokenAdminRegistryFor: async () => ROUTER,
   } as unknown as SolanaChain
 }
 
 function generate(opts = {}, registered = false, mintAuthority: PublicKey | null = MINT_AUTHORITY) {
-  return SolanaTokenManager.fromChain(
-    stubChain(registered, mintAuthority),
-  ).generateUnsignedRegisterAdmin({
+  return new RegisterAdmin().generate(stubChain(registered, mintAuthority), {
     tokenAddress: TOKEN.toBase58(),
     address: ADDRESS,
     payer: PAYER,
@@ -131,6 +141,19 @@ describe('RegisterAdmin (cct/solana)', () => {
       )
     })
 
+    it('rejects owner registration without a mint authority', async () => {
+      await assert.rejects(
+        () =>
+          generate(
+            { registrationMethod: 'owner', administrator: ADMINISTRATOR.toBase58() },
+            false,
+            null,
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
+    })
+
     it('requires an administrator for CCIP-admin registration without a mint authority', async () => {
       await assert.rejects(
         () =>
@@ -147,9 +170,7 @@ describe('RegisterAdmin (cct/solana)', () => {
     it('rejects a missing Router config with a typed error', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(
-            stubChain(false, MINT_AUTHORITY, false),
-          ).generateUnsignedRegisterAdmin({
+          new RegisterAdmin().generate(stubChain(false, MINT_AUTHORITY, false), {
             tokenAddress: TOKEN.toBase58(),
             address: ADDRESS,
             registrationMethod: 'ccip-admin',
@@ -177,10 +198,22 @@ describe('RegisterAdmin (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      assert.deepEqual(
+        await new RegisterAdmin().execute(stubChain(), {
+          tokenAddress: TOKEN.toBase58(),
+          address: ADDRESS,
+          registrationMethod: 'owner',
+          wallet: SUBMIT_WALLET,
+        }),
+        { hash: HASH },
+      )
+    })
+
     it('rejects an authority that differs from the executing wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).registerAdmin({
+          new RegisterAdmin().execute(stubChain(), {
             tokenAddress: TOKEN.toBase58(),
             address: ADDRESS,
             registrationMethod: 'owner',

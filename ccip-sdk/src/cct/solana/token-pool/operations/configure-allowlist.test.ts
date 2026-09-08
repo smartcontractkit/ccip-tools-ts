@@ -7,8 +7,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { ConfigureAllowlist } from './configure-allowlist.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -43,7 +43,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedConfigureAllowlist({
+  return new ConfigureAllowlist().generate(stubChain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -109,9 +109,7 @@ describe('ConfigureAllowlist (cct/solana)', () => {
 
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await SolanaTokenManager.fromChain(
-        stubChain(),
-      ).generateUnsignedConfigureAllowlist({
+      const unsigned = await new ConfigureAllowlist().generate(stubChain(), {
         tokenAddress: TOKEN,
         poolProgramAddress,
         payer: PAYER,
@@ -177,8 +175,20 @@ describe('ConfigureAllowlist (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('rejects an invalid wallet', async () => {
+      await assert.rejects(() =>
+        new ConfigureAllowlist().execute(stubChain(), {
+          tokenAddress: TOKEN,
+          poolType: 'burn-mint',
+          add: [ALLOWED],
+          enabled: true,
+          wallet: {} as never,
+        }),
+      )
+    })
+
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).configureAllowlist({
+      const result = await new ConfigureAllowlist().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         add: [ALLOWED],
@@ -192,7 +202,7 @@ describe('ConfigureAllowlist (cct/solana)', () => {
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).configureAllowlist({
+          new ConfigureAllowlist().execute(stubChain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,

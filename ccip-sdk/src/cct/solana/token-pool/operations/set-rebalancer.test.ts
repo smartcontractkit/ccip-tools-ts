@@ -7,8 +7,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { SetRebalancer } from './set-rebalancer.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -42,7 +42,7 @@ function submitChain(): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedSetRebalancer({
+  return new SetRebalancer().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'lock-release',
     payer: PAYER,
@@ -125,7 +125,7 @@ describe('SetRebalancer (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).setRebalancer({
+      const result = await new SetRebalancer().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'lock-release',
         rebalancer: REBALANCER,
@@ -138,7 +138,7 @@ describe('SetRebalancer (cct/solana)', () => {
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setRebalancer({
+          new SetRebalancer().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'lock-release',
             rebalancer: REBALANCER,

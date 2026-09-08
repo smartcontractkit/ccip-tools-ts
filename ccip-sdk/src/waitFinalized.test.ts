@@ -46,6 +46,9 @@ class WaitFinalizedMockChain extends Chain {
   /** Logs yielded by getLogs (watch mode will keep looping after these until aborted) */
   logsToYield: ChainLog[] = []
 
+  /** The watch signal handed to the last getLogs call (for teardown assertions) */
+  lastWatchSignal: AbortSignal | undefined = undefined
+
   constructor() {
     super(networkInfo(1))
   }
@@ -70,6 +73,7 @@ class WaitFinalizedMockChain extends Chain {
   }
 
   async *getLogs(opts: LogFilter): AsyncIterableIterator<ChainLog> {
+    if (opts.watch instanceof AbortSignal) this.lastWatchSignal = opts.watch
     for (const log of this.logsToYield) {
       yield log
     }
@@ -228,6 +232,34 @@ describe('waitFinalized', () => {
     const result = await chain.waitFinalized({ log })
     assert.ok(result)
     assert.equal(typeof result.number, 'number')
+    chain.destroy()
+  })
+
+  it('tears the watch chain down on success without aborting external signals', async () => {
+    const chain = new WaitFinalizedMockChain()
+    const log = makeLog()
+    chain.defaultBlockInfo = { number: 100, timestamp: 1_700_000_000 }
+    chain.txResult = {
+      hash: log.transactionHash,
+      logs: [],
+      blockNumber: 100,
+      timestamp: 1_700_000_100, // newer than finalized → slow path
+      from: '0xSender',
+    }
+    chain.logsToYield = [log]
+    const callerAc = new AbortController()
+
+    const result = await chain.waitFinalized({ log, abort: callerAc.signal })
+    assert.ok(result)
+
+    // Teardown: the watch signal handed to getLogs is aborted by the time
+    // waitFinalized resolves — derived composites drop their listeners instead
+    // of lingering in Node's gcPersistentSignals until a source eventually fires.
+    assert.ok(chain.lastWatchSignal)
+    assert.equal(chain.lastWatchSignal!.aborted, true)
+    // ...while the external signals it derived from stay untouched.
+    assert.equal(callerAc.signal.aborted, false)
+    assert.equal(chain.abort.aborted, false)
     chain.destroy()
   })
 

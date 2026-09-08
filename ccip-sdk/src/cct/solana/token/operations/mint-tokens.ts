@@ -4,6 +4,7 @@ import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -19,14 +20,12 @@ import {
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
+import { CreateTokenAccount } from './create-token-account.ts'
 
 type MintTokensParams = {
   /** SPL token mint address. */
   tokenAddress: string
-  /**
-   * Associated Token Account (ATA) address for the recipient on this token mint.
-   * ⚠️ ATA must already exist; use `createTokenAccount` if needed.
-   */
+  /** Recipient owner address; its ATA must exist unless `createRecipientATA` is set. */
   recipient: string
   /**
    * Amount to mint in base units (not human-readable tokens).
@@ -34,6 +33,8 @@ type MintTokensParams = {
    * Maximum u64: 2^64 - 1.
    */
   amount: bigint
+  /** Create the recipient ATA idempotently before minting. Defaults to false. */
+  createRecipientATA?: boolean
   /** Mint authority. Defaults to `payer` for single-signer transactions. */
   authority?: string
   /** SPL Token multisig member addresses. Required when authority is an SPL Token multisig. */
@@ -41,9 +42,11 @@ type MintTokensParams = {
 }
 
 type ParsedMintTokensParams = {
+  payer: PublicKey
   tokenAddress: PublicKey
   recipient: PublicKey
   amount: bigint
+  createRecipientATA: boolean
   authority: PublicKey
   multisigSigners: PublicKey[]
 }
@@ -60,7 +63,7 @@ export type ExecuteMintTokensParams = SolanaExecuteParams<MintTokensParams>
 /** Result of executing Solana SPL token minting. */
 export type ExecuteMintTokensResult = TransactionResult
 
-/** Mints SPL tokens to a recipient's existing associated token account. */
+/** Mints SPL tokens to a recipient's associated token account. */
 export class MintTokens extends SolanaOperation<
   MintTokensParams,
   UnsignedSolanaTx,
@@ -74,12 +77,17 @@ export class MintTokens extends SolanaOperation<
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')
     }
+    if (params.createRecipientATA !== undefined && typeof params.createRecipientATA !== 'boolean') {
+      throw new CCTParamsInvalidError(this.name, 'createRecipientATA', 'must be a boolean')
+    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
+      payer,
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       recipient: parsePublicKey(this.name, 'recipient', params.recipient),
       amount: params.amount,
+      createRecipientATA: params.createRecipientATA ?? false,
       authority:
         params.authority === undefined
           ? payer
@@ -90,18 +98,38 @@ export class MintTokens extends SolanaOperation<
     }
   }
 
-  /** Builds an SPL Token `MintTo` instruction for the recipient's associated token account. */
+  /** Builds recipient ATA creation, when requested, followed by an SPL Token `MintTo` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedMintTokensParams,
   ): Promise<UnsignedSolanaTx> {
-    const { tokenAccount, tokenProgram } = await resolveExistingTokenAccount(
-      chain.connection,
-      opts.tokenAddress,
-      opts.recipient,
-    )
+    const createRecipientATA = opts.createRecipientATA
+      ? await new CreateTokenAccount().generate(chain, {
+          payer: opts.payer.toBase58(),
+          tokenAddress: opts.tokenAddress.toBase58(),
+          ownerAddress: opts.recipient.toBase58(),
+        })
+      : undefined
+
+    let tokenAccount: PublicKey
+    let tokenProgram: PublicKey
+
+    if (opts.createRecipientATA) {
+      const resolved = await resolveATA(chain.connection, opts.tokenAddress, opts.recipient)
+      tokenAccount = resolved.ata
+      tokenProgram = resolved.tokenProgram
+    } else {
+      const existing = await resolveExistingTokenAccount(
+        chain.connection,
+        opts.tokenAddress,
+        opts.recipient,
+      )
+      tokenAccount = existing.tokenAccount
+      tokenProgram = existing.tokenProgram
+    }
 
     const instructions: TransactionInstruction[] = [
+      ...(createRecipientATA?.instructions ?? []),
       createMintToInstruction(
         opts.tokenAddress,
         tokenAccount,
@@ -113,9 +141,17 @@ export class MintTokens extends SolanaOperation<
     ]
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, recipient = ${opts.recipient.toBase58()}, amount = ${opts.amount}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, recipient = ${opts.recipient.toBase58()}, amount = ${
+        opts.amount
+      }`,
     )
-    return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
+    return {
+      family: ChainFamily.Solana,
+      instructions,
+      mainIndex: createRecipientATA ? 1 : 0,
+    }
   }
 
   /** Generate, sign, simulate, send, and confirm with the mint authority wallet. */

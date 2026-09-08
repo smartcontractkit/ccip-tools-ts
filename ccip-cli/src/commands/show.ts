@@ -357,6 +357,7 @@ export async function showRequests(
       offRamp,
       messageId: request.message.messageId,
       sourceChainSelector: request.message.sourceChainSelector,
+      sequenceNumber: request.message.sequenceNumber,
       startTime: request.log.blockTimestamp,
       verifications: !argv.wait ? await verifications$ : undefined,
       watch: argv.wait && ctx.abort,

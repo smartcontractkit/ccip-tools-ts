@@ -210,8 +210,17 @@ export type CantonConfig = {
   /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
-  /** JSON Web Token for authentication with the Canton Ledger API. */
-  jwt: string
+  /**
+   * JSON Web Token for authentication with the Canton Ledger API.
+   *
+   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
+   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
+   * getter is supplied, the SDK clients call it per request to obtain a fresh
+   * JWT, enabling automatic refresh. The CLI resolves its `auth` block upfront
+   * and injects either a string or a getter here; web/Electron embedders inject
+   * their own.
+   */
+  jwt?: string | (() => Promise<string>)
 
   /** Base URL for the EDS (Explicit Disclosure Service) API. */
   edsUrl: string
@@ -264,7 +273,7 @@ export type CantonConfig = {
 
   /**
    * Transfer-factory preview amount for Canton fee-token payments.
-   * Rarely needs changing; mirrors Go CLI transfer-factory `"1.0"` default.
+   * Rarely needs changing; defaults to `"1.0"`.
    */
   feeTransferFactoryAmount?: string
 
@@ -2012,17 +2021,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async *getExecutionReceipts({
     offRamp,
-    messageId,
     sourceChainSelector,
+    messageId,
+    sequenceNumber,
     verifications,
     ...hints
   }: {
     /** address of OffRamp contract */
     offRamp: string
-    /** filter: yield only executions for this message */
-    messageId?: string
     /** filter: yield only executions for this source chain */
     sourceChainSelector?: bigint
+    /** filter: yield only executions for this message */
+    messageId?: string
+    /** filter: narrow the scan to this message's own commit batch; used by SVM chains to
+     *  locate the `commit_report` PDA without prior verifications */
+    sequenceNumber?: bigint
     /** optional commit associated with the request, can be used for optimizations in some families */
     verifications?: CCIPVerifications
   } & Pick<
@@ -2042,6 +2055,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (
         !receipt ||
         (messageId && receipt.messageId !== messageId) ||
+        (sequenceNumber != null && receipt.sequenceNumber !== sequenceNumber) ||
         (sourceChainSelector &&
           receipt.sourceChainSelector &&
           receipt.sourceChainSelector !== sourceChainSelector)
