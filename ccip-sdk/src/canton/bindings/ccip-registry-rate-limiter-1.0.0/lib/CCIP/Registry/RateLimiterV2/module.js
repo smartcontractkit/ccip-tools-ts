@@ -72,7 +72,7 @@ exports.RateLimitMode = {
 
 exports.RateLimiter = damlTypes.assembleTemplate(
   {
-    templateId: '#ccip-registry-rate-limiter-v2:CCIP.Registry.RateLimiterV2:RateLimiter',
+    templateId: '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter',
     templateIdWithPackageId: '#6856206c569bf6c13704eb5cd3fedecb64245fce1af80898b4ddf6580f51fa92:CCIP.Registry.RateLimiterV2:RateLimiter',
     keyDecoder: jtv.constant(undefined),
     keyEncode: function () { throw 'EncodeError'; },
@@ -160,7 +160,7 @@ exports.RateLimiter = damlTypes.assembleTemplate(
   pkg674d8f60de56afd32698ae19516260217c73dd9ed082680fa840ede4b7665240.MCMS.MCMSReceiver.MCMSReceiver,
 );
 
-damlTypes.registerTemplate(exports.RateLimiter, ['6856206c569bf6c13704eb5cd3fedecb64245fce1af80898b4ddf6580f51fa92', '#ccip-registry-rate-limiter-v2']);
+damlTypes.registerTemplate(exports.RateLimiter, ['6856206c569bf6c13704eb5cd3fedecb64245fce1af80898b4ddf6580f51fa92', '#ccip-registry-rate-limiter']);
 
 exports.SetConfig = {
   decoder: damlTypes.lazyMemo(function () {

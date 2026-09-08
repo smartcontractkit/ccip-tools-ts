@@ -8,11 +8,11 @@
 import type {
   BurnMintTokenPool,
   Initialize as InitializeArg,
-} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import type {
   LaneDeploySpec as LaneDeploySpecArg,
   RateLimiterDeploySpec as RateLimiterDeploySpecArg,
-} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2Types/module.js'
+} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2Types/module.js'
 import type { JsCommands } from '../../../canton/client/index.ts'
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
@@ -37,7 +37,7 @@ export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
 
 /**
  * BurnMintTokenPool template ID — the registry-pools family
- * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool-v2`).
+ * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool`).
  * This is the ONLY BurnMintTokenPool family the SDK targets: it adds the
  * mandatory `observers` field (EDS auto-detection) and the atomic
  * `Initialize` choice the production-pools family (`CCIP.BurnMintTokenPoolV2`,
@@ -45,15 +45,15 @@ export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
  * package.
  */
 export const BURN_MINT_POOL_TEMPLATE_ID =
-  '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
+  '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
 
 /** LockReleaseTokenPool template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
 export const LOCK_RELEASE_POOL_TEMPLATE_ID =
-  '#ccip-registry-lock-release-token-pool-v2:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+  '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
 /** RateLimiter template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
 export const RATE_LIMITER_TEMPLATE_ID =
-  '#ccip-registry-rate-limiter-v2:CCIP.Registry.RateLimiterV2:RateLimiter'
+  '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'
 
 /** A contract reference for the exercise builders: a CID plus its disclosure blob. */
 export interface PoolContractRef {

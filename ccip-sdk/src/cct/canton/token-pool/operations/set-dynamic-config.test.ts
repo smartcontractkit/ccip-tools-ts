@@ -19,9 +19,9 @@ import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 
 const BURN_MINT_TEMPLATE_ID =
-  '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
+  '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
 const LOCK_RELEASE_TEMPLATE_ID =
-  '#ccip-registry-lock-release-token-pool-v2:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+  '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 const POOL_CID = `${BURN_MINT_TEMPLATE_ID}:00deadbeef`
 const POOL_OWNER = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
 const POOL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32) // keccak256 hash form

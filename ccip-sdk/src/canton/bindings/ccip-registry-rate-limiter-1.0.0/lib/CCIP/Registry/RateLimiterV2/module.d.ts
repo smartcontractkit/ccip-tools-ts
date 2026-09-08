@@ -71,7 +71,7 @@ export declare interface RateLimiterInterface {
     damlTypes.ChoiceFrom<damlTypes.Template<RateLimiter, undefined>>;
 }
 export declare const RateLimiter:
-  damlTypes.Template<RateLimiter, undefined, '#ccip-registry-rate-limiter-v2:CCIP.Registry.RateLimiterV2:RateLimiter'> &
+  damlTypes.Template<RateLimiter, undefined, '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'> &
   damlTypes.ToInterface<RateLimiter, pkg674d8f60de56afd32698ae19516260217c73dd9ed082680fa840ede4b7665240.MCMS.MCMSReceiver.MCMSReceiver> &
   RateLimiterInterface
 

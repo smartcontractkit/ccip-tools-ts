@@ -10,7 +10,7 @@ import * as pkg289011bdbefe42c7dbea0a4f101127095e8b5f5281d45c84f6eca06de11689a4 
 import * as pkg35086e11b8984749fa11117698187768af4550987924602e33e78624ba4b50e3 from '@daml.js/ccip-core-v2-2.1.1';
 import * as pkg4ded6b668cb3b64f7a88a30874cd41c75829f5e064b3fbbadf41ec7e8363354f from '@daml.js/splice-api-token-metadata-v1-1.0.0';
 import * as pkg674d8f60de56afd32698ae19516260217c73dd9ed082680fa840ede4b7665240 from '@daml.js/mcms-api-1.0.0';
-import * as pkg6856206c569bf6c13704eb5cd3fedecb64245fce1af80898b4ddf6580f51fa92 from '@daml.js/ccip-registry-rate-limiter-v2-2.0.1';
+import * as pkg6856206c569bf6c13704eb5cd3fedecb64245fce1af80898b4ddf6580f51fa92 from '@daml.js/ccip-registry-rate-limiter-1.0.0';
 import * as pkg6feabd6c3535eaaa23c820efbdaed64e15d733bdbfc292b88225888162774cfb from '@daml.js/ccip-codec-v2-2.0.0';
 import * as pkg718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b from '@daml.js/splice-api-token-holding-v1-1.0.0';
 import * as pkg7fffaf108129d37413d8edfbd91ffe373051b2cb0621c26e245093c6138daf58 from '@daml.js/ccip-api-v2-2.0.0';
@@ -129,7 +129,7 @@ export declare interface BurnMintTokenPoolInterface {
     damlTypes.ChoiceFrom<damlTypes.Template<BurnMintTokenPool, undefined>>;
 }
 export declare const BurnMintTokenPool:
-  damlTypes.Template<BurnMintTokenPool, undefined, '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'> &
+  damlTypes.Template<BurnMintTokenPool, undefined, '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'> &
   damlTypes.ToInterface<BurnMintTokenPool, pkg289011bdbefe42c7dbea0a4f101127095e8b5f5281d45c84f6eca06de11689a4.CCIP.InterfacesV2.TokenPool.ITokenPool | pkg674d8f60de56afd32698ae19516260217c73dd9ed082680fa840ede4b7665240.MCMS.MCMSReceiver.MCMSReceiver> &
   BurnMintTokenPoolInterface
 

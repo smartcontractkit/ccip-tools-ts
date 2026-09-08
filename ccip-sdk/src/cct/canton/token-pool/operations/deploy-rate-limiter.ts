@@ -18,7 +18,7 @@
  * @packageDocumentation
  */
 
-import type { RateLimiter as RateLimiterArg } from '../../../../canton/bindings/ccip-registry-rate-limiter-v2-2.0.1/lib/CCIP/Registry/RateLimiterV2/module.js'
+import type { RateLimiter as RateLimiterArg } from '../../../../canton/bindings/ccip-registry-rate-limiter-1.0.0/lib/CCIP/Registry/RateLimiterV2/module.js'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'

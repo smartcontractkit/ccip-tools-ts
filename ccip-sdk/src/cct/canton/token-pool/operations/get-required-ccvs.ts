@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 
-import type { GetRequiredCCVs as GetRequiredCCVsArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-v2-2.1.1/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
+import type { GetRequiredCCVs as GetRequiredCCVsArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type FinalityConfig, EMPTY_CHOICE_CONTEXT, encodeFinalityConfig } from '../../encoding.ts'
