@@ -244,17 +244,19 @@ ccip-cli send \
 
 ### Canton to EVM
 
+On Canton source, `--wallet` is not needed — the JWT from `--canton-config` (either the static `jwt` field or a token resolved from `auth`) is used to submit the send transaction:
+
 ```bash
 ccip-cli send \
   -s canton-testnet \
   -d ethereum-testnet-sepolia \
-  -r ccipsender \
+  -r prod-ccipsender \
   --canton-config ./canton-config.json \
   --rpc https://ledger.example.com/api/json \
   --rpc https://ethereum-sepolia-rpc.example.com \
   --to 0xReceiverContract \
   -t link-token=1.0 \
-  --estimate-gas-limit -101
+  --no-estimate-gas-limit
 ```
 
 On Canton source, `-r` is the **CCIPSender instance id** (not an EVM router address). Use `--only-get-fee` to preview — Canton returns `0` since fees are computed on-ledger. Pass Canton send extras via `--extra`:

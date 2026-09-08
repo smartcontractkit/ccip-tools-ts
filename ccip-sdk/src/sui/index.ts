@@ -20,7 +20,6 @@ import {
   type ChainContext,
   type ChainStatic,
   type GetBalanceOpts,
-  type LogFilter,
   type TokenInfo,
   type TokenPoolConfig,
   type TokenPoolRemote,
@@ -44,7 +43,7 @@ import {
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
+import { createRateLimitedFetch, fetchProfileForUrl, redactEndpointUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { decodeMessage, normalizeDeep } from '../requests.ts'
@@ -62,11 +61,11 @@ import type {
   ExecutionReceipt,
   ExecutionState,
   Lane,
-  LeanNumbers,
   MessageInput,
   WithLogger,
 } from '../types.ts'
 import {
+  convertKeysToCamelCase,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
@@ -87,6 +86,13 @@ import {
 import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
 import { getSuiLeafHasher } from './hasher.ts'
+import {
+  type SuiLogStreamOpts,
+  SUI_OFFRAMP_EXECUTE_FUNCTIONS,
+  SUI_OFFRAMP_MODULE,
+  canonicalSuiLogAddress,
+  getSuiExecutionFailureLog,
+} from './logs.ts'
 import {
   deriveObjectID,
   getDynamicFieldIds,
@@ -227,6 +233,23 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         args.options?.showInput,
       ],
     })
+    // Checkpoint/timestamp lookups for a page of event digests. Immutable once
+    // committed, and the same digests recur whenever two scans' windows overlap
+    // (a re-run, or a second lane sharing the offramp), so they are worth keeping
+    // — a single scan's pages carry disjoint digests and see no benefit.
+    if (typeof this.client.multiGetTransactionBlocks === 'function')
+      this.client.multiGetTransactionBlocks = memoize(
+        this.client.multiGetTransactionBlocks.bind(this.client),
+        {
+          async: true,
+          maxSize: 100,
+          expires: 60e3,
+          transformKey: ([args]: Parameters<typeof this.client.multiGetTransactionBlocks>) => [
+            args.digests.join(','),
+            JSON.stringify(args.options ?? null),
+          ],
+        },
+      )
     // Partial/mock clients (unit tests) may not carry every method; skip those
     if (typeof this.client.getObject === 'function')
       this.client.getObject = memoize(this.client.getObject.bind(this.client), {
@@ -238,30 +261,94 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           JSON.stringify(args.options ?? null),
         ],
       })
-    if (typeof this.client.getOwnedObjects === 'function')
-      this.client.getOwnedObjects = memoize(this.client.getOwnedObjects.bind(this.client), {
-        async: true,
-        maxSize: 200,
-        expires: 30e3,
-        transformKey: ([args]: Parameters<typeof this.client.getOwnedObjects>) => [
-          args.owner,
-          args.cursor,
-          args.limit,
-          JSON.stringify(args.filter ?? null),
-          JSON.stringify(args.options ?? null),
-        ],
-      })
-    if (typeof this.client.getDynamicFields === 'function')
-      this.client.getDynamicFields = memoize(this.client.getDynamicFields.bind(this.client), {
-        async: true,
-        maxSize: 200,
-        expires: 60e3,
-        transformKey: ([args]: Parameters<typeof this.client.getDynamicFields>) => [
-          args.parentId,
-          args.cursor,
-          args.limit,
-        ],
-      })
+    if (typeof this.client.getOwnedObjects === 'function') {
+      const getOwnedObjects = this.client.getOwnedObjects.bind(this.client)
+      // Packages a probe simply does not own the pointer of are the COMMON case
+      // during discovery (candidates are tried in turn), so a genuine empty must
+      // stay cheap. Remember it for the same window as a hit: the memo drops
+      // rejections, so without this every re-probe of the same package would
+      // re-run the whole retry ladder below.
+      const missedPointers = new Map<string, number>()
+      // Load-balanced Sui proxies (cldev-style) round-robin across backends whose
+      // object indexes may be stale: a by-struct-type getOwnedObjects lookup can
+      // answer 200 `data: []` even though the pointer exists. Quick retries
+      // usually land on a synced backend.
+      //
+      // This ladder is the ONLY retry layer for that empty. The error it ends on
+      // is deliberately worded to fall OUTSIDE TRANSIENT_LOOKUP_ERROR: while it
+      // matched, an outer withLookupRetry re-ran the whole ladder, so one package
+      // that owns no pointer cost 5x5 requests and ~30s of backoff instead of 5
+      // and ~4s — enough to look like a hang across a handful of candidates.
+      this.client.getOwnedObjects = memoize(
+        async (args: Parameters<SuiJsonRpcClient['getOwnedObjects']>[0]) => {
+          const pointerType =
+            args.filter != null && 'StructType' in args.filter ? args.filter.StructType : undefined
+          const pointerLookup = typeof pointerType === 'string' && pointerType.includes('Pointer')
+          const missKey = pointerLookup ? `${String(args.owner)}|${pointerType}` : undefined
+          const noPointer = () =>
+            new CCIPDataFormatUnsupportedError(
+              `Sui package ${String(args.owner)} owns no ${pointerType} object`,
+              { context: { structType: pointerType } },
+            )
+          if (missKey) {
+            const missedAt = missedPointers.get(missKey)
+            if (missedAt != null && Date.now() - missedAt < 30e3) throw noPointer()
+            missedPointers.delete(missKey)
+          }
+          for (let attempt = 0; ; attempt++) {
+            const res = await getOwnedObjects(args)
+            if (!pointerLookup || res.data.length !== 0) return res
+            if (attempt >= 4) {
+              if (missKey) {
+                if (missedPointers.size > 200) missedPointers.clear()
+                missedPointers.set(missKey, Date.now())
+              }
+              throw noPointer()
+            }
+            // plain timer: AbortSignal-based sleep can resolve out from under a
+            // process with no other handles (its timeout is unref'd)
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt))
+          }
+        },
+        {
+          async: true,
+          maxSize: 200,
+          expires: 30e3,
+          transformKey: ([args]: Parameters<typeof this.client.getOwnedObjects>) => [
+            args.owner,
+            args.cursor,
+            args.limit,
+            JSON.stringify(args.filter ?? null),
+            JSON.stringify(args.options ?? null),
+          ],
+        },
+      )
+    }
+    if (typeof this.client.getDynamicFields === 'function') {
+      const getDynamicFields = this.client.getDynamicFields.bind(this.client)
+      // Same proxy class as above: a stale backend answers empty instead of the
+      // object's dynamic fields; a couple of quick retries usually land on a
+      // synced one (a final empty keeps the pre-existing semantics).
+      this.client.getDynamicFields = memoize(
+        async (args: Parameters<SuiJsonRpcClient['getDynamicFields']>[0]) => {
+          for (let attempt = 0; ; attempt++) {
+            const res = await getDynamicFields(args)
+            if (res.data.length !== 0 || attempt >= 4) return res
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt))
+          }
+        },
+        {
+          async: true,
+          maxSize: 200,
+          expires: 60e3,
+          transformKey: ([args]: Parameters<typeof this.client.getDynamicFields>) => [
+            args.parentId,
+            args.cursor,
+            args.limit,
+          ],
+        },
+      )
+    }
     if (typeof this.client.getCoinMetadata === 'function')
       this.client.getCoinMetadata = memoize(this.client.getCoinMetadata.bind(this.client), {
         async: true,
@@ -288,7 +375,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Get chain identifier from the client and map to network info format
     const rawChainId = await tempClient.getChainIdentifier().catch(() => null)
     if (rawChainId === null) {
-      throw new CCIPDataFormatUnsupportedError(`Unable to fetch chain identifier from URL: ${url}`)
+      throw new CCIPDataFormatUnsupportedError(
+        `Unable to fetch chain identifier from URL: ${redactEndpointUrl(url)}`,
+      )
     }
 
     // Map Sui chain identifiers to our network info format
@@ -360,7 +449,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     })
 
     const timestamp = Number(txResponse.timestampMs || 0) / 1000
-    // Extract events from the transaction
+    const failed = txResponse.effects?.status.status === 'failure'
+    const failureLog = failed ? getSuiExecutionFailureLog(txResponse) : undefined
     const events: ChainLog[] = []
     if (txResponse.events?.length) {
       for (const [i, event] of txResponse.events.entries()) {
@@ -368,6 +458,10 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         const splitIdx = eventType.lastIndexOf('::')
         const address = eventType.substring(0, splitIdx)
         const eventName = eventType.substring(splitIdx + 2)
+        // A failed PTB's partial events can carry a stale success
+        // ExecutionStateChanged (the event fires before the final steps); the
+        // synthetic failure log below replaces it.
+        if (failed && eventName === 'ExecutionStateChanged') continue
 
         events.push({
           address: address,
@@ -380,6 +474,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         })
       }
     }
+    if (failureLog) events.push(failureLog)
 
     return {
       hash: digest,
@@ -387,6 +482,15 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       blockNumber: Number(txResponse.checkpoint || 0),
       timestamp,
       from: txResponse.transaction?.data.sender || '',
+      ...(failureLog && {
+        // Same camelCase+bigint shape decodeReceipt gives the receipt's
+        // returnData, so tx.error and the CCIPExecution.error a consumer
+        // derives downstream agree.
+        error: convertKeysToCamelCase(
+          (failureLog.data as Record<string, unknown>).return_data,
+          (v) => (typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v),
+        ),
+      }),
     }
   }
 
@@ -395,7 +499,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @throws {@link CCIPLogsAddressRequiredError} if address is not provided
    * @throws {@link CCIPTopicsInvalidError} if topics format is invalid (thrown by {@link streamSuiLogs})
    */
-  async *getLogs(opts: LeanNumbers<LogFilter> & { versionAsHash?: boolean }) {
+  async *getLogs(opts: SuiLogStreamOpts) {
     if (opts.watch) {
       opts = {
         ...opts,
@@ -800,19 +904,27 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // `since` floors stand in for (or raise) startBlock/startTime here too — this
     // override scans the indexer directly instead of going through getLogs.
     const hints = withSinceStart(restHints)
-    // executions target the LATEST offramp package (older versions are
-    // version-gated and revert), so the indexer filter must too
-    const offRampPkg = normalizeSuiAddress(
-      (await getLatestPackageId(offRamp, this.client)).split('::')[0]!,
-    )
+    // The MoveFunction filter matches the package the execution actually RAN on —
+    // the latest at execution time. That is the CALLER's package for a historical
+    // window (which may predate an upgrade), but the CURRENT latest for anything
+    // executed since the caller's id was minted (the API/config commonly carries
+    // the original package id, whose functions are version-gated after an
+    // upgrade). Neither alone covers both, so scan both, deduped; `yielded`
+    // already keys on digest, so an overlap costs nothing.
+    const callerPkg = normalizeSuiAddress(offRamp.split('::')[0]!)
+    const latestPkg = await getLatestPackageId(offRamp, this.client)
+      .then((id) => normalizeSuiAddress(id.split('::')[0]!))
+      .catch(() => undefined)
+    const offRampPkgs = [...new Set([callerPkg, ...(latestPkg ? [latestPkg] : [])])]
     const startTimeMs = hints.startTime != null ? Number(hints.startTime) * 1000 : 0
     const startCheckpoint = hints.startBlock != null ? Number(hints.startBlock) : 0
     const yielded = new Set<string>()
 
-    const execFns = ['init_execute', 'manually_init_execute']
     for (;;) {
       let found = 0
-      for (const fn of execFns) {
+      for (const [offRampPkg, fn] of offRampPkgs.flatMap((pkg) =>
+        SUI_OFFRAMP_EXECUTE_FUNCTIONS.map((fn) => [pkg, fn] as const),
+      )) {
         let cursor: string | null | undefined
         let outOfWindow = false
         for (;;) {
@@ -820,9 +932,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           const res = await withLookupRetry(() =>
             this.client.queryTransactionBlocks({
               filter: {
-                MoveFunction: { package: offRampPkg, module: 'offramp', function: fn },
+                MoveFunction: { package: offRampPkg, module: SUI_OFFRAMP_MODULE, function: fn },
               },
-              options: { showEvents: true },
+              options: { showEvents: true, showEffects: true, showInput: true },
               limit: 50,
               ...(cursor ? { cursor } : {}),
             }),
@@ -841,6 +953,38 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
             }
             if (yielded.has(block.digest)) continue
             yielded.add(block.digest)
+
+            // Failed executions emit no ExecutionStateChanged event (and a
+            // failed PTB's partial events could carry a stale success one):
+            // surface the failure itself, reconstructed from the transaction.
+            if (block.effects?.status.status === 'failure') {
+              const failureLog = getSuiExecutionFailureLog(block, offRamp)
+              if (!failureLog) continue
+              const receipt = (this.constructor as ChainStatic).decodeReceipt(failureLog)
+              if (!receipt) continue
+              if (messageId && receipt.messageId !== messageId) continue
+              if (
+                sourceChainSelector &&
+                receipt.sourceChainSelector &&
+                receipt.sourceChainSelector !== sourceChainSelector
+              )
+                continue
+              let error
+              if (
+                receipt.returnData &&
+                (!isBytesLike(receipt.returnData) || dataLength(receipt.returnData) > 0)
+              ) {
+                if (!isBytesLike(receipt.returnData)) error = receipt.returnData
+                try {
+                  error = (this.constructor as ChainStatic).parse?.(receipt.returnData) ?? error
+                } catch {
+                  // ignore
+                }
+              }
+              yield { receipt, log: failureLog, ...(!!error && { error }) }
+              found++
+              continue
+            }
 
             for (const [i, event] of (block.events ?? []).entries()) {
               const eventName = event.type.slice(event.type.lastIndexOf('::') + 2)
@@ -877,6 +1021,35 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       if (!hints.watch) break
       if (!found) await new Promise((resolve) => setTimeout(resolve, 5000))
     }
+  }
+
+  /**
+   * Canonicalizes BOTH sides of the base class's exact `offRamp` address match.
+   *
+   * Sui log addresses are `<package>::<module>` (Move event types are
+   * `<package>::<module>::<Struct>`; getTransaction slices the struct off) with
+   * the node's full padded package id, while callers pass the OffRamp in
+   * whatever form their source used — a bare package id, short (unpadded) from
+   * the API (the CLI's `show <messageId>`) or a decoded message,
+   * `<package>::offramp` from SDK discovery. Both are converted to
+   * `<normalized-package>::offramp` up front, so an exact compare downstream
+   * matches successes and failures alike instead of silently dropping every
+   * receipt.
+   */
+  override async getExecutionReceiptsInTx(
+    tx: string | ChainTransaction,
+    filters?: Parameters<Chain['getExecutionReceiptsInTx']>[1],
+  ): Promise<CCIPExecution[]> {
+    const offRamp = filters?.offRamp
+    if (!offRamp) return super.getExecutionReceiptsInTx(tx, filters)
+    if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    return super.getExecutionReceiptsInTx(
+      {
+        ...tx,
+        logs: tx.logs.map((log) => ({ ...log, address: canonicalSuiLogAddress(log.address) })),
+      },
+      { ...filters, offRamp: canonicalSuiLogAddress(offRamp) },
+    )
   }
 
   /**
@@ -1299,11 +1472,13 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     }
 
     const eventData = data as {
-      message_hash: BytesLike
+      message_hash?: BytesLike
       message_id: BytesLike
       sequence_number: string
       source_chain_selector: string
       state: number
+      gas_used?: string
+      return_data?: Record<string, string>
     }
 
     return {
@@ -1311,7 +1486,18 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       sequenceNumber: BigInt(eventData.sequence_number),
       state: Number(eventData.state) as ExecutionState,
       sourceChainSelector: BigInt(eventData.source_chain_selector),
-      messageHash: hexlify(getDataBytes(eventData.message_hash)),
+      ...(eventData.message_hash
+        ? { messageHash: hexlify(getDataBytes(eventData.message_hash)) }
+        : {}),
+      ...(eventData.return_data && {
+        // camelCase+bigint — the same shape getTransaction's tx.error and the
+        // failure log's return_data decode to, so every consumer surface agrees.
+        // numeric strings become bigints, so the record is not Record<string, string>
+        returnData: convertKeysToCamelCase(eventData.return_data, (v) =>
+          typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v,
+        ) as Record<string, unknown>,
+      }),
+      ...(eventData.gas_used ? { gasUsed: BigInt(eventData.gas_used) } : {}),
     }
   }
 
@@ -1887,7 +2073,17 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param data - Raw data to parse.
    * @returns Parsed data or undefined.
    */
-  static parse(data: unknown) {
+  static parse(data: unknown): Record<string, unknown> | undefined {
+    if (
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      !(data instanceof Uint8Array) &&
+      ('effects_status' in data || 'effectsStatus' in data)
+    )
+      // The failure return_data record — surface as-is so CCIPExecution.error
+      // carries the decoded fields.
+      return data as Record<string, unknown>
     if (isBytesLike(data)) {
       const parsedExtraArgs = this.decodeExtraArgs(data)
       if (parsedExtraArgs) return parsedExtraArgs

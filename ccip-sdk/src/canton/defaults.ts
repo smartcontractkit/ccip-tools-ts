@@ -18,7 +18,7 @@ export const DEFAULT_CANTON_SENDER_INSTANCE_ID = 'ccipsender'
 /** CCIP-owned LINK instrument id on Canton (`ccipParty::link-token`). */
 export const DEFAULT_CANTON_LINK_INSTRUMENT_ID = 'link-token'
 
-/** CLI / Go `profiles` fee-token names returned by {@link CantonChain.getFeeTokens}. */
+/** CLI `profiles` fee-token names returned by {@link CantonChain.getFeeTokens}. */
 export const CANTON_FEE_TOKEN_CLI_SYMBOLS = {
   native: 'native',
   link: 'LINK',

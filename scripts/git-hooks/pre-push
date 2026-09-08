@@ -2,11 +2,13 @@
 #
 # Refuse pushes that carry unsigned commits.
 #
-# For every pushed branch ref, every commit in <base>..<local> must carry a valid
-# signature, where <base> is the remote ref's current tip (the commits the push
-# actually adds) — or `main` when the ref is brand new. A force-push that rewrites
-# history is therefore checked across the full rewritten range, so an unsigned
-# commit introduced by the rewrite blocks the push.
+# Every commit a push actually adds to the remote must carry a valid signature:
+# commits in <base>..<local> (where <base> is the remote ref's current tip — or
+# `main` when the ref is brand new) minus commits the remote already holds via
+# its remote-tracking refs (e.g. a commit already on origin/main is not being
+# re-uploaded, so it is not re-checked). A force-push that rewrites history is
+# therefore checked for the rewritten commits the remote does not have yet, so
+# an unsigned commit introduced by the rewrite blocks the push.
 #
 # Install (see CONTRIBUTING.md "Signed commits"):
 #   Option A — symlink into this clone's hooks dir (tracks this file, no drift):
@@ -21,6 +23,18 @@ set -u
 
 refuse=0
 me=pre-push
+remote_name=${1:-}   # remote being pushed to; its URL when pushing by URL
+
+# Only commits the destination remote does not already have are checked: the
+# push adds <base>..<local>, minus anything reachable from the remote's
+# tracking refs. When pushing to a URL there is no tracking ref to trust, so
+# the whole range is checked instead (conservative). Stale tracking refs err
+# the same way: a commit that is actually on the remote may be re-checked.
+exclude=
+case "$remote_name" in
+  '' | */*) ;;                                   # bare invocation or URL push
+  *) exclude="--not --remotes=$remote_name" ;;
+esac
 
 base_for() {
   # $1 = remote sha (all-zero for a brand-new ref)
@@ -70,7 +84,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ;;
     esac
   done <<EOF
-$(git rev-list --format='%H %G?' --no-commit-header "$base..$local_sha" 2>/dev/null)
+$(git rev-list --format='%H %G?' --no-commit-header "$base..$local_sha" $exclude 2>/dev/null)
 EOF
 done
 

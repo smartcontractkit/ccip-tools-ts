@@ -560,6 +560,36 @@ export class CCIPCommitNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a commit report covering the message exists on-chain, but the transaction
+ * that created it is outside the RPC endpoint's retained transaction history.
+ *
+ * Not transient on the endpoint that raised it — retrying there cannot recover a pruned
+ * transaction; only an endpoint with longer retention (or the CCIP API) can resolve it.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const verifications = await chain.getVerifications({ offRamp, request })
+ * } catch (error) {
+ *   if (error instanceof CCIPCommitHistoryPrunedError) {
+ *     console.log(error.context.endpoint, 'pruned the commit tx; use a longer-retention RPC')
+ *   }
+ * }
+ * ```
+ */
+export class CCIPCommitHistoryPrunedError extends CCIPError {
+  override readonly name = 'CCIPCommitHistoryPrunedError'
+  /** Creates a commit history pruned error. */
+  constructor(sequenceNumber: bigint, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.COMMIT_HISTORY_PRUNED,
+      `Commit report covering sequenceNumber=${sequenceNumber} exists, but its creating transaction is outside this RPC endpoint's retained history; use an endpoint with longer transaction retention`,
+      { ...options, isTransient: false, context: { ...options?.context, sequenceNumber } },
+    )
+  }
+}
+
+/**
  * Thrown when merkle root verification fails.
  *
  * @example

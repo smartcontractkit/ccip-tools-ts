@@ -177,8 +177,6 @@ import {
   type GenerateSetTokenAuthorityResult,
   type GenerateUpdateMetadataAuthorityParams,
   type GenerateUpdateMetadataAuthorityResult,
-  type GetTokenInfoParams,
-  type GetTokenInfoResult,
   ApproveToken,
   CreateTokenAccount,
   GetTokenInfo,
@@ -1925,6 +1923,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
    * accepted administrator.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
    *
    * @example
    * ```ts
@@ -1959,6 +1958,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
    * administrator, or `authority` differs from the wallet.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
    * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
    *
    * @example
