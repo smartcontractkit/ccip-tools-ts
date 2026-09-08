@@ -177,6 +177,8 @@ import {
   type GenerateSetTokenAuthorityResult,
   type GenerateUpdateMetadataAuthorityParams,
   type GenerateUpdateMetadataAuthorityResult,
+  type GetTokenInfoParams,
+  type GetTokenInfoResult,
   ApproveToken,
   CreateTokenAccount,
   GetTokenInfo,
@@ -2233,16 +2235,23 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads an SPL token mint's metadata, program, supply, and mint/freeze authorities.
+   * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
+   * authorities.
    *
    * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
-   * the SPL Token or Token-2022 mint account. Supply is in base units.
+   * the SPL Token or Token-2022 mint account. Supply is in base units. Solana-only; no EVM CCT
+   * equivalent exists.
+   *
+   * @see {@link setTokenAuthority} Sets the mint or freeze authorities returned here.
+   * @see {@link updateMetadataAuthority} Updates the Metaplex metadata associated with this mint.
+   * @see {@link getTokenPoolState} Reads pool configuration rather than mint state.
+   * @see {@link SolanaChain.getTokenInfo} Reads the underlying token metadata.
    *
    * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
-   * @throws {@link CCIPSplTokenInvalidError} If the mint is not a valid SPL token.
-   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
+   * @throws {@link CCIPSplTokenInvalidError} If the token metadata is not a valid SPL token.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
    *
    * @example
    * ```ts
