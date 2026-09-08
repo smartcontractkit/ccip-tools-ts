@@ -57,6 +57,11 @@ import {
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
 import {
+  type GetRebalancerParams,
+  type GetRebalancerResult,
+  GetRebalancer,
+} from './token-pool/operations/get-rebalancer.ts'
+import {
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   GetTokenPoolRemotes,
@@ -82,6 +87,7 @@ import {
   type SetRateLimitAdminParams,
   SetRateLimitAdmin,
 } from './token-pool/operations/set-rate-limit-admin.ts'
+import { type SetRebalancerParams, SetRebalancer } from './token-pool/operations/set-rebalancer.ts'
 import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
   type TransferOwnershipParams,
@@ -116,6 +122,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
+  readonly #setRebalancer = new SetRebalancer()
+  readonly #getRebalancer = new GetRebalancer()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
@@ -626,6 +634,82 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setDynamicConfig(opts: EVMExecuteParams<SetDynamicConfigParams>): Promise<TransactionResult> {
     return this.#setDynamicConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setRebalancer` tx (for multisig / offline signing): appoints the
+   * **LockRelease** pool role allowed to move liquidity (v1.5.0–v1.6.1).
+   * @remarks Owner-only, and the appointee — not the owner — is who
+   * {@link generateUnsignedProvideLiquidity} and {@link generateUnsignedWithdrawLiquidity} then
+   * accept. When `sender` is supplied it is checked against the pool's `owner()` before any
+   * calldata is built; omit it and no owner read is made (nothing to compare against).
+   *
+   * A zero `rebalancer` is accepted and revokes the role, which stops liquidity movement
+   * entirely: the pool then accepts those calls from nobody.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
+   * on its `ERC20LockBox` instead — see {@link authorizeLockboxCallers}
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
+   * address, or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedSetRebalancer({
+   *   poolAddress: '0xPool...',
+   *   rebalancer: '0xLiquidityOps...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetRebalancer(opts: SetRebalancerParams): Promise<UnsignedEVMTx> {
+    return this.#setRebalancer.generate(this.chain, opts)
+  }
+
+  /**
+   * Appoints the pool's rebalancer, signing + submitting with `opts.wallet`. `sender` defaults to
+   * the wallet's address and must equal it — the wallet must be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
+   * the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setRebalancer({
+   *   poolAddress: '0xPool...',
+   *   rebalancer: '0xLiquidityOps...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  setRebalancer(opts: EVMExecuteParams<SetRebalancerParams>): Promise<TransactionResult> {
+    return this.#setRebalancer.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a LockRelease pool's rebalancer — the account allowed to move its liquidity
+   * (v1.5.0–v1.6.1).
+   * @remarks Informational, for audit and UX: the liquidity write ops make this same check
+   * themselves, so there is no need to call this first.
+   * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer, which is what
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on.
+   * @returns The rebalancer, checksummed. The zero address when none is configured, meaning the
+   * pool accepts liquidity calls from nobody.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no rebalancer —
+   * its `ERC20LockBox` authorizes its own callers
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const rebalancer = await cct.getRebalancer({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getRebalancer(opts: GetRebalancerParams): Promise<GetRebalancerResult> {
+    return this.#getRebalancer.query(this.chain, opts)
   }
 
   /**
@@ -1327,6 +1411,11 @@ export type {
   SetChainRateLimiterConfigsParams,
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
+export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'
+export type {
+  GetRebalancerParams,
+  GetRebalancerResult,
+} from './token-pool/operations/get-rebalancer.ts'
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
