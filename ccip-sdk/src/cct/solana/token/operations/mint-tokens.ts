@@ -1,9 +1,10 @@
 import { createMintToInstruction } from '@solana/spl-token'
-import { type TransactionInstruction, PublicKey } from '@solana/web3.js'
+import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { resolveATA } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -110,17 +111,22 @@ export class MintTokens extends SolanaOperation<
         })
       : undefined
 
-    const existingTokenAccount = opts.createRecipientATA
-      ? undefined
-      : await resolveExistingTokenAccount(chain.connection, opts.tokenAddress, opts.recipient)
+    let tokenAccount: PublicKey
+    let tokenProgram: PublicKey
 
-    const tokenAccount = createRecipientATA
-      ? new PublicKey(createRecipientATA.tokenAccountAddress)
-      : existingTokenAccount!.tokenAccount
-
-    const tokenProgram = createRecipientATA
-      ? createRecipientATA.instructions[0]!.keys.at(-1)!.pubkey
-      : existingTokenAccount!.tokenProgram
+    if (opts.createRecipientATA) {
+      const resolved = await resolveATA(chain.connection, opts.tokenAddress, opts.recipient)
+      tokenAccount = resolved.ata
+      tokenProgram = resolved.tokenProgram
+    } else {
+      const existing = await resolveExistingTokenAccount(
+        chain.connection,
+        opts.tokenAddress,
+        opts.recipient,
+      )
+      tokenAccount = existing.tokenAccount
+      tokenProgram = existing.tokenProgram
+    }
 
     const instructions: TransactionInstruction[] = [
       ...(createRecipientATA?.instructions ?? []),

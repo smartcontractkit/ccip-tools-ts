@@ -3,7 +3,7 @@
 //   .then((res) => res.text())
 //   .then((text) => text.trim())
 export type LockreleaseTokenPool = {
-  version: '1.6.3'
+  version: '1.6.4'
   name: 'lockrelease_token_pool'
   instructions: [
     {
@@ -987,7 +987,7 @@ export type LockreleaseTokenPool = {
 }
 
 export const IDL: LockreleaseTokenPool = {
-  version: '1.6.3',
+  version: '1.6.4',
   name: 'lockrelease_token_pool',
   instructions: [
     {

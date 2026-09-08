@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash, createPrivateKey, createPublicKey, verify } from 'node:crypto'
 import { describe, it } from 'node:test'
 
-import { Ed25519TransactionSigner } from './canton.ts'
+import { Ed25519TransactionSigner } from './canton/index.ts'
 
 // ---------------------------------------------------------------------------
 // Test Constants

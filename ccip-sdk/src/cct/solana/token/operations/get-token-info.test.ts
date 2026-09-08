@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
+import { CCIPTokenDataParseError } from '../../../../errors/index.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { GetTokenInfo } from './get-token-info.ts'
 
@@ -46,10 +47,32 @@ describe('GetTokenInfo (cct/solana)', () => {
         ...metadata,
         tokenProgram: TOKEN_PROGRAM_ID.toBase58(),
         supply: 1_000_000n,
+        isInitialized: true,
         mintAuthority: mintAuthority.toBase58(),
         freezeAuthority: null,
       })
       assert.equal(received, tokenAddress)
+    })
+
+    it('rejects non-mint SPL accounts before fetching metadata', async () => {
+      let metadataCalls = 0
+      const chain = {
+        connection: {
+          getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(1) }),
+        },
+        getTokenInfo: async () => {
+          metadataCalls++
+          return { symbol: 'TKN', decimals: 6 }
+        },
+      } as unknown as SolanaChain
+
+      await assert.rejects(new GetTokenInfo().query(chain, { tokenAddress }), (error: unknown) => {
+        assert.ok(error instanceof CCIPTokenDataParseError)
+        assert.equal(error.context.token, tokenAddress)
+        assert.ok(error.cause instanceof Error)
+        return true
+      })
+      assert.equal(metadataCalls, 0)
     })
   })
 

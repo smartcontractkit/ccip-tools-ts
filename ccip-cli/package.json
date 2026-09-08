@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-cli",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "CCIP Command Line Interface, based on @chainlink/ccip-sdk",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -23,7 +23,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:unit": "node ../scripts/run-tests.mjs src --exclude integration,e2e,fork",
+    "test:unit": "node --test \"src/**/!(*integration|*e2e|*fork).test.ts\"",
     "lint": "oxfmt --check ./src && oxlint ./src",
     "lint:fix": "oxfmt ./src && oxlint --fix ./src",
     "typecheck": "tsc --noEmit",
@@ -43,18 +43,18 @@
     "!**/__mocks__"
   ],
   "devDependencies": {
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.1",
     "@types/update-notifier": "^6.0.8",
     "@types/yargs": "17.0.35",
-    "tsx": "4.23.12",
+    "tsx": "4.23.13",
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^6.3.1",
-    "@chainlink/ccip-sdk": "^1.13.0",
+    "@aptos-labs/ts-sdk": "^7.3.0",
+    "@chainlink/ccip-sdk": "^1.13.1",
     "@coral-xyz/anchor": "^0.29.0",
     "@ethers-ext/signer-ledger": "^6.0.0-beta.1",
-    "@inquirer/prompts": "8.5.2",
+    "@inquirer/prompts": "8.7.0",
     "@ledgerhq/hw-app-aptos": "6.37.0",
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
