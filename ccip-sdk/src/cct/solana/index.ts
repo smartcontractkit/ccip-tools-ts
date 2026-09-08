@@ -822,12 +822,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
-   * must be allowed to initialize the pool. Set `createPoolSignerATA` to also create the pool signer
-   * PDA's associated token account idempotently; otherwise use the returned `poolSignerAddress` with
-   * `generateUnsignedCreateTokenAccount` before `generateUnsignedSetPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `generateUnsignedCreateTokenAccount` before
+   * `generateUnsignedSetPool`, or transfers fail with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link generateUnsignedCreateTokenAccount}
    * @see {@link generateUnsignedSetPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
@@ -856,12 +869,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
-   * must be allowed to initialize the pool. Set `createPoolSignerATA` to also create the pool signer
-   * PDA's associated token account idempotently; otherwise use the returned `poolSignerAddress` with
-   * `createTokenAccount` before `setPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `createTokenAccount` before `setPool`, or transfers fail
+   * with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link createTokenAccount}
    * @see {@link setPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.

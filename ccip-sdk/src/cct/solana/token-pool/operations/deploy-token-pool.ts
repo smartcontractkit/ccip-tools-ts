@@ -43,7 +43,16 @@ type DeployTokenPoolParams = {
    * If omitted, the pool is initialized without an allowlist.
    */
   allowlist?: string[]
-  /** Create the pool signer PDA's associated token account idempotently. Defaults to false. */
+  /**
+   * Create the pool signer PDA's associated token account (`pool_token_account`) idempotently.
+   *
+   * @remarks The pool requires a `pool_token_account` (the associated token account owned by the
+   * `pool_signer` PDA) to lock/release or mint on transfers. Without it, a `ccip-send` fails with
+   * `AccountNotInitialized (3012)`. Setting `createPoolSignerATA: true` creates this account in the
+   * deploy transaction; otherwise create it separately before any transfer.
+   *
+   * Defaults to false.
+   */
   createPoolSignerATA?: boolean
   /** Pool authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
@@ -139,6 +148,7 @@ export class DeployTokenPool extends SolanaOperation<
     ]
 
     if (createPoolSignerATA) {
+      // Append ATA creation after initialize (initialize must be main instruction index 0)
       instructions.push(
         ...(
           await new CreateTokenAccount().generate(chain, {
