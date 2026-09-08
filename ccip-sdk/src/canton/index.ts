@@ -1427,6 +1427,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    /*
+    * TODO: this currently trusts the preparing participant node to act honestly.
+    *  While this level of trust is expected on Canton, it is not ideal - we could
+    *  decode the prepared transaction, present it to the user, and compute the
+    *  signing hash ourselves.
+    * */
+
     // Step 2 — Sign the hash
     const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
     this.logger.info(
