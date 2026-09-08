@@ -772,15 +772,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Gated on the pool's `rebalancer`, **not** its owner, and the tokens are sent to
    * `msg.sender` — so they land with the rebalancer, whoever signs. A given `sender` is checked
    * against `getRebalancer()` before any calldata is built.
-   * @remarks The pool's balance is read first, so withdrawing more than it holds is reported
-   * before signing. Advisory only — every CCIP transfer through the pool moves that balance, so a
-   * later shortfall still reverts `InsufficientLiquidity`.
+   * @remarks The pool's balance is read first, so withdrawing more than it can pay is reported
+   * before signing. Advisory only: every CCIP transfer moves that balance, so a later shortfall
+   * still reverts `InsufficientLiquidity`.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `amount` is zero, or `sender`
    * is given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
+   * @throws {@link CCTTxFailedError} if the pool's withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -826,9 +826,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool-upgrade primitive.
    * @remarks Two-step, because the new pool withdraws from the old one as its rebalancer: first
    * point the **old** pool's rebalancer at the new pool with
-   * {@link generateUnsignedSetRebalancer}, then call this on the **new** pool. Both preconditions
-   * are checked before any calldata is built — `from`'s rebalancer must be `poolAddress`, and a
-   * given `sender` must own `poolAddress`.
+   * {@link generateUnsignedSetRebalancer}, then call this on the **new** pool.
+   * @remarks The source pool is read before any calldata is built: it must be a LockRelease pool
+   * escrowing the **same token**, hold the amount, and have `poolAddress` as its rebalancer. The
+   * token check has no on-chain counterpart, and a mismatch does not revert: the destination would
+   * silently receive an asset it does not manage.
    * @remarks From v1.6.1, `amount: MaxUint256` means "the source pool's whole balance"; on a
    * v1.5.x pool that sentinel does not exist and is rejected rather than left to revert.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
@@ -836,8 +838,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `from` equals `poolAddress`,
-   * `amount` is zero, `from` does not have `poolAddress` as its rebalancer, or `sender` is given
-   * and does not own `poolAddress`
+   * `amount` is zero, `from` escrows a different token or does not have `poolAddress` as its
+   * rebalancer, or `sender` is given and does not own `poolAddress`
+   * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -864,8 +867,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, `from` does not have `poolAddress` as its rebalancer, or the wallet
-   * does not own `poolAddress`
+   * the wallet's address, the source pool is not wired to `poolAddress`, or the wallet does not
+   * own `poolAddress`
+   * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
    * `InsufficientLiquidity` when the source pool holds less than `amount`
    * @throws {@link CCTTxFailedError} if submission fails before broadcast

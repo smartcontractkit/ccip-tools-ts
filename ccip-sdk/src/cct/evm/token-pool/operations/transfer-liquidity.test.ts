@@ -11,6 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
+  CCTTxFailedError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type TransferLiquidityParams, TransferLiquidity } from './transfer-liquidity.ts'
@@ -18,6 +19,8 @@ import { type TransferLiquidityParams, TransferLiquidity } from './transfer-liqu
 const POOL = '0x' + '11'.repeat(20)
 const OLD_POOL = '0x' + '22'.repeat(20)
 const OWNER = '0x' + '33'.repeat(20)
+const TOKEN = '0x' + '55'.repeat(20)
+const OTHER_TOKEN = '0x' + '66'.repeat(20)
 const NOT_THE_OWNER = '0x' + '88'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const AMOUNT = 1_000000000000000000n
@@ -34,7 +37,7 @@ const dataFor = (from: string, amount: bigint) =>
 type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
 
-const REVERT = (to: string, data: string) =>
+const REVERT = (to: string | null, data: string) =>
   makeError('execution reverted', 'CALL_EXCEPTION', {
     action: 'call',
     data: '0x',
@@ -44,25 +47,37 @@ const REVERT = (to: string, data: string) =>
     revert: null,
   })
 
+/** ERC-20 side of the source-liquidity check, answered off a fresh Interface. */
+const ERC20 = new Interface(['function balanceOf(address account) view returns (uint256)'])
+
 /**
- * EVMChain stub: `typeAndVersion` reports the destination pool's type/version, and
- * `provider.call` answers per address — `owner()` on the destination pool, `getRebalancer()` on
- * the source pool. Every other pair reverts, which is what pins both which read goes where and
- * "no other RPC".
+ * EVMChain stub covering both pools: `typeAndVersion` answers per address, and `provider.call`
+ * answers `owner()` / `getToken()` on the destination and `getToken()` / `getRebalancer()` on the
+ * source, plus `balanceOf` on their token. Any other pair reverts, which pins both which read
+ * goes where and "no other RPC".
  */
 function stubChain({
   type = 'LockReleaseTokenPool',
   version = '1.5.0' as TokenPoolVersion,
   owner = OWNER,
-  /** The source pool's rebalancer; defaults to the destination pool, the wiring this op needs. */
-  sourceRebalancer = POOL as string | null,
+  /** The source pool's own type; a BurnMint pool holds no liquidity to transfer. */
+  sourceType = 'LockReleaseTokenPool' as string | null,
+  /** The source pool's rebalancer; defaults to the destination, the wiring this op needs. */
+  sourceRebalancer = POOL as string,
+  /** The source pool's escrowed token; defaults to the destination's. */
+  sourceToken = TOKEN as string,
+  /** Liquidity the source pool holds; defaults to exactly the transfer. */
+  sourceLiquidity = AMOUNT,
   seen = newSeen(),
 }: {
   type?: string
   version?: TokenPoolVersion
   owner?: string
-  /** `null` stands in for a `from` that does not declare `getRebalancer()` at all. */
-  sourceRebalancer?: string | null
+  /** `null` stands in for a `from` that does not report `typeAndVersion` at all. */
+  sourceType?: string | null
+  sourceRebalancer?: string
+  sourceToken?: string
+  sourceLiquidity?: bigint
   seen?: Seen
 } = {}): EVMChain {
   const iface = TOKEN_POOL_INTERFACES.LockRelease['1.5.1']
@@ -70,20 +85,30 @@ function stubChain({
     provider: {
       call: ({ to, data }: { to: string; data: string }) => {
         const fn = iface.getFunction(data.slice(0, 10))?.name
-        if (fn === 'owner' && to === POOL) {
-          seen.calls.push(`owner@pool`)
-          return Promise.resolve(iface.encodeFunctionResult(fn, [owner]))
+        const answer = (label: string, values: unknown[]) => {
+          seen.calls.push(label)
+          return Promise.resolve(iface.encodeFunctionResult(fn!, values))
         }
-        if (fn === 'getRebalancer' && to === OLD_POOL && sourceRebalancer !== null) {
-          seen.calls.push(`getRebalancer@from`)
-          return Promise.resolve(iface.encodeFunctionResult(fn, [sourceRebalancer]))
+        if (to === POOL && fn === 'owner') return answer('owner@pool', [owner])
+        if (to === POOL && fn === 'getToken') return answer('getToken@pool', [TOKEN])
+        if (to === OLD_POOL && fn === 'getToken') return answer('getToken@from', [sourceToken])
+        if (to === OLD_POOL && fn === 'getRebalancer')
+          return answer('getRebalancer@from', [sourceRebalancer])
+        if (ERC20.getFunction(data.slice(0, 10))?.name === 'balanceOf') {
+          seen.calls.push('balanceOf@from')
+          return Promise.resolve(ERC20.encodeFunctionResult('balanceOf', [sourceLiquidity]))
         }
         throw REVERT(to, data)
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    typeAndVersion: () => {
-      seen.calls.push('typeAndVersion')
+    typeAndVersion: (address: string) => {
+      if (address === OLD_POOL) {
+        if (sourceType === null) return Promise.reject(REVERT(address, '0x181f5a77'))
+        seen.calls.push('typeAndVersion@from')
+        return Promise.resolve(parseTypeAndVersion(`${sourceType} 1.6.1`))
+      }
+      seen.calls.push('typeAndVersion@pool')
       return Promise.resolve(parseTypeAndVersion(`${type} ${version}`))
     },
     nextNonce: () => Promise.resolve(0),
@@ -143,7 +168,15 @@ describe('TransferLiquidity (cct/evm)', () => {
     it('reads the rebalancer from the source pool and the owner from the destination', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
-      assert.deepEqual(seen.calls, ['typeAndVersion', 'getRebalancer@from', 'owner@pool'])
+      assert.deepEqual(seen.calls, [
+        'typeAndVersion@pool',
+        'typeAndVersion@from',
+        'getToken@pool',
+        'getToken@from',
+        'getRebalancer@from',
+        'balanceOf@from',
+        'owner@pool',
+      ])
     })
 
     it('omits from — and skips the owner read — when sender is not supplied', async () => {
@@ -152,7 +185,8 @@ describe('TransferLiquidity (cct/evm)', () => {
 
       assert.equal(unsigned.transactions[0]!.from, undefined)
       // the source-pool wiring is still checked: it holds regardless of who signs
-      assert.deepEqual(seen.calls, ['typeAndVersion', 'getRebalancer@from'])
+      assert.ok(seen.calls.includes('getRebalancer@from'))
+      assert.ok(!seen.calls.includes('owner@pool'), 'no sender to compare an owner against')
     })
   })
 
@@ -263,14 +297,47 @@ describe('TransferLiquidity (cct/evm)', () => {
       )
     })
 
-    it('reports a source that does not answer getRebalancer() against `from`', async () => {
+    it('rejects a source that does not answer typeAndVersion', async () => {
+      await assert.rejects(() => generate(stubChain({ sourceType: null })))
+    })
+
+    it('rejects a BurnMint source pool, which holds no liquidity to transfer', async () => {
       await assert.rejects(
-        () => generate(stubChain({ sourceRebalancer: null })),
+        () => generate(stubChain({ sourceType: 'BurnMintTokenPool' })),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === OLD_POOL &&
+          err.context.actual === 'BurnMintTokenPool',
+      )
+    })
+
+    it('rejects a source pool escrowing a different token, which the chain would not catch', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ sourceToken: OTHER_TOKEN })),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'from' &&
-          /LockRelease pool/.test(err.message),
+          err.message.includes(OTHER_TOKEN) &&
+          /does not manage/.test(err.message),
       )
+    })
+
+    it('rejects a transfer larger than the source pool holds', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ sourceLiquidity: AMOUNT - 1n })),
+        (err: unknown) =>
+          err instanceof CCTTxFailedError &&
+          err.context.operation === 'transferLiquidity' &&
+          /holds 999999999999999999 of/.test(err.message),
+      )
+    })
+
+    it('does not compare the sentinel to the source balance, which the pool resolves itself', async () => {
+      // an empty source pool still builds: transfer-all of nothing is a no-op, not a revert
+      const unsigned = await generate(stubChain({ version: '1.6.1', sourceLiquidity: 0n }), {
+        amount: MaxUint256,
+      })
+      assert.equal(unsigned.transactions[0]!.data, dataFor(OLD_POOL, MaxUint256))
     })
 
     it('rejects a sender that does not own the destination pool', async () => {

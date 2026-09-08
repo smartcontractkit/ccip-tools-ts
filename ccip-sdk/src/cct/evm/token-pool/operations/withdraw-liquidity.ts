@@ -75,10 +75,9 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
    * given) is the pool's rebalancer.
    * @remarks The rebalancer check lives here, not in {@link execute}, so the offline / multisig
    * path gets it too rather than being handed a transaction that reverts once signed.
-   * @remarks The pool's balance is pre-flighted ({@link assertPoolLiquidity}), for parity with
-   * Solana's `withdrawLiquidity`. Advisory only — every CCIP transfer through the pool moves that
-   * balance, so it catches "withdraw more than was ever provided" rather than proving the amount
-   * will still fit when the tx mines; a later shortfall still reverts `InsufficientLiquidity`.
+   * @remarks The pool's balance is pre-flighted ({@link assertPoolLiquidity}). Advisory only:
+   * every CCIP transfer moves that balance, so a later shortfall still reverts
+   * `InsufficientLiquidity`.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through an
    * `ERC20LockBox` instead

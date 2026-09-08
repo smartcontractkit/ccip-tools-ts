@@ -6,10 +6,10 @@
  * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist read
  * `applyAllowlistUpdates` pre-flights against ({@link readTokenPoolAllowlist}) plus the
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
- * liquidity reads with their guards ({@link readTokenPoolRebalancer},
- * {@link readTokenPoolAcceptsLiquidity}, {@link assertPoolRebalancer},
- * {@link assertLockReleasePool}). The write-side rate-limit shape lane-config ops share lives in
- * `rate-limit.ts`. Mirrors `token/contracts.ts`.
+ * liquidity layer: the rebalancer and liquidity reads plus the guards the liquidity ops pre-flight
+ * with ({@link assertLockReleasePool}, {@link assertPoolRebalancer},
+ * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}). The write-side rate-limit shape
+ * lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
@@ -428,10 +428,13 @@ export async function readTokenPoolAcceptsLiquidity(
 }
 
 /**
- * The token a pool escrows, plus a handle to it. `getToken()` is declared identically by every
- * pool type and version, so this needs no dispatch.
+ * The token a pool escrows, plus a handle to it, in one `eth_call`. `getToken()` is declared
+ * identically by every pool type and version, so this needs no dispatch.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool to read `getToken()` from.
+ * @returns The escrowed token, checksummed, and an ERC-20 contract bound to it.
  */
-async function readPoolToken(
+export async function readTokenPoolToken(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<{ token: string; erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI> }> {
@@ -450,9 +453,9 @@ async function readPoolToken(
  * only signal is an `ERC20InsufficientAllowance` revert at wallet-confirmation time, naming
  * neither the token to approve nor the pool to approve it to. The error names `approveToken`,
  * which grants exactly this allowance.
- * @remarks Advisory, not a guarantee: an allowance can be spent or revoked between building and
- * signing. It changes only by an explicit `approve` though, so unlike a pool balance — which
- * every CCIP transfer moves — a build-time reading is stable enough to be worth one round trip.
+ * @remarks Advisory: an allowance can be spent or revoked between building and signing. It moves
+ * only on an explicit `approve` though, so unlike a pool balance it is stable enough to be worth
+ * the round trip.
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool being deposited into.
@@ -468,7 +471,7 @@ export async function assertLiquidityFunding(
   account: string,
   amount: bigint,
 ): Promise<void> {
-  const { token, erc20 } = await readPoolToken(chain, poolAddress)
+  const { token, erc20 } = await readTokenPoolToken(chain, poolAddress)
   const [balance, allowance] = await Promise.all([
     erc20.balanceOf(account),
     erc20.allowance(account, poolAddress),
@@ -486,18 +489,16 @@ export async function assertLiquidityFunding(
 }
 
 /**
- * Pre-flights a `withdrawLiquidity` against the pool's own ERC-20 balance, which is what the pool
- * pays out of.
+ * Pre-flights a withdrawal against the pool's own ERC-20 balance, which is what it pays out of.
  *
- * @remarks Also parity with Solana, which checks the pool token account the same way.
  * @remarks Weaker than {@link assertLiquidityFunding}: a pool's balance moves with every CCIP
- * transfer through it, so this catches the common "withdraw more than was ever provided" mistake
- * rather than proving the withdrawal will still fit when the tx mines.
+ * transfer through it, so this catches "withdraw more than was ever provided" rather than proving
+ * the amount will still fit when the tx mines.
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool being withdrawn from.
  * @param amount - Withdrawal amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
+ * @throws {@link CCTTxFailedError} if the pool's balance is below `amount`
  */
 export async function assertPoolLiquidity(
   operation: string,
@@ -505,13 +506,29 @@ export async function assertPoolLiquidity(
   poolAddress: string,
   amount: bigint,
 ): Promise<void> {
-  const { token, erc20 } = await readPoolToken(chain, poolAddress)
-  const balance = await erc20.balanceOf(poolAddress)
-  if (balance >= amount) return
+  const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress)
+  if (liquidity >= amount) return
   throw new CCTTxFailedError(
     operation,
-    `pool ${poolAddress} holds ${balance} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+    `pool ${poolAddress} holds ${liquidity} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
   )
+}
+
+/**
+ * A pool's liquidity and the token it is denominated in, from one pair of calls.
+ *
+ * @remarks Returns the token as well so `transferLiquidity`, which checks both pools escrow the
+ * same one, needs no second read.
+ * @param chain - Chain to read from.
+ * @param poolAddress - LockRelease pool to read.
+ * @returns The escrowed token, checksummed, and the pool's balance of it.
+ */
+export async function readTokenPoolLiquidity(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<{ token: string; liquidity: bigint }> {
+  const { token, erc20 } = await readTokenPoolToken(chain, poolAddress)
+  return { token, liquidity: await erc20.balanceOf(poolAddress) }
 }
 
 /**

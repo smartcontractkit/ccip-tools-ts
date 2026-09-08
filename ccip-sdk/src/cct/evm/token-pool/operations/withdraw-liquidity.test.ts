@@ -52,7 +52,7 @@ function stubChain({
   type?: string
   version?: TokenPoolVersion
   rebalancer?: string
-  /** Liquidity the pool holds; defaults to exactly the withdrawal. */
+  /** The pool's balance of the escrowed token; defaults to exactly the withdrawal. */
   poolBalance?: bigint
   seen?: Seen
 } = {}): EVMChain {
@@ -149,7 +149,7 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, dataFor(amount))
     })
 
-    it('accepts a siloed pool, whose unsiloed bucket takes the same call', async () => {
+    it('accepts a siloed pool, which takes the same call', async () => {
       const unsigned = await generate(
         stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.6.1' }),
       )
@@ -179,7 +179,7 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       ['amount', 1 as never],
       ['amount', -1n],
       ['amount', 2n ** 256n],
-      // a withdrawal of nothing: a siloed pool reverts on it, every other pool mines a no-op
+      // a withdrawal of nothing would mine as a no-op
       ['amount', 0n],
       ['sender', 'not-an-address'],
     ] as const) {
