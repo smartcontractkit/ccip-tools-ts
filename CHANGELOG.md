@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Solana: `getTransaction`/`getLogs` now work on clusters emitting version-1 transactions (Agave 4.x devnet and later), via the `@solana/web3.js` 1.99.0 bump (v1 transaction read support); all dependents already accept `^1.99.0`, so no `overrides` needed and anchor stays at 0.29
 - Tests: the whole suite runs as one parallel `node --test` invocation — networked e2e/integration suites moved to disjoint low-activity lanes/fixtures with per-network endpoint sets configurable via `RPC_*` env vars (one per network, comma-separated lists allowed, wired to CI secrets), so suites never contend on a rate-limited endpoint and the full run finishes in ~5min
 - Aptos and Sui now support detecting execution failures — bundled Sui fixes: deep-history `getLogs` walks ascending checkpoint slices instead of paging from the tip, empty `getOwnedObjects` pointer lookups are memoized instead of retried for ~30s, and `offRamp` receipt filters no longer drop successful Aptos/Sui receipts
 

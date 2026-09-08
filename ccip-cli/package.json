@@ -59,7 +59,7 @@
     "@ledgerhq/hw-app-solana": "7.9.0",
     "@ledgerhq/hw-transport-node-hid": "6.32.0",
     "@mysten/sui": "^2.26.2",
-    "@solana/web3.js": "^1.98.4",
+    "@solana/web3.js": "^1.99.0",
     "@ton-community/ton-ledger": "^7.3.0",
     "@ton/crypto": "^3.3.0",
     "@ton/ton": "^16.3.0",

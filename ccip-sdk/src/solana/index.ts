@@ -403,7 +403,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async getTransaction(hash: string): Promise<SolanaTransaction> {
     const tx = await this.connection.getTransaction(hash, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: 1,
     })
     if (!tx)
       throw new CCIPTransactionNotFoundError(hash, { context: { network: this.network.name } })
@@ -826,7 +826,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
         for (const { signature } of sigs) {
           const tx = await this.connection.getTransaction(signature, {
-            maxSupportedTransactionVersion: 0,
+            maxSupportedTransactionVersion: 1,
             commitment: 'confirmed',
           })
           if (!tx) continue
