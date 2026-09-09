@@ -1,10 +1,11 @@
-import { AuthorityType, createSetAuthorityInstruction } from '@solana/spl-token'
+import { AuthorityType, createSetAuthorityInstruction, unpackMint } from '@solana/spl-token'
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
+import { CCIPTokenDataParseError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveTokenProgram } from '../../../../solana/utils.ts'
+import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -128,7 +129,29 @@ export class SetTokenAuthority extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedSetTokenAuthorityParams,
   ): Promise<UnsignedSolanaTx> {
-    const tokenProgram = await resolveTokenProgram(chain.connection, opts.tokenAddress)
+    const mintAccount = await resolveTokenMint(chain.connection, opts.tokenAddress)
+    let mint
+
+    try {
+      mint = unpackMint(opts.tokenAddress, mintAccount, mintAccount.owner)
+    } catch (cause) {
+      throw new CCIPTokenDataParseError(opts.tokenAddress.toBase58(), {
+        cause: cause instanceof Error ? cause : undefined,
+      })
+    }
+
+    for (const authorityType of opts.authorityTypes) {
+      const currentAuthority =
+        authorityType === TOKEN_AUTHORITY_TYPES.MINT ? mint.mintAuthority : mint.freezeAuthority
+      if (!currentAuthority?.equals(opts.authority)) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'authority',
+          `must match the token ${authorityType} authority`,
+        )
+      }
+    }
+
     const instructions: TransactionInstruction[] = opts.authorityTypes.map((authorityType) =>
       createSetAuthorityInstruction(
         opts.tokenAddress,
@@ -136,12 +159,16 @@ export class SetTokenAuthority extends SolanaOperation<
         SPL_AUTHORITY_TYPES[authorityType],
         opts.newAuthority,
         opts.multisigSigners,
-        tokenProgram,
+        mintAccount.owner,
       ),
     )
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, authorityTypes = ${opts.authorityTypes.join(',')}, newAuthority = ${opts.newAuthority?.toBase58() ?? 'revoked'}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, authorityTypes = ${opts.authorityTypes.join(
+        ',',
+      )}, newAuthority = ${opts.newAuthority?.toBase58() ?? 'revoked'}`,
     )
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
   }
@@ -170,6 +197,13 @@ export class SetTokenAuthority extends SolanaOperation<
       )
     }
 
-    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
+    return submit(
+      chain,
+      wallet,
+      await this.buildUnsigned(chain, parsed),
+      this.name,
+      computeUnits,
+      true,
+    )
   }
 }

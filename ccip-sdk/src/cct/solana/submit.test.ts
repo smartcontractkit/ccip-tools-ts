@@ -1,16 +1,26 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { SendTransactionError, TransactionExpiredTimeoutError } from '@solana/web3.js'
+import {
+  ComputeBudgetProgram,
+  Keypair,
+  SendTransactionError,
+  TransactionExpiredTimeoutError,
+  TransactionInstruction,
+} from '@solana/web3.js'
 
+import { ChainFamily } from '../../networks.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
-import { createCCTSubmitError } from './submit.ts'
+import { createCCTSubmitError, submit } from './submit.ts'
 
 const OP = 'setPool'
 
 describe('Submit error mapping (cct/solana)', () => {
   it('maps post-broadcast confirmation errors with a signature to not-confirmed', () => {
-    const cause = Object.assign(new Error('transaction was not confirmed'), { signature: 'abc' })
+    const cause = Object.assign(new Error('transaction was not confirmed'), {
+      signature: 'abc',
+    })
     const err = createCCTSubmitError(OP, cause)
 
     assert.ok(err instanceof CCTTxNotConfirmedError)
@@ -38,7 +48,9 @@ describe('Submit error mapping (cct/solana)', () => {
   })
 
   it('maps signed on-chain failures to permanent tx failed', () => {
-    const cause = Object.assign(new Error('custom program error: 0x1'), { signature: 'jkl' })
+    const cause = Object.assign(new Error('custom program error: 0x1'), {
+      signature: 'jkl',
+    })
     const err = createCCTSubmitError(OP, cause)
 
     assert.ok(err instanceof CCTTxFailedError)
@@ -70,5 +82,92 @@ describe('Submit error mapping (cct/solana)', () => {
 
     assert.ok(err instanceof CCTTxFailedError)
     assert.equal(err.isTransient, false)
+  })
+
+  it('does not submit a slice when its simulation rejects', async () => {
+    let sends = 0
+    const chain = {
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      connection: {
+        simulateTransaction: async () => ({
+          value: { err: { InstructionError: [2, { Custom: 4 }] }, logs: [] },
+        }),
+        sendTransaction: async () => {
+          sends++
+          return 'unused'
+        },
+      },
+    } as unknown as SolanaChain
+    const wallet = {
+      publicKey: Keypair.generate().publicKey,
+      signTransaction: async <T>(tx: T) => tx,
+    }
+
+    await assert.rejects(
+      submit(
+        chain,
+        wallet,
+        {
+          family: ChainFamily.Solana,
+          instructions: [
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 1 }),
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 2 }),
+          ],
+          mainIndex: 0,
+        },
+        OP,
+      ),
+      CCTTxFailedError,
+    )
+    assert.equal(sends, 0)
+  })
+
+  it('reports confirmed slices when a later slice fails', async () => {
+    const hash = 'confirmed-slice'
+    let simulations = 0
+    const chain = {
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      connection: {
+        simulateTransaction: async () => ({
+          value: {
+            err: ++simulations === 1 ? null : { InstructionError: [1, { Custom: 4 }] },
+            logs: [],
+          },
+        }),
+        getLatestBlockhash: async () => ({
+          blockhash: Keypair.generate().publicKey.toBase58(),
+          lastValidBlockHeight: 1,
+        }),
+        sendTransaction: async () => hash,
+        confirmTransaction: async () => ({ value: { err: null } }),
+      },
+    } as unknown as SolanaChain
+    const wallet = {
+      publicKey: Keypair.generate().publicKey,
+      signTransaction: async <T>(tx: T) => tx,
+    }
+    const instruction = () =>
+      new TransactionInstruction({
+        programId: Keypair.generate().publicKey,
+        keys: [],
+        data: Buffer.alloc(700),
+      })
+
+    await assert.rejects(
+      submit(
+        chain,
+        wallet,
+        {
+          family: ChainFamily.Solana,
+          instructions: [instruction(), instruction()],
+          mainIndex: 0,
+        },
+        OP,
+      ),
+      (error: unknown) =>
+        error instanceof CCTTxFailedError &&
+        Array.isArray(error.context.committedHashes) &&
+        error.context.committedHashes[0] === hash,
+    )
   })
 })
