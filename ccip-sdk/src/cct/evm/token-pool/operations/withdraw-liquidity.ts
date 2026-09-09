@@ -83,6 +83,7 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
    * `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool's rebalancer
    * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,

@@ -87,6 +87,7 @@ export class SetRebalancer extends EVMOperation<SetRebalancerParams> {
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which authorizes liquidity on
    * its `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,

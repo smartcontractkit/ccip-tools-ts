@@ -252,19 +252,10 @@ export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVer
  * same selector, same `address` return — by both {@link TOKEN_POOL_FAMILIES} at all four
  * supported versions, so the v1.5.0 `BurnMint` interface types the call for every pool.
  * @remarks **Deliberately not routed through the `getTokenPoolState` query op, and must not be
- * "simplified" back to it.** Two reasons, the first of which is a correctness bug and not just a
- * cost concern:
- *
- * 1. `getTokenPoolState` throws {@link CCTContractTypeInvalidError} for a v2.0.0
- *    `SiloedLockReleaseTokenPool`, because that pool escrows per remote chain
- *    (`getLockBox(uint64)`) and so has no single `lockBox` field for the query's result shape to
- *    report. `SiloedLockReleaseTokenPool` is nonetheless a supported {@link TokenPoolType}, and
- *    the write ops' calldata is perfectly valid against it. Gating an owner check through that
- *    query would therefore make every one of those ops permanently unusable on siloed pools —
- *    failing on an unrelated result-shape limitation while `generateUnsigned*` works fine.
- * 2. It costs 6–8 `eth_call`s (token, router, RMN proxy, rate-limit admin, supported chains,
- *    dynamic config, finality config, lockbox) plus a `getTokenInfo` round trip, and re-resolves
- *    `typeAndVersion`, all to obtain one address.
+ * "simplified" back to it.** That query costs 6–8 `eth_call`s (token, router, RMN proxy,
+ * rate-limit admin, supported chains, dynamic config, finality config, lockbox) plus a
+ * `getTokenInfo` round trip, and re-resolves `typeAndVersion`, all to obtain one address that
+ * this one call returns — on every owner-gated write op, at every version.
  *
  * This mirrors `token-admin-registry/operations/transfer-admin.ts`, which likewise does its own
  * narrow pre-tx read rather than going through a read op.

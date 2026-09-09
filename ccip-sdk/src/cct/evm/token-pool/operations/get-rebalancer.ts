@@ -47,6 +47,7 @@ export class GetRebalancer extends EVMQuery<GetRebalancerParams, GetRebalancerRe
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no rebalancer: it
    * escrows through an external `ERC20LockBox`, which authorizes its own callers
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async read(
     chain: EVMChain,

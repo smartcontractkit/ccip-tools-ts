@@ -18,10 +18,7 @@ import {
   type AuthorizeLockboxCallersParams,
   AuthorizeLockboxCallers,
 } from './lockbox/operations/authorize-callers.ts'
-import {
-  type DeployLockboxParams,
-  DeployLockbox,
-} from './lockbox/operations/deploy-lockbox.ts'
+import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import {
   type AcceptAdminParams,
@@ -41,18 +38,12 @@ import {
   type RegisterAdminParams,
   RegisterAdmin,
 } from './token-admin-registry/operations/register-admin.ts'
-import {
-  type SetPoolParams,
-  SetPool,
-} from './token-admin-registry/operations/set-pool.ts'
+import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
 import {
   type TransferAdminParams,
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
-import {
-  type AddRemotePoolParams,
-  AddRemotePool,
-} from './token-pool/operations/add-remote-pool.ts'
+import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
 import {
   type ApplyAllowlistUpdatesParams,
   ApplyAllowlistUpdates,
@@ -100,14 +91,8 @@ import {
   type SetRateLimitAdminParams,
   SetRateLimitAdmin,
 } from './token-pool/operations/set-rate-limit-admin.ts'
-import {
-  type SetRebalancerParams,
-  SetRebalancer,
-} from './token-pool/operations/set-rebalancer.ts'
-import {
-  type SetRemotePoolParams,
-  SetRemotePool,
-} from './token-pool/operations/set-remote-pool.ts'
+import { type SetRebalancerParams, SetRebalancer } from './token-pool/operations/set-rebalancer.ts'
+import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
   type TransferLiquidityParams,
   TransferLiquidity,
@@ -120,14 +105,8 @@ import {
   type WithdrawLiquidityParams,
   WithdrawLiquidity,
 } from './token-pool/operations/withdraw-liquidity.ts'
-import {
-  type ApproveTokenParams,
-  ApproveToken,
-} from './token/operations/approve-token.ts'
-import {
-  type DeployTokenParams,
-  DeployToken,
-} from './token/operations/deploy-token.ts'
+import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
+import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
   type GetBurnersParams,
   type GetBurnersResult,
@@ -138,16 +117,8 @@ import {
   type GetMintersResult,
   GetMinters,
 } from './token/operations/get-minters.ts'
-import {
-  type IsBurnerParams,
-  type IsBurnerResult,
-  IsBurner,
-} from './token/operations/is-burner.ts'
-import {
-  type IsMinterParams,
-  type IsMinterResult,
-  IsMinter,
-} from './token/operations/is-minter.ts'
+import { type IsBurnerParams, type IsBurnerResult, IsBurner } from './token/operations/is-burner.ts'
+import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/operations/is-minter.ts'
 import { type MintParams, Mint } from './token/operations/mint.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
@@ -213,10 +184,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /** Creates from an RPC URL. */
-  static async fromUrl(
-    url: string,
-    ctx?: ChainContext,
-  ): Promise<EVMTokenManager> {
+  static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMTokenManager> {
     return new EVMTokenManager(await EVMChain.fromUrl(url, ctx))
   }
 
@@ -255,9 +223,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedRegisterAdmin(
-    opts: RegisterAdminParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedRegisterAdmin(opts: RegisterAdminParams): Promise<UnsignedEVMTx> {
     return this.#registerAdmin.generate(this.chain, opts)
   }
 
@@ -286,9 +252,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  registerAdmin(
-    opts: EVMExecuteParams<RegisterAdminParams>,
-  ): Promise<TransactionResult> {
+  registerAdmin(opts: EVMExecuteParams<RegisterAdminParams>): Promise<TransactionResult> {
     return this.#registerAdmin.execute(this.chain, opts)
   }
 
@@ -350,9 +314,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedTransferAdmin(
-    opts: TransferAdminParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedTransferAdmin(opts: TransferAdminParams): Promise<UnsignedEVMTx> {
     return this.#transferAdmin.generate(this.chain, opts)
   }
 
@@ -378,9 +340,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  transferAdmin(
-    opts: EVMExecuteParams<TransferAdminParams>,
-  ): Promise<TransactionResult> {
+  transferAdmin(opts: EVMExecuteParams<TransferAdminParams>): Promise<TransactionResult> {
     return this.#transferAdmin.execute(this.chain, opts)
   }
 
@@ -424,9 +384,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  acceptAdmin(
-    opts: EVMExecuteParams<AcceptAdminParams>,
-  ): Promise<TransactionResult> {
+  acceptAdmin(opts: EVMExecuteParams<AcceptAdminParams>): Promise<TransactionResult> {
     return this.#acceptAdmin.execute(this.chain, opts)
   }
 
@@ -451,9 +409,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * }
    * ```
    */
-  getTokenAdminRegistry(
-    opts: GetTokenAdminRegistryParams,
-  ): Promise<GetTokenAdminRegistryResult> {
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
     return this.#getTokenAdminRegistry.query(this.chain, opts)
   }
 
@@ -468,9 +424,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const tokens = await cct.getSupportedTokens({ address: '0xTokenAdminRegistry...' })
    * ```
    */
-  getSupportedTokens(
-    opts: GetSupportedTokensParams,
-  ): Promise<GetSupportedTokensResult> {
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<GetSupportedTokensResult> {
     return this.#getSupportedTokens.query(this.chain, opts)
   }
 
@@ -480,9 +434,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * calldata is stable across pool versions, so the resolved encoding is version/type-independent.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
-  generateUnsignedTransferOwnership(
-    opts: TransferOwnershipParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {
     return this.#transferOwnership.generate(this.chain, opts)
   }
 
@@ -492,9 +444,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    */
-  transferOwnership(
-    opts: EVMExecuteParams<TransferOwnershipParams>,
-  ): Promise<TransactionResult> {
+  transferOwnership(opts: EVMExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
     return this.#transferOwnership.execute(this.chain, opts)
   }
 
@@ -622,9 +572,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedSetRateLimitAdmin(
-    opts: SetRateLimitAdminParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedSetRateLimitAdmin(opts: SetRateLimitAdminParams): Promise<UnsignedEVMTx> {
     return this.#setRateLimitAdmin.generate(this.chain, opts)
   }
 
@@ -647,9 +595,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setRateLimitAdmin(
-    opts: EVMExecuteParams<SetRateLimitAdminParams>,
-  ): Promise<TransactionResult> {
+  setRateLimitAdmin(opts: EVMExecuteParams<SetRateLimitAdminParams>): Promise<TransactionResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
   }
 
@@ -688,9 +634,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedSetDynamicConfig(
-    opts: SetDynamicConfigParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedSetDynamicConfig(opts: SetDynamicConfigParams): Promise<UnsignedEVMTx> {
     return this.#setDynamicConfig.generate(this.chain, opts)
   }
 
@@ -723,9 +667,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setDynamicConfig(
-    opts: EVMExecuteParams<SetDynamicConfigParams>,
-  ): Promise<TransactionResult> {
+  setDynamicConfig(opts: EVMExecuteParams<SetDynamicConfigParams>): Promise<TransactionResult> {
     return this.#setDynamicConfig.execute(this.chain, opts)
   }
 
@@ -750,9 +692,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * await cct.provideLiquidity({ poolAddress: pool, amount, wallet })
    * ```
    */
-  generateUnsignedApproveToken(
-    opts: ApproveTokenParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedApproveToken(opts: ApproveTokenParams): Promise<UnsignedEVMTx> {
     return this.#approveToken.generate(this.chain, opts)
   }
 
@@ -776,9 +716,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  approveToken(
-    opts: EVMExecuteParams<ApproveTokenParams>,
-  ): Promise<TransactionResult> {
+  approveToken(opts: EVMExecuteParams<ApproveTokenParams>): Promise<TransactionResult> {
     return this.#approveToken.execute(this.chain, opts)
   }
 
@@ -790,10 +728,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `Unauthorized` for everyone else, the owner included. A given `sender` is checked against
    * `getRebalancer()` before any calldata is built.
    * @remarks The rebalancer must hold `amount` of the pool's token **and** have approved the pool
-   * for it — the deposit is a `transferFrom`. Both are read before the calldata is returned, so a
-   * missing approval is reported here instead of reverting `ERC20InsufficientAllowance` in the
-   * wallet. Matches Solana's `provideLiquidity`, which likewise refuses to build without the
-   * delegation behind it.
+   * for it — the deposit is a `transferFrom`. Set that allowance with
+   * {@link generateUnsignedApproveToken} / {@link approveToken}, `spender` being the pool. Both
+   * are read before the calldata is returned, so a missing approval is reported here instead of
+   * reverting `ERC20InsufficientAllowance` in the wallet. Matches Solana's `provideLiquidity`,
+   * which likewise refuses to build without the delegation behind it.
    * @remarks On a v1.5.0 / v1.5.1 pool the immutable `acceptLiquidity` flag is read too: a pool
    * deployed with it `false` can never take deposits, so that is reported before signing rather
    * than as a `LiquidityNotAccepted` revert. v1.6.1 dropped the flag.
@@ -816,16 +755,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedProvideLiquidity(
-    opts: ProvideLiquidityParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedProvideLiquidity(opts: ProvideLiquidityParams): Promise<UnsignedEVMTx> {
     return this.#provideLiquidity.generate(this.chain, opts)
   }
 
   /**
    * Deposits liquidity into a LockRelease pool, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool's
-   * rebalancer, and must have approved `amount` to the pool.
+   * rebalancer, and must have approved `amount` to the pool with {@link approveToken}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
@@ -844,9 +781,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  provideLiquidity(
-    opts: EVMExecuteParams<ProvideLiquidityParams>,
-  ): Promise<TransactionResult> {
+  provideLiquidity(opts: EVMExecuteParams<ProvideLiquidityParams>): Promise<TransactionResult> {
     return this.#provideLiquidity.execute(this.chain, opts)
   }
 
@@ -876,9 +811,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedWithdrawLiquidity(
-    opts: WithdrawLiquidityParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedWithdrawLiquidity(opts: WithdrawLiquidityParams): Promise<UnsignedEVMTx> {
     return this.#withdrawLiquidity.generate(this.chain, opts)
   }
 
@@ -902,9 +835,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  withdrawLiquidity(
-    opts: EVMExecuteParams<WithdrawLiquidityParams>,
-  ): Promise<TransactionResult> {
+  withdrawLiquidity(opts: EVMExecuteParams<WithdrawLiquidityParams>): Promise<TransactionResult> {
     return this.#withdrawLiquidity.execute(this.chain, opts)
   }
 
@@ -932,20 +863,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
+   * import { MaxUint256 } from 'ethers'
+   *
    * // step 1, on the old pool: let the new pool withdraw from it
    * await cct.setRebalancer({ poolAddress: oldPool, rebalancer: newPool, wallet })
    * // step 2, on the new pool: pull everything across (v1.6.1+)
    * const unsigned = await cct.generateUnsignedTransferLiquidity({
    *   poolAddress: newPool,
-   *   from: oldPool,
-   *   amount: MaxUint256,
+   *   from: oldPool, // the source pool, not the signer — see `sender`
+   *   amount: MaxUint256, // the source pool's whole balance
    *   sender: '0xOwner...',
    * })
    * ```
    */
-  generateUnsignedTransferLiquidity(
-    opts: TransferLiquidityParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedTransferLiquidity(opts: TransferLiquidityParams): Promise<UnsignedEVMTx> {
     return this.#transferLiquidity.generate(this.chain, opts)
   }
 
@@ -974,9 +905,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  transferLiquidity(
-    opts: EVMExecuteParams<TransferLiquidityParams>,
-  ): Promise<TransactionResult> {
+  transferLiquidity(opts: EVMExecuteParams<TransferLiquidityParams>): Promise<TransactionResult> {
     return this.#transferLiquidity.execute(this.chain, opts)
   }
 
@@ -1006,9 +935,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedSetRebalancer(
-    opts: SetRebalancerParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedSetRebalancer(opts: SetRebalancerParams): Promise<UnsignedEVMTx> {
     return this.#setRebalancer.generate(this.chain, opts)
   }
 
@@ -1031,9 +958,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setRebalancer(
-    opts: EVMExecuteParams<SetRebalancerParams>,
-  ): Promise<TransactionResult> {
+  setRebalancer(opts: EVMExecuteParams<SetRebalancerParams>): Promise<TransactionResult> {
     return this.#setRebalancer.execute(this.chain, opts)
   }
 
@@ -1105,9 +1030,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployToken(
-    opts: EVMExecuteParams<DeployTokenParams>,
-  ): Promise<DeployResult> {
+  deployToken(opts: EVMExecuteParams<DeployTokenParams>): Promise<DeployResult> {
     return this.#deployToken.execute(this.chain, opts)
   }
 
@@ -1265,9 +1188,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedDeployTokenPool(
-    opts: DeployTokenPoolParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedDeployTokenPool(opts: DeployTokenPoolParams): Promise<UnsignedEVMTx> {
     return this.#deployTokenPool.generate(this.chain, opts)
   }
 
@@ -1299,9 +1220,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployTokenPool(
-    opts: EVMExecuteParams<DeployTokenPoolParams>,
-  ): Promise<DeployResult> {
+  deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
   }
 
@@ -1321,9 +1240,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedDeployLockbox(
-    opts: DeployLockboxParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedDeployLockbox(opts: DeployLockboxParams): Promise<UnsignedEVMTx> {
     return this.#deployLockbox.generate(this.chain, opts)
   }
 
@@ -1345,9 +1262,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  deployLockbox(
-    opts: EVMExecuteParams<DeployLockboxParams>,
-  ): Promise<DeployResult> {
+  deployLockbox(opts: EVMExecuteParams<DeployLockboxParams>): Promise<DeployResult> {
     return this.#deployLockbox.execute(this.chain, opts)
   }
 
@@ -1423,9 +1338,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * }
    * ```
    */
-  getTokenPoolState(
-    opts: GetTokenPoolStateParams,
-  ): Promise<GetTokenPoolStateResult> {
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 
@@ -1469,9 +1382,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  getTokenPoolRemotes(
-    opts: GetTokenPoolRemotesParams,
-  ): Promise<GetTokenPoolRemotesResult> {
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
     return this.#getTokenPoolRemotes.query(this.chain, opts)
   }
 
@@ -1502,9 +1413,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedSetRemotePool(
-    opts: SetRemotePoolParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedSetRemotePool(opts: SetRemotePoolParams): Promise<UnsignedEVMTx> {
     return this.#setRemotePool.generate(this.chain, opts)
   }
 
@@ -1532,9 +1441,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  setRemotePool(
-    opts: EVMExecuteParams<SetRemotePoolParams>,
-  ): Promise<TransactionResult> {
+  setRemotePool(opts: EVMExecuteParams<SetRemotePoolParams>): Promise<TransactionResult> {
     return this.#setRemotePool.execute(this.chain, opts)
   }
 
@@ -1566,9 +1473,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedAddRemotePool(
-    opts: AddRemotePoolParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedAddRemotePool(opts: AddRemotePoolParams): Promise<UnsignedEVMTx> {
     return this.#addRemotePool.generate(this.chain, opts)
   }
 
@@ -1596,9 +1501,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  addRemotePool(
-    opts: EVMExecuteParams<AddRemotePoolParams>,
-  ): Promise<TransactionResult> {
+  addRemotePool(opts: EVMExecuteParams<AddRemotePoolParams>): Promise<TransactionResult> {
     return this.#addRemotePool.execute(this.chain, opts)
   }
 
@@ -1630,9 +1533,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedRemoveRemotePool(
-    opts: RemoveRemotePoolParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedRemoveRemotePool(opts: RemoveRemotePoolParams): Promise<UnsignedEVMTx> {
     return this.#removeRemotePool.generate(this.chain, opts)
   }
 
@@ -1660,9 +1561,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  removeRemotePool(
-    opts: EVMExecuteParams<RemoveRemotePoolParams>,
-  ): Promise<TransactionResult> {
+  removeRemotePool(opts: EVMExecuteParams<RemoveRemotePoolParams>): Promise<TransactionResult> {
     return this.#removeRemotePool.execute(this.chain, opts)
   }
 
@@ -1700,9 +1599,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  applyChainUpdates(
-    opts: EVMExecuteParams<ApplyChainUpdatesParams>,
-  ): Promise<TransactionResult> {
+  applyChainUpdates(opts: EVMExecuteParams<ApplyChainUpdatesParams>): Promise<TransactionResult> {
     return this.#applyChainUpdates.execute(this.chain, opts)
   }
 
@@ -1777,9 +1674,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedApplyChainUpdates(
-    opts: ApplyChainUpdatesParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedApplyChainUpdates(opts: ApplyChainUpdatesParams): Promise<UnsignedEVMTx> {
     return this.#applyChainUpdates.generate(this.chain, opts)
   }
 
@@ -1820,9 +1715,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * })
    * ```
    */
-  generateUnsignedApplyAllowlistUpdates(
-    opts: ApplyAllowlistUpdatesParams,
-  ): Promise<UnsignedEVMTx> {
+  generateUnsignedApplyAllowlistUpdates(opts: ApplyAllowlistUpdatesParams): Promise<UnsignedEVMTx> {
     return this.#applyAllowlistUpdates.generate(this.chain, opts)
   }
 
@@ -1882,22 +1775,10 @@ export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type { ApproveTokenParams } from './token/operations/approve-token.ts'
 export type { MintParams } from './token/operations/mint.ts'
-export type {
-  GetMintersParams,
-  GetMintersResult,
-} from './token/operations/get-minters.ts'
-export type {
-  GetBurnersParams,
-  GetBurnersResult,
-} from './token/operations/get-burners.ts'
-export type {
-  IsMinterParams,
-  IsMinterResult,
-} from './token/operations/is-minter.ts'
-export type {
-  IsBurnerParams,
-  IsBurnerResult,
-} from './token/operations/is-burner.ts'
+export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
+export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
+export type { IsMinterParams, IsMinterResult } from './token/operations/is-minter.ts'
+export type { IsBurnerParams, IsBurnerResult } from './token/operations/is-burner.ts'
 export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,

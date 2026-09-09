@@ -6,8 +6,9 @@
  * is to appoint the rebalancer with {@link SetRebalancer}.
  *
  * @remarks The deposit is a `transferFrom` on the rebalancer, so the tokens must be **approved to
- * the pool** first. That is pre-flighted here ({@link assertLiquidityFunding}) rather than left to
- * revert `ERC20InsufficientAllowance` in the wallet, matching Solana's `provideLiquidity`.
+ * the pool** first — see `token/operations/approve-token.ts`. That is pre-flighted here
+ * ({@link assertLiquidityFunding}) rather than left to revert `ERC20InsufficientAllowance` in the
+ * wallet, matching Solana's `provideLiquidity`.
  *
  * @remarks **Removed in v2.0.0**, where a LockRelease pool escrows through an external
  * `ERC20LockBox` instead of holding liquidity itself.
@@ -93,6 +94,7 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
    * given and is not the pool's rebalancer
    * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the pool for, less than
    * `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,

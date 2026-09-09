@@ -51,8 +51,12 @@ export type TransferLiquidityParams = {
    * liquidity. Must be non-zero: it is the tx `to`. */
   poolAddress: string
   /**
-   * Source pool to pull liquidity out of, typically the pool being replaced. Must already have
-   * `poolAddress` set as its rebalancer, which is what authorizes the withdrawal.
+   * **Source pool** — not the tx sender, which is `sender`. The pool liquidity is pulled *out
+   * of*, typically the one being replaced; `poolAddress` is where it lands. Named after the
+   * on-chain `transferLiquidity(address from, uint256 amount)` parameter.
+   *
+   * Must already have `poolAddress` set as its rebalancer, which is what authorizes the
+   * withdrawal.
    */
   from: string
   /**
@@ -174,6 +178,7 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
    * escrow different tokens, `from` does not have the destination pool as its rebalancer, or
    * `sender` is given and does not own the destination pool
    * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,
