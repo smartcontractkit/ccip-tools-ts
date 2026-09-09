@@ -21,7 +21,12 @@ import {
 } from '../../operation.ts'
 import { deriveMetadataAddress } from '../../programs/token.ts'
 import { submit } from '../../submit.ts'
-import { validateOptionalPublicKey, validatePublicKey } from '../../validate.ts'
+import {
+  U64_MAX,
+  validateBigInt,
+  validateOptionalPublicKey,
+  validatePublicKey,
+} from '../../validate.ts'
 
 type BaseDeployTokenParams = {
   /** Mint decimals. Must be an integer between 0 and 255. */
@@ -248,11 +253,8 @@ function validateBaseParams(operation: string, params: GenerateDeployTokenParams
 }
 
 function validatePreMintParams(operation: string, params: GenerateDeployTokenParams): void {
-  if (
-    params.preMint !== undefined &&
-    (typeof params.preMint !== 'bigint' || params.preMint <= 0n)
-  ) {
-    throw new CCTParamsInvalidError(operation, 'preMint', 'must be a positive bigint')
+  if (params.preMint !== undefined) {
+    validateBigInt(operation, 'preMint', params.preMint, 1n, U64_MAX)
   }
   if (params.preMint !== undefined && !params.preMintRecipient) {
     throw new CCTParamsInvalidError(
