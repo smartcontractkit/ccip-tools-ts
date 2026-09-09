@@ -86,6 +86,52 @@ export function validatePublicKeys(operation: string, param: string, values: unk
 }
 
 /**
+ * Asserts public keys do not contain duplicates.
+ * @throws CCTParamsInvalidError if a public key is duplicated.
+ */
+export function validateUniquePublicKeys(
+  operation: string,
+  param: string,
+  publicKeys: PublicKey[],
+): void {
+  if (new Set(publicKeys.map((publicKey) => publicKey.toBase58())).size !== publicKeys.length) {
+    throw new CCTParamsInvalidError(operation, param, 'must not contain duplicate addresses')
+  }
+}
+
+/**
+ * Asserts bigint chain selectors do not contain duplicates.
+ * @throws CCTParamsInvalidError if a chain selector is duplicated.
+ */
+export function validateUniqueChainSelectors(
+  operation: string,
+  param: string,
+  selectors: unknown[],
+): void {
+  const seen = new Set<bigint>()
+  for (const [i, selector] of selectors.entries()) {
+    if (typeof selector === 'bigint' && seen.has(selector)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate chain selectors',
+      )
+    }
+    if (typeof selector === 'bigint') seen.add(selector)
+  }
+}
+
+/**
+ * Asserts hex byte values do not contain duplicates.
+ * @throws CCTParamsInvalidError if a hex byte value is duplicated.
+ */
+export function validateUniqueHexBytes(operation: string, param: string, values: Buffer[]): void {
+  if (new Set(values.map((value) => value.toString('hex'))).size !== values.length) {
+    throw new CCTParamsInvalidError(operation, param, 'must not contain duplicate hex values')
+  }
+}
+
+/**
  * Asserts `value` is a non-empty string.
  * @throws CCTParamsInvalidError if `value` is not a non-empty string.
  */

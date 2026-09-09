@@ -23,6 +23,8 @@ import {
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
+  validateUniqueChainSelectors,
+  validateUniqueHexBytes,
   validateWritableIndexes,
 } from './validate.ts'
 
@@ -225,6 +227,27 @@ describe('Validate (cct/solana)', () => {
       () => validateBigInt('op', 'selector', 2n, undefined, 1n),
       (err: unknown) =>
         err instanceof CCTParamsInvalidError && err.context.reason === 'must be a bigint <= 1',
+    )
+  })
+
+  it('rejects duplicate chain selectors', () => {
+    assert.doesNotThrow(() => validateUniqueChainSelectors('op', 'selectors', [1n, 2n]))
+    assert.throws(
+      () => validateUniqueChainSelectors('op', 'selectors', [1n, 1n]),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'selectors[1]',
+    )
+  })
+
+  it('rejects duplicate hex byte values', () => {
+    assert.doesNotThrow(() => validateUniqueHexBytes('op', 'addresses', [Buffer.from('01', 'hex')]))
+    assert.throws(
+      () =>
+        validateUniqueHexBytes('op', 'addresses', [
+          Buffer.from('01', 'hex'),
+          Buffer.from('01', 'hex'),
+        ]),
+      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'addresses',
     )
   })
 
