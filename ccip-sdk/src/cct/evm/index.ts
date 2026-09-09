@@ -43,6 +43,10 @@ import {
   type TransferAdminParams,
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
+import {
+  type AcceptPoolOwnershipParams,
+  AcceptPoolOwnership,
+} from './token-pool/operations/accept-pool-ownership.ts'
 import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
 import {
   type ApplyAllowlistUpdatesParams,
@@ -84,16 +88,26 @@ import {
 } from './token-pool/operations/set-rate-limit-admin.ts'
 import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
 import {
-  type TransferOwnershipParams,
-  TransferOwnership,
-} from './token-pool/operations/transfer-ownership.ts'
+  type TransferPoolOwnershipParams,
+  TransferPoolOwnership,
+} from './token-pool/operations/transfer-pool-ownership.ts'
+import {
+  type AcceptTokenOwnershipParams,
+  AcceptTokenOwnership,
+} from './token/operations/accept-token-ownership.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
+import {
+  type TransferTokenOwnershipParams,
+  TransferTokenOwnership,
+} from './token/operations/transfer-token-ownership.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly chain: EVMChain
   // Token operations
   readonly #deployToken = new DeployToken()
+  readonly #transferTokenOwnership = new TransferTokenOwnership()
+  readonly #acceptTokenOwnership = new AcceptTokenOwnership()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -105,7 +119,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
-  readonly #transferOwnership = new TransferOwnership()
+  readonly #transferPoolOwnership = new TransferPoolOwnership()
+  readonly #acceptPoolOwnership = new AcceptPoolOwnership()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #setRemotePool = new SetRemotePool()
@@ -257,7 +272,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned TokenAdminRegistry `transferAdmin` tx (for multisig / offline signing).
    * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the
    * handoff. This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
-   * (see {@link transferOwnership}); do not confuse the two.
+   * (see {@link transferPoolOwnership}); do not confuse the two.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is not the
    * token's current registry administrator (including a not-yet-accepted registration)
    * @example
@@ -279,7 +294,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Proposes a new TokenAdminRegistry administrator, signing + submitting with `opts.wallet`
    * (the current registry admin). Two-step: `newAdmin` must separately call `acceptAdmin`.
    * This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
-   * (see {@link transferOwnership}); do not confuse the two.
+   * (see {@link transferPoolOwnership}); do not confuse the two.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
    * token's current registry administrator (including a not-yet-accepted registration), or if an
@@ -389,20 +404,192 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned pool `transferOwnership` tx (for multisig / offline signing). Probes the
    * pool's on-chain `typeAndVersion` to resolve its interface + encoder; the `transferOwnership`
    * calldata is stable across pool versions, so the resolved encoding is version/type-independent.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @remarks Step one of two: nothing changes until `newOwner` calls {@link acceptPoolOwnership},
+   * and until then the current owner keeps every privilege. Re-proposing replaces the pending
+   * address, and proposing the zero address cancels the transfer outright.
+   * @remarks `sender` is pre-flighted against the pool's on-chain `owner()` (one extra `eth_call`),
+   * so an unauthorized proposer is reported before a multisig reviews and signs. Omit it to build
+   * the calldata without that read, when the eventual signer is not yet known.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`
+   * (the pool would revert `CannotTransferToSelf`), or if `sender` is given and is not the pool
+   * owner
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedTransferPoolOwnership({
+   *   poolAddress: '0xPool...',
+   *   newOwner: '0xNewOwner...', // must separately call acceptPoolOwnership
+   *   sender: '0xCurrentOwner...',
+   * })
+   * ```
    */
-  generateUnsignedTransferOwnership(opts: TransferOwnershipParams): Promise<UnsignedEVMTx> {
-    return this.#transferOwnership.generate(this.chain, opts)
+  generateUnsignedTransferPoolOwnership(opts: TransferPoolOwnershipParams): Promise<UnsignedEVMTx> {
+    return this.#transferPoolOwnership.generate(this.chain, opts)
   }
 
   /**
-   * Proposes a new pool owner (two-step), signing + submitting with `opts.wallet`.
+   * Proposes a new pool owner, signing + submitting with `opts.wallet` — which must be the pool's
+   * current owner, and is what `sender` defaults to. Step one of two, per
+   * {@link generateUnsignedTransferPoolOwnership}: ownership moves only once `newOwner` calls
+   * {@link acceptPoolOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
+   * signer, if `sender` is given and is not the wallet's address, or if the signer is not the pool
+   * owner
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * const { hash } = await cct.transferPoolOwnership({
+   *   poolAddress: '0xPool...',
+   *   newOwner: '0xNewOwner...',
+   *   wallet, // the current pool owner
+   * })
+   * ```
    */
-  transferOwnership(opts: EVMExecuteParams<TransferOwnershipParams>): Promise<TransactionResult> {
-    return this.#transferOwnership.execute(this.chain, opts)
+  transferPoolOwnership(
+    opts: EVMExecuteParams<TransferPoolOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#transferPoolOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `acceptOwnership` tx (for multisig / offline signing), completing a
+   * transfer proposed by {@link generateUnsignedTransferPoolOwnership}. Probes the pool's on-chain
+   * `typeAndVersion`, which confirms the address is a supported CCT pool — the `acceptOwnership()`
+   * calldata itself is one fixed selector at every version.
+   * @remarks **Nothing about the caller can be pre-flighted:** the pool authorizes this against a
+   * `private` pending-owner slot with no getter, so a tx signed by anyone other than the proposed
+   * owner is only rejected on-chain. `sender` therefore just sets `tx.from`.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` or `sender` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
+   * @example
+   * ```typescript
+   * // signed by the address a previous transferPoolOwnership proposed
+   * const unsigned = await cct.generateUnsignedAcceptPoolOwnership({
+   *   poolAddress: '0xPool...',
+   *   sender: '0xProposedOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptPoolOwnership(opts: AcceptPoolOwnershipParams): Promise<UnsignedEVMTx> {
+    return this.#acceptPoolOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Completes a pending pool ownership transfer, signing + submitting with `opts.wallet` — which
+   * must be the address {@link transferPoolOwnership} proposed. Ownership moves in this tx, and a
+   * wallet that is not the proposed owner reverts rather than failing validation, per
+   * {@link generateUnsignedAcceptPoolOwnership}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or `sender` is given and is
+   * not the wallet's address
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
+   * the pool's proposed owner
+   * @example
+   * ```typescript
+   * const { hash } = await cct.acceptPoolOwnership({
+   *   poolAddress: '0xPool...',
+   *   wallet, // the proposed owner
+   * })
+   * ```
+   */
+  acceptPoolOwnership(
+    opts: EVMExecuteParams<AcceptPoolOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptPoolOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned token `transferOwnership` tx (for multisig / offline signing), for a v1.x
+   * `FactoryBurnMintERC20`. The token owner grants and revokes mint/burn roles, and is independent
+   * of the pool's owner ({@link generateUnsignedTransferPoolOwnership}) — moving one leaves the
+   * other untouched. Same two-step and zero-address semantics, completed by
+   * {@link acceptTokenOwnership}, and the same `owner()` pre-flight of `sender`.
+   * @remarks **v1.x only, and not enforced.** A v2.0.0 `CrossChainToken` has no
+   * `transferOwnership`; it uses `AccessControlDefaultAdminRules` (`beginDefaultAdminTransfer`, on
+   * a mandatory delay), which this SDK does not yet wrap. Passing one is not detected — its
+   * `owner()` aliases the default admin, so the pre-flight passes and the tx reverts once
+   * broadcast.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`,
+   * or if `sender` is given and is not the token owner
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedTransferTokenOwnership({
+   *   tokenAddress: '0xToken...',
+   *   newOwner: '0xNewOwner...', // must separately call acceptTokenOwnership
+   *   sender: '0xCurrentOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedTransferTokenOwnership(
+    opts: TransferTokenOwnershipParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#transferTokenOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new token owner, signing + submitting with `opts.wallet` — which must be the
+   * token's current owner, and is what `sender` defaults to. Two-step, and v1.x-only without a
+   * version check, per {@link generateUnsignedTransferTokenOwnership}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
+   * signer, if `sender` is given and is not the wallet's address, or if the signer is not the
+   * token owner
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails
+   * @example
+   * ```typescript
+   * const { hash } = await cct.transferTokenOwnership({
+   *   tokenAddress: '0xToken...',
+   *   newOwner: '0xNewOwner...',
+   *   wallet, // the current token owner
+   * })
+   * ```
+   */
+  transferTokenOwnership(
+    opts: EVMExecuteParams<TransferTokenOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#transferTokenOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned token `acceptOwnership` tx (for multisig / offline signing), completing a
+   * transfer proposed by {@link generateUnsignedTransferTokenOwnership}. v1.x tokens only, and not
+   * pre-flightable for the same reason as {@link generateUnsignedAcceptPoolOwnership}: the pending
+   * owner is a `private` slot with no getter, so `sender` only sets `tx.from`.
+   * @remarks Builds without touching the chain: there is neither a version to resolve nor a role
+   * to read.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `sender` is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedAcceptTokenOwnership({
+   *   tokenAddress: '0xToken...',
+   *   sender: '0xProposedOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptTokenOwnership(opts: AcceptTokenOwnershipParams): Promise<UnsignedEVMTx> {
+    return this.#acceptTokenOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Completes a pending token ownership transfer, signing + submitting with `opts.wallet` — which
+   * must be the address {@link transferTokenOwnership} proposed. Ownership moves in this tx.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is invalid, or `sender` is given and
+   * is not the wallet's address
+   * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
+   * the token's proposed owner
+   * @example
+   * ```typescript
+   * const { hash } = await cct.acceptTokenOwnership({
+   *   tokenAddress: '0xToken...',
+   *   wallet, // the proposed owner
+   * })
+   * ```
+   */
+  acceptTokenOwnership(
+    opts: EVMExecuteParams<AcceptTokenOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptTokenOwnership.execute(this.chain, opts)
   }
 
   /**
@@ -464,7 +651,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * transaction, signing + submitting with `opts.wallet`.
    * @remarks Gated on **either** the pool `owner` or its `rateLimitAdmin` — rate limits are the one
    * pool write that accepts a delegated role, so this check is a disjunction where
-   * {@link transferOwnership}'s is owner-only. Both roles are reported by
+   * {@link transferPoolOwnership}'s is owner-only. Both roles are reported by
    * {@link getTokenPoolState}; `rateLimitAdmin` is the zero address when unset, and an unset role
    * matches nobody.
    *
@@ -845,7 +1032,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```typescript
    * const state = await cct.getTokenPoolState({ poolAddress: '0xPool...' })
-   * // state.owner must sign transferOwnership / lane config; state.rateLimitAdmin may set rate limits
+   * // state.owner must sign transferPoolOwnership / lane config; state.rateLimitAdmin may set rate limits
    * if (state.version === '2.0.0') {
    *   console.log(state.feeAdmin, state.finalityDepth)
    *   if (state.type === 'LockReleaseTokenPool') console.log(state.lockBox)
@@ -1287,7 +1474,11 @@ export type {
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { TransferTokenOwnershipParams } from './token/operations/transfer-token-ownership.ts'
+export type { AcceptTokenOwnershipParams } from './token/operations/accept-token-ownership.ts'
 export * from './token/contracts.ts'
+export type { TransferPoolOwnershipParams } from './token-pool/operations/transfer-pool-ownership.ts'
+export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
 export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
