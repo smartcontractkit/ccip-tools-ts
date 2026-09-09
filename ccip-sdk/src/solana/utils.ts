@@ -10,6 +10,7 @@ import {
   type Connection,
   type Signer,
   type SimulateTransactionConfig,
+  type SimulatedTransactionResponse,
   type Transaction,
   type TransactionInstruction,
   type VersionedTransactionResponse,
@@ -24,6 +25,7 @@ import { dataLength, dataSlice, encodeBase64, hexlify } from 'ethers'
 
 import type { RateLimiterState } from '../chain.ts'
 import {
+  CCIPDataFormatUnsupportedError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
@@ -32,6 +34,7 @@ import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
+import { PACKET_DATA_SIZE, compileV1Message, serializeV1Transaction } from './v1.ts'
 import type { SolanaLog } from './index.ts'
 
 /**
@@ -403,6 +406,11 @@ export function getErrorFromLogs(
 
 /**
  * Simulates a Solana transaction to estimate compute units.
+ *
+ * Prefers a v0 transaction (supports address lookup tables); when the v0 wire does
+ * not fit the 1232-byte packet (or v0 can't represent the accounts), falls back to a
+ * v1 transaction (SIMD-0385: all accounts static, compute-unit limit inlined into
+ * the message's transactionConfig, 4096-byte wire limit) simulated via raw RPC.
  * @param params - Simulation parameters including connection and payer.
  * @returns Simulation result with estimated compute units.
  */
@@ -421,34 +429,8 @@ export async function simulateTransaction(
   // Add max compute units for simulation
   const maxComputeUnits = 1_400_000
   const recentBlockhash = '11111111111111111111111111111112'
-  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: computeUnitsOverride || maxComputeUnits,
-  })
-
-  let tx: VersionedTransaction
-  if (!('tx' in rest)) {
-    // Create message with compute budget instruction
-    const message = new TransactionMessage({
-      payerKey,
-      recentBlockhash,
-      instructions: [computeBudgetIx, ...rest.instructions],
-    })
-
-    const messageV0 = message.compileToV0Message(rest.addressLookupTableAccounts)
-    tx = new VersionedTransaction(messageV0)
-  } else if (!('version' in rest.tx)) {
-    // Create message with compute budget instruction
-    const message = new TransactionMessage({
-      payerKey,
-      recentBlockhash,
-      instructions: [computeBudgetIx, ...rest.tx.instructions],
-    })
-
-    const messageV0 = message.compileToV0Message(rest.addressLookupTableAccounts)
-    tx = new VersionedTransaction(messageV0)
-  } else {
-    tx = rest.tx
-  }
+  const computeUnitLimit = computeUnitsOverride || maxComputeUnits
+  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })
 
   const config: SimulateTransactionConfig = {
     commitment: 'confirmed',
@@ -456,25 +438,121 @@ export async function simulateTransaction(
     sigVerify: false,
   }
 
-  const result = await connection.simulateTransaction(tx, config)
-
-  logger.debug('Simulation results:', {
-    logs: result.value.logs,
-    unitsConsumed: result.value.unitsConsumed,
-    returnData: result.value.returnData,
-    err: result.value.err,
-  })
-  if (result.value.err) {
-    // same error sendTransaction sends, to be catched up
-    throw new SendTransactionError({
-      action: 'simulate',
-      signature: '',
-      transactionMessage: jsonStringify(result.value.err),
-      logs: result.value.logs!,
+  const finish = (result: SimulatedTransactionResponse) => {
+    logger.debug('Simulation results:', {
+      logs: result.logs,
+      unitsConsumed: result.unitsConsumed,
+      returnData: result.returnData,
+      err: result.err,
     })
+    if (result.err) {
+      // same error sendTransaction sends, to be catched up
+      throw new SendTransactionError({
+        action: 'simulate',
+        signature: '',
+        transactionMessage: jsonStringify(result.err),
+        logs: result.logs!,
+      })
+    }
+    return result
   }
 
-  return result.value
+  if (!('tx' in rest)) {
+    // build the v0 transaction; undefined when v0 can't represent it (e.g. too many
+    // accounts to compile) or its wire exceeds the 1232-byte packet
+    let tx: VersionedTransaction | undefined
+    try {
+      const message = new TransactionMessage({
+        payerKey,
+        recentBlockhash,
+        instructions: [computeBudgetIx, ...rest.instructions],
+      })
+      tx = new VersionedTransaction(message.compileToV0Message(rest.addressLookupTableAccounts))
+      if (tx.serialize().length > PACKET_DATA_SIZE) tx = undefined
+    } catch {
+      tx = undefined
+    }
+
+    if (tx) {
+      return finish((await connection.simulateTransaction(tx, config)).value)
+    }
+
+    // v1 fallback: no address lookup tables — every account static; zero-filled
+    // signature slots (the count comes from the header) so sigVerify: false passes
+    const message = compileV1Message({
+      payerKey,
+      recentBlockhash,
+      instructions: rest.instructions,
+      computeUnitLimit,
+    })
+    const wire = serializeV1Transaction(
+      message,
+      new Array(message.header.numRequiredSignatures).fill(null),
+    )
+    return finish(await simulateRawV1(connection, wire))
+  }
+
+  if (!('version' in rest.tx)) {
+    // legacy Transaction: rebuild as v0, with the same v1 fallback shape as above
+    let tx: VersionedTransaction | undefined
+    try {
+      const message = new TransactionMessage({
+        payerKey,
+        recentBlockhash,
+        instructions: [computeBudgetIx, ...rest.tx.instructions],
+      })
+      tx = new VersionedTransaction(message.compileToV0Message())
+      if (tx.serialize().length > PACKET_DATA_SIZE) tx = undefined
+    } catch {
+      tx = undefined
+    }
+
+    if (tx) {
+      return finish((await connection.simulateTransaction(tx, config)).value)
+    }
+
+    const message = compileV1Message({
+      payerKey,
+      recentBlockhash,
+      instructions: rest.tx.instructions,
+      computeUnitLimit,
+    })
+    const wire = serializeV1Transaction(
+      message,
+      new Array(message.header.numRequiredSignatures).fill(null),
+    )
+    return finish(await simulateRawV1(connection, wire))
+  }
+
+  // already-versioned transaction: simulate as-is
+  return finish((await connection.simulateTransaction(rest.tx, config)).value)
+}
+
+/**
+ * Simulates a raw (already serialized) transaction via raw RPC — web3.js'
+ * `Connection.simulateTransaction` only serializes legacy/v0 envelopes.
+ */
+async function simulateRawV1(connection: Connection, wire: Uint8Array) {
+  const res = await (
+    connection as unknown as {
+      _rpcRequest(method: string, args: unknown[]): Promise<{ result?: { value?: unknown } }>
+    }
+  )._rpcRequest('simulateTransaction', [
+    Buffer.from(wire).toString('base64'),
+    {
+      commitment: 'confirmed',
+      encoding: 'base64',
+      replaceRecentBlockhash: true,
+      sigVerify: false,
+    },
+  ])
+  const value = res.result?.value
+  if (!value) {
+    throw new CCIPDataFormatUnsupportedError(
+      'simulateTransaction RPC response for a v1 transaction',
+    )
+  }
+  return value as SimulatedTransactionResponse
 }
 
 /**
@@ -558,21 +636,48 @@ export async function simulateAndSendTxs(
     if (end <= start) throw lastErr
 
     const blockhash = await connection.getLatestBlockhash('confirmed')
-    const txMsg = new TransactionMessage({
-      payerKey: wallet.publicKey,
-      recentBlockhash: blockhash.blockhash,
-      instructions: [
-        ...(computeUnitLimit
-          ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
-          : []),
-        ...ixs,
-      ],
-    })
-    const messageV0 = txMsg.compileToV0Message(addressLookupTableAccounts)
-    const tx = new VersionedTransaction(messageV0)
 
-    const signed = await wallet.signTransaction(tx)
-    const signature = await connection.sendTransaction(signed)
+    // Prefer a v0 transaction (supports address lookup tables); fall back to a v1
+    // transaction (all accounts static, compute-unit limit inlined into the message's
+    // transactionConfig, 4096-byte wire limit instead of 1232) when the v0 wire does
+    // not fit the packet or v0 can't represent the accounts
+    let txV0: VersionedTransaction | undefined
+    try {
+      const txMsg = new TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash: blockhash.blockhash,
+        instructions: [
+          ...(computeUnitLimit
+            ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+            : []),
+          ...ixs,
+        ],
+      })
+      txV0 = new VersionedTransaction(txMsg.compileToV0Message(addressLookupTableAccounts))
+      if (txV0.serialize().length > PACKET_DATA_SIZE) txV0 = undefined
+    } catch {
+      txV0 = undefined
+    }
+
+    let signature: string
+    if (txV0) {
+      const signed = await wallet.signTransaction(txV0)
+      signature = await connection.sendTransaction(signed)
+    } else {
+      const messageV1 = compileV1Message({
+        payerKey: wallet.publicKey,
+        recentBlockhash: blockhash.blockhash,
+        instructions: ixs,
+        computeUnitLimit,
+      })
+      const txV1 = new VersionedTransaction(messageV1)
+      // v1 signing flows through the standard tx.sign()/partialSign() paths, which
+      // sign the message.serialize() bytes — SerializableMessageV1 provides them
+      await wallet.signTransaction(txV1)
+      signature = await connection.sendRawTransaction(
+        serializeV1Transaction(messageV1, txV1.signatures),
+      )
+    }
     await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
     if (includesMain) mainHash = signature
   }

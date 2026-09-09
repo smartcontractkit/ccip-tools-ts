@@ -251,6 +251,66 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         'decoded messageId should match',
       )
     })
+
+    it('should send an oversized token-transfer message via a v1 transaction', async () => {
+      assert.ok(solanaChain, 'chain should be initialized')
+      assert.ok(wallet, 'wallet should be initialized')
+      assert.ok(connection, 'connection should be initialized')
+
+      // Fund the wallet's USDC associated token account through the surfpool
+      // cheatcode (the forked mainnet USDC pool burns from the sender's ATA)
+      const rpc = connection as unknown as {
+        _rpcRequest(m: string, a: unknown[]): Promise<{ result?: unknown }>
+      }
+      const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+      await rpc._rpcRequest('surfnet_setTokenAccount', [
+        wallet.publicKey.toBase58(),
+        usdcMint,
+        { amount: 1_000_000_000, state: 'initialized' }, // 1000 USDC
+      ])
+
+      // Pad the message data so the ccipSend wire exceeds the 1232-byte v0 packet
+      // even with address-lookup-table compression (v0 ≈ 1370 bytes), while still
+      // fitting the 4096-byte v1 limit (SIMD-0385) the SDK falls back to. Token
+      // transfers require allowOutOfOrderExecution (the router pulls the tokens in
+      // a follow-up transaction).
+      const data = `0x${'ab'.repeat(256)}`
+      const request = await solanaChain.sendMessage({
+        router: SOLANA_ROUTER,
+        destChainSelector: ETH_MAINNET_SELECTOR,
+        message: {
+          receiver: '0x9eC0e4A4c411493773E01e2ABF4D42395788846b',
+          data,
+          tokenAmounts: [{ token: usdcMint, amount: 1_000_000n }],
+          extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
+        },
+        wallet,
+      })
+
+      // The SDK prefers v0 and only falls back to v1 when the v0 wire does not fit;
+      // re-read the transaction to assert the version the cluster recorded
+      const tx = await solanaChain.getTransaction(request.tx.hash)
+      assert.equal(
+        tx.tx.version,
+        1,
+        `the oversized send should have been a v1 transaction (got ${tx.tx.version})`,
+      )
+
+      // Token transfer assertions
+      assert.equal(request.message.tokenAmounts?.length, 1)
+      assert.equal(request.message.tokenAmounts?.[0]?.amount, 1_000_000n)
+
+      // Verify the message (incl. tokenAmounts) decodes from the on-chain logs
+      const decoded = await solanaChain.getMessagesInTx(tx)
+      assert.equal(decoded.length, 1, 'should find exactly one CCIP message in tx')
+      assert.equal(
+        decoded[0]!.message.messageId,
+        request.message.messageId,
+        'decoded messageId should match',
+      )
+      assert.equal(decoded[0]!.message.tokenAmounts?.length, 1)
+      assert.equal(decoded[0]!.message.tokenAmounts?.[0]?.amount, 1_000_000n)
+    })
   })
 
   describe('execute', () => {
