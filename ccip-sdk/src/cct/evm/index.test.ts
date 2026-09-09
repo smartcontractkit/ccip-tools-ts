@@ -731,6 +731,7 @@ describe('EVMTokenManager (cct/evm)', () => {
     const TOKEN_FNS = new Interface([
       'function mint(address account, uint256 amount)',
       'function isMinter(address minter) view returns (bool)',
+      'function isBurner(address burner) view returns (bool)',
       'function getMinters() view returns (address[])',
       'function getBurners() view returns (address[])',
     ])
@@ -739,6 +740,7 @@ describe('EVMTokenManager (cct/evm)', () => {
     function tokenChain(isMinter = true) {
       const results: Record<string, unknown[]> = {
         isMinter: [isMinter],
+        isBurner: [isMinter],
         getMinters: [[MINTER]],
         getBurners: [[POOL]],
       }
@@ -802,6 +804,28 @@ describe('EVMTokenManager (cct/evm)', () => {
     it('getBurners lists the burn-role holders', async () => {
       const cct = EVMTokenManager.fromChain(tokenChain())
       assert.deepEqual(await cct.getBurners({ tokenAddress: TOKEN }), [POOL])
+    })
+
+    it('isMinter answers the single-address mint-role check', async () => {
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain()).isMinter({
+          tokenAddress: TOKEN,
+          account: MINTER,
+        }),
+        true,
+      )
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain(false)).isMinter({
+          tokenAddress: TOKEN,
+          account: RECIPIENT,
+        }),
+        false,
+      )
+    })
+
+    it('isBurner answers the single-address burn-role check', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.equal(await cct.isBurner({ tokenAddress: TOKEN, account: POOL }), true)
     })
   })
 })

@@ -98,6 +98,8 @@ import {
   type GetMintersResult,
   GetMinters,
 } from './token/operations/get-minters.ts'
+import { type IsBurnerParams, type IsBurnerResult, IsBurner } from './token/operations/is-burner.ts'
+import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/operations/is-minter.ts'
 import { type MintParams, Mint } from './token/operations/mint.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
@@ -108,6 +110,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #mint = new Mint()
   readonly #getMinters = new GetMinters()
   readonly #getBurners = new GetBurners()
+  readonly #isMinter = new IsMinter()
+  readonly #isBurner = new IsBurner()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -698,7 +702,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks v1.5.1 / v1.6.2 tokens only; v2.0.0's `CrossChainToken` gates minting through
    * AccessControl, which ships separately. `sender` is checked against the token's
    * `isMinter(address)`, **not** its owner: `mint` is `onlyMinter`, and the owner is the role
-   * admin, who need not hold the role. Grant it first with `grantMintRole`.
+   * admin, who need not hold the role. Grant it first with `grantMintRole`. The full sequence:
+   * {@link deployToken} → `grantMintRole` → {@link generateUnsignedMint}, checking the grant
+   * landed with {@link isMinter} (or {@link getMinters} for the whole set).
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and does
@@ -748,8 +754,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Lists every account holding a BurnMintERC677 token's mint role, via `getMinters()`.
-   * @remarks Informational, for audit and UX. To check *one* address, the token answers directly
-   * with `isMinter(address)` — one call instead of an unbounded set plus a client-side scan.
+   * @remarks Informational, for audit and UX. To check *one* address, use {@link isMinter} — one
+   * call instead of an unbounded set plus a client-side scan.
    * @remarks v1.5.1 / v1.6.2 tokens only: v2.0.0's `CrossChainToken` uses AccessControl, which
    * does not enumerate role members, so there is no equivalent read.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
@@ -767,8 +773,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Lists every account holding a BurnMintERC677 token's burn role, via `getBurners()`.
-   * @remarks Same shape and caveats as {@link getMinters}; to check one address, use the token's
-   * `isBurner(address)`.
+   * @remarks Same shape and caveats as {@link getMinters}; to check one address, use
+   * {@link isBurner}.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
@@ -779,6 +785,43 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getBurners(opts: GetBurnersParams): Promise<GetBurnersResult> {
     return this.#getBurners.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether `account` holds a BurnMintERC677 token's mint role, via `isMinter(address)`.
+   * @remarks The pre-flight for a {@link mint}: the token's `mint` is `onlyMinter`, and the owner
+   * is only the role admin, who need not hold the role. Prefer this over scanning
+   * {@link getMinters} — one call, and it stays a single call as the role set grows.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
+   * address
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @example
+   * ```typescript
+   * if (await cct.isMinter({ tokenAddress: '0xToken...', account: '0xOpsKey...' })) {
+   *   await cct.mint({ tokenAddress: '0xToken...', account: '0xRecipient...', amount, wallet })
+   * }
+   * ```
+   */
+  isMinter(opts: IsMinterParams): Promise<IsMinterResult> {
+    return this.#isMinter.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether `account` holds a BurnMintERC677 token's burn role, via `isBurner(address)`.
+   * @remarks Same shape and caveats as {@link isMinter}; the burn-role counterpart of the set
+   * read {@link getBurners}.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
+   * address
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @example
+   * ```typescript
+   * const poolCanBurn = await cct.isBurner({ tokenAddress: '0xToken...', account: '0xPool...' })
+   * ```
+   */
+  isBurner(opts: IsBurnerParams): Promise<IsBurnerResult> {
+    return this.#isBurner.query(this.chain, opts)
   }
 
   /**
@@ -1394,6 +1437,8 @@ export type { DeployTokenParams } from './token/operations/deploy-token.ts'
 export type { MintParams } from './token/operations/mint.ts'
 export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
 export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
+export type { IsMinterParams, IsMinterResult } from './token/operations/is-minter.ts'
+export type { IsBurnerParams, IsBurnerResult } from './token/operations/is-burner.ts'
 export * from './token/contracts.ts'
 export type {
   DeployTokenPoolParams,

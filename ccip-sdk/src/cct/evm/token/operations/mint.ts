@@ -76,8 +76,14 @@ export class Mint extends EVMOperation<MintParams> {
    * that can satisfy {@link buildUnsigned}'s role check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or
-   * if any other param is invalid (see {@link buildUnsigned})
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, if
+   * the wallet does not hold the mint role, or if any other param is invalid (see
+   * {@link buildUnsigned})
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — e.g. the mint would
+   * exceed the token's `maxSupply`, which is not pre-flighted
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    */
   override async execute(
     chain: EVMChain,
