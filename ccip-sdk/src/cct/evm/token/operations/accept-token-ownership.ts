@@ -19,7 +19,7 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { TokenVersion, getTokenInterface } from '../contracts.ts'
+import { getErc20Token } from '../contracts.ts'
 
 /** Parameters for {@link AcceptTokenOwnership}. */
 export type AcceptTokenOwnershipParams = {
@@ -44,15 +44,15 @@ export class AcceptTokenOwnership extends EVMOperation<AcceptTokenOwnershipParam
   /**
    * Encodes `acceptOwnership` with no chain access at all.
    * @remarks Nothing to resolve and nothing to read: `acceptOwnership()` is one fixed selector,
-   * declared identically by v1.5.1 and v1.6.2, and the only account the contract accepts is the
-   * `private` pending owner — so, like `approveToken`, it builds without touching the chain.
+   * declared identically by v1.5.1 and v1.6.2 (see {@link getErc20Token}), and the only account
+   * the contract accepts is the `private` pending owner. So it builds without touching the chain,
+   * the only CCT write in this family that does not.
    */
   protected buildUnsigned(
     _chain: EVMChain,
     { tokenAddress }: AcceptTokenOwnershipParams,
   ): UnsignedEVMTx {
-    const iface = getTokenInterface(TokenVersion.V1_5_1)
-    return callTx(tokenAddress, iface.encodeFunctionData('acceptOwnership', []))
+    return callTx(tokenAddress, getErc20Token().encodeFunctionData('acceptOwnership', []))
   }
 
   /**

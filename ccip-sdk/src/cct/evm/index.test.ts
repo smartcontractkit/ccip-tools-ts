@@ -722,4 +722,110 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.equal(called, false, 'validation fails before TAR discovery')
     })
   })
+
+  describe('mint and role reads', () => {
+    const MINTER = '0x' + '99'.repeat(20)
+    const RECIPIENT = '0x' + 'aa'.repeat(20)
+    const AMOUNT = 1_000000000000000000n
+    /** Fresh Interface — the manager's own cached one must not be what these assertions compare to. */
+    const TOKEN_FNS = new Interface([
+      'function mint(address account, uint256 amount)',
+      'function isMinter(address minter) view returns (bool)',
+      'function isBurner(address burner) view returns (bool)',
+      'function getMinters() view returns (address[])',
+      'function getBurners() view returns (address[])',
+    ])
+
+    /** Chain stub for a BurnMintERC677 token on which `MINTER` holds the mint role. */
+    function tokenChain(isMinter = true) {
+      const results: Record<string, unknown[]> = {
+        isMinter: [isMinter],
+        isBurner: [isMinter],
+        getMinters: [[MINTER]],
+        getBurners: [[POOL]],
+      }
+      return stubChain({
+        provider: {
+          call: ({ data }: { data: string }) => {
+            const fn = TOKEN_FNS.getFunction(data.slice(0, 10))!.name
+            return Promise.resolve(TOKEN_FNS.encodeFunctionResult(fn, results[fn]))
+          },
+        } as never,
+      })
+    }
+
+    it('generateUnsignedMint encodes mint(account, amount) to the token', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      const unsigned = await cct.generateUnsignedMint({
+        tokenAddress: TOKEN,
+        account: RECIPIENT,
+        amount: AMOUNT,
+        sender: MINTER,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TOKEN)
+      assert.equal(tx.from, MINTER)
+      assert.equal(tx.data, TOKEN_FNS.encodeFunctionData('mint', [RECIPIENT, AMOUNT]))
+    })
+
+    it('mint submits as the minting wallet', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      const { hash } = await cct.mint({
+        tokenAddress: TOKEN,
+        account: RECIPIENT,
+        amount: AMOUNT,
+        wallet: fakeSigner(MINTER),
+      })
+      assert.equal(hash, HASH)
+    })
+
+    it('mint rejects a wallet without the mint role', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain(false))
+      await assert.rejects(
+        () =>
+          cct.mint({
+            tokenAddress: TOKEN,
+            account: RECIPIENT,
+            amount: AMOUNT,
+            wallet: fakeSigner(ADMIN),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
+
+    it('getMinters lists the mint-role holders', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.deepEqual(await cct.getMinters({ tokenAddress: TOKEN }), [MINTER])
+    })
+
+    it('getBurners lists the burn-role holders', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.deepEqual(await cct.getBurners({ tokenAddress: TOKEN }), [POOL])
+    })
+
+    it('isMinter answers the single-address mint-role check', async () => {
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain()).isMinter({
+          tokenAddress: TOKEN,
+          account: MINTER,
+        }),
+        true,
+      )
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain(false)).isMinter({
+          tokenAddress: TOKEN,
+          account: RECIPIENT,
+        }),
+        false,
+      )
+    })
+
+    it('isBurner answers the single-address burn-role check', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.equal(await cct.isBurner({ tokenAddress: TOKEN, account: POOL }), true)
+    })
+  })
 })

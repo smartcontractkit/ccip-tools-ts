@@ -27,7 +27,7 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
-import { TokenVersion, assertTokenOwner, getTokenInterface } from '../contracts.ts'
+import { assertTokenOwner, getErc20Token } from '../contracts.ts'
 
 /** Parameters for {@link TransferTokenOwnership}. */
 export type TransferTokenOwnershipParams = {
@@ -83,8 +83,8 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
   /**
    * Encodes `transferOwnership`, then confirms `sender` (when given) is the token owner.
    * @remarks No version resolution at all: `transferOwnership(address)` is declared identically by
-   * v1.5.1 and v1.6.2, so the v1.5.1 interface encodes for both — the same reason `approveToken`
-   * builds off a single interface.
+   * v1.5.1 and v1.6.2, so {@link getErc20Token}'s pinned interface encodes for both, exactly as it
+   * does for the role and mint writes.
    * @remarks The owner check lives here, not only in {@link execute}, so the offline / multisig
    * path gets it too: `generateUnsignedTransferTokenOwnership` with an unauthorized `sender` would
    * otherwise hand back a fully-formed transaction that reverts only after being reviewed and
@@ -95,8 +95,10 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
     chain: EVMChain,
     { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
   ): Promise<UnsignedEVMTx> {
-    const iface = getTokenInterface(TokenVersion.V1_5_1)
-    const unsigned = callTx(tokenAddress, iface.encodeFunctionData('transferOwnership', [newOwner]))
+    const unsigned = callTx(
+      tokenAddress,
+      getErc20Token().encodeFunctionData('transferOwnership', [newOwner]),
+    )
     if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
     return unsigned
   }

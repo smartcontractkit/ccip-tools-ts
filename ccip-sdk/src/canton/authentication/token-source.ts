@@ -128,8 +128,8 @@ export function buildOAuthRequestOptions(opts: OAuthRequestOptions) {
  *
  * @param fetcher - Called when the cached token is missing or expired.
  *   MUST return a fresh {@link AccessToken}.
- * @param initial - Optional initial token (returned on the first call without
- *   fetching, when still valid).
+ * @param initial - Optional initial token (returned without fetching on every
+ *   call while still valid).
  * @returns A memoized `() => Promise<AccessToken>` that caches until the
  *   returned token's `expiresAt` passes (accounting for skew).
  */
@@ -154,19 +154,15 @@ export function createMemoizedTokenFetcher(
     },
   )
 
-  // When an initial token is provided and still valid, short-circuit the first
-  // call to return it without fetching. Subsequent calls delegate to the
-  // memoized fetcher (which will fetch only if the token has since expired).
+  // Return the initial token on every call while valid; only fetch once it
+  // expires. (A single-shot short-circuit would leave the memoize cache empty
+  // and trigger a spurious re-fetch on the next call.)
   if (initial && !isTokenExpired(initial)) {
-    let usedInitial = false
     return async (): Promise<AccessToken> => {
-      if (!usedInitial) {
-        usedInitial = true
-        return initial
+      if (lastToken && !isTokenExpired(lastToken)) {
+        return lastToken
       }
-      if (isTokenExpired(lastToken)) {
-        memoized.cache.clear('token expired')
-      }
+      memoized.cache.clear('token expired')
       return memoized()
     }
   }
