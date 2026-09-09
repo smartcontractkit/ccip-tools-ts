@@ -832,6 +832,7 @@ const SELECTORS: Selectors = {
     selector: 470401360549526817n,
     name: 'superseed-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '5611': {
@@ -863,6 +864,7 @@ const SELECTORS: Selectors = {
     selector: 379340054879810246n,
     name: 'everclear-testnet-sepolia',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '6900': {
@@ -1182,6 +1184,7 @@ const SELECTORS: Selectors = {
     selector: 13694007683517087973n,
     name: 'superseed-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '57054': {
@@ -1431,6 +1434,7 @@ const SELECTORS: Selectors = {
     selector: 3789623672476206327n,
     name: 'bitcoin-testnet-bitlayer-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '200901': {
@@ -1485,6 +1489,7 @@ const SELECTORS: Selectors = {
     selector: 2279865765895943307n,
     name: 'ethereum-testnet-sepolia-scroll-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '534352': {
