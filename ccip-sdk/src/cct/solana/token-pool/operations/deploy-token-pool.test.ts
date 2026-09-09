@@ -160,7 +160,8 @@ describe('DeployTokenPool (cct/solana)', () => {
       const address = Keypair.generate().publicKey.toBase58()
       await assert.rejects(
         () => generate({ allowlist: [address, address] }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'allowlist',
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'allowlist[1]',
       )
     })
 

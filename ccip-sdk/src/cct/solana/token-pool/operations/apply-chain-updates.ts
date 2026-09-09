@@ -196,7 +196,8 @@ export type ExecuteApplyChainUpdatesResult = { hashes: string[]; chainSelectors:
  * Applies the EVM `applyChainUpdates` equivalent as Solana instructions.
  *
  * @remarks
- * This preserves EVM ordering: all removals run first, then each added chain is initialized,
+ * Chain selectors to add and remove must not contain duplicates. This preserves EVM ordering: all
+ * removals run first, then each added chain is initialized,
  * configured with remote pools, and assigned both rate-limit configs. EVM-style replacement is
  * supported by listing a selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`;
  * adding an existing selector without removing it fails. Updates are packed into one or more

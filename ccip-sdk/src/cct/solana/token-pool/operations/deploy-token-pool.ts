@@ -90,7 +90,10 @@ export type ExecuteDeployTokenPoolResult = TransactionResult & {
   poolSignerAddress: string
 }
 
-/** Initializes a Solana token pool, optionally configuring an allowlist. */
+/**
+ * Initializes a Solana token pool, optionally configuring an allowlist.
+ * @remarks The allowlist must not contain duplicate addresses.
+ */
 export class DeployTokenPool extends SolanaOperation<
   DeployTokenPoolParams,
   GenerateDeployTokenPoolResult,

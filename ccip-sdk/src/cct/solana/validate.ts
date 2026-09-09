@@ -94,13 +94,23 @@ export function validateUniquePublicKeys(
   param: string,
   publicKeys: PublicKey[],
 ): void {
-  if (new Set(publicKeys.map((publicKey) => publicKey.toBase58())).size !== publicKeys.length) {
-    throw new CCTParamsInvalidError(operation, param, 'must not contain duplicate addresses')
+  const seen = new Set<string>()
+  for (const [i, publicKey] of publicKeys.entries()) {
+    const address = publicKey.toBase58()
+    if (seen.has(address)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate addresses',
+      )
+    }
+    seen.add(address)
   }
 }
 
 /**
  * Asserts bigint chain selectors do not contain duplicates.
+ * @remarks Silently ignores non-bigint entries; relies on downstream `validateBigInt` for type safety.
  * @throws CCTParamsInvalidError if a chain selector is duplicated.
  */
 export function validateUniqueChainSelectors(
@@ -125,9 +135,23 @@ export function validateUniqueChainSelectors(
  * Asserts hex byte values do not contain duplicates.
  * @throws CCTParamsInvalidError if a hex byte value is duplicated.
  */
-export function validateUniqueHexBytes(operation: string, param: string, values: Buffer[]): void {
-  if (new Set(values.map((value) => value.toString('hex'))).size !== values.length) {
-    throw new CCTParamsInvalidError(operation, param, 'must not contain duplicate hex values')
+export function validateUniqueHexBytes(
+  operation: string,
+  param: string,
+  values: Buffer[],
+  label = 'hex values',
+): void {
+  const seen = new Set<string>()
+  for (const [i, value] of values.entries()) {
+    const hex = value.toString('hex')
+    if (seen.has(hex)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        `must not contain duplicate ${label}`,
+      )
+    }
+    seen.add(hex)
   }
 }
 
@@ -393,7 +417,11 @@ export async function resolveExistingTokenAccount(
   tokenAddress: PublicKey,
   holder: PublicKey,
   tokenAccount?: PublicKey,
-): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey; account: Account }> {
+): Promise<{
+  tokenAccount: PublicKey
+  tokenProgram: PublicKey
+  account: Account
+}> {
   const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
   const account = tokenAccount ?? ata
   let tokenAccountInfo: Account

@@ -56,7 +56,10 @@ export type ExecuteConfigureAllowlistParams = SolanaExecuteParams<ConfigureAllow
 /** Result of executing Solana token pool allowlist configuration. */
 export type ExecuteConfigureAllowlistResult = TransactionResult
 
-/** Adds addresses to and enables or disables a Solana token pool allowlist. */
+/**
+ * Adds addresses to and enables or disables a Solana token pool allowlist.
+ * @remarks Added addresses must not contain duplicates.
+ */
 export class ConfigureAllowlist extends SolanaOperation<
   ConfigureAllowlistParams,
   UnsignedSolanaTx,

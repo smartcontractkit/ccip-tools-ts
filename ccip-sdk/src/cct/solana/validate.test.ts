@@ -25,6 +25,7 @@ import {
   validatePublicKeys,
   validateUniqueChainSelectors,
   validateUniqueHexBytes,
+  validateUniquePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
 
@@ -230,6 +231,15 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
+  it('rejects duplicate public keys', () => {
+    const address = PublicKey.default
+    assert.throws(
+      () => validateUniquePublicKeys('op', 'addresses', [address, address]),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'addresses[1]',
+    )
+  })
+
   it('rejects duplicate chain selectors', () => {
     assert.doesNotThrow(() => validateUniqueChainSelectors('op', 'selectors', [1n, 2n]))
     assert.throws(
@@ -247,7 +257,22 @@ describe('Validate (cct/solana)', () => {
           Buffer.from('01', 'hex'),
           Buffer.from('01', 'hex'),
         ]),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'addresses',
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.param === 'addresses[1]' &&
+        err.context.reason === 'must not contain duplicate hex values',
+    )
+    assert.throws(
+      () =>
+        validateUniqueHexBytes(
+          'op',
+          'remotePoolAddresses',
+          [Buffer.from('01', 'hex'), Buffer.from('01', 'hex')],
+          'remote pool addresses',
+        ),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.reason === 'must not contain duplicate remote pool addresses',
     )
   })
 

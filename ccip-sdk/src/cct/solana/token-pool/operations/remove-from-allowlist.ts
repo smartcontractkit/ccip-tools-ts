@@ -57,7 +57,10 @@ export type ExecuteRemoveFromAllowlistParams = SolanaExecuteParams<RemoveFromAll
 /** Result of executing Solana token pool allowlist removal. */
 export type ExecuteRemoveFromAllowlistResult = TransactionResult
 
-/** Removes addresses from a Solana token pool allowlist. */
+/**
+ * Removes addresses from a Solana token pool allowlist.
+ * @remarks Removed addresses must not contain duplicates.
+ */
 export class RemoveFromAllowlist extends SolanaOperation<
   RemoveFromAllowlistParams,
   UnsignedSolanaTx,

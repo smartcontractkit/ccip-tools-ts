@@ -108,7 +108,12 @@ export class EditChainRemoteConfig extends SolanaOperation<
     const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
       parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
     )
-    validateUniqueHexBytes(this.name, 'remotePoolAddresses', remotePoolAddresses)
+    validateUniqueHexBytes(
+      this.name,
+      'remotePoolAddresses',
+      remotePoolAddresses,
+      'remote pool addresses',
+    )
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {

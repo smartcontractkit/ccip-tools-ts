@@ -37,7 +37,7 @@ type BaseDeployTokenParams = {
   mintAuthority?: string
   /** Freeze authority. Defaults to payer; set null to disable freezing. */
   freezeAuthority?: string | null
-  /** Initial supply in base units. Requires preMintRecipient. */
+  /** Initial supply in base units, between 1 and 2^64 - 1. Requires preMintRecipient. */
   preMint?: bigint
   /** Recipient owner for the initial supply ATA. */
   preMintRecipient?: string
