@@ -29,6 +29,7 @@ import {
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateInteger,
+  validateUniqueHexBytes,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool remote-config editing generation and execution. */
@@ -107,6 +108,7 @@ export class EditChainRemoteConfig extends SolanaOperation<
     const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
       parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
     )
+    validateUniqueHexBytes(this.name, 'remotePoolAddresses', remotePoolAddresses)
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {

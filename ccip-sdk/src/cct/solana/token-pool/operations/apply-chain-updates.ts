@@ -24,6 +24,7 @@ import {
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateUniqueChainSelectors,
 } from '../../validate.ts'
 import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
 import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
@@ -227,7 +228,22 @@ export class ApplyChainUpdates extends SolanaOperation<
         'at least one of chainsToAdd or remoteChainSelectorsToRemove must be non-empty',
       )
     }
-    validateRemotePoolAddresses(this.name, params.chainsToAdd)
+    validateUniqueChainSelectors(
+      this.name,
+      'remoteChainSelectorsToRemove',
+      params.remoteChainSelectorsToRemove,
+    )
+    const chainsToAdd: unknown[] = params.chainsToAdd
+    validateUniqueChainSelectors(
+      this.name,
+      'chainsToAdd',
+      chainsToAdd.map((update) =>
+        typeof update === 'object' && update !== null
+          ? (update as { remoteChainSelector?: unknown }).remoteChainSelector
+          : undefined,
+      ),
+    )
+    validateRemotePoolAddresses(this.name, chainsToAdd)
 
     return {
       ...params,
