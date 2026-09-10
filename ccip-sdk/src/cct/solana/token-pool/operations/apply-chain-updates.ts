@@ -24,6 +24,7 @@ import {
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateUniqueChainSelectors,
 } from '../../validate.ts'
 import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
 import { EditChainRemoteConfig } from './edit-chain-remote-config.ts'
@@ -195,7 +196,8 @@ export type ExecuteApplyChainUpdatesResult = { hashes: string[]; chainSelectors:
  * Applies the EVM `applyChainUpdates` equivalent as Solana instructions.
  *
  * @remarks
- * This preserves EVM ordering: all removals run first, then each added chain is initialized,
+ * Chain selectors to add and remove must not contain duplicates. This preserves EVM ordering: all
+ * removals run first, then each added chain is initialized,
  * configured with remote pools, and assigned both rate-limit configs. EVM-style replacement is
  * supported by listing a selector in both `remoteChainSelectorsToRemove` and `chainsToAdd`;
  * adding an existing selector without removing it fails. Updates are packed into one or more
@@ -227,7 +229,22 @@ export class ApplyChainUpdates extends SolanaOperation<
         'at least one of chainsToAdd or remoteChainSelectorsToRemove must be non-empty',
       )
     }
-    validateRemotePoolAddresses(this.name, params.chainsToAdd)
+    validateUniqueChainSelectors(
+      this.name,
+      'remoteChainSelectorsToRemove',
+      params.remoteChainSelectorsToRemove,
+    )
+    const chainsToAdd: unknown[] = params.chainsToAdd
+    validateUniqueChainSelectors(
+      this.name,
+      'chainsToAdd',
+      chainsToAdd.map((update) =>
+        typeof update === 'object' && update !== null
+          ? (update as { remoteChainSelector?: unknown }).remoteChainSelector
+          : undefined,
+      ),
+    )
+    validateRemotePoolAddresses(this.name, chainsToAdd)
 
     return {
       ...params,

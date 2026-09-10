@@ -281,6 +281,30 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         [{ chainsToAdd: null }, 'chainsToAdd'],
         [{ chainsToAdd: [], remoteChainSelectorsToRemove: [] }, 'chainsToAdd'],
         [{ chainsToAdd: [null] }, 'chainsToAdd[0]'],
+        [{ remoteChainSelectorsToRemove: [SELECTOR, SELECTOR] }, 'remoteChainSelectorsToRemove[1]'],
+        [
+          {
+            chainsToAdd: [
+              {
+                remoteChainSelector: SELECTOR,
+                remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+                remotePoolAddresses: [],
+                remoteTokenDecimals: 18,
+                inboundRateLimiterConfig: { enabled: false },
+                outboundRateLimiterConfig: { enabled: false },
+              },
+              {
+                remoteChainSelector: SELECTOR,
+                remoteTokenAddress: '0xaabbccddeeff00112233445566778899aabbccdd',
+                remotePoolAddresses: [],
+                remoteTokenDecimals: 18,
+                inboundRateLimiterConfig: { enabled: false },
+                outboundRateLimiterConfig: { enabled: false },
+              },
+            ],
+          },
+          'chainsToAdd[1]',
+        ],
         [
           {
             chainsToAdd: [

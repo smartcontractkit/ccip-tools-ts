@@ -159,7 +159,7 @@ describe('ConfigureAllowlist (cct/solana)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'configureAllowlist' &&
-          err.context.param === 'add',
+          err.context.param === 'add[1]',
       )
     })
 
