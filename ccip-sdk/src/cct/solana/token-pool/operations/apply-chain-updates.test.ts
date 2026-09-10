@@ -420,8 +420,8 @@ describe('ApplyChainUpdates (cct/solana)', () => {
           }),
         (error: unknown) =>
           CCIPError.isCCIPError(error) &&
-          error.context.committedHashes instanceof Array &&
-          error.context.committedHashes[0] === HASH &&
+          error.context.committedBatchHashes instanceof Array &&
+          error.context.committedBatchHashes[0] === HASH &&
           error.context.committedChainSelectors instanceof Array &&
           error.context.committedChainSelectors[0]?.join() === '0x3,0x4' &&
           error.context.failedBatchIndex === 1 &&

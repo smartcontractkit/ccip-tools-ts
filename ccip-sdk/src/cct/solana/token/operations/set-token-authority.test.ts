@@ -28,19 +28,19 @@ const WALLET = {
 }
 
 function mintData(
-  mintAuthority = new PublicKey(AUTHORITY),
-  freezeAuthority = mintAuthority,
+  mintAuthority: PublicKey | null = new PublicKey(AUTHORITY),
+  freezeAuthority: PublicKey | null = mintAuthority,
 ): Buffer {
   const data = Buffer.alloc(MINT_SIZE)
   MintLayout.encode(
     {
-      mintAuthorityOption: 1,
-      mintAuthority,
+      mintAuthorityOption: mintAuthority ? 1 : 0,
+      mintAuthority: mintAuthority ?? PublicKey.default,
       supply: 0n,
       decimals: 6,
       isInitialized: true,
-      freezeAuthorityOption: 1,
-      freezeAuthority,
+      freezeAuthorityOption: freezeAuthority ? 1 : 0,
+      freezeAuthority: freezeAuthority ?? PublicKey.default,
     },
     data,
   )
@@ -49,8 +49,8 @@ function mintData(
 
 function chain(
   mintOwner: PublicKey | null = TOKEN_PROGRAM_ID,
-  mintAuthority = new PublicKey(AUTHORITY),
-  freezeAuthority = mintAuthority,
+  mintAuthority: PublicKey | null = new PublicKey(AUTHORITY),
+  freezeAuthority: PublicKey | null = mintAuthority,
 ): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -79,8 +79,8 @@ function submitChain(): SolanaChain {
 function generate(
   opts: Record<string, unknown> = {},
   mintOwner?: PublicKey | null,
-  mintAuthority?: PublicKey,
-  freezeAuthority?: PublicKey,
+  mintAuthority?: PublicKey | null,
+  freezeAuthority?: PublicKey | null,
 ) {
   return new SetTokenAuthority().generate(chain(mintOwner, mintAuthority, freezeAuthority), {
     tokenAddress: TOKEN,
@@ -229,7 +229,9 @@ describe('SetTokenAuthority (cct/solana)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'authority' &&
-          err.message.includes('mint authority'),
+          err.context.authorityType === 'mint' &&
+          err.context.currentAuthority === PAYER &&
+          err.message.includes(`mint authority (${PAYER})`),
       )
       await assert.rejects(
         () =>
@@ -242,7 +244,19 @@ describe('SetTokenAuthority (cct/solana)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'authority' &&
-          err.message.includes('freeze authority'),
+          err.context.authorityType === 'freeze' &&
+          err.context.currentAuthority === PAYER &&
+          err.message.includes(`freeze authority (${PAYER})`),
+      )
+    })
+
+    it('identifies a revoked authority', async () => {
+      await assert.rejects(
+        () => generate({ authorityTypes: ['mint'] }, TOKEN_PROGRAM_ID, null),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.currentAuthority === null &&
+          err.message.includes('mint authority (already revoked)'),
       )
     })
 

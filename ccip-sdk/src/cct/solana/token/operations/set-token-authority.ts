@@ -144,10 +144,19 @@ export class SetTokenAuthority extends SolanaOperation<
       const currentAuthority =
         authorityType === TOKEN_AUTHORITY_TYPES.MINT ? mint.mintAuthority : mint.freezeAuthority
       if (!currentAuthority?.equals(opts.authority)) {
+        const currentAuthorityAddress = currentAuthority?.toBase58()
         throw new CCTParamsInvalidError(
           this.name,
           'authority',
-          `must match the token ${authorityType} authority`,
+          `authority ${opts.authority.toBase58()} is not the current ${authorityType} authority (${
+            currentAuthorityAddress ?? 'already revoked'
+          })`,
+          {
+            context: {
+              authorityType,
+              currentAuthority: currentAuthorityAddress ?? null,
+            },
+          },
         )
       }
     }
@@ -173,7 +182,15 @@ export class SetTokenAuthority extends SolanaOperation<
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the current authority wallet. */
+  /**
+   * Generate, sign, simulate, send, and confirm with the current authority wallet.
+   *
+   * @throws {CCTParamsInvalidError} If authority types or authority validation is invalid, or
+   * multisig signers are supplied for signed execution.
+   * @throws {CCIPTokenDataParseError} If mint data cannot be parsed.
+   * @throws CCTTxFailedError If simulation or on-chain execution fails.
+   * @throws CCTTxNotConfirmedError If the submitted transaction is not confirmed in time.
+   */
   override async execute(
     chain: SolanaChain,
     params: ExecuteSetTokenAuthorityParams,
@@ -203,7 +220,7 @@ export class SetTokenAuthority extends SolanaOperation<
       await this.buildUnsigned(chain, parsed),
       this.name,
       computeUnits,
-      true,
+      /* requireSingleTransaction */ true,
     )
   }
 }

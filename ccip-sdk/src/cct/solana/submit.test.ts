@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  AddressLookupTableAccount,
   ComputeBudgetProgram,
   Keypair,
   SendTransactionError,
@@ -125,15 +126,30 @@ describe('Submit error mapping (cct/solana)', () => {
   it('reports confirmed slices when a later slice fails', async () => {
     const hash = 'confirmed-slice'
     let simulations = 0
+    const simulationLookupCounts: number[] = []
+    const lookupAddress = Keypair.generate().publicKey
+    const lookupTable = new AddressLookupTableAccount({
+      key: Keypair.generate().publicKey,
+      state: {
+        deactivationSlot: 0xffff_ffff_ffff_ffffn,
+        lastExtendedSlot: 0,
+        lastExtendedSlotStartIndex: 0,
+        authority: undefined,
+        addresses: [lookupAddress],
+      },
+    })
     const chain = {
       logger: { debug() {}, info() {}, warn() {}, error() {} },
       connection: {
-        simulateTransaction: async () => ({
-          value: {
-            err: ++simulations === 1 ? null : { InstructionError: [1, { Custom: 4 }] },
-            logs: [],
-          },
-        }),
+        simulateTransaction: async (tx: { message: { addressTableLookups: unknown[] } }) => {
+          simulationLookupCounts.push(tx.message.addressTableLookups.length)
+          return {
+            value: {
+              err: ++simulations === 1 ? null : { InstructionError: [1, { Custom: 4 }] },
+              logs: [],
+            },
+          }
+        },
         getLatestBlockhash: async () => ({
           blockhash: Keypair.generate().publicKey.toBase58(),
           lastValidBlockHeight: 1,
@@ -149,7 +165,7 @@ describe('Submit error mapping (cct/solana)', () => {
     const instruction = () =>
       new TransactionInstruction({
         programId: Keypair.generate().publicKey,
-        keys: [],
+        keys: [{ pubkey: lookupAddress, isSigner: false, isWritable: false }],
         data: Buffer.alloc(700),
       })
 
@@ -160,14 +176,17 @@ describe('Submit error mapping (cct/solana)', () => {
         {
           family: ChainFamily.Solana,
           instructions: [instruction(), instruction()],
+          lookupTables: [lookupTable],
           mainIndex: 0,
         },
         OP,
       ),
       (error: unknown) =>
         error instanceof CCTTxFailedError &&
+        error.message.startsWith('partially applied: 1 transaction(s) confirmed;') &&
         Array.isArray(error.context.committedHashes) &&
         error.context.committedHashes[0] === hash,
     )
+    assert.deepEqual(simulationLookupCounts, [1, 1])
   })
 })

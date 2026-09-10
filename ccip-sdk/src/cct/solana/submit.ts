@@ -65,12 +65,13 @@ function getTransactionSlice(unsigned: UnsignedSolanaTx, start: number, end: num
   return {
     includesMain,
     instructions: unsigned.instructions.slice(start, end),
-    lookupTables: includesMain ? unsigned.lookupTables : undefined,
+    // Lookup tables may be needed by instructions in any slice.
+    lookupTables: unsigned.lookupTables,
   }
 }
 
 /**
- * Submits CCT instruction slices, shrinking only locally oversized slices.
+ * Submits CCT instruction slices, splitting only after local size-overflow detection.
  *
  * A simulation failure aborts its slice without submitting it. Confirmed earlier slices are
  * attached as `committedHashes` when a later slice fails. Set `requireSingleTransaction` for
