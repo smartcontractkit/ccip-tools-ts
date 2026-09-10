@@ -1,10 +1,11 @@
 /**
  * EVM token contract layer for CCT: cached {@link Interface}s per {@link TokenVersion}
  * ({@link getTokenInterface}) for read/write (e.g. ownership) ops, the deployable
- * `CrossChainToken` (v2.0.0) artifact ({@link getTokenArtifact}), and the token's role reads —
- * the narrow predicate a role-gated write pre-flights ({@link readTokenRole}) and the
- * informational role-set enumerations ({@link readTokenRoleHolders}). `2.0.0` is
- * `CrossChainToken`; `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors
+ * `CrossChainToken` (v2.0.0) artifact ({@link getTokenArtifact}), the token's role reads — the
+ * narrow predicate a role-gated write pre-flights ({@link readTokenRole}) and the informational
+ * role-set enumerations ({@link readTokenRoleHolders}) — and the owner read
+ * ({@link readTokenOwner}) plus the owner-only guard over it ({@link assertTokenOwner}). `2.0.0`
+ * is `CrossChainToken`; `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors
  * `token-pool/contracts.ts`.
  *
  * @packageDocumentation
@@ -14,7 +15,12 @@ import { Interface, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { CCTContractTypeInvalidError, CCTContractVersionUnsupportedError } from '../../errors.ts'
+import { resultToObject } from '../../../evm/types.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import FACTORY_BURN_MINT_ERC20_V1_6_2_ABI from '../artifacts/abi/V1_6_2/factory-burn-mint-erc20.ts'
 import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-token.ts'
@@ -52,6 +58,17 @@ export function getTokenInterface(version: TokenVersion): Interface {
 }
 
 /**
+ * The interface every BurnMintERC677 role/mint write encodes through.
+ *
+ * Pinned to v1.5.1: the role functions, `mint`, and the role reads are identical at v1.6.2 and
+ * on `HyperLiquidCompatibleERC20 1.6.2`, so there is nothing to dispatch on. v2.0.0's
+ * `CrossChainToken` is a different contract, ruled out by {@link readTokenRole}.
+ */
+export function getErc20Token(): Interface {
+  return TOKEN_INTERFACES[TokenVersion.V1_5_1]
+}
+
+/**
  * Deploy artifacts ({@link DeployArtifact}: contract name + ctor {@link Interface} + creation
  * bytecode) keyed by {@link TokenVersion}, built once; read via {@link getTokenArtifact}. Only
  * `2.0.0` (`CrossChainToken`) is deployable.
@@ -72,17 +89,6 @@ export function getTokenArtifact(version: TokenVersion): DeployArtifact {
   const artifact = TOKEN_ARTIFACTS[version]
   if (!artifact) throw new CCTContractVersionUnsupportedError('token', version)
   return artifact
-}
-
-/**
- * The interface every BurnMintERC677 role/mint write encodes through.
- *
- * Pinned to v1.5.1: the role functions, `mint`, and the role reads are identical at v1.6.2 and
- * on `HyperLiquidCompatibleERC20 1.6.2`, so there is nothing to dispatch on. v2.0.0's
- * `CrossChainToken` is a different contract, ruled out by {@link readTokenRole}.
- */
-export function getErc20Token(): Interface {
-  return TOKEN_INTERFACES[TokenVersion.V1_5_1]
 }
 
 /**
@@ -185,4 +191,44 @@ export async function readTokenRoleHolders(
       { cause: err instanceof Error ? err : undefined },
     )
   }
+}
+
+/** `Ownable2Step.owner()`, declared identically by every supported token. */
+type TokenOwnerGetter = Pick<TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>, 'owner'>
+
+/**
+ * Reads a token's Ownable2Step `owner()` in a single `eth_call`. On the BurnMintERC677 family the
+ * owner *is* the mint/burn role admin — `grantMintRole` and its siblings are `onlyOwner`.
+ * @param chain - Chain to read from.
+ * @param tokenAddress - Token contract to read `owner()` from.
+ * @returns The current owner, checksummed.
+ */
+export async function readTokenOwner(chain: EVMChain, tokenAddress: string): Promise<string> {
+  const token: TokenOwnerGetter = getTypedContract(
+    chain,
+    tokenAddress,
+    FACTORY_BURN_MINT_ERC20_V1_5_1_ABI,
+  )
+  return getAddress(resultToObject(await token.owner()))
+}
+
+/**
+ * Pre-flights `sender` against the token's on-chain `owner()` for an owner-gated write, so an
+ * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an opaque
+ * `OnlyOwner` revert after a multisig has already reviewed and signed.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param tokenAddress - Token being written to.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the token owner
+ */
+export async function assertTokenOwner(
+  operation: string,
+  chain: EVMChain,
+  tokenAddress: string,
+  sender: string,
+): Promise<void> {
+  const owner = await readTokenOwner(chain, tokenAddress)
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(operation, 'sender', `must be the current token owner (${owner})`)
 }
