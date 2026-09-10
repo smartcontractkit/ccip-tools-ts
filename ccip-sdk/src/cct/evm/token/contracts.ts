@@ -1,10 +1,12 @@
 /**
  * EVM token contract layer for CCT: cached {@link Interface}s per {@link TokenVersion}
  * ({@link getTokenInterface}) for read/write (e.g. ownership) ops, the deployable
- * `CrossChainToken` (v2.0.0) artifact ({@link getTokenArtifact}), and the narrow reads the
- * role-gated writes are built on ({@link readTokenRole}, {@link readTokenOwner}) plus the
- * owner-only guard over the latter ({@link assertTokenOwner}). `2.0.0` is `CrossChainToken`;
- * `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors `token-pool/contracts.ts`.
+ * `CrossChainToken` (v2.0.0) artifact ({@link getTokenArtifact}), the token's role reads — the
+ * narrow predicate a role-gated write pre-flights ({@link readTokenRole}) and the informational
+ * role-set enumerations ({@link readTokenRoleHolders}) — and the owner read
+ * ({@link readTokenOwner}) plus the owner-only guard over it ({@link assertTokenOwner}). `2.0.0`
+ * is `CrossChainToken`; `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors
+ * `token-pool/contracts.ts`.
  *
  * @packageDocumentation
  */
@@ -140,6 +142,52 @@ export async function readTokenRole(
       // the type is genuinely unknown: the contract answered nothing
       'unknown',
       `it does not declare ${read}(address) — a v2.0.0 CrossChainToken gates mint/burn through AccessControl instead, and support for it ships separately`,
+      { cause: err instanceof Error ? err : undefined },
+    )
+  }
+}
+
+/** The two role-set getters, declared identically by every BurnMintERC677 token. */
+type TokenRoleHolderReader = Pick<
+  TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
+  'getMinters' | 'getBurners'
+>
+
+/**
+ * Reads the full set of accounts holding one of a BurnMintERC677 token's roles, in a single
+ * `eth_call`.
+ *
+ * Informational, for audit and UX; checking one address is {@link readTokenRole}, not this set
+ * plus a client-side scan. Same family check and version reasoning as that read: only this family
+ * enumerates its role members, and both getters are identical at v1.5.1 and v1.6.2.
+ * @param chain - Chain to read from.
+ * @param tokenAddress - Token contract to read from.
+ * @param read - Which role set to enumerate.
+ * @returns The current holders, checksummed, in the order the token returns them.
+ * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` does not declare `read` — it is
+ * not a BurnMintERC677 token
+ */
+export async function readTokenRoleHolders(
+  chain: EVMChain,
+  tokenAddress: string,
+  read: 'getMinters' | 'getBurners',
+): Promise<string[]> {
+  const token: TokenRoleHolderReader = getTypedContract(
+    chain,
+    tokenAddress,
+    FACTORY_BURN_MINT_ERC20_V1_5_1_ABI,
+  )
+  try {
+    // the abitype handle types an `address[]` return as `(string | Addressable)[]`
+    return (await token[read]()).map((holder) => getAddress(holder as string))
+  } catch (err) {
+    if (!isMissingFunction(err)) throw err
+    throw new CCTContractTypeInvalidError(
+      tokenAddress,
+      'BurnMintERC677 token (FactoryBurnMintERC20 v1.5.1 / v1.6.2)',
+      // the type is genuinely unknown: the contract answered nothing
+      'unknown',
+      `it does not declare ${read}() — a v2.0.0 CrossChainToken gates mint/burn through AccessControl, which does not enumerate role members`,
       { cause: err instanceof Error ? err : undefined },
     )
   }

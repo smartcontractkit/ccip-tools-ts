@@ -183,6 +183,24 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
+    it('rejects a partial canonical CCIP address block', async () => {
+      const ccipAddresses = await deriveCcipLookupTableAddresses(stubChain(), {
+        lookupTableAddress: new PublicKey(LOOKUP_TABLE),
+        tokenMint: new PublicKey(TOKEN),
+        poolProgram: new PublicKey(POOL_PROGRAM),
+      })
+
+      await assert.rejects(
+        () =>
+          generate(
+            { tokenAddress: TOKEN, poolProgramAddress: POOL_PROGRAM },
+            stubChain({ addresses: [ccipAddresses[0]!] }),
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'lookupTableAddress',
+      )
+    })
+
     it('defaults omitted additional addresses to an empty list', async () => {
       const unsigned = await generate({
         additionalAddresses: undefined,
@@ -269,6 +287,15 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
 
       assert.equal(getLookupTableCalls, 0)
+    })
+
+    it('rejects duplicate additional addresses', async () => {
+      const address = Keypair.generate().publicKey.toBase58()
+      await assert.rejects(
+        () => generate({ additionalAddresses: [address, address] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'additionalAddresses',
+      )
     })
 
     it('requires at least one address source', async () => {

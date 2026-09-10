@@ -227,6 +227,19 @@ describe('canton/authentication — token-source primitives', () => {
     assert.equal(fetchCount, 0, 'should not fetch when initial token is still valid')
   })
 
+  it('createMemoizedTokenFetcher keeps returning the initial token on subsequent calls without fetching', async () => {
+    let fetchCount = 0
+    const initial = { accessToken: 'initial-tok', expiresAt: Date.now() + 60_000 }
+    const fetchToken = createMemoizedTokenFetcher(async () => {
+      fetchCount++
+      return { accessToken: `tok-${fetchCount}`, expiresAt: Date.now() + 60_000 }
+    }, initial)
+    assert.equal((await fetchToken()).accessToken, 'initial-tok')
+    assert.equal((await fetchToken()).accessToken, 'initial-tok')
+    assert.equal((await fetchToken()).accessToken, 'initial-tok')
+    assert.equal(fetchCount, 0, 'should not fetch while the initial token is still valid')
+  })
+
   it('generateCodeVerifier produces a non-empty base64url string', () => {
     const v = generateCodeVerifier()
     assert.ok(v.length >= 43, `verifier too short: ${v.length}`)
