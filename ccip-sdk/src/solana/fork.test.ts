@@ -297,8 +297,8 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       )
 
       // Token transfer assertions
-      assert.equal(request.message.tokenAmounts?.length, 1)
-      assert.equal(request.message.tokenAmounts?.[0]?.amount, 1_000_000n)
+      assert.equal(request.message.tokenAmounts.length, 1)
+      assert.equal(request.message.tokenAmounts[0]?.amount, 1_000_000n)
 
       // Verify the message (incl. tokenAmounts) decodes from the on-chain logs
       const decoded = await solanaChain.getMessagesInTx(tx)
@@ -308,8 +308,8 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         request.message.messageId,
         'decoded messageId should match',
       )
-      assert.equal(decoded[0]!.message.tokenAmounts?.length, 1)
-      assert.equal(decoded[0]!.message.tokenAmounts?.[0]?.amount, 1_000_000n)
+      assert.equal(decoded[0]!.message.tokenAmounts.length, 1)
+      assert.equal(decoded[0]!.message.tokenAmounts[0]?.amount, 1_000_000n)
     })
   })
 
