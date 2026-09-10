@@ -26,9 +26,11 @@ import { dataLength, dataSlice, encodeBase64, hexlify } from 'ethers'
 import type { RateLimiterState } from '../chain.ts'
 import {
   CCIPDataFormatUnsupportedError,
+  CCIPPartialTransactionSubmissionError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
   CCIPTransactionNotFinalizedError,
+  CCIPTransactionTooLargeError,
 } from '../errors/index.ts'
 import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
@@ -430,7 +432,9 @@ export async function simulateTransaction(
   const maxComputeUnits = 1_400_000
   const recentBlockhash = '11111111111111111111111111111112'
   const computeUnitLimit = computeUnitsOverride || maxComputeUnits
-  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })
+  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+    units: computeUnitLimit,
+  })
 
   const config: SimulateTransactionConfig = {
     commitment: 'confirmed',
@@ -446,13 +450,16 @@ export async function simulateTransaction(
       err: result.err,
     })
     if (result.err) {
-      // same error sendTransaction sends, to be catched up
-      throw new SendTransactionError({
-        action: 'simulate',
-        signature: '',
-        transactionMessage: jsonStringify(result.err),
-        logs: result.logs!,
-      })
+      // Same error sendTransaction sends, retaining the structured simulation error for callers.
+      throw Object.assign(
+        new SendTransactionError({
+          action: 'simulate',
+          signature: '',
+          transactionMessage: jsonStringify(result.err),
+          logs: result.logs!,
+        }),
+        { simulationError: result.err },
+      )
     }
     return result
   }
@@ -579,8 +586,22 @@ export function simulationProvider(
   }
 }
 
+/** Returns whether a simulation error was caused by Solana compute-budget exhaustion. */
+function isComputeBudgetError(error: unknown): boolean {
+  if (!(error instanceof SendTransactionError)) return false
+  const structured = (error as { simulationError?: unknown }).simulationError
+  if (typeof structured === 'string') return structured === 'ComputationalBudgetExceeded'
+  if (structured && typeof structured === 'object' && 'InstructionError' in structured) {
+    const detail = (structured as { InstructionError?: unknown }).InstructionError
+    return Array.isArray(detail) && detail[1] === 'ComputationalBudgetExceeded'
+  }
+  return false
+}
+
 /**
- * Sign, simulate, send and confirm as many instructions as possible on each transaction
+ * Sign, simulate, send and confirm as many instructions as possible on each transaction.
+ * The default `'partial'` mode may confirm a valid instruction prefix before a later failure.
+ *
  * @param ctx - Context object containing connection and logger
  * @param wallet - Wallet to sign and pay for txs
  * @param unsignedTx - instructions to sign and send
@@ -589,99 +610,128 @@ export function simulationProvider(
  *   - mainIndex - Index of the main instruction
  *   - lookupTables - lookupTables to be used for main instruction
  * @param computeUnits - max computeUnits limit to be used for main instruction
+ * @param splitMode - `'partial'` splits after any simulation failure, `'resource'` splits only
+ *   compute-budget and transaction-size failures, and `'atomic'` never splits.
  * @returns - signature of successful transaction including main instruction
+ *
+ * @throws {@link CCIPPartialTransactionSubmissionError} If a later transaction fails after
+ * earlier transactions confirmed; `context.committedHashes` contains their signatures.
  */
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
   wallet: Wallet,
   { instructions, mainIndex, lookupTables }: Omit<UnsignedSolanaTx, 'family'>,
   computeUnits?: number,
+  splitMode: 'partial' | 'resource' | 'atomic' = 'partial',
 ): Promise<string> {
   const { connection } = ctx
   let mainHash: string
-  for (
-    let [start, end] = [0, instructions.length];
-    start < instructions.length;
-    [start, end] = [end, instructions.length]
-  ) {
-    let computeUnitLimit, lastErr, addressLookupTableAccounts, ixs, includesMain
-    do {
-      ixs = instructions.slice(start, end)
-      includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
-      addressLookupTableAccounts = includesMain ? lookupTables : undefined
+  const committedHashes: string[] = []
+  try {
+    for (
+      let [start, end] = [0, instructions.length];
+      start < instructions.length;
+      [start, end] = [end, instructions.length]
+    ) {
+      let computeUnitLimit, lastErr, addressLookupTableAccounts, ixs, includesMain
+      do {
+        ixs = instructions.slice(start, end)
+        includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
+        addressLookupTableAccounts = includesMain ? lookupTables : undefined
 
-      try {
-        const simulated =
-          (
-            await simulateTransaction(ctx, {
-              payerKey: wallet.publicKey,
-              instructions: ixs,
-              addressLookupTableAccounts,
-            })
-          ).unitsConsumed || 0
+        try {
+          const simulated =
+            (
+              await simulateTransaction(ctx, {
+                payerKey: wallet.publicKey,
+                instructions: ixs,
+                addressLookupTableAccounts,
+              })
+            ).unitsConsumed || 0
 
-        if (computeUnits != null) {
-          computeUnitLimit = computeUnits
-        } else if (simulated <= 200000) {
-          computeUnitLimit = undefined
-        } else {
-          computeUnitLimit = Math.ceil(simulated * 1.1)
+          if (computeUnits != null) {
+            computeUnitLimit = computeUnits
+          } else if (simulated <= 200000) {
+            computeUnitLimit = undefined
+          } else {
+            computeUnitLimit = Math.ceil(simulated * 1.1)
+          }
+          break
+        } catch (err) {
+          lastErr = err
+          // Only partial mode treats every simulation failure as a split boundary.
+          if (
+            (splitMode === 'partial' ||
+              (splitMode === 'resource' &&
+                (isComputeBudgetError(err) || err instanceof CCIPTransactionTooLargeError))) &&
+            end - 1 > start
+          ) {
+            end--
+            continue
+          }
+          throw err
         }
-        break
-      } catch (err) {
-        lastErr = err
-        end-- // truncate until finding a slice which fits (both computeUnits and tx size limits)
+      } while (end > start)
+      if (end <= start) throw lastErr
+
+      const blockhash = await connection.getLatestBlockhash('confirmed')
+
+      // Prefer a v0 transaction (supports address lookup tables); fall back to a v1
+      // transaction (all accounts static, compute-unit limit inlined into the message's
+      // transactionConfig, 4096-byte wire limit instead of 1232) when the v0 wire does
+      // not fit the packet or v0 can't represent the accounts
+      let txV0: VersionedTransaction | undefined
+      try {
+        const txMsg = new TransactionMessage({
+          payerKey: wallet.publicKey,
+          recentBlockhash: blockhash.blockhash,
+          instructions: [
+            ...(computeUnitLimit
+              ? [
+                  ComputeBudgetProgram.setComputeUnitLimit({
+                    units: computeUnitLimit,
+                  }),
+                ]
+              : []),
+            ...ixs,
+          ],
+        })
+        txV0 = new VersionedTransaction(txMsg.compileToV0Message(addressLookupTableAccounts))
+        if (txV0.serialize().length > PACKET_DATA_SIZE) txV0 = undefined
+      } catch {
+        txV0 = undefined
       }
-    } while (end > start)
-    if (end <= start) throw lastErr
 
-    const blockhash = await connection.getLatestBlockhash('confirmed')
-
-    // Prefer a v0 transaction (supports address lookup tables); fall back to a v1
-    // transaction (all accounts static, compute-unit limit inlined into the message's
-    // transactionConfig, 4096-byte wire limit instead of 1232) when the v0 wire does
-    // not fit the packet or v0 can't represent the accounts
-    let txV0: VersionedTransaction | undefined
-    try {
-      const txMsg = new TransactionMessage({
-        payerKey: wallet.publicKey,
-        recentBlockhash: blockhash.blockhash,
-        instructions: [
-          ...(computeUnitLimit
-            ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
-            : []),
-          ...ixs,
-        ],
-      })
-      txV0 = new VersionedTransaction(txMsg.compileToV0Message(addressLookupTableAccounts))
-      if (txV0.serialize().length > PACKET_DATA_SIZE) txV0 = undefined
-    } catch {
-      txV0 = undefined
+      let signature: string
+      if (txV0) {
+        const signed = await wallet.signTransaction(txV0)
+        signature = await connection.sendTransaction(signed)
+      } else {
+        const messageV1 = compileV1Message({
+          payerKey: wallet.publicKey,
+          recentBlockhash: blockhash.blockhash,
+          instructions: ixs,
+          computeUnitLimit,
+        })
+        const txV1 = new VersionedTransaction(messageV1)
+        // v1 signing flows through the standard tx.sign()/partialSign() paths, which
+        // sign the message.serialize() bytes — SerializableMessageV1 provides them
+        await wallet.signTransaction(txV1)
+        signature = await connection.sendRawTransaction(
+          serializeV1Transaction(messageV1, txV1.signatures),
+        )
+      }
+      await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+      committedHashes.push(signature)
+      if (includesMain) mainHash = signature
     }
-
-    let signature: string
-    if (txV0) {
-      const signed = await wallet.signTransaction(txV0)
-      signature = await connection.sendTransaction(signed)
-    } else {
-      const messageV1 = compileV1Message({
-        payerKey: wallet.publicKey,
-        recentBlockhash: blockhash.blockhash,
-        instructions: ixs,
-        computeUnitLimit,
-      })
-      const txV1 = new VersionedTransaction(messageV1)
-      // v1 signing flows through the standard tx.sign()/partialSign() paths, which
-      // sign the message.serialize() bytes — SerializableMessageV1 provides them
-      await wallet.signTransaction(txV1)
-      signature = await connection.sendRawTransaction(
-        serializeV1Transaction(messageV1, txV1.signatures),
-      )
-    }
-    await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
-    if (includesMain) mainHash = signature
+    return mainHash!
+  } catch (error) {
+    if (!committedHashes.length) throw error
+    throw new CCIPPartialTransactionSubmissionError(committedHashes, {
+      cause: error instanceof Error ? error : undefined,
+    })
   }
-  return mainHash!
 }
 
 /**
