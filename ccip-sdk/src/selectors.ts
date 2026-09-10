@@ -1757,6 +1757,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '4103882950': {
+    selector: 18362000170840307455n,
+    name: 'private-testnet-basalt',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '7052886157': {
     selector: 410896468069059699n,
     name: 'glamsterdam-devnet-6',
@@ -1768,6 +1774,12 @@ const SELECTORS: Selectors = {
     name: 'glamsterdam-devnet-5',
     network_type: 'TESTNET',
     deprecated: true,
+    family: 'EVM',
+  },
+  '7091047534': {
+    selector: 12540949017250913122n,
+    name: 'ethereum-testnet-plataberget',
+    network_type: 'TESTNET',
     family: 'EVM',
   },
   // end:generate
