@@ -1,10 +1,11 @@
-import { AuthorityType, createSetAuthorityInstruction } from '@solana/spl-token'
+import { AuthorityType, createSetAuthorityInstruction, unpackMint } from '@solana/spl-token'
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 
+import { CCIPTokenDataParseError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveTokenProgram } from '../../../../solana/utils.ts'
+import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -128,7 +129,38 @@ export class SetTokenAuthority extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedSetTokenAuthorityParams,
   ): Promise<UnsignedSolanaTx> {
-    const tokenProgram = await resolveTokenProgram(chain.connection, opts.tokenAddress)
+    const mintAccount = await resolveTokenMint(chain.connection, opts.tokenAddress)
+    let mint
+
+    try {
+      mint = unpackMint(opts.tokenAddress, mintAccount, mintAccount.owner)
+    } catch (cause) {
+      throw new CCIPTokenDataParseError(opts.tokenAddress.toBase58(), {
+        cause: cause instanceof Error ? cause : undefined,
+      })
+    }
+
+    for (const authorityType of opts.authorityTypes) {
+      const currentAuthority =
+        authorityType === TOKEN_AUTHORITY_TYPES.MINT ? mint.mintAuthority : mint.freezeAuthority
+      if (!currentAuthority?.equals(opts.authority)) {
+        const currentAuthorityAddress = currentAuthority?.toBase58()
+        throw new CCTParamsInvalidError(
+          this.name,
+          'authority',
+          `authority ${opts.authority.toBase58()} is not the current ${authorityType} authority (${
+            currentAuthorityAddress ?? 'already revoked'
+          })`,
+          {
+            context: {
+              authorityType,
+              currentAuthority: currentAuthorityAddress ?? null,
+            },
+          },
+        )
+      }
+    }
+
     const instructions: TransactionInstruction[] = opts.authorityTypes.map((authorityType) =>
       createSetAuthorityInstruction(
         opts.tokenAddress,
@@ -136,17 +168,29 @@ export class SetTokenAuthority extends SolanaOperation<
         SPL_AUTHORITY_TYPES[authorityType],
         opts.newAuthority,
         opts.multisigSigners,
-        tokenProgram,
+        mintAccount.owner,
       ),
     )
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, authorityTypes = ${opts.authorityTypes.join(',')}, newAuthority = ${opts.newAuthority?.toBase58() ?? 'revoked'}`,
+      `${
+        this.name
+      }: token = ${opts.tokenAddress.toBase58()}, authorityTypes = ${opts.authorityTypes.join(
+        ',',
+      )}, newAuthority = ${opts.newAuthority?.toBase58() ?? 'revoked'}`,
     )
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
   }
 
-  /** Generate, sign, simulate, send, and confirm with the current authority wallet. */
+  /**
+   * Generate, sign, simulate, send, and confirm with the current authority wallet.
+   *
+   * @throws {CCTParamsInvalidError} If authority types or authority validation is invalid, or
+   * multisig signers are supplied for signed execution.
+   * @throws {CCIPTokenDataParseError} If mint data cannot be parsed.
+   * @throws CCTTxFailedError If simulation or on-chain execution fails.
+   * @throws CCTTxNotConfirmedError If the submitted transaction is not confirmed in time.
+   */
   override async execute(
     chain: SolanaChain,
     params: ExecuteSetTokenAuthorityParams,
@@ -170,6 +214,13 @@ export class SetTokenAuthority extends SolanaOperation<
       )
     }
 
-    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
+    return submit(
+      chain,
+      wallet,
+      await this.buildUnsigned(chain, parsed),
+      this.name,
+      computeUnits,
+      /* requireSingleTransaction */ true,
+    )
   }
 }
