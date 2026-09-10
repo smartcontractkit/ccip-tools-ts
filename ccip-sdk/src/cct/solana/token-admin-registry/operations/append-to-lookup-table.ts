@@ -157,6 +157,9 @@ export class AppendToLookupTable extends SolanaOperation<
       )
     }
 
+    const existingAddresses = new Set(
+      lookupTable.value.state.addresses.map((address) => address.toBase58()),
+    )
     const addresses = [...opts.additionalAddresses]
 
     if (opts.tokenMint && poolProgram) {
@@ -166,19 +169,28 @@ export class AppendToLookupTable extends SolanaOperation<
         tokenMint,
         poolProgram,
       })
-      const existingAddresses = new Set(
-        lookupTable.value.state.addresses.map((address) => address.toBase58()),
-      )
-
-      if (ccipAddresses.every((address) => existingAddresses.has(address.toBase58()))) {
+      if (ccipAddresses.some((address) => existingAddresses.has(address.toBase58()))) {
         throw new CCTParamsInvalidError(
           this.name,
           'lookupTableAddress',
-          'lookup table already contains the canonical CCIP address block; only append additionalAddresses or use an empty ALT',
+          'lookup table already contains canonical CCIP addresses; only append additionalAddresses or use an empty ALT',
         )
       }
 
       addresses.unshift(...ccipAddresses)
+    }
+
+    const appendedAddresses = new Set<string>()
+    for (const address of addresses) {
+      const value = address.toBase58()
+      if (existingAddresses.has(value) || appendedAddresses.has(value)) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'additionalAddresses',
+          'must not contain addresses already in the ALT or duplicate addresses',
+        )
+      }
+      appendedAddresses.add(value)
     }
 
     const totalAddressesAfterAppend = lookupTable.value.state.addresses.length + addresses.length

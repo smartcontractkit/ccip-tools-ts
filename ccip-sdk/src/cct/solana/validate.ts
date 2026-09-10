@@ -86,6 +86,76 @@ export function validatePublicKeys(operation: string, param: string, values: unk
 }
 
 /**
+ * Asserts public keys do not contain duplicates.
+ * @throws CCTParamsInvalidError if a public key is duplicated.
+ */
+export function validateUniquePublicKeys(
+  operation: string,
+  param: string,
+  publicKeys: PublicKey[],
+): void {
+  const seen = new Set<string>()
+  for (const [i, publicKey] of publicKeys.entries()) {
+    const address = publicKey.toBase58()
+    if (seen.has(address)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate addresses',
+      )
+    }
+    seen.add(address)
+  }
+}
+
+/**
+ * Asserts bigint chain selectors do not contain duplicates.
+ * @remarks Silently ignores non-bigint entries; relies on downstream `validateBigInt` for type safety.
+ * @throws CCTParamsInvalidError if a chain selector is duplicated.
+ */
+export function validateUniqueChainSelectors(
+  operation: string,
+  param: string,
+  selectors: unknown[],
+): void {
+  const seen = new Set<bigint>()
+  for (const [i, selector] of selectors.entries()) {
+    if (typeof selector === 'bigint' && seen.has(selector)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate chain selectors',
+      )
+    }
+    if (typeof selector === 'bigint') seen.add(selector)
+  }
+}
+
+/**
+ * Asserts hex byte values do not contain duplicates.
+ * @throws CCTParamsInvalidError if a hex byte value is duplicated.
+ */
+export function validateUniqueHexBytes(
+  operation: string,
+  param: string,
+  values: Buffer[],
+  label = 'hex values',
+): void {
+  const seen = new Set<string>()
+  for (const [i, value] of values.entries()) {
+    const hex = value.toString('hex')
+    if (seen.has(hex)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        `must not contain duplicate ${label}`,
+      )
+    }
+    seen.add(hex)
+  }
+}
+
+/**
  * Asserts `value` is a non-empty string.
  * @throws CCTParamsInvalidError if `value` is not a non-empty string.
  */
@@ -347,7 +417,11 @@ export async function resolveExistingTokenAccount(
   tokenAddress: PublicKey,
   holder: PublicKey,
   tokenAccount?: PublicKey,
-): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey; account: Account }> {
+): Promise<{
+  tokenAccount: PublicKey
+  tokenProgram: PublicKey
+  account: Account
+}> {
   const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
   const account = tokenAccount ?? ata
   let tokenAccountInfo: Account

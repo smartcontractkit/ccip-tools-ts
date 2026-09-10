@@ -7,6 +7,7 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { U64_MAX } from '../../validate.ts'
 import { DeployToken } from './deploy-token.ts'
 
 const BLOCKHASH = PublicKey.default.toBase58()
@@ -129,6 +130,7 @@ describe('DeployToken (cct/solana)', () => {
         [{ freezeAuthority: 'invalid' }, 'freezeAuthority'],
         [{ preMint: 0n }, 'preMint'],
         [{ preMint: 1 }, 'preMint'],
+        [{ preMint: U64_MAX + 1n }, 'preMint'],
         [{ preMint: 1n }, 'preMintRecipient'],
         [{ preMint: 1n, preMintRecipient: 'invalid' }, 'preMintRecipient'],
       ] as const) {

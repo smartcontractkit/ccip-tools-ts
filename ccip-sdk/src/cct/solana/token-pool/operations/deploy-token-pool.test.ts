@@ -156,6 +156,15 @@ describe('DeployTokenPool (cct/solana)', () => {
       )
     })
 
+    it('rejects duplicate allowlist addresses', async () => {
+      const address = Keypair.generate().publicKey.toBase58()
+      await assert.rejects(
+        () => generate({ allowlist: [address, address] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'allowlist[1]',
+      )
+    })
+
     it('rejects invalid allowlist addresses', async () => {
       await assert.rejects(
         () => generate({ allowlist: ['not-a-pubkey'] }),

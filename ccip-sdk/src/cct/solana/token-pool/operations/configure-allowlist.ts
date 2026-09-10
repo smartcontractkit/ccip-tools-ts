@@ -1,9 +1,8 @@
 import { type PublicKey, SystemProgram } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -21,6 +20,7 @@ import {
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateUniquePublicKeys,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool `configureAllowlist` generation and execution. */
@@ -56,7 +56,10 @@ export type ExecuteConfigureAllowlistParams = SolanaExecuteParams<ConfigureAllow
 /** Result of executing Solana token pool allowlist configuration. */
 export type ExecuteConfigureAllowlistResult = TransactionResult
 
-/** Adds addresses to and enables or disables a Solana token pool allowlist. */
+/**
+ * Adds addresses to and enables or disables a Solana token pool allowlist.
+ * @remarks Added addresses must not contain duplicates.
+ */
 export class ConfigureAllowlist extends SolanaOperation<
   ConfigureAllowlistParams,
   UnsignedSolanaTx,
@@ -78,9 +81,7 @@ export class ConfigureAllowlist extends SolanaOperation<
     const add = params.add.map((address, index) =>
       parsePublicKey(this.name, `add[${index}]`, address),
     )
-    if (new Set(add.map((address) => address.toBase58())).size !== add.length) {
-      throw new CCTParamsInvalidError(this.name, 'add', 'must not contain duplicate addresses')
-    }
+    validateUniquePublicKeys(this.name, 'add', add)
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -125,14 +126,7 @@ export class ConfigureAllowlist extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteConfigureAllowlistParams,
   ): Promise<ExecuteConfigureAllowlistResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    const generateParams: GenerateConfigureAllowlistParams = {
-      ...rest,
-      payer: wallet.publicKey.toBase58(),
-    }
-    const parsed = this.prepare(generateParams)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
