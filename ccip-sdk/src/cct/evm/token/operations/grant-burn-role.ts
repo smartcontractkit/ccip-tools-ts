@@ -39,20 +39,13 @@ export class GrantBurnRole extends EVMOperation<GrantBurnRoleParams> {
   /**
    * Reads the current role state, then — when `sender` is known — confirms it owns the token.
    *
-   * @remarks The role read comes first because it is also the family check: only a
-   * BurnMintERC677 token declares `isBurner`, so a v2.0.0 `CrossChainToken`, a token pool, or an
-   * EOA fails there rather than one step later (see {@link readTokenRole}). `owner()` alone
-   * would not catch any of them, since all three declare it.
-   * @remarks Both checks live here, not only in {@link execute}, so the offline / multisig path
-   * gets them too — `generateUnsignedGrantBurnRole` with an unauthorized `sender` would otherwise hand
-   * back a fully-formed transaction that reverts `OnlyOwner` after being reviewed and signed.
-   * @remarks Rejecting a redundant grant is deliberately stricter than the chain: the role set is
-   * an `EnumerableSet`, so granting twice is a silent on-chain no-op, not a revert. Surfacing
-   * it here stops a multisig from spending a review cycle on a transaction that changes
-   * nothing.
+   * The role read runs first because it is also the family check ({@link readTokenRole}), which
+   * `owner()` cannot make: a token pool and a v2.0.0 `CrossChainToken` declare `owner()` too. Both
+   * checks run here rather than in {@link execute}, so the offline / multisig path gets them, and
+   * a redundant grant is rejected even though the chain would mine it as a silent no-op.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * @throws {@link CCTParamsInvalidError} if `burner` already holds the burn role, or `sender` is given and is
-   * not the token owner
+   * @throws {@link CCTParamsInvalidError} if `burner` already holds the burn role, or `sender`
+   * is given and is not the token owner
    */
   protected async buildUnsigned(
     chain: EVMChain,

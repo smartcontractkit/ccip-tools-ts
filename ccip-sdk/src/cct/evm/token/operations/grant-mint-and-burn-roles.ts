@@ -39,18 +39,13 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
 
   /**
    * Reads both role states, then — when `sender` is known — confirms it owns the token.
+   * Rejected only when the account holds both roles already: holding one still builds, since
+   * completing the pair is what this call is for.
    *
-   * @remarks Rejected only when `burnAndMinter` already holds **both** roles: holding just one
-   * still builds, since completing the pair is exactly what this call is for.
-   * @remarks The role reads come first because they are also the family check: only a
-   * BurnMintERC677 token declares `isMinter`/`isBurner`, so a v2.0.0 `CrossChainToken` — which
-   * declares `grantMintAndBurnRoles` too, but gates the roles through AccessControl — a token
-   * pool, or an EOA fails there rather than producing calldata it cannot honour (see
-   * {@link readTokenRole}). `owner()` alone would not catch any of them.
-   * @remarks Both checks live here, not only in {@link execute}, so the offline / multisig path
-   * gets them too — `generateUnsignedGrantMintAndBurnRoles` with an unauthorized `sender` would
-   * otherwise hand back a fully-formed transaction that reverts `OnlyOwner` after being reviewed
-   * and signed.
+   * The role reads run first because they are also the family check ({@link readTokenRole}), which
+   * `owner()` cannot make: a token pool and a v2.0.0 `CrossChainToken` declare `owner()` too, and
+   * v2.0.0 declares `grantMintAndBurnRoles` itself. Both checks run here rather than in
+   * {@link execute}, so the offline / multisig path gets them.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * @throws {@link CCTParamsInvalidError} if `burnAndMinter` already holds both roles, or `sender`
    * is given and is not the token owner
