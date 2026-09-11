@@ -55,7 +55,12 @@ export type RpcEnvName = (typeof RPC_ENV)[keyof typeof RPC_ENV]
  */
 export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
   RPC_SEPOLIA:
-    'https://rpc.sepolia.ethpandaops.io,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia',
+    // raced where it matters (the solana devnet suites probe a fixture tx before
+    // binding); ethpandaops leads for first-entry suites.
+    // ethereum-sepolia-rpc.publicnode.com / sepolia.drpc.org added 2026-09:
+    // ethpandaops throttles hard from CI's shared egress IP (90s per-request
+    // aborts inside EVM ops → suite timeouts).
+    'https://rpc.sepolia.ethpandaops.io,https://ethereum-sepolia-rpc.publicnode.com,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia,https://sepolia.drpc.org',
   RPC_BASE_SEPOLIA: 'https://gateway.tenderly.co/public/base-sepolia,https://sepolia.base.org',
   RPC_ARBITRUM_SEPOLIA: 'https://sepolia-rollup.arbitrum.io/rpc',
   RPC_OPTIMISM_SEPOLIA: 'https://gateway.tenderly.co/public/optimism-sepolia',

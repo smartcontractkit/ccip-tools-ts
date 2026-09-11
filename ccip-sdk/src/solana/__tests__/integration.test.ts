@@ -24,7 +24,6 @@ import { SolanaChain } from '../index.ts'
 // useResourceForDescribe.
 
 const FUJI_RPC = rpcEndpoint('RPC_FUJI')
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'
@@ -60,6 +59,27 @@ const solanaDevnetHealthy = (url: string) =>
   })
     .then((res) => res.json() as Promise<{ result?: unknown }>)
     .then((json) => json.result != null)
+
+/**
+ * Sepolia counterpart: prove the fixture send tx is reachable AND complete (tx +
+ * receipt) — the tests here replay the send tx and consume its logs. A throttled
+ * endpoint aborts each EVM op at EVMChain's 90s per-request bound, which is what
+ * blew this suite's 300s ceiling in CI (two ops ≈ one bound + change).
+ */
+const sepoliaHealthy = async (url: string) => {
+  const body = (method: string) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [EVM_TO_SOLANA_V2_TX] }),
+      signal: AbortSignal.timeout(20_000),
+    }).then((res) => res.json() as Promise<{ result?: unknown }>)
+  const [tx, receipt] = await Promise.all([
+    body('eth_getTransactionByHash'),
+    body('eth_getTransactionReceipt'),
+  ])
+  return tx.result != null && receipt.result != null
+}
 
 // Latest v2 messages on the current (post-redeploy) contracts, for both directions.
 const SOLANA_TO_SEPOLIA_V2_TX =
@@ -310,15 +330,23 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   // Sepolia is the EVM counterpart of several fixtures here (v2 both directions)
   useResourceForDescribe(['solana-devnet', 'sepolia'])
   let solanaChain: SolanaChain
+  let sepoliaRpc: string
 
   before(async () => {
-    solanaChain = await SolanaChain.fromUrl(
-      await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
-      {
-        apiClient: null,
-        logger: testLogger,
-      },
-    )
+    // CI's shared egress IP trips public endpoints' keyless quotas run to run:
+    // race each network's defaults with a fixture-data probe instead of binding
+    // to the first entry — a throttled endpoint stalled this suite past its 300s
+    // ceiling (each slow EVM op aborts at EVMChain's 90s request bound; devnet
+    // signature scans crawl through pacing retries).
+    const [devnetRpc, sepolia] = await Promise.all([
+      raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      raceRpcEndpoint('RPC_SEPOLIA', sepoliaHealthy),
+    ])
+    sepoliaRpc = sepolia
+    solanaChain = await SolanaChain.fromUrl(devnetRpc, {
+      apiClient: null,
+      logger: testLogger,
+    })
   })
 
   it('should synthesize and decode CCIPMessageSentV2 from Anchor CPI event data', async () => {
@@ -372,7 +400,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should fetch EVM to Solana v2 OffRamp executions without verifications', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
 
@@ -420,7 +448,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should resolve v2 verifications policy via get_ccvs_for_msg (RMN accounts) without a simulation panic', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
     const tx = await source.getTransaction(EVM_TO_SOLANA_V2_TX)
@@ -461,7 +489,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     async function runAssertions() {
       await using disposer = new AsyncDisposableStack()
       const dest = disposer.adopt(
-        await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+        await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
         (dest) => dest.provider.destroy(),
       )
 
@@ -485,7 +513,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should fetch the latest Sepolia -> Solana v2 execution', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
 
