@@ -37,6 +37,7 @@ const sidebars: SidebarsConfig = {
         'guides/querying-data',
         'guides/token-pools',
         'guides/multi-chain',
+        'guides/chain-endpoints',
         'guides/viem-integration',
         'guides/browser-setup',
         'guides/error-handling',
