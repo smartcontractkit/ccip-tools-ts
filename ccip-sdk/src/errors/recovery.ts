@@ -23,6 +23,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TRANSACTION_NOT_FINALIZED: 'Wait for transaction finality.',
   TRANSACTION_TOO_LARGE:
     'Transaction exceeds its version wire size limit (1232 bytes for v0, 4096 for v1). Reduce the message data or split into smaller transactions.',
+  PARTIAL_TRANSACTION_SUBMISSION:
+    'Inspect committedHashes before retrying so confirmed transactions are not submitted again.',
 
   MESSAGE_INVALID: 'Verify the message format matches the expected CCIP message structure.',
   MESSAGE_DECODE_FAILED:
