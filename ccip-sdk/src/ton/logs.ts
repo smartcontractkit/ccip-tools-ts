@@ -320,11 +320,21 @@ export type TonV3Context = {
   logger?: Pick<Logger, 'debug' | 'warn'>
 }
 
+/** The public TonCenter v3 index for a network — the terminal fallback when no
+ * endpoint-derived index is usable (or none was derivable). */
+export function publicTonV3BaseUrl(networkType: NetworkType): string {
+  return networkType === NetworkType.Mainnet
+    ? 'https://toncenter.com/api/v3'
+    : 'https://testnet.toncenter.com/api/v3'
+}
+
 /**
  * The TonCenter v3 index base URL for a chain: derived from the v2 RPC endpoint when
  * it has an `/api/v2` path (`https://toncenter.com/api/v2/jsonRPC` →
  * `https://toncenter.com/api/v3`); otherwise the public TonCenter index for the
  * chain's network — the same fallback `lookupTxByRawHash` uses for hash lookups.
+ * Note the derivation alone does not guarantee the derived host actually SERVES v3
+ * (a v2-only proxy does not) — callers probe before trusting it.
  * StartTime-only scans are rare (cold backfills), so leaning on the public index for
  * them is acceptable even for chains otherwise served by a private endpoint.
  * @internal
@@ -338,9 +348,7 @@ export function tonV3BaseUrl(endpoint: string, networkType: NetworkType): string
   } catch {
     // not a parseable URL — fall through to the network-type default
   }
-  return networkType === NetworkType.Mainnet
-    ? 'https://toncenter.com/api/v3'
-    : 'https://testnet.toncenter.com/api/v3'
+  return publicTonV3BaseUrl(networkType)
 }
 
 /** Builds a v3 request URL from the base, preserving the base's query (e.g. toncenter's `?api_key=`). */

@@ -113,6 +113,8 @@ const chain = await EVMChain.fromUrl('https://rpc.sepolia.org', {
 })
 ```
 
+Some chains consult secondary "public-indexer-like" endpoints internally (TON's TonCenter v3 index, Aptos' GraphQL indexer, the CCIP verifier indexers, …) — each has a ctx override with a documented default. See [Chain Endpoints & Indexers](/sdk/guides/chain-endpoints).
+
 ## Unified Interface
 
 All chain classes implement the `Chain` interface, so you can write chain-agnostic code:

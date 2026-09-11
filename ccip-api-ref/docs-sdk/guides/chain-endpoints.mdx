@@ -1,0 +1,94 @@
+---
+id: chain-endpoints
+title: 'Chain Endpoints & Indexers'
+description: 'Secondary indexer endpoints the SDK queries behind the scenes, their ctx overrides, and defaults.'
+sidebar_label: Chain Endpoints & Indexers
+sidebar_position: 11
+---
+
+# Chain Endpoints & Indexers
+
+Besides the primary RPC endpoint you pass to `fromUrl` / `fromClient`, some chain families consult **secondary, "public-indexer-like" endpoints** — fast paths and lookups that otherwise default to a public service. Every one of them can be pointed elsewhere through the chain context (`ctx`), so private deployments never silently depend on a public default.
+
+All of these requests flow through the chain's fetch — a custom `ctx.fetch` applies to them too (see [the note at the end](#fetch-overrides).
+
+## Summary
+
+| Scope | Secondary endpoint | ctx option | Default |
+|-------|--------------------|------------|---------|
+| all families | CCIP REST API — lane info, message lookups by ID, execution inputs, lane latency | `apiClient` | `https://api.ccip.chain.link` |
+| all families | CCIP v2 verifier indexers — commit / CCV lookups via `getVerifications` | `verificationsIndexer` (a per-call `indexer` option wins) | mainnet: `https://indexer-1.ccip.chain.link`, `https://indexer-2.ccip.chain.link`; testnet: `https://indexer-1.testnet.ccip.chain.link`, `https://indexer-2.testnet.ccip.chain.link` |
+| TON | TonCenter v3 index — `getLogs` fast path, indexed tip, raw-hash tx lookups | `v3Url` | probed: derived from the endpoint when it is toncenter-shaped; otherwise the public TonCenter index for the network |
+| Aptos | GraphQL indexer (`queryIndexer`) — `getLogs` fast path and execution-failure scans | `indexerUrl` | Aptos SDK per-network default, e.g. `https://api.mainnet.aptoslabs.com/v1/graphql` |
+| Canton | CCIP CCV indexer service — verifier results and disclosure lookups | `cantonConfig.indexerUrl` | `https://indexer-1.ccip.chain.link` |
+| EVM, Solana, Sui | none — every query rides the single RPC endpoint | — | — |
+
+## All families: CCIP REST API
+
+The shared `ChainContext.apiClient` accepts a URL string, a pre-built `CCIPAPIClient`, or `null` to disable the API entirely (RPC-only mode):
+
+```typescript
+const chain = await EVMChain.fromUrl(rpcUrl, {
+  apiClient: 'https://staging-api.example.com', // or a CCIPAPIClient instance, or null
+})
+```
+
+## All families: CCIP v2 verifier indexers
+
+`getVerifications` races the CCIP API against the CCIP v2 verifier indexers for commit / CCV data. The built-in defaults are selected by the chain's network type; a chain-level override keeps that choice from hitting the public indexers:
+
+```typescript
+const chain = await EVMChain.fromUrl(rpcUrl, {
+  verificationsIndexer: ['https://my-indexer.example.com'],
+})
+```
+
+A per-call `indexer` option (accepted by `getVerifications`) still wins over the ctx default; Canton additionally honors `cantonConfig.indexerUrl` (below).
+
+## TON: TonCenter v3 index
+
+TON's primary API is the v2 JSON-RPC endpoint, but several operations need the separate **v3 index**: the `getLogs` fast path (startTime-only and index-hinted scans), the indexed-tip probe, the bounded-walk metadata oracle, and raw-hash transaction lookups (`getTransaction('0x<64-hex>')`). Point them all at one URL with `v3Url`:
+
+```typescript
+const chain = await TONChain.fromUrl('https://my-v2-proxy.example/jsonRPC', {
+  v3Url: 'https://my-index.example.com/api/v3?api_key=s3cr3t',
+})
+```
+
+When `v3Url` is omitted, the URL is **resolved (once per chain) as follows**:
+
+1. If the endpoint is toncenter-shaped (an `/api/v2` path), the same-origin `/api/v3` is derived (its query — e.g. an `api_key` — is carried over), then **probed** with a v3-only method (`/masterchainInfo`). A host that does not actually serve v3 (a v2-only proxy) falls back to the public TonCenter index for the network, so a bad inference never poisons v3 consumers.
+2. Any other endpoint goes straight to the public TonCenter index (`https://toncenter.com/api/v3` or `https://testnet.toncenter.com/api/v3`).
+
+An explicit `v3Url` is taken on faith and never probed.
+
+## Aptos: GraphQL indexer
+
+Aptos' GraphQL endpoint **is** its indexer: `provider.queryIndexer` backs the `getLogs` fast path and the execution-failure scans. Override it with `indexerUrl`:
+
+```typescript
+const chain = await AptosChain.fromUrl('https://fullnode.example.internal/v1', {
+  indexerUrl: 'https://my-indexer.example.internal/graphql',
+})
+```
+
+When omitted, the Aptos SDK's per-network default applies (`https://api.<network>.aptoslabs.com/v1/graphql`). The fullnode URL is **never** used to infer an indexer URL — a non-standard fullnode pair requires the explicit option (note that a `Network.CUSTOM` Aptos config throws without one).
+
+## Canton: CCIP CCV indexer
+
+Canton's CCV verifier results and disclosure lookups go through the CCIP CCV indexer service, configured as part of the Canton config:
+
+```typescript
+const chain = await CantonChain.fromUrl(ledgerUrl, {
+  cantonConfig: {
+    // ...
+    indexerUrl: 'https://my-ccv-indexer.example.com',
+  },
+})
+```
+
+Default: `https://indexer-1.ccip.chain.link` (the first mainnet verifier indexer).
+
+## Fetch overrides
+
+A custom `ctx.fetch` is used verbatim for every request above (primary and secondary alike). TON and Aptos additionally accept dedicated fetch overrides for their index traffic (`ctx.v3Fetch` for TON — built automatically from the resolved v3 URL when omitted), since the index host's rate-limit profile differs from the RPC host's.

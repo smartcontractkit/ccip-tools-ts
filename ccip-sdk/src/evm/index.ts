@@ -2564,7 +2564,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // race API client + indexer URLs
       const verifications = await fetchVerifications(request.message.messageId, {
         apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.network.networkType,
+        indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
         watch:
           opts.watch instanceof AbortSignal
             ? AbortSignal.any([opts.watch, this.abort])
