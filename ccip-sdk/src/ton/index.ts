@@ -40,7 +40,7 @@ import {
   redactEndpointUrl,
 } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
+import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -77,6 +77,7 @@ import {
   type TonV3Event,
   fetchV3IndexedTip,
   openV3EventStream,
+  publicTonV3BaseUrl,
   streamTransactionsForAddress,
   streamV3TxMeta,
   tonV3BaseUrl,
@@ -114,11 +115,22 @@ function shardContainsAccount(shardStr: string, acct: Address): boolean {
 /**
  * TON-specific {@link ChainContext} extras. Optional and local to this module on
  * purpose: the shared ChainContext stays family-agnostic, while TON's secondary index
- * API (TonCenter v3, used by the getLogs fast path) accepts its own fetch override.
- * `v3Fetch` defaults to `fetch` verbatim when one is provided; otherwise the chain
- * builds a host-paced, fail-fast instance itself.
+ * API (TonCenter v3, used by the getLogs fast path and raw-hash tx lookups) accepts
+ * its own URL and fetch overrides. `v3Url` is honored verbatim when provided; one is
+ * inferred from the provider endpoint only when it is omitted. `v3Fetch` defaults to
+ * `fetch` verbatim when one is provided; otherwise the chain builds a host-paced,
+ * fail-fast instance from the resolved v3 URL itself.
  */
 export type TONChainContext = ChainContext & {
+  /**
+   * TonCenter v3 index base URL for this chain, honored verbatim (query included,
+   * e.g. an `api_key`) by every v3 index call: the getLogs fast path, the indexed
+   * tip, the bounded-walk metadata oracle and raw-hash tx lookups. NEVER probed —
+   * an explicit URL is taken on faith. When omitted, one is inferred from the
+   * provider endpoint and probed once with a v3-only method; a host that does not
+   * serve v3 falls back to the public toncenter index for this network.
+   */
+  v3Url?: string
   /** Fetch override for the TonCenter v3 index API (see TONChain.v3FetchFor). */
   v3Fetch?: typeof fetch
 }
@@ -163,9 +175,18 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ctx?.fetch ??
       createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
 
+    // The v3 index base URL is resolved lazily (v3UrlFor): an explicit ctx.v3Url wins
+    // and is taken on faith; otherwise one is inferred from the provider endpoint (a
+    // toncenter v2 path → same-origin /api/v3 with its query) and PROBED with a
+    // v3-only method, falling back to the public index when the host lacks v3. Every
+    // v3 call — getLogs fast path, indexed tip, walk metadata oracle, raw-hash tx
+    // lookups — shares the resolution.
+    this.ctxV3Url_ = ctx?.v3Url
+
     // v3 index fetch: an explicit `v3Fetch` (TON-local ctx extra) wins; a
     // caller-provided `fetch` is reused verbatim (tests, tuned callers); otherwise the
-    // first v3 call lazily installs a host-paced, fail-fast instance (see v3FetchFor).
+    // first v3 call lazily installs a host-paced, fail-fast instance built from the
+    // resolved v3 URL (see v3FetchFor).
     this.v3Fetch_ = ctx?.v3Fetch ?? ctx?.fetch
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
@@ -272,16 +293,6 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
       const fetchFn: typeof fetch =
         ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
-      // Same provenance for the v3 index fetch (a TON-local ctx extra): a
-      // caller-supplied fetch is reused verbatim; the default path gets a dedicated
-      // paced, fail-fast instance instead of the v2 endpoint's profile (see v3FetchFor).
-      const v3Fetch: typeof fetch | undefined =
-        ctx?.v3Fetch ??
-        ctx?.fetch ??
-        createRateLimitedFetch(
-          { seed: { limit: 1, windowMs: 1500 }, maxRetries: 2, keyBy: 'origin' },
-          ctx,
-        )
 
       // For known public providers, detect network from URL to avoid an API call during init
       // (free-tier endpoints are rate-limited and return transient 5xx errors).
@@ -291,6 +302,25 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         // testnet.toncenter.com / testnet.tonapi.io → testnet; bare domain → mainnet
         isMainnetHint = !url.includes('testnet.')
       }
+
+      // Same provenance for the v3 index fetch (a TON-local ctx extra): a
+      // caller-supplied fetch is reused verbatim; the default path gets a dedicated
+      // paced, fail-fast instance profiled for the chain's v3 index host — an explicit
+      // ctx.v3Url when set, else the endpoint-derived/public index (see v3FetchFor).
+      const v3Fetch: typeof fetch | undefined =
+        ctx?.v3Fetch ??
+        ctx?.fetch ??
+        createRateLimitedFetch(
+          {
+            ...fetchProfileForUrl(
+              ctx?.v3Url ??
+                tonV3BaseUrl(url, isMainnetHint ? NetworkType.Mainnet : NetworkType.Testnet),
+            ),
+            maxRetries: 2,
+            keyBy: 'origin',
+          },
+          ctx,
+        )
 
       // Always use the fetch adapter so our fetch function is used for all requests.
       // Also merges ctx.abort into every request signal so raceAc.abort() cancels in-flight sockets.
@@ -504,15 +534,71 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   // constructor when the caller supplies `v3Fetch`/`fetch`; lazily created otherwise.
   private v3Fetch_?: typeof fetch
 
+  /** Explicit v3 index base URL from ctx (see TONChainContext.v3Url) — honored
+   * verbatim, never probed. */
+  private readonly ctxV3Url_?: string
+
+  /** The chain's resolved v3 index URL, settled once per chain (see v3UrlFor). */
+  private v3UrlResolved_?: Promise<string>
+
+  /** Whether v3Fetch_ was lazily built (vs caller-provided) — a failed probe may
+   * rebuild it for the fallback host's profile. */
+  private v3FetchLazilyBuilt_ = false
+
+  /**
+   * The chain's v3 index base URL: ctx.v3Url is honored verbatim (never probed);
+   * otherwise a same-origin /api/v3 derived from a toncenter-shaped endpoint is
+   * probed once with a v3-only method, falling back to the public toncenter index
+   * when the host does not serve v3 (see probeV3Url).
+   */
+  private v3UrlFor(): Promise<string> {
+    if (this.ctxV3Url_) return Promise.resolve(this.ctxV3Url_)
+    return (this.v3UrlResolved_ ??= this.probeV3Url())
+  }
+
+  /**
+   * Probes the endpoint-derived v3 index with a v3-only method (`/masterchainInfo`):
+   * a host serving v2 only — e.g. a private proxy with a toncenter-shaped path —
+   * must not poison v3 consumers, so a failed probe permanently falls back to the
+   * public toncenter index for this network (a chain restart re-probes). A
+   * non-toncenter-shaped endpoint resolves to the public default without probing.
+   */
+  private async probeV3Url(): Promise<string> {
+    const derived = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
+    const fallbackUrl = publicTonV3BaseUrl(this.network.networkType)
+    if (derived === fallbackUrl) return derived // nothing endpoint-derived to verify
+    try {
+      const seqno = await fetchV3IndexedTip({
+        rateLimitedFetch: this.v3FetchFor(derived),
+        v3BaseUrl: derived,
+      })
+      // The probe just paid the tip call — warm the 30s cache with it.
+      this.v3Tip_ = { at: Date.now(), seqno }
+      return derived
+    } catch (error) {
+      this.logger.warn(
+        `TON v3 index probe failed on ${redactEndpointUrl(derived)}; falling back to the public index for this network`,
+        error,
+      )
+      // Rebuild the lazy fetch for the fallback host's profile; a caller-provided
+      // fetch stays untouched.
+      if (this.v3FetchLazilyBuilt_) this.v3Fetch_ = undefined
+      return fallbackUrl
+    }
+  }
+
   /** The dedicated v3-index fetch (see the note above); lazily created when unset. */
   private v3FetchFor(baseUrl: string): typeof fetch {
+    if (this.v3Fetch_) return this.v3Fetch_
     // keyBy origin: the index's keyless quota (~1 RPS per egress IP) is shared
     // across /messages, /transactions and /masterchainInfo — per-path limiters
     // would each pace independently and re-burst the host, tripping 429s.
-    return (this.v3Fetch_ ??= createRateLimitedFetch(
+    this.v3Fetch_ = createRateLimitedFetch(
       { ...fetchProfileForUrl(baseUrl), maxRetries: 2, keyBy: 'origin' },
       { logger: this.logger },
-    ))
+    )
+    this.v3FetchLazilyBuilt_ = true
+    return this.v3Fetch_
   }
 
   // The v3 index's masterchain tip, cached 30s: the lag guard is network-global, so a
@@ -542,12 +628,13 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /** The v3 index's masterchain tip, cached 30s (network-global, not per-scan). */
-  private async getV3IndexedTip(baseUrl: string): Promise<number> {
+  private async getV3IndexedTip(): Promise<number> {
     const cached = this.v3Tip_
     if (cached && Date.now() - cached.at < 30_000) return cached.seqno
+    const v3BaseUrl = await this.v3UrlFor()
     const seqno = await fetchV3IndexedTip({
-      rateLimitedFetch: this.v3FetchFor(baseUrl),
-      v3BaseUrl: baseUrl,
+      rateLimitedFetch: this.v3FetchFor(v3BaseUrl),
+      v3BaseUrl,
     })
     this.v3Tip_ = { at: Date.now(), seqno }
     return seqno
@@ -642,11 +729,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
             'hash',
             `Invalid TON transaction hash format: "${tx}". Expected "workchain:address:lt:hash" or 64-char hex hash`,
           )
+        // Same provenance as the getLogs index paths: the chain's resolved v3 index
+        // base (ctx.v3Url, else probed endpoint-inference with a public-index
+        // fallback) and the dedicated paced, fail-fast v3 fetch — not the v2
+        // endpoint's fetch profile.
+        const v3BaseUrl = await this.v3UrlFor()
         const txInfo = await lookupTxByRawHash(
           cleanHash,
           this.network.networkType,
-          this.rateLimitedFetch,
-          this,
+          this.v3FetchFor(v3BaseUrl),
+          { logger: this.logger, baseUrl: v3BaseUrl },
         )
 
         tx = `${txInfo.account}:${txInfo.lt}:${cleanHash}`
@@ -1082,14 +1174,14 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       userStartBlock == null &&
       ((opts.startTime != null && sinceLt == null) || sinceIndexLt != null)
     ) {
-      const v3BaseUrl = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
+      const v3BaseUrl = await this.v3UrlFor()
       const v3 = await openV3EventStream(
         opts_,
         {
           provider: this.provider,
           v3BaseUrl,
           rateLimitedFetch: this.v3FetchFor(v3BaseUrl),
-          getIndexedTip: () => this.getV3IndexedTip(v3BaseUrl),
+          getIndexedTip: () => this.getV3IndexedTip(),
           getTransaction: (tx, seqno) => this.buildChainTransaction(tx, acct, seqno),
           logger: this.logger,
         },
@@ -1131,8 +1223,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     // first yield, the walk degrades to the legacy collect-then-drain pagination with
     // per-tx seqno resolution. An index/RPC disagreement mid-stream truncates like a
     // chain gap.
-    const v3Base = tonV3BaseUrl(this.provider.parameters.endpoint, this.network.networkType)
     const deep = (await this.windowAgeSeconds(acct, sinceLtFloor)) >= TONChain.WALK_META_MIN_AGE_S
+    // Resolving the v3 URL probes the index once per chain — skipped entirely on
+    // shallow scans, so a v2-only chain doing steady-state polls never touches v3.
+    const v3Url = deep ? await this.v3UrlFor() : undefined
     const walkCtx = {
       provider: this.provider,
       getTransaction: (tx: Transaction, seqno?: number): Promise<ChainTransaction> =>
@@ -1140,7 +1234,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       ...(deep && {
         v3Meta: (afterLt: bigint) =>
           streamV3TxMeta(
-            { rateLimitedFetch: this.v3FetchFor(v3Base), v3BaseUrl: v3Base },
+            { rateLimitedFetch: this.v3FetchFor(v3Url!), v3BaseUrl: v3Url! },
             acct,
             0,
             afterLt,
