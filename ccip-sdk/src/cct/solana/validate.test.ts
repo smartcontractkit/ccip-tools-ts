@@ -4,7 +4,10 @@ import { describe, it } from 'node:test'
 import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
-import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
+import {
+  CCIPTokenAccountMintMismatchError,
+  CCIPTokenAccountNotFoundError,
+} from '../../errors/index.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
@@ -324,6 +327,29 @@ describe('Validate (cct/solana)', () => {
     }
     await assert.rejects(() =>
       resolveExistingTokenAccount(invalidConnection as never, mint, holder, tokenAccount),
+    )
+  })
+
+  it('rejects an explicit token account whose decoded mint differs', async () => {
+    const mint = new PublicKey(Uint8Array.from({ length: 32 }, () => 1))
+    const holder = new PublicKey(Uint8Array.from({ length: 32 }, () => 2))
+    const tokenAccount = new PublicKey(Uint8Array.from({ length: 32 }, () => 3))
+    const resolvedMint = new PublicKey(Uint8Array.from({ length: 32 }, () => 4))
+    const data = Buffer.alloc(165)
+    resolvedMint.toBuffer().copy(data)
+    const connection = {
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(mint)
+          ? { owner: TOKEN_PROGRAM_ID, data: mintData() }
+          : { owner: TOKEN_PROGRAM_ID, data },
+    }
+
+    await assert.rejects(
+      () => resolveExistingTokenAccount(connection as never, mint, holder, tokenAccount),
+      (err: unknown) =>
+        err instanceof CCIPTokenAccountMintMismatchError &&
+        err.context.requestedMint === mint.toBase58() &&
+        err.context.resolvedMint === resolvedMint.toBase58(),
     )
   })
 
