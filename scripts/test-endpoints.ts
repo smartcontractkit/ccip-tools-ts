@@ -78,16 +78,17 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     // per-family race would otherwise let a pruned fullnode win the chain).
     'https://archive.testnet.aptoslabs.com/v1',
   RPC_SOLANA_DEVNET: [
-    // raced: first endpoint to resolve wins, so a throttled one doesn't stall
-    // the suite; retention varies over time (as of 2026-08: onfinality prunes
-    // signature history around ~1 month, api.devnet.solana.com/devnet.rpcpool.com
-    // retain longer but 429 harder from cold starts) — keep fixtures fresher
-    // than the shortest observed retention horizon. devnet.rpcpool.com leads:
-    // public, holds at least ~1 week of txs and doesn't 429 as aggressively as
-    // onfinality's free tier.
+    // raced via raceRpcEndpoint (the suites probe a fixture tx): first endpoint to
+    // answer wins, so a throttled one doesn't stall the suite. Retention varies over
+    // time (as of 2026-08: onfinality prunes signature history around ~1 month,
+    // api.devnet.solana.com/devnet.rpcpool.com retain longer but 429 harder from cold
+    // starts) — keep fixtures fresher than the shortest observed retention horizon.
+    // devnet.rpcpool.com leads: public, holds at least ~1 week of txs and doesn't 429
+    // as aggressively as the others; onfinality trails (429s hard from cold/shared
+    // egress IPs, observed 2026-09).
     'https://devnet.rpcpool.com',
-    'https://solana-devnet.api.onfinality.io/public',
     'https://api.devnet.solana.com',
+    'https://solana-devnet.api.onfinality.io/public',
   ].join(','),
   RPC_TON_TESTNET: 'https://testnet.toncenter.com/api/v2',
   RPC_SUI_TESTNET: 'https://sui-testnet-endpoint.blockvision.org',
@@ -146,4 +147,38 @@ export function rpcEndpoints(envName: RpcEnvName): string[] {
  */
 export function rpcEndpoint(envName: RpcEnvName): string {
   return rpcEndpoints(envName)[0]!
+}
+
+/**
+ * Races every endpoint configured for `envName` with a probe and returns the
+ * first one that passes — for suites that construct a single chain, which
+ * would otherwise bind to the first entry and stall when that endpoint is
+ * throttled (CI's shared egress IP trips public endpoints' keyless quotas
+ * run-to-run; see the Solana devnet v2 suite's 300s CI timeout).
+ *
+ * The probe should be cheap but REPRESENTATIVE of what the suite needs: for
+ * retention-sensitive scans, probe the fixture data itself (e.g. a
+ * `getTransaction` on a fixture tx) — a fast-but-pruned endpoint that wins the
+ * race stalls the suite just the same. Each probe is bounded by `timeoutMs`;
+ * when every probe fails or times out, falls back to {@link rpcEndpoint} (the
+ * previous first-entry behavior) so the suite still runs as it used to.
+ */
+export async function raceRpcEndpoint(
+  envName: RpcEnvName,
+  probe: (url: string) => Promise<boolean>,
+  { timeoutMs = 20_000 }: { timeoutMs?: number } = {},
+): Promise<string> {
+  const attempts = rpcEndpoints(envName).map(async (url) => {
+    const ok = await Promise.race([
+      Promise.resolve(probe(url)).catch(() => false),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+    ])
+    if (!ok) throw new Error(`probe failed for ${url}`)
+    return url
+  })
+  try {
+    return await Promise.any(attempts)
+  } catch {
+    return rpcEndpoint(envName)
+  }
 }

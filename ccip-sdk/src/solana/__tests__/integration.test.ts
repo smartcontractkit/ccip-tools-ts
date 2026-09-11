@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
@@ -25,7 +25,6 @@ import { SolanaChain } from '../index.ts'
 
 const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
-const SOLANA_DEVNET_RPC = rpcEndpoint('RPC_SOLANA_DEVNET')
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'
@@ -39,6 +38,28 @@ const SOLANA_V2_SEND_MESSAGE_ID =
   '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722'
 const EVM_TO_SOLANA_V2_MESSAGE_ID =
   '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f'
+
+/**
+ * Retention-aware health probe for the public devnet endpoints (passed to
+ * {@link raceRpcEndpoint}): an endpoint only wins the race when it answers the
+ * fixture execution tx — the very data the scans here need — inside the race
+ * timeout, so a fast-but-pruned or hard-429ing public endpoint never binds the
+ * suite (CI's shared egress IP trips keyless quotas run to run).
+ */
+const solanaDevnetHealthy = (url: string) =>
+  fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTransaction',
+      params: [SOLANA_V2_EXEC_TX, { maxSupportedTransactionVersion: 1, commitment: 'confirmed' }],
+    }),
+    signal: AbortSignal.timeout(20_000),
+  })
+    .then((res) => res.json() as Promise<{ result?: unknown }>)
+    .then((json) => json.result != null)
 
 // Latest v2 messages on the current (post-redeploy) contracts, for both directions.
 const SOLANA_TO_SEPOLIA_V2_TX =
@@ -291,10 +312,13 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   let solanaChain: SolanaChain
 
   before(async () => {
-    solanaChain = await SolanaChain.fromUrl(SOLANA_DEVNET_RPC, {
-      apiClient: null,
-      logger: testLogger,
-    })
+    solanaChain = await SolanaChain.fromUrl(
+      await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      {
+        apiClient: null,
+        logger: testLogger,
+      },
+    )
   })
 
   it('should synthesize and decode CCIPMessageSentV2 from Anchor CPI event data', async () => {
@@ -501,10 +525,13 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
   let chain: SolanaChain | undefined
 
   before(async () => {
-    chain = await SolanaChain.fromUrl(SOLANA_DEVNET_RPC, {
-      apiClient: null,
-      logger: testLogger,
-    })
+    chain = await SolanaChain.fromUrl(
+      await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      {
+        apiClient: null,
+        logger: testLogger,
+      },
+    )
   })
 
   after(async () => {})
