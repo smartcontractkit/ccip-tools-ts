@@ -12,15 +12,16 @@
  * @packageDocumentation
  */
 
-import type { FinalityConfig as FinalityConfigArg } from '../../canton/bindings/ccip-codec-v2-2.0.0/lib/CCIP/CodecV2/FinalityConfig/module.js'
-import type { TransferTimeout as TransferTimeoutArg } from '../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2Types/module.js'
 import type {
-  RateLimitDirection as RateLimitDirectionArg,
-  RateLimitMode as RateLimitModeArg,
-} from '../../canton/bindings/ccip-registry-rate-limiter-1.0.0/lib/CCIP/Registry/RateLimiterV2/module.js'
+  ChoiceContextArg,
+  FinalityConfigArg,
+  RateLimitDirectionArg,
+  RateLimitModeArg,
+  TransferTimeoutArg,
+} from './daml-types.ts'
 
 /** Empty `Splice.Api.Token.MetadataV1.ChoiceContext` (`values` is a `TextMap` → JSON object). */
-export const EMPTY_CHOICE_CONTEXT: Record<string, unknown> = { values: {} }
+export const EMPTY_CHOICE_CONTEXT: ChoiceContextArg = { values: {} }
 
 /**
  * Encode a `Chainlink.InstanceAddress.RawInstanceAddress` newtype. Note this

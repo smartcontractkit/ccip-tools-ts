@@ -8,11 +8,11 @@
  * @packageDocumentation
  */
 
-import type { ApplyChainUpdates as ApplyChainUpdatesArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { ApplyChainUpdatesArg } from '../../daml-types.ts'
 import { type FinalityConfig, encodeFinalityConfig, rawInstanceAddress } from '../../encoding.ts'
 import {
   type CantonExecuteParams,
@@ -24,8 +24,8 @@ import {
   BURN_MINT_POOL_TEMPLATE_ID,
   LOCK_RELEASE_POOL_TEMPLATE_ID,
   buildPoolExercise,
-  resolvePoolRef,
   normalizeRemoteAddress,
+  resolvePoolRef,
 } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */

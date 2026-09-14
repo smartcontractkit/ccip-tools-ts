@@ -12,9 +12,9 @@
  * @packageDocumentation
  */
 
-import type { GetRequiredCCVs as GetRequiredCCVsArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { FinalityConfigArg, GetRequiredCCVsArg } from '../../daml-types.ts'
 import { type FinalityConfig, EMPTY_CHOICE_CONTEXT, encodeFinalityConfig } from '../../encoding.ts'
 import { CantonQuery } from '../../query.ts'
 import { parseNonEmptyString, parsePartyId } from '../../validate.ts'
@@ -69,7 +69,7 @@ interface ParsedGetRequiredCCVs {
   remoteChainSelector: string
   direction: TransferDirection
   sourceAmount: string
-  finality: Record<string, unknown>
+  finality: FinalityConfigArg
   extraData: string
 }
 
