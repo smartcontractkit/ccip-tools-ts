@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, getCreateAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -13,7 +13,7 @@ import { DeployLockbox } from './deploy-lockbox.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
-const DEPLOYED = '0x' + '77'.repeat(20)
+const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
 const HASH = '0x' + 'ab'.repeat(32)
 
 // Golden vector: the ctor arg is a single 32-byte word holding the token address. Computed
