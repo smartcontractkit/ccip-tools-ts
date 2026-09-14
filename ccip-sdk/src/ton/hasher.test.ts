@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import type { EVMExtraArgsV2 } from '../extra-args.ts'
 import { type CCIPMessage_V1_6, CCIPVersion } from '../types.ts'
 import { getTONLeafHasher, hashTONMetadata } from './hasher.ts'
-import type { EVMExtraArgsV2 } from '../extra-args.ts'
 
 const ZERO_ADDRESS = '0x' + '0'.repeat(40)
 

@@ -3,15 +3,15 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, concat, toBeHex, zeroPadValue } from 'ethers'
 
-import { EVMChain } from './index.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { defaultAbiCoder, interfaces } from './const.ts'
 import { CCIPVersion, ExecutionState } from '../types.ts'
+import { defaultAbiCoder, interfaces } from './const.ts'
+import { EVMChain } from './index.ts'
 
 import '../index.ts'
 

@@ -19,8 +19,14 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
+import { deriveMetadataAddress } from '../../programs/token.ts'
 import { submit } from '../../submit.ts'
-import { validateOptionalPublicKey, validatePublicKey } from '../../validate.ts'
+import {
+  U64_MAX,
+  validateBigInt,
+  validateOptionalPublicKey,
+  validatePublicKey,
+} from '../../validate.ts'
 
 type BaseDeployTokenParams = {
   /** Mint decimals. Must be an integer between 0 and 255. */
@@ -31,7 +37,7 @@ type BaseDeployTokenParams = {
   mintAuthority?: string
   /** Freeze authority. Defaults to payer; set null to disable freezing. */
   freezeAuthority?: string | null
-  /** Initial supply in base units. Requires preMintRecipient. */
+  /** Initial supply in base units, between 1 and 2^64 - 1. Requires preMintRecipient. */
   preMint?: bigint
   /** Recipient owner for the initial supply ATA. */
   preMintRecipient?: string
@@ -76,17 +82,8 @@ export type ExecuteDeployTokenResult = TransactionResult & {
   metadataAddress?: string
 }
 
-const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
-
 function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length
-}
-
-function deriveMetadataAddress(mint: PublicKey): string {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-    METADATA_PROGRAM_ID,
-  )[0].toBase58()
 }
 
 async function loadMetaplex() {
@@ -256,11 +253,8 @@ function validateBaseParams(operation: string, params: GenerateDeployTokenParams
 }
 
 function validatePreMintParams(operation: string, params: GenerateDeployTokenParams): void {
-  if (
-    params.preMint !== undefined &&
-    (typeof params.preMint !== 'bigint' || params.preMint <= 0n)
-  ) {
-    throw new CCTParamsInvalidError(operation, 'preMint', 'must be a positive bigint')
+  if (params.preMint !== undefined) {
+    validateBigInt(operation, 'preMint', params.preMint, 1n, U64_MAX)
   }
   if (params.preMint !== undefined && !params.preMintRecipient) {
     throw new CCTParamsInvalidError(
@@ -319,7 +313,7 @@ export class DeployToken extends SolanaOperation<
     const lamports = await chain.connection.getMinimumBalanceForRentExemption(getMintLen([]))
     const instructions = createMintInstructions(mint, lamports, params.decimals, config)
 
-    const metadataAddress = params.withMetaplex ? deriveMetadataAddress(mint) : undefined
+    const metadataAddress = params.withMetaplex ? deriveMetadataAddress(mint).toBase58() : undefined
     if (params.withMetaplex)
       instructions.push(
         ...(await createMetadataInstructions(

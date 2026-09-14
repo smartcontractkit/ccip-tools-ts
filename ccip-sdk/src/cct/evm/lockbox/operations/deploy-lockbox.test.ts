@@ -3,13 +3,13 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, makeError } from 'ethers'
 
-import { DeployLockbox } from './deploy-lockbox.ts'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import ERC20_LOCKBOX_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/erc20-lockbox.ts'
 import LOCKBOX_V2_0_0 from '../../artifacts/bytecode/V2_0_0/erc20-lockbox.ts'
+import { DeployLockbox } from './deploy-lockbox.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)

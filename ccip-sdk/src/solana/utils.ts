@@ -22,6 +22,7 @@ import {
 import bs58 from 'bs58'
 import { dataLength, dataSlice, encodeBase64, hexlify } from 'ethers'
 
+import type { RateLimiterState } from '../chain.ts'
 import {
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
@@ -31,7 +32,6 @@ import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
-import type { RateLimiterState } from '../chain.ts'
 import type { SolanaLog } from './index.ts'
 
 /**

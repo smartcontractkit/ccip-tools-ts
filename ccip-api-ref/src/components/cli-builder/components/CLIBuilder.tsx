@@ -9,8 +9,6 @@
 import { type ReactNode, useMemo } from 'react'
 
 import styles from './CLIBuilder.module.css'
-import { CommandPreview } from './CommandPreview.tsx'
-import { GROUP_LABELS, OptionGroup } from './OptionGroup.tsx'
 import { useCommandBuilder } from '../hooks/index.ts'
 import { getSchema } from '../schemas/index.ts'
 import type {
@@ -21,7 +19,9 @@ import type {
   OptionValue,
   StringOption,
 } from '../types/index.ts'
+import { CommandPreview } from './CommandPreview.tsx'
 import { ArrayInput, BooleanInput, ChainSelect, SelectInput, StringInput } from './inputs/index.ts'
+import { GROUP_LABELS, OptionGroup } from './OptionGroup.tsx'
 
 export interface CLIBuilderProps {
   /** Command name to build (e.g., 'send', 'show') */
@@ -125,7 +125,7 @@ function CLIBuilderForm({
 
     for (const opt of schema.options) {
       const group = opt.group ?? 'other'
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- groups is built dynamically
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- groups is built dynamically
       if (!groups[group]) {
         groups[group] = []
       }
@@ -138,7 +138,6 @@ function CLIBuilderForm({
   // Get ordered group names
   const groupOrder = ['message', 'gas', 'solana', 'wallet', 'output', 'rpc', 'other']
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- groupedOptions[g] may be undefined for groups with no options
   const orderedGroups = groupOrder.filter((g) => groupedOptions[g]?.length > 0)
 
   return (
@@ -214,10 +213,9 @@ function CLIBuilderForm({
 /**
  * Render appropriate input for an argument
  *
- * Note: eslint disable for no-unnecessary-condition because OptionValue includes undefined,
+ * Note: Oxlint disable for no-unnecessary-condition because OptionValue includes undefined,
  * but type assertions narrow it before the nullish coalescing check.
  */
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 function renderArgumentInput(
   arg: ArgumentDefinition,
   values: Record<string, OptionValue>,
@@ -233,7 +231,7 @@ function renderArgumentInput(
       <ChainSelect
         key={arg.name}
         definition={arg}
-        value={(value as string) ?? ''}
+        value={(value ?? '') as string}
         onChange={(v) => handleChange(arg.name, v)}
         error={error}
       />
@@ -245,7 +243,7 @@ function renderArgumentInput(
     <StringInput
       key={arg.name}
       definition={arg}
-      value={(value as string) ?? ''}
+      value={(value ?? '') as string}
       onChange={(v) => handleChange(arg.name, v)}
       error={error}
     />
@@ -271,7 +269,7 @@ function renderOptionInput(
         <BooleanInput
           key={opt.name}
           definition={opt}
-          value={(value as boolean) ?? false}
+          value={(value ?? false) as boolean}
           onChange={(v) => handleChange(opt.name, v)}
         />
       )
@@ -281,7 +279,7 @@ function renderOptionInput(
         <SelectInput
           key={opt.name}
           definition={opt}
-          value={(value as string) ?? ''}
+          value={(value ?? '') as string}
           onChange={(v) => handleChange(opt.name, v)}
           error={error}
         />
@@ -292,7 +290,7 @@ function renderOptionInput(
         <ArrayInput
           key={opt.name}
           definition={opt}
-          value={(value as string[]) ?? []}
+          value={(value ?? []) as string[]}
           onChange={(v) => handleChange(opt.name, v)}
           error={error}
         />
@@ -303,7 +301,7 @@ function renderOptionInput(
         <ChainSelect
           key={opt.name}
           definition={opt}
-          value={(value as string) ?? ''}
+          value={(value ?? '') as string}
           onChange={(v) => handleChange(opt.name, v)}
           error={error}
         />
@@ -316,11 +314,10 @@ function renderOptionInput(
         <StringInput
           key={opt.name}
           definition={opt as StringOption}
-          value={(value as string) ?? ''}
+          value={(value ?? '') as string}
           onChange={(v) => handleChange(opt.name, v)}
           error={error}
         />
       )
   }
 }
-/* eslint-enable @typescript-eslint/no-unnecessary-condition */

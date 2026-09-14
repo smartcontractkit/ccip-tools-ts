@@ -29,7 +29,8 @@ type EstimateExecComputeUnitsOpts = {
     data?: BytesLike
     tokenReceiver?: string
     destTokenAmounts?: readonly ((
-      { token: string } | { destTokenAddress: string; extraData?: string }
+      | { token: string }
+      | { destTokenAddress: string; extraData?: string }
     ) & { amount: bigint })[]
     accounts?: readonly string[]
     accountIsWritableBitmap?: bigint

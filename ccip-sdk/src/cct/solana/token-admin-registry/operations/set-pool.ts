@@ -17,9 +17,7 @@ import {
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { parsePublicKey, validateWritableIndexes } from '../../validate.ts'
-
-/** Standard BurnMint/LockRelease pool ALT writable positions. */
-export const DEFAULT_WRITABLE_INDEXES = [3, 4, 7] as const
+import { DEFAULT_WRITABLE_INDEXES } from '../constants.ts'
 
 /** Parameters shared by Solana TokenAdminRegistry `setPool` generation and execution. */
 type SetPoolParams = {
@@ -37,7 +35,7 @@ type SetPoolParams = {
    * pools; custom pools with extra accounts MUST extend this or the pool CPI gets wrong
    * write-permissions and fails at execution. Each entry is a byte (0–255).
    */
-  writableIndexes?: number[]
+  writableIndexes?: readonly number[]
   /**
    * Token admin authority. Defaults to `payer` for single-signer transactions.
    * Multisig/Squads flows should pass the admin/vault authority explicitly.
@@ -87,7 +85,7 @@ export class SetPool extends SolanaOperation<SetPoolParams, UnsignedSolanaTx, Pa
         params.authority === undefined
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
-      writableIndexes: params.writableIndexes ?? [...DEFAULT_WRITABLE_INDEXES],
+      writableIndexes: [...(params.writableIndexes ?? DEFAULT_WRITABLE_INDEXES)],
     }
   }
 

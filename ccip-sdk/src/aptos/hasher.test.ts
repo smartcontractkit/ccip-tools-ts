@@ -6,8 +6,8 @@ import { hexlify, toUtf8Bytes, zeroPadValue } from 'ethers'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import { encodeExtraArgs } from '../extra-args.ts'
 import '../index.ts'
-import { hashAptosMetadata, hashV16AptosMessage } from './hasher.ts'
 import { encodeRawBytes } from '../shared/bcs-codecs.ts'
+import { hashAptosMetadata, hashV16AptosMessage } from './hasher.ts'
 
 describe('aptos hasher', () => {
   it('should encode raw bytes properly', () => {

@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, id } from 'ethers'
 
-import { EVMTokenManager } from './index.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
+import { EVMTokenManager } from './index.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -720,6 +720,234 @@ describe('EVMTokenManager (cct/evm)', () => {
           err.context.param === 'address',
       )
       assert.equal(called, false, 'validation fails before TAR discovery')
+    })
+  })
+
+  describe('mint/burn role management', () => {
+    const ROLE_TOKEN_OWNER = '0x' + '99'.repeat(20)
+    const ROLE_ACCOUNT = '0x' + 'aa'.repeat(20)
+    /** Fresh Interface — the manager's own cached one must not be what these assertions compare to. */
+    const ROLES = new Interface([
+      'function grantMintAndBurnRoles(address burnAndMinter)',
+      'function grantMintRole(address minter)',
+      'function grantBurnRole(address burner)',
+      'function revokeMintRole(address minter)',
+      'function revokeBurnRole(address burner)',
+      'function owner() view returns (address)',
+      'function isMinter(address minter) view returns (bool)',
+      'function isBurner(address burner) view returns (bool)',
+    ])
+
+    /**
+     * Chain stub for a v1.6.2 `FactoryBurnMintERC20` owned by `ROLE_TOKEN_OWNER`, on which
+     * `ROLE_ACCOUNT` holds `roles` — enough for both the owner gate and the role-state pre-flight.
+     */
+    function roleChain(roles: { isMinter?: boolean; isBurner?: boolean } = {}) {
+      const results: Record<string, unknown[]> = {
+        owner: [ROLE_TOKEN_OWNER],
+        isMinter: [roles.isMinter ?? false],
+        isBurner: [roles.isBurner ?? false],
+      }
+      return stubChain({
+        provider: {
+          call: ({ data }: { data: string }) => {
+            const fn = ROLES.getFunction(data.slice(0, 10))!.name
+            return Promise.resolve(ROLES.encodeFunctionResult(fn, results[fn]))
+          },
+        } as never,
+      })
+    }
+
+    /**
+     * One case per wired op: the two manager methods, the account parameter, and the role state
+     * that makes its call a real change. The methods are named explicitly rather than indexed by
+     * string, so a renamed or unwired method is a compile error here.
+     */
+    const CASES = [
+      {
+        fn: 'grantMintAndBurnRoles',
+        param: 'burnAndMinter',
+        roles: {},
+        generate: (cct: EVMTokenManager, o: object) =>
+          cct.generateUnsignedGrantMintAndBurnRoles(o as never),
+        submit: (cct: EVMTokenManager, o: object) => cct.grantMintAndBurnRoles(o as never),
+      },
+      {
+        fn: 'grantMintRole',
+        param: 'minter',
+        roles: {},
+        generate: (cct: EVMTokenManager, o: object) =>
+          cct.generateUnsignedGrantMintRole(o as never),
+        submit: (cct: EVMTokenManager, o: object) => cct.grantMintRole(o as never),
+      },
+      {
+        fn: 'grantBurnRole',
+        param: 'burner',
+        roles: {},
+        generate: (cct: EVMTokenManager, o: object) =>
+          cct.generateUnsignedGrantBurnRole(o as never),
+        submit: (cct: EVMTokenManager, o: object) => cct.grantBurnRole(o as never),
+      },
+      {
+        fn: 'revokeMintRole',
+        param: 'minter',
+        roles: { isMinter: true },
+        generate: (cct: EVMTokenManager, o: object) =>
+          cct.generateUnsignedRevokeMintRole(o as never),
+        submit: (cct: EVMTokenManager, o: object) => cct.revokeMintRole(o as never),
+      },
+      {
+        fn: 'revokeBurnRole',
+        param: 'burner',
+        roles: { isBurner: true },
+        generate: (cct: EVMTokenManager, o: object) =>
+          cct.generateUnsignedRevokeBurnRole(o as never),
+        submit: (cct: EVMTokenManager, o: object) => cct.revokeBurnRole(o as never),
+      },
+    ] as const
+
+    for (const { fn, param, roles, generate, submit } of CASES) {
+      const expected = ROLES.encodeFunctionData(fn, [ROLE_ACCOUNT])
+
+      it(`generateUnsigned* encodes ${fn}(address) to the token`, async () => {
+        const cct = EVMTokenManager.fromChain(roleChain(roles))
+        const unsigned = await generate(cct, {
+          tokenAddress: TOKEN,
+          [param]: ROLE_ACCOUNT,
+          sender: ROLE_TOKEN_OWNER,
+        })
+
+        assert.equal(unsigned.family, ChainFamily.EVM)
+        assert.equal(unsigned.transactions.length, 1)
+        const tx = unsigned.transactions[0]!
+        assert.equal(tx.to, TOKEN)
+        assert.equal(tx.from, ROLE_TOKEN_OWNER)
+        assert.equal(tx.data, expected)
+      })
+
+      it(`${fn} submits as the token owner`, async () => {
+        const cct = EVMTokenManager.fromChain(roleChain(roles))
+        const { hash } = await submit(cct, {
+          tokenAddress: TOKEN,
+          [param]: ROLE_ACCOUNT,
+          wallet: fakeSigner(ROLE_TOKEN_OWNER),
+        })
+        assert.equal(hash, HASH)
+      })
+
+      it(`${fn} rejects a sender that does not own the token`, async () => {
+        const cct = EVMTokenManager.fromChain(roleChain(roles))
+        await assert.rejects(
+          () => generate(cct, { tokenAddress: TOKEN, [param]: ROLE_ACCOUNT, sender: ADMIN }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+        )
+      })
+    }
+  })
+
+  describe('mint and role reads', () => {
+    const MINTER = '0x' + '99'.repeat(20)
+    const RECIPIENT = '0x' + 'aa'.repeat(20)
+    const AMOUNT = 1_000000000000000000n
+    /** Fresh Interface — the manager's own cached one must not be what these assertions compare to. */
+    const TOKEN_FNS = new Interface([
+      'function mint(address account, uint256 amount)',
+      'function isMinter(address minter) view returns (bool)',
+      'function isBurner(address burner) view returns (bool)',
+      'function getMinters() view returns (address[])',
+      'function getBurners() view returns (address[])',
+    ])
+
+    /** Chain stub for a BurnMintERC677 token on which `MINTER` holds the mint role. */
+    function tokenChain(isMinter = true) {
+      const results: Record<string, unknown[]> = {
+        isMinter: [isMinter],
+        isBurner: [isMinter],
+        getMinters: [[MINTER]],
+        getBurners: [[POOL]],
+      }
+      return stubChain({
+        provider: {
+          call: ({ data }: { data: string }) => {
+            const fn = TOKEN_FNS.getFunction(data.slice(0, 10))!.name
+            return Promise.resolve(TOKEN_FNS.encodeFunctionResult(fn, results[fn]))
+          },
+        } as never,
+      })
+    }
+
+    it('generateUnsignedMint encodes mint(account, amount) to the token', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      const unsigned = await cct.generateUnsignedMint({
+        tokenAddress: TOKEN,
+        account: RECIPIENT,
+        amount: AMOUNT,
+        sender: MINTER,
+      })
+
+      assert.equal(unsigned.family, ChainFamily.EVM)
+      assert.equal(unsigned.transactions.length, 1)
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TOKEN)
+      assert.equal(tx.from, MINTER)
+      assert.equal(tx.data, TOKEN_FNS.encodeFunctionData('mint', [RECIPIENT, AMOUNT]))
+    })
+
+    it('mint submits as the minting wallet', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      const { hash } = await cct.mint({
+        tokenAddress: TOKEN,
+        account: RECIPIENT,
+        amount: AMOUNT,
+        wallet: fakeSigner(MINTER),
+      })
+      assert.equal(hash, HASH)
+    })
+
+    it('mint rejects a wallet without the mint role', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain(false))
+      await assert.rejects(
+        () =>
+          cct.mint({
+            tokenAddress: TOKEN,
+            account: RECIPIENT,
+            amount: AMOUNT,
+            wallet: fakeSigner(ADMIN),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
+
+    it('getMinters lists the mint-role holders', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.deepEqual(await cct.getMinters({ tokenAddress: TOKEN }), [MINTER])
+    })
+
+    it('getBurners lists the burn-role holders', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.deepEqual(await cct.getBurners({ tokenAddress: TOKEN }), [POOL])
+    })
+
+    it('isMinter answers the single-address mint-role check', async () => {
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain()).isMinter({
+          tokenAddress: TOKEN,
+          account: MINTER,
+        }),
+        true,
+      )
+      assert.equal(
+        await EVMTokenManager.fromChain(tokenChain(false)).isMinter({
+          tokenAddress: TOKEN,
+          account: RECIPIENT,
+        }),
+        false,
+      )
+    })
+
+    it('isBurner answers the single-address burn-role check', async () => {
+      const cct = EVMTokenManager.fromChain(tokenChain())
+      assert.equal(await cct.isBurner({ tokenAddress: TOKEN, account: POOL }), true)
     })
   })
 })

@@ -38,6 +38,7 @@ import { isHexString } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { fetchChainsFromRpcs, resolveIndexer } from '../providers/index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
@@ -49,7 +50,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { fetchChainsFromRpcs, resolveIndexer } from '../providers/index.ts'
 
 export const command = ['show <tx-hash-or-id>', '* <tx-hash-or-id>']
 export const describe = 'Show details of a CCIP request'
@@ -357,6 +357,7 @@ export async function showRequests(
       offRamp,
       messageId: request.message.messageId,
       sourceChainSelector: request.message.sourceChainSelector,
+      sequenceNumber: request.message.sequenceNumber,
       startTime: request.log.blockTimestamp,
       verifications: !argv.wait ? await verifications$ : undefined,
       watch: argv.wait && ctx.abort,

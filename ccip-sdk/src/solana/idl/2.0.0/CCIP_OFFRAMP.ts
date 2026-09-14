@@ -1,13 +1,14 @@
 /**
  * Minimal CCIP v2 (`ccip-offramp 2.0.0-dev`) IDL.
  *
- * Only the pieces the SDK needs beyond the 1.6.0 offramp IDL: the `SourceChain` account
- * (`source_chain_state` PDA seed) whose layout changed in v2, and the
- * `ExecutionStateChangedV2` event. The `ReferenceAddresses` account is byte-identical
- * to 1.6.0, so it keeps being read via the 1.6.0 IDL in "compatibility mode".
+ * Only the pieces the SDK needs beyond the 1.6.0 offramp IDL: the `SourceChain` and
+ * `ReferenceAddresses` accounts (whose layouts changed in v2), the
+ * `ExecutionStateChangedV2` event, and the `get_ccvs_for_msg` view (which now also
+ * requires the RMN Remote CPI accounts).
  *
  * v2 `SourceChain` dropped the `state` field (`minSeqNr`) and reshaped `SourceChainConfig`
- * (removed `isRmnVerificationDisabled`/`laneCodeVersion`, added the CCV vecs). Anchor 0.29
+ * (replaced the single `on_ramp` with `on_ramps` Vec and added the CCV vecs). v2
+ * `ReferenceAddresses` added a `bump` field between `version` and `router`. Anchor 0.29
  * IDL format.
  */
 export type CcipOfframpV2 = {
@@ -22,8 +23,12 @@ export type CcipOfframpV2 = {
       ]
       accounts: [
         { name: 'config'; isMut: false; isSigner: false },
-        { name: 'referenceAddress'; isMut: false; isSigner: false },
+        { name: 'referenceAddresses'; isMut: false; isSigner: false },
         { name: 'sourceChain'; isMut: false; isSigner: false },
+        // RMN Remote CPI accounts (UncheckedAccount). Validated via `reference_addresses.rmn_remote`.
+        { name: 'rmnRemote'; isMut: false; isSigner: false },
+        { name: 'rmnRemoteCurses'; isMut: false; isSigner: false },
+        { name: 'rmnRemoteConfig'; isMut: false; isSigner: false },
       ]
       args: [{ name: 'params'; type: { defined: 'GetCcvsForMsgParams' } }]
       returns: { defined: 'GetCcvsForMsgResponse' }
@@ -39,6 +44,20 @@ export type CcipOfframpV2 = {
           { name: 'bump'; type: 'u8' },
           { name: 'chainSelector'; type: 'u64' },
           { name: 'config'; type: { defined: 'SourceChainConfig' } },
+        ]
+      }
+    },
+    {
+      name: 'referenceAddresses'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'version'; type: 'u8' },
+          { name: 'bump'; type: 'u8' },
+          { name: 'router'; type: 'publicKey' },
+          { name: 'feeQuoter'; type: 'publicKey' },
+          { name: 'offrampLookupTable'; type: 'publicKey' },
+          { name: 'rmnRemote'; type: 'publicKey' },
         ]
       }
     },
@@ -87,7 +106,7 @@ export type CcipOfframpV2 = {
         kind: 'struct'
         fields: [
           { name: 'isEnabled'; type: 'bool' },
-          { name: 'onRamp'; type: { defined: 'OnRampAddress' } },
+          { name: 'onRamps'; type: { vec: { defined: 'OnRampAddress' } } },
           { name: 'defaultCcvs'; type: { vec: 'publicKey' } },
           { name: 'laneMandatedCcvs'; type: { vec: 'publicKey' } },
         ]
@@ -169,8 +188,12 @@ export const IDL: CcipOfframpV2 = {
       ],
       accounts: [
         { name: 'config', isMut: false, isSigner: false },
-        { name: 'referenceAddress', isMut: false, isSigner: false },
+        { name: 'referenceAddresses', isMut: false, isSigner: false },
         { name: 'sourceChain', isMut: false, isSigner: false },
+        // RMN Remote CPI accounts (UncheckedAccount).
+        { name: 'rmnRemote', isMut: false, isSigner: false },
+        { name: 'rmnRemoteCurses', isMut: false, isSigner: false },
+        { name: 'rmnRemoteConfig', isMut: false, isSigner: false },
       ],
       args: [{ name: 'params', type: { defined: 'GetCcvsForMsgParams' } }],
       returns: { defined: 'GetCcvsForMsgResponse' },
@@ -186,6 +209,20 @@ export const IDL: CcipOfframpV2 = {
           { name: 'bump', type: 'u8' },
           { name: 'chainSelector', type: 'u64' },
           { name: 'config', type: { defined: 'SourceChainConfig' } },
+        ],
+      },
+    },
+    {
+      name: 'referenceAddresses',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'version', type: 'u8' },
+          { name: 'bump', type: 'u8' },
+          { name: 'router', type: 'publicKey' },
+          { name: 'feeQuoter', type: 'publicKey' },
+          { name: 'offrampLookupTable', type: 'publicKey' },
+          { name: 'rmnRemote', type: 'publicKey' },
         ],
       },
     },
@@ -234,7 +271,7 @@ export const IDL: CcipOfframpV2 = {
         kind: 'struct',
         fields: [
           { name: 'isEnabled', type: 'bool' },
-          { name: 'onRamp', type: { defined: 'OnRampAddress' } },
+          { name: 'onRamps', type: { vec: { defined: 'OnRampAddress' } } },
           { name: 'defaultCcvs', type: { vec: 'publicKey' } },
           { name: 'laneMandatedCcvs', type: { vec: 'publicKey' } },
         ],

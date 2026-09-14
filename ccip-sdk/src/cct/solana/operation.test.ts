@@ -3,11 +3,11 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey } from '@solana/web3.js'
 
-import { SolanaOperation } from './operation.ts'
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
+import { SolanaOperation } from './operation.ts'
 
 class TestOperation extends SolanaOperation<{ value: string }> {
   readonly name = 'testOperation'

@@ -7,10 +7,16 @@ import {
   endpointKey,
   fetchProfileForUrl,
   getEndpointLogRange,
+  getEndpointTopicLimit,
+  originKey,
   parseLogRangeError,
   parseRateLimitHeaders,
   parseRetryAfter,
+  parseTopicLimitError,
+  redactEndpointUrl,
+  registerEndpointBase,
   setEndpointLogRange,
+  setEndpointTopicLimit,
 } from './fetch.ts'
 
 function withMockedPerformanceNow<T>(now: number, fn: () => T): T {
@@ -151,35 +157,87 @@ describe('parseRateLimitHeaders', () => {
 // ---------------------------------------------------------------------------
 
 describe('endpointKey', () => {
-  it('strips query params from string URL', () => {
-    const key = endpointKey('https://api.example.com/v1/rpc?key=secret&foo=bar')
-    assert.equal(key, 'https://api.example.com/v1/rpc')
+  it('falls back to origin when no base is registered', () => {
+    assert.equal(endpointKey('https://api.example.com/v1/rpc'), 'https://api.example.com')
+    assert.equal(
+      endpointKey('https://api.example.com/v1/rpc?key=secret&foo=bar'),
+      'https://api.example.com',
+    )
+    assert.equal(endpointKey('https://api.example.com/v1/rpc#fragment'), 'https://api.example.com')
+    assert.equal(
+      endpointKey(new URL('https://api.example.com/rpc?foo=bar')),
+      'https://api.example.com',
+    )
+    assert.equal(
+      endpointKey(new Request('https://api.example.com/rpc?foo=bar')),
+      'https://api.example.com',
+    )
   })
 
-  it('strips hash from string URL', () => {
-    const key = endpointKey('https://api.example.com/v1/rpc#fragment')
-    assert.equal(key, 'https://api.example.com/v1/rpc')
-  })
-
-  it('preserves path', () => {
-    const key = endpointKey('https://api.example.com/v1/rpc')
-    assert.equal(key, 'https://api.example.com/v1/rpc')
-  })
-
-  it('handles URL object', () => {
-    const key = endpointKey(new URL('https://api.example.com/rpc?foo=bar'))
-    assert.equal(key, 'https://api.example.com/rpc')
-  })
-
-  it('handles Request object', () => {
-    const key = endpointKey(new Request('https://api.example.com/rpc?foo=bar'))
-    assert.equal(key, 'https://api.example.com/rpc')
-  })
-
-  it('two URLs with different queries share the same key', () => {
-    const k1 = endpointKey('https://api.example.com/rpc?a=1')
-    const k2 = endpointKey('https://api.example.com/rpc?b=2')
+  it('resolves to the longest registered base prefix', () => {
+    registerEndpointBase('https://rpc.example.com/aptos/mainnet/alchemy1')
+    registerEndpointBase('https://rpc.example.com/aptos/mainnet/archive/alchemy1')
+    const base = endpointKey('https://rpc.example.com/aptos/mainnet/alchemy1')
+    assert.equal(base, 'https://rpc.example.com/aptos/mainnet/alchemy1')
+    const k1 = endpointKey(
+      'https://rpc.example.com/aptos/mainnet/alchemy1/transactions/by_version/6934979110',
+    )
+    const k2 = endpointKey(
+      'https://rpc.example.com/aptos/mainnet/alchemy1/transactions/by_version/6934980851',
+    )
+    assert.equal(k1, base)
     assert.equal(k1, k2)
+    // matching is boundary-aware: /alchemy1x must NOT resolve to /alchemy1 → origin fallback
+    assert.equal(
+      endpointKey('https://rpc.example.com/aptos/mainnet/alchemy1x/transactions'),
+      'https://rpc.example.com',
+    )
+    // the archive variant resolves to its own registered base
+    assert.equal(
+      endpointKey(
+        'https://rpc.example.com/aptos/mainnet/archive/alchemy1/transactions/by_version/1',
+      ),
+      'https://rpc.example.com/aptos/mainnet/archive/alchemy1',
+    )
+  })
+
+  it('register is idempotent and longest-prefix wins over shorter bases', () => {
+    registerEndpointBase('https://rpc.example.com/aptos/mainnet/alchemy1')
+    registerEndpointBase('https://rpc.example.com')
+    assert.equal(
+      endpointKey('https://rpc.example.com/aptos/mainnet/alchemy1/x'),
+      'https://rpc.example.com/aptos/mainnet/alchemy1',
+    )
+  })
+})
+
+describe('originKey', () => {
+  it('merges every path of a host into one key', () => {
+    const k1 = originKey('https://testnet.toncenter.com/api/v3/messages?source=x')
+    const k2 = originKey('https://testnet.toncenter.com/api/v3/transactions')
+    const k3 = originKey('https://testnet.toncenter.com/api/v3/masterchainInfo')
+    assert.equal(k1, 'https://testnet.toncenter.com')
+    assert.equal(k2, k1)
+    assert.equal(k3, k1)
+  })
+
+  it('keeps distinct hosts (and proxy paths) separate', () => {
+    assert.notEqual(
+      originKey('https://testnet.toncenter.com/api/v3/messages'),
+      originKey('https://toncenter.com/api/v3/messages'),
+    )
+    // Distinct backends behind one proxy host stay separate under endpointKey
+    // once their base URLs are registered (as chain constructors do via
+    // fetchProfileForUrl); unregistered paths fall back to origin.
+    registerEndpointBase('https://gateway.example/ton/testnet/node1/jsonRPC')
+    assert.equal(
+      endpointKey('https://gateway.example/ton/testnet/node1/jsonRPC'),
+      'https://gateway.example/ton/testnet/node1/jsonRPC',
+    )
+    assert.notEqual(
+      endpointKey('https://gateway.example/ton/testnet/node1/jsonRPC'),
+      endpointKey('https://gateway.example/ton/testnet/node2/jsonRPC'),
+    )
   })
 })
 
@@ -263,6 +321,15 @@ describe('parseLogRangeError', () => {
     const result = parseLogRangeError(err)
     assert.ok(result !== null)
     assert.equal(result.maxRange, 10000)
+  })
+
+  it('parses 1rpc "limited to 0 - 50 blocks range" as the SECOND number', () => {
+    // The span is phrased as a pair, so the naive "first number" reading would
+    // learn a range of 0 and stall the scan outright.
+    const err = new Error('eth_getLogs is limited to 0 - 50 blocks range')
+    const result = parseLogRangeError(err)
+    assert.ok(result !== null)
+    assert.equal(result.maxRange, 50)
   })
 
   it('parses Alchemy suggested range [0x..., 0x...]', () => {
@@ -603,6 +670,69 @@ describe('createRateLimitedFetch', () => {
     assert.equal(mockedFetch.mock.calls.length, 1)
   })
 
+  it('merges the caller signal with ctx abort ONCE: every retry attempt shares the same signal object', async () => {
+    // Two 429s then success → 3 attempts through the retry loop.
+    let callCount = 0
+    const seenSignals: (AbortSignal | undefined)[] = []
+    globalThis.fetch = mockedFetch = mock.fn((_input: unknown, init?: RequestInit) => {
+      callCount++
+      seenSignals.push(init?.signal as AbortSignal | undefined)
+      if (callCount <= 2) {
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+
+    // With a per-request signal and a ctx abort: one composite for all attempts.
+    const callerAc = new AbortController()
+    const ctxAc = new AbortController()
+    const result = await createRateLimitedFetch({}, { abort: ctxAc.signal })(
+      'https://rl-test-signal-once.example.com',
+      { signal: callerAc.signal },
+    )
+    assert.equal(result.ok, true)
+    assert.equal(seenSignals.length, 3)
+    // No per-attempt re-wrap: attempts 1..3 must all see the SAME merged signal.
+    assert.ok(seenSignals[0])
+    assert.equal(seenSignals[1], seenSignals[0])
+    assert.equal(seenSignals[2], seenSignals[0])
+    // It must still reflect BOTH sources (composite semantics preserved).
+    assert.equal(seenSignals[0]!.aborted, false)
+    callerAc.abort()
+    assert.equal(seenSignals[0]!.aborted, true)
+
+    // Without a per-request signal, the ctx abort itself is passed through
+    // verbatim (no composite is created at all).
+    seenSignals.length = 0
+    callCount = 0
+    globalThis.fetch = mockedFetch = mock.fn((_input: unknown, init?: RequestInit) => {
+      callCount++
+      seenSignals.push(init?.signal as AbortSignal | undefined)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+    await createRateLimitedFetch(
+      {},
+      { abort: ctxAc.signal },
+    )('https://rl-test-signal-once2.example.com')
+    assert.equal(callCount, 1)
+    assert.equal(seenSignals[0], ctxAc.signal)
+  })
+
   it('should handle network errors with retry logic', async () => {
     let callCount = 0
     globalThis.fetch = mockedFetch = mock.fn(() => {
@@ -814,6 +944,36 @@ describe('adaptive limiting', () => {
     assert.ok(Date.now() - t0 < 4000, `expected burst+retry (no pacing), took ${Date.now() - t0}ms`)
   })
 
+  it('drains an over-cap pacing backlog instead of failing the requests', async () => {
+    let calls = 0
+    globalThis.fetch = mock.fn(async () => {
+      calls++
+      return ok()
+    })
+    // 1 request per 250ms pacer with a small (test-only) backlog ceiling: the
+    // concurrent burst reserves ~750ms of slots, so the tail requests exceed
+    // the cap and fail fast in acquire(). They must then sleep off the
+    // already-reserved backlog and still go out — no hard failure, no retry
+    // storm (calls stays at the request count).
+    const f = createRateLimitedFetch({
+      seed: { limit: 1, windowMs: 250 },
+      maxPacingBacklogMs: 300,
+    })
+    const url = 'https://drain-backlog.example.com/rpc'
+    const t0 = Date.now()
+    await Promise.all(Array.from({ length: 4 }, (_, i) => f(url, rpc('m', i))))
+    const elapsed = Date.now() - t0
+    assert.equal(calls, 4)
+    // The second request's slot is the only hard timing guarantee of the run: the
+    // tail requests fail fast, then re-enter after draining the already-reserved
+    // backlog at whatever backlog the scheduler observes — the exact slot count is
+    // non-deterministic on loaded runners (CI saw ~300ms of scheduler-dependent
+    // drain). Pacing missing entirely would finish in milliseconds, so one slot
+    // (windowMs) discriminates paced drain from full speed.
+    assert.ok(elapsed >= 250, `expected at least one paced slot, took ${elapsed}ms`)
+    assert.ok(elapsed < 10_000, `took suspiciously long: ${elapsed}ms`)
+  })
+
   it('seeded (TON-like) limiter doubles window on consecutive header-less 429s', async () => {
     let calls = 0
     globalThis.fetch = mock.fn(() => {
@@ -915,5 +1075,148 @@ describe('createAxiosFetchAdapter', () => {
     const adapter2 = createAxiosFetchAdapter(globalThis.fetch)
     assert.equal(typeof adapter1, 'function')
     assert.equal(typeof adapter2, 'function')
+  })
+})
+
+describe('parseTopicLimitError', () => {
+  it('recognises common phrasings and extracts the cap when stated', () => {
+    for (const [msg, want] of [
+      ['too many topics in filter', undefined],
+      ['requested too many topics', undefined],
+      ['eth_getLogs is limited to 5 topics', 5],
+      ['limited to a maximum of 4 topics', 4],
+      ['maximum number of topics is 5', 5],
+      ['max topics: 3', 3],
+      ['topics limit exceeded', undefined],
+    ] as const) {
+      const info = parseTopicLimitError({ code: -32602, message: msg })
+      assert.notEqual(info, null, `should match: ${msg}`)
+      assert.equal(info?.maxTopics, want, `cap for: ${msg}`)
+    }
+  })
+
+  it('does NOT match a block-range error', () => {
+    // Confusing the two would shrink the wrong dimension forever: a range error
+    // would teach a bogus topic cap and split every filter for no reason.
+    for (const msg of [
+      'query returned more than 10000 results',
+      'block range too large (maximum 2000)',
+      'up to a 10000 block range',
+      'Exceeded maximum block range: 1000',
+    ]) {
+      assert.equal(parseTopicLimitError({ code: -32005, message: msg }), null, msg)
+      assert.notEqual(parseLogRangeError({ code: -32005, message: msg }), null, msg)
+    }
+  })
+
+  it('returns null for unrelated errors and nullish input', () => {
+    assert.equal(parseTopicLimitError(null), null)
+    assert.equal(parseTopicLimitError(undefined), null)
+    assert.equal(parseTopicLimitError(new Error('execution reverted')), null)
+    assert.equal(parseTopicLimitError({ code: -32000, message: 'header not found' }), null)
+  })
+
+  it('finds the message nested in a JSON-RPC error body', () => {
+    const info = parseTopicLimitError({
+      code: 'SERVER_ERROR',
+      info: { error: { code: -32602, message: 'eth_getLogs is limited to 5 topics' } },
+    })
+    assert.deepEqual(info, { maxTopics: 5 })
+  })
+})
+
+describe('endpoint topic limit', () => {
+  it('stores and reads back per endpoint, keyed like the log range', () => {
+    const a = 'https://topiclimit-a.example/rpc'
+    const b = 'https://topiclimit-b.example/rpc'
+    assert.equal(getEndpointTopicLimit(a), undefined)
+
+    setEndpointTopicLimit(a, 5, 'error')
+    assert.equal(getEndpointTopicLimit(a), 5)
+    // A cap learned for one provider must not leak to another: the whole point of
+    // storing it per endpoint is that a round-robin spans several providers.
+    assert.equal(getEndpointTopicLimit(b), undefined)
+
+    // Independent of the log-range slot on the same endpoint.
+    setEndpointLogRange(a, 1000, 'error')
+    assert.equal(getEndpointTopicLimit(a), 5)
+    assert.equal(getEndpointLogRange(a), 1000)
+  })
+})
+
+describe('redactEndpointUrl', () => {
+  it('drops the query string, where keyed gateways carry their key', () => {
+    assert.equal(
+      redactEndpointUrl('https://toncenter.com/api/v2?api_key=s3cr3t-key-abcdef1234567890'),
+      'https://toncenter.com/api/v2',
+    )
+  })
+
+  it('masks long path segments, where keyed-path providers embed the key', () => {
+    assert.equal(
+      redactEndpointUrl('https://mainnet.infura.io/v3/0123456789abcdef0123456789abcdef'),
+      'https://mainnet.infura.io/v3/***',
+    )
+    assert.equal(
+      redactEndpointUrl(
+        'https://still-silent-mist.eth.quiknode.pro/0123456789abcdef0123456789abcdef/',
+      ),
+      'https://still-silent-mist.eth.quiknode.pro/***/',
+    )
+  })
+
+  it('keeps ordinary public paths intact', () => {
+    assert.equal(
+      redactEndpointUrl('https://gateway.tenderly.co/public/sepolia'),
+      'https://gateway.tenderly.co/public/sepolia',
+    )
+    assert.equal(redactEndpointUrl('https://evm.astar.network'), 'https://evm.astar.network/')
+  })
+
+  it('drops userinfo and degrades non-URL input to ***', () => {
+    assert.equal(
+      redactEndpointUrl('https://user:pass@rpc.example.com/v1'),
+      'https://rpc.example.com/v1',
+    )
+    assert.equal(redactEndpointUrl('not a url'), '***')
+    assert.equal(redactEndpointUrl(undefined), '***')
+    assert.equal(redactEndpointUrl(new URL('https://ok.example/path')), 'https://ok.example/path')
+  })
+
+  it('never logs credentials from the endpoint URL through the fetch logger', async () => {
+    const KEY = 's3cr3t-key-abcdef1234567890'
+    const endpoint = `https://ton-gateway.example.com/api/v2?api_key=${KEY}`
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      calls++
+      if (calls === 1)
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+        } as Response)
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+      } as Response)
+    })
+
+    const debugCalls: unknown[][] = []
+    const logger = {
+      debug: (...args: unknown[]) => void debugCalls.push(args),
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    }
+    const rateLimitedFetch = createRateLimitedFetch({}, { logger: logger as any })
+
+    await rateLimitedFetch(endpoint)
+
+    const flat = JSON.stringify(debugCalls)
+    assert.ok(!flat.includes(KEY), 'the endpoint credential must never reach the logger')
+    assert.ok(flat.includes('https://ton-gateway.example.com/api/v2'))
   })
 })

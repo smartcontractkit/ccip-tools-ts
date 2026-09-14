@@ -1,13 +1,13 @@
-import { normalizeCantonCcvList, receiverRequiresConfiguredCcvs } from '../ccv-addresses.ts'
-import type { DisclosedContract } from './types.ts'
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { hashedUtf8Hex, isCantonPartyId, normalizeHex } from '../../utils.ts'
+import { normalizeCantonCcvList, receiverRequiresConfiguredCcvs } from '../ccv-addresses.ts'
 import {
   type CantonClient,
   type EventFormat,
   type GetActiveContractsRequest,
   createCantonClient,
 } from '../client/index.ts'
+import type { DisclosedContract } from './types.ts'
 
 /**
  * Extract a named string field from a contract's `createArgument` object.
@@ -162,7 +162,7 @@ export type CcipPackageNames = {
 }
 
 const CCIP_MODULE_ENTITIES = {
-  perPartyRouter: 'CCIP.PerPartyRouter:PerPartyRouter',
+  perPartyRouter: 'CCIP.RuntimeV2.PerPartyRouter:PerPartyRouter',
   ccipReceiver: 'CCIP.CCIPReceiver:CCIPReceiver',
   ccipSender: 'CCIP.CCIPSender:CCIPSender',
 } as const

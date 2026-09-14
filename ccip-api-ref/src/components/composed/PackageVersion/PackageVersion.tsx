@@ -18,7 +18,7 @@ export function PackageVersion({ package: pkg }: PackageVersionProps): React.JSX
   const version =
     pkg === 'sdk' ? (customFields?.sdkVersion as string) : (customFields?.cliVersion as string)
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- customFields may not have version
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- customFields may not have version
   return <span>{version ?? 'unknown'}</span>
 }
 

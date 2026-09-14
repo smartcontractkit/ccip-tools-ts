@@ -10,28 +10,36 @@ import { createPublicClient, http } from 'viem'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
 import { FUJI_TO_SEPOLIA, SOLANA_DEVNET_TO_SEPOLIA, TON_TO_SEPOLIA } from './fork.test.data.ts'
-import { EVMChain } from './index.ts'
 import { ViemTransportProvider } from './viem/client-adapter.ts'
+import { EVMChain } from './index.ts'
+
+// Forks fetch live state from Sepolia/Fuji/Arb-Sepolia/Hedera-testnet upstreams; several
+// execution paths also hit the staging CCIP API.
+await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'api'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = process.env['RPC_SEPOLIA'] || 'https://sepolia.gateway.tenderly.co'
+const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = process.env['RPC_FUJI'] || 'https://api.avax-test.network/ext/bc/C/rpc'
+const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 
-const ARB_SEP_RPC = process.env['RPC_ARB_SEPOLIA'] || 'https://sepolia-rollup.arbitrum.io/rpc'
+const ARB_SEP_RPC = rpcEndpoint('RPC_ARBITRUM_SEPOLIA')
 const ARB_SEP_CHAIN_ID = 421614
 
+// Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
+// Router 1.2.0 from the CCIP Directory (https://docs.chain.link/ccip/directory/testnet)
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
 // ── sendMessage constants ──
@@ -118,6 +126,26 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
+// Anvil's genesis fetch is a single request to the fork URL, so a public testnet
+// RPC storming the CI egress (429/5xx for minutes) aborts startup with "failed to
+// create genesis" before the per-request fork resilience below can help. Retry the
+// whole start with backoff so a transient storm doesn't down the suite.
+async function startForkWithRetries(instance: ReturnType<typeof Instance.anvil>): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await instance.start()
+      return
+    } catch (err) {
+      await instance.stop().catch(() => {})
+      if (attempt === 4) throw err
+      testLogger.debug(
+        `anvil start failed (attempt ${attempt}/4, retrying in ${10 * attempt}s): ${(err as Error).message}`,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 10_000 * attempt))
+    }
+  }
+}
+
 describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
@@ -154,7 +182,11 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       { forkUrl: ARB_SEP_RPC, chainId: ARB_SEP_CHAIN_ID, port: 8644, ...forkOpts },
       {},
     )
-    await Promise.all([sepoliaInstance.start(), fujiInstance.start(), arbSepInstance.start()])
+    await Promise.all([
+      startForkWithRetries(sepoliaInstance),
+      startForkWithRetries(fujiInstance),
+      startForkWithRetries(arbSepInstance),
+    ])
 
     const sepoliaProvider = new JsonRpcProvider(
       `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,

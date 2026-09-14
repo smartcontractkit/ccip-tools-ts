@@ -1,6 +1,6 @@
+import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
 import type { JsCommands, PartySignatures } from './client/index.ts'
-import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.
@@ -118,8 +118,7 @@ export interface CantonCCVSendInput {
 }
 
 /**
- * Token input carrying the Transfer Factory reference and metadata
- * (maps to Go `interfaces.TokenInput`).
+ * Token input carrying the Transfer Factory reference and metadata.
  */
 export interface CantonTokenInput {
   transferFactory: string
@@ -128,8 +127,7 @@ export interface CantonTokenInput {
 }
 
 /**
- * Extra arguments attached to a Canton token input
- * (maps to Go `splice_api_token_metadata_v1.ExtraArgs`).
+ * Extra arguments attached to a Canton token input.
  */
 export interface CantonTokenExtraArgs {
   context: { values: Record<string, unknown> }

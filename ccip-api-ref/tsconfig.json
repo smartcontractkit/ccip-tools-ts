@@ -10,7 +10,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "stableTypeOrdering": true,
     "types": ["node"]
   },
   "include": [

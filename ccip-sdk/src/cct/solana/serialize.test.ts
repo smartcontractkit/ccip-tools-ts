@@ -5,8 +5,8 @@ import { describe, it } from 'node:test'
 import { Message, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js'
 import bs58 from 'bs58'
 
-import { serializeUnsignedSolanaTx } from './serialize.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
+import { serializeUnsignedSolanaTx } from './serialize.ts'
 
 const KEY = PublicKey.default
 const connection = {

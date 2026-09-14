@@ -97,7 +97,7 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   }
 
   /** Validates the constructor params before building init-code. */
-  protected validate(params: DeployTokenPoolParams): void {
+  protected override validate(params: DeployTokenPoolParams): void {
     if (!isDeployableTokenPoolType(params.type))
       throw new CCTParamsInvalidError(
         this.name,

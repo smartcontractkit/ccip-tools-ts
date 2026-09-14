@@ -12,10 +12,12 @@
  * upstream v2 IDL, inlined here as `u32` (identical borsh layout).
  *
  * As of the latest devnet redeploy, `DestChainConfigCcipV2` carries the full upstream
- * layout: `addressBytesLength` (after `laneCodeVersion`) and the trailing
- * `baseExecutionGasCost` (CrossChainGas) + `maxFeePerMessage` (UsdCents) fields.
- * Borsh does NOT skip trailing bytes on a too-short layout (it errors on offset
- * overflow), so the IDL must match the on-chain account exactly.
+ * layout: `addressBytesLength` and `tokenReceiverAllowed` (after `laneCodeVersion`),
+ * then the trailing `baseExecutionGasCost` (CrossChainGas) + `maxFeePerMessage`
+ * (UsdCents) fields. Borsh does NOT skip trailing bytes on a too-short layout (it
+ * errors on offset overflow), so the IDL must match the on-chain account exactly.
+ * (Missing fields shift every subsequent offset — e.g. a missing `tokenReceiverAllowed`
+ * makes anchor's borsh decoder read a garbage vec length and fail with ERR_OUT_OF_RANGE.)
  */
 export type CcipRouterV2 = {
   version: '2.0.0'
@@ -122,6 +124,7 @@ export type CcipRouterV2 = {
         fields: [
           { name: 'laneCodeVersion'; type: { defined: 'CodeVersion' } },
           { name: 'addressBytesLength'; type: 'u8' },
+          { name: 'tokenReceiverAllowed'; type: 'bool' },
           { name: 'allowedSenders'; type: { vec: 'publicKey' } },
           { name: 'allowListEnabled'; type: 'bool' },
           { name: 'defaultCcvs'; type: { vec: 'publicKey' } },
@@ -251,6 +254,7 @@ export const IDL: CcipRouterV2 = {
         fields: [
           { name: 'laneCodeVersion', type: { defined: 'CodeVersion' } },
           { name: 'addressBytesLength', type: 'u8' },
+          { name: 'tokenReceiverAllowed', type: 'bool' },
           { name: 'allowedSenders', type: { vec: 'publicKey' } },
           { name: 'allowListEnabled', type: 'bool' },
           { name: 'defaultCcvs', type: { vec: 'publicKey' } },

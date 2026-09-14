@@ -150,8 +150,9 @@ const CHAIN_TIPS: Record<ChainType, React.ReactNode> = {
   canton: (
     <>
       Canton uses the Ledger JSON API (not a traditional RPC). Your network operator provides the
-      ledger URL (typically ending in <code>/api/json</code>). Authentication requires a JWT — see{' '}
-      <a href="/cli/configuration#canton-configuration">Canton Configuration</a>.
+      ledger URL (typically ending in <code>/api/json</code>). Authentication requires a JWT, either
+      pre-obtained or resolved automatically via OIDC — see{' '}
+      <a href="/cli/configuration#canton-authentication">Canton Authentication</a>.
     </>
   ),
 }

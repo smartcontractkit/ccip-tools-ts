@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli send` command.
  */
 
-import { outputOptions, rpcOptions, walletOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions, rpcOptions, walletOptions } from './common.ts'
 
 export const sendSchema: CommandSchema<'send'> = {
   name: 'send',

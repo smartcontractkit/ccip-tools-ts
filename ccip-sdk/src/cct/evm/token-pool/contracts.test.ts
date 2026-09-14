@@ -4,10 +4,16 @@ import { describe, it } from 'node:test'
 import { Interface } from 'ethers'
 
 import {
+  CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
+  CCTOperationUnsupportedError,
+} from '../../errors.ts'
+import {
   TOKEN_POOL_FAMILIES,
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
+  assertLockReleasePool,
   getTokenPoolFamily,
   getTokenPoolInterface,
   isLockReleaseTokenPoolType,
@@ -16,11 +22,6 @@ import {
   parseTokenPoolVersion,
   resolveEncoder,
 } from './contracts.ts'
-import {
-  CCTContractTypeInvalidError,
-  CCTContractVersionUnsupportedError,
-  CCTOperationUnsupportedError,
-} from '../../errors.ts'
 
 const ADDR = '0x' + '11'.repeat(20)
 
@@ -83,8 +84,7 @@ describe('pool versions', () => {
   it('isTokenPoolVersion narrows known versions and rejects others', () => {
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_5_1), true)
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V2_0_0), true)
-    // `1.6.0` is a real on-chain string for SiloedLockReleaseTokenPool (v1.6.0 tag), but its ABI
-    // isn't in the 2.0.0 dep, so it's deliberately deferred (rejected) — not "no such version".
+    // `1.6.0` is a real on-chain string, but no ABI is vendored for it — deferred, not unknown
     assert.equal(isTokenPoolVersion('1.6.0'), false)
     assert.equal(isTokenPoolVersion('garbage'), false)
   })
@@ -147,6 +147,46 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
+  it('normalizes the v1.5.0 *AndProxy shims to their base type', () => {
+    for (const [contractType, type] of [
+      ['BurnMintTokenPoolAndProxy', 'BurnMintTokenPool'],
+      ['BurnFromMintTokenPoolAndProxy', 'BurnFromMintTokenPool'],
+      ['BurnWithFromMintTokenPoolAndProxy', 'BurnWithFromMintTokenPool'],
+      ['LockReleaseTokenPoolAndProxy', 'LockReleaseTokenPool'],
+    ] as const) {
+      assert.deepEqual(parseTokenPoolVersion({ address: ADDR, contractType, version: '1.5.0' }), {
+        type,
+        version: TokenPoolVersion.V1_5_0,
+      })
+    }
+  })
+
+  it('only strips AndProxy at v1.5.0 — the shim exists at no other version', () => {
+    for (const version of ['1.5.1', '1.6.1', '2.0.0']) {
+      assert.throws(
+        () =>
+          parseTokenPoolVersion({
+            address: ADDR,
+            contractType: 'BurnMintTokenPoolAndProxy',
+            version,
+          }),
+        CCTContractTypeInvalidError,
+      )
+    }
+  })
+
+  it('gates the stripped base type, so an unsupported AndProxy name is still rejected', () => {
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'UpgradeableLockReleaseTokenPoolAndProxy',
+          version: '1.5.0',
+        }),
+      CCTContractTypeInvalidError,
+    )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
@@ -183,6 +223,84 @@ describe('TOKEN_POOL_INTERFACES', () => {
     assert.ok(
       !TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1].hasFunction('getPreviousPool'),
     )
+  })
+})
+
+/** The functions the LockRelease liquidity + rebalancer ops encode, checked against the ABIs. */
+const LIQUIDITY_FUNCTIONS = [
+  'provideLiquidity',
+  'withdrawLiquidity',
+  'transferLiquidity',
+  'setRebalancer',
+  'getRebalancer',
+] as const
+
+describe('LockRelease liquidity surface', () => {
+  /** The versions the liquidity ops floor-match a single 1.5.0 encoder across. */
+  const V1_X = [TokenPoolVersion.V1_5_0, TokenPoolVersion.V1_5_1, TokenPoolVersion.V1_6_1] as const
+
+  it('declares every liquidity function with an identical signature at v1.5.0–v1.6.1', () => {
+    // this parity is what licenses one encoder entry at 1.5.0 instead of a per-version table
+    for (const fn of LIQUIDITY_FUNCTIONS) {
+      const [first, ...rest] = V1_X.map((version) =>
+        TOKEN_POOL_INTERFACES.LockRelease[version].getFunction(fn)!.format('sighash'),
+      )
+      for (const sighash of rest) assert.equal(sighash, first, `${fn} diverged across v1.x`)
+    }
+  })
+
+  it('drops every liquidity function at v2.0.0, which escrows through a lockbox', () => {
+    for (const fn of LIQUIDITY_FUNCTIONS)
+      assert.equal(
+        TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0].hasFunction(fn),
+        false,
+        `${fn} unexpectedly present at 2.0.0`,
+      )
+  })
+
+  it('declares no liquidity function on the BurnMint family at any version', () => {
+    for (const version of Object.values(TokenPoolVersion))
+      for (const fn of LIQUIDITY_FUNCTIONS)
+        assert.equal(
+          TOKEN_POOL_INTERFACES.BurnMint[version].hasFunction(fn),
+          false,
+          `${fn} unexpectedly present on BurnMint ${version}`,
+        )
+  })
+
+  it('declares canAcceptLiquidity only at v1.5.0 and v1.5.1', () => {
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_0].hasFunction('canAcceptLiquidity'),
+      true,
+    )
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_1].hasFunction('canAcceptLiquidity'),
+      true,
+    )
+    // 1.6.1 dropped the immutable flag and always accepts deposits
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_6_1].hasFunction('canAcceptLiquidity'),
+      false,
+    )
+  })
+})
+
+describe('assertLockReleasePool', () => {
+  it('passes every lock-release type through', () => {
+    for (const type of TOKEN_POOL_TYPES.filter(isLockReleaseTokenPoolType))
+      assert.doesNotThrow(() => assertLockReleasePool('provideLiquidity', ADDR, type))
+  })
+
+  it('rejects every burn-mint type, naming the operation', () => {
+    for (const type of TOKEN_POOL_TYPES.filter((t) => !isLockReleaseTokenPoolType(t)))
+      assert.throws(
+        () => assertLockReleasePool('provideLiquidity', ADDR, type),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === ADDR &&
+          err.context.actual === type &&
+          err.context.operation === 'provideLiquidity',
+      )
   })
 })
 
@@ -227,6 +345,77 @@ describe('resolveEncoder', () => {
   it('throws when nothing is registered at or below the version', () => {
     assert.throws(
       () => resolveEncoder({ [TokenPoolVersion.V2_0_0]: () => 'b' }, TokenPoolVersion.V1_5_0, 'op'),
+      CCTOperationUnsupportedError,
+    )
+  })
+
+  it('inherits the lower version\u2019s encoder across every absent key above it', () => {
+    // a single V1_5_0 entry \u2014 the shape `transfer-ownership.ts` uses \u2014 must cover every version
+    const encoders = { [TokenPoolVersion.V1_5_0]: () => 'only' }
+    for (const version of Object.values(TokenPoolVersion))
+      assert.equal(resolveEncoder(encoders, version, 'op')(), 'only')
+  })
+
+  it('stops at an explicit null ceiling instead of inheriting the encoder downward', () => {
+    // `applyAllowListUpdates`: present 1.5.0\u20131.6.1, removed outright in 2.0.0
+    const encoders = {
+      [TokenPoolVersion.V1_5_0]: () => 'allowList',
+      [TokenPoolVersion.V2_0_0]: null,
+    }
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V1_5_0, 'op')(), 'allowList')
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V1_5_1, 'op')(), 'allowList')
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V1_6_1, 'op')(), 'allowList')
+    assert.throws(
+      () => resolveEncoder(encoders, TokenPoolVersion.V2_0_0, 'op'),
+      (error: unknown) =>
+        error instanceof CCTOperationUnsupportedError &&
+        error.context.operation === 'op' &&
+        error.context.version === TokenPoolVersion.V2_0_0,
+    )
+  })
+
+  it('applies a null ceiling to every version at or above it, not just the keyed one', () => {
+    // a ceiling keyed below the top must not be escaped by asking for a higher version
+    const encoders = {
+      [TokenPoolVersion.V1_5_0]: () => 'a',
+      [TokenPoolVersion.V1_6_1]: null,
+    }
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V1_5_1, 'op')(), 'a')
+    assert.throws(
+      () => resolveEncoder(encoders, TokenPoolVersion.V1_6_1, 'op'),
+      CCTOperationUnsupportedError,
+    )
+    assert.throws(
+      () => resolveEncoder(encoders, TokenPoolVersion.V2_0_0, 'op'),
+      CCTOperationUnsupportedError,
+    )
+  })
+
+  it('lets a later version re-register an encoder above a null ceiling', () => {
+    // the walk is downward-from-requested, so a re-added function is found before the ceiling
+    const encoders = {
+      [TokenPoolVersion.V1_5_0]: () => 'old',
+      [TokenPoolVersion.V1_5_1]: null,
+      [TokenPoolVersion.V2_0_0]: () => 'new',
+    }
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V1_5_0, 'op')(), 'old')
+    assert.throws(
+      () => resolveEncoder(encoders, TokenPoolVersion.V1_6_1, 'op'),
+      CCTOperationUnsupportedError,
+    )
+    assert.equal(resolveEncoder(encoders, TokenPoolVersion.V2_0_0, 'op')(), 'new')
+  })
+
+  it('throws when the requested version itself is the only null entry', () => {
+    assert.throws(
+      () => resolveEncoder({ [TokenPoolVersion.V1_5_0]: null }, TokenPoolVersion.V1_5_0, 'op'),
+      CCTOperationUnsupportedError,
+    )
+  })
+
+  it('throws on an empty table', () => {
+    assert.throws(
+      () => resolveEncoder({}, TokenPoolVersion.V1_6_1, 'op'),
       CCTOperationUnsupportedError,
     )
   })

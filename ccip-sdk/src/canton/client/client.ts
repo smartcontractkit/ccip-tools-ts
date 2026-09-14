@@ -95,8 +95,16 @@ export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashi
 export interface CantonClientConfig {
   /** Base URL of the Canton JSON Ledger API (e.g., http://localhost:7575) */
   baseUrl: string
-  /** JWT for authentication */
-  jwt: string
+  /**
+   * JWT for authentication.
+   *
+   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
+   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
+   * getter is supplied, each request awaits it and uses the returned JWT in the
+   * `Authorization` header, enabling automatic refresh without re-creating the
+   * client.
+   */
+  jwt?: string | (() => Promise<string>)
   /** Request timeout in milliseconds */
   timeout?: number
   /** Abort signal for cancelling in-flight requests (e.g., from Chain.abort) */
@@ -114,7 +122,7 @@ export interface CantonClientConfig {
  */
 export function createCantonClient(config: CantonClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const headers = buildHeaders(config.jwt)
+  const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
   const signal = config.signal
   // Build a fetch adapter only when the caller explicitly supplies a fetch function.
@@ -123,14 +131,24 @@ export function createCantonClient(config: CantonClientConfig) {
     ? createAxiosFetchAdapter(config.fetch, signal)
     : undefined
 
-  // Internal helpers that capture baseUrl/headers/timeoutMs/signal for
+  /**
+   * Resolve the request headers. When `jwt` is a function, await it per request
+   * so each call carries a fresh token (enabling automatic refresh).
+   */
+  async function resolveHeaders(): Promise<Record<string, string>> {
+    const token = typeof jwt === 'function' ? await jwt() : jwt
+    return buildHeaders(token)
+  }
+
+  // Internal helpers that capture baseUrl/timeoutMs/signal for
   // cleaner call sites inside createCantonClient.
-  const get2 = <T>(
+  const get2 = async <T>(
     path: string,
     queryParams?: Record<string, string>,
     retries?: number,
-  ): Promise<T> =>
-    request<T>(
+  ): Promise<T> => {
+    const headers = await resolveHeaders()
+    return request<T>(
       'GET',
       baseUrl,
       path,
@@ -142,15 +160,17 @@ export function createCantonClient(config: CantonClientConfig) {
       signal,
       fetchAdapter,
     )
+  }
 
-  const post2 = <T>(
+  const post2 = async <T>(
     path: string,
     body: unknown,
     queryParams?: Record<string, string>,
     retries?: number,
     overrideTimeoutMs?: number,
-  ): Promise<T> =>
-    request<T>(
+  ): Promise<T> => {
+    const headers = await resolveHeaders()
+    return request<T>(
       'POST',
       baseUrl,
       path,
@@ -162,6 +182,7 @@ export function createCantonClient(config: CantonClientConfig) {
       signal,
       fetchAdapter,
     )
+  }
 
   return {
     /**

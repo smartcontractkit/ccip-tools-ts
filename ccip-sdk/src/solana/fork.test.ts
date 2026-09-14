@@ -6,11 +6,15 @@ import { after, before, describe, it } from 'node:test'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
+import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
+import { networkInfo } from '../index.ts'
 import { ExecutionState, MessageStatus } from '../types.ts'
 import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
 import { SolanaChain } from './index.ts'
-import { networkInfo } from '../index.ts'
+
+// Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
+await useResource(['solana-mainnet', 'api'])
 
 // ── Constants ──
 
@@ -159,6 +163,28 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   after(async () => {
+    // Tear down the web3.js websocket BEFORE stopping surfpool. Sends confirm
+    // through it (connection.confirmTransaction), and web3.js hands its client
+    // `max_reconnects: Infinity` — once surfpool is gone the client would retry
+    // the dead socket every second forever, keeping this test process alive
+    // long after every test has passed. There is no public accessor for the
+    // client, so this pokes the private field, but only through its public
+    // CommonClient API (setAutoReconnect/close).
+    const wsClient = (
+      connection as unknown as {
+        _rpcWebSocket?: {
+          setAutoReconnect?: (enable: boolean) => void
+          close?: (code?: number, data?: string) => void
+        }
+      }
+    )._rpcWebSocket
+    wsClient?.setAutoReconnect?.(false)
+    try {
+      wsClient?.close?.(1000, 'fork tests done')
+    } catch {
+      // socket already gone
+    }
+
     await surfpoolInstance?.stop()
   })
 

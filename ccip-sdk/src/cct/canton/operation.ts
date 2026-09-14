@@ -62,7 +62,13 @@ export type CantonExecuteParams<P extends object> = P & {
 export abstract class CantonOperation<
   P extends object,
   Parsed = CantonGenerateParams<P>,
-> extends Operation<CantonChain, CantonGenerateParams<P>, UnsignedCantonTx, CantonTransactionResult> {
+> extends Operation<
+  CantonChain,
+  CantonGenerateParams<P>,
+  UnsignedCantonTx,
+  CantonTransactionResult,
+  Parsed
+> {
   /**
    * Optional validation hook required by the shared CCT operation contract.
    *
@@ -70,7 +76,7 @@ export abstract class CantonOperation<
    * operation validation and normalization; override this only when parsing
    * is unnecessary.
    */
-  protected validate(_params: CantonGenerateParams<P>): void {}
+  protected override validate(_params: CantonGenerateParams<P>): void {}
 
   /**
    * Normalize params without mutating the caller's input.
@@ -79,12 +85,12 @@ export abstract class CantonOperation<
    * from `CantonGenerateParams<P>`, e.g. to parse party IDs / instrument IDs
    * into validated forms or apply defaults.
    */
-  protected parse(params: CantonGenerateParams<P>): Parsed {
+  protected override parse(params: CantonGenerateParams<P>): Parsed {
     return params as Parsed
   }
 
   /** Validates and normalizes params for generation or execution. */
-  protected prepare(params: CantonGenerateParams<P>): Parsed {
+  protected override prepare(params: CantonGenerateParams<P>): Parsed {
     this.validate(params)
     return this.parse(params)
   }

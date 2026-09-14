@@ -7,8 +7,8 @@ import { AddressLookupTableProgram, Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { TOKEN_POOL_PROGRAMS } from '../../programs/token-pool.ts'
+import { CreateLookupTable } from './create-lookup-table.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const POOL_PROGRAM = Keypair.generate().publicKey.toBase58()
@@ -16,8 +16,9 @@ const ROUTER = Keypair.generate().publicKey.toBase58()
 const FEE_QUOTER = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
-  publicKey: Keypair.generate().publicKey,
+  publicKey: new PublicKey(AUTHORITY),
   signTransaction: async <T>(tx: T) => tx,
 }
 
@@ -30,6 +31,13 @@ function stubChain(onGetSlot?: () => void): SolanaChain {
         return 123
       },
       getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
     },
     getTokenPoolConfig: async () => ({
       token: TOKEN,
@@ -41,7 +49,7 @@ function stubChain(onGetSlot?: () => void): SolanaChain {
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(stubChain()).generateUnsignedCreateLookupTable({
+  return new CreateLookupTable().generate(stubChain(), {
     tokenAddress: TOKEN,
     poolProgramAddress: POOL_PROGRAM,
     payer: PAYER,
@@ -73,9 +81,7 @@ describe('CreateLookupTable (cct/solana)', () => {
     })
 
     it('accepts a canonical pool type', async () => {
-      const unsigned = await SolanaTokenManager.fromChain(
-        stubChain(),
-      ).generateUnsignedCreateLookupTable({
+      const unsigned = await new CreateLookupTable().generate(stubChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         payer: PAYER,
@@ -90,9 +96,7 @@ describe('CreateLookupTable (cct/solana)', () => {
     })
 
     it('builds create-only ALT instruction in createEmpty mode', async () => {
-      const unsigned = await SolanaTokenManager.fromChain(
-        stubChain(),
-      ).generateUnsignedCreateLookupTable({
+      const unsigned = await new CreateLookupTable().generate(stubChain(), {
         payer: PAYER,
         authority: AUTHORITY,
         mode: 'createEmpty',
@@ -113,9 +117,7 @@ describe('CreateLookupTable (cct/solana)', () => {
     })
 
     it('defaults createEmpty authority to payer', async () => {
-      const unsigned = await SolanaTokenManager.fromChain(
-        stubChain(),
-      ).generateUnsignedCreateLookupTable({
+      const unsigned = await new CreateLookupTable().generate(stubChain(), {
         payer: PAYER,
         mode: 'createEmpty',
       })
@@ -158,14 +160,15 @@ describe('CreateLookupTable (cct/solana)', () => {
       let getSlotCalls = 0
 
       await assert.rejects(
-        SolanaTokenManager.fromChain(
+        new CreateLookupTable().generate(
           stubChain(() => getSlotCalls++),
-        ).generateUnsignedCreateLookupTable({
-          tokenAddress: TOKEN,
-          poolType: 'burn-mint',
-          poolProgramAddress: POOL_PROGRAM,
-          payer: PAYER,
-        } as never),
+          {
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            poolProgramAddress: POOL_PROGRAM,
+            payer: PAYER,
+          } as never,
+        ),
         CCTParamsInvalidError,
       )
 
@@ -174,14 +177,25 @@ describe('CreateLookupTable (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the lookup table address', async () => {
+      const result = await new CreateLookupTable().execute(stubChain(), {
+        tokenAddress: TOKEN,
+        poolProgramAddress: POOL_PROGRAM,
+        wallet: WALLET,
+      })
+
+      assert.equal(result.hash, HASH)
+      assert.match(result.lookupTableAddress, /^[1-9A-HJ-NP-Za-km-z]+$/)
+    })
+
     it('rejects signed create+extend when authority is not the wallet', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(stubChain()).createLookupTable({
+          new CreateLookupTable().execute(stubChain(), {
             tokenAddress: TOKEN,
             poolProgramAddress: POOL_PROGRAM,
             wallet: WALLET,
-            authority: AUTHORITY,
+            authority: PAYER,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&

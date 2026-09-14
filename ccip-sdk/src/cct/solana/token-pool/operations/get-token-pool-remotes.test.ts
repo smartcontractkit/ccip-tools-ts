@@ -6,8 +6,8 @@ import { PublicKey } from '@solana/web3.js'
 import type { TokenPoolRemote } from '../../../../chain.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
+import { GetTokenPoolRemotes } from './get-token-pool-remotes.ts'
 
 function key(byte: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
@@ -39,7 +39,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
 
   describe('query', () => {
     it('delegates selected remote config decoding to the chain reader', async () => {
-      const remotes = await SolanaTokenManager.fromChain(chain()).getTokenPoolRemotes({
+      const remotes = await new GetTokenPoolRemotes().query(chain(), {
         tokenAddress: mint.toBase58(),
         poolProgramAddress: program.toBase58(),
         remoteChainSelector: selector,
@@ -56,7 +56,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
         },
       } as unknown as SolanaChain
 
-      const remotes = await SolanaTokenManager.fromChain(chainWithAll).getTokenPoolRemotes({
+      const remotes = await new GetTokenPoolRemotes().query(chainWithAll, {
         tokenAddress: mint.toBase58(),
         poolProgramAddress: program.toBase58(),
       })
@@ -75,7 +75,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
         ]
       for (const [opts, param] of cases) {
         await assert.rejects(
-          SolanaTokenManager.fromChain(chain()).getTokenPoolRemotes({
+          new GetTokenPoolRemotes().query(chain(), {
             tokenAddress: mint.toBase58(),
             poolProgramAddress: program.toBase58(),
             remoteChainSelector: selector,

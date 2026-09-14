@@ -7,8 +7,8 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
+import { SetRateLimitAdmin } from './set-rate-limit-admin.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -28,8 +28,7 @@ function chain(): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -39,11 +38,11 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedSetRateLimitAdmin({
+  return new SetRateLimitAdmin().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -116,7 +115,7 @@ describe('SetRateLimitAdmin (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).setRateLimitAdmin({
+      const result = await new SetRateLimitAdmin().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         newRateLimitAdmin: NEW_RATE_LIMIT_ADMIN,
@@ -129,7 +128,7 @@ describe('SetRateLimitAdmin (cct/solana)', () => {
     it('rejects a non-wallet authority for signed configuration', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).setRateLimitAdmin({
+          new SetRateLimitAdmin().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             newRateLimitAdmin: NEW_RATE_LIMIT_ADMIN,

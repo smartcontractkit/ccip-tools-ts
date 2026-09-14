@@ -13,23 +13,14 @@ import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
-  type ExecuteCreateTokenAccountParams,
-  type ExecuteCreateTokenAccountResult,
-  type ExecuteDeployTokenParams,
-  type ExecuteDeployTokenResult,
-  type GenerateCreateTokenAccountParams,
-  type GenerateCreateTokenAccountResult,
-  type GenerateDeployTokenParams,
-  type GenerateDeployTokenResult,
-  CreateTokenAccount,
-} from './token/operations/index.ts'
-import {
   type ExecuteAcceptAdminParams,
   type ExecuteAcceptAdminResult,
   type ExecuteAppendToLookupTableParams,
   type ExecuteAppendToLookupTableResult,
   type ExecuteCreateLookupTableParams,
   type ExecuteCreateLookupTableResult,
+  type ExecuteOwnerOverridePendingAdministratorParams,
+  type ExecuteOwnerOverridePendingAdministratorResult,
   type ExecuteRegisterAdminParams,
   type ExecuteRegisterAdminResult,
   type ExecuteSetPoolParams,
@@ -42,6 +33,8 @@ import {
   type GenerateAppendToLookupTableResult,
   type GenerateCreateLookupTableParams,
   type GenerateCreateLookupTableResult,
+  type GenerateOwnerOverridePendingAdministratorParams,
+  type GenerateOwnerOverridePendingAdministratorResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
   type GenerateSetPoolParams,
@@ -56,6 +49,7 @@ import {
   CreateLookupTable,
   GetSupportedTokens,
   GetTokenAdminRegistry,
+  OwnerOverridePendingAdministrator,
   RegisterAdmin,
   SetPool,
   TransferAdmin,
@@ -64,6 +58,8 @@ import {
   type BaseGetTokenPoolStateResult,
   type BurnMintPoolProgramRef,
   type CustomPoolProgramRef,
+  type ExecuteAcceptOwnershipParams,
+  type ExecuteAcceptOwnershipResult,
   type ExecuteAppendRemotePoolAddressesParams,
   type ExecuteAppendRemotePoolAddressesResult,
   type ExecuteApplyChainUpdatesParams,
@@ -80,12 +76,24 @@ import {
   type ExecuteEditChainRemoteConfigResult,
   type ExecuteInitChainRemoteConfigParams,
   type ExecuteInitChainRemoteConfigResult,
+  type ExecuteProvideLiquidityParams,
+  type ExecuteProvideLiquidityResult,
   type ExecuteRemoveFromAllowlistParams,
   type ExecuteRemoveFromAllowlistResult,
+  type ExecuteSetCanAcceptLiquidityParams,
+  type ExecuteSetCanAcceptLiquidityResult,
   type ExecuteSetChainRateLimitParams,
   type ExecuteSetChainRateLimitResult,
   type ExecuteSetRateLimitAdminParams,
   type ExecuteSetRateLimitAdminResult,
+  type ExecuteSetRebalancerParams,
+  type ExecuteSetRebalancerResult,
+  type ExecuteTransferOwnershipParams,
+  type ExecuteTransferOwnershipResult,
+  type ExecuteWithdrawLiquidityParams,
+  type ExecuteWithdrawLiquidityResult,
+  type GenerateAcceptOwnershipParams,
+  type GenerateAcceptOwnershipResult,
   type GenerateAppendRemotePoolAddressesParams,
   type GenerateAppendRemotePoolAddressesResult,
   type GenerateApplyChainUpdatesParams,
@@ -102,18 +110,29 @@ import {
   type GenerateEditChainRemoteConfigResult,
   type GenerateInitChainRemoteConfigParams,
   type GenerateInitChainRemoteConfigResult,
+  type GenerateProvideLiquidityParams,
+  type GenerateProvideLiquidityResult,
   type GenerateRemoveFromAllowlistParams,
   type GenerateRemoveFromAllowlistResult,
+  type GenerateSetCanAcceptLiquidityParams,
+  type GenerateSetCanAcceptLiquidityResult,
   type GenerateSetChainRateLimitParams,
   type GenerateSetChainRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
+  type GenerateSetRebalancerParams,
+  type GenerateSetRebalancerResult,
+  type GenerateTransferOwnershipParams,
+  type GenerateTransferOwnershipResult,
+  type GenerateWithdrawLiquidityParams,
+  type GenerateWithdrawLiquidityResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type LockReleaseGetTokenPoolStateResult,
   type LockReleasePoolProgramRef,
+  AcceptOwnership,
   AppendRemotePoolAddresses,
   ApplyChainUpdates,
   ConfigureAllowlist,
@@ -124,16 +143,60 @@ import {
   GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainRemoteConfig,
+  ProvideLiquidity,
   RemoveFromAllowlist,
+  SetCanAcceptLiquidity,
   SetChainRateLimit,
   SetRateLimitAdmin,
+  SetRebalancer,
+  TransferOwnership,
+  WithdrawLiquidity,
 } from './token-pool/operations/index.ts'
+import {
+  type ExecuteApproveTokenParams,
+  type ExecuteApproveTokenResult,
+  type ExecuteCreateTokenAccountParams,
+  type ExecuteCreateTokenAccountResult,
+  type ExecuteDeployTokenParams,
+  type ExecuteDeployTokenResult,
+  type ExecuteMintTokensParams,
+  type ExecuteMintTokensResult,
+  type ExecuteSetTokenAuthorityParams,
+  type ExecuteSetTokenAuthorityResult,
+  type ExecuteUpdateMetadataAuthorityParams,
+  type ExecuteUpdateMetadataAuthorityResult,
+  type GenerateApproveTokenParams,
+  type GenerateApproveTokenResult,
+  type GenerateCreateTokenAccountParams,
+  type GenerateCreateTokenAccountResult,
+  type GenerateDeployTokenParams,
+  type GenerateDeployTokenResult,
+  type GenerateMintTokensParams,
+  type GenerateMintTokensResult,
+  type GenerateSetTokenAuthorityParams,
+  type GenerateSetTokenAuthorityResult,
+  type GenerateUpdateMetadataAuthorityParams,
+  type GenerateUpdateMetadataAuthorityResult,
+  type GetTokenInfoParams,
+  type GetTokenInfoResult,
+  ApproveToken,
+  CreateTokenAccount,
+  GetTokenInfo,
+  MintTokens,
+  SetTokenAuthority,
+  UpdateMetadataAuthority,
+} from './token/operations/index.ts'
 
 /** CCT admin facade for Solana. */
 export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> {
   readonly chain: SolanaChain
   // Token operations
+  readonly #approveToken = new ApproveToken()
   readonly #createTokenAccount = new CreateTokenAccount()
+  readonly #getTokenInfo = new GetTokenInfo()
+  readonly #mintTokens = new MintTokens()
+  readonly #setTokenAuthority = new SetTokenAuthority()
+  readonly #updateMetadataAuthority = new UpdateMetadataAuthority()
 
   // Token admin registry operations
   readonly #acceptAdmin = new AcceptAdmin()
@@ -141,11 +204,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #createLookupTable = new CreateLookupTable()
   readonly #getSupportedTokens = new GetSupportedTokens()
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
+  readonly #ownerOverridePendingAdministrator = new OwnerOverridePendingAdministrator()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
   readonly #transferAdmin = new TransferAdmin()
 
   // Token pool operations
+  readonly #acceptOwnership = new AcceptOwnership()
   readonly #appendRemotePoolAddresses = new AppendRemotePoolAddresses()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #configureAllowlist = new ConfigureAllowlist()
@@ -156,9 +221,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #initChainRemoteConfig = new InitChainRemoteConfig()
+  readonly #provideLiquidity = new ProvideLiquidity()
   readonly #removeFromAllowlist = new RemoveFromAllowlist()
+  readonly #setCanAcceptLiquidity = new SetCanAcceptLiquidity()
   readonly #setChainRateLimit = new SetChainRateLimit()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
+  readonly #setRebalancer = new SetRebalancer()
+  readonly #transferOwnership = new TransferOwnership()
+  readonly #withdrawLiquidity = new WithdrawLiquidity()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -192,6 +262,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds unsigned Solana mint creation instructions, optionally with initial supply.
    * The `payer` defaults as mint, freeze, and metadata update authority.
    *
+   * @see {@link updateMetadataAuthority} To transfer the initial metadata update authority.
+   *
    * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
    *
    * @example
@@ -218,6 +290,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Creates a Solana mint, optionally with initial supply.
    * The wallet public key defaults as mint, freeze, and metadata update authority.
    *
+   * @see {@link updateMetadataAuthority} To transfer the initial metadata update authority.
+   *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If token parameters are invalid.
    * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
@@ -236,6 +310,72 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   async deployToken(opts: ExecuteDeployTokenParams): Promise<ExecuteDeployTokenResult> {
     const { DeployToken } = await import('./token/operations/index.ts')
     return new DeployToken().execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to approve a delegate to transfer SPL tokens.
+   *
+   * @see {@link approveToken} For wallet-based execution.
+   *
+   * @remarks
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. For an SPL Token multisig authority, provide `multisigSigners` and collect member signatures
+   * externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApproveToken({
+   *   payer: owner,
+   *   tokenAddress: mint,
+   *   delegate,
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  generateUnsignedApproveToken(
+    opts: GenerateApproveTokenParams,
+  ): Promise<GenerateApproveTokenResult> {
+    return this.#approveToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Approves a delegate to transfer SPL tokens from the selected token account using the executing
+   * authority wallet.
+   *
+   * @see {@link generateUnsignedApproveToken} For externally signed transactions.
+   *
+   * @remarks
+   * This is a prerequisite for pool liquidity operations: approve the pool signer PDA as `delegate`
+   * with the maximum allowance it may transfer during `provideLiquidity`. Approval grants a trusted
+   * delegate spend authority and replaces the account's existing delegate and allowance; set `amount`
+   * to `0n` to clear the allowance. `tokenAccount` defaults to the authority's existing associated token
+   * account. SPL Token multisig authorities require `multisigSigners`.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.approveToken({ wallet, tokenAddress: mint, delegate, amount: 1_000_000n })
+   * ```
+   */
+  approveToken(opts: ExecuteApproveTokenParams): Promise<ExecuteApproveTokenResult> {
+    return this.#approveToken.execute(this.chain, opts)
   }
 
   /**
@@ -295,6 +435,210 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
     opts: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
     return this.#createTokenAccount.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to mint SPL tokens to a recipient's associated token account.
+   *
+   * @remarks
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. `authority` defaults to `payer`. For an SPL
+   * Token multisig authority, provide `multisigSigners` and collect member signatures externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedMintTokens({
+   *   payer: mintAuthority,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
+   * })
+   * ```
+   */
+  generateUnsignedMintTokens(opts: GenerateMintTokensParams): Promise<GenerateMintTokensResult> {
+    return this.#mintTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Mints SPL tokens to a recipient's associated token account using the executing wallet.
+   *
+   * @remarks
+   * `amount` is in base units. Set `createRecipientATA` to create the recipient ATA idempotently
+   * before minting; otherwise it must already exist. SPL Token multisig authorities require
+   * `multisigSigners` and external member signatures; use {@link generateUnsignedMintTokens}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address, amount, or multisig signer is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the recipient ATA is missing and
+   * `createRecipientATA` is not set.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.mintTokens({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   recipient,
+   *   amount: 1_000_000n, // One token for a mint with six decimals
+   * })
+   * ```
+   */
+  mintTokens(opts: ExecuteMintTokensParams): Promise<ExecuteMintTokensResult> {
+    return this.#mintTokens.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions for an immediate SPL Token mint and/or freeze authority update.
+   *
+   * @see {@link setTokenAuthority} For wallet-based execution.
+   *
+   * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * instructions are atomic: no role changes if any selected update fails.
+   * `authority` defaults to `payer`. For an SPL Token multisig authority, provide `multisigSigners`
+   * and collect member signatures externally.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetTokenAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority,
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
+   *
+   * @example Permanently revoke mint authority
+   * ```ts
+   * const revokeUnsigned = await cct.generateUnsignedSetTokenAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority: null, // ⚠️ PERMANENT
+   *   authorityTypes: ['mint'],
+   * })
+   * ```
+   */
+  generateUnsignedSetTokenAuthority(
+    opts: GenerateSetTokenAuthorityParams,
+  ): Promise<GenerateSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.generate(this.chain, opts)
+  }
+
+  /**
+   * Immediately sets SPL Token mint and/or freeze authority using the executing wallet.
+   *
+   * @see {@link generateUnsignedSetTokenAuthority} For externally signed transactions.
+   *
+   * @remarks
+   * ⚠️ **IRREVERSIBLE:** Setting `newAuthority` to null **permanently revokes** the selected authority
+   * roles for the SPL Token. Once revoked, the authority cannot be recovered or transferred.
+   * Example: revoked mint authority prevents anyone from minting tokens. Use with extreme caution.
+   *
+   * Once confirmed, the current authority loses the selected roles. Set `authorityTypes` to
+   * `['mint']`, `['freeze']`, or both. All selected roles must have the same current authority. The
+   * transaction is atomic: no role changes if any selected update fails.
+   * SPL Token multisig authorities require `multisigSigners` and external member signatures; use
+   * {@link generateUnsignedSetTokenAuthority}.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or authority role selection is invalid, or
+   * `authority` does not match the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setTokenAuthority({ wallet, tokenAddress: mint, newAuthority, authorityTypes: ['mint'] })
+   * ```
+   */
+  setTokenAuthority(opts: ExecuteSetTokenAuthorityParams): Promise<ExecuteSetTokenAuthorityResult> {
+    return this.#setTokenAuthority.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions to transfer a token's Metaplex metadata update authority.
+   *
+   * @see {@link updateMetadataAuthority} For wallet-based execution.
+   * @see {@link setTokenAuthority} For SPL mint and freeze authority changes.
+   * @see {@link deployToken} To set the initial metadata update authority.
+   *
+   * @remarks
+   * The mint must have mutable Metaplex Token Metadata and `authority` must match its current
+   * update authority. `authority` defaults to `payer`; both the payer and authority must sign if
+   * they differ. Use this to hand metadata control to a multisig or DAO after deployment.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the mint has no Metaplex
+   * metadata, or `authority` is not its current metadata update authority.
+   * @throws {@link CCTTxFailedError} If the metadata is immutable.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedUpdateMetadataAuthority({
+   *   payer: currentAuthority,
+   *   tokenAddress: mint,
+   *   newAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedUpdateMetadataAuthority(
+    opts: GenerateUpdateMetadataAuthorityParams,
+  ): Promise<GenerateUpdateMetadataAuthorityResult> {
+    return this.#updateMetadataAuthority.generate(this.chain, opts)
+  }
+
+  /**
+   * Transfers a token's Metaplex metadata update authority using the executing wallet.
+   *
+   * @see {@link generateUnsignedUpdateMetadataAuthority} For externally signed transactions.
+   * @see {@link setTokenAuthority} For SPL mint and freeze authority changes.
+   * @see {@link deployToken} To set the initial metadata update authority.
+   *
+   * @remarks
+   * The mint must have mutable Metaplex Token Metadata and the executing wallet must be its
+   * current update authority. Use this to hand metadata control to a multisig or DAO after
+   * deployment. Use {@link generateUnsignedUpdateMetadataAuthority} when payer and authority
+   * differ or external signatures are required.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the mint has no Metaplex
+   * metadata, or `authority` does not match the metadata or executing wallet.
+   * @throws {@link CCTTxFailedError} If the metadata is immutable, simulation fails, or the Metaplex
+   * program rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.updateMetadataAuthority({ wallet, tokenAddress: mint, newAuthority })
+   * ```
+   */
+  updateMetadataAuthority(
+    opts: ExecuteUpdateMetadataAuthorityParams,
+  ): Promise<ExecuteUpdateMetadataAuthorityResult> {
+    return this.#updateMetadataAuthority.execute(this.chain, opts)
   }
 
   /**
@@ -478,12 +822,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `generateUnsignedCreateTokenAccount`
-   * before `generateUnsignedSetPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `generateUnsignedCreateTokenAccount` before
+   * `generateUnsignedSetPool`, or transfers fail with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link generateUnsignedCreateTokenAccount}
    * @see {@link generateUnsignedSetPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
    *
@@ -496,6 +853,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   payer,
    *   authority,
    *   allowlist: [allowedSender],
+   *   createPoolSignerATA: true,
    * })
    * ```
    */
@@ -511,11 +869,25 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
    * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
-   * must be allowed to initialize the pool. This does not create the pool signer PDA's associated
-   * token account; use the returned `poolSignerAddress` with `createTokenAccount` before `setPool`.
+   * must be allowed to initialize the pool.
+   *
+   * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
+   * account) to lock/release or mint on transfers. Set `createPoolSignerATA: true` to create it
+   * idempotently in this transaction. If omitted (defaults to `false`), create it separately with
+   * the returned `poolSignerAddress` via `createTokenAccount` before `setPool`, or transfers fail
+   * with `AccountNotInitialized (3012)`.
+   *
+   * When to use `createPoolSignerATA: true` vs. the separate
+   * `generateUnsignedCreateTokenAccount` op:
+   * - Use this option when deploying a pool that will immediately receive transfers (simplest, one tx)
+   * - Use the separate op for vault-owned pools or when decoupling pool initialization from ATA setup
+   *
+   * This option is Solana-only (no EVM equivalent). It is analogous to `createRecipientATA` on
+   * {@link mintTokens}, the same idiomatic pattern for atomicity.
    *
    * @see {@link createTokenAccount}
    * @see {@link setPool}
+   * @see {@link mintTokens}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
@@ -527,6 +899,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.deployTokenPool({
    *   tokenAddress: mint,
    *   poolType: 'burn-mint',
+   *   createPoolSignerATA: true,
    *   wallet,
    * })
    * ```
@@ -893,6 +1266,424 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned instruction to deposit a rebalancer's tokens into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. `authority`
+   * defaults to `payer`. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
+   * and delegate at least `amount` to the pool signer PDA. Set `includeApproval: true` to bundle
+   * that approval before the liquidity instruction in this transaction.
+   *
+   * @see {@link provideLiquidity}
+   * @see {@link generateUnsignedApproveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
+   *
+   * @example Generate bundled approval and liquidity instructions
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const liquidity = await cct.generateUnsignedProvideLiquidity({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
+   * })
+   * ```
+   */
+  generateUnsignedProvideLiquidity(
+    opts: GenerateProvideLiquidityParams,
+  ): Promise<GenerateProvideLiquidityResult> {
+    return this.#provideLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits tokens from the executing rebalancer wallet into a lock-release pool.
+   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
+   * have the canonical lock-release `provideLiquidity` instruction and account layout. The wallet's
+   * associated token account must exist and hold the positive u64 `amount` in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
+   * to the pool signer PDA, unless `includeApproval: true` bundles that approval in this transaction.
+   *
+   * @see {@link generateUnsignedProvideLiquidity}
+   * @see {@link approveToken}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
+   * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+   * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
+   * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
+   * signer and `includeApproval` is false, the pool rejects the rebalancer, liquidity is disabled,
+   * the token account lacks funds, or simulation/submission fails.
+   *
+   * @example Approve and provide liquidity in one transaction
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.provideLiquidity({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   *   includeApproval: true,
+   * })
+   * ```
+   */
+  provideLiquidity(opts: ExecuteProvideLiquidityParams): Promise<ExecuteProvideLiquidityResult> {
+    return this.#provideLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to withdraw tokens from a lock-release pool to a rebalancer's
+   * associated token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`;
+   * a custom program must have the canonical lock-release `withdrawLiquidity` instruction and account
+   * layout. `authority` defaults to `payer`. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority. The rebalancer's associated token account must already exist.
+   *
+   * @see {@link withdrawLiquidity}
+   * @see {@link generateUnsignedSetRebalancer}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example Generate a liquidity withdrawal instruction
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const withdrawal = await cct.generateUnsignedWithdrawLiquidity({
+   *   payer: rebalancer,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawLiquidity(
+    opts: GenerateWithdrawLiquidityParams,
+  ): Promise<GenerateWithdrawLiquidityResult> {
+    return this.#withdrawLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws tokens from a lock-release pool into the executing rebalancer wallet's associated
+   * token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom
+   * program must have the canonical lock-release `withdrawLiquidity` instruction and account layout.
+   * The wallet's associated token account must exist. `amount` is a positive u64 in base units.
+   *
+   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
+   * transaction authority.
+   *
+   * @see {@link generateUnsignedWithdrawLiquidity}
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
+   * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, liquidity is disabled,
+   * lacks liquidity, the token account does not exist, or simulation/submission fails.
+   *
+   * @example Withdraw liquidity
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.withdrawLiquidity({
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   amount: 1_000_000n,
+   * })
+   * ```
+   */
+  withdrawLiquidity(opts: ExecuteWithdrawLiquidityParams): Promise<ExecuteWithdrawLiquidityResult> {
+    return this.#withdrawLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that sets whether an initialized Solana lock-release token pool
+   * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. Pass canonical
+   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
+   *
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetRebalancer}
+   *
+   * @throws {@link CCTParamsInvalidError} If `allow`, a pool parameter, or public key is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetCanAcceptLiquidity({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   allow: true,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetCanAcceptLiquidity(
+    opts: GenerateSetCanAcceptLiquidityParams,
+  ): Promise<GenerateSetCanAcceptLiquidityResult> {
+    return this.#setCanAcceptLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets whether an initialized Solana lock-release token pool accepts `provideLiquidity` deposits
+   * and `withdrawLiquidity` transfers using the pool owner wallet.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
+   * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
+   * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
+   *
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   * @see {@link setRebalancer}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If `allow` or a pool parameter is invalid, or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setCanAcceptLiquidity({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   allow: true,
+   *   wallet,
+   * })
+   * ```
+   */
+  setCanAcceptLiquidity(
+    opts: ExecuteSetCanAcceptLiquidityParams,
+  ): Promise<ExecuteSetCanAcceptLiquidityResult> {
+    return this.#setCanAcceptLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that sets the address authorized to provide or withdraw
+   * liquidity for an initialized Solana lock-release token pool. Pass canonical
+   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to
+   * `payer`. The default/zero public key (`11111111111111111111111111111111`) disables
+   * rebalancing.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
+   * @see {@link setRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetRebalancer({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   rebalancer,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetRebalancer(
+    opts: GenerateSetRebalancerParams,
+  ): Promise<GenerateSetRebalancerResult> {
+    return this.#setRebalancer.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets the address authorized to provide or withdraw liquidity for an initialized Solana
+   * lock-release token pool using the pool owner wallet. Pass canonical `poolType: 'lock-release'`
+   * or a compatible `poolProgramAddress`; set `rebalancer` to the default/zero public key
+   * (`11111111111111111111111111111111`) to disable rebalancing.
+   *
+   * @remarks
+   * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
+   * Setting the zero address (`11111111111111111111111111111111`) removes the rebalancer; until a new one
+   * is set, **no account can provide or withdraw liquidity**, even liquidity already in the pool.
+   * This does not affect whether the pool accepts liquidity — see {@link setCanAcceptLiquidity}.
+   *
+   * @see {@link generateUnsignedSetRebalancer}
+   * @see {@link setCanAcceptLiquidity}
+   * @see {@link generateUnsignedSetCanAcceptLiquidity}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setRebalancer({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   rebalancer,
+   *   wallet,
+   * })
+   * ```
+   *
+   * @example Disable rebalancing
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setRebalancer({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   rebalancer: PublicKey.default.toBase58(), // disable
+   *   wallet,
+   * })
+   * ```
+   */
+  setRebalancer(opts: ExecuteSetRebalancerParams): Promise<ExecuteSetRebalancerResult> {
+    return this.#setRebalancer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that proposes a new owner for an initialized Solana token pool.
+   * Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   * The operation reads pool state and rejects the current owner or default public key. The proposed
+   * owner must accept ownership separately before the transfer takes effect.
+   *
+   * @see {@link transferOwnership}
+   * @see {@link generateUnsignedAcceptOwnership}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newOwner,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedTransferOwnership(
+    opts: GenerateTransferOwnershipParams,
+  ): Promise<GenerateTransferOwnershipResult> {
+    return this.#transferOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new owner for an initialized Solana token pool using the current owner wallet.
+   * It rejects the current owner or default public key. The proposed owner must accept ownership
+   * separately before the transfer takes effect.
+   *
+   * @see {@link generateUnsignedTransferOwnership}
+   * @see {@link acceptOwnership}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   newOwner,
+   *   wallet,
+   * })
+   * ```
+   */
+  transferOwnership(opts: ExecuteTransferOwnershipParams): Promise<ExecuteTransferOwnershipResult> {
+    return this.#transferOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that accepts pending ownership of an initialized Solana token
+   * pool. Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to
+   * `payer`. The operation reads pool state and requires it to be the proposed owner.
+   *
+   * @see {@link acceptOwnership}
+   * @see {@link generateUnsignedTransferOwnership}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedAcceptOwnership(
+    opts: GenerateAcceptOwnershipParams,
+  ): Promise<GenerateAcceptOwnershipResult> {
+    return this.#acceptOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts pending ownership of an initialized Solana token pool using the proposed owner wallet.
+   * It verifies the wallet is the proposed owner before submitting.
+   *
+   * @see {@link generateUnsignedAcceptOwnership}
+   * @see {@link transferOwnership}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool account does not exist.
+   * @throws {@link CCTTxFailedError} If the wallet is not the proposed owner or
+   * simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.acceptOwnership({
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   wallet,
+   * })
+   * ```
+   */
+  acceptOwnership(opts: ExecuteAcceptOwnershipParams): Promise<ExecuteAcceptOwnershipResult> {
+    return this.#acceptOwnership.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned instruction that sets inbound and outbound rate limits for an initialized
    * Solana token pool remote-chain config. Pass canonical `poolType` or a compatible
    * `poolProgramAddress`; `authority` defaults to `payer`.
@@ -1146,6 +1937,76 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
     return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces an initial pending registry administrator.
+   *
+   * @remarks
+   * Only the mint authority may authorize this recovery path, and only while the registry has no
+   * accepted administrator. It replaces the initial pending administrator; the replacement must
+   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
+   * unsigned method for Squads/vault signatures.
+   *
+   * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
+   * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
+   * accepted administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedOwnerOverridePendingAdministrator(
+    opts: GenerateOwnerOverridePendingAdministratorParams,
+  ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initial pending registry administrator using the mint authority wallet.
+   *
+   * @remarks
+   * This recovery path only works while the registry has no accepted administrator. It replaces the
+   * initial pending administrator; it does not make the replacement an administrator. The replacement
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
+   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
+   *
+   * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
+   * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
+   * administrator, or `authority` differs from the wallet.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.ownerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   wallet: mintAuthorityWallet,
+   * })
+   * ```
+   */
+  ownerOverridePendingAdministrator(
+    opts: ExecuteOwnerOverridePendingAdministratorParams,
+  ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
   }
 
   /**
@@ -1403,6 +2264,36 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
+   * authorities.
+   *
+   * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
+   * the SPL Token or Token-2022 mint account. Supply is in base units. Solana-only; no EVM CCT
+   * equivalent exists.
+   *
+   * @see {@link setTokenAuthority} Sets the mint or freeze authorities returned here.
+   * @see {@link updateMetadataAuthority} Updates the Metaplex metadata associated with this mint.
+   * @see {@link getTokenPoolState} Reads pool configuration rather than mint state.
+   * @see {@link SolanaChain.getTokenInfo} Reads the underlying token metadata.
+   *
+   * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPSplTokenInvalidError} If the token metadata is not a valid SPL token.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const info = await cct.getTokenInfo({ tokenAddress: mint })
+   * console.log(`${info.symbol}: ${info.decimals} decimals`)
+   * ```
+   */
+  getTokenInfo(opts: GetTokenInfoParams): Promise<GetTokenInfoResult> {
+    return this.#getTokenInfo.query(this.chain, opts)
+  }
+
+  /**
    * Reads all, or one selected, Solana token pool remote-chain configurations.
    *
    * @remarks Results are keyed by remote network name. Omit `remoteChainSelector` to scan all
@@ -1463,7 +2354,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
    */
   getTokenPoolState(
-    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & { tokenAddress: string },
+    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & {
+      tokenAddress: string
+    },
   ): Promise<BaseGetTokenPoolStateResult>
   /**
    * Reads a pool state account whose program is not known statically; narrow the result on the
@@ -1544,6 +2437,8 @@ export {
   deriveTokenPoolSignerPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
+export { TOKEN_AUTHORITY_TYPES } from './token/constants.ts'
+export { DEFAULT_WRITABLE_INDEXES, REGISTRATION_METHODS } from './token-admin-registry/constants.ts'
 export type { TransactionResult } from '../operation.ts'
 export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'

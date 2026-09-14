@@ -351,9 +351,10 @@ export async function getMessagesInTx(source: Chain, tx: ChainTransaction): Prom
 export async function getMessageById(
   source: Chain,
   messageId: string,
-  opts?: Pick<LogFilter, 'page' | 'startBlock' | 'startTime'> & { onRamp?: string },
+  opts?: Pick<LogFilter, 'page' | 'startBlock' | 'startTime' | 'since'> & { onRamp?: string },
 ): Promise<CCIPRequest> {
-  if (opts?.startBlock == null && opts?.startTime == null) throw new CCIPLogsRequiresStartError()
+  if (opts?.startBlock == null && opts?.startTime == null && opts?.since == null)
+    throw new CCIPLogsRequiresStartError()
   const { onRamp, ...hints } = opts
   for await (const log of source.getLogs({
     topics: ['CCIPSendRequested', 'CCIPMessageSent'],
@@ -403,11 +404,16 @@ export async function getMessagesInBatch<
   type LogAnchor = Pick<R['log'], 'blockNumber' | 'blockTimestamp'>
   type BatchEntry = { log: LogAnchor; message: R['message'] }
 
+  // A `since` hint is a per-log resume cursor for a CONTINUOUS scan; this batch
+  // walk bounds each leg by explicit floors (startBlock/startTime/endBlock)
+  // recomputed per retry, so forwarding it would pin the floor into the backward
+  // retry legs and exhaust them into CCIPMessageBatchIncompleteError. Drop it.
+  const { since: _since, ...floorOpts } = opts
   const baseFilter = {
-    page: opts.page ?? BLOCK_LOG_WINDOW_SIZE,
+    page: floorOpts.page ?? BLOCK_LOG_WINDOW_SIZE,
     topics: [request.log.topics[0]],
     address: request.log.address,
-    ...opts,
+    ...floorOpts,
   }
 
   const entries: BatchEntry[] = []
@@ -598,7 +604,16 @@ export async function waitFinalized<C extends Chain>(
     ])
     if (tx.timestamp <= finalized.timestamp) return latest
   }
-  const watch = abort ? AbortSignal.any([chain.abort, abort]) : chain.abort
+  // Owned handle on the watch composite: aborted in the `finally` below so
+  // `watch` — and the whole getLogs watch chain derived from `combinedWatch` —
+  // aborts and drops its listeners on EVERY exit path, including success.
+  // Without it, teardown of the derived composites relies on the deadline
+  // abort / their own poll timers, and a still-attached once-listener keeps
+  // the composite in Node's gcPersistentSignals until a source finally fires.
+  const watchAc = new AbortController()
+  const watch = abort
+    ? AbortSignal.any([chain.abort, abort, watchAc.signal])
+    : AbortSignal.any([chain.abort, watchAc.signal])
 
   // Block-height deadline: poll finalized block height and abort if tx is gone
   const deadlineAc = new AbortController()
@@ -670,9 +685,12 @@ export async function waitFinalized<C extends Chain>(
     throw err
   } finally {
     deadlineAc.abort() // stop the poller if getLogs resolved first
+    watchAc.abort() // release the watch chain (derived composites + listeners) now
     await blockHeightPoller // clean up
   }
-  // getLogs ended without matching the tx; if we were cancelled, don't report a reorg
-  if (watch.aborted) return undefined
+  // getLogs ended without matching the tx; if we were cancelled, don't report a reorg.
+  // NB: `watch` is ALWAYS aborted by now (watchAc fires in `finally`), so check the
+  // external signals directly — never the composite.
+  if (chain.abort.aborted || abort?.aborted) return undefined
   throw new CCIPTransactionNotFinalizedError(log.transactionHash)
 }

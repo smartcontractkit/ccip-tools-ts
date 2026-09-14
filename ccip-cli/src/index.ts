@@ -31,7 +31,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.11.1-cb8efe1'
+const VERSION = '1.13.1-247aa263'
 // generate:end
 
 const require = createRequire(import.meta.url)
@@ -180,7 +180,7 @@ if (import.meta.main || wasCalledAsScript()) {
         util.inspect.defaultOptions.depth = 3
         console.debug(
           'Pending handles after main completion:',
-          (process as any)._getActiveHandles().length, // eslint-disable-line
+          (process as any)._getActiveHandles().length,
         )
         process.exit()
       }, 5e3).unref()

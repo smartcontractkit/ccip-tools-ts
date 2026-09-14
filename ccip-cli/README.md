@@ -283,7 +283,10 @@ Canton requires a config file with connection parameters via `--canton-config <p
 {
   "party": "sender::1220...",
   "ccipParty": "ccip::1220...",
-  "jwt": "eyJ...",
+  "auth": {
+    "type": "clientCredentials",
+    "authUrl": "https://auth.example.com/oauth2/default"
+  },
   "edsUrl": "https://eds.example.com",
   "transferInstructionUrl": "https://transfer-instruction.example.com",
   "externalEdsUrlsByOwner": {
@@ -293,8 +296,48 @@ Canton requires a config file with connection parameters via `--canton-config <p
 }
 ```
 
-**Required fields:** `party`, `ccipParty`, `jwt`, `edsUrl`, `transferInstructionUrl`  
-**Optional fields:** `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `senderInstanceId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
+Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCredentials` flow, or use `"jwt": "eyJ..."` in place of the `auth` block for a pre-obtained token.
+
+> [!NOTE]
+> The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
+
+**Required fields:** `party`, `ccipParty`, `edsUrl`, `transferInstructionUrl` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
+**Optional fields:** `jwt`, `auth`, `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `senderInstanceId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
+
+#### Canton authentication
+
+The `auth` object supports three flows. The `static` flow wraps a pre-obtained JWT (equivalent to the top-level `jwt` field); `clientCredentials` and `authorizationCode` obtain a JWT automatically via [OpenID Connect (OIDC)](https://openid.net/connect/):
+
+| `auth.type`           | Use case                         | Required fields                          |
+| --------------------- | -------------------------------- | ---------------------------------------- |
+| `static`              | Pre-obtained JWT                 | `jwt`                                    |
+| `clientCredentials`   | Machine-to-machine (CI/CD)       | `authUrl`, `clientId`†, `clientSecret`†  |
+| `authorizationCode`   | Interactive browser login (PKCE) | `authUrl`, `clientId`†                   |
+
+† `clientId` and `clientSecret` may be omitted from the config file and resolved from `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` env vars. **Keep secrets in env vars, not in config files.**
+
+```json
+{
+  "party": "sender::1220...",
+  "ccipParty": "ccip::1220...",
+  "auth": {
+    "type": "clientCredentials",
+    "authUrl": "https://auth.example.com"
+  },
+  "edsUrl": "https://eds.example.com",
+  "transferInstructionUrl": "https://transfer-instruction.example.com"
+}
+```
+
+```bash
+export CANTON_CLIENT_ID="my-client-id"
+export CANTON_CLIENT_SECRET="my-client-secret"
+```
+
+When `auth` is set, the CLI resolves a JWT upfront (before connecting to the ledger) via the SDK's runtime-agnostic OAuth 2.0 protocol helpers (backed by [`oauth4webapi`](https://github.com/panva/oauth4webapi)). For `clientCredentials` and `authorizationCode`, the CLI injects a `() => Promise<string>` getter as `jwt` so tokens are refreshed automatically per request. If both `jwt` and `auth` are present, `jwt` takes precedence.
+
+> [!NOTE]
+> The `authorizationCode` flow is orchestrated by the CLI: it starts a local callback server (`node:http`) and opens the default browser (`open`/`xdg-open`). These Node-specific steps live in the CLI, not the SDK, so the SDK stays runtime-agnostic (no `node:*` imports) and can be embedded in web/Electron apps. Web embedders compose the SDK's protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling.
 
 #### Example
 

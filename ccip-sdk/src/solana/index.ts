@@ -43,7 +43,7 @@ import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
   CCIPBlockTimeNotFoundError,
-  CCIPCommitNotFoundError,
+  CCIPCommitHistoryPrunedError,
   CCIPContractNotRouterError,
   CCIPDataFormatUnsupportedError,
   CCIPExecutionReportChainMismatchError,
@@ -72,17 +72,8 @@ import {
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
-import { getDestTokenAmount } from '../gas.ts'
-import { cleanUpBuffers } from './cleanup.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
-import {
-  decodeSolanaGenericExtraArgsV3,
-  decodeSolanaSuiExtraArgsV1,
-  encodeSolanaExtraArgs,
-} from './extra-args.ts'
-import { estimateExecComputeUnits } from './gas.ts'
-import { getV16SolanaLeafHasher } from './hasher.ts'
+import { getDestTokenAmount } from '../gas.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
@@ -116,9 +107,19 @@ import {
   getDataBytes,
   leToBigInt,
   parseTypeAndVersion,
+  passesTypeAndVersion,
   toLeArray,
   util,
 } from '../utils.ts'
+import { cleanUpBuffers } from './cleanup.ts'
+import { generateUnsignedExecuteReport } from './exec.ts'
+import {
+  decodeSolanaGenericExtraArgsV3,
+  decodeSolanaSuiExtraArgsV1,
+  encodeSolanaExtraArgs,
+} from './extra-args.ts'
+import { estimateExecComputeUnits } from './gas.ts'
+import { getV16SolanaLeafHasher } from './hasher.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
@@ -130,11 +131,11 @@ import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
+import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import {
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
-import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   convertRateLimiter,
@@ -257,7 +258,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
     this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
     })
     this.getTransaction = memoize(this.getTransaction.bind(this), {
@@ -270,16 +272,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
-    // cache account info for 30 seconds
+    // cache account info for 5 seconds
     this.connection.getAccountInfo = memoize(this.connection.getAccountInfo.bind(this.connection), {
-      maxSize: 100,
       maxArgs: 2,
+      maxSize: 100,
       expires: 5e3,
       transformKey: ([address, commitment]) =>
         [(address as PublicKey).toString(), commitment] as const,
@@ -310,7 +314,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
       maxArgs: 2,
-      maxSize: 20,
+      maxSize: 10,
     })
   }
 
@@ -522,8 +526,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     // Process signatures and yield logs
+    const since = opts.since
     for await (const tx of this.getTransactionsForAddress({ ...opts, excludeAddresses })) {
       for (const log of tx.logs) {
+        // Per-log resume exclusivity: the hinted tx streams WHOLE (the node's
+        // `until` cursor is transaction-granular and would drop its same-tx
+        // followers), so within the hinted tx logs at/before the hinted index —
+        // which the previous run emitted — are skipped, while later same-tx
+        // logs (batch executions, multi-topic streams) still flow.
+        if (
+          since?.transactionHash != null &&
+          since.index != null &&
+          log.transactionHash === since.transactionHash &&
+          log.index <= since.index
+        )
+          continue
         // Filter and yield logs from the specified program, and which match event discriminant or log prefix
         if (
           (programs !== true && !programs.includes(log.address)) ||
@@ -534,6 +551,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
             ))
         )
           continue
+        if (!(await passesTypeAndVersion(this, log.address, opts.typeAndVersions))) continue
         yield log
       }
     }
@@ -614,6 +632,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         {
           ...routerConfig,
           destChainSelector,
+          rmn: routerConfig.rmnRemote,
           ...destChainState.config,
           router: onRamp,
           typeAndVersion,
@@ -667,18 +686,26 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Fetch `reference_addresses` PDA for the OffRamp
+   * Fetch `reference_addresses` PDA for the OffRamp.
+   *
+   * The layout differs between v1.6 (no `bump` byte) and v2 (`bump` between `version` and
+   * `router`), so we load the matching IDL after `typeAndVersion`:
+   *   - v1.6  → `CCIP_OFFRAMP_IDL.referenceAddresses` (version + router + …)
+   *   - v2    → `CCIP_OFFRAMP_V2_IDL.referenceAddresses` (version + bump + router + …)
    */
   private async _getOffRampReferenceAddresses(offRamp: string) {
     const offRamp_ = new PublicKey(offRamp)
-    // Read referenceAddresses PDA for router and other fields
-    const program = new Program(CCIP_OFFRAMP_IDL, offRamp_, { connection: this.connection })
-    const [referenceAddressesAddr] = PublicKey.findProgramAddressSync(
+    const [, version] = await this.typeAndVersion(offRamp)
+    const program = new Program(
+      version.startsWith('2.') ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL,
+      offRamp_,
+      { connection: this.connection },
+    )
+    const [referenceAddressesPda] = PublicKey.findProgramAddressSync(
       [Buffer.from('reference_addresses')],
       offRamp_,
     )
-    const refAddresses = await program.account.referenceAddresses.fetch(referenceAddressesAddr)
-    return refAddresses
+    return program.account.referenceAddresses.fetch(referenceAddressesPda)
   }
 
   /**
@@ -705,25 +732,33 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       offRamp_,
     )
     const sourceChain = await program.account.sourceChain.fetch(statePda)
-    const { onRamp: onRampField, ...sourceConfig } = sourceChain.config
     // v1 carries a per-lane `state` (minSeqNr); v2 has none.
     const state = 'state' in sourceChain ? sourceChain.state : undefined
-    const onRamp = decodeAddress(
-      getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
-      networkInfo(sourceChainSelector).family,
-    )
+
+    // v1 exposes a single `onRamp`; v2 exposes a `onRamps` Vec. Normalize both to `onRamps`.
+    const sourceFamily = networkInfo(sourceChainSelector).family
+    const decodeOnRampField = (onRampField: { bytes: readonly number[]; len: number }) =>
+      decodeOnRampAddress(
+        getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
+        sourceFamily,
+      )
+    const onRamps = Array.isArray(sourceChain.config.onRamps)
+      ? sourceChain.config.onRamps.map(decodeOnRampField)
+      : [decodeOnRampField(sourceChain.config.onRamp)]
+    const { onRamp: _onRamp, onRamps: _onRamps, ...sourceConfig } = sourceChain.config
 
     return normalizeDeep(
       {
         ...refAddresses,
+        rmn: refAddresses.rmnRemote,
         sourceChainSelector,
         ...sourceConfig,
         ...state,
-        onRamps: [onRamp],
+        onRamps,
         typeAndVersion,
       },
       {
-        sourceFamily: networkInfo(sourceChainSelector).family,
+        sourceFamily,
         destFamily: (this.constructor as typeof SolanaChain).family,
       },
     )
@@ -1597,17 +1632,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const pda = (seed: string, ...extra: Uint8Array[]) =>
         PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
 
-      // Read ReferenceAddresses to get the router for receiver_registry PDA derivation
-      const refAddrPda = pda('reference_addresses')
-      const refAddrAcc = await this.connection.getAccountInfo(refAddrPda)
-      if (!refAddrAcc) {
-        throw new CCIPCommitNotFoundError(
-          String(request.lane.sourceChainSelector),
-          request.message.sequenceNumber,
-        )
-      }
-      // ReferenceAddresses layout: 8(disc) + 1(ver) + 1(bump) + 32(router) + ...
-      const router = new PublicKey(refAddrAcc.data.subarray(10, 42))
+      // Read ReferenceAddresses to get the router (receiver_registry derivation) and the
+      // RMN Remote program (required by the `get_ccvs_for_msg` view since the latest redeploy).
+      const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
+      const router = refAddresses.router
 
       // Resolve the receiver and its remaining_accounts
       const message = request.message as CCIPMessage
@@ -1654,6 +1682,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         }
       }
 
+      // RMN Remote CPI accounts (required by the latest offramp). The `rmn_remote` program is
+      // read from ReferenceAddresses; its two config/curse PDAs are derived under it.
+      const [rmnRemoteCurses] = PublicKey.findProgramAddressSync(
+        [Buffer.from('curses')],
+        refAddresses.rmnRemote,
+      )
+      const [rmnRemoteConfig] = PublicKey.findProgramAddressSync(
+        [Buffer.from('config')],
+        refAddresses.rmnRemote,
+      )
+
       const ccvs = (await program.methods
         .getCcvsForMsg({
           // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
@@ -1666,8 +1705,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         })
         .accounts({
           config: pda('config'),
-          referenceAddress: refAddrPda,
+          referenceAddresses: pda('reference_addresses'),
           sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
+          rmnRemote: refAddresses.rmnRemote,
+          rmnRemoteCurses,
+          rmnRemoteConfig,
         })
         .remainingAccounts(remainingAccounts)
         .view()) as {
@@ -1692,41 +1734,24 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       })
       return { verificationPolicy, verifications }
     }
-    const commitsAroundSeqNum = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
-      filters: [
-        {
-          // commit report account discriminator filter
-          memcmp: {
-            offset: 0,
-            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
-          },
-        },
-        {
-          // sourceChainSelector filter
-          memcmp: {
-            offset: 8 + 1,
-            bytes: encodeBase58(toLeArray(request.lane.sourceChainSelector, 8)),
-          },
-        },
-        // memcmp report.min with msg.sequenceNumber's without least-significant byte;
-        // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
-        {
-          memcmp: {
-            offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
-            bytes: encodeBase58(toLeArray(request.message.sequenceNumber, 8).slice(1)),
-          },
-        },
-      ],
-    })
-    for (const acc of commitsAroundSeqNum) {
-      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
-      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
-      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
-      if (
-        BigInt(request.message.sequenceNumber) < minSeqNr ||
-        maxSeqNr < BigInt(request.message.sequenceNumber)
-      )
+    const coveringPdas = await this._getCommitReportPdaAccounts(
+      offRamp,
+      request.lane.sourceChainSelector,
+      BigInt(request.message.sequenceNumber),
+    )
+    let coveringPdaPruned = false
+    for (const acc of coveringPdas) {
+      // The PDA's creating tx is the commit itself, i.e. its oldest signature; an existing
+      // account with no retained signatures means this endpoint pruned that tx. The generic
+      // fallback below walks the offRamp's whole retained signature history fetching each tx
+      // individually, which can never surface a pruned commit — it would just crawl for minutes
+      // under public-endpoint rate limits. Fail fast instead; a longer-retention endpoint can
+      // still resolve the same PDA.
+      const sigs = await this.connection.getSignaturesForAddress(acc.pubkey, { limit: 1000 })
+      if (sigs.length === 0) {
+        coveringPdaPruned = true
         continue
+      }
       // we have all the commit report info, but we also need log details (txHash, etc)
       for await (const log of this.getLogs({
         startTime: 1, // just to force getting the oldest log first
@@ -1742,15 +1767,68 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         if (report) return { report, log }
       }
     }
+    if (coveringPdaPruned)
+      throw new CCIPCommitHistoryPrunedError(BigInt(request.message.sequenceNumber), {
+        context: { offRamp, endpoint: this.connection.rpcEndpoint },
+      })
     // in case we can't find it, fallback to generic iterating txs
     return super.getVerifications(opts)
+  }
+
+  /**
+   * Locates open `commit_report` PDAs on a v1.x offRamp covering `sequenceNumber`, via a
+   * single `getProgramAccounts` probe filtered by account discriminator, source chain
+   * selector and a ~around-seqNum memcmp. Returns the covering accounts (usually zero or
+   * one); empty when the message is not committed yet or the PDA was closed by cleanup —
+   * commit report PDAs are only retained while unexecuted/retryable.
+   */
+  private async _getCommitReportPdaAccounts(
+    offRamp: string,
+    sourceChainSelector: bigint,
+    sequenceNumber: bigint,
+  ): Promise<{ pubkey: PublicKey; account: { data: Uint8Array } }[]> {
+    const accounts = await this.connection.getProgramAccounts(new PublicKey(offRamp), {
+      filters: [
+        {
+          // commit report account discriminator filter
+          memcmp: {
+            offset: 0,
+            bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('CommitReport')),
+          },
+        },
+        {
+          // sourceChainSelector filter
+          memcmp: {
+            offset: 8 + 1,
+            bytes: encodeBase58(toLeArray(sourceChainSelector, 8)),
+          },
+        },
+        // memcmp report.min with msg.sequenceNumber's without least-significant byte;
+        // this should be ~256 around seqNum, i.e. big chance of a match; requires PDAs not to have been closed
+        {
+          memcmp: {
+            offset: 8 + 1 + 8 + 32 + 8 + /*skip byte*/ 1,
+            bytes: encodeBase58(toLeArray(sequenceNumber, 8).slice(1)),
+          },
+        },
+      ],
+    })
+    const covering: { pubkey: PublicKey; account: { data: Uint8Array } }[] = []
+    for (const acc of accounts) {
+      // const merkleRoot = acc.account.data.subarray(8 + 1 + 8, 8 + 1 + 8 + 32)
+      const minSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8)
+      const maxSeqNr = acc.account.data.readBigUInt64LE(8 + 1 + 8 + 32 + 8 + 8)
+      if (sequenceNumber < minSeqNr || maxSeqNr < sequenceNumber) continue
+      covering.push(acc)
+    }
+    return covering
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
-    const { offRamp, sourceChainSelector, verifications, messageId } = opts
+    const { offRamp, sourceChainSelector, sequenceNumber, verifications, messageId } = opts
     const [, version] = await this.typeAndVersion(offRamp)
     const topics = [
       version >= CCIPVersion.V2_0 ? 'ExecutionStateChangedV2' : 'ExecutionStateChanged',
@@ -1789,6 +1867,35 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         topics,
         programs: [offRamp],
         address: commitReportPda.toBase58(),
+      }
+    } else if (sourceChainSelector && sequenceNumber) {
+      // Without verifications (e.g. the commit scan failed or was skipped), the covering
+      // `commit_report` PDA can still be located by probing accounts around the sequence
+      // number. Narrowing to it bounds the scan to this report's own txs (commit +
+      // executions) instead of a full offRamp-address sweep — one getTransaction per tx in
+      // the start window, which is unbounded under public-endpoint rate limits. When the
+      // probe finds nothing (not committed yet, or PDA closed by cleanup) or itself fails
+      // (e.g. rate-limited), fall through to the generic sweep as before. A pruned PDA
+      // simply yields no logs and ends the scan.
+      let covering:
+        | Awaited<ReturnType<SolanaChain['_getCommitReportPdaAccounts']>>[number]
+        | undefined
+      try {
+        ;[covering] = await this._getCommitReportPdaAccounts(
+          offRamp,
+          sourceChainSelector,
+          sequenceNumber,
+        )
+      } catch (_err) {
+        // probing is best-effort; never let it fail the receipts scan itself
+      }
+      if (covering) {
+        opts_ = {
+          ...opts,
+          topics,
+          programs: [offRamp],
+          address: covering.pubkey.toBase58(),
+        }
       }
     }
     yield* super.getExecutionReceipts(opts_)

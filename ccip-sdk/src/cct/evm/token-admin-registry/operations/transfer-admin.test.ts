@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, getAddress } from 'ethers'
 
-import { type TransferAdminParams, TransferAdmin } from './transfer-admin.ts'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type TransferAdminParams, TransferAdmin } from './transfer-admin.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const ADDRESS = '0x' + '22'.repeat(20)

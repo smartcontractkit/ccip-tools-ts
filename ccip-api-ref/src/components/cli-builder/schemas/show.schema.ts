@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli show` command.
  */
 
-import { outputOptions, rpcOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions, rpcOptions } from './common.ts'
 
 export const showSchema: CommandSchema<'show'> = {
   name: 'show',

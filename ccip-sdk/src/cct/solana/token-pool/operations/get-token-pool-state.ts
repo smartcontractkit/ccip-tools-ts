@@ -68,7 +68,8 @@ export type LockReleaseGetTokenPoolStateResult = GetTokenPoolStateResultBase & {
  * only narrow this union when the program is not known statically.
  */
 export type GetTokenPoolStateResult =
-  BaseGetTokenPoolStateResult | LockReleaseGetTokenPoolStateResult
+  | BaseGetTokenPoolStateResult
+  | LockReleaseGetTokenPoolStateResult
 
 function serializeBaseConfig(config: TokenPoolConfig): BaseConfig {
   return {

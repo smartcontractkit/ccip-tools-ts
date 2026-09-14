@@ -3,7 +3,6 @@ import { describe, it } from 'node:test'
 
 import { beginCell } from '@ton/core'
 
-import { crc32, extractMagicTag, lookupTxByRawHash, tryParseCell } from './utils.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
@@ -11,6 +10,7 @@ import {
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
 import { NetworkType } from '../networks.ts'
+import { crc32, extractMagicTag, lookupTxByRawHash, tryParseCell } from './utils.ts'
 
 describe('TON utils unit tests', () => {
   describe('tryParseCell', () => {

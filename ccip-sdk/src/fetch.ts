@@ -9,7 +9,6 @@ import {
 import type { WithLogger } from './types.ts'
 import { sleep } from './utils.ts'
 
-/* eslint-disable jsdoc/require-jsdoc */
 /**
  * Tuning for the rate-limited fetch wrapper.
  * - `maxRetries`: attempts on transient (429/5xx) responses.
@@ -21,7 +20,25 @@ export type RateLimitOpts = {
   maxRetries: number
   /** Max concurrent in-flight requests per endpoint (default 5). */
   maxInFlight?: number
+  /**
+   * How requests share limiter state (default `'path'`): `'path'` keys by
+   * origin + pathname — distinct backends behind one proxy host (e.g.
+   * gateway.example/ethereum/sepolia/provider1) keep independent limiters.
+   * `'origin'` merges every path of a host into one shared limiter — for a
+   * host whose quota is genuinely per-host, like TonCenter v3's keyless ~1 RPS
+   * across /messages, /transactions and /masterchainInfo. Opt-in: callers
+   * decide whether the host throttles per path or per origin.
+   */
+  keyBy?: 'origin' | 'path'
   seed?: { limit: number; windowMs: number }
+  /**
+   * Ceiling on how far ahead the pacer may reserve a slot before a request
+   * fails fast instead of sleeping (default 30_000ms). A request that exceeds
+   * it is retried after the already-reserved backlog drains, so the ceiling
+   * bounds per-request latency without converting a slow endpoint into a hard
+   * failure.
+   */
+  maxPacingBacklogMs?: number
 }
 
 /** Default (ceiling) max concurrent in-flight requests per endpoint. */
@@ -119,14 +136,20 @@ class AdaptiveLimiter {
   active: boolean
   limit: number
   windowMs: number
+  /** Fail-fast ceiling on the paced backlog (see {@link RateLimitOpts.maxPacingBacklogMs}). */
+  private readonly maxPacingBacklogMs: number
   private nextSendAt = 0
   private lastLimitTs = 0
   private successStreak = 0
 
-  constructor(seed?: { limit: number; windowMs: number }) {
+  constructor(
+    seed?: { limit: number; windowMs: number },
+    maxPacingBacklogMs: number = MAX_PACING_WAIT_MS,
+  ) {
     this.active = seed != null
     this.limit = Math.max(1, seed?.limit ?? 1)
     this.windowMs = clampWindow(seed?.windowMs ?? DEFAULT_WINDOW_MS)
+    this.maxPacingBacklogMs = Math.max(0, maxPacingBacklogMs)
   }
 
   /** Wait (only when active) for this scope's evenly-paced slot. Fails fast when
@@ -138,15 +161,20 @@ class AdaptiveLimiter {
     if (!this.active) return
     const now = performance.now()
     const at = Math.max(now, this.nextSendAt)
-    if (at - now > MAX_PACING_WAIT_MS) {
+    if (at - now > this.maxPacingBacklogMs) {
       throw new CCIPError(
         'ABORT',
-        `pacing backlog ${at - now}ms exceeds cap ${MAX_PACING_WAIT_MS}ms`,
+        `pacing backlog ${at - now}ms exceeds cap ${this.maxPacingBacklogMs}ms`,
         { isTransient: true },
       )
     }
     this.nextSendAt = at + this.windowMs / this.limit // reserve next slot synchronously
     if (at > now) await sleep(at - now, signal) // abortable: caller checks the signal next
+  }
+
+  /** Milliseconds before the currently-reserved pacing slots drain (0 when inactive/free). */
+  backlogMs(now = performance.now()): number {
+    return this.active ? Math.max(0, this.nextSendAt - now) : 0
   }
 
   /** On a 429: activate + pace ONLY when an explicit reset window is known.
@@ -196,29 +224,101 @@ interface EndpointState {
   limiters: Map<string, AdaptiveLimiter>
   /** Seed applied to newly-created limiters for this endpoint (known hosts). */
   seed?: { limit: number; windowMs: number }
+  /** Fail-fast ceiling for the endpoint's pacing backlog. */
+  pacingBacklogCapMs: number
   /** True once we've seen method-scoped rate headers; routes by JSON-RPC method. */
   methodScoped: boolean
   logRange?: { maxRange: number; source: 'error' | 'success' }
+  /** Learned cap on how many entries one eth_getLogs topic position may hold. */
+  topicLimit?: { maxTopics: number; source: 'error' | 'success' }
 }
 
-/** Module-global registry keyed by origin + pathname (query/hash stripped). */
+/** Module-global registry keyed by {@link endpointKey} (query/hash stripped). */
 const endpointRegistry = new Map<string, EndpointState>()
 
-/** Derive a stable key from a fetch input (string | URL | Request). */
-export function endpointKey(input: Parameters<typeof fetch>[0]): string {
+/**
+ * Chain base URLs registered by the chain constructors (`registerEndpointBase`)
+ * so deep REST paths (e.g. aptos `/transactions/by_version/<ledger version>`)
+ * resolve to the same endpoint state as the chain's own URL instead of minting
+ * one state per resource identifier. Sorted by path length descending per
+ * origin for longest-prefix lookup.
+ */
+const endpointBases = new Map<string, string[]>()
+
+/** Parse a fetch input into a URL, or null when unparseable. */
+function toURL(input: Parameters<typeof fetch>[0]): URL | null {
   try {
-    let url: URL
-    if (typeof input === 'string') {
-      url = new URL(input)
-    } else if (input instanceof Request) {
-      url = new URL(input.url)
-    } else {
-      url = input
-    }
-    return url.origin + url.pathname
+    if (typeof input === 'string') return new URL(input)
+    if (input instanceof Request) return new URL(input.url)
+    return input instanceof URL ? input : new URL(String(input))
   } catch {
-    // eslint-disable-next-line @typescript-eslint/no-base-to-string
-    return typeof input === 'string' ? input : String(input)
+    return null
+  }
+}
+
+/** Normalize a base URL: origin + path with trailing slashes stripped (root → origin). */
+function normalizeBase(url: URL): string {
+  const path = url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, '')
+  return url.origin + path
+}
+
+/**
+ * Register a chain endpoint's base URL. Every fetch whose URL is this origin
+ * with this path prefix resolves to the same {@link endpointKey} — the longest
+ * registered prefix wins, so per-endpoint limiters stay precise while REST
+ * resource paths under a chain share its limiter. Returns the normalized base.
+ *
+ * @param input - The chain's endpoint URL (string | URL | Request).
+ */
+export function registerEndpointBase(input: Parameters<typeof fetch>[0]): string {
+  const url = toURL(input)
+  if (!url)
+    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
+  const base = normalizeBase(url)
+  const list = endpointBases.get(url.origin)
+  if (list) {
+    if (!list.includes(base)) {
+      list.push(base)
+      list.sort((a, b) => b.length - a.length)
+    }
+  } else {
+    endpointBases.set(url.origin, [base])
+  }
+  return base
+}
+
+/**
+ * Derive a stable key from a fetch input (string | URL | Request).
+ *
+ * Resolves to the LONGEST registered chain base URL that prefixes the input
+ * path (boundary-aware: `/base` matches `/base/…` but not `/basex/…`); when no
+ * registered base matches, falls back to the origin alone. This keeps the
+ * endpoint-state key space bounded by the registered chain endpoints while
+ * never minting states for per-resource REST paths.
+ */
+export function endpointKey(input: Parameters<typeof fetch>[0]): string {
+  const url = toURL(input)
+  if (!url)
+    return typeof input === 'string' ? input : input instanceof Request ? input.url : input.href
+  const bases = endpointBases.get(url.origin)
+  if (bases) {
+    const path = url.pathname.replace(/\/+$/, '') || '/'
+    for (const base of bases) {
+      const basePath = base.slice(url.origin.length) || '/'
+      if (path === basePath || path.startsWith(basePath === '/' ? '/' : basePath + '/')) return base
+    }
+  }
+  return url.origin
+}
+
+/** Key by origin only; unparseable input falls back to {@link endpointKey}. */
+export function originKey(input: Parameters<typeof fetch>[0]): string {
+  try {
+    if (typeof input === 'string') return new URL(input).origin
+    if (input instanceof Request) return new URL(input.url).origin
+    return input.origin
+  } catch {
+    return endpointKey(input)
   }
 }
 
@@ -226,17 +326,24 @@ function getOrCreateEndpoint(
   input: Parameters<typeof fetch>[0],
   seed?: { limit: number; windowMs: number },
   maxInFlight: number = DEFAULT_MAX_IN_FLIGHT,
+  pacingBacklogCapMs: number = MAX_PACING_WAIT_MS,
+  keyBy: RateLimitOpts['keyBy'] = 'path',
 ): EndpointState {
-  const key = endpointKey(input)
+  const key = keyBy === 'origin' ? originKey(input) : endpointKey(input)
   let state = endpointRegistry.get(key)
   if (!state) {
     state = {
       sem: new AdaptiveSemaphore(maxInFlight),
       limiters: new Map(),
       seed,
+      pacingBacklogCapMs: Math.max(0, pacingBacklogCapMs),
       methodScoped: false,
     }
     endpointRegistry.set(key, state)
+  } else if (seed && !state.seed) {
+    // A caller that knows the host is throttled may seed an entry another caller
+    // created unseeded (limiters constructed before this point stay unseeded).
+    state.seed = seed
   }
   return state
 }
@@ -244,13 +351,11 @@ function getOrCreateEndpoint(
 function getLimiter(ep: EndpointState, scope: string): AdaptiveLimiter {
   let lim = ep.limiters.get(scope)
   if (!lim) {
-    lim = new AdaptiveLimiter(ep.seed)
+    lim = new AdaptiveLimiter(ep.seed, ep.pacingBacklogCapMs)
     ep.limiters.set(scope, lim)
   }
   return lim
 }
-/* eslint-enable jsdoc/require-jsdoc */
-
 /**
  * Parses a Retry-After header value into an epoch-ms wait-until time.
  * Handles both delta-seconds (integer) and HTTP-date formats.
@@ -390,6 +495,11 @@ function extractRateHint(response: Response, method?: string): RateHint {
  * @returns Partial RateLimitOpts (optionally with a `seed`) for the host.
  */
 export function fetchProfileForUrl(url: string): Partial<RateLimitOpts> {
+  // Every chain endpoint flows through here: register it as an endpoint base
+  // so deep REST paths under it (e.g. aptos `/transactions/by_version/<ledger
+  // version>`) resolve to the chain's own endpoint state instead of minting
+  // one per resource identifier. No-op for unparseable URLs.
+  registerEndpointBase(url)
   try {
     const { hostname } = new URL(url)
     // TON public gateways genuinely cap at ~1 req/sec and 429 constantly from a
@@ -437,6 +547,41 @@ export function setEndpointLogRange(
   getOrCreateEndpoint(input).logRange = { maxRange, source }
 }
 
+/**
+ * Returns the learned cap on entries per eth_getLogs topic position, if set.
+ *
+ * Some providers (Avalanche's public RPC among them) reject a filter whose topic
+ * OR-set is larger than a fixed number. The cap varies by provider, so like
+ * {@link getEndpointLogRange} it is learned and stored per endpoint rather than
+ * assumed globally — the same URL-keyed registry, so a round-robin across several
+ * providers doesn't apply one provider's cap to another.
+ *
+ * @param input - Fetch input (string, URL, or Request).
+ * @returns Max topics per position, or undefined if not learned.
+ */
+export function getEndpointTopicLimit(input: Parameters<typeof fetch>[0]): number | undefined {
+  return endpointRegistry.get(endpointKey(input))?.topicLimit?.maxTopics
+}
+
+/**
+ * Sets the learned eth_getLogs topic-count cap for an endpoint.
+ *
+ * Exported so a caller who already KNOWS an endpoint is capped can seed it and skip
+ * the discovery round-trip — worth doing, because discovery costs one failed request
+ * and depends on matching the provider's error text (see {@link parseTopicLimitError}).
+ *
+ * @param input - Fetch input (string, URL, or Request).
+ * @param maxTopics - The learned cap on entries in one topic position.
+ * @param source - Whether learned from an error or a success.
+ */
+export function setEndpointTopicLimit(
+  input: Parameters<typeof fetch>[0],
+  maxTopics: number,
+  source: 'error' | 'success',
+): void {
+  getOrCreateEndpoint(input).topicLimit = { maxTopics, source }
+}
+
 /** Buffer in ms added after a rate-limit reset before sending next request. */
 const RESET_BUFFER_MS = 200
 
@@ -453,10 +598,32 @@ function extractMethod(init?: RequestInit): string | undefined {
   if (!init?.body || (typeof init.body !== 'string' && typeof init.body !== 'object')) return
   try {
     const parsed = (typeof init.body === 'string' ? JSON.parse(init.body) : init.body) as
-      { method?: string } | undefined
+      | { method?: string }
+      | undefined
     if (parsed && typeof parsed.method === 'string') return parsed.method
   } catch {
     // Not JSON or no method field
+  }
+}
+
+/**
+ * Renders an endpoint URL for logs without leaking credentials. The query
+ * string is dropped entirely (keyed gateways carry their key there, e.g.
+ * toncenter's `?api_key=`), path segments of 24+ characters are masked
+ * (keyed-path providers embed the key there, e.g. alchemy/infura/quiknode),
+ * and rebuilding from `origin` drops any userinfo. Non-URL input degrades to
+ * `***` — never echo the raw value back.
+ */
+export function redactEndpointUrl(input: unknown): string {
+  try {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : String(input))
+    const path = url.pathname
+      .split('/')
+      .map((segment) => (segment.length >= 24 ? '***' : segment))
+      .join('/')
+    return url.origin + path
+  } catch {
+    return '***'
   }
 }
 
@@ -474,6 +641,7 @@ export function createRateLimitedFetch(
 ): typeof fetch {
   opts.maxRetries ??= 15
   const opts_ = opts as RateLimitOpts
+  const pacingBacklogCapMs = opts_.maxPacingBacklogMs ?? MAX_PACING_WAIT_MS
 
   // Backoff used when the limiter is NOT pacing (occasional/bursty 429s). Uses
   // FULL JITTER over a 250ms→2s ramp: critical because callers often fire a
@@ -506,7 +674,25 @@ export function createRateLimitedFetch(
 
     let lastError: Error | null = null
     const method = extractMethod(init)
-    const ep = getOrCreateEndpoint(input, opts_.seed, opts_.maxInFlight)
+    const ep = getOrCreateEndpoint(
+      input,
+      opts_.seed,
+      opts_.maxInFlight,
+      pacingBacklogCapMs,
+      opts_.keyBy,
+    )
+
+    // Merge the caller's per-request signal with the context abort ONCE, before
+    // the retry loop: wrapping per attempt would nest a fresh composite over the
+    // previous attempt's (depth = retry count), and every wrapper that never
+    // aborts keeps its abort listener registered (Node holds such composites in
+    // its gcPersistentSignals set for as long as any source lives). One composite
+    // per request keeps undici's listener attach/detach churn flat too.
+    if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
+    else if (abort) {
+      if (!init) init = {}
+      init.signal = abort
+    }
 
     for (let attempt = 0; attempt <= opts_.maxRetries; attempt++) {
       // Bail out promptly when the caller aborts (e.g. a per-request timeout):
@@ -535,11 +721,6 @@ export function createRateLimitedFetch(
         // the slot so a backing-off request doesn't occupy a slot.
         await ep.sem.acquire()
         try {
-          if (init?.signal && abort) init.signal = AbortSignal.any([init.signal, abort])
-          else if (abort) {
-            if (!init) init = {}
-            init.signal = abort
-          }
           abort?.throwIfAborted()
           response = await globalThis.fetch(input instanceof Request ? input.clone() : input, init)
 
@@ -570,7 +751,7 @@ export function createRateLimitedFetch(
           ep.sem.release()
         }
       } catch (error) {
-        logger.debug('fetch errored', attempt, error, input, bodyStr(init?.body))
+        logger.debug('fetch errored', attempt, error, redactEndpointUrl(input), bodyStr(init?.body))
         lastError = error instanceof Error ? error : CCIPError.from(error, 'HTTP_ERROR')
 
         // Only retry on retryable network errors (rate-limit pattern); rethrow everything else
@@ -580,17 +761,25 @@ export function createRateLimitedFetch(
         // concurrency cap and back off before retrying (no header → no pacing).
         ep.sem.decrease()
         // A pacing-backlog abort means acquire() itself won't wait next attempt
-        // (it fails fast instead of sleeping past the cap), so back off here —
-        // otherwise a deep backlog just re-throws instantly on every remaining
-        // attempt instead of giving the queue time to drain.
+        // (it fails fast instead of sleeping past the cap). Rather than retrying
+        // into the same instant refusal under a deep backlog (jittered backoff
+        // drains nothing in 250ms→2s steps), deterministically wait out the
+        // already-reserved slots: the caller is going to wait for this endpoint
+        // anyway, and an idle drain re-enters acquire() below the cap. Sleep is
+        // abort-aware so callers can still bound/cancel the wait.
         const isPacingBacklog = lastError.message.includes('pacing backlog')
-        if (!lim.active || isPacingBacklog) await sleep(backoffMs(attempt), abort)
+        if (isPacingBacklog) await sleep(Math.min(pacingBacklogCapMs, lim.backlogMs() + 250), abort)
+        else if (!lim.active) await sleep(backoffMs(attempt), abort)
         continue
       }
 
       // Slot released — now handle the response (and back off off-slot if retrying).
       if (response.ok) {
-        logger.debug('fetched', response.status, bodyStr(init?.body))
+        logger.debug(
+          'fetched',
+          response.status,
+          init?.body ? bodyStr(init.body) : redactEndpointUrl(input),
+        )
         return response
       }
       if (isTransientHttpStatus(response.status)) {
@@ -603,7 +792,12 @@ export function createRateLimitedFetch(
         return response
       }
       // Non-transient non-ok (4xx etc): return immediately, no retry.
-      logger.debug('fetch non-retryable status', input, response.status, bodyStr(init?.body))
+      logger.debug(
+        'fetch non-retryable status',
+        redactEndpointUrl(input),
+        response.status,
+        bodyStr(init?.body),
+      )
       return response
     }
 
@@ -696,17 +890,20 @@ export interface LogRangeErrorInfo {
 }
 
 /**
- * Parses RPC errors for "getLogs block range too large" messages.
- *
- * Covers Alchemy, Infura, QuickNode, and generic EVM provider patterns.
- * Also checks JSON-RPC error code -32005.
+ * Walks an arbitrary caught error and collects the strings that came from an actual
+ * `message` field, plus the sentinels the range parser keys off. Shared by
+ * {@link parseLogRangeError} and {@link parseTopicLimitError} so both see the same
+ * (carefully tuned) view of a provider error — the traversal rules below are subtle
+ * enough that two copies would drift.
  *
  * @param err - The caught error (any shape).
- * @returns Non-null LogRangeErrorInfo if the error is a range error, null otherwise.
+ * @returns Collected `message` strings and the range/size sentinels.
  */
-export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
-  if (err == null) return null
-
+function collectErrorMessages(err: unknown): {
+  messageTexts: string[]
+  isRangeCode: boolean
+  isHttp413: boolean
+} {
   // messageTexts: strings from actual `message` keys — the only ones tested against patterns.
   // Sentinels: independent signals (code -32005, HTTP 413) collected separately.
   const messageTexts: string[] = []
@@ -766,6 +963,21 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     }
   }
   extractMessages(err)
+  return { messageTexts, isRangeCode, isHttp413 }
+}
+
+/**
+ * Parses RPC errors for "getLogs block range too large" messages.
+ *
+ * Covers Alchemy, Infura, QuickNode, and generic EVM provider patterns.
+ * Also checks JSON-RPC error code -32005.
+ *
+ * @param err - The caught error (any shape).
+ * @returns Non-null LogRangeErrorInfo if the error is a range error, null otherwise.
+ */
+export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
+  if (err == null) return null
+  const { messageTexts, isRangeCode, isHttp413 } = collectErrorMessages(err)
 
   // Range-error patterns (case-insensitive). First capture group = limit number when present.
   const RANGE_ERROR_PATTERNS = [
@@ -775,6 +987,9 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     /query returned more than (\d+) results/i,
     // QuickNode
     /eth_getLogs is limited to a (\d+) range/i,
+    // 1rpc: "eth_getLogs is limited to 0 - 50 blocks range" — the span is given as
+    // a pair, so the LIMIT is the second number, not the first.
+    /limited to\s+\d+\s*-\s*(\d+)\s*blocks?\s+range/i,
     /exceeds the range/i,
     // erpc/hyperliquid: "query exceeds max block range 1000"
     // hedera/alchemy: "Exceeded maximum block range: 1000"
@@ -804,7 +1019,6 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
   // Alchemy suggested range: [0x..., 0x...]
   const ALCHEMY_SUGGESTED_RANGE = /\[(0x[0-9a-f]+),\s*(0x[0-9a-f]+)\]/i
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by extractMessages closure above
   let isRangeError = isRangeCode || isHttp413
   let maxRange: number | undefined
   let suggestedRange: [number, number] | undefined
@@ -847,5 +1061,77 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
   const info: LogRangeErrorInfo = {}
   if (maxRange !== undefined) info.maxRange = maxRange
   if (suggestedRange !== undefined) info.suggestedRange = suggestedRange
+  return info
+}
+
+/** Topic-cap info from a getLogs "too many topics" error. */
+export interface TopicLimitErrorInfo {
+  /** Maximum entries allowed in one topic position, if extractable from the message. */
+  maxTopics?: number
+}
+
+/**
+ * Parses RPC errors for "too many topics in eth_getLogs filter" messages.
+ *
+ * Some providers cap how many values one topic position may OR together —
+ * Avalanche's public RPC is the known case. The cap is per provider, so a match
+ * teaches {@link setEndpointTopicLimit} for that endpoint only.
+ *
+ * Deliberately conservative: it must NOT match a block-range error (that is
+ * {@link parseLogRangeError}'s job, and mistaking one for the other would shrink the
+ * wrong dimension forever). Every pattern therefore requires the word "topic".
+ *
+ * A message we fail to recognise simply means no cap is learned and the filter is
+ * sent whole, i.e. exactly today's behaviour — never a silently wrong result. Callers
+ * that already know an endpoint's cap can bypass detection with
+ * {@link setEndpointTopicLimit}.
+ *
+ * @param err - The caught error (any shape).
+ * @returns Non-null TopicLimitErrorInfo if the error is a topic-count error, else null.
+ */
+export function parseTopicLimitError(err: unknown): TopicLimitErrorInfo | null {
+  if (err == null) return null
+  const { messageTexts } = collectErrorMessages(err)
+
+  // All require "topic" so a range error can never land here. First capture group
+  // is the cap where the provider states it.
+  const TOPIC_LIMIT_PATTERNS = [
+    // "too many topics", "too many topics in filter", "requested too many topics"
+    /too many topics/i,
+    // "eth_getLogs is limited to 5 topics", "limited to a maximum of 5 topics"
+    /limited to (?:a maximum of )?(\d+) topics?/i,
+    // "maximum 5 topics", "max topics: 5", "maximum number of topics is 5"
+    /\bmax(?:imum)?\b[^.]{0,40}?\btopics?\b[^0-9]{0,20}(\d+)/i,
+    // "exceeds the maximum topics", "topics limit exceeded"
+    /\btopics?\b[^.]{0,20}\blimit\b/i,
+    /\blimit\b[^.]{0,20}\btopics?\b/i,
+  ]
+  const TOPIC_COUNT_RE = /(\d+)\s*topics?\b/i
+
+  let isTopicError = false
+  let maxTopics: number | undefined
+
+  for (const msg of messageTexts) {
+    for (const re of TOPIC_LIMIT_PATTERNS) {
+      const m = re.exec(msg)
+      if (!m) continue
+      isTopicError = true
+      const n = Number(m[1])
+      if (!isNaN(n) && n > 0 && (maxTopics === undefined || n < maxTopics)) maxTopics = n
+    }
+    // Fall back to any "<N> topics" phrasing in a message already known to be about
+    // a topic limit (e.g. "too many topics: max 5 topics allowed").
+    if (isTopicError && maxTopics === undefined) {
+      const m = TOPIC_COUNT_RE.exec(msg)
+      if (m) {
+        const n = Number(m[1])
+        if (!isNaN(n) && n > 0) maxTopics = n
+      }
+    }
+  }
+
+  if (!isTopicError) return null
+  const info: TopicLimitErrorInfo = {}
+  if (maxTopics !== undefined) info.maxTopics = maxTopics
   return info
 }

@@ -1,6 +1,6 @@
 import type { AbiParametersToPrimitiveTypes, ExtractAbiEvent } from 'abitype'
 import type { BytesLike, Log as EVMLog } from 'ethers'
-import type { SetFieldType, SetOptional } from 'type-fest'
+import type { SetFieldType, SetOptional, Simplify, Writable } from 'type-fest'
 
 import type { APICCIPRequestMetadata } from './api/types.ts'
 import type OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
@@ -118,16 +118,15 @@ export type CCIPMessage<V extends CCIPVersion = CCIPVersion> = V extends typeof 
 /**
  * Generic log structure compatible across chain families.
  */
-export type ChainLog = Pick<
-  EVMLog,
-  'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'
-> & {
-  blockTimestamp: number
-  /** Log data as bytes or parsed object. */
-  data: BytesLike | Record<string, unknown>
-  /** Optional reference to the containing transaction. */
-  tx?: SetOptional<ChainTransaction, 'logs'>
-}
+export type ChainLog = Simplify<
+  Pick<Writable<EVMLog>, 'topics' | 'index' | 'address' | 'blockNumber' | 'transactionHash'> & {
+    blockTimestamp: number
+    /** Log data as bytes or parsed object. */
+    data: BytesLike | Record<string, unknown>
+    /** Optional reference to the containing transaction. */
+    tx?: SetOptional<ChainTransaction, 'logs'>
+  }
+>
 
 /**
  * Generic transaction structure compatible across chain families.
@@ -326,8 +325,12 @@ export type ExecutionReceipt = {
   sourceChainSelector?: bigint
   /** Hash of the message (if available). */
   messageHash?: string
-  /** Return data from the receiver contract (if any). */
-  returnData?: BytesLike | Record<string, string>
+  /**
+   * Return data from the receiver contract (if any). A decoded record's values
+   * are not all strings: families that reconstruct a failure receipt off-chain
+   * (Aptos, Sui) surface numeric fields as bigints, like the rest of the SDK.
+   */
+  returnData?: BytesLike | Record<string, unknown>
   /** Gas consumed by execution (if available). */
   gasUsed?: bigint
 }

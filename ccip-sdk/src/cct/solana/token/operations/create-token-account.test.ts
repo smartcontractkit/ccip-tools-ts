@@ -7,7 +7,7 @@ import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
-import { type PublicKey, Keypair } from '@solana/web3.js'
+import { Keypair, PublicKey } from '@solana/web3.js'
 
 import {
   CCIPTokenMintInvalidError,
@@ -16,11 +16,16 @@ import {
 } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { SolanaTokenManager } from '../../index.ts'
+import { CreateTokenAccount } from './create-token-account.ts'
 
 const PAYER = Keypair.generate().publicKey.toBase58()
 const MINT = Keypair.generate().publicKey
 const OWNER = Keypair.generate().publicKey
+const HASH = Keypair.generate().publicKey.toBase58()
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
 
 function stubChain(mintOwner: PublicKey | null = TOKEN_2022_PROGRAM_ID): SolanaChain {
   return {
@@ -31,8 +36,23 @@ function stubChain(mintOwner: PublicKey | null = TOKEN_2022_PROGRAM_ID): SolanaC
   } as unknown as SolanaChain
 }
 
+function submitChain(): SolanaChain {
+  return Object.assign(stubChain(), {
+    connection: {
+      getAccountInfo: async () => ({ owner: TOKEN_2022_PROGRAM_ID }),
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  })
+}
+
 function generate(opts = {}, mintOwner?: PublicKey | null) {
-  return SolanaTokenManager.fromChain(stubChain(mintOwner)).generateUnsignedCreateTokenAccount({
+  return new CreateTokenAccount().generate(stubChain(mintOwner), {
     payer: PAYER,
     tokenAddress: MINT.toBase58(),
     ownerAddress: OWNER.toBase58(),
@@ -90,9 +110,27 @@ describe('CreateTokenAccount (cct/solana)', () => {
   })
 
   describe('execute', () => {
+    it('signs, submits, and returns the token account address', async () => {
+      const result = await new CreateTokenAccount().execute(submitChain(), {
+        tokenAddress: MINT.toBase58(),
+        ownerAddress: OWNER.toBase58(),
+        wallet: WALLET,
+      })
+
+      assert.deepEqual(result, {
+        hash: HASH,
+        tokenAccountAddress: getAssociatedTokenAddressSync(
+          MINT,
+          OWNER,
+          true,
+          TOKEN_2022_PROGRAM_ID,
+        ).toBase58(),
+      })
+    })
+
     it('rejects an invalid wallet before generating instructions', async () => {
       await assert.rejects(
-        SolanaTokenManager.fromChain(stubChain()).createTokenAccount({
+        new CreateTokenAccount().execute(stubChain(), {
           tokenAddress: MINT.toBase58(),
           ownerAddress: OWNER.toBase58(),
           wallet: {},
