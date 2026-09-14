@@ -17,7 +17,6 @@
     "resolveJsonModule": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
-    "stableTypeOrdering": true,
   },
   "exclude": ["dist", "node_modules"],
 }

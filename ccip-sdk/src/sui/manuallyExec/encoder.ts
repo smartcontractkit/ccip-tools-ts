@@ -17,7 +17,7 @@ const Any2SuiTokenTransferBCS = bcs.struct('Any2SuiTokenTransfer', {
   amount: bcs.u256(),
 })
 
-const ExecutionReportBCS = bcs.struct('ExecutionReport', {
+export const ExecutionReportBCS = bcs.struct('ExecutionReport', {
   source_chain_selector: bcs.u64(),
   message_id: bcs.fixedArray(32, bcs.u8()),
   header_source_chain_selector: bcs.u64(),

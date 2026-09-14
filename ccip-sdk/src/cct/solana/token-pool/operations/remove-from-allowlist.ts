@@ -1,9 +1,8 @@
 import { type PublicKey, SystemProgram } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -21,6 +20,7 @@ import {
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateUniquePublicKeys,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool `removeFromAllowlist` generation and execution. */
@@ -57,7 +57,10 @@ export type ExecuteRemoveFromAllowlistParams = SolanaExecuteParams<RemoveFromAll
 /** Result of executing Solana token pool allowlist removal. */
 export type ExecuteRemoveFromAllowlistResult = TransactionResult
 
-/** Removes addresses from a Solana token pool allowlist. */
+/**
+ * Removes addresses from a Solana token pool allowlist.
+ * @remarks Removed addresses must not contain duplicates.
+ */
 export class RemoveFromAllowlist extends SolanaOperation<
   RemoveFromAllowlistParams,
   UnsignedSolanaTx,
@@ -76,9 +79,7 @@ export class RemoveFromAllowlist extends SolanaOperation<
     const remove = params.remove.map((address, index) =>
       parsePublicKey(this.name, `remove[${index}]`, address),
     )
-    if (new Set(remove.map((address) => address.toBase58())).size !== remove.length) {
-      throw new CCTParamsInvalidError(this.name, 'remove', 'must not contain duplicate addresses')
-    }
+    validateUniquePublicKeys(this.name, 'remove', remove)
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -122,14 +123,7 @@ export class RemoveFromAllowlist extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteRemoveFromAllowlistParams,
   ): Promise<ExecuteRemoveFromAllowlistResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    const generateParams: GenerateRemoveFromAllowlistParams = {
-      ...rest,
-      payer: wallet.publicKey.toBase58(),
-    }
-    const parsed = this.prepare(generateParams)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

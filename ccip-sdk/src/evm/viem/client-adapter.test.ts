@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ViemTransportProvider, fromViemClient } from './client-adapter.ts'
 import { CCIPViemAdapterError } from '../../errors/index.ts'
+import { ViemTransportProvider, fromViemClient } from './client-adapter.ts'
 
 describe('fromViemClient', () => {
   it('should throw if chain is not defined', async () => {

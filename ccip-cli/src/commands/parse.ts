@@ -17,6 +17,7 @@
  */
 
 import {
+  type ChainStatic,
   CCIPDataParseError,
   jsonStringify,
   supportedChains,
@@ -25,7 +26,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, prettyTable } from './utils.ts'
+import { getCtx, logParsedError, prettyFormat, prettyTable } from './utils.ts'
 
 export const command = [
   'parse <data>',
@@ -66,15 +67,19 @@ export function handler(argv: Awaited<ReturnType<typeof builder>['argv']> & Glob
 function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
   const { output } = ctx
   let parsed
+  let parsedChain: ChainStatic | undefined
   for (const chain of Object.values(supportedChains)) {
     try {
       parsed = chain.parse?.(argv.data)
-      if (parsed) break
+      if (parsed) {
+        parsedChain = chain
+        break
+      }
     } catch (_) {
       // pass
     }
   }
-  if (!parsed) throw new CCIPDataParseError(argv.data)
+  if (!parsed || !parsedChain) throw new CCIPDataParseError(argv.data)
 
   switch (argv.format) {
     case Format.log: {
@@ -82,7 +87,7 @@ function parseBytes(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       break
     }
     case Format.pretty:
-      prettyTable.call(ctx, parsed)
+      prettyTable.call(ctx, prettyFormat(parsed, parsedChain.family) as Record<string, unknown>)
       break
     case Format.json:
       output.write(jsonStringify(parsed, 2))

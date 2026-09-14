@@ -36,6 +36,7 @@ import { hexlify, isHexString } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
+import { fetchChainsFromRpcs, loadChainWallet, resolveIndexer } from '../providers/index.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
@@ -45,7 +46,6 @@ import {
   selectRequest,
   withDateTimestamp,
 } from './utils.ts'
-import { fetchChainsFromRpcs, loadChainWallet, resolveIndexer } from '../providers/index.ts'
 
 // const MAX_QUEUE = 1000
 // const MAX_EXECS_IN_BATCH = 1

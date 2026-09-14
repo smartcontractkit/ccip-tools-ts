@@ -30,7 +30,7 @@ export class SetPool extends EVMOperation<SetPoolParams> {
   readonly name = 'setPool'
 
   /** Validates all addresses before any RPC. */
-  protected validate(p: SetPoolParams): void {
+  protected override validate(p: SetPoolParams): void {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'poolAddress', p.poolAddress)
     validateAddress(this.name, 'address', p.address)

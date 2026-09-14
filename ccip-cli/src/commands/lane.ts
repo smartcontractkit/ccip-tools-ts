@@ -1,10 +1,10 @@
 import { discoverOffRamp, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
-import { type Ctx, Format } from './types.ts'
-import { getCtx, logParsedError, prettyTable } from './utils.ts'
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
+import { type Ctx, Format } from './types.ts'
+import { formatDisplayAddress, getCtx, logParsedError, prettyFormat, prettyTable } from './utils.ts'
 
 export const command = ['lane', 'get-lane']
 export const describe = 'Show OnRamp and OffRamp configs for a CCIP lane between two chains'
@@ -75,18 +75,18 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
 
   const source = await getChain(sourceNetwork.name)
 
-  // Resolve router-or-onramp: if typeAndVersion identifies it as a Router, fetch the OnRamp.
-  // typeAndVersion may throw for chains where the address format requires a module suffix
-  // (e.g., bare Aptos package address) — in that case we treat the address as an OnRamp directly.
+  // Resolve router-or-onramp: if typeAndVersion identifies it as a Router (or
+  // a family-specific router handle like Sui's `StateObjectRouter`), fetch the
+  // OnRamp. If typeAndVersion doesn't answer, treat the address as an OnRamp.
   let onRamp = argv.router
   try {
     const [type] = await source.typeAndVersion(argv.router)
-    if (type === 'Router') {
+    if (type.includes('Router')) {
       onRamp = await source.getOnRampForRouter(argv.router, destNetwork.chainSelector)
       logger.debug('Resolved OnRamp from Router:', onRamp)
     }
   } catch (_) {
-    // treat as OnRamp
+    // typeAndVersion unavailable for this address form: treat it as an OnRamp.
   }
 
   const onRampConfig = await source.getOnRampConfig(onRamp, destNetwork.chainSelector)
@@ -98,7 +98,14 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       break
     case Format.pretty:
       output.write(`OnRamp (${sourceNetwork.name}) [${sourceNetwork.family}]:`)
-      prettyTable.call(ctx, { onRamp, ...onRampConfig })
+      prettyTable.call(ctx, {
+        onRamp: formatDisplayAddress(onRamp, sourceNetwork.family),
+        // offRamp/offramp (v2 configs) are dest-chain addresses
+        ...(prettyFormat(onRampConfig, sourceNetwork.family, {
+          offRamp: destNetwork.family,
+          offramp: destNetwork.family,
+        }) as Record<string, unknown>),
+      })
       break
     default:
       if (jsonEnvelope) {
@@ -143,7 +150,13 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       break
     case Format.pretty:
       output.write(`OffRamp (${destNetwork.name}) [${destNetwork.family}]:`)
-      prettyTable.call(ctx, { offRamp, ...offRampConfig })
+      prettyTable.call(ctx, {
+        offRamp: formatDisplayAddress(offRamp, destNetwork.family),
+        // onRamps accepted by the offRamp are source-chain addresses
+        ...(prettyFormat(offRampConfig, destNetwork.family, {
+          onRamps: sourceNetwork.family,
+        }) as Record<string, unknown>),
+      })
       break
     default:
       if (jsonEnvelope) {

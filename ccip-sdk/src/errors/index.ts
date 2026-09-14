@@ -21,6 +21,7 @@ export {
   CCIPLogRangeTooLargeError,
   CCIPLogsAddressRequiredError,
   CCIPLogsRequiresStartError,
+  CCIPLogsStreamInconsistentError,
   CCIPLogsWatchRequiresFinalityError,
   CCIPLogsWatchRequiresStartError,
 } from './specialized.ts'
@@ -48,6 +49,7 @@ export {
 
 // Specialized errors - Commit & Merkle
 export {
+  CCIPCommitHistoryPrunedError,
   CCIPCommitNotFoundError,
   CCIPMerkleFlagsMismatchError,
   CCIPMerkleHashesTooLargeError,

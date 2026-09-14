@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createCantonClient } from './client.ts'
 import { createAxiosFetchAdapter } from '../../fetch.ts'
+import { createCantonClient } from './client.ts'
 
 const BASE_URL = 'http://localhost:7575'
 const JWT = 'test-jwt'

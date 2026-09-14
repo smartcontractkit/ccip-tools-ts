@@ -347,7 +347,9 @@ export function encodeExtraArgs(args: ExtraArgs | undefined): string {
           {
             ...args,
             tokenReceiver: zeroPadValue(getAddressBytes(args.tokenReceiver), 32),
-            receiverObjectIds: args.receiverObjectIds.map((a) => getDataBytes(a)),
+            receiverObjectIds: args.receiverObjectIds.map((a) =>
+              zeroPadValue(getAddressBytes(a), 32),
+            ),
           },
         ],
       ),

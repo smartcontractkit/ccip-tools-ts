@@ -8,10 +8,10 @@
 import { useCallback, useRef, useState } from 'react'
 
 import styles from './CopyPageButton.module.css'
-import { MarkdownPreviewModal } from './MarkdownPreviewModal.tsx'
 import { TIMING, UI_TEXT, buildAIUrl } from './constants.ts'
 import { copyToClipboard, extractPageContent } from './contentExtractor.ts'
 import { useClickOutside, useKeyPress } from './hooks/index.ts'
+import { MarkdownPreviewModal } from './MarkdownPreviewModal.tsx'
 import type { CopyAction, CopyPageButtonProps } from './types.ts'
 
 export function CopyPageButton({ className }: CopyPageButtonProps) {

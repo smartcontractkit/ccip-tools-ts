@@ -1,14 +1,23 @@
 import { Buffer } from 'buffer'
 
-import { PublicKey } from '@solana/web3.js'
+import { type Account, TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
+import { type Connection, PublicKey } from '@solana/web3.js'
 
-import { CCIPAddressInvalidError } from '../../errors/index.ts'
+import {
+  CCIPAddressInvalidError,
+  CCIPTokenAccountNotFoundError,
+  CCIPTokenPoolStateNotFoundError,
+} from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError } from '../errors.ts'
+import type { SolanaChain } from '../../solana/index.ts'
+import { resolveATA } from '../../solana/utils.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
   TOKEN_POOL_PROGRAMS,
+  decodeTokenPoolState,
+  deriveTokenPoolConfigPda,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
 
@@ -77,6 +86,76 @@ export function validatePublicKeys(operation: string, param: string, values: unk
 }
 
 /**
+ * Asserts public keys do not contain duplicates.
+ * @throws CCTParamsInvalidError if a public key is duplicated.
+ */
+export function validateUniquePublicKeys(
+  operation: string,
+  param: string,
+  publicKeys: PublicKey[],
+): void {
+  const seen = new Set<string>()
+  for (const [i, publicKey] of publicKeys.entries()) {
+    const address = publicKey.toBase58()
+    if (seen.has(address)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate addresses',
+      )
+    }
+    seen.add(address)
+  }
+}
+
+/**
+ * Asserts bigint chain selectors do not contain duplicates.
+ * @remarks Silently ignores non-bigint entries; relies on downstream `validateBigInt` for type safety.
+ * @throws CCTParamsInvalidError if a chain selector is duplicated.
+ */
+export function validateUniqueChainSelectors(
+  operation: string,
+  param: string,
+  selectors: unknown[],
+): void {
+  const seen = new Set<bigint>()
+  for (const [i, selector] of selectors.entries()) {
+    if (typeof selector === 'bigint' && seen.has(selector)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate chain selectors',
+      )
+    }
+    if (typeof selector === 'bigint') seen.add(selector)
+  }
+}
+
+/**
+ * Asserts hex byte values do not contain duplicates.
+ * @throws CCTParamsInvalidError if a hex byte value is duplicated.
+ */
+export function validateUniqueHexBytes(
+  operation: string,
+  param: string,
+  values: Buffer[],
+  label = 'hex values',
+): void {
+  const seen = new Set<string>()
+  for (const [i, value] of values.entries()) {
+    const hex = value.toString('hex')
+    if (seen.has(hex)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        `must not contain duplicate ${label}`,
+      )
+    }
+    seen.add(hex)
+  }
+}
+
+/**
  * Asserts `value` is a non-empty string.
  * @throws CCTParamsInvalidError if `value` is not a non-empty string.
  */
@@ -133,6 +212,22 @@ export function resolvePoolProgram(operation: string, params: PoolProgramRef): P
   }
 
   return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
+}
+
+/** Resolves a lock-release token pool program and rejects the canonical burn-mint program. */
+export function resolveLockReleasePoolProgram(
+  operation: string,
+  params: PoolProgramRef,
+): PublicKey {
+  const poolProgram = resolvePoolProgram(operation, params)
+  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) {
+    throw new CCTParamsInvalidError(
+      operation,
+      params.poolProgramAddress === undefined ? 'poolType' : 'poolProgramAddress',
+      'must be lock-release',
+    )
+  }
+  return poolProgram
 }
 
 /**
@@ -245,4 +340,100 @@ export function parseNonEmptyHexBytes(
   const bytes = parseHexBytes(operation, param, value, maxBytes)
   if (!bytes.length) throw new CCTParamsInvalidError(operation, param, 'must not be empty')
   return bytes
+}
+
+/**
+ * Validates that a token account delegates at least an amount to the expected delegate.
+ * @throws {@link CCTTxFailedError} If the delegate is missing, differs, or has insufficient allowance.
+ */
+export function validateDelegation(
+  operation: string,
+  tokenAccount: PublicKey,
+  account: Account,
+  delegate: PublicKey,
+  amount: bigint,
+): void {
+  if (account.delegate?.equals(delegate) && account.delegatedAmount >= amount) return
+
+  const delegation = !account.delegate
+    ? 'has no delegate'
+    : !account.delegate.equals(delegate)
+      ? `delegates to ${account.delegate.toBase58()}`
+      : `delegates only ${account.delegatedAmount}`
+  throw new CCTTxFailedError(
+    operation,
+    `token account ${tokenAccount.toBase58()} ${delegation}; delegate at least ${amount} to ${delegate.toBase58()} with approveToken first`,
+    {
+      context: {
+        tokenAccount: tokenAccount.toBase58(),
+        delegate: account.delegate?.toBase58(),
+        expectedDelegate: delegate.toBase58(),
+        delegatedAmount: account.delegatedAmount.toString(),
+      },
+    },
+  )
+}
+
+/**
+ * Verifies that a rebalancer may move liquidity for a lock-release pool.
+ * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+ * @throws {@link CCTTxFailedError} If the authority is not the rebalancer or liquidity is disabled.
+ */
+export async function validatePoolLiquidityConfig(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  mint: PublicKey,
+  authority: PublicKey,
+): Promise<void> {
+  const state = deriveTokenPoolConfigPda(poolProgram, mint)
+  const account = await chain.connection.getAccountInfo(state)
+  if (!account) throw new CCIPTokenPoolStateNotFoundError(state.toBase58())
+
+  const { config } = decodeTokenPoolState(account.data, {
+    tokenPool: state.toBase58(),
+    mint: mint.toBase58(),
+    poolProgram: poolProgram.toBase58(),
+    accountOwner: account.owner.toBase58(),
+  })
+  if (!config.rebalancer.equals(authority))
+    throw new CCTTxFailedError(
+      operation,
+      `pool rebalancer is ${config.rebalancer.toBase58()}, not ${authority.toBase58()}; set it with setRebalancer first`,
+    )
+  if (!config.canAcceptLiquidity)
+    throw new CCTTxFailedError(
+      operation,
+      'pool does not accept liquidity; enable it with setCanAcceptLiquidity(true) first',
+    )
+}
+
+/**
+ * Resolves an existing token account, defaulting to the holder's associated token account.
+ * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+ */
+export async function resolveExistingTokenAccount(
+  connection: Connection,
+  tokenAddress: PublicKey,
+  holder: PublicKey,
+  tokenAccount?: PublicKey,
+): Promise<{
+  tokenAccount: PublicKey
+  tokenProgram: PublicKey
+  account: Account
+}> {
+  const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
+  const account = tokenAccount ?? ata
+  let tokenAccountInfo: Account
+
+  try {
+    tokenAccountInfo = await getAccount(connection, account, undefined, tokenProgram)
+  } catch (error) {
+    if (error instanceof TokenAccountNotFoundError) {
+      throw new CCIPTokenAccountNotFoundError(tokenAddress.toBase58(), holder.toBase58())
+    }
+    throw error
+  }
+
+  return { tokenAccount: account, tokenProgram, account: tokenAccountInfo }
 }

@@ -4,12 +4,12 @@ import { describe, it } from 'node:test'
 import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
-import { GetTokenPoolState } from './get-token-pool-state.ts'
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTDataDecodeError } from '../../../errors.ts'
 import { decodeTokenPoolState, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
+import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 function key(byte: number): PublicKey {
   return new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
@@ -105,7 +105,6 @@ describe('GetTokenPoolState (cct/solana)', () => {
 
     it('wraps non-Error decode causes', (t) => {
       t.mock.method(tokenPoolCoder.accounts, 'decode', () => {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error -- verify unknown decoder throws are normalized.
         throw 'invalid account data'
       })
 

@@ -218,10 +218,10 @@ export async function extractOpenApiContent(): Promise<ExtractedContent | null> 
     )
 
     // Get title from operation or page
-    /* eslint-disable @typescript-eslint/no-unnecessary-condition -- DOM textContent may be null */
+    /* oxlint-disable typescript/no-unnecessary-condition -- DOM textContent may be null */
     const title =
       operation.summary || document.querySelector('h1')?.textContent?.trim() || 'API Endpoint'
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+    /* oxlint-enable typescript/no-unnecessary-condition */
 
     return {
       markdown: addFrontmatter(markdown, title),
@@ -305,7 +305,7 @@ function generateMarkdownFromOperation(
     }
     if (operation.requestBody.content) {
       const content = operation.requestBody.content['application/json']
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- content type may not exist
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- content type may not exist
       if (content?.schema) {
         lines.push(...formatSchema(content.schema, schemas, 0))
         lines.push('')
@@ -327,14 +327,14 @@ function generateMarkdownFromOperation(
       }
       if (response.content) {
         const content = response.content['application/json']
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- content type may not exist
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- content type may not exist
         if (content?.schema) {
           lines.push('**Response Schema:**')
           lines.push('')
           lines.push(...formatSchema(content.schema, schemas, 0))
           lines.push('')
         }
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- content type may not exist
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- content type may not exist
         if (content?.example) {
           lines.push('**Example:**')
           lines.push('')
@@ -371,10 +371,10 @@ function formatParameters(params: Parameter[]): string[] {
 
     if (param.schema?.example !== undefined && param.schema.example !== null) {
       const example = param.schema.example
-      /* eslint-disable @typescript-eslint/no-unnecessary-condition -- typeof null === 'object' in JS */
+      /* oxlint-disable typescript/no-unnecessary-condition -- typeof null === 'object' in JS */
       const exampleStr =
-        typeof example === 'object' && example !== null ? JSON.stringify(example) : String(example) // eslint-disable-line @typescript-eslint/no-base-to-string
-      /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+        typeof example === 'object' && example !== null ? JSON.stringify(example) : String(example) // oxlint-disable-line typescript/no-base-to-string
+      /* oxlint-enable typescript/no-unnecessary-condition */
       lines.push(`  - Example: \`${exampleStr}\``)
     }
 
@@ -431,12 +431,12 @@ function formatSchema(
 
       if (propSchema.example !== undefined && propSchema.example !== null) {
         const example = propSchema.example
-        /* eslint-disable @typescript-eslint/no-unnecessary-condition -- typeof null === 'object' in JS */
+        /* oxlint-disable typescript/no-unnecessary-condition -- typeof null === 'object' in JS */
         const exampleStr =
           typeof example === 'object' && example !== null
             ? JSON.stringify(example)
-            : String(example) // eslint-disable-line @typescript-eslint/no-base-to-string
-        /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+            : String(example) // oxlint-disable-line typescript/no-base-to-string
+        /* oxlint-enable typescript/no-unnecessary-condition */
         lines.push(`${indent}  - Example: \`${exampleStr}\``)
       }
 

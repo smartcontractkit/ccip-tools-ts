@@ -1,9 +1,8 @@
 import { PublicKey } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { type UnsignedSolanaTx, isWallet } from '../../../../solana/types.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -117,12 +116,7 @@ export class AcceptAdmin extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteAcceptAdminParams,
   ): Promise<ExecuteAcceptAdminResult> {
-    const { wallet, computeUnits, ...rest } = params
-    if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
-
-    const payer = wallet.publicKey.toBase58()
-    const generateParams: GenerateAcceptAdminParams = { ...rest, payer }
-    const parsed = this.prepare(generateParams)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

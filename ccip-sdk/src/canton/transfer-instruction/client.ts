@@ -73,8 +73,15 @@ export interface TransferInstructionErrorResponse {
 export interface TransferInstructionClientConfig {
   /** Base URL of the token registry (e.g. http://localhost:9000) */
   baseUrl: string
-  /** Optional JWT for authentication */
-  jwt?: string
+  /**
+   * Optional JWT for authentication.
+   *
+   * Pass a string for a static token, or a `() => Promise<string>` getter for
+   * a refreshable token. When a getter is supplied, each request awaits it and
+   * uses the returned JWT in the `Authorization` header (enabling automatic
+   * refresh).
+   */
+  jwt?: string | (() => Promise<string>)
   /** Request timeout in milliseconds (default: 30 000) */
   timeout?: number
   /**
@@ -95,8 +102,14 @@ export interface TransferInstructionClientConfig {
  */
 export function createTransferInstructionClient(config: TransferInstructionClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const headers = buildHeaders(config.jwt)
+  const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
+
+  /** Resolve request headers, awaiting `jwt` when it is a function. */
+  async function resolveHeaders(): Promise<Record<string, string>> {
+    const token = typeof jwt === 'function' ? await jwt() : jwt
+    return buildHeaders(token)
+  }
 
   const apiPath = (path: string) => (config.useScanProxy === false ? path : `/v0/scan-proxy${path}`)
   return {
@@ -108,6 +121,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
     async getTransferFactory(
       request: GetFactoryRequest,
     ): Promise<TransferFactoryWithChoiceContext> {
+      const headers = await resolveHeaders()
       return post<TransferFactoryWithChoiceContext>(
         baseUrl,
         apiPath('/registry/transfer-instruction/v1/transfer-factory'),
@@ -126,6 +140,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
       transferInstructionId: string,
       request?: GetChoiceContextRequest,
     ): Promise<ChoiceContext> {
+      const headers = await resolveHeaders()
       return post<ChoiceContext>(
         baseUrl,
         apiPath(
@@ -146,6 +161,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
       transferInstructionId: string,
       request?: GetChoiceContextRequest,
     ): Promise<ChoiceContext> {
+      const headers = await resolveHeaders()
       return post<ChoiceContext>(
         baseUrl,
         apiPath(
@@ -166,6 +182,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
       transferInstructionId: string,
       request?: GetChoiceContextRequest,
     ): Promise<ChoiceContext> {
+      const headers = await resolveHeaders()
       return post<ChoiceContext>(
         baseUrl,
         apiPath(

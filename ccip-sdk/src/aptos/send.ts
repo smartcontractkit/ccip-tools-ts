@@ -4,7 +4,7 @@ import { getBytes, zeroPadValue } from 'ethers'
 import { encodeExtraArgs } from '../extra-args.ts'
 import { ChainFamily } from '../networks.ts'
 import type { AnyMessage } from '../types.ts'
-import { getDataBytes } from '../utils.ts'
+import { getAddressBytes, getDataBytes } from '../utils.ts'
 
 export const DEFAULT_FEE_TOKEN = '0xa'
 
@@ -23,7 +23,7 @@ function messageArgs(
   encodedExtraArgs: Uint8Array,
 ] {
   // Prepare the message structure for the view call
-  const receiver = getBytes(zeroPadValue(getDataBytes(message.receiver), 32))
+  const receiver = getBytes(zeroPadValue(getAddressBytes(message.receiver), 32))
   const data = getDataBytes(message.data || '0x')
 
   // Get the native token to use as fee token if not specified

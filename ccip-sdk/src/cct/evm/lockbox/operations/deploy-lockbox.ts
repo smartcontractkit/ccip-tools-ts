@@ -26,7 +26,7 @@ export class DeployLockbox extends EVMDeployOperation<DeployLockboxParams> {
   readonly name = 'deployLockbox'
 
   /** Validates the constructor params before building init-code. */
-  protected validate(params: DeployLockboxParams): void {
+  protected override validate(params: DeployLockboxParams): void {
     validateNonZeroAddress(this.name, 'token', params.token)
   }
 

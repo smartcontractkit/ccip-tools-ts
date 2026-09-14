@@ -126,7 +126,7 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
   readonly name = 'registerAdmin'
 
   /** Validates addresses and, if given, `registrationMethod`; no RPC. */
-  protected validate(p: RegisterAdminParams): void {
+  protected override validate(p: RegisterAdminParams): void {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'registryModule', p.registryModule)
     validateAddress(this.name, 'address', p.address)
@@ -245,7 +245,7 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
   /**
    * Signs and submits as the token's authority, defaulting `sender` to the signing wallet — the
    * only address the module's `msg.sender` check can pass. See
-   * {@link EVMOperation.senderBoundToWallet} for why a divergent `sender` is rejected.
+   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
    */
@@ -253,7 +253,7 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
     chain: EVMChain,
     params: EVMExecuteParams<RegisterAdminParams>,
   ): Promise<TransactionResult> {
-    const sender = await this.senderBoundToWallet(params.wallet, params.sender)
+    const sender = await this.resolveWalletSender(params.wallet, params.sender)
     return super.execute(chain, { ...params, sender })
   }
 }

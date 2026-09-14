@@ -4,8 +4,8 @@
  * Defines the schema for the `ccip-cli lane-latency` command.
  */
 
-import { outputOptions } from './common.ts'
 import type { CommandSchema } from '../types/index.ts'
+import { outputOptions } from './common.ts'
 
 export const laneLatencySchema: CommandSchema<'lane-latency'> = {
   name: 'lane-latency',

@@ -1,4 +1,6 @@
 import {
+  type Block,
+  type BlockParams,
   type BytesLike,
   type JsonRpcApiProvider,
   type Log,
@@ -111,8 +113,8 @@ import {
   decodeOnRampAddress,
   encodeAddressToAny,
   getAddressBytes,
+  getBlockNumberAtOrAfter,
   getDataBytes,
-  getSomeBlockNumberBefore,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -294,6 +296,11 @@ export function isTokenOnlyEstimate(message: {
   return dataLength === 0 && receiveGasLimit === 0n
 }
 
+function destroyOnAbort(abort: AbortSignal, provider: JsonRpcApiProvider): void {
+  const ref = new WeakRef(provider)
+  abort.addEventListener('abort', () => ref.deref()?.destroy(), { once: true })
+}
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
@@ -345,12 +352,13 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.nonces = {}
 
     this.provider = provider
-    this.abort.addEventListener('abort', () => this.provider.destroy(), { once: true })
+    destroyOnAbort(this.abort, this.provider)
 
     const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
       forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
     })
     this.getBlockInfo = getBlockInfo
@@ -393,8 +401,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         network,
       )
     }
+    // fix tron-* evm chains returning `stateRoot="0x"` and breaking ethers
+    provider._wrapBlock = (value: BlockParams, network: Network): Block => {
+      if (
+        typeof value.stateRoot === 'string' &&
+        value.stateRoot !== ZeroHash &&
+        value.stateRoot.match(/^0x0*$/)
+      ) {
+        value.stateRoot = ZeroHash
+      }
+      return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapBlock.call(
+        this.provider,
+        value,
+        network,
+      )
+    }
 
-    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), { async: true, maxArgs: 1 })
+    this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
+      async: true,
+      maxArgs: 1,
+      maxSize: 100,
+      expires: 600e3,
+    })
 
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
@@ -406,27 +434,32 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.getTokenForTokenPool = memoize(this.getTokenForTokenPool.bind(this), {
       async: true,
       maxArgs: 1,
-      maxSize: 1024,
+      maxSize: 100,
+      expires: 600e3,
     })
     this.getNativeTokenForRouter = memoize(this.getNativeTokenForRouter.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getTokenAdminRegistryFor = memoize(this.getTokenAdminRegistryFor.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 10,
+      expires: 600e3,
     })
     this.detectUsdcDomains = memoize(this.detectUsdcDomains.bind(this), { async: true })
     this.resolveVerifier = memoize(this.resolveVerifier.bind(this), { async: true })
@@ -434,6 +467,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       async: true,
       maxArgs: 1,
       maxSize: 100,
+      expires: 600e3,
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
@@ -492,34 +526,72 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   /**
    * Creates a JSON-RPC provider from a URL.
    * @param url - WebSocket (wss://) or HTTP (https://) endpoint URL.
-   * @returns A ready JSON-RPC provider.
+   * @returns The ready JSON-RPC provider plus an optional `detach` that removes
+   * its mid-handshake abort listener once the provider is owned by a chain
+   * (the chain's composite abort then owns teardown).
    */
   static async _getProvider(
     url: string,
     ctx?: { abort?: AbortSignal; fetch?: typeof fetch } & Parameters<
       typeof createRateLimitedFetch
     >[1],
-  ): Promise<JsonRpcApiProvider> {
+  ): Promise<[JsonRpcApiProvider, (() => void) | undefined]> {
     const abort = ctx?.abort
-    let providerReady: Promise<JsonRpcApiProvider>
     if (url.startsWith('ws')) {
       const provider = new WebSocketProvider(url, undefined, { staticNetwork: true })
-      abort?.addEventListener('abort', () => void provider.destroy(), { once: true })
-      providerReady = new Promise((resolve, reject) => {
+      // Destroy the socket when the caller aborts — during the handshake AND
+      // while a hanging request still has no owning chain (e.g. `getNetwork` in
+      // fromProvider). The listener is removed only once the chain is installed
+      // (the detach, in fromUrl's finally) or the handshake fails (below): a
+      // dangling one on a long-lived signal would root the provider — and via
+      // its _wrap* hooks the whole chain — forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      const providerReady = new Promise<JsonRpcApiProvider>((resolve, reject) => {
         provider.websocket.onerror = reject
         provider
           ._waitUntilReady()
           .then(() => resolve(provider))
           .catch(reject)
+      }).catch((err) => {
+        // No chain will own this provider: drop the listener so a long-lived
+        // caller signal does not root the failed provider.
+        abort?.removeEventListener('abort', onAbort)
+        throw err as Error
       })
+      return [
+        await providerReady,
+        abort ? () => abort.removeEventListener('abort', onAbort) : undefined,
+      ]
     } else if (url.startsWith('http')) {
       const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
       const req = new FetchRequest(url)
-      req.getUrlFunc = async (r, _signal) => {
+      req.getUrlFunc = async (r, signal) => {
+        // Bound each logical request (all retry attempts of the rate-limited
+        // fetch included). Without this, an endpoint that accepts the
+        // connection but never responds hangs on undici's 300s headers timeout
+        // per attempt — one black-holed public endpoint could wedge a whole
+        // CLI invocation far past any caller's patience. ethers' cancel
+        // signal (a FetchCancelSignal, not an AbortSignal) is bridged onto an
+        // AbortController so it actually preempts the in-flight fetch.
+        // 90s comfortably exceeds any legitimate slow call (a chunked
+        // eth_getLogs under active pacing).
+        const timeoutSignal = AbortSignal.timeout(90_000)
+        let requestSignal: AbortSignal = timeoutSignal
+        if (signal) {
+          const cancel = new AbortController()
+          try {
+            signal.addListener(() => cancel.abort())
+            requestSignal = AbortSignal.any([cancel.signal, timeoutSignal])
+          } catch {
+            requestSignal = AbortSignal.abort() // already cancelled by ethers
+          }
+        }
         const resp = await fetchFn(r.url, {
           method: r.method || 'POST',
           headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
           body: r.body ?? undefined,
+          signal: requestSignal,
         })
         const headers: Record<string, string> = {}
         resp.headers.forEach((v, k) => {
@@ -533,12 +605,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         staticNetwork: true,
         batchMaxCount: 20,
       })
-      abort?.addEventListener('abort', () => provider.destroy(), { once: true })
-      providerReady = Promise.resolve(provider)
+      // Tear down an unresponsive provider while it has no owning chain yet
+      // (e.g. `getNetwork` hanging during construction) when the caller aborts.
+      // Detached once the chain is installed: from then on the chain's
+      // composite `this.abort` — firing on `destroy()` AND the context abort —
+      // owns teardown, and a listener left on a long-lived signal would root
+      // the provider (and via its _wrap* hooks the whole chain) forever.
+      const onAbort = () => void provider.destroy()
+      abort?.addEventListener('abort', onAbort, { once: true })
+      return [provider, abort ? () => abort.removeEventListener('abort', onAbort) : undefined]
     } else {
       throw new CCIPDataFormatUnsupportedError(url)
     }
-    return providerReady
   }
 
   /**
@@ -574,7 +652,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * ```
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url, ctx), ctx)
+    const [provider, detach] = await this._getProvider(url, ctx)
+    try {
+      return await this.fromProvider(provider, ctx)
+    } finally {
+      // Chain installed (or construction failed and the provider destroyed):
+      // the chain's composite `this.abort` owns provider teardown from here.
+      detach?.()
+    }
   }
 
   /** {@inheritDoc Chain.getBlockInfo} */
@@ -593,10 +678,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     const { timestamp } = await this.getBlockInfo(tx.blockNumber)
     const chainTx = {
-      ...tx,
+      ...tx, // oxlint-disable-line typescript/no-misused-spread
       timestamp,
       logs: [] as ChainLog[],
     }
+    // oxlint-disable-next-line typescript/no-misused-spread
     const logs: ChainLog[] = tx.logs.map((l) => ({ ...l, blockTimestamp: timestamp, tx: chainTx }))
     chainTx.logs = logs
     return chainTx
@@ -686,7 +772,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           Object.assign(message, decodeMessageV1(message.encodedMessage as BytesLike))
         }
         if (message) break
-      } catch (_) {
+      } catch {
         // try next fragment
       }
     }
@@ -720,7 +806,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       let result
       try {
         result = interfaces.OffRamp_v1_6.decodeEventLog(fragment, log.data, log.topics)
-      } catch (_) {
+      } catch {
         continue
       }
       if (result.length === 1) result = result[0] as Result
@@ -784,7 +870,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...result,
           state: Number(result.state) as ExecutionState,
         } as ExecutionReceipt
-      } catch (_) {
+      } catch {
         // continue
       }
     }
@@ -870,7 +956,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     let contract
     if (type === 'PriceRegistry') {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.PriceRegistry_v1_2,
@@ -887,14 +972,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       })
     }
     if (version < CCIPVersion.V2_0) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v1_6,
         this.provider,
       ) as unknown as TypedContract<typeof FeeQuoter_1_6_ABI>
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       contract = new Contract(
         feeQuoter,
         interfaces.FeeQuoter_v2_0,
@@ -1137,7 +1220,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           resultToObject(contract.getStaticConfig()),
           resultToObject(contract.getSourceChainConfig(sourceChainSelector!)),
         ])
-        const onRamps = sourceChainConfig.onRamps.map((o) => decodeOnRampAddress(o, sourceFamily))
+        const onRamps = []
+        for (const onRamp of sourceChainConfig.onRamps) {
+          try {
+            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily))
+          } catch {
+            // ignore
+          }
+        }
         return {
           ...staticConfig,
           ...(await getRmn(staticConfig.rmnRemote)),
@@ -1478,7 +1568,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     let blockTag: number | undefined
     if (opts.timestamp != null) {
       const { number: latestBlock } = (await this.provider.getBlock('latest'))!
-      blockTag = await getSomeBlockNumberBefore(
+      blockTag = await getBlockNumberAtOrAfter(
         async (block: number) => (await this.provider.getBlock(block))!.timestamp,
         latestBlock,
         opts.timestamp,
@@ -2315,51 +2405,71 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
                 fastOutbound?: RateLimiterBucket
                 fastInbound?: RateLimiterBucket
               }> => {
-                const mechanism = Number(await proxy.getLockOrBurnMechanism(chain.chainSelector))
-                let poolAddr
-                switch (mechanism) {
-                  case 1 /* CCTP_V1 */: {
-                    poolAddr = cctpPools['cctpV1Pool']
-                    const contract = new Contract(
-                      poolAddr,
-                      interfaces.TokenPool_v1_6,
-                      this.provider,
-                    ) as unknown as TypedContract<typeof TokenPool_ABI>
-                    return Promise.all([
-                      contract.getCurrentOutboundRateLimiterState(chain.chainSelector),
-                      contract.getCurrentInboundRateLimiterState(chain.chainSelector),
-                    ] as const).then(([outbound, inbound]) => ({ outbound, inbound }))
-                  }
-                  case 3 /* LOCK_RELEASE (v1) */:
-                    poolAddr ??= cctpPools['siloedLockReleasePool']
-                  // fall through
-                  case 2 /* CCTP_V2 */:
-                    poolAddr ??= cctpPools['cctpV2Pool']
-                  // fall through
-                  case 4 /* CCV */: {
-                    poolAddr ??= cctpPools['cctpV2PoolWithCCV']
-                    const contract = new Contract(
-                      poolAddr,
-                      interfaces.TokenPool_v2_0,
-                      this.provider,
-                    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+                const pools = [
+                  undefined,
+                  'cctpV1Pool',
+                  'cctpV2Pool',
+                  'siloedLockReleasePool',
+                  'cctpV2PoolWithCCV',
+                ] as const
+                const mechanism =
+                  pools[Number(await proxy.getLockOrBurnMechanism(chain.chainSelector))]
+                if (!mechanism || !cctpPools[mechanism] || cctpPools[mechanism] === ZeroAddress)
+                  throw new CCIPTokenPoolChainConfigNotFoundError(
+                    tokenPool,
+                    previousPool!,
+                    chain.name,
+                  )
+                const poolAddr = cctpPools[mechanism]
+                const [, version, typeAndVersion] = await this.typeAndVersion(poolAddr)
+                if (version < CCIPVersion.V2_0) {
+                  const contract = new Contract(
+                    poolAddr,
+                    interfaces.TokenPool_v1_6,
+                    this.provider,
+                  ) as unknown as TypedContract<typeof TokenPool_ABI>
+                  return Promise.all([
+                    contract.getCurrentOutboundRateLimiterState(chain.chainSelector),
+                    contract.getCurrentInboundRateLimiterState(chain.chainSelector),
+                    contract.getRouter(),
+                  ] as const).then(([outbound, inbound, router]) => ({
+                    outbound,
+                    inbound,
+                    // populate some more useful fields from previousPool
+                    tokenPool: poolAddr,
+                    typeAndVersion,
+                    router,
+                  }))
+                } else {
+                  const contract = new Contract(
+                    poolAddr,
+                    interfaces.TokenPool_v2_0,
+                    this.provider,
+                  ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
 
-                    return Promise.all([
-                      contract.getCurrentRateLimiterState(chain.chainSelector, false),
-                      contract.getCurrentRateLimiterState(chain.chainSelector, true),
-                    ] as const).then(([[outbound, inbound], [fastOutbound, fastInbound]]) => ({
+                  const filterDynamicConfig = (dynamicConfig: { router: string }) => {
+                    return Object.fromEntries(
+                      Object.entries(resultToObject(dynamicConfig)).filter(
+                        ([, v]) => v && v !== ZeroAddress,
+                      ),
+                    )
+                  }
+                  return Promise.all([
+                    contract.getCurrentRateLimiterState(chain.chainSelector, false),
+                    contract.getCurrentRateLimiterState(chain.chainSelector, true),
+                    contract.getDynamicConfig(),
+                  ] as const).then(
+                    ([[outbound, inbound], [fastOutbound, fastInbound], dynamicConfig]) => ({
                       outbound,
                       inbound,
                       fastOutbound,
                       fastInbound,
-                    }))
-                  }
-                  default:
-                    throw new CCIPTokenPoolChainConfigNotFoundError(
-                      tokenPool,
-                      previousPool!,
-                      chain.name,
-                    )
+                      // populate some more useful fields from previousPool
+                      tokenPool: poolAddr,
+                      typeAndVersion,
+                      ...filterDynamicConfig(dynamicConfig as unknown as { router: string }),
+                    }),
+                  )
                 }
               },
             ),
@@ -2382,28 +2492,27 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     )
 
     return Promise.all([supportedChains, remotePools, remoteTokens, remoteRateLimits]).then(
-      ([supportedChains, remotePools, remoteTokens, remoteRateLimits]) =>
+      ([supportedChains, remotePoolss, remoteTokens, remoteRateLimits]) =>
         Object.fromEntries(
-          supportedChains.map(
-            (chain, i) =>
-              [
-                chain.name,
-                {
-                  remoteToken: remoteTokens[i]!,
-                  remotePools: remotePools[i]!,
-                  outboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]!.outbound),
-                  inboundRateLimiterState: toRateLimiterState(remoteRateLimits[i]!.inbound),
-                  ...(remoteRateLimits[i]!.fastOutbound != null && {
-                    fastOutboundRateLimiterState: toRateLimiterState(
-                      remoteRateLimits[i]!.fastOutbound,
-                    ),
-                    fastInboundRateLimiterState: toRateLimiterState(
-                      remoteRateLimits[i]!.fastInbound!,
-                    ),
-                  }),
-                },
-              ] as const,
-          ),
+          supportedChains.map((chain, i) => {
+            const remoteToken = remoteTokens[i]!,
+              remotePools = remotePoolss[i]!
+            const { outbound, inbound, fastOutbound, fastInbound, ...rest } = remoteRateLimits[i]!
+            return [
+              chain.name,
+              {
+                remoteToken,
+                remotePools,
+                outboundRateLimiterState: toRateLimiterState(outbound),
+                inboundRateLimiterState: toRateLimiterState(inbound),
+                ...(fastOutbound != null && {
+                  fastOutboundRateLimiterState: toRateLimiterState(fastOutbound),
+                  fastInboundRateLimiterState: toRateLimiterState(fastInbound!),
+                }),
+                ...rest,
+              },
+            ] as const
+          }),
         ),
     )
   }

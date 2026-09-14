@@ -8,11 +8,11 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js'
 
+import type { SolanaChain } from '../../../solana/index.ts'
+import { resolveTokenProgram } from '../../../solana/utils.ts'
 import { deriveFeeBillingTokenConfigPda } from './fee-quoter.ts'
 import { deriveExternalTokenPoolsSignerPda, deriveTokenAdminRegistryPda } from './router.ts'
 import { deriveTokenPoolConfigPda, deriveTokenPoolSignerPda } from './token-pool.ts'
-import type { SolanaChain } from '../../../solana/index.ts'
-import { resolveTokenProgram } from '../../../solana/utils.ts'
 
 const CREATE_LOOKUP_TABLE_DISCRIMINATOR = 0
 const CREATE_LOOKUP_TABLE_DATA_LENGTH = 13

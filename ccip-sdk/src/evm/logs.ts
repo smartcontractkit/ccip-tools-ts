@@ -1,23 +1,27 @@
 import { type JsonRpcApiProvider, type Log, isHexString } from 'ethers'
-import type { SetFieldType } from 'type-fest'
+import type { SetFieldType, SetRequired } from 'type-fest'
 
-import type { LogFilter } from '../chain.ts'
+import { type Chain, type LogFilter, withSinceStart } from '../chain.ts'
 import {
   CCIPLogRangeTooLargeError,
   CCIPLogTopicsNotFoundError,
   CCIPLogsRequiresStartError,
   CCIPLogsWatchRequiresFinalityError,
+  CCIPNotImplementedError,
 } from '../errors/index.ts'
 import type { FinalityRequested } from '../extra-args.ts'
 import {
   type LogRangeErrorInfo,
   getEndpointLogRange,
+  getEndpointTopicLimit,
   parseLogRangeError,
+  parseTopicLimitError,
   setEndpointLogRange,
+  setEndpointTopicLimit,
 } from '../fetch.ts'
-import { getSomeBlockNumberBefore, signalToPromise } from '../utils.ts'
-import { getAllFragmentsMatchingEvents } from './const.ts'
 import type { ChainLog, LeanNumbers, Logger, WithLogger } from '../types.ts'
+import { getBlockNumberAtOrAfter, passesTypeAndVersion, signalToPromise } from '../utils.ts'
+import { getAllFragmentsMatchingEvents } from './const.ts'
 
 /** Tags or values which can be used as `endBlock` in {@link EVMChain.getLogs} filter */
 export type EVMEndBlockTag = FinalityRequested | 'latest'
@@ -88,6 +92,79 @@ function shrinkPage(info: LogRangeErrorInfo, span: number): number {
 }
 
 /**
+ * Floor for a learned topic cap. A provider claiming it accepts fewer than this is
+ * either misparsed or unusable for CCIP — the smallest useful filter is one event
+ * name, and a single name can already expand to several topic0s.
+ */
+const MIN_TOPIC_LIMIT = 2
+
+/**
+ * Runs one eth_getLogs, splitting the position-0 topic OR-set when the endpoint caps
+ * how many values it accepts there (Avalanche's public RPC being the known case).
+ *
+ * Sub-queries cover the SAME block range over disjoint topic subsets, so the union is
+ * exactly what one unsplit call would have returned and no dedup is needed — unlike
+ * the Aptos multi-handle merge, which reconciles independent cursors. Results are
+ * re-sorted by (blockNumber, index) because the caller relies on ascending order.
+ *
+ * Splitting only happens once a cap is known: with none learned the filter goes out
+ * whole, exactly as before, so uncapped endpoints keep paying a single request. A cap
+ * is learned from the provider's own error (see parseTopicLimitError), and the failing
+ * call is then retried split — the caller sees a slower first call, not a failure.
+ */
+async function getLogsWithinTopicLimit(
+  provider: JsonRpcApiProvider,
+  filter: BaseFilter & { fromBlock: number; toBlock: number | EVMEndBlockTag | bigint },
+  url: string | undefined,
+  logger: Logger,
+): Promise<Log[]> {
+  // Only position 0 is ever an OR-set here (getEvmLogs collapses every requested
+  // event into it), so nothing else can trip a cap.
+  const topics0 = filter.topics?.[0]
+  const canSplit = Array.isArray(topics0) && topics0.length > 1
+
+  const runSplit = async (limit: number): Promise<Log[]> => {
+    const all = topics0 as string[]
+    const chunks: string[][] = []
+    for (let i = 0; i < all.length; i += limit) chunks.push(all.slice(i, i + limit))
+    logger.debug(
+      `evm getLogs: splitting ${all.length} topics into ${chunks.length} calls (limit=${limit})`,
+      { url },
+    )
+    const results = await Promise.all(
+      chunks.map((chunk) => provider.getLogs({ ...filter, topics: [chunk] })),
+    )
+    return results.flat().sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index)
+  }
+
+  const known = url !== undefined ? getEndpointTopicLimit(url) : undefined
+  if (canSplit && known !== undefined && topics0.length > known) return runSplit(known)
+
+  try {
+    return await provider.getLogs(filter)
+  } catch (err) {
+    const info = parseTopicLimitError(err)
+    // Not a topic-cap error, or nothing to split: let the caller's range handling
+    // (and ultimately the activity's retry) deal with it.
+    if (info === null || !canSplit) throw err
+
+    // Trust a stated cap; otherwise halve until the provider stops complaining.
+    const limit = Math.max(
+      MIN_TOPIC_LIMIT,
+      info.maxTopics ?? Math.floor((known ?? topics0.length) / 2),
+    )
+    if (limit >= topics0.length) throw err // can't subdivide further
+
+    logger.warn(
+      `evm getLogs: endpoint caps topics per call, splitting ${topics0.length} into groups of ${limit}`,
+      { url, err },
+    )
+    if (url !== undefined) setEndpointTopicLimit(url, limit, 'error')
+    return runSplit(limit)
+  }
+}
+
+/**
  * Streams raw logs over `[fromBlock, toBlock]`, paginating by `pageBox.value`
  * and adaptively shrinking the page (down to {@link MIN_LOG_RANGE}) whenever the
  * RPC rejects a chunk as too wide. The learned page is propagated through
@@ -144,7 +221,7 @@ async function* streamLogs(
     const filter_ = { fromBlock: cursor, toBlock: toFilter, ...baseFilter }
     logger.debug('evm getLogs:', filter_)
     try {
-      yield* await provider.getLogs(filter_)
+      yield* await getLogsWithinTopicLimit(provider, filter_, url, logger)
       cursor = chunkTo + 1 // advance only after a chunk succeeds
     } catch (err) {
       // An invalid/inverted range (-32602) — e.g. a round-robin proxy landed on a
@@ -182,6 +259,10 @@ async function* streamLogs(
 /**
  * Implements Chain.getLogs for EVM.
  * Walks logs forward from `startBlock` or `startTime`; if neither is provided, throws.
+ * When both a block floor (`startBlock`, or `since.blockNumber` merged by
+ * withSinceStart) and `startTime` are provided, the scan still starts at the floor
+ * block and `startTime` only skips the early blocks before it (log timestamps are
+ * block timestamps).
  * @param filter - Chain LogFilter
  * @param ctx - Context object containing provider, logger and optional abort signal
  * @returns Async iterator of logs.
@@ -192,12 +273,39 @@ export async function* getEvmLogs(
     provider: JsonRpcApiProvider
     getBlockInfo: (block: EVMEndBlockTag) => Promise<{ number: number; timestamp: number }>
     abort?: AbortSignal
+    /** Only needed when `filter.typeAndVersions` is used; omitted in most tests/callers. */
+    typeAndVersion?: Chain['typeAndVersion']
   } & WithLogger,
 ): AsyncIterableIterator<ChainLog> {
   const { provider, logger = console } = ctx
+  // Narrow-typed stand-in so passesTypeAndVersion always has a callable typeAndVersion;
+  // only reached when filter.typeAndVersions is set but ctx.typeAndVersion was not passed.
+  const typeAndVersionChain = ctx.typeAndVersion
+    ? (ctx as SetRequired<typeof ctx, 'typeAndVersion'>)
+    : {
+        logger,
+        typeAndVersion: () =>
+          Promise.reject(new CCIPNotImplementedError('typeAndVersion in this getLogs context')),
+      }
   // Work on a shallow copy: getEvmLogs resolves page/endBlock/startBlock/topics
   // in place, and must not mutate the caller's filter object.
   filter = { ...filter }
+
+  // A hint addressed to a different contract is not this stream's: ignore it
+  // wholesale — no floors, no index exclusion. An ADDRESSLESS sweep keeps the
+  // hint whole: every log carries an address, so the hint is normally that
+  // sweep's OWN last emitted log — a valid resume cursor for a filter spanning
+  // the whole network.
+  if (
+    filter.address &&
+    filter.since?.address &&
+    filter.since.address.toLowerCase() !== filter.address.toLowerCase()
+  ) {
+    logger.warn('Invalid since.address: ', filter.since.address, '!==', filter.address)
+    filter.since = undefined
+  }
+  // `since.blockNumber`/`blockTimestamp` stand in for (or raise) startBlock/startTime.
+  filter = withSinceStart(filter)
 
   if (filter.startBlock == null && filter.startTime == null) throw new CCIPLogsRequiresStartError()
   if (
@@ -213,7 +321,12 @@ export async function* getEvmLogs(
   ) {
     const topics = new Set(
       filter.topics
-        .filter(isHexString)
+        // NB the arrow is load-bearing: passing `isHexString` directly hands it the
+        // array INDEX as its second `length` argument, so every raw topic0 was
+        // dropped (or, if the caller passed only raw topics, the whole filter was
+        // rejected as "no matching topics"). 32 is the correct length anyway — a
+        // topic is always 32 bytes.
+        .filter((t) => isHexString(t, 32))
         .concat(Object.keys(getAllFragmentsMatchingEvents(filter.topics)) as `0x${string}`[])
         .flat(),
     )
@@ -239,7 +352,7 @@ export async function* getEvmLogs(
   // is just the number), so pass undefined and keep plain numeric chunking.
   const endIsDynamic = typeof endTag === 'string' || Number(endTag) < 0
   const { number: endBlock } = (await provider.getBlock(endTag))!
-  filter.startBlock ??= await getSomeBlockNumberBefore(
+  filter.startBlock ??= await getBlockNumberAtOrAfter(
     async (block: number) => (await ctx.getBlockInfo(block)).timestamp,
     endBlock,
     Number(filter.startTime!),
@@ -258,7 +371,27 @@ export async function* getEvmLogs(
   async function* emit(logs: AsyncIterable<Log> | Iterable<Log>): AsyncGenerator<ChainLog> {
     for await (const log of logs) {
       if (log.blockNumber > latestLogBlockNumber) latestLogBlockNumber = log.blockNumber
-      yield { ...log, blockTimestamp: (await ctx.getBlockInfo(log.blockNumber)).timestamp }
+      // Resume-cursor exclusivity: the hinted block is fetched whole, and its
+      // logs at or before the hinted (blockNumber, index) were emitted by the
+      // previous run of this same filter — addressless or not — so they are
+      // skipped, while later same-block logs (and other contracts' logs past
+      // the cursor) still flow.
+      if (
+        filter.since?.blockNumber &&
+        filter.since.index != null &&
+        log.blockNumber <= filter.since.blockNumber &&
+        log.index <= filter.since.index
+      )
+        continue // at/before the resume point within its block
+      const blockTimestamp = (await ctx.getBlockInfo(log.blockNumber)).timestamp
+      // When the block floor came from startBlock/since.blockNumber, startTime's only
+      // remaining job is to skip the early blocks before it. (When startTime alone
+      // derived the floor, getBlockNumberAtOrAfter already guaranteed this.)
+      if (filter.startTime != null && blockTimestamp < Number(filter.startTime)) continue
+      if (!(await passesTypeAndVersion(typeAndVersionChain, log.address, filter.typeAndVersions)))
+        continue
+      // oxlint-disable-next-line typescript/no-misused-spread
+      yield { ...log, blockTimestamp }
     }
   }
 

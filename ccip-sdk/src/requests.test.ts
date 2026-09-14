@@ -8,7 +8,6 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 import type { Chain, LogFilter } from './chain.ts'
 import { CCIPAddressInvalidError, CCIPArgumentInvalidError } from './errors/specialized.ts'
 import type { GenericExtraArgsV3 } from './extra-args.ts'
-import { ChainFamily, EVMChain, networkInfo } from './index.ts'
 import {
   buildMessageForDest,
   decodeMessage,
@@ -29,6 +28,7 @@ import {
   CCIPVersion,
 } from './types.ts'
 import { jsonStringify } from './utils.ts'
+import { ChainFamily, EVMChain, networkInfo } from './index.ts'
 
 let rampAddress: string
 
@@ -1492,7 +1492,11 @@ describe('decodeMessage', () => {
 
         const result = SuiChain.buildMessageForDest(message)
 
-        assert.deepEqual(result.extraArgs.receiverObjectIds, accounts)
+        // addresses come back in canonical short form (leading zero nibbles stripped)
+        assert.deepEqual(result.extraArgs.receiverObjectIds, [
+          '0x1111111111111111111111111111111111111111111111111111111111111',
+          '0x2222222222222222222222222222222222222222222222222222222222222',
+        ])
       })
 
       it('should use receiverObjectIds directly when provided', () => {
@@ -1507,7 +1511,9 @@ describe('decodeMessage', () => {
 
         const result = SuiChain.buildMessageForDest(message)
 
-        assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
+        assert.deepEqual(result.extraArgs.receiverObjectIds, [
+          '0x3333333333333333333333333333333333333333333333333333333333333',
+        ])
       })
 
       it('should prefer receiverObjectIds over accounts', () => {
@@ -1524,7 +1530,9 @@ describe('decodeMessage', () => {
 
         const result = SuiChain.buildMessageForDest(message)
 
-        assert.deepEqual(result.extraArgs.receiverObjectIds, objectIds)
+        assert.deepEqual(result.extraArgs.receiverObjectIds, [
+          '0x1111111111111111111111111111111111111111111111111111111111111',
+        ])
       })
 
       it('should handle empty receiverObjectIds array', () => {

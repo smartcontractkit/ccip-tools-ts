@@ -2,19 +2,21 @@ import assert from 'node:assert/strict'
 import { before, describe, it } from 'node:test'
 
 import '../index.ts'
-
-import { CCIPAPIClient } from './index.ts'
+import { useResource } from '../../../scripts/useResource.ts'
 import {
   CCIPLaneNotFoundError,
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
 } from '../errors/index.ts'
 import { MessageStatus } from '../types.ts'
+import { CCIPAPIClient } from './index.ts'
+
+// The suite only talks to the staging CCIP API — the selectors below are data, not endpoints.
+await useResource(['api'])
 
 // Test data from CLI E2E tests (show.test.ts)
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const FUJI_SELECTOR = 14767482510784806043n
-const SOLANA_SELECTOR = 16423721717087811551n
 const KNOWN_MESSAGE_ID = '0xdfb374fef50749b0bc86784e097ecc9547c5145ddfb8f9d96f1da3024abfcd04'
 const KNOWN_TX_HASH = '0x25e63fa89abb77acd353edc24ed3ab5880a8d206c8229e6f61dc00d399f447b3'
 const STAGING_API_URL = 'https://api.ccip.cldev.cloud'
@@ -31,13 +33,16 @@ describe(
     let api: CCIPAPIClient
 
     before(() => {
-      // Uses staging API by default (api.ccip.cldev.cloud)
-      api = CCIPAPIClient.fromUrl()
+      // Pin staging (api.ccip.cldev.cloud): the fromUrl() default is prod
+      // (api.ccip.chain.link), which can lack data for low-traffic testnet
+      // lanes (e.g. getLaneLatency -> INSUFFICIENT_DATA there, but not here).
+      api = CCIPAPIClient.fromUrl(STAGING_API_URL)
     })
 
     describe('getLaneLatency', () => {
       it('should return totalMs for valid testnet lane', { timeout: 30000 }, async () => {
-        const result = await api.getLaneLatency(SEPOLIA_SELECTOR, SOLANA_SELECTOR)
+        // default window (no numOfBlocks); staging serves this lane, prod may not
+        const result = await api.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR)
 
         assert.equal(typeof result.totalMs, 'number')
         assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
@@ -48,7 +53,7 @@ describe(
         { timeout: 30000 },
         async () => {
           const staging = CCIPAPIClient.fromUrl(STAGING_API_URL)
-          const result = await staging.getLaneLatency(SEPOLIA_SELECTOR, SOLANA_SELECTOR, 10)
+          const result = await staging.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR, 10)
 
           assert.equal(typeof result.totalMs, 'number')
           assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)

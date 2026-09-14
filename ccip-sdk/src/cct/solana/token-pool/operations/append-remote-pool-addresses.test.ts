@@ -7,12 +7,12 @@ import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { SolanaTokenManager } from '../../index.ts'
 import {
   deriveTokenPoolChainConfigPda,
   deriveTokenPoolConfigPda,
   resolveTokenPoolProgram,
 } from '../../programs/token-pool.ts'
+import { AppendRemotePoolAddresses } from './append-remote-pool-addresses.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
@@ -33,8 +33,7 @@ function chain(): SolanaChain {
 }
 
 function submitChain(): SolanaChain {
-  return {
-    ...chain(),
+  return Object.assign(chain(), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -44,11 +43,11 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-  } as unknown as SolanaChain
+  })
 }
 
 function generate(opts = {}) {
-  return SolanaTokenManager.fromChain(chain()).generateUnsignedAppendRemotePoolAddresses({
+  return new AppendRemotePoolAddresses().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
@@ -140,7 +139,7 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await SolanaTokenManager.fromChain(submitChain()).appendRemotePoolAddresses({
+      const result = await new AppendRemotePoolAddresses().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
@@ -154,7 +153,7 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
     it('rejects a non-wallet authority for signed appending', async () => {
       await assert.rejects(
         () =>
-          SolanaTokenManager.fromChain(chain()).appendRemotePoolAddresses({
+          new AppendRemotePoolAddresses().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
             authority: AUTHORITY,
