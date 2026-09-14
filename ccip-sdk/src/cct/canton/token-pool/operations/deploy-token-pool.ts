@@ -43,7 +43,12 @@ import {
   type CantonGenerateParams,
   CantonOperation,
 } from '../../operation.ts'
-import { TAR_TEMPLATE_ID, resolveTar } from '../../token-admin-registry/shared.ts'
+import {
+  TAR_TEMPLATE_ID,
+  TOKEN_CONFIG_TEMPLATE_ID,
+  deriveTokenConfigInstanceAddress,
+  resolveTar,
+} from '../../token-admin-registry/shared.ts'
 import type { CantonDeployResult } from '../../types.ts'
 import { parseInstrumentId, parsePartyId } from '../../validate.ts'
 import {
@@ -79,7 +84,13 @@ export interface DeployTokenPoolParams {
   ccipOwner: string
   /** Instrument to bridge (`{ admin, id }` or `"admin::1220…::id"`). */
   instrumentId: { admin: string; id: string } | string
-  /** Token decimals. */
+  /**
+   * The token's decimals ON CANTON (10 for Token Standard instruments) — NOT
+   * the remote chain's decimals. The pool converts between this and the remote
+   * side's decimals (carried in the message). Getting this wrong silently
+   * mis-scales every transfer (e.g. 18 here for a 10-decimal Canton token
+   * mints 10^8× the intended amount on inbound).
+   */
   decimals: number
   /**
    * Observer parties for EDS auto-detection. Mandatory — the on-ledger
@@ -110,6 +121,16 @@ export interface DeployTokenPoolParams {
    * `ProposeAdministrator` call to succeed (its `isOwner || isAdmin` check).
    */
   admin: string
+  /**
+   * Existing `TokenConfig` contract ID, for the third-party-admin flow:
+   * the instrument's admin (or ccipOwner) proposed `admin` out of band, and
+   * `Initialize` accepts the role on the existing config instead of creating
+   * one. Resolve the current CID via `getTokenAdminRegistry` (it rotates on
+   * every write). NOTE: on-ledger, `ProposeAdministrator` rejects an existing
+   * config that already has an admin — so this cannot be used to re-deploy a
+   * pool for an instrument that already completed admin setup.
+   */
+  existingTokenConfigCid?: string
   /** Remote-chain lanes to wire up atomically with the pool (may be empty). */
   lanes: LaneDeploySpec[]
 }
@@ -234,9 +255,53 @@ export class DeployTokenPool extends CantonOperation<
     // on the sender's participant.
     const { tarContract } = await resolveTar(chain, p.sender, p.tokenAdminRegistryInstanceAddress)
 
+    const disclosedContracts = [
+      {
+        templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
+        contractId: tarContract.contractId,
+        createdEventBlob: tarContract.createdEventBlob,
+        synchronizerId: tarContract.synchronizerId,
+      },
+    ]
+
+    // Third-party-admin flow: the existing TokenConfig must be disclosed too —
+    // Initialize's internal ProposeAdministrator fetches it by CID, and the
+    // sender is not a signatory on it.
+    if (p.existingTokenConfigCid) {
+      const tokenConfigAddress = deriveTokenConfigInstanceAddress(p.instrumentId, p.ccipOwner)
+      const tokenConfig = await chain.findActiveContractByInstanceAddress(
+        TOKEN_CONFIG_TEMPLATE_ID,
+        tokenConfigAddress,
+        [p.sender],
+      )
+      if (!tokenConfig) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'existingTokenConfigCid',
+          `no active TokenConfig found at the derived address ${tokenConfigAddress} — ` +
+            'create one first via the out-of-band propose flow',
+        )
+      }
+      if (tokenConfig.contractId !== p.existingTokenConfigCid) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'existingTokenConfigCid',
+          `CID ${p.existingTokenConfigCid} does not match the current TokenConfig ` +
+            `${tokenConfig.contractId} (it rotates on every write — re-read it via getTokenAdminRegistry)`,
+        )
+      }
+      disclosedContracts.push({
+        templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
+        contractId: tokenConfig.contractId,
+        createdEventBlob: tokenConfig.createdEventBlob,
+        synchronizerId: tokenConfig.synchronizerId,
+      })
+    }
+
     const createArguments = buildPoolCreateArguments({ ...p, deps })
     const choiceArgument = buildInitializeChoiceArgument({
       tokenAdminRegistryCid: tarContract.contractId,
+      existingTokenConfigCid: p.existingTokenConfigCid,
       admin: p.admin,
       lanes: p.lanes ?? [],
     })
@@ -256,14 +321,7 @@ export class DeployTokenPool extends CantonOperation<
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
       actAs: [...new Set([p.poolOwner, p.admin])],
-      disclosedContracts: [
-        {
-          templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
-          contractId: tarContract.contractId,
-          createdEventBlob: tarContract.createdEventBlob,
-          synchronizerId: tarContract.synchronizerId,
-        },
-      ],
+      disclosedContracts,
     }
   }
 }

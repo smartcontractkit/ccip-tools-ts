@@ -446,12 +446,25 @@ function encodeRateLimiterDeploySpec(s: RateLimiterDeploySpec): RateLimiterDeplo
   }
 }
 
+/**
+ * Normalize an address for on-ledger storage in a pool's remote chain config:
+ * strip an optional `0x` prefix and left-pad 20-byte (EVM) addresses to 32
+ * bytes. Canonical form is 32-byte-padded bare hex: inbound executes compare
+ * the stored value verbatim against the message's 32-byte-padded
+ * sourcePoolAddress/sourceTokenAddress, while outbound sends strip the padding
+ * again for sub-32-byte destination chains (validateDestChainAddress).
+ */
+export function normalizeRemoteAddress(s: string): string {
+  const bare = s.startsWith('0x') ? s.slice(2) : s
+  return bare.length === 40 ? bare.padStart(64, '0') : bare
+}
+
 /** Encode a {@link LaneDeploySpec} for the `Initialize` choice argument. */
 export function encodeLaneDeploySpec(l: LaneDeploySpec): LaneDeploySpecArg {
   return {
     remoteChainSelector: l.remoteChainSelector.toString(),
-    remotePools: l.remotePools,
-    remoteTokenAddress: l.remoteTokenAddress,
+    remotePools: l.remotePools.map(normalizeRemoteAddress),
+    remoteTokenAddress: normalizeRemoteAddress(l.remoteTokenAddress),
     inboundCCVs: (l.inboundCCVs ?? []).map(rawInstanceAddress),
     outboundCCVs: (l.outboundCCVs ?? []).map(rawInstanceAddress),
     finalityConfig: encodeFinalityConfig(l.finalityConfig ?? { type: 'WaitForFinality' }),
