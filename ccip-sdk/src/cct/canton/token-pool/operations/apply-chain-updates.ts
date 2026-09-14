@@ -25,6 +25,7 @@ import {
   LOCK_RELEASE_POOL_TEMPLATE_ID,
   buildPoolExercise,
   resolvePoolRef,
+  normalizeRemoteAddress,
 } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
@@ -155,8 +156,8 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),
       chainsToAdd: (p.chainsToAdd ?? []).map((c) => ({
         remoteChainSelector: c.remoteChainSelector.toString(),
-        remotePools: c.remotePools,
-        remoteTokenAddress: c.remoteTokenAddress,
+        remotePools: c.remotePools.map(normalizeRemoteAddress),
+        remoteTokenAddress: normalizeRemoteAddress(c.remoteTokenAddress),
         inboundCCVs: (c.inboundCCVs ?? []).map(rawInstanceAddress),
         outboundCCVs: (c.outboundCCVs ?? []).map(rawInstanceAddress),
         finalityConfig: encodeFinalityConfig(c.finalityConfig ?? { type: 'WaitForFinality' }),

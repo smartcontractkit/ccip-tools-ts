@@ -161,6 +161,7 @@ interface PoolDeployConfig {
   gatewayUrl?: string
   gatewayAccessToken?: string
   instrumentId?: string
+  /** The token's decimals ON CANTON (10 for Token Standard instruments) — NOT the remote chain's. */
   decimals?: number
   poolType?: 'burnMint' | 'lockRelease'
   poolInstanceId?: string
@@ -168,8 +169,14 @@ interface PoolDeployConfig {
   remoteTokenAddress?: string
   /** Comma-separated remote EVM pool contract address(es) (NOT the token). Required. */
   remotePools?: string
+  /** Rate-limit capacity in HUMAN token units (scaled by 10^decimals at deploy). */
   rlCapacity?: string
+  /** Refill rate in HUMAN tokens per second (scaled by 10^decimals at deploy). */
   rlRate?: string
+  /** Comma-separated CCV raw instance addresses ("instanceId@party") mandated for the lane
+   *  (inbound + outbound). Required for token-only transfers: the on-ledger execute-time CCV
+   *  set ignores the receiver's own requiredCCVs and falls back to lane defaults if unset. */
+  ccv?: string
   /** Comma-separated observer parties for EDS auto-detection. Defaults to `[ccipOwner]`. */
   observers?: string
   deps?: Partial<PoolFactoryDeps>
@@ -296,8 +303,16 @@ async function main(): Promise<void> {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const rlCapacity = BigInt(setting('RL_CAPACITY', 'rlCapacity') ?? '1000000')
-  const rlRate = BigInt(setting('RL_RATE', 'rlRate') ?? '100')
+  // Rate-limit values are scaled to the pool's decimals on-ledger (see
+  // RateLimiterV2: "Must be scaled according to the associated token pool's
+  // decimals setting") — the config takes human units, scaled here.
+  const rlScale = 10n ** BigInt(decimals)
+  const rlCapacity = BigInt(setting('RL_CAPACITY', 'rlCapacity') ?? '1000000') * rlScale
+  const rlRate = BigInt(setting('RL_RATE', 'rlRate') ?? '100') * rlScale
+  const ccvs = (setting('CCV', 'ccv') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 
   // Derived addresses (offline, deterministic).
   const tokenConfigAddress = deriveTokenConfigInstanceAddress(instrumentId, ccipOwner)
@@ -421,9 +436,19 @@ async function main(): Promise<void> {
 
   async function runDeployPool(): Promise<void> {
     const label = `deploy: ${poolType} pool (atomic Initialize — TAR registration + lane + 3 rate limiters in one tx)`
-    if (process.env['SKIP_IF_CONFIRMED'] === '1' && (await poolExists())) {
-      console.error('── skip deploy-pool (already confirmed)')
-      return
+    if (await poolExists()) {
+      if (process.env['SKIP_IF_CONFIRMED'] === '1') {
+        console.error('── skip deploy-pool (already confirmed)')
+        return
+      }
+      // Resubmitting a fresh create+Initialize against an existing pool is a
+      // false-positive trap: the confirm check can't distinguish "this tx
+      // succeeded" from "a pool already existed" (a rolled-back duplicate
+      // registration looks identical).
+      throw new Error(
+        `pool ${poolInstanceAddress} already exists — refusing to resubmit. ` +
+          'Use a new POOL_INSTANCE_ID for a fresh deploy, or SKIP_IF_CONFIRMED=1 to no-op.',
+      )
     }
     const unsigned = await manager.generateUnsignedDeployTokenPool({
       poolType,
@@ -441,6 +466,8 @@ async function main(): Promise<void> {
           remoteChainSelector,
           remotePools,
           remoteTokenAddress,
+          inboundCCVs: ccvs,
+          outboundCCVs: ccvs,
           inbound: {
             instanceId: rlInInstanceId,
             isEnabled: true,
