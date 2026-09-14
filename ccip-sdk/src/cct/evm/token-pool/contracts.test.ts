@@ -13,6 +13,7 @@ import {
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
+  assertLockReleasePool,
   getTokenPoolFamily,
   getTokenPoolInterface,
   isLockReleaseTokenPoolType,
@@ -222,6 +223,84 @@ describe('TOKEN_POOL_INTERFACES', () => {
     assert.ok(
       !TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1].hasFunction('getPreviousPool'),
     )
+  })
+})
+
+/** The functions the LockRelease liquidity + rebalancer ops encode, checked against the ABIs. */
+const LIQUIDITY_FUNCTIONS = [
+  'provideLiquidity',
+  'withdrawLiquidity',
+  'transferLiquidity',
+  'setRebalancer',
+  'getRebalancer',
+] as const
+
+describe('LockRelease liquidity surface', () => {
+  /** The versions the liquidity ops floor-match a single 1.5.0 encoder across. */
+  const V1_X = [TokenPoolVersion.V1_5_0, TokenPoolVersion.V1_5_1, TokenPoolVersion.V1_6_1] as const
+
+  it('declares every liquidity function with an identical signature at v1.5.0–v1.6.1', () => {
+    // this parity is what licenses one encoder entry at 1.5.0 instead of a per-version table
+    for (const fn of LIQUIDITY_FUNCTIONS) {
+      const [first, ...rest] = V1_X.map((version) =>
+        TOKEN_POOL_INTERFACES.LockRelease[version].getFunction(fn)!.format('sighash'),
+      )
+      for (const sighash of rest) assert.equal(sighash, first, `${fn} diverged across v1.x`)
+    }
+  })
+
+  it('drops every liquidity function at v2.0.0, which escrows through a lockbox', () => {
+    for (const fn of LIQUIDITY_FUNCTIONS)
+      assert.equal(
+        TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0].hasFunction(fn),
+        false,
+        `${fn} unexpectedly present at 2.0.0`,
+      )
+  })
+
+  it('declares no liquidity function on the BurnMint family at any version', () => {
+    for (const version of Object.values(TokenPoolVersion))
+      for (const fn of LIQUIDITY_FUNCTIONS)
+        assert.equal(
+          TOKEN_POOL_INTERFACES.BurnMint[version].hasFunction(fn),
+          false,
+          `${fn} unexpectedly present on BurnMint ${version}`,
+        )
+  })
+
+  it('declares canAcceptLiquidity only at v1.5.0 and v1.5.1', () => {
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_0].hasFunction('canAcceptLiquidity'),
+      true,
+    )
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_1].hasFunction('canAcceptLiquidity'),
+      true,
+    )
+    // 1.6.1 dropped the immutable flag and always accepts deposits
+    assert.equal(
+      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_6_1].hasFunction('canAcceptLiquidity'),
+      false,
+    )
+  })
+})
+
+describe('assertLockReleasePool', () => {
+  it('passes every lock-release type through', () => {
+    for (const type of TOKEN_POOL_TYPES.filter(isLockReleaseTokenPoolType))
+      assert.doesNotThrow(() => assertLockReleasePool('provideLiquidity', ADDR, type))
+  })
+
+  it('rejects every burn-mint type, naming the operation', () => {
+    for (const type of TOKEN_POOL_TYPES.filter((t) => !isLockReleaseTokenPoolType(t)))
+      assert.throws(
+        () => assertLockReleasePool('provideLiquidity', ADDR, type),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === ADDR &&
+          err.context.actual === type &&
+          err.context.operation === 'provideLiquidity',
+      )
   })
 })
 

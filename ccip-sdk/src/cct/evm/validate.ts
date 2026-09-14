@@ -108,6 +108,18 @@ export function validateUint256(operation: string, param: string, value: unknown
 }
 
 /**
+ * Asserts `value` is a `bigint` in `[1, 2^256 − 1]` — a Solidity `uint256` that must move
+ * something. The amount guard for the liquidity ops, whose zero case is either a revert
+ * (`LiquidityAmountCannotBeZero` on a siloed pool) or a transfer of nothing. Mirrors Solana's
+ * `validateBigInt(..., 1n, U64_MAX)`.
+ * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
+ */
+export function validatePositiveUint256(operation: string, param: string, value: unknown): void {
+  validateUint256(operation, param, value)
+  if (value === 0n) throw new CCTParamsInvalidError(operation, param, 'must be greater than zero')
+}
+
+/**
  * Asserts `value` is a `bigint` in `[0, 2^128 − 1]` (a Solidity `uint128`), narrowing it to
  * `bigint` for callers.
  * @throws {@link CCTParamsInvalidError} if `value` is not such a bigint
