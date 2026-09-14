@@ -388,7 +388,7 @@ export class ApplyChainUpdates extends SolanaOperation<
       } catch (error) {
         if (CCIPError.isCCIPError(error)) {
           Object.assign(error.context, {
-            committedHashes: hashes,
+            committedBatchHashes: hashes,
             committedChainSelectors: chainSelectors,
             failedBatchIndex,
             totalBatches: batches.length,
