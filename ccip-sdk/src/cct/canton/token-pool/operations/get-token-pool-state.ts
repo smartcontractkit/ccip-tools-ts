@@ -10,14 +10,14 @@
  * @packageDocumentation
  */
 
-import type { CantonChain } from '../../../../canton/index.ts'
 import {
+  type CantonChain,
   decodeDamlRecord,
   extractFieldValue,
   extractRecordField,
 } from '../../../../canton/index.ts'
-import { CantonQuery } from '../../query.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CantonQuery } from '../../query.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
 
 /** A remote-chain config entry on the pool. */
@@ -28,6 +28,16 @@ export interface PoolRemoteChainConfig {
   remotePools: string[]
   /** Remote token address (encoded instrument ID). */
   remoteTokenAddress: string
+  /** Mandated inbound CCV raw instance addresses (`instanceId@party`). */
+  inboundCCVs: string[]
+  /** Mandated outbound CCV raw instance addresses. */
+  outboundCCVs: string[]
+  /** Inbound (default-finality) rate limiter raw instance address. */
+  inboundRateLimiter: string
+  /** Inbound custom-finality rate limiter raw instance address. */
+  inboundCustomBlockConfirmationsRateLimiter: string
+  /** Outbound rate limiter raw instance address. */
+  outboundRateLimiter: string
 }
 
 /** Result of `getTokenPoolState`: the pool's config. */
@@ -235,7 +245,27 @@ function decodeRemoteChainConfigRecord(
     remoteChainSelector: key,
     remotePools: decodeStringList(cfg['remotePools']),
     remoteTokenAddress: decodeString(cfg['remoteTokenAddress']),
+    inboundCCVs: decodeRawAddressList(cfg['inboundCCVs']),
+    outboundCCVs: decodeRawAddressList(cfg['outboundCCVs']),
+    inboundRateLimiter: decodeRawAddress(cfg['inboundRateLimiter']),
+    inboundCustomBlockConfirmationsRateLimiter: decodeRawAddress(
+      cfg['inboundCustomBlockConfirmationsRateLimiter'],
+    ),
+    outboundRateLimiter: decodeRawAddress(cfg['outboundRateLimiter']),
   }
+}
+
+/** Decode a `RawInstanceAddress` newtype (`{unpack: string}`, possibly Sum-wrapped in gRPC) to its raw string. */
+function decodeRawAddress(value: unknown): string {
+  const fields = decodeDamlRecord(value)
+  const unpack = extractFieldValue(fields['unpack'])
+  return typeof unpack === 'string' ? unpack : ''
+}
+
+/** Decode a `[RawInstanceAddress]` list to raw strings. */
+function decodeRawAddressList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return (value as unknown[]).map(decodeRawAddress).filter((s) => s.length > 0)
 }
 
 /**

@@ -13,8 +13,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ChainFamily } from '../../../../networks.ts'
 import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID } from '../shared.ts'
 
@@ -193,11 +193,21 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       remoteChainSelector: '5009297550715157269',
       remotePools: ['0xpool-evm-1'],
       remoteTokenAddress: '0xtoken-evm-1',
+      inboundCCVs: [],
+      outboundCCVs: [],
+      inboundRateLimiter: '',
+      inboundCustomBlockConfirmationsRateLimiter: '',
+      outboundRateLimiter: '',
     })
     assert.deepEqual(result.remoteChainConfigs[1], {
       remoteChainSelector: '16015286601757825753',
       remotePools: ['0xpool-evm-2', '0xpool-evm-2b'],
       remoteTokenAddress: '0xtoken-evm-2',
+      inboundCCVs: [],
+      outboundCCVs: [],
+      inboundRateLimiter: '',
+      inboundCustomBlockConfirmationsRateLimiter: '',
+      outboundRateLimiter: '',
     })
   })
 
@@ -233,6 +243,12 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       remoteChainSelector: '16015286601757825753',
       remotePools: ['0x0000000000000000000000000000000000000001'],
       remoteTokenAddress: '0x0000000000000000000000000000000000000001',
+      // New fields (CCVs + limiter references) decode empty when absent.
+      inboundCCVs: [],
+      outboundCCVs: [],
+      inboundRateLimiter: '',
+      inboundCustomBlockConfirmationsRateLimiter: '',
+      outboundRateLimiter: '',
     })
   })
 
