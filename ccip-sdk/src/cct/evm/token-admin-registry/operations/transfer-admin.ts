@@ -18,17 +18,21 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
-import { validateAddress } from '../../validate.ts'
+import {
+  type EVMExecuteParams,
+  EVMOperation,
+  callTx,
+  withUnmetPrecondition,
+} from '../../operation.ts'
+import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
 /**
  * Parameters for {@link TransferAdmin}.
  * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
- * for {@link TransferAdmin.generate}: the pre-tx check below has nothing to compare
- * `administrator` against without it, so an omitted `sender` is rejected in
+ * for {@link TransferAdmin.generate}: the current-administrator check below has nothing to
+ * compare against without it, so an omitted `sender` is rejected in
  * {@link TransferAdmin.parse}. {@link TransferAdmin.execute} relaxes this — it defaults
  * `sender` to the signing wallet's own address, the only address that can satisfy the
  * current-administrator check for a signed submission (see {@link TransferAdmin.execute}).
@@ -48,10 +52,10 @@ export type TransferAdminParams = {
   address: string
   /**
    * Current registry administrator. Required for {@link TransferAdmin.generate}
-   * (unsigned/offline flows) — `buildUnsigned` must read the registry and confirm the caller is
-   * the current administrator *before* encoding a tx, so it needs to know who that caller is up
-   * front. Optional for {@link TransferAdmin.execute}, which defaults it to the wallet's address
-   * — see the remarks above.
+   * (unsigned/offline flows) — `buildUnsigned` reads the registry and checks the caller against
+   * the current administrator, so it needs to know who that caller is. Optional for
+   * {@link TransferAdmin.execute}, which defaults it to the wallet's address — see the remarks
+   * above.
    */
   sender?: string
 }
@@ -77,12 +81,18 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     validateAddress(this.name, 'newAdmin', p.newAdmin)
     validateAddress(this.name, 'address', p.address)
     validateAddress(this.name, 'sender', p.sender)
+    // Non-zero as well as well-formed, and checked here rather than left to the registry
+    // comparison in `buildUnsigned`: that comparison no longer throws, and it was the only thing
+    // rejecting a zero `sender` — which `isAddress` accepts in its ICAP spelling, and which no
+    // key can sign. (`newAdmin` stays zero-permitting: that spelling cancels a pending transfer.)
+    validateNonZeroAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
-   * Reads the registry directly, confirms `sender` is the current administrator, then builds
-   * `transferAdminRole` calldata against the TAR resolved from `address`.
+   * Builds `transferAdminRole` calldata against the TAR resolved from `address`, checking the
+   * registry's own state — is the token registered, and is `sender` its current administrator —
+   * and recording anything unmet as an {@link UnmetPrecondition} on the returned tx.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -97,13 +107,25 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
 
     const pending = pendingAdministrator === ZeroAddress ? undefined : pendingAdministrator
 
+    // TAR.transferAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
+    const data = getTokenAdminRegistryInterface().encodeFunctionData('transferAdminRole', [
+      p.tokenAddress,
+      p.newAdmin,
+    ])
+    chain.logger.debug(`${this.name}: registry = ${to}, token = ${p.tokenAddress}`)
+    const tx = callTx(to, data)
+
+    // Recorded rather than thrown — see `accept-admin.ts` for the reasoning. The calldata is
+    // `transferAdminRole(token, newAdmin)` whoever administers the token today; a plan that
+    // registers and accepts first is precisely how an unregistered token stops being one.
+    //
     // Registration state is checked BEFORE comparing against `sender`, and deliberately so: an
-    // unregistered token has a zero `administrator`, so an equality-first check would let
-    // `sender: ZeroAddress` (which validateAddress permits) compare equal to it and build a
-    // `transferAdminRole` tx for a token that has no admin to transfer.
+    // unregistered token has a zero `administrator`, so an equality-first check would blame the
+    // caller for not being an administrator that does not exist, instead of naming the actual
+    // problem — the token was never registered.
     if (administrator === ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
+      return withUnmetPrecondition(
+        tx,
         'sender',
         pending
           ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
@@ -111,20 +133,13 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
       )
     }
     if (administrator !== p.sender) {
-      throw new CCTParamsInvalidError(
-        this.name,
+      return withUnmetPrecondition(
+        tx,
         'sender',
         `must be the current token administrator (${administrator})`,
       )
     }
-
-    // TAR.transferAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
-    const data = getTokenAdminRegistryInterface().encodeFunctionData('transferAdminRole', [
-      p.tokenAddress,
-      p.newAdmin,
-    ])
-    chain.logger.debug(`${this.name}: registry = ${to}, token = ${p.tokenAddress}`)
-    return callTx(to, data)
+    return tx
   }
 
   /**
@@ -133,8 +148,9 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
    * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
    * rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or
-   * if any other param is invalid (see {@link buildUnsigned})
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, if
+   * any other param is invalid, or if the registry does not currently satisfy a requirement
+   * {@link buildUnsigned} recorded
    */
   override async execute(
     chain: EVMChain,
