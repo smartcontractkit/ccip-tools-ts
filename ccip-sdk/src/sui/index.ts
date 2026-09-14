@@ -372,8 +372,19 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Create a temporary client to detect the network (network name unknown yet)
     const tempClient = new SuiJsonRpcClient({ transport, network: url })
 
-    // Get chain identifier from the client and map to network info format
-    const rawChainId = await tempClient.getChainIdentifier().catch(() => null)
+    // Detect the chain identifier. The URL keyword (mainnet/testnet/devnet) is
+    // checked first — it avoids an RPC probe that some keyed gateways (e.g.
+    // BlockVision's `sui-testnet.blockvision.org/v1/<key>`) don't support
+    // (`sui_getCheckpoint` returns 404 there). When the URL carries no
+    // recognizable name, fall back to the SDK's checkpoint-based derivation.
+    const urlNetwork = url.includes('mainnet')
+      ? '35834a8a'
+      : url.includes('testnet')
+        ? '4c78adac'
+        : url.includes('devnet')
+          ? 'b0c08dea'
+          : null
+    const rawChainId = urlNetwork ?? (await tempClient.getChainIdentifier().catch(() => null))
     if (rawChainId === null) {
       throw new CCIPDataFormatUnsupportedError(
         `Unable to fetch chain identifier from URL: ${redactEndpointUrl(url)}`,
