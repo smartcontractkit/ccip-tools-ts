@@ -15,6 +15,7 @@ import {
 } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 
+import { CCIPPartialTransactionSubmissionError } from '../errors/index.ts'
 import type { Wallet } from './types.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { compileV1Message, serializeMessageV1, serializeV1Transaction } from './v1.ts'
@@ -365,6 +366,105 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal(signature, 'v0-signature')
       assert.equal(captured.sentWire, undefined, 'no raw v1 transaction was sent')
       assert.equal((captured.sentV0 as VersionedTransaction).message.version, 0)
+    })
+
+    it('simulateAndSendTxs does not split a compute-budget failure in atomic mode', async () => {
+      const { connection } = mockConnection()
+      let simulations = 0
+      ;(
+        connection as unknown as { simulateTransaction: () => Promise<unknown> }
+      ).simulateTransaction = async () => {
+        simulations++
+        return {
+          value: { err: { InstructionError: [0, 'ComputationalBudgetExceeded'] }, logs: [] },
+        }
+      }
+
+      await assert.rejects(
+        simulateAndSendTxs(
+          { connection },
+          wallet,
+          {
+            instructions: [...SMALL, ...SMALL],
+            mainIndex: 0,
+          },
+          undefined,
+          'atomic',
+        ),
+      )
+      assert.equal(simulations, 1)
+    })
+
+    it('simulateAndSendTxs rethrows a program error in resource mode', async () => {
+      const { connection } = mockConnection()
+      let simulations = 0
+      ;(
+        connection as unknown as { simulateTransaction: () => Promise<unknown> }
+      ).simulateTransaction = async () => {
+        simulations++
+        return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+      }
+
+      await assert.rejects(
+        simulateAndSendTxs(
+          { connection },
+          wallet,
+          { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+          undefined,
+          'resource',
+        ),
+      )
+      assert.equal(simulations, 1)
+    })
+
+    it('simulateAndSendTxs preserves program-error splitting in partial mode', async () => {
+      const { connection } = mockConnection()
+      let simulations = 0
+      ;(
+        connection as unknown as { simulateTransaction: () => Promise<unknown> }
+      ).simulateTransaction = async () => {
+        if (++simulations === 1) {
+          return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+        }
+        return { value: { logs: [], unitsConsumed: 5 } }
+      }
+
+      await simulateAndSendTxs({ connection }, wallet, {
+        instructions: [...SMALL, ...SMALL],
+        mainIndex: 0,
+      })
+      assert.equal(simulations, 3)
+    })
+
+    it('simulateAndSendTxs reports confirmed slices when a later slice fails', async () => {
+      const { connection } = mockConnection()
+      let simulations = 0
+      ;(
+        connection as unknown as { simulateTransaction: () => Promise<unknown> }
+      ).simulateTransaction = async () => {
+        switch (++simulations) {
+          case 1:
+            return {
+              value: { err: { InstructionError: [0, 'ComputationalBudgetExceeded'] }, logs: [] },
+            }
+          case 2:
+            return { value: { logs: [], unitsConsumed: 5 } }
+          default:
+            return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+        }
+      }
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL],
+          mainIndex: 0,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
+          assert.deepEqual(error.context.committedHashes, ['v0-signature'])
+          return true
+        },
+      )
     })
   })
 })
