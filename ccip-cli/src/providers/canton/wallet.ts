@@ -19,7 +19,7 @@ import CantonLedger, {
   SIGNATURE_FRAMING_BYTE,
   STATUS,
 } from '@ledgerhq/hw-app-canton/lib/index'
-import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid/lib/TransportNodeHid'
 import { TransportStatusError } from '@ledgerhq/hw-transport/errors'
 // @ts-ignore
 import BIPPath from 'bip32-path'
