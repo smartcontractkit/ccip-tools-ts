@@ -324,11 +324,27 @@ void describe('SuiChain.getLogs multi-topic', () => {
 })
 
 describe('fromUrl', () => {
-  it('posts JSON-RPC to the endpoint verbatim, keeping keyed path segments intact', async () => {
-    // BlockVision-style: the API key is a PATH segment. The JSON-RPC transport
-    // must POST to the url exactly as given — nothing appended or stripped.
-    const urls: string[] = []
+  it('detects the network from a URL keyword without an RPC call, keeping keyed path segments', async () => {
+    // BlockVision-style: the API key is a PATH segment. A URL carrying a
+    // network keyword (testnet) is detected without any RPC call, so the key
+    // never leaves the client and no rate-limited probe can fail.
+    let calls = 0
     const chain = await SuiChain.fromUrl('https://sui-testnet.blockvision.org/v1/s3cr3t', {
+      fetch: async () => {
+        calls++
+        return new Response('{}', { headers: { 'Content-Type': 'application/json' } })
+      },
+    })
+    assert.equal(chain.network.name, 'sui-testnet')
+    assert.equal(calls, 0, 'no RPC call for a URL with a network keyword')
+  })
+
+  it('posts JSON-RPC to the endpoint verbatim, keeping keyed path segments intact', async () => {
+    // A URL with NO network keyword falls back to the chain-identifier RPC;
+    // the JSON-RPC transport must POST to the url exactly as given — nothing
+    // appended or stripped — so a keyed path segment reaches the gateway.
+    const urls: string[] = []
+    const chain = await SuiChain.fromUrl('https://gw.example.node/v1/s3cr3t', {
       fetch: async (input, init) => {
         urls.push(input instanceof Request ? input.url : String(input))
         const req = JSON.parse(init?.body as string) as { id?: unknown; method?: string }
@@ -345,6 +361,6 @@ describe('fromUrl', () => {
     })
     assert.equal(chain.network.name, 'sui-testnet')
     assert.ok(urls.length > 0)
-    assert.ok(urls.every((u) => u === 'https://sui-testnet.blockvision.org/v1/s3cr3t'))
+    assert.ok(urls.every((u) => u === 'https://gw.example.node/v1/s3cr3t'))
   })
 })
