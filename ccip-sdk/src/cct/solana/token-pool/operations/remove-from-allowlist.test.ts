@@ -153,7 +153,7 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'removeFromAllowlist' &&
-          err.context.param === 'remove',
+          err.context.param === 'remove[1]',
       )
     })
   })
