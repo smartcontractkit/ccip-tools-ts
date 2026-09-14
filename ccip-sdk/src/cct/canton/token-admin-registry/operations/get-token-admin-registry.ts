@@ -10,10 +10,9 @@
  * @packageDocumentation
  */
 
-import type { CantonChain } from '../../../../canton/index.ts'
-import { decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
-import { CantonQuery } from '../../query.ts'
+import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CantonQuery } from '../../query.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
 
 /** Parameters for `getTokenAdminRegistry`. */
@@ -36,6 +35,10 @@ export interface GetTokenAdminRegistryResult {
   isCCIPManaged: boolean
   /** `TokenConfig` contract ID for the instrument. */
   tokenConfigCid: string
+  /** Whether a burn-mint factory is wired (SetBurnMintFactory) — required for pool send/execute. */
+  burnMintFactorySet: boolean
+  /** Whether a transfer factory is wired (SetTransferFactory). */
+  transferFactorySet: boolean
 }
 
 /** Parsed params for {@link GetTokenAdminRegistry.read}. */
@@ -83,7 +86,12 @@ export class GetTokenAdminRegistry extends CantonQuery<
     )
 
     if (!contract) {
-      return { isCCIPManaged: false, tokenConfigCid: '' }
+      return {
+        isCCIPManaged: false,
+        tokenConfigCid: '',
+        burnMintFactorySet: false,
+        transferFactorySet: false,
+      }
     }
 
     const fields = decodeDamlRecord(contract.createArgument)
@@ -93,8 +101,17 @@ export class GetTokenAdminRegistry extends CantonQuery<
       tokenPool: decodeTokenPool(fields['tokenPool']),
       isCCIPManaged: decodeBool(fields['isCCIPManaged']),
       tokenConfigCid: contract.contractId,
+      burnMintFactorySet: decodeOptionalPresent(fields['burnMintFactory']),
+      transferFactorySet: decodeOptionalPresent(fields['transferFactory']),
     }
   }
+}
+
+/** Whether a Daml `Optional` field is `Some` (value present). Handles natural JSON (null vs value) and gRPC (`{None:{}}` vs `{Some: ...}`). */
+function decodeOptionalPresent(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === 'object' && 'None' in (value as Record<string, unknown>)) return false
+  return true
 }
 
 /** Decode a Daml `Optional Party` into a string (or `undefined` when `None`).
