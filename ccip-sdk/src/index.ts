@@ -109,6 +109,7 @@ export {
   isSupportedTxHash,
   jsonParse,
   jsonStringify,
+  linkAbortSignals,
   signalToPromise,
   withRetry,
 } from './utils.ts'
