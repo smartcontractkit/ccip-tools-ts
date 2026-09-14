@@ -4,11 +4,31 @@ import type { ChainFamily } from '../networks.ts'
 import type { CleanAddressable } from './messages.ts'
 
 /**
+ * An on-chain requirement the CURRENT chain state does not satisfy, reported alongside the
+ * calldata rather than thrown.
+ *
+ * @remarks Only meaningful on the `generateUnsigned*` path, where the transaction is built to be
+ * reviewed and signed later: by then the state may well have moved, typically because an earlier
+ * transaction in the same plan put it there. `execute` rejects these instead — see
+ * `EVMOperation.execute`.
+ */
+export type UnmetPrecondition = {
+  /** Parameter the requirement is attributed to, e.g. `'sender'`. Matches the `param` an
+   *  equivalent `CCTParamsInvalidError` would carry. */
+  param: string
+  /** Why the current state does not satisfy it, phrased for a human reviewer. */
+  reason: string
+}
+
+/**
  * Type representing a set of unsigned EVM transactions
  */
 export type UnsignedEVMTx = {
   family: typeof ChainFamily.EVM
   transactions: Pick<TransactionRequest, 'from' | 'to' | 'data' | 'gasLimit' | 'value'>[]
+  /** Present only when the op found requirements the current chain state does not meet. Absent
+   *  on the happy path, so existing consumers are unaffected. */
+  preconditions?: UnmetPrecondition[]
 }
 
 /**
