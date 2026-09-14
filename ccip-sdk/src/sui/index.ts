@@ -377,13 +377,14 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // BlockVision's `sui-testnet.blockvision.org/v1/<key>`) don't support
     // (`sui_getCheckpoint` returns 404 there). When the URL carries no
     // recognizable name, fall back to the SDK's checkpoint-based derivation.
-    const urlNetwork =
-      url.includes('mainnet') ? '35834a8a'
-      : url.includes('testnet') ? '4c78adac'
-      : url.includes('devnet') ? 'b0c08dea'
-      : null
-    const rawChainId =
-      urlNetwork ?? (await tempClient.getChainIdentifier().catch(() => null))
+    const urlNetwork = url.includes('mainnet')
+      ? '35834a8a'
+      : url.includes('testnet')
+        ? '4c78adac'
+        : url.includes('devnet')
+          ? 'b0c08dea'
+          : null
+    const rawChainId = urlNetwork ?? (await tempClient.getChainIdentifier().catch(() => null))
     if (rawChainId === null) {
       throw new CCIPDataFormatUnsupportedError(
         `Unable to fetch chain identifier from URL: ${redactEndpointUrl(url)}`,
