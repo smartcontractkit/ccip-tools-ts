@@ -5,18 +5,16 @@
  * @packageDocumentation
  */
 
-import type {
-  BurnMintTokenPool,
-  Initialize as InitializeArg,
-} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
-import type {
-  LaneDeploySpec as LaneDeploySpecArg,
-  RateLimiterDeploySpec as RateLimiterDeploySpecArg,
-} from '../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2Types/module.js'
 import type { JsCommands } from '../../../canton/client/index.ts'
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
+import type {
+  BurnMintTokenPoolArg,
+  InitializeArg,
+  LaneDeploySpecArg,
+  RateLimiterDeploySpecArg,
+} from '../daml-types.ts'
 import {
   type FinalityConfig,
   type TransferTimeout,
@@ -371,7 +369,7 @@ export interface PoolCreateArgsInput {
  * separate generated package but shares the identical field shape, so this
  * return type is structurally valid for both.
  */
-export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenPool {
+export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenPoolArg {
   return {
     instanceId: p.instanceId,
     poolOwner: p.poolOwner,

@@ -12,11 +12,11 @@
  * @packageDocumentation
  */
 
-import type { SetRateLimitConfig as SetRateLimitConfigArg } from '../../../../canton/bindings/ccip-registry-burn-mint-token-pool-1.0.0/lib/CCIP/Registry/BurnMintTokenPoolV2/module.js'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { SetRateLimitConfigArg } from '../../daml-types.ts'
 import {
   type CantonExecuteParams,
   type CantonGenerateParams,

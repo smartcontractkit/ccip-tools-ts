@@ -18,11 +18,11 @@
  * @packageDocumentation
  */
 
-import type { RateLimiter as RateLimiterArg } from '../../../../canton/bindings/ccip-registry-rate-limiter-1.0.0/lib/CCIP/Registry/RateLimiterV2/module.js'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { RateLimiterArg } from '../../daml-types.ts'
 import { damlTimeNow, encodeRateLimitDirection, encodeRateLimitMode } from '../../encoding.ts'
 import {
   type CantonExecuteParams,
