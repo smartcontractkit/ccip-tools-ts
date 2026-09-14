@@ -411,30 +411,38 @@ export async function parseJettonContent(
  * @param networkType - Network type (mainnet or testnet)
  * @param fetch - Rate-limited fetch function
  * @param logger - Logger instance
+ * @param baseUrl - TonCenter v3 index base URL to override the network's public
+ *   default with (e.g. one derived from the chain's endpoint via `tonV3BaseUrl`, so
+ *   a private endpoint and its `?api_key=` are honored). Any query on it is carried
+ *   over to the lookup, as in the index paths in `logs.ts`.
  * @returns Transaction identifier components needed for V4 API lookup
  */
 export async function lookupTxByRawHash(
   hash: string,
   networkType: NetworkType,
   fetch = globalThis.fetch,
-  { logger = console }: WithLogger = {},
+  { logger = console, baseUrl: v3BaseUrl }: WithLogger & { baseUrl?: string } = {},
 ): Promise<{
   account: string
   lt: string
   hash: string
 }> {
-  const baseUrl =
-    networkType === NetworkType.Mainnet
-      ? 'https://toncenter.com/api/v3/transactions'
-      : 'https://testnet.toncenter.com/api/v3/transactions'
-
   // TonCenter V3 accepts hex directly
   const cleanHash = bytesToBuffer(hash).toString('hex')
-  const url = `${baseUrl}?hash=${cleanHash}`
+
+  const base = new URL(
+    v3BaseUrl ??
+      (networkType === NetworkType.Mainnet
+        ? 'https://toncenter.com/api/v3'
+        : 'https://testnet.toncenter.com/api/v3'),
+  )
+  const url = new URL(`${base.pathname.replace(/\/+$/, '')}/transactions`, base)
+  for (const [key, value] of base.searchParams) url.searchParams.append(key, value)
+  url.searchParams.append('hash', cleanHash)
 
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await fetch(url.href, {
       headers: { Accept: 'application/json' },
     })
   } catch (error) {
