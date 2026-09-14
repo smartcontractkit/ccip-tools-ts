@@ -124,6 +124,7 @@ export {
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPSplTokenInvalidError,
+  CCIPTokenAccountMintMismatchError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenAmountInvalidError,
   CCIPTokenDataParseError,

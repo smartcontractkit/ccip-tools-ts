@@ -9,6 +9,7 @@ import {
 import { Keypair, PublicKey } from '@solana/web3.js'
 
 import {
+  CCIPTokenAccountMintMismatchError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
@@ -20,6 +21,7 @@ import { U64_MAX } from '../../validate.ts'
 import { ApproveToken } from './approve-token.ts'
 
 const TOKEN = Keypair.generate().publicKey
+const OTHER_TOKEN = Keypair.generate().publicKey
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const DELEGATE = Keypair.generate().publicKey.toBase58()
@@ -32,13 +34,16 @@ const WALLET = { publicKey: Keypair.generate().publicKey, signTransaction: async
 function chain(
   mintOwner: PublicKey | null = TOKEN_PROGRAM_ID,
   tokenAccountExists = true,
+  tokenAccountMint = TOKEN,
 ): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
       getAccountInfo: async (address: PublicKey) => {
         if (!mintOwner || address.equals(TOKEN)) return mintOwner ? { owner: mintOwner } : null
-        return tokenAccountExists ? { owner: mintOwner, data: Buffer.alloc(165) } : null
+        const data = Buffer.alloc(165)
+        tokenAccountMint.toBuffer().copy(data)
+        return tokenAccountExists ? { owner: mintOwner, data } : null
       },
     },
   } as unknown as SolanaChain
@@ -101,9 +106,12 @@ describe('ApproveToken (cct/solana)', () => {
       )
     })
 
-    it('uses an explicitly supplied token account', async () => {
-      const unsigned = await generate({ tokenAccount: TOKEN_ACCOUNT })
-      assert.equal(unsigned.instructions[0]!.keys[0]!.pubkey.toBase58(), TOKEN_ACCOUNT)
+    it('uses a matching explicitly supplied token account for Token and Token-2022', async () => {
+      for (const tokenProgram of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+        const unsigned = await generate({ tokenAccount: TOKEN_ACCOUNT }, tokenProgram)
+        assert.equal(unsigned.instructions[0]!.programId.toBase58(), tokenProgram.toBase58())
+        assert.equal(unsigned.instructions[0]!.keys[0]!.pubkey.toBase58(), TOKEN_ACCOUNT)
+      }
     })
 
     it('supports Token-2022 multisig authorities', async () => {
@@ -172,6 +180,23 @@ describe('ApproveToken (cct/solana)', () => {
             amount: 1n,
           }),
         (err: unknown) => err instanceof CCIPTokenAccountNotFoundError,
+      )
+    })
+
+    it('rejects an explicit token account with a different mint before building an instruction', async () => {
+      await assert.rejects(
+        () =>
+          new ApproveToken().generate(chain(TOKEN_PROGRAM_ID, true, OTHER_TOKEN), {
+            payer: PAYER,
+            tokenAddress: TOKEN.toBase58(),
+            tokenAccount: TOKEN_ACCOUNT,
+            delegate: DELEGATE,
+            amount: 1n,
+          }),
+        (err: unknown) =>
+          err instanceof CCIPTokenAccountMintMismatchError &&
+          err.context.requestedMint === TOKEN.toBase58() &&
+          err.context.resolvedMint === OTHER_TOKEN.toBase58(),
       )
     })
 

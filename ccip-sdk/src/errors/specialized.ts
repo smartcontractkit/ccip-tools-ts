@@ -3453,6 +3453,26 @@ export class CCIPTokenAccountNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a supplied SPL token account belongs to a different mint than requested.
+ *
+ * `context.requestedMint` is the requested mint; `context.resolvedMint` is decoded from the supplied
+ * token account. This is permanent: supply an account for the requested mint.
+ */
+export class CCIPTokenAccountMintMismatchError extends CCIPError {
+  override readonly name = 'CCIPTokenAccountMintMismatchError'
+  constructor(tokenAccount: string, requestedMint: string, resolvedMint: string) {
+    super(
+      CCIPErrorCode.TOKEN_ACCOUNT_MINT_MISMATCH,
+      `Token account mint mismatch for ${tokenAccount}: expected ${requestedMint}, got ${resolvedMint}`,
+      {
+        isTransient: false,
+        context: { tokenAccount, requestedMint, resolvedMint },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when transaction not finalized after timeout. Transient: may need more time.
  *
  * @example
