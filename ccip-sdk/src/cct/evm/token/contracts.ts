@@ -19,6 +19,7 @@ import { resultToObject } from '../../../evm/types.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
+  CCTOperationUnsupportedError,
   CCTParamsInvalidError,
 } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
@@ -58,6 +59,19 @@ export function getTokenInterface(version: TokenVersion): Interface {
 }
 
 /**
+ * The interface every BurnMintERC677 role, mint and ownership write encodes through.
+ *
+ * Pinned to v1.5.1: the role functions, `mint`, the role reads and `transferOwnership` /
+ * `acceptOwnership` are identical at v1.6.2 and on `HyperLiquidCompatibleERC20 1.6.2`, so there is
+ * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, ruled out by
+ * {@link readTokenRole} for the role writes and by {@link assertOwnable2StepToken} for the
+ * ownership writes.
+ */
+export function getErc20Token(): Interface {
+  return TOKEN_INTERFACES[TokenVersion.V1_5_1]
+}
+
+/**
  * Deploy artifacts ({@link DeployArtifact}: contract name + ctor {@link Interface} + creation
  * bytecode) keyed by {@link TokenVersion}, built once; read via {@link getTokenArtifact}. Only
  * `2.0.0` (`CrossChainToken`) is deployable.
@@ -78,19 +92,6 @@ export function getTokenArtifact(version: TokenVersion): DeployArtifact {
   const artifact = TOKEN_ARTIFACTS[version]
   if (!artifact) throw new CCTContractVersionUnsupportedError('token', version)
   return artifact
-}
-
-/**
- * The interface every BurnMintERC677 role, mint and ownership write encodes through.
- *
- * Pinned to v1.5.1: the role functions, `mint`, the role reads and `transferOwnership` /
- * `acceptOwnership` are identical at v1.6.2 and on `HyperLiquidCompatibleERC20 1.6.2`, so there is
- * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, ruled out by
- * {@link readTokenRole} for the role writes; the ownership ops document it as unsupported rather
- * than detecting it, since v1.5.1 predates `typeAndVersion()`.
- */
-export function getErc20Token(): Interface {
-  return TOKEN_INTERFACES[TokenVersion.V1_5_1]
 }
 
 /**
@@ -195,7 +196,48 @@ export async function readTokenRoleHolders(
   }
 }
 
-/** `Ownable2Step.owner()`, spelled identically by every supported token version. */
+/** The one `typeAndVersion` contract type that is a token but *not* an Ownable2Step one. */
+const CROSS_CHAIN_TOKEN_TYPE = 'CrossChainToken'
+
+/**
+ * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built, so it fails
+ * as a typed {@link CCTOperationUnsupportedError} off-chain instead of as a reverted transaction:
+ * `CrossChainToken` declares neither `transferOwnership` nor `acceptOwnership`, and the tx would
+ * mine reverted (its `owner()` alias makes the {@link assertTokenOwner} pre-flight pass).
+ *
+ * @remarks Detects v2 positively and leaves the v1.x path untouched: `CrossChainToken 2.0.0` is
+ * the only token that reports that type, v1.6.2 reports `FactoryBurnMintERC20`, and v1.5.1
+ * predates `typeAndVersion()` entirely. So *any* read failure — a missing function, a revert, or a
+ * transient RPC error — proceeds as v1.x, exactly as before this guard existed. It can refuse a
+ * v1.x token only if the chain claims it is a `CrossChainToken`.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read `typeAndVersion()` from.
+ * @param tokenAddress - Token the ownership write targets.
+ * @throws {@link CCTOperationUnsupportedError} if the token reports `CrossChainToken`
+ */
+export async function assertOwnable2StepToken(
+  operation: string,
+  chain: EVMChain,
+  tokenAddress: string,
+): Promise<void> {
+  let contractType: string
+  let version: string
+  try {
+    ;[contractType, version] = await chain.typeAndVersion(tokenAddress)
+  } catch {
+    return // no typeAndVersion(), a revert, or a transient failure — proceed as v1.x
+  }
+  if (contractType !== CROSS_CHAIN_TOKEN_TYPE) return
+  throw new CCTOperationUnsupportedError(operation, version, {
+    context: { address: tokenAddress, contractType },
+    recovery:
+      `${CROSS_CHAIN_TOKEN_TYPE} ownership is AccessControlDefaultAdminRules, not Ownable2Step: ` +
+      'move it with beginDefaultAdminTransfer(newAdmin) then acceptDefaultAdminTransfer() under ' +
+      "DEFAULT_ADMIN_ROLE, after the contract's mandatory accept delay.",
+  })
+}
+
+/** `Ownable2Step.owner()`, declared identically by every supported token version. */
 type TokenOwnerGetter = Pick<TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>, 'owner'>
 
 /**
@@ -205,6 +247,8 @@ type TokenOwnerGetter = Pick<TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1
  * identically by `FactoryBurnMintERC20` v1.5.1 / v1.6.2 and by v2.0.0's `CrossChainToken`, where
  * it aliases the `DEFAULT_ADMIN_ROLE` holder. Mirrors `readTokenPoolOwner` in
  * `token-pool/contracts.ts`.
+ * @remarks On the BurnMintERC677 family the owner *is* the mint/burn role admin — `grantMintRole`
+ * and its siblings are `onlyOwner`.
  * @remarks Unlike {@link readTokenRole}, this is *not* also a family check: every one of those
  * contracts answers `owner()`, so it narrows nothing about the token's type.
  * @param chain - Chain to read from.
@@ -223,7 +267,7 @@ export async function readTokenOwner(chain: EVMChain, tokenAddress: string): Pro
 /**
  * Pre-flights `sender` against the token's on-chain `owner()` for an owner-gated write, so an
  * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an opaque
- * `Only callable by owner` revert after a multisig has already reviewed and signed. The token-side
+ * `OnlyCallableByOwner` revert after a multisig has already reviewed and signed. The token-side
  * counterpart of `assertPoolOwner`.
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read the owner from.

@@ -21,7 +21,12 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import { CreateTokenAccount } from '../../token/operations/create-token-account.ts'
-import { parsePublicKey, validateAuthorityMatchesWallet, validatePoolType } from '../../validate.ts'
+import {
+  parsePublicKey,
+  validateAuthorityMatchesWallet,
+  validatePoolType,
+  validateUniquePublicKeys,
+} from '../../validate.ts'
 
 /**
  * Parameters for initializing a Solana token pool, optionally with an allowlist.
@@ -85,7 +90,10 @@ export type ExecuteDeployTokenPoolResult = TransactionResult & {
   poolSignerAddress: string
 }
 
-/** Initializes a Solana token pool, optionally configuring an allowlist. */
+/**
+ * Initializes a Solana token pool, optionally configuring an allowlist.
+ * @remarks The allowlist must not contain duplicate addresses.
+ */
 export class DeployTokenPool extends SolanaOperation<
   DeployTokenPoolParams,
   GenerateDeployTokenPoolResult,
@@ -106,6 +114,11 @@ export class DeployTokenPool extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'createPoolSignerATA', 'must be a boolean')
     }
 
+    const allowlist = (params.allowlist ?? []).map((address, i) =>
+      parsePublicKey(this.name, `allowlist[${i}]`, address),
+    )
+    validateUniquePublicKeys(this.name, 'allowlist', allowlist)
+
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
@@ -115,9 +128,7 @@ export class DeployTokenPool extends SolanaOperation<
         params.authority === undefined
           ? payer
           : parsePublicKey(this.name, 'authority', params.authority),
-      allowlist: (params.allowlist ?? []).map((address, i) =>
-        parsePublicKey(this.name, `allowlist[${i}]`, address),
-      ),
+      allowlist,
       createPoolSignerATA: params.createPoolSignerATA ?? false,
     }
   }
