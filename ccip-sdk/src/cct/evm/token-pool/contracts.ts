@@ -273,6 +273,22 @@ export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): 
 }
 
 /**
+ * Reads a v2.0.0 pool's packed `allowedFinality` config in one `eth_call`.
+ * @remarks Callers must resolve and require v2.0.0 first: earlier pool ABIs do not declare this
+ * getter. The raw `bytes4` stays here so its consumer chooses the SDK-level decoded shape.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 token pool to read.
+ * @returns The packed `bytes4` finality config.
+ */
+export async function readTokenPoolAllowedFinality(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  return resultToObject(await pool.getAllowedFinalityConfig())
+}
+
+/**
  * `TokenPool`'s allowlist getters, identical across v1.5.0–v1.6.1 and both ABI families. Absent
  * from v2.0.0, which dropped the allowlist — callers must resolve the version first.
  */
