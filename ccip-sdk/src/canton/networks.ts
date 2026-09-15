@@ -30,7 +30,11 @@ export interface CantonNetworkConfig {
   feeQuoter: string
   /** RMNRemote raw instance address. */
   rmnRemote: string
-  /** Public JSON Ledger API base URL. */
+  /** JSON Ledger API base URL. NOTE: this is the *consumer's own* participant
+   * or gateway endpoint, not a network-wide constant — the value here is the
+   * protocol operator's participant (a convenience default for our own
+   * examples). External integrators always pass their own. Omitted where no
+   * meaningful default exists (mainnet). */
   ledgerUrl?: string
   /** Global CCIP EDS (explicit disclosure service) base URL. */
   edsUrl?: string
@@ -58,6 +62,23 @@ export const CANTON_NETWORKS: Readonly<Record<string, CantonNetworkConfig>> = {
       'rmn_remote-pttst@rmnOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
     ledgerUrl: 'https://testnet.cv1.bcy-v.metalhosts.com/api/json',
     edsUrl: 'https://eds.testnet.ccip.chain.link',
+  },
+  // `canton:MainNet` values verified against the prod-mainnet deployment
+  // (cld-signing/domains/ccv/prod_mainnet address_refs.json + EDS prod-mainnet
+  // config), Sep 2026. Raw instance IDs cross-checked: keccak256(raw) matches
+  // the deployment's hashed instance addresses.
+  'canton:MainNet': {
+    ccipOwner:
+      'ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
+    tokenAdminRegistry:
+      'tokenadminregistry-wjmat@ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
+    feeQuoter:
+      'feequoter-dwxyx@ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
+    rmnRemote:
+      'rmn_remote-zqxpl@rmnOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
+    // No ledgerUrl: there is no shared/public participant — each consumer
+    // supplies their own participant or gateway URL (see CantonNetworkConfig).
+    edsUrl: 'https://eds.ccip.chain.link',
   },
 }
 

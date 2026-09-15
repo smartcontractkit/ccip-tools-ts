@@ -23,6 +23,12 @@ import { normalizeRemoteAddress } from '../src/cct/canton/token-pool/shared.ts'
 
 interface PoolConfig {
   owner?: string
+  ccipOwner?: string
+  chainId?: string
+  ledgerUrl?: string
+  edsUrl?: string
+  poolType?: 'burnMint' | 'lockRelease'
+  poolInstanceId?: string
   instrumentId: string
   decimals?: number
   observers: string
@@ -40,16 +46,19 @@ const cfg = JSON.parse(
   readFileSync(process.env['CONFIG_JSON'] ?? 'pool.json', 'utf8'),
 ) as PoolConfig
 
-const chainId = 'canton:TestNet'
+const chainId = cfg.chainId ?? 'canton:TestNet'
 const network = getCantonNetworkConfig(chainId)!
 const gatewayUrl = cfg.gatewayUrl
 const accessToken = cfg.gatewayAccessToken
-const owner = cfg.owner ?? (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
-const ccipOwner = network.ccipOwner
+const owner = cfg.owner || (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
+const ccipOwner = cfg.ccipOwner || network.ccipOwner
+const ledgerUrl = cfg.ledgerUrl ?? network.ledgerUrl
+if (!ledgerUrl) throw new Error(`No ledger URL for ${chainId} — set ledgerUrl in the config`)
+const edsUrl = cfg.edsUrl ?? network.edsUrl
 
 const instrumentId = { admin: owner, id: cfg.instrumentId }
-const poolType = 'burnMint' as const
-const poolInstanceId = `${cfg.instrumentId.toLowerCase()}-pool-001`
+const poolType = cfg.poolType ?? 'burnMint'
+const poolInstanceId = cfg.poolInstanceId || `${cfg.instrumentId.toLowerCase()}-pool-001`
 const poolInstanceAddress = `${poolInstanceId}@${owner}`
 const observers = cfg.observers.split(',').map((s) => s.trim())
 const selector = cfg.remoteChainSelector ?? ''
@@ -67,13 +76,13 @@ const rlInCustom = `${poolInstanceId}-rl-in-custom-${selector}@${owner}`
 await ensureGatewaySession({ gatewayUrl, accessToken, networkId: 'canton:chainlink-testnet' })
 const { CantonChain } = await import('../src/canton/index.ts')
 const { createGatewayLedgerFetch } = await import('../src/canton/gateway-ledger-fetch.ts')
-const chain = await CantonChain.fromUrl(network.ledgerUrl!, {
+const chain = await CantonChain.fromUrl(ledgerUrl, {
   fetch: createGatewayLedgerFetch({ gatewayUrl, accessToken, ledgerBaseUrl: network.ledgerUrl! }),
   cantonConfig: {
     party: owner,
     ccipParty: ccipOwner,
     jwt: accessToken,
-    edsUrl: 'http://unused-here.local',
+    edsUrl: edsUrl ?? 'http://unused-here.local', // unused by these reads
     transferInstructionUrl: 'http://unused-here.local',
     chainId,
   },

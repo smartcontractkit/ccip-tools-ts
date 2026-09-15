@@ -31,40 +31,6 @@ export {
 } from './apply-chain-updates.ts'
 
 export {
-  type ExecuteSetRateLimitConfigParams,
-  type ExecuteSetRateLimitConfigResult,
-  type GenerateSetRateLimitConfigParams,
-  type GenerateSetRateLimitConfigResult,
-  type RateLimitConfig,
-  type SetRateLimitConfigParams,
-  SetRateLimitConfig,
-} from './set-rate-limit-config.ts'
-
-export {
-  type DeployRateLimiterParams,
-  type ExecuteDeployRateLimiterParams,
-  type ExecuteDeployRateLimiterResult,
-  type GenerateDeployRateLimiterParams,
-  type GenerateDeployRateLimiterResult,
-  DeployRateLimiter,
-} from './deploy-rate-limiter.ts'
-
-export {
-  type ExecuteSetDynamicConfigParams,
-  type ExecuteSetDynamicConfigResult,
-  type GenerateSetDynamicConfigParams,
-  type GenerateSetDynamicConfigResult,
-  type SetDynamicConfigParams,
-  SetDynamicConfig,
-} from './set-dynamic-config.ts'
-
-export {
-  type GetRequiredCCVsParams,
-  type GetRequiredCCVsResult,
-  GetRequiredCCVs,
-} from './get-required-ccvs.ts'
-
-export {
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type PoolRemoteChainConfig,
