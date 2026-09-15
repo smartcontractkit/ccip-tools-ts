@@ -64,8 +64,7 @@ export function getTokenInterface(version: TokenVersion): Interface {
  * Pinned to v1.5.1: the role functions, `mint`, the role reads and `transferOwnership` /
  * `acceptOwnership` are identical at v1.6.2 and on `HyperLiquidCompatibleERC20 1.6.2`, so there is
  * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, ruled out by
- * {@link readTokenRole} for the role writes and by {@link assertOwnable2StepToken} for the
- * ownership writes.
+ * {@link readTokenRole} and {@link assertOwnable2StepToken}.
  */
 export function getErc20Token(): Interface {
   return TOKEN_INTERFACES[TokenVersion.V1_5_1]
@@ -200,16 +199,12 @@ export async function readTokenRoleHolders(
 const CROSS_CHAIN_TOKEN_TYPE = 'CrossChainToken'
 
 /**
- * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built, so it fails
- * as a typed {@link CCTOperationUnsupportedError} off-chain instead of as a reverted transaction:
- * `CrossChainToken` declares neither `transferOwnership` nor `acceptOwnership`, and the tx would
- * mine reverted (its `owner()` alias makes the {@link assertTokenOwner} pre-flight pass).
+ * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built: it declares
+ * neither `transferOwnership` nor `acceptOwnership`, and its `owner()` alias passes the
+ * {@link assertTokenOwner} pre-flight, so the tx would mine reverted.
  *
- * @remarks Detects v2 positively and leaves the v1.x path untouched: `CrossChainToken 2.0.0` is
- * the only token that reports that type, v1.6.2 reports `FactoryBurnMintERC20`, and v1.5.1
- * predates `typeAndVersion()` entirely. So *any* read failure — a missing function, a revert, or a
- * transient RPC error — proceeds as v1.x, exactly as before this guard existed. It can refuse a
- * v1.x token only if the chain claims it is a `CrossChainToken`.
+ * @remarks Only v2 reports that type, so *any* read failure (v1.5.1 predating
+ * `typeAndVersion()`, a revert, a transient error) proceeds and v1.x is untouched.
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read `typeAndVersion()` from.
  * @param tokenAddress - Token the ownership write targets.
@@ -284,4 +279,36 @@ export async function assertTokenOwner(
   const owner = await readTokenOwner(chain, tokenAddress)
   if (getAddress(sender) === owner) return
   throw new CCTParamsInvalidError(operation, 'sender', `must be the current token owner (${owner})`)
+}
+
+/**
+ * The token-side `assertPoolOwnershipTransfer`: bounds a two-step transfer against the token's
+ * `owner()` in one `eth_call`.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param tokenAddress - Token being written to.
+ * @param newOwner - The address being proposed as the next owner.
+ * @param sender - The address the tx will be sent from, when known.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the owner, or `newOwner` already is
+ */
+export async function assertTokenOwnershipTransfer(
+  operation: string,
+  chain: EVMChain,
+  tokenAddress: string,
+  newOwner: string,
+  sender?: string,
+): Promise<void> {
+  const owner = await readTokenOwner(chain, tokenAddress)
+  if (sender !== undefined && getAddress(sender) !== owner)
+    throw new CCTParamsInvalidError(
+      operation,
+      'sender',
+      `must be the current token owner (${owner})`,
+    )
+  if (getAddress(newOwner) === owner)
+    throw new CCTParamsInvalidError(
+      operation,
+      'newOwner',
+      `must differ from the current token owner (${owner}) — the token would revert CannotTransferToSelf`,
+    )
 }

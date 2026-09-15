@@ -7,9 +7,10 @@
  * `ConfirmedOwnerWithProposal` (v1.5.1) and `Ownable2Step` (v1.6.2). A caller who is not the
  * proposed owner simply reverts. The token counterpart of {@link AcceptPoolOwnership}.
  *
- * @remarks **v1.x only, by contract rather than by check**, per {@link TransferTokenOwnership}:
- * v2.0.0's `CrossChainToken` has no `acceptOwnership`, using `acceptDefaultAdminTransfer` instead,
- * and nothing here detects one before the tx is broadcast.
+ * @remarks **v1.x only, and a v2.0.0 token is refused off-chain**, per
+ * {@link TransferTokenOwnership}: v2.0.0's `CrossChainToken` has no `acceptOwnership`, using
+ * `acceptDefaultAdminTransfer` instead, so {@link assertOwnable2StepToken} rejects it on
+ * `typeAndVersion()` before any calldata is built.
  *
  * @packageDocumentation
  */
@@ -19,7 +20,7 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { getErc20Token } from '../contracts.ts'
+import { assertOwnable2StepToken, getErc20Token } from '../contracts.ts'
 
 /** Parameters for {@link AcceptTokenOwnership}. */
 export type AcceptTokenOwnershipParams = {
@@ -42,16 +43,18 @@ export class AcceptTokenOwnership extends EVMOperation<AcceptTokenOwnershipParam
   }
 
   /**
-   * Encodes `acceptOwnership` with no chain access at all.
-   * @remarks Nothing to resolve and nothing to read: `acceptOwnership()` is one fixed selector,
-   * declared identically by v1.5.1 and v1.6.2 (see {@link getErc20Token}), and the only account
-   * the contract accepts is the `private` pending owner. So it builds without touching the chain,
-   * the only CCT write in this family that does not.
+   * Refuses a v2.0.0 `CrossChainToken`, then encodes `acceptOwnership`.
+   * @remarks Nothing to resolve and nothing to read about the caller: `acceptOwnership()` is one
+   * fixed selector, declared identically by v1.5.1 and v1.6.2 (see {@link getErc20Token}), and the
+   * only account the contract accepts is the `private` pending owner. Its one `eth_call` is the v2
+   * guard.
+   * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
    */
-  protected buildUnsigned(
-    _chain: EVMChain,
+  protected async buildUnsigned(
+    chain: EVMChain,
     { tokenAddress }: AcceptTokenOwnershipParams,
-  ): UnsignedEVMTx {
+  ): Promise<UnsignedEVMTx> {
+    await assertOwnable2StepToken(this.name, chain, tokenAddress)
     return callTx(tokenAddress, getErc20Token().encodeFunctionData('acceptOwnership', []))
   }
 
@@ -60,6 +63,7 @@ export class AcceptTokenOwnership extends EVMOperation<AcceptTokenOwnershipParam
    * @remarks The contract authorizes on `msg.sender`, so the wallet *is* the address that must be
    * the proposed owner; see {@link EVMOperation.resolveWalletSender}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — notably when the wallet is
    * not the token's proposed owner, which cannot be checked before signing

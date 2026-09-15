@@ -438,12 +438,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Step one of two: nothing changes until `newOwner` calls {@link acceptPoolOwnership},
    * and until then the current owner keeps every privilege. Re-proposing replaces the pending
    * address, and proposing the zero address cancels the transfer outright.
-   * @remarks `sender` is pre-flighted against the pool's on-chain `owner()` (one extra `eth_call`),
-   * so an unauthorized proposer is reported before a multisig reviews and signs. Omit it to build
-   * the calldata without that read, when the eventual signer is not yet known.
+   * @remarks The pool's on-chain `owner()` is read either way (one extra `eth_call`): `sender`,
+   * when given, is pre-flighted against it, and `newOwner` is bounded away from it even when
+   * `sender` is omitted because the eventual signer is not yet known.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`
-   * (the pool would revert `CannotTransferToSelf`), or if `sender` is given and is not the pool
-   * owner
+   * or the pool's current owner (the pool would revert `CannotTransferToSelf`), or if `sender` is
+   * given and is not the pool owner
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedTransferPoolOwnership({

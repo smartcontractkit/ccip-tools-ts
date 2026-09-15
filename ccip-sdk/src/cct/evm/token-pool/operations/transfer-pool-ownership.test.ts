@@ -128,14 +128,14 @@ describe('TransferPoolOwnership (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, dataFor(ZeroAddress))
     })
 
-    it('omits from — and skips the owner read — when sender is not supplied', async () => {
+    it('omits from — but still reads owner() — when sender is not supplied', async () => {
       let calls = 0
       const unsigned = await generate(stubChain({ onCall: () => (calls += 1) }), {
         sender: undefined,
       })
       assert.equal(unsigned.transactions[0]!.from, undefined)
-      // typeAndVersion only; no owner() round trip
-      assert.equal(calls, 1)
+      // typeAndVersion + owner(): the owner read bounds newOwner away from it, sender or not
+      assert.equal(calls, 2)
     })
   })
 
@@ -176,9 +176,16 @@ describe('TransferPoolOwnership (cct/evm)', () => {
       assert.equal(called, false)
     })
 
-    it('cannot check the self-transfer without a sender, so it builds', async () => {
-      const unsigned = await generate(stubChain(), { newOwner: OWNER, sender: undefined })
-      assert.equal(unsigned.transactions[0]!.data, dataFor(OWNER))
+    it('rejects a self-transfer with no sender, against the on-chain owner', async () => {
+      await assert.rejects(
+        () => generate(stubChain(), { newOwner: OWNER, sender: undefined }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'transferPoolOwnership' &&
+          err.context.param === 'newOwner' &&
+          err.message.includes(OWNER) &&
+          /CannotTransferToSelf/.test(err.message),
+      )
     })
   })
 

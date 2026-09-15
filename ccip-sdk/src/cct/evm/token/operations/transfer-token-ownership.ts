@@ -6,13 +6,11 @@
  * independent owners — the token's, which controls mint/burn roles, and the pool's, which controls
  * lane config — and moving one leaves the other exactly where it was.
  *
- * @remarks **v1.x only, by contract rather than by check.** v2.0.0's `CrossChainToken` has no
- * `transferOwnership` at all; ownership there is `AccessControlDefaultAdminRules`, moved with
- * `beginDefaultAdminTransfer` / `acceptDefaultAdminTransfer` on a mandatory delay. Nothing here
- * detects one: `owner()` exists on v2.0.0 too, aliasing the default admin, so the pre-flight
- * passes and the tx reverts once broadcast. Deliberate — the only signal separating the two is
- * `typeAndVersion()`, which v1.5.1 predates, so reading it would mean treating every revert as
- * v1.5.1 and guessing.
+ * @remarks **v1.x only, and a v2.0.0 token is refused off-chain.** v2.0.0's `CrossChainToken` has
+ * no `transferOwnership` at all; ownership there is `AccessControlDefaultAdminRules`, moved with
+ * `beginDefaultAdminTransfer` / `acceptDefaultAdminTransfer` on a mandatory delay. `owner()`
+ * exists there too (aliasing the default admin), so only `typeAndVersion()` tells them apart —
+ * {@link assertOwnable2StepToken} does that, leaving v1.x untouched.
  *
  * @remarks Nothing changes on-chain until the proposed owner accepts.
  *
@@ -27,7 +25,11 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
-import { assertTokenOwner, getErc20Token } from '../contracts.ts'
+import {
+  assertOwnable2StepToken,
+  assertTokenOwnershipTransfer,
+  getErc20Token,
+} from '../contracts.ts'
 
 /** Parameters for {@link TransferTokenOwnership}. */
 export type TransferTokenOwnershipParams = {
@@ -39,7 +41,8 @@ export type TransferTokenOwnershipParams = {
    *
    * @remarks The zero address is **allowed** and meaningful: it parks the pending owner on an
    * address nobody can sign as, retracting a mistaken proposal. The one address the contract
-   * rejects is the caller's own (`Cannot transfer to self`), checked below when `sender` is known.
+   * rejects is the current owner's own, which {@link assertTokenOwnershipTransfer} catches against
+   * the token's on-chain `owner()`.
    */
   newOwner: string
   /**
@@ -89,17 +92,20 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
    * path gets it too: `generateUnsignedTransferTokenOwnership` with an unauthorized `sender` would
    * otherwise hand back a fully-formed transaction that reverts only after being reviewed and
    * signed.
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the token owner
+   * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the token owner, or if
+   * `newOwner` is already the token owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
     { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
   ): Promise<UnsignedEVMTx> {
+    await assertOwnable2StepToken(this.name, chain, tokenAddress)
     const unsigned = callTx(
       tokenAddress,
       getErc20Token().encodeFunctionData('transferOwnership', [newOwner]),
     )
-    if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
+    await assertTokenOwnershipTransfer(this.name, chain, tokenAddress, newOwner, sender)
     return unsigned
   }
 
@@ -109,8 +115,9 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather than
    * signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or
-   * is not the token owner, or equals `newOwner`
+   * is not the token owner, or equals `newOwner`, or if `newOwner` is already the token owner
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    */
   override async execute(
