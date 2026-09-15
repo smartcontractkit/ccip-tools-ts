@@ -27,7 +27,8 @@ describe('getCantonNetworkConfig', () => {
   it('returns undefined for networks without a registered deployment', () => {
     assert.equal(getCantonNetworkConfig('canton:LocalNet'), undefined)
     assert.equal(getCantonNetworkConfig('canton:DevNet'), undefined)
-    assert.equal(getCantonNetworkConfig('canton:MainNet'), undefined)
+    // canton:MainNet is registered (verified against the prod-mainnet deployment, Sep 2026).
+    assert.notEqual(getCantonNetworkConfig('canton:MainNet'), undefined)
     assert.equal(getCantonNetworkConfig('canton:Nowhere'), undefined)
   })
 

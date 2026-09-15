@@ -10,6 +10,7 @@
  *
  * pool.json fields: instrumentId, decimals, observers, ccv, remoteChainSelector,
  * remoteTokenAddress, remotePools, gatewayUrl, gatewayAccessToken.
+ * See examples/pool.example.json for the shape.
  *
  * @packageDocumentation
  */
@@ -28,6 +29,13 @@ import { deriveTokenConfigInstanceAddress } from '../src/cct/canton/token-admin-
 
 interface PoolExampleConfig {
   owner?: string
+  admin?: string
+  ccipOwner?: string
+  chainId?: string
+  ledgerUrl?: string
+  edsUrl?: string
+  poolType?: 'burnMint' | 'lockRelease'
+  poolInstanceId?: string
   instrumentId: string
   decimals: number
   observers: string
@@ -47,22 +55,31 @@ const cfg = JSON.parse(
 
 const gatewayUrl = cfg.gatewayUrl
 const accessToken = cfg.gatewayAccessToken
-const chainId = 'canton:TestNet'
+const chainId = cfg.chainId ?? 'canton:TestNet'
 const network = getCantonNetworkConfig(chainId)!
-const owner = cfg.owner ?? (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
+const ledgerUrl = cfg.ledgerUrl ?? network.ledgerUrl
+if (!ledgerUrl) throw new Error(`No ledger URL for ${chainId} — set ledgerUrl in the config`)
+const edsUrl = cfg.edsUrl ?? network.edsUrl
+if (!edsUrl) throw new Error(`No EDS URL for ${chainId} — set edsUrl in the config`)
+const owner = cfg.owner || (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
+const ccipOwner = cfg.ccipOwner || network.ccipOwner
 
 // ── Setup: chain + manager (all ledger access via the wallet gateway) ──────
 await ensureGatewaySession({ gatewayUrl, accessToken, networkId: 'canton:chainlink-testnet' })
 const { CantonChain } = await import('../src/canton/index.ts')
 const { createGatewayLedgerFetch } = await import('../src/canton/gateway-ledger-fetch.ts')
-const chain = await CantonChain.fromUrl(network.ledgerUrl!, {
-  fetch: createGatewayLedgerFetch({ gatewayUrl, accessToken, ledgerBaseUrl: network.ledgerUrl! }),
+const chain = await CantonChain.fromUrl(ledgerUrl, {
+  fetch: createGatewayLedgerFetch({ gatewayUrl, accessToken, ledgerBaseUrl: ledgerUrl }),
   cantonConfig: {
     party: owner,
-    ccipParty: network.ccipOwner,
+    ccipParty: ccipOwner,
     jwt: accessToken,
-    edsUrl: 'http://unused-here.local',
-    transferInstructionUrl: 'http://unused-here.local',
+    // The EDS disclosure service — REQUIRED for external parties: the deploy
+    // resolves the TAR contract through it (TAR is signatory-only to ccipOwner,
+    // so no external party can ACS-read it; the EDS disclosure endpoint is
+    // public and unauthenticated by design).
+    edsUrl,
+    transferInstructionUrl: 'http://unused-here.local', // unused by this flow
     chainId,
   },
 })
@@ -73,16 +90,17 @@ const manager = CantonTokenManager.fromChain(chain)
 const instrumentId = cfg.instrumentId
 const decimals = Number(cfg.decimals)
 const selector = BigInt(cfg.remoteChainSelector)
-const poolInstanceId = `${instrumentId.toLowerCase()}-pool-001`
+const poolType = (cfg.poolType ?? 'burnMint') as 'burnMint' | 'lockRelease'
+const poolInstanceId = cfg.poolInstanceId || `${instrumentId.toLowerCase()}-pool-001`
 const scale = 10n ** BigInt(decimals)
 const capacity = BigInt(cfg.rlCapacity ?? '1000000') * scale
 const rate = BigInt(cfg.rlRate ?? '100') * scale
 
 const unsigned = await manager.generateUnsignedDeployTokenPool({
-  poolType: 'burnMint',
+  poolType,
   instanceId: poolInstanceId,
   poolOwner: owner,
-  ccipOwner: network.ccipOwner,
+  ccipOwner,
   instrumentId: { admin: owner, id: instrumentId },
   decimals,
   observers: String(cfg.observers).split(','),
@@ -132,13 +150,13 @@ await new Promise<void>((r) =>
 const poolInstanceAddress = `${poolInstanceId}@${owner}`
 const pool = await manager.getTokenPoolState({
   poolInstanceAddress,
-  poolType: 'burnMint',
+  poolType,
   poolOwner: owner,
 })
 const tar = await manager.getTokenAdminRegistry({
   tokenConfigInstanceAddress: deriveTokenConfigInstanceAddress(
     { admin: owner, id: instrumentId },
-    network.ccipOwner,
+    ccipOwner,
   ),
   adminParty: owner,
 })

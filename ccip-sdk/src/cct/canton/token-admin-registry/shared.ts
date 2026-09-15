@@ -32,7 +32,7 @@ export function deriveTokenConfigInstanceAddress(
   return `${instanceId}@${ccipOwner}`
 }
 
-/** A contract reference for {@link buildTarExercise}: a CID plus its disclosure blob. */
+/** A contract reference: a CID plus its disclosure blob. */
 export interface TarContractRef {
   /** Contract ID. */
   contractId: string
@@ -122,69 +122,4 @@ export async function resolveTar(
   return { tarContract: toContractRef(contract), ccipOwner: contract.signatories[0] }
 }
 
-/** Inputs to {@link buildTarExercise}. */
-export interface BuildTarExerciseInput {
-  /** TAR choice name (e.g. `SetPool`, `ProposeAdministrator`, `AcceptAdminRole`, `TransferAdminRole`). */
-  choice: string
-  /** TAR contract reference (CID + disclosure blob). */
-  tarContract: TarContractRef
-  /**
-   * `TokenConfig` contract reference for the instrument (disclosed with the
-   * command). Omit for first-time `ProposeAdministrator` — the choice creates
-   * the TokenConfig when `tokenConfigCid` is `None`.
-   */
-  tokenConfigContract?: TarContractRef
-  /** Daml choice argument record. */
-  choiceArgument: Record<string, unknown>
-  /** Acting party IDs (`actAs`). */
-  actAs: string[]
-  /** Command-ID prefix (a timestamp + random suffix is appended for dedup). */
-  commandIdPrefix: string
-}
-
-/**
- * Build a `JsCommands` exercising a TAR choice. The TAR contract and the
- * instrument's `TokenConfig` (when it already exists) are disclosed alongside
- * the command with their real `createdEventBlob` + `synchronizerId` (fetched
- * by the resolvers or supplied by the caller), so the participant can
- * reconstruct them during interactive submission.
- */
-export function buildTarExercise(input: BuildTarExerciseInput): JsCommands {
-  const { choice, tarContract, tokenConfigContract, choiceArgument, actAs, commandIdPrefix } = input
-
-  const disclosedContracts = [
-    {
-      templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
-      contractId: tarContract.contractId,
-      createdEventBlob: tarContract.createdEventBlob,
-      synchronizerId: tarContract.synchronizerId,
-    },
-    ...(tokenConfigContract
-      ? [
-          {
-            templateId: tokenConfigContract.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
-            contractId: tokenConfigContract.contractId,
-            createdEventBlob: tokenConfigContract.createdEventBlob,
-            synchronizerId: tokenConfigContract.synchronizerId,
-          },
-        ]
-      : []),
-  ]
-
-  return {
-    commands: [
-      {
-        ExerciseCommand: {
-          templateId: tarContract.templateId ?? TAR_TEMPLATE_ID,
-          contractId: tarContract.contractId,
-          choice,
-          choiceArgument,
-        },
-      },
-    ],
-    commandId: `${commandIdPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    actAs,
-    disclosedContracts,
-  }
-}
 
