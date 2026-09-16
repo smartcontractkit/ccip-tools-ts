@@ -972,6 +972,117 @@ describe('TON index unit tests', () => {
     })
   })
 
+  describe('v3 index url resolution', () => {
+    // A raw-hash tx lookup is the simplest v3 call to observe end-to-end: which index
+    // URL served it (and whether a probe preceded it) is the point of these tests.
+    const TX_RESPONSE = () =>
+      new Response(
+        JSON.stringify({
+          transactions: [{ account: '0:' + '11'.repeat(32), lt: '123', hash: 'def' }],
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      )
+
+    function chainCapturingV3Urls(
+      ctx: { v3Url?: string },
+      endpoint: string,
+      handle: (url: URL) => Response,
+    ) {
+      const urls: string[] = []
+      const fetchImpl = (async (input: unknown) => {
+        const url = new URL(String(input instanceof Request ? input.url : input))
+        urls.push(url.href)
+        return handle(url)
+      }) as unknown as typeof fetch
+      const client = {
+        parameters: { endpoint },
+        // Hydration after the index lookup: the lookup's account/lt are synthetic, so
+        // this returns null and getTransaction rejects — the captured URL is the point.
+        getTransaction: async () => null,
+      } as unknown as TonClient
+      return { chain: new TONChain(client, mockNetworkInfo, { ...ctx, fetch: fetchImpl }), urls }
+    }
+
+    it('raw-hash tx lookup honors ctx.v3Url verbatim (no probe)', async () => {
+      const { chain, urls } = chainCapturingV3Urls(
+        { v3Url: 'http://mock-index.example/api/v3?api_key=s3cr3t' },
+        'https://toncenter.com/api/v2/jsonRPC?api_key=rpc-key',
+        (url) =>
+          url.pathname === '/api/v3/transactions'
+            ? TX_RESPONSE()
+            : new Response('', { status: 404 }),
+      )
+
+      await assert.rejects(() => chain.getTransaction('ab'.repeat(32)), /not found/i)
+
+      const v3 = urls.filter((u) => u.includes('/api/v3'))
+      assert.equal(v3.length, 1, `exactly one v3 call expected, got: ${urls.join(', ')}`)
+      const parsed = new URL(v3[0]!)
+      assert.equal(parsed.origin, 'http://mock-index.example')
+      assert.equal(parsed.pathname, '/api/v3/transactions')
+      assert.equal(parsed.searchParams.get('api_key'), 's3cr3t')
+      assert.equal(parsed.searchParams.get('hash'), 'ab'.repeat(32))
+    })
+
+    it('a derived v3 url is probed and kept when the host serves v3', async () => {
+      const { chain, urls } = chainCapturingV3Urls(
+        {},
+        'http://mock-ton-api/api/v2/jsonRPC',
+        (url) =>
+          url.pathname === '/api/v3/masterchainInfo'
+            ? new Response(JSON.stringify({ last: { seqno: 100 } }), {
+                headers: { 'Content-Type': 'application/json' },
+              })
+            : url.pathname === '/api/v3/transactions'
+              ? TX_RESPONSE()
+              : new Response('', { status: 404 }),
+      )
+
+      await assert.rejects(() => chain.getTransaction('ab'.repeat(32)), /not found/i)
+
+      const v3 = urls.filter((u) => u.includes('/api/v3'))
+      assert.ok(
+        v3.every((u) => u.startsWith('http://mock-ton-api/api/v3/')),
+        `every v3 call must target the derived index; got: ${v3.join(', ')}`,
+      )
+      assert.match(v3[0]!, /masterchainInfo/, 'the probe (v3-only method) goes first')
+      assert.match(
+        v3.at(-1)!,
+        /\/api\/v3\/transactions\?/,
+        'the raw-hash lookup then uses the derived index',
+      )
+    })
+
+    it('a failed probe on a v2-only host falls back to the public index', async () => {
+      const { chain, urls } = chainCapturingV3Urls(
+        {},
+        'http://v2-only.example/api/v2/jsonRPC',
+        (url) =>
+          url.host === 'testnet.toncenter.com' && url.pathname === '/api/v3/transactions'
+            ? TX_RESPONSE()
+            : new Response('no v3 here', { status: 404 }),
+      )
+
+      await assert.rejects(() => chain.getTransaction('ab'.repeat(32)), /not found/i)
+
+      assert.match(
+        urls[0]!,
+        /^http:\/\/v2-only\.example\/api\/v3\/masterchainInfo/,
+        'the probe hits the derived host first',
+      )
+      assert.ok(
+        urls.some((u) => u.startsWith('https://testnet.toncenter.com/api/v3/transactions')),
+        `the lookup must fall back to the public index; got: ${urls.join(', ')}`,
+      )
+      assert.ok(
+        urls.every(
+          (u) => !u.startsWith('http://v2-only.example/api/v3/') || u.includes('masterchainInfo'),
+        ),
+        'nothing but the probe ever touches the v2-only host',
+      )
+    })
+  })
+
   describe('fromUrl', () => {
     it('appends the JSON-RPC path while preserving the query string', async () => {
       const chain = await TONChain.fromUrl('https://testnet.toncenter.com/api/v2?api_key=s3cr3t')

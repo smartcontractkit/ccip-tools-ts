@@ -159,6 +159,16 @@ export type ChainContext = WithLogger & {
   apiRetryConfig?: ApiRetryConfig
 
   /**
+   * Default CCIP v2 indexer base URLs for `getVerifications` (commit / CCV verifier
+   * lookups), overriding the built-in public per-network defaults
+   * ({@link MAINNET_INDEXER_URLS} / {@link TESTNET_INDEXER_URLS}). A per-call
+   * `indexer` option still wins over this.
+   *
+   * Default: `undefined` (use the built-in public indexers for the chain's network)
+   */
+  verificationsIndexer?: readonly string[]
+
+  /**
    * Abort signal for cancelling in-flight requests and watch loops on this chain.
    * When the signal fires, the provider is destroyed and all active getLogs watch loops exit.
    */
@@ -840,6 +850,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiClient: CCIPAPIClient | null
   /** Retry configuration for API fallback operations (null if API client is disabled) */
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
+  /** Default CCIP v2 indexer base URLs for getVerifications (undefined → network defaults) */
+  readonly verificationsIndexer?: readonly string[]
   /**
    * Fires when the chain should tear down: either {@link Chain.destroy} was
    * called, or the ChainContext abort signal fired. Listeners registered with
@@ -855,7 +867,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient, apiRetryConfig, abort } = ctx ?? {}
+    const { logger = console, apiClient, apiRetryConfig, verificationsIndexer, abort } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -865,6 +877,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       )
     this.network = network as NetworkInfo<F>
     this.logger = logger
+    this.verificationsIndexer = verificationsIndexer
 
     const ac = new AbortController()
     // Composite: `destroy()` aborts the inner controller, the context abort

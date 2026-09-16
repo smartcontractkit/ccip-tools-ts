@@ -123,6 +123,34 @@ export class CCIPTransactionNotFoundError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a transaction exceeds the wire size limits of its version
+ * (1232 bytes for legacy/v0, 4096 bytes for v1) or the account/instruction
+ * capacity of its message format.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.execute(input)
+ * } catch (error) {
+ *   if (error instanceof CCIPTransactionTooLargeError) {
+ *     console.log(`Transaction needs ${error.context.wireBytes} bytes`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTransactionTooLargeError extends CCIPError {
+  override readonly name = 'CCIPTransactionTooLargeError'
+  /** Creates a transaction too large error. */
+  constructor(message: string, options?: CCIPErrorOptions) {
+    super(CCIPErrorCode.TRANSACTION_TOO_LARGE, message, {
+      ...options,
+      isTransient: false,
+      context: { ...options?.context },
+    })
+  }
+}
+
 // CCIP Message
 
 /**

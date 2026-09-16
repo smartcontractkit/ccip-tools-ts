@@ -10,7 +10,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type Client, type ClientRequest, AptosConfig, Network } from '@aptos-labs/ts-sdk'
+import {
+  type Client,
+  type ClientRequest,
+  AptosApiType,
+  AptosConfig,
+  Network,
+} from '@aptos-labs/ts-sdk'
 
 import { AptosChain } from './index.ts'
 
@@ -132,6 +138,44 @@ describe('createAptosFetchClient shim (integration via fromAptosConfig)', () => 
     assert.ok(
       fetchCalls.every((c) => !c.method || c.method === 'GET'),
       'getLedgerInfo should be GET',
+    )
+  })
+
+  it('ctx.indexerUrl overrides the indexer endpoint used by queryIndexer', async () => {
+    const spyFetch: typeof fetch = async () =>
+      new Response(JSON.stringify(ledgerInfo()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    const chain = await AptosChain.fromAptosConfig(
+      { network: Network.MAINNET, fullnode: 'https://fullnode.example.internal' },
+      { fetch: spyFetch, indexerUrl: 'https://indexer.example.internal/graphql' },
+    )
+
+    assert.equal(chain.provider.config.indexer, 'https://indexer.example.internal/graphql')
+    assert.equal(
+      chain.provider.config.getRequestUrl(AptosApiType.INDEXER),
+      'https://indexer.example.internal/graphql',
+    )
+  })
+
+  it('without ctx.indexerUrl, the SDK per-network default indexer applies', async () => {
+    const spyFetch: typeof fetch = async () =>
+      new Response(JSON.stringify(ledgerInfo()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    const chain = await AptosChain.fromAptosConfig(
+      { network: Network.MAINNET, fullnode: 'https://fullnode.example.internal' },
+      { fetch: spyFetch },
+    )
+
+    assert.equal(chain.provider.config.indexer, undefined)
+    assert.equal(
+      chain.provider.config.getRequestUrl(AptosApiType.INDEXER),
+      'https://api.mainnet.aptoslabs.com/v1/graphql',
     )
   })
 
