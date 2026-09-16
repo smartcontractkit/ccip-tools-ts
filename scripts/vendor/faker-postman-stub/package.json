@@ -1,0 +1,12 @@
+{
+  "name": "faker-postman-stub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stand-in for @faker-js/faker in postman-collection's subtree; see index.cjs",
+  "type": "commonjs",
+  "main": "index.cjs",
+  "exports": {
+    ".": "./index.cjs",
+    "./locale/en": "./index.cjs"
+  }
+}

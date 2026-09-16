@@ -38,37 +38,21 @@
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "axios": "1.20.0",
-    "tar": "7.5.22",
-    "js-yaml": "^4.3.1",
-    "@apidevtools/json-schema-ref-parser": {
-      "js-yaml": "5.2.3"
+    "image-size": "npm:@localnerve/image-size@^2.1.4",
+    "postman-collection": {
+      "@faker-js/faker": "file:../../scripts/vendor/faker-postman-stub"
     },
-    "@redocly/openapi-core": {
-      "js-yaml": "5.2.3"
-    },
-    "postcss": "8.5.26",
-    "protobufjs": "7.6.6",
+    "axios": "^1.20.0",
+    "tar": "^7.5.22",
+    "protobufjs": "^7.6.6",
+    "postcss": "^8.5.28",
     "uuid": "^11.1.1",
     "yaml@1": "^1.10.3",
-    "serialize-javascript": "^7.1.0",
-    "ws": "8.21.3",
-    "undici": "8.10.0",
-    "joi": "^18.2.5",
-    "fast-uri": "3.1.6",
-    "image-size": "npm:@localnerve/image-size@2.1.2",
-    "qs": "6.16.0",
+    "serialize-javascript": "^7.1.1",
     "toml": "^5.0.0",
     "lodash-es": "^4.18.1",
-    "serve-handler": {
-      "brace-expansion": "1.1.18"
-    },
-    "shelljs": {
-      "glob": {
-        "minimatch": {
-          "brace-expansion": "1.1.18"
-        }
-      }
+    "openapi-to-postmanv2": {
+      "js-yaml": "^4.3.2"
     }
   },
   "allowScripts": {

@@ -37,33 +37,44 @@ this bridge can be removed when TypeDoc supports TypeScript 7.
 
 ### Dependency overrides and accepted advisories
 
-The root `package.json` `overrides` block pins transitive dependencies. Those pins
-exist for two different reasons, and the difference decides whether a bump is safe:
+The root `package.json` `overrides` block pins transitive dependencies. Keep it minimal:
+each entry must still be doing something, and `npm audit` plus `npm ls` are the test for
+that — an entry whose package already resolves to a patched release on its own only keeps
+the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in three kinds:
 
-- **Advisory pins** — a dependent declares a range whose older releases are affected by
-  an advisory, and the patched release is outside what it allows (`toml`, `lodash-es`,
-  `qs`, `undici`, `joi`, …). Bump these whenever `npm audit` reports a newer fix.
-- **Compatibility pins** — a version a dependent cannot actually run with, kept only to
-  stop a hoist onto something worse.
+- **Version pins** — the dependents' ranges allow (or resolve to) a release inside an
+  advisory, and the patched release is outside what they ask for (`axios`, `tar`,
+  `protobufjs`, `postcss`, `uuid`, `yaml@1`, `serialize-javascript`, `toml`,
+  `lodash-es`, and `js-yaml` for `openapi-to-postmanv2`: that one pins `4.3.0` exactly
+  while the 4.x line is patched only from `4.3.2`). Prefer a range over an exact pin so
+  later patches flow in by themselves, and bump them when `npm audit` reports a newer fix.
+- **Fork swaps** — advisories with no version to pin to, where the fix lives in a
+  maintained fork of the same code: `bigint-buffer` → `@trufflesuite/bigint-buffer`
+  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles) and
+  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS).
+- **The faker stub** — `postman-collection` (the docs toolchain's OpenAPI→Postman
+  converter, via `docusaurus-plugin-openapi-docs`) is the last release of its line: it
+  pins `@faker-js/faker@5.5.3` exactly and reads the pre-v8 API off it at import time,
+  while every version that patches GHSA-qxc2-j82w-r537 (`>= 10.5`) dropped that API — the
+  two cannot coexist. Forcing a patched faker to clear the finding therefore means
+  patching postman-collection, which is what the override does: it points that one
+  dependency at [`scripts/vendor/faker-postman-stub`](scripts/vendor/faker-postman-stub),
+  a no-op stand-in. The docs pipeline only runs OpenAPI → Postman → static pages and never
+  evaluates a Postman dynamic variable (`{{$randomCity}}`, the only consumer of those
+  generators), so the stub is inert there.
 
-Forcing a version a dependent cannot use breaks it at runtime, so three findings are
-accepted and must not be "fixed" by pinning:
+Two findings cannot be pinned away and are accepted (both were re-checked against the
+advisory ranges, not just `npm audit` output):
 
-- `@faker-js/faker` — reached only through the docs toolchain
-  (`docusaurus-plugin-openapi-docs` → `openapi-to-postmanv2`/`postman-code-generators`
-  → `postman-collection`, devDependencies of `ccip-api-ref`). `postman-collection@5.3.1`
-  (latest) pins `5.5.3` exactly and reads the pre-v8 API (`faker.address.city`) at import:
-  overriding to the patched `>=10.5` that GHSA-qxc2-j82w-r537 asks for makes
-  `npm run gen-api -w ccip-api-ref` fail with `Cannot read properties of undefined
-  (reading 'city')`. The advisory's vulnerable path (`faker.helpers.fake`) is never
-  called, and none of it ships — it is a docs build dependency.
-- `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no
-  patched version to pin. It reaches the CLI through `ethers` v5
+- `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no patched
+  version to pin. It reaches the CLI through `ethers` v5
   (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
 - `@solana/web3.js` → `jayson` → `stream-json` — `stream-json` is fixed in `3.6.0`,
-  a pure-ESM rewrite that CJS `jayson` cannot load, and `1.99.0` is the last `web3.js` 1.x
-  (the v1-transaction support the CLI relies on). npm's suggested "fix" downgrades to
-  `1.98.4`, which would drop that support.
+  a pure-ESM rewrite that CJS `jayson` cannot load (and would need `require(esm)` support
+  from every consumer's Node), and `1.99.0` is the last `web3.js` 1.x — the v1-transaction
+  support the CLI relies on. npm's suggested "fix" downgrades to `1.98.4`, which would drop
+  that support. The vulnerable API (`pick`/`ignore`/`filter`/`replace`) is not used by
+  jayson, which only takes `StreamValues` and `Verifier`.
 
 ## Test Suite Layout
 
