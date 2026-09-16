@@ -888,7 +888,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads a **v2.0.0** pool's router and delegated admin roles.
+   * Reads a **v2.0.0+** pool's router and delegated admin roles.
    *
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
@@ -906,7 +906,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads token-transfer fee configuration for a destination chain from a **v2.0.0** pool.
+   * Reads token-transfer fee configuration for a destination chain from a **v2.0.0+** pool.
    *
    * @remarks The pool token is read automatically. `finality` and `tokenArgs` default to
    * `'finalized'` and `'0x'`, respectively, which are correct for standard pools.

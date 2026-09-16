@@ -1,5 +1,5 @@
 /**
- * getTokenTransferFeeConfig — reads a v2.0.0 pool's token-transfer fee configuration for a
+ * getTokenTransferFeeConfig — reads a v2.0.0+ pool's token-transfer fee configuration for a
  * destination chain.
  *
  * @packageDocumentation
@@ -10,12 +10,13 @@ import { isHexString, toBeHex } from 'ethers'
 import type { TokenTransferFeeConfig } from '../../../../chain.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { type FinalityRequested, encodeFinality } from '../../../../extra-args.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   readTokenPoolTokenTransferFeeConfig,
+  resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
 
@@ -36,15 +37,20 @@ export type GetTokenTransferFeeConfigParams = {
   tokenArgs?: string
 }
 
-/** Token-transfer fee configuration returned by a v2.0.0 pool. */
+/** Token-transfer fee configuration returned by a v2.0.0+ pool. */
 export type GetTokenTransferFeeConfigResult = TokenTransferFeeConfig
 
-/** Reads a v2.0.0 pool's token-transfer fee configuration for one destination chain. */
+/** Reads a v2.0.0+ pool's token-transfer fee configuration for one destination chain. */
 export class GetTokenTransferFeeConfig extends EVMQuery<
   GetTokenTransferFeeConfigParams,
   GetTokenTransferFeeConfigResult
 > {
   readonly name = 'getTokenTransferFeeConfig'
+
+  /** The v2.0.0 getter is inherited until a later pool ABI changes its result shape. */
+  private readonly readers: Partial<
+    Record<TokenPoolVersion, typeof readTokenPoolTokenTransferFeeConfig>
+  > = { [TokenPoolVersion.V2_0_0]: readTokenPoolTokenTransferFeeConfig }
 
   /** @throws {@link CCTParamsInvalidError} if a getter argument cannot be ABI-encoded */
   protected prepare(params: GetTokenTransferFeeConfigParams): GetTokenTransferFeeConfigParams {
@@ -67,8 +73,8 @@ export class GetTokenTransferFeeConfig extends EVMQuery<
   }
 
   /**
-   * Resolves the pool version before the read, so a pool without the getter reports an unsupported
-   * operation rather than a bare call failure.
+   * Resolves the compatible getter through the same floor-match as pool writes, so a newer pool
+   * inherits v2.0.0's read until its ABI changes.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
@@ -79,9 +85,7 @@ export class GetTokenTransferFeeConfig extends EVMQuery<
     { poolAddress, remoteChainSelector, finality, tokenArgs }: GetTokenTransferFeeConfigParams,
   ): Promise<GetTokenTransferFeeConfigResult> {
     const { version } = await resolveTokenPool(chain, poolAddress)
-    if (version !== TokenPoolVersion.V2_0_0)
-      throw new CCTOperationUnsupportedError(this.name, version)
-    return readTokenPoolTokenTransferFeeConfig(
+    return resolveEncoder(this.readers, version, this.name)(
       chain,
       poolAddress,
       remoteChainSelector,
