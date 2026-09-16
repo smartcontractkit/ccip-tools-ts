@@ -66,8 +66,11 @@ const ccvs = (cfg.ccv ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
-const wantCapacity = cfg.rlCapacity ?? '1000000'
-const wantRate = cfg.rlRate ?? '100'
+// Rate-limit capacity/rate are scaled to the pool's decimals on-ledger —
+// compare against the scaled form of the config's human-unit values.
+const rlScale = 10n ** BigInt(cfg.decimals ?? 10)
+const wantCapacity = (BigInt(cfg.rlCapacity ?? '1000000') * rlScale).toString()
+const wantRate = (BigInt(cfg.rlRate ?? '100') * rlScale).toString()
 const tokenConfigAddress = deriveTokenConfigInstanceAddress(instrumentId, ccipOwner)
 const rlIn = `${poolInstanceId}-rl-in-${selector}@${owner}`
 const rlOut = `${poolInstanceId}-rl-out-${selector}@${owner}`
@@ -205,6 +208,10 @@ await check('Lane references the deployed rate limiters', async () => {
 // Without these, the pool's LockOrBurn/ReleaseFromTicket aborts on-ledger.
 await check('Token factories wired in TAR', async () => {
   const tar = await getTar()
+  // Older TAR deployments predate the factory fields — nothing to check there.
+  if (!tar.factoryFieldsSupported) {
+    return { pass: true, detail: 'skipped (deployed TAR version predates factory fields)' }
+  }
   const missing: string[] = []
   if (!tar.burnMintFactorySet) missing.push('burnMintFactory')
   if (!tar.transferFactorySet) missing.push('transferFactory')

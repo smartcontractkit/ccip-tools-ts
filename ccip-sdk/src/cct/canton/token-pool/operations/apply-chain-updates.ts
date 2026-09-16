@@ -11,13 +11,14 @@
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import type { ApplyChainUpdatesArg } from '../../daml-types.ts'
 import { type FinalityConfig, encodeFinalityConfig, rawInstanceAddress } from '../../encoding.ts'
 import {
   type CantonExecuteParams,
   type CantonGenerateParams,
   CantonOperation,
+  extractExerciseResult,
 } from '../../operation.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 import {
@@ -177,5 +178,21 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
       actAs: [p.sender],
       commandIdPrefix: 'cct-apply-chain-updates',
     })
+  }
+
+  override async execute(
+    chain: CantonChain,
+    params: ExecuteApplyChainUpdatesParams,
+  ): Promise<ExecuteApplyChainUpdatesResult> {
+    const base = await super.execute(chain, params)
+    const poolCid = extractExerciseResult(base.response, 'ApplyChainUpdates')
+    if (typeof poolCid !== 'string') {
+      throw new CCTTxFailedError(
+        this.name,
+        'ApplyChainUpdates exerciseResult was not a contract ID',
+        { context: { updateId: base.hash } },
+      )
+    }
+    return { ...base, poolCid }
   }
 }

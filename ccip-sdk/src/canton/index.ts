@@ -99,6 +99,7 @@ import {
 import { AcsDisclosureProvider } from './explicit-disclosures/acs.ts'
 import { type EdsMessage, EdsDisclosureProvider } from './explicit-disclosures/eds.ts'
 import type { DisclosedContract } from './explicit-disclosures/types.ts'
+import { submitCantonCommands } from './submit-commands.ts'
 import { type TokenMetadataClient, createTokenMetadataClient } from './token-metadata/client.ts'
 import {
   type TransferInstructionClient,
@@ -682,105 +683,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Find an active contract by template ID and a match predicate.
-   *
-   * Mirrors Go `FindActiveContractByInstanceAddress` (deployment/utils/operations/contract/exercise.go):
-   * queries the ACS at ledger end with a per-party `TemplateFilter` (carrying the
-   * full `#<pkg>:<Module>:<Entity>` templateId, which embeds the package name)
-   * with `includeCreatedEventBlob: true`, then accepts the first contract for
-   * which `match` returns true. `match` receives the decoded `createArgument`
-   * record; the common case is matching on the `instanceId` field, but any
-   * field (e.g. an `instrumentId`) can be used.
-   *
-   * The returned {@link CantonActiveContract} carries `createdEventBlob` +
-   * `synchronizerId` so the caller can embed it as a disclosed contract in a
-   * later submission — this is what unblocks real `execute()` for CCT ops.
-   *
-   * @param templateId - Full template ID, e.g. `#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry`.
-   * @param parties - Parties whose ACS visibility to query (ActAs first, then ReadAs).
-   * @param match - Predicate over the decoded `createArgument` record.
-   * @returns The first matching active contract, or `null` if none match.
-   */
-  async findActiveContractByTemplate(
-    templateId: string,
-    parties: string[],
-    match: (createArgument: unknown) => boolean,
-  ): Promise<CantonActiveContract | null> {
-    const queryParties = parties.filter((p) => typeof p === 'string' && p.length > 0)
-    if (queryParties.length === 0) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'CantonChain.findActiveContractByTemplate: at least one query party is required',
-      )
-    }
-
-    const { offset } = await this.provider.getLedgerEnd()
-
-    // Per-party TemplateFilter carrying the full templateId string (the JSON API
-    // accepts `#<pkg>:<Module>:<Entity>` directly — no need to split into
-    // packageId/module/entity like Go's structured Identifier). Cumulative
-    // filters widen visibility, so one filter per party is correct. The filter
-    // object is built once and replicated per party via computed keys so the
-    // literal stays precisely typed against `Map_Filters` (mirrors
-    // `fetchTokenHoldings`' inline pattern).
-    const partyFilter = {
-      cumulative: [
-        {
-          identifierFilter: {
-            TemplateFilter: {
-              value: {
-                templateId,
-                includeCreatedEventBlob: true,
-              },
-            },
-          },
-        },
-      ],
-    }
-    const filtersByParty: Record<string, typeof partyFilter> = {}
-    for (const party of queryParties) {
-      filtersByParty[party] = partyFilter
-    }
-
-    const responses = await this.provider.getActiveContracts({
-      activeAtOffset: offset,
-      eventFormat: { filtersByParty, verbose: true },
-    })
-
-    const seenContractIds = new Set<string>()
-    for (const response of responses) {
-      const active = activeContractFromResponse(response)
-      if (!active) continue
-      if (seenContractIds.has(active.contractId)) continue
-      seenContractIds.add(active.contractId)
-
-      if (match(active.createArgument)) {
-        return {
-          contractId: active.contractId,
-          templateId: active.templateId,
-          createdEventBlob: active.createdEventBlob,
-          synchronizerId: active.synchronizerId,
-          signatories: active.signatories,
-          createArgument: active.createArgument,
-        }
-      }
-    }
-    return null
-  }
-
-  /**
-   * Enumerate active contracts of a template matching a predicate.
-   *
-   * Like {@link findActiveContractByTemplate} but returns **all** matching
-   * contracts (not just the first). Used by read ops that enumerate a template
-   * family, e.g. `getSupportedTokens` listing every `TokenConfig`. Deduplicates
-   * by contract ID (the ACS stream can surface the same contract via multiple
-   * parties).
+   * Enumerate active contracts of a template matching a predicate. Deduplicates
+   * by contract ID; each result carries `createdEventBlob`/`synchronizerId` for disclosure.
    *
    * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`).
    * @param parties - Parties whose ACS visibility to query.
-   * @param match - Predicate over the decoded `createArgument`. Pass `() => true`
-   *   to return every active contract of the template.
+   * @param match - Predicate over the decoded `createArgument`.
    * @returns All matching active contracts (may be empty).
    */
   async findActiveContractsByTemplate(
@@ -889,63 +797,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       match = contract
     }
     return match
-  }
-
-  /**
-   * Exercise a non-consuming Daml read choice and return its decoded result.
-   *
-   * Builds a `JsCommands` exercising `choice` on `contractId` (template
-   * `templateId`) with `actAs = [caller]`, submits via `submitAndWaitForTransaction`,
-   * and extracts the `exerciseResult` from the first `ExercisedEvent` matching
-   * `choice`. The raw `exerciseResult` value is returned for the caller to
-   * decode with the shared field helpers.
-   *
-   * Used by CCT read ops (`getRequiredCCVs`, `getTokenAdminRegistry`) that
-   * query state via non-consuming choices rather than ACS snapshots.
-   *
-   * @param templateId - Full template ID of the target contract.
-   * @param contractId - Target contract ID.
-   * @param choice - Read choice name (e.g. `GetRequiredCCVs`, `Get`).
-   * @param choiceArgument - Daml choice argument record.
-   * @param caller - Acting party (`actAs`).
-   * @returns The raw `exerciseResult` value, or `null` if no matching exercised event.
-   */
-  async submitReadChoice(
-    templateId: string,
-    contractId: string,
-    choice: string,
-    choiceArgument: Record<string, unknown>,
-    caller: string,
-  ): Promise<unknown> {
-    const commands: JsCommands = {
-      commands: [
-        {
-          ExerciseCommand: {
-            templateId,
-            contractId,
-            choice,
-            choiceArgument,
-          },
-        },
-      ],
-      commandId: `cct-read-${choice}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      actAs: [caller],
-      // Read choices are non-consuming and visible to the caller; the target
-      // contract is re-fetched by the participant during interactive submission,
-      // so no explicit disclosedContracts are required.
-      disclosedContracts: [],
-    }
-
-    const response = await this.provider.submitAndWaitForTransaction(commands)
-    const tx = response.transaction as { events?: unknown[] } | undefined
-    for (const event of tx?.events ?? []) {
-      const ev = event as Record<string, unknown>
-      const exercised = ev['ExercisedEvent'] as Record<string, unknown> | undefined
-      if (exercised && exercised['choice'] === choice && exercised['exerciseResult'] != null) {
-        return exercised['exerciseResult']
-      }
-    }
-    return null
   }
 
   /**
@@ -1283,7 +1134,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(`CantonChain.sendMessage: submitting command`)
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer)
+    const response = await submitCantonCommands(this, unsigned.commands, wallet.signer)
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1587,7 +1438,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer)
+    const response = await submitCantonCommands(this, unsigned.commands, wallet.signer)
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1612,119 +1463,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return { receipt, log }
   }
 
-  // ─── Internal submission helper ─────────────────────────────────────────
-
-  /**
-   * Build a prepare-submission request with synchronizer and package preferences
-   * required by prod Canton participants for interactive signing.
-   */
-  private async buildPrepareRequest(commands: JsCommands): Promise<JsPrepareSubmissionRequest> {
-    const synchronizerId = await this.resolveSubmissionSynchronizerId(commands)
-    const packageNames = this.resolvePackageNamesForCommands(commands)
-    const packageIdSelectionPreference = await this.provider.getPreferredPackageIds(
-      commands.actAs,
-      packageNames,
-      synchronizerId,
-    )
-    if (packageIdSelectionPreference.length === 0) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'CantonChain: unable to resolve packageIdSelectionPreference for prepare submission',
-      )
-    }
-
-    return {
-      commandId: commands.commandId,
-      commands: commands.commands,
-      actAs: commands.actAs,
-      readAs: commands.readAs,
-      disclosedContracts: commands.disclosedContracts,
-      synchronizerId,
-      packageIdSelectionPreference,
-      hashingSchemeVersion: 'HASHING_SCHEME_VERSION_V3',
-    }
-  }
-
-  /** Resolve synchronizerId for interactive prepare when commands omit it explicitly. */
-  private async resolveSubmissionSynchronizerId(commands: JsCommands): Promise<string> {
-    if (commands.synchronizerId) return commands.synchronizerId
-
-    const fromDisclosed = commands.disclosedContracts
-      ?.map((dc) => dc.synchronizerId)
-      .find((id) => typeof id === 'string' && id.length > 0)
-    if (fromDisclosed) return fromDisclosed
-
-    const synchronizers = await this.provider.getConnectedSynchronizers()
-    const synchronizerId = synchronizers[0]?.synchronizerId
-    if (!synchronizerId) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'CantonChain: unable to resolve synchronizerId for prepare submission',
-      )
-    }
-    return synchronizerId
-  }
-
-  /** Collect DAR package names referenced by command template IDs for prepare submission. */
-  private resolvePackageNamesForCommands(commands: JsCommands): string[] {
-    const names = new Set<string>([
-      ...packageNamesFromTemplateRefs(commands),
-      ...CANTON_SEND_PACKAGE_NAMES,
-    ])
-    return [...names]
-  }
-
-  /**
-   * Submit a command to the ledger, using external signing when a
-   * {@link TransactionSigner} is provided.
-   *
-   * - **No signer**: delegates to `submitAndWaitForTransaction` (direct submit).
-   * - **With signer**: uses the interactive submission API:
-   *   1. Prepare the transaction (`/v2/interactive-submission/prepare`).
-   *   2. Decode the hash and call `signer.sign(hashBytes)`.
-   *   3. Execute the signed transaction (`/v2/interactive-submission/executeAndWaitForTransaction`).
-   */
-  async submitCommands(
-    commands: JsCommands,
-    signer?: TransactionSigner,
-  ): Promise<JsSubmitAndWaitForTransactionResponse> {
-    if (!signer) {
-      return this.provider.submitAndWaitForTransaction(commands)
-    }
-
-    // Step 1 — Prepare the transaction
-    const prepareRequest = await this.buildPrepareRequest(commands)
-
-    const prepareResponse = await this.provider.prepareSubmission(prepareRequest)
-
-    if (!prepareResponse.preparedTransaction || !prepareResponse.preparedTransactionHash) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'prepareSubmission returned an incomplete response (missing preparedTransaction or hash)',
-      )
-    }
-
-    // Step 2 — Sign the hash
-    const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
-    const partySignatures = await signer.sign(hashBytes)
-
-    // Step 3 — Execute the signed transaction
-    const hashingSchemeVersion =
-      prepareResponse.hashingSchemeVersion &&
-      prepareResponse.hashingSchemeVersion !== 'HASHING_SCHEME_VERSION_UNSPECIFIED'
-        ? prepareResponse.hashingSchemeVersion
-        : 'HASHING_SCHEME_VERSION_V3'
-
-    const executeResponse = await this.provider.executeSubmissionAndWaitForTransaction({
-      preparedTransaction: prepareResponse.preparedTransaction,
-      partySignatures,
-      deduplicationPeriod: { Empty: {} },
-      hashingSchemeVersion,
-      submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    })
-
-    return executeResponse
-  }
 
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the
@@ -1771,7 +1509,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Exercise `UpdateRequiredCCVs` on an existing `CCIPReceiver` contract.
    *
    * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
+   * (interactive vs. direct); see {@link submitCantonCommands}.
    */
   private async updateReceiverRequiredCCVs(
     receiverCid: string,
@@ -1799,7 +1537,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(
       `CantonChain.updateReceiverRequiredCCVs: receiver=${receiverCid} ccvs=${requiredCcvsRaw.join(', ')}`,
     )
-    const response = await this.submitCommands(updateCmd, signer)
+    const response = await submitCantonCommands(this, updateCmd, signer)
     const newCid = extractCreatedContractId(response.transaction, 'CCIPReceiver')
     if (!newCid) {
       throw new CCIPError(
@@ -1819,7 +1557,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * fresh contract.
    *
    * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
+   * (interactive vs. direct); see {@link submitCantonCommands}.
    */
   private async createReceiverForFinality(
     payer: string,
@@ -1856,7 +1594,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.debug(
           `CantonChain.createReceiverForFinality: creating CCIPReceiver finality=${finality} instanceId=${instanceId} attempt=${attempt}/${attempts}`,
         )
-        const response = await this.submitCommands(createCmd, signer)
+        const response = await submitCantonCommands(this, createCmd, signer)
         const tx = response.transaction as { events?: unknown[] }
         for (const event of tx.events ?? []) {
           const ev = event as Record<string, unknown>
@@ -2176,7 +1914,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Create a `PerPartyRouter` for `party` via the EDS factory disclosure.
    *
    * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
+   * (interactive vs. direct); see {@link submitCantonCommands}.
    */
   private async createPerPartyRouter(party: string, signer?: TransactionSigner): Promise<void> {
     const factory = await this.edsDisclosureProvider.fetchPerPartyRouterFactoryDisclosures(party)
@@ -2204,14 +1942,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         synchronizerId: dc.synchronizerId,
       })),
     }
-    await this.submitCommands(createCmd, signer)
+    await submitCantonCommands(this, createCmd, signer)
   }
 
   /**
    * Create a `CCIPSender` contract for `party` when none exists in ACS.
    *
    * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
+   * (interactive vs. direct); see {@link submitCantonCommands}.
    */
   private async createCcipSender(party: string, signer?: TransactionSigner): Promise<void> {
     const senderTemplateId = `#${this.ccipPackages.ccipSender}:CCIP.CCIPSender:CCIPSender`
@@ -2230,7 +1968,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       commandId: `ccip-create-sender-${Date.now()}`,
       actAs: [party],
     }
-    await this.submitCommands(createCmd, signer)
+    await submitCantonCommands(this, createCmd, signer)
   }
 
   /**
@@ -2798,45 +2536,6 @@ function assertRequiredCcvsCovered(
       `CantonChain.generateUnsignedExecute: token pool requires CCV result(s) not provided by verifications: ${missing.join(', ')}`,
     )
   }
-}
-
-/** Package names commonly involved in CCIP Canton send (fee + token pool paths). */
-const CANTON_SEND_PACKAGE_NAMES = [
-  'ccip-core',
-  'ccip-executor',
-  'ccip-burn-mint-token-pool',
-  'splice-amulet',
-  'splice-api-token-holding-v1',
-  'splice-api-token-transfer-instruction-v1',
-  'link',
-] as const
-
-function packageNamesFromTemplateRefs(commands: JsCommands): string[] {
-  const names = new Set<string>()
-  for (const templateId of templateIdsFromCommands(commands)) {
-    if (!templateId.startsWith('#')) continue
-    const trimmed = templateId.slice(1)
-    const sep = trimmed.indexOf(':')
-    if (sep > 0) names.add(trimmed.slice(0, sep))
-  }
-  return [...names]
-}
-
-function templateIdsFromCommands(commands: JsCommands): string[] {
-  const ids: string[] = []
-  for (const disclosed of commands.disclosedContracts ?? []) {
-    if (disclosed.templateId) ids.push(disclosed.templateId)
-  }
-  for (const command of commands.commands) {
-    const record = command as Record<string, unknown>
-    for (const key of ['ExerciseCommand', 'CreateCommand'] as const) {
-      const nested = record[key]
-      if (!nested || typeof nested !== 'object') continue
-      const templateId = (nested as Record<string, unknown>)['templateId']
-      if (typeof templateId === 'string') ids.push(templateId)
-    }
-  }
-  return ids
 }
 
 function resolveIndexerBaseUrl(

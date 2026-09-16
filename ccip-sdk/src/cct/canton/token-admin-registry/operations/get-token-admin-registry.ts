@@ -39,6 +39,10 @@ export interface GetTokenAdminRegistryResult {
   burnMintFactorySet: boolean
   /** Whether a transfer factory is wired (SetTransferFactory). */
   transferFactorySet: boolean
+  /** Whether the deployed TAR package version carries the factory fields at all.
+   *  False on older deployments (fields added in a later ccip-core) — the set
+   *  flags are meaningless then. */
+  factoryFieldsSupported: boolean
 }
 
 /** Parsed params for {@link GetTokenAdminRegistry.read}. */
@@ -91,6 +95,7 @@ export class GetTokenAdminRegistry extends CantonQuery<
         tokenConfigCid: '',
         burnMintFactorySet: false,
         transferFactorySet: false,
+        factoryFieldsSupported: false,
       }
     }
 
@@ -103,6 +108,7 @@ export class GetTokenAdminRegistry extends CantonQuery<
       tokenConfigCid: contract.contractId,
       burnMintFactorySet: decodeOptionalPresent(fields['burnMintFactory']),
       transferFactorySet: decodeOptionalPresent(fields['transferFactory']),
+      factoryFieldsSupported: 'burnMintFactory' in fields || 'transferFactory' in fields,
     }
   }
 }
