@@ -110,7 +110,7 @@ export class CCTTxNotConfirmedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTContractTypeInvalidError) {
  *     console.log(`Expected ${error.context.expected} at ${error.context.address}, got "${error.context.actual}"`)
@@ -151,7 +151,7 @@ export class CCTContractTypeInvalidError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTContractVersionUnsupportedError) {
  *     console.log(`Unsupported ${error.context.contractType} version: ${error.context.version}`)
@@ -182,7 +182,7 @@ export class CCTContractVersionUnsupportedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTOperationUnsupportedError) {
  *     console.log(`${error.context.operation} unsupported at version ${error.context.version}`)
