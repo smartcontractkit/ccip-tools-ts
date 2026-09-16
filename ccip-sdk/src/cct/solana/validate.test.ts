@@ -4,11 +4,12 @@ import { describe, it } from 'node:test'
 import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
+import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
 import {
-  CCIPTokenAccountMintMismatchError,
-  CCIPTokenAccountNotFoundError,
-} from '../../errors/index.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+  CCTParamsInvalidError,
+  CCTTokenAccountMintMismatchError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
   parseHexBytes,
@@ -347,7 +348,7 @@ describe('Validate (cct/solana)', () => {
     await assert.rejects(
       () => resolveExistingTokenAccount(connection as never, mint, holder, tokenAccount),
       (err: unknown) =>
-        err instanceof CCIPTokenAccountMintMismatchError &&
+        err instanceof CCTTokenAccountMintMismatchError &&
         err.context.requestedMint === mint.toBase58() &&
         err.context.resolvedMint === resolvedMint.toBase58(),
     )

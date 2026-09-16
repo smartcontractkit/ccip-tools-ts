@@ -5,14 +5,17 @@ import { type Connection, PublicKey } from '@solana/web3.js'
 
 import {
   CCIPAddressInvalidError,
-  CCIPTokenAccountMintMismatchError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenPoolStateNotFoundError,
 } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import {
+  CCTParamsInvalidError,
+  CCTTokenAccountMintMismatchError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
@@ -412,7 +415,7 @@ export async function validatePoolLiquidityConfig(
 /**
  * Resolves an existing token account, defaulting to the holder's associated token account.
  * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
- * @throws {@link CCIPTokenAccountMintMismatchError} If an explicitly supplied token account belongs to a different mint.
+ * @throws {@link CCTTokenAccountMintMismatchError} If an explicitly supplied token account belongs to a different mint.
  */
 export async function resolveExistingTokenAccount(
   connection: Connection,
@@ -438,7 +441,7 @@ export async function resolveExistingTokenAccount(
   }
 
   if (tokenAccount && !tokenAccountInfo.mint.equals(tokenAddress)) {
-    throw new CCIPTokenAccountMintMismatchError(
+    throw new CCTTokenAccountMintMismatchError(
       account.toBase58(),
       tokenAddress.toBase58(),
       tokenAccountInfo.mint.toBase58(),

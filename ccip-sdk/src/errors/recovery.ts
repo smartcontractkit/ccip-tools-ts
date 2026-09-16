@@ -119,8 +119,6 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   TOKEN_ACCOUNT_NOT_FOUND:
     'The token account does not exist for this holder. The holder has never held this token. You may treat this as zero balance.',
-  TOKEN_ACCOUNT_MINT_MISMATCH:
-    'Use a token account whose mint matches the requested token address.',
   LEGACY_TOKEN_POOLS_UNSUPPORTED:
     'Legacy token pools (CCIP <1.5) are not supported. Upgrade to CCIP 1.5+ token pools.',
 
@@ -227,6 +225,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   // Cross-Chain Token
   CCT_PARAMS_INVALID:
     'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TOKEN_ACCOUNT_MINT_MISMATCH:
+    'Use a token account whose mint matches the requested token address.',
   CCT_TX_FAILED:
     'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
   CCT_TX_NOT_CONFIRMED:

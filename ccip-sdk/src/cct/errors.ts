@@ -39,6 +39,37 @@ export class CCTParamsInvalidError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a supplied SPL token account belongs to a different mint than requested.
+ *
+ * `context.requestedMint` is the requested mint; `context.resolvedMint` is decoded from the supplied
+ * token account. This is permanent: supply an account for the requested mint.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.generateUnsignedApproveToken({ payer, tokenAddress, tokenAccount, delegate, amount })
+ * } catch (error) {
+ *   if (error instanceof CCTTokenAccountMintMismatchError) {
+ *     console.log(error.context.requestedMint, error.context.resolvedMint)
+ *   }
+ * }
+ * ```
+ */
+export class CCTTokenAccountMintMismatchError extends CCIPError {
+  override readonly name = 'CCTTokenAccountMintMismatchError'
+  constructor(tokenAccount: string, requestedMint: string, resolvedMint: string) {
+    super(
+      CCIPErrorCode.CCT_TOKEN_ACCOUNT_MINT_MISMATCH,
+      `Token account mint mismatch for ${tokenAccount}: expected ${requestedMint}, got ${resolvedMint}`,
+      {
+        isTransient: false,
+        context: { tokenAccount, requestedMint, resolvedMint },
+      },
+    )
+  }
+}
+
 // Transaction submission
 
 /**

@@ -327,7 +327,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid.
    * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
-   * @throws {@link CCIPTokenAccountMintMismatchError} If an explicit token account belongs to another mint.
+   * @throws {@link CCTTokenAccountMintMismatchError} If an explicit token account belongs to another mint.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -366,7 +366,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCTParamsInvalidError} If an address, allowance, or multisig signer is invalid, or
    * `authority` does not match the executing wallet.
    * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
-   * @throws {@link CCIPTokenAccountMintMismatchError} If an explicit token account belongs to another mint.
+   * @throws {@link CCTTokenAccountMintMismatchError} If an explicit token account belongs to another mint.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If simulation or the SPL Token program rejects the transaction.

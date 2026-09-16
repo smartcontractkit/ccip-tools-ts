@@ -9,14 +9,13 @@ import {
 import { Keypair, PublicKey } from '@solana/web3.js'
 
 import {
-  CCIPTokenAccountMintMismatchError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenMintInvalidError,
   CCIPTokenMintNotFoundError,
 } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTokenAccountMintMismatchError } from '../../../errors.ts'
 import { U64_MAX } from '../../validate.ts'
 import { ApproveToken } from './approve-token.ts'
 
@@ -194,7 +193,7 @@ describe('ApproveToken (cct/solana)', () => {
             amount: 1n,
           }),
         (err: unknown) =>
-          err instanceof CCIPTokenAccountMintMismatchError &&
+          err instanceof CCTTokenAccountMintMismatchError &&
           err.context.requestedMint === TOKEN.toBase58() &&
           err.context.resolvedMint === OTHER_TOKEN.toBase58(),
       )
