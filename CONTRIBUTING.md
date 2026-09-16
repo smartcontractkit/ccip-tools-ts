@@ -35,6 +35,36 @@ typechecks. The root `typescript` alias points to the official TypeScript 6
 compatibility package because TypeDoc still requires TypeScript's classic API;
 this bridge can be removed when TypeDoc supports TypeScript 7.
 
+### Dependency overrides and accepted advisories
+
+The root `package.json` `overrides` block pins transitive dependencies. Those pins
+exist for two different reasons, and the difference decides whether a bump is safe:
+
+- **Advisory pins** — a dependent declares a range whose older releases are affected by
+  an advisory, and the patched release is outside what it allows (`toml`, `lodash-es`,
+  `qs`, `undici`, `joi`, …). Bump these whenever `npm audit` reports a newer fix.
+- **Compatibility pins** — a version a dependent cannot actually run with, kept only to
+  stop a hoist onto something worse.
+
+Forcing a version a dependent cannot use breaks it at runtime, so three findings are
+accepted and must not be "fixed" by pinning:
+
+- `@faker-js/faker` — reached only through the docs toolchain
+  (`docusaurus-plugin-openapi-docs` → `openapi-to-postmanv2`/`postman-code-generators`
+  → `postman-collection`, devDependencies of `ccip-api-ref`). `postman-collection@5.3.1`
+  (latest) pins `5.5.3` exactly and reads the pre-v8 API (`faker.address.city`) at import:
+  overriding to the patched `>=10.5` that GHSA-qxc2-j82w-r537 asks for makes
+  `npm run gen-api -w ccip-api-ref` fail with `Cannot read properties of undefined
+  (reading 'city')`. The advisory's vulnerable path (`faker.helpers.fake`) is never
+  called, and none of it ships — it is a docs build dependency.
+- `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no
+  patched version to pin. It reaches the CLI through `ethers` v5
+  (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
+- `@solana/web3.js` → `jayson` → `stream-json` — `stream-json` is fixed in `3.6.0`,
+  a pure-ESM rewrite that CJS `jayson` cannot load, and `1.99.0` is the last `web3.js` 1.x
+  (the v1-transaction support the CLI relies on). npm's suggested "fix" downgrades to
+  `1.98.4`, which would drop that support.
+
 ## Test Suite Layout
 
 Test files are classified by filename suffix:
@@ -87,7 +117,9 @@ Locks are per-machine, so all networked suites must run inside a single CI job/r
 
 ### RPC endpoint env vars
 
-Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to keyless public defaults hard-coded in the suites, so locally you only set what you want to override:
+Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to the keyless public defaults centralised in [`scripts/test-endpoints.ts`](scripts/test-endpoints.ts), so locally you only set what you want to override.
+
+Suites that would otherwise bind a single endpoint race their candidates with a health probe instead (`raceRpcEndpoint`), and that race always keeps the network's public defaults as a fallback tier behind whatever the env var configures: a secret that has gone dead (rotated key, exhausted quota) then costs the race nothing instead of failing the suite outright.
 
 | Variable | Network |
 | --- | --- |

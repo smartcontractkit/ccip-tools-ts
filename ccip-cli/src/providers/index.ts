@@ -119,7 +119,15 @@ export async function collectEndpoints(
       .map((s) => s.trim()) || [],
   )
   for (const [env, val] of Object.entries(process.env)) {
-    if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) endpoints.add(val)
+    if (!env.startsWith('RPC_') || !val) continue
+    // RPC_* vars hold comma-separated lists (same shape --rpc accepts), so a
+    // multi-endpoint value must fan out instead of being raced as one URL with
+    // commas in it — which no family can resolve, and which stalls every
+    // "not found on any chain" determination until it fails.
+    for (const url of val.split(',')) {
+      const endpoint = url.trim()
+      if (endpoint && RPCS_RE.test(endpoint)) endpoints.add(endpoint)
+    }
   }
   if (rpcsFile && existsSync(rpcsFile)) {
     try {
