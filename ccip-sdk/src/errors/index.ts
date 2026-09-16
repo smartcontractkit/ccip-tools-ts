@@ -92,7 +92,11 @@ export {
 export { CCIPContractNotRouterError, CCIPContractTypeInvalidError } from './specialized.ts'
 
 // Specialized errors - Wallet & Signer
-export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.ts'
+export {
+  CCIPWalletChainMismatchError,
+  CCIPWalletInvalidError,
+  CCIPWalletNotSignerError,
+} from './specialized.ts'
 
 // Specialized errors - Execution
 export {

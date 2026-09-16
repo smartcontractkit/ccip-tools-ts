@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
@@ -203,6 +203,7 @@ function stubChain(
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     typeAndVersion: () => {
       probes++
       return Promise.resolve(parseTypeAndVersion(`${POOL_TYPE[family]} ${version}`))

@@ -2326,6 +2326,42 @@ export class CCIPWalletInvalidError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when the signing wallet is connected to a different chain than the calldata was built
+ * for. Raised before anything is signed, broadcast or nonce-consumed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.deployToken({ ...opts, wallet }) // wallet connected to another network
+ * } catch (error) {
+ *   if (error instanceof CCIPWalletChainMismatchError) {
+ *     console.log(`Expected chain ${error.context.expected}, wallet on ${error.context.actual}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPWalletChainMismatchError extends CCIPError {
+  override readonly name = 'CCIPWalletChainMismatchError'
+  /** Creates a wallet chain mismatch error */
+  constructor(
+    chainName: string,
+    expected: number | string,
+    actual: number | string,
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.WALLET_CHAIN_MISMATCH,
+      `Wallet is connected to the wrong chain for ${chainName}: expected ${expected}, got ${actual}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, chainName, expected, actual },
+      },
+    )
+  }
+}
+
 // Source Chain
 
 /**

@@ -6,7 +6,7 @@ import { ZeroAddress, getAddress, getIcapAddress, id, makeError } from 'ethers'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { AcceptAdmin } from './accept-admin.ts'
 
@@ -69,6 +69,7 @@ function stubChain(overrides: Partial<EVMChain> = {}): EVMChain {
   return {
     provider: stubProvider({ pendingAdministrator: SENDER }),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
     nextNonce: async () => 0,
     rollbackNonce: () => {},
