@@ -192,6 +192,39 @@ export async function assertPoolOwner(
 }
 
 /**
+ * Bounds a two-step ownership transfer against the pool's `owner()`, in one `eth_call`: `sender`,
+ * when known, must be it, and `newOwner` must not already be (`CannotTransferToSelf`). Bounding
+ * `newOwner` against the chain is what makes it hold with no `sender`.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param poolAddress - Pool being written to.
+ * @param newOwner - The address being proposed as the next owner.
+ * @param sender - The address the tx will be sent from, when known.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the owner, or `newOwner` already is
+ */
+export async function assertPoolOwnershipTransfer(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  newOwner: string,
+  sender?: string,
+): Promise<void> {
+  const owner = await readTokenPoolOwner(chain, poolAddress)
+  if (sender !== undefined && getAddress(sender) !== owner)
+    throw new CCTParamsInvalidError(
+      operation,
+      'sender',
+      `must be the current token pool owner (${owner})`,
+    )
+  if (getAddress(newOwner) === owner)
+    throw new CCTParamsInvalidError(
+      operation,
+      'newOwner',
+      `must differ from the current token pool owner (${owner}) — the pool would revert CannotTransferToSelf`,
+    )
+}
+
+/**
  * Guards a LockRelease-only op: the liquidity and rebalancer functions are absent from the
  * `BurnMint` ABI, so without this the op would hand that {@link Interface} an unknown function
  * name and fail as an opaque ethers error instead of naming the real problem.
