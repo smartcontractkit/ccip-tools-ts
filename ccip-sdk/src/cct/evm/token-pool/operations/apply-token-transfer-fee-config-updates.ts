@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { type Interface, ZeroAddress, getAddress } from 'ethers'
+import type { Interface } from 'ethers'
 
 import type { TokenTransferFeeConfig } from '../../../../chain.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -28,9 +28,8 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
+  assertPoolOwnerOrFeeAdmin,
   getTokenPoolInterface,
-  readTokenPoolFeeAdmin,
-  readTokenPoolOwner,
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
@@ -193,26 +192,8 @@ export class ApplyTokenTransferFeeConfigUpdates extends EVMOperation<
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     if (params.sender !== undefined)
-      await this.#assertFeeRole(chain, params.poolAddress, params.sender)
+      await assertPoolOwnerOrFeeAdmin(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
-  }
-
-  async #assertFeeRole(chain: EVMChain, poolAddress: string, sender: string): Promise<void> {
-    const [owner, feeAdmin] = await Promise.all([
-      readTokenPoolOwner(chain, poolAddress),
-      readTokenPoolFeeAdmin(chain, poolAddress),
-    ])
-    const signer = getAddress(sender)
-    if (signer === owner || (feeAdmin !== ZeroAddress && signer === feeAdmin)) return
-    throw new CCTParamsInvalidError(
-      this.name,
-      'sender',
-      `must be the pool owner (${owner})${
-        feeAdmin === ZeroAddress
-          ? ' — this pool has no feeAdmin set'
-          : ` or its feeAdmin (${feeAdmin})`
-      }`,
-    )
   }
 
   /**

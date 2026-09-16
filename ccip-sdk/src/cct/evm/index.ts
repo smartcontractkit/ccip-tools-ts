@@ -70,6 +70,7 @@ import {
   type GetDynamicConfigResult,
   GetDynamicConfig,
 } from './token-pool/operations/get-dynamic-config.ts'
+import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
 import {
   type GetRebalancerParams,
   type GetRebalancerResult,
@@ -124,6 +125,10 @@ import {
   type TransferOwnershipParams,
   TransferOwnership,
 } from './token-pool/operations/transfer-ownership.ts'
+import {
+  type WithdrawFeeTokensParams,
+  WithdrawFeeTokens,
+} from './token-pool/operations/withdraw-fee-tokens.ts'
 import {
   type WithdrawLiquidityParams,
   WithdrawLiquidity,
@@ -191,11 +196,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
   readonly #getDynamicConfig = new GetDynamicConfig()
+  readonly #getFee = new GetFee()
   readonly #getTokenTransferFeeConfig = new GetTokenTransferFeeConfig()
   readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
   readonly #provideLiquidity = new ProvideLiquidity()
+  readonly #withdrawFeeTokens = new WithdrawFeeTokens()
   readonly #withdrawLiquidity = new WithdrawLiquidity()
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
@@ -865,6 +872,63 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned **v2.0.0** pool fee-token withdrawal transaction.
+   *
+   * @remarks The pool owner or delegated `feeAdmin` may transfer the full balances of the selected
+   * fee tokens to `recipient`. On LockRelease pools, bridge liquidity remains in the external
+   * lockbox and is not withdrawable here.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedWithdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   sender: '0xFeeAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFeeTokens(opts: WithdrawFeeTokensParams): Promise<UnsignedEVMTx> {
+    return this.#withdrawFeeTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws the selected fee-token balances from a **v2.0.0** pool to `recipient`.
+   *
+   * @remarks The signing wallet must be the pool owner or delegated `feeAdmin`.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.withdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   wallet, // pool owner or configured feeAdmin
+   * })
+   * ```
+   */
+  withdrawFeeTokens(opts: EVMExecuteParams<WithdrawFeeTokensParams>): Promise<TransactionResult> {
+    return this.#withdrawFeeTokens.execute(this.chain, opts)
+  }
+
+  /**
    * Reads the finality modes a **v2.0.0+** pool accepts.
    *
    * @remarks `finalityDepth` is the FTF minimum block depth (`0` when disabled); `finalitySafe`
@@ -903,6 +967,30 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getDynamicConfig(opts: GetDynamicConfigParams): Promise<GetDynamicConfigResult> {
     return this.#getDynamicConfig.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the fee parameters a **v2.0.0+** pool applies to a destination chain and finality.
+   *
+   * @remarks `getFee` reports the configured USD-cent and basis-point values, not a fee amount.
+   * `finality` defaults to `'finalized'`.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const fee = await cct.getFee({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getFee(opts: GetFeeParams): Promise<GetFeeResult> {
+    return this.#getFee.query(this.chain, opts)
   }
 
   /**
@@ -2335,6 +2423,7 @@ export type {
   GetDynamicConfigParams,
   GetDynamicConfigResult,
 } from './token-pool/operations/get-dynamic-config.ts'
+export type { GetFeeParams, GetFeeResult } from './token-pool/operations/get-fee.ts'
 export type {
   GetTokenTransferFeeConfigParams,
   GetTokenTransferFeeConfigResult,
@@ -2355,6 +2444,7 @@ export type {
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
 export type { ProvideLiquidityParams } from './token-pool/operations/provide-liquidity.ts'
+export type { WithdrawFeeTokensParams } from './token-pool/operations/withdraw-fee-tokens.ts'
 export type { WithdrawLiquidityParams } from './token-pool/operations/withdraw-liquidity.ts'
 export type { TransferLiquidityParams } from './token-pool/operations/transfer-liquidity.ts'
 export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'
