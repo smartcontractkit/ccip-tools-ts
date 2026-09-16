@@ -114,16 +114,20 @@ export class GetTokenPoolState extends CantonQuery<
       [p.poolOwner],
     )
     if (!contract) {
-      throw new Error(
-        `getTokenPoolState: pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        `pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
       )
     }
 
     const fields = decodeDamlRecord(contract.createArgument)
     const instrumentId = decodeInstrumentId(fields)
     if (!instrumentId) {
-      throw new Error(
-        `getTokenPoolState: pool ${p.poolInstanceAddress} has no decodable instrumentId`,
+      throw new CCTParamsInvalidError(
+        this.name,
+        'poolInstanceAddress',
+        `pool ${p.poolInstanceAddress} has no decodable instrumentId`,
       )
     }
 

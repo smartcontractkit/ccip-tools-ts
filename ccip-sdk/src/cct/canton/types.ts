@@ -42,20 +42,6 @@ export type CantonDeployResult = CantonTransactionResult & {
   rateLimiterCids?: string[]
   /** `TokenConfig` contract ID the TAR registered for the instrument. */
   tokenConfigCid?: string
-  /** Raw hex instance address of the deployed pool (`keccak256` of the unpack string). */
+  /** Derived offline from request params, not ledger-verified — `poolCid` is the verified identity. */
   poolInstanceAddress?: string
-}
-
-/**
- * Result of a TAR admin write (`setPool`, `registerAdmin`, `acceptAdmin`,
- * `transferAdmin`): the transaction result plus the `tokenConfigCid` the TAR
- * created/updated for the instrument (consumed by follow-on choices).
- */
-export type CantonTarAdminResult = CantonTransactionResult & {
-  /** `TokenConfig` contract ID for the instrument after the write. */
-  tokenConfigCid: string
-  /** Pending admin party, for `registerAdmin` / `transferAdmin` (undefined for `acceptAdmin`). */
-  pendingAdmin?: string
-  /** Accepted admin party, for `acceptAdmin` (undefined for the propose/transfer ops). */
-  admin?: string
 }

@@ -94,7 +94,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   /** Atomically deploys and initializes a `BurnMintTokenPool`/`LockReleaseTokenPool` (registry-pools family). */
   async deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
-    return this.#deployTokenPool.execute(this.chain, opts) as Promise<ExecuteDeployTokenPoolResult>
+    return this.#deployTokenPool.execute(this.chain, opts)
   }
 
   // ─── Pool: applyChainUpdates ────────────────────────────────────────────
@@ -110,10 +110,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   async applyChainUpdates(
     opts: ExecuteApplyChainUpdatesParams,
   ): Promise<ExecuteApplyChainUpdatesResult> {
-    return this.#applyChainUpdates.execute(
-      this.chain,
-      opts,
-    ) as Promise<ExecuteApplyChainUpdatesResult>
+    return this.#applyChainUpdates.execute(this.chain, opts)
   }
 
   // ─── TAR: reads ─────────────────────────────────────────────────────────

@@ -84,7 +84,7 @@ export interface CantonInstrumentId {
 }
 
 /**
- * An active contract read from the ACS via {@link CantonChain.findActiveContractByTemplate}.
+ * An active contract read from the ACS via {@link CantonChain.findActiveContractsByTemplate}.
  *
  * Carries the fields needed both to resolve a contract by `instanceId` and to
  * embed it as a disclosed contract in a later submission (`createdEventBlob` +

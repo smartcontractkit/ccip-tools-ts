@@ -3,18 +3,18 @@
  * for approval, signing, and on-ledger execution.
  *
  * The Wallet Gateway speaks CIP-103 over JSON-RPC 2.0 (HTTP POST to its
- * `/api/v0/dapp` endpoint). `prepareExecuteAndWait` takes a
- * `JsPrepareSubmissionRequest` — which is the same shape as the `JsCommands`
- * the CCT ops produce (`commands`, `actAs`, `disclosedContracts`,
- * `commandId`, ...) — so an {@link UnsignedCantonTx} from
- * `manager.generateUnsigned<Op>(...)` maps directly onto the gateway call.
+ * `/api/v0/dapp` endpoint). `prepareExecute` takes a `JsPrepareSubmissionRequest`
+ * — which is the same shape as the `JsCommands` the CCT ops produce
+ * (`commands`, `actAs`, `disclosedContracts`, `commandId`, ...) — so an
+ * {@link UnsignedCantonTx} from `manager.generateUnsigned<Op>(...)` maps
+ * directly onto the gateway call.
  *
  * The gateway handles approval (its `approve` UI, or auto-approve for capable
  * wallets), signs via its configured signing driver (participant / Blockdaemon
  * / Fireblocks / Securosys / Dfns / internal), and submits to the Canton
- * ledger. `prepareExecuteAndWait` blocks until the transaction is executed,
- * returning the full transaction event. This submitter parses out the
- * `updateId` (the Canton tx hash) and returns a {@link CantonTransactionResult}.
+ * ledger. `prepareExecute` is two-phase and non-blocking — see
+ * {@link submitViaGateway} for the approval-URL / API-key-auth split; the
+ * final on-ledger `updateId` isn't returned here.
  *
  * This is the "initiate from the SDK, approve + send via gateway" seam. It
  * composes directly with the CCT ops:

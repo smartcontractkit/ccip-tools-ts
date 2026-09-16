@@ -33,15 +33,17 @@
  * @packageDocumentation
  */
 
+import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import type { TransferTimeout } from '../../encoding.ts'
 import {
   type CantonExecuteParams,
   type CantonGenerateParams,
   CantonOperation,
+  extractCreatedContractIds,
 } from '../../operation.ts'
 import {
   TAR_TEMPLATE_ID,
@@ -57,6 +59,7 @@ import {
   type PoolReceiveContext,
   BURN_MINT_POOL_TEMPLATE_ID,
   LOCK_RELEASE_POOL_TEMPLATE_ID,
+  RATE_LIMITER_TEMPLATE_ID,
   buildInitializeChoiceArgument,
   buildPoolCreateArguments,
   resolvePoolFactoryDeps,
@@ -322,6 +325,33 @@ export class DeployTokenPool extends CantonOperation<
       // dedup covers the common case where they're the same party.
       actAs: [...new Set([p.poolOwner, p.admin])],
       disclosedContracts,
+    }
+  }
+
+  override async execute(
+    chain: CantonChain,
+    params: ExecuteDeployTokenPoolParams,
+  ): Promise<ExecuteDeployTokenPoolResult> {
+    const base = await super.execute(chain, params)
+
+    const templateId =
+      params.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
+    const poolCids = extractCreatedContractIds(base.response, templateId)
+    const [poolCid] = poolCids
+    if (poolCids.length !== 1 || !poolCid) {
+      throw new CCTTxFailedError(
+        this.name,
+        `expected exactly one created ${templateId}, found ${poolCids.length}`,
+        { context: { updateId: base.hash } },
+      )
+    }
+
+    return {
+      ...base,
+      poolCid,
+      rateLimiterCids: extractCreatedContractIds(base.response, RATE_LIMITER_TEMPLATE_ID),
+      tokenConfigCid: extractCreatedContractIds(base.response, TOKEN_CONFIG_TEMPLATE_ID)[0],
+      poolInstanceAddress: hashedRawInstanceAddress(`${params.instanceId}@${params.poolOwner}`),
     }
   }
 }

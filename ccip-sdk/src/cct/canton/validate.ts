@@ -31,8 +31,9 @@ export function parsePartyId(operation: string, param: string, value: string): s
 
 /**
  * Validate and return a Canton instrument ID. Accepts both the structured
- * `{ admin, id }` form and the string form `"admin::id"` (where `admin` is a
- * party ID and `id` is the token name).
+ * `{ admin, id }` form and the string form `"hint::1220<fingerprint>::tokenId"`
+ * (the first two `::`-separated segments are the admin party ID, the rest is
+ * the token id).
  * @returns the normalized `{ admin, id }` object.
  */
 export function parseInstrumentId(

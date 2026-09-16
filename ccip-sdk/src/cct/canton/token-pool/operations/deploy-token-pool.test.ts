@@ -11,11 +11,14 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { type GenerateDeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
+import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { ChainFamily } from '../../../../networks.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import { TOKEN_CONFIG_TEMPLATE_ID } from '../../token-admin-registry/shared.ts'
+import { BURN_MINT_POOL_TEMPLATE_ID, RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 
 const fp = (hex: string) => '1220' + hex.repeat(32)
 const POOL_OWNER = `poolOwner::${fp('ab')}`
@@ -260,6 +263,79 @@ describe('deployTokenPool deps resolution', () => {
         assert.ok(err instanceof CCTParamsInvalidError)
         assert.match(err.message, /feeQuoter, rmnRemote/)
         assert.doesNotMatch(err.message, /missing tokenAdminRegistry/)
+        return true
+      },
+    )
+  })
+})
+
+function mockChainWithSubmit(events: unknown[]): CantonChain {
+  const chain = mockChain('canton:TestNet')
+  return {
+    ...chain,
+    provider: {
+      submitAndWaitForTransaction: async () => ({
+        transaction: { updateId: 'update-1', events },
+      }),
+    },
+  } as unknown as CantonChain
+}
+
+/** Real ledger events echo the concrete package-id form, never the symbolic `#<pkg-name>:…` one. */
+function concreteTemplateId(symbolicTemplateId: string, packageId: string): string {
+  return `#${packageId}:${symbolicTemplateId.split(':').slice(1).join(':')}`
+}
+
+describe('deployTokenPool execute result parsing', () => {
+  const op = new DeployTokenPool()
+  const wallet = { party: POOL_OWNER }
+
+  it('extracts poolCid, rateLimiterCids, tokenConfigCid, and poolInstanceAddress', async () => {
+    const chain = mockChainWithSubmit([
+      {
+        CreatedEvent: {
+          templateId: concreteTemplateId(BURN_MINT_POOL_TEMPLATE_ID, 'deadbeef'),
+          contractId: 'pool-cid-1',
+        },
+      },
+      {
+        CreatedEvent: {
+          templateId: concreteTemplateId(RATE_LIMITER_TEMPLATE_ID, 'deadbeef'),
+          contractId: 'rl-cid-1',
+        },
+      },
+      {
+        CreatedEvent: {
+          templateId: concreteTemplateId(RATE_LIMITER_TEMPLATE_ID, 'deadbeef'),
+          contractId: 'rl-cid-2',
+        },
+      },
+      {
+        CreatedEvent: {
+          templateId: concreteTemplateId(TOKEN_CONFIG_TEMPLATE_ID, 'cafebabe'),
+          contractId: 'token-config-cid-1',
+        },
+      },
+    ])
+
+    const result = await op.execute(chain, { ...baseParams(), wallet })
+
+    assert.equal(result.poolCid, 'pool-cid-1')
+    assert.deepEqual(result.rateLimiterCids, ['rl-cid-1', 'rl-cid-2'])
+    assert.equal(result.tokenConfigCid, 'token-config-cid-1')
+    assert.equal(
+      result.poolInstanceAddress,
+      hashedRawInstanceAddress(`pool-1@${POOL_OWNER}`),
+    )
+  })
+
+  it('throws when the response has no created pool contract', async () => {
+    const chain = mockChainWithSubmit([])
+
+    await assert.rejects(
+      () => op.execute(chain, { ...baseParams(), wallet }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCTTxFailedError)
         return true
       },
     )

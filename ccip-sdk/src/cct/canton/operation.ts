@@ -1,21 +1,24 @@
 /**
  * Canton {@link Operation} lifecycle: validate → parse → build unsigned
- * `JsCommands` → submit via {@link CantonChain.submitCommands}.
+ * `JsCommands` → submit via {@link submitCantonCommands}.
  *
  * Mirrors the Solana split: {@link CantonGenerateParams} (with an explicit
  * `sender` party, no wallet) for {@link generate}, and {@link CantonExecuteParams}
  * (with a `wallet`) for {@link execute}. `execute` derives `sender` from
  * `wallet.party`, builds the commands, and submits via
- * {@link CantonChain.submitCommands} (prepare → sign → execute when a `signer`
+ * {@link submitCantonCommands} (prepare → sign → execute when a `signer`
  * is present, direct submit otherwise).
  *
  * @packageDocumentation
  */
 
-import { CCIPWalletInvalidError } from '../../errors/index.ts'
-import type { CantonChain } from '../../canton/index.ts'
-import { type CantonWallet, isCantonWallet, type UnsignedCantonTx } from '../../canton/types.ts'
+import { CCIPError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { JsCommands } from '../../canton/client/index.ts'
+import { getTemplateEntityName } from '../../canton/events.ts'
+import type { CantonChain } from '../../canton/index.ts'
+import { submitCantonCommands } from '../../canton/submit-commands.ts'
+import { type CantonWallet, isCantonWallet, type UnsignedCantonTx } from '../../canton/types.ts'
+import { CCTTxFailedError } from '../errors.ts'
 import { Operation } from '../operation.ts'
 import type { CantonTransactionResult } from './types.ts'
 
@@ -54,7 +57,7 @@ export type CantonExecuteParams<P extends object> = P & {
  *
  * `generate` returns an {@link UnsignedCantonTx} (a `JsCommands` ready for
  * interactive submission or external signing). `execute` signs and submits via
- * {@link CantonChain.submitCommands} and returns the confirmed `updateId`.
+ * {@link submitCantonCommands} and returns the confirmed `updateId`.
  *
  * `buildCommands` receives the parsed generate params (with `sender`), so it
  * reads `params.sender` for `actAs` — not `params.wallet.party`.
@@ -117,7 +120,7 @@ export abstract class CantonOperation<
 
   /**
    * Validates the wallet, derives `sender` from `wallet.party`, builds the
-   * commands, and submits via {@link CantonChain.submitCommands}. Returns the
+   * commands, and submits via {@link submitCantonCommands}. Returns the
    * confirmed `updateId` plus the raw ledger response for result parsing.
    */
   async execute(
@@ -129,8 +132,24 @@ export abstract class CantonOperation<
 
     const parsed = this.prepare({ ...rest, sender: wallet.party } as CantonGenerateParams<P>)
     const commands = await this.buildCommands(chain, parsed)
-    const response = await chain.submitCommands(commands, wallet.signer)
+    let response
+    try {
+      response = await submitCantonCommands(chain, commands, wallet.signer)
+    } catch (error) {
+      // Not CCTTxNotConfirmedError: Canton submit-and-wait isn't safely retriable.
+      if (CCIPError.isCCIPError(error)) {
+        throw new CCTTxFailedError(this.name, error.message, {
+          cause: error,
+          isTransient: error.isTransient,
+          retryAfterMs: error.retryAfterMs,
+        })
+      }
+      throw error
+    }
 
+    if (!response.transaction) {
+      throw new CCTTxFailedError(this.name, 'submitted transaction response has no transaction field')
+    }
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -139,4 +158,37 @@ export abstract class CantonOperation<
     chain.logger.debug(`${this.name}: submitted, updateId=${updateId}`)
     return { hash: updateId, response }
   }
+}
+
+/** Matches by entity name — ledger events echo the concrete package-id, not the symbolic form. */
+export function extractCreatedContractIds(
+  response: CantonTransactionResult['response'],
+  templateId: string,
+): string[] {
+  const entityName = templateId.split(':').at(-1) ?? templateId
+  const events = (response.transaction as { events?: unknown[] } | undefined)?.events ?? []
+  const ids: string[] = []
+  for (const event of events) {
+    const created = (event as { CreatedEvent?: Record<string, unknown> })?.CreatedEvent
+    if (!created || typeof created['contractId'] !== 'string') continue
+    if (getTemplateEntityName(created) === entityName) {
+      ids.push(created['contractId'])
+    }
+  }
+  return ids
+}
+
+/** `exerciseResult` of the first `ExercisedEvent` matching `choice` in a submitted transaction. */
+export function extractExerciseResult(
+  response: CantonTransactionResult['response'],
+  choice: string,
+): unknown {
+  const events = (response.transaction as { events?: unknown[] } | undefined)?.events ?? []
+  for (const event of events) {
+    const exercised = (event as { ExercisedEvent?: Record<string, unknown> })?.ExercisedEvent
+    if (exercised?.['choice'] === choice && exercised['exerciseResult'] != null) {
+      return exercised['exerciseResult']
+    }
+  }
+  return null
 }
