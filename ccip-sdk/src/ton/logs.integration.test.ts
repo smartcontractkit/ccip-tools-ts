@@ -181,6 +181,28 @@ async function v3IndexHealthy(base: string, v2Tip?: number): Promise<boolean> {
   return false
 }
 
+/** Reachability ≠ request budget: a throttled-but-up index passes
+ * {@link v3IndexHealthy} (one or two GETs land fine), and a 24h scan then crawls
+ * the SDK's per-request 429-backoff ladder for ~20 minutes per test while holding
+ * the network lock — queueing every other ton-testnet suite behind it. Fire a
+ * short burst at the keyless budget instead: a healthy one absorbs 4 requests at
+ * 1s spacing without a 429; a throttled one surfaces it immediately. */
+async function v3NotThrottled(base: string): Promise<boolean> {
+  for (let i = 0; i < 4; i++) {
+    if (i > 0) await sleep(1_000)
+    try {
+      const res = await fetch(`${base}/masterchainInfo`, {
+        headers: { Accept: 'application/json' },
+      })
+      if (res.status === 429) return false
+      if (!res.ok) return false // non-4xx failures: treat as hostile too
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
 /** Live scans retry until an attempt's shapes hold (each test's clean condition):
  * the shared public index 429-storms shared-egress networks in minute-scale
  * bursts, and the index can lag the v2 tip in the same window — both transient.
@@ -255,7 +277,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     } catch {
       // v2 endpoint unreachable too — the probe falls back to reachability-only
     }
-    return v3IndexHealthy(tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet), v2Tip)
+    const base = tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet)
+    return (await v3IndexHealthy(base, v2Tip)) && (await v3NotThrottled(base))
   }
 
   /** Skip the test when the live index probe failed (see before hook). */
@@ -394,6 +417,16 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         // an environment condition, not a regression — the wire assertions below only
         // have meaning once a scan actually yields.
         t.skip('index degraded: every attempt truncated before the first sealed block')
+        return
+      }
+      if (calls.walkPages > 0 && calls.rateLimited) {
+        // The burst probe can't see throttling starting mid-suite: a 429'd final
+        // attempt degrades the scan to the v2 walk, so the fast-path shape assertions
+        // below are environment noise, not regression signal (the hermetic unit suite
+        // covers the logic) — same escape hatch as the degraded-index skip above.
+        t.skip(
+          `toncenter still throttling this egress (rate-limited ${calls.rateLimited}× on the last attempt)`,
+        )
         return
       }
       for (const l of logs) {
@@ -641,6 +674,15 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       }
       if (logs.length === 0) {
         t.skip('index degraded: every attempt truncated before the first sealed block')
+        return
+      }
+      if (spy.calls.walkPages > 0 && spy.calls.rateLimited) {
+        // Same mid-suite throttle escape hatch as the startTime-only scan above: a
+        // 429'd final attempt degrades to the v2 walk, which is environment noise for
+        // the fast-path assertions, not regression signal.
+        t.skip(
+          `toncenter still throttling this egress (rate-limited ${spy.calls.rateLimited}× on the last attempt)`,
+        )
         return
       }
       const first = logs[0]!

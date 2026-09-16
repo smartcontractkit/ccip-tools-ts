@@ -1005,7 +1005,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(`CantonChain.sendMessage: submitting command`)
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer)
+    const response = await this.submitCommands(unsigned.commands, wallet.signer, 'Send Message')
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1309,7 +1309,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer)
+    const response = await this.submitCommands(unsigned.commands, wallet.signer, 'Execute Message')
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1403,13 +1403,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * - **No signer**: delegates to `submitAndWaitForTransaction` (direct submit).
    * - **With signer**: uses the interactive submission API:
    *   1. Prepare the transaction (`/v2/interactive-submission/prepare`).
-   *   2. Decode the hash and call `signer.sign(hashBytes)`.
+   *   2. Decode the hash and call `signer.signTxHash(hashBytes)`.
    *   3. Execute the signed transaction (`/v2/interactive-submission/executeAndWaitForTransaction`).
    */
   private async submitCommands(
     commands: JsCommands,
     signer?: TransactionSigner,
+    reason: string = 'submit command',
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
+    // If no signer is passed, default to direct submission.
     if (!signer) {
       return this.provider.submitAndWaitForTransaction(commands)
     }
@@ -1426,9 +1428,19 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
+    /*
+     * TODO: this currently trusts the preparing participant node to act honestly.
+     *  While this level of trust is expected on Canton, it is not ideal - we could
+     *  decode the prepared transaction, present it to the user, and compute the
+     *  signing hash ourselves.
+     * */
+
     // Step 2 — Sign the hash
     const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
-    const partySignatures = await signer.sign(hashBytes)
+    this.logger.info(
+      `Canton: prepared transaction (${reason}), signing transaction with hash ${Buffer.from(hashBytes).toString('hex').toUpperCase()}`,
+    )
+    const partySignatures = await signer.signTxHash(hashBytes)
 
     // Step 3 — Execute the signed transaction
     const hashingSchemeVersion =
@@ -1437,15 +1449,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         ? prepareResponse.hashingSchemeVersion
         : 'HASHING_SCHEME_VERSION_V3'
 
-    const executeResponse = await this.provider.executeSubmissionAndWaitForTransaction({
+    return await this.provider.executeSubmissionAndWaitForTransaction({
       preparedTransaction: prepareResponse.preparedTransaction,
-      partySignatures,
+      partySignatures: {
+        signatures: [partySignatures],
+      },
       deduplicationPeriod: { Empty: {} },
       hashingSchemeVersion,
       submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     })
-
-    return executeResponse
   }
 
   /**
@@ -1521,7 +1533,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(
       `CantonChain.updateReceiverRequiredCCVs: receiver=${receiverCid} ccvs=${requiredCcvsRaw.join(', ')}`,
     )
-    const response = await this.submitCommands(updateCmd, signer)
+    const response = await this.submitCommands(
+      updateCmd,
+      signer,
+      'Update CCIPReceiver requiredCCVs',
+    )
     const newCid = extractCreatedContractId(response.transaction, 'CCIPReceiver')
     if (!newCid) {
       throw new CCIPError(
@@ -1578,7 +1594,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.debug(
           `CantonChain.createReceiverForFinality: creating CCIPReceiver finality=${finality} instanceId=${instanceId} attempt=${attempt}/${attempts}`,
         )
-        const response = await this.submitCommands(createCmd, signer)
+        const response = await this.submitCommands(createCmd, signer, 'Create CCIPReceiver')
         const tx = response.transaction as { events?: unknown[] }
         for (const event of tx.events ?? []) {
           const ev = event as Record<string, unknown>
@@ -1926,7 +1942,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         synchronizerId: dc.synchronizerId,
       })),
     }
-    await this.submitCommands(createCmd, signer)
+    await this.submitCommands(createCmd, signer, 'Create PerPartyRouter')
   }
 
   /**
@@ -1952,7 +1968,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       commandId: `ccip-create-sender-${Date.now()}`,
       actAs: [party],
     }
-    await this.submitCommands(createCmd, signer)
+    await this.submitCommands(createCmd, signer, 'Create CCIPSender')
   }
 
   /**
