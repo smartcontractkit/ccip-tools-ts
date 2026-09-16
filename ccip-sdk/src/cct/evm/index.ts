@@ -699,9 +699,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned pool `setAllowedFinalityConfig` tx (for multisig / offline signing).
    * Configures the **v2.0.0-only** FTF minimum block depth and optional FCR/safe-finality mode.
    *
-   * @remarks `allowedFinality.finalityDepth` is an integer in `[0, 65535]`; `0` disables FTF.
-   * Set `allowedFinality.finalitySafe` to `true` to allow FCR independently of the depth. The
-   * pool owner is the only permitted caller; when `sender` is supplied it is checked against
+   * @remarks This replaces the whole finality config: `allowedFinality.finalityDepth` is an integer
+   * in `[0, 65535]`, and `0` disables FTF; omitting `allowedFinality.finalitySafe` disables FCR.
+   * To preserve one setting while changing the other, first call {@link getAllowedFinalityConfig}.
+   * The pool owner is the only permitted caller; when `sender` is supplied it is checked against
    * `owner()` before calldata is returned.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
@@ -729,9 +730,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Sets the finality modes a **v2.0.0** pool accepts, signing + submitting as its owner.
    *
-   * @remarks `allowedFinality.finalityDepth` is an integer in `[0, 65535]`; `0` disables FTF.
-   * Set `allowedFinality.finalitySafe` to `true` to allow FCR independently of the depth. `sender`
-   * defaults to the wallet address and, when supplied, must equal it.
+   * @remarks This replaces the whole finality config: `allowedFinality.finalityDepth` is an integer
+   * in `[0, 65535]`, and `0` disables FTF; omitting `allowedFinality.finalitySafe` disables FCR.
+   * To preserve one setting while changing the other, first call {@link getAllowedFinalityConfig}.
+   * `sender` defaults to the wallet address and, when supplied, must equal it.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
@@ -760,7 +762,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads the finality modes a **v2.0.0** pool accepts.
+   * Reads the finality modes a **v2.0.0+** pool accepts.
    *
    * @remarks `finalityDepth` is the FTF minimum block depth (`0` when disabled); `finalitySafe`
    * is `true` when FCR/safe finality is allowed.
@@ -2201,6 +2203,11 @@ export type {
   GetRebalancerParams,
   GetRebalancerResult,
 } from './token-pool/operations/get-rebalancer.ts'
+export type {
+  GetAllowedFinalityConfigParams,
+  GetAllowedFinalityConfigResult,
+} from './token-pool/operations/get-allowed-finality-config.ts'
+export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set-allowed-finality-config.ts'
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'

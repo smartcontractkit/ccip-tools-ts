@@ -34,8 +34,9 @@ export type SetAllowedFinalityConfigParams = {
   /** Token pool to reconfigure. Must be non-zero — it is the transaction destination. */
   poolAddress: string
   /**
-   * Finality modes the pool accepts. `finalityDepth` is an integer in `[0, 65535]`; `0` disables
-   * FTF. Set `finalitySafe` to enable FCR/safe finality independently of the depth.
+   * Full replacement finality config. `finalityDepth` is an integer in `[0, 65535]`; `0` disables
+   * FTF. Omitting `finalitySafe` disables FCR/safe finality; read the current config with
+   * `getAllowedFinalityConfig` before updating one field while preserving the other.
    */
   allowedFinality: FinalityAllowed
   /**
