@@ -3,9 +3,13 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, makeError } from 'ethers'
 
-import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
+import {
+  CCIPExecTxRevertedError,
+  CCIPWalletChainMismatchError,
+  CCIPWalletInvalidError,
+} from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import crossChainBytecode from '../../artifacts/bytecode/V2_0_0/cross-chain-token.ts'
 import { DeployToken } from './deploy-token.ts'
@@ -17,6 +21,10 @@ const ROLE_ADMIN = '0x' + '33'.repeat(20)
 const PREMINT_RECIPIENT = '0x' + '44'.repeat(20)
 const DEPLOYED = '0x' + '77'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+/** Ethereum Sepolia; the chain the wallet is wrongly connected to. */
+const OTHER_CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia').chainId)
 
 // Golden vector: a pinned constructor-arg encoding for the fixed inputs below. Independent of
 // the SDK encoder — it guards CrossChainToken's init-code (bytecode + constructor) against drift.
@@ -55,6 +63,7 @@ const DEPLOY_DATA = crossChainBytecode + CTOR_ARGS
 function stubChain(): EVMChain {
   return {
     provider: {} as never,
+    network: { chainId: CHAIN_ID },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
@@ -93,6 +102,11 @@ describe('DeployToken (cct/evm)', () => {
     assert.equal(tx.from, SENDER)
     assert.ok(tx.data!.startsWith(crossChainBytecode), 'data starts with creation bytecode')
     assert.equal(tx.data, DEPLOY_DATA)
+  })
+
+  it('pins the tx to the manager chain with an explicit chainId', async () => {
+    const unsigned = await new DeployToken().generate(stubChain(), INPUTS)
+    assert.equal(unsigned.transactions[0]!.chainId, CHAIN_ID)
   })
 
   it('omits `from` when no sender is given', async () => {
@@ -267,5 +281,30 @@ describe('DeployToken (cct/evm)', () => {
       () => new DeployToken().execute(stubChain(), { ...INPUTS, wallet: {} }),
       (err: unknown) => err instanceof CCIPWalletInvalidError,
     )
+  })
+
+  // TOB-CLCCT-3: this used to deploy on the wallet's chain and report it as this chain's.
+  it('deploys nothing when the wallet is connected to another chain', async () => {
+    let deployed = false
+    const wallet = {
+      ...fakeSigner({}),
+      provider: { _detectNetwork: () => Promise.resolve({ chainId: BigInt(OTHER_CHAIN_ID) }) },
+      sendTransaction: () => {
+        deployed = true
+        throw new Error('must not broadcast')
+      },
+      signTransaction: () => {
+        deployed = true
+        throw new Error('must not sign')
+      },
+    }
+    await assert.rejects(
+      () => new DeployToken().execute(stubChain(), { ...INPUTS, wallet }),
+      (err: unknown) =>
+        err instanceof CCIPWalletChainMismatchError &&
+        err.context.expected === CHAIN_ID &&
+        err.context.actual === OTHER_CHAIN_ID,
+    )
+    assert.equal(deployed, false)
   })
 })
