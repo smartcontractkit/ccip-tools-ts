@@ -10,7 +10,7 @@
  * @packageDocumentation
  */
 
-import { type Interface, getAddress } from 'ethers'
+import { type Interface, getAddress, getCreateAddress } from 'ethers'
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { type EVMChain, isSigner } from '../../evm/index.ts'
@@ -167,9 +167,9 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
 
   /**
    * {@link generate}, then sign and submit; resolves to the tx hash and the newly deployed
-   * contract address (read from the mined receipt), plus the
+   * contract address (validated against the submitted CREATE sender and nonce), plus the
    * {@link ExplorerVerificationInput} for verifying its source on a block explorer.
-   * @throws {@link CCTTxFailedError} if the tx mined without producing a contract address
+   * @throws {@link CCTTxFailedError} if the tx mined without the expected contract address
    */
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
     const unsigned = await this.generate(chain, params)
@@ -177,14 +177,33 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
     // Same value `buildUnsigned` appended to the bytecode. Taken from `encode` rather than
     // sliced back out of the init-code, so it stays correct regardless of the tx layout.
     const encodedConstructorArgs = this.encode(iface, params)
-    const { response, receipt } = await submit(chain, params.wallet, unsigned, this.name)
-    if (!receipt.contractAddress)
+    const { response, receipt, sender, nonce } = await submit(
+      chain,
+      params.wallet,
+      unsigned,
+      this.name,
+    )
+    const expectedAddress = getAddress(getCreateAddress({ from: sender, nonce }))
+    const returnedAddress = receipt.contractAddress
+    if (returnedAddress == null)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
-        context: { txHash: response.hash },
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
+      })
+    let contractAddress: string
+    try {
+      contractAddress = getAddress(returnedAddress)
+    } catch {
+      throw new CCTTxFailedError(this.name, 'deployment returned an invalid contract address', {
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
+      })
+    }
+    if (contractAddress !== expectedAddress)
+      throw new CCTTxFailedError(this.name, 'deployment returned an unexpected contract address', {
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
       })
     return {
       hash: response.hash,
-      contractAddress: receipt.contractAddress,
+      contractAddress: expectedAddress,
       verification: { contract, encodedConstructorArgs },
     }
   }
