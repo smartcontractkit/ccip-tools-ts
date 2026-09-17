@@ -322,6 +322,46 @@ export async function readTokenPoolAllowedFinality(
   return resultToObject(await pool.getAllowedFinalityConfig())
 }
 
+/** Fee parameters a v2.0.0 pool applies to a destination-chain transfer. */
+export type TokenPoolFee = {
+  feeUSDCents: bigint
+  destGasOverhead: number
+  destBytesOverhead: number
+  tokenFeeBps: number
+  isEnabled: boolean
+}
+
+/**
+ * Reads a v2.0.0 pool's fee parameters in one `eth_call`.
+ *
+ * @remarks Standard pools use only `destChainSelector` and `requestedFinalityConfig`; the other
+ * `getFee` ABI inputs are reserved for pool-specific implementations, so this supplies their
+ * neutral values.
+ */
+export async function readTokenPoolFee(
+  chain: EVMChain,
+  poolAddress: string,
+  destChainSelector: bigint,
+  requestedFinalityConfig: string,
+): Promise<TokenPoolFee> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const fee = await pool.getFee(
+    ZeroAddress,
+    destChainSelector,
+    0n,
+    ZeroAddress,
+    requestedFinalityConfig,
+    '0x',
+  )
+  return {
+    feeUSDCents: fee[0] as bigint,
+    destGasOverhead: Number(fee[1]),
+    destBytesOverhead: Number(fee[2]),
+    tokenFeeBps: Number(fee[3]),
+    isEnabled: fee[4] as boolean,
+  }
+}
+
 /** Reads a v2.0.0 pool's token and its token-transfer fee config in two `eth_call`s. */
 export async function readTokenPoolTokenTransferFeeConfig(
   chain: EVMChain,
@@ -439,6 +479,30 @@ export async function readTokenPoolDynamicConfig(
 /** Reads the v2.0.0 pool's delegated token-transfer-fee admin in one `eth_call`. */
 export async function readTokenPoolFeeAdmin(chain: EVMChain, poolAddress: string): Promise<string> {
   return (await readTokenPoolDynamicConfig(chain, poolAddress)).feeAdmin
+}
+
+/** Pre-flights `sender` against the pool owner or its delegated v2.0.0 `feeAdmin`. */
+export async function assertPoolOwnerOrFeeAdmin(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  sender: string,
+): Promise<void> {
+  const [owner, feeAdmin] = await Promise.all([
+    readTokenPoolOwner(chain, poolAddress),
+    readTokenPoolFeeAdmin(chain, poolAddress),
+  ])
+  const signer = getAddress(sender)
+  if (signer === owner || (feeAdmin !== ZeroAddress && signer === feeAdmin)) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the pool owner (${owner})${
+      feeAdmin === ZeroAddress
+        ? ' — this pool has no feeAdmin set'
+        : ` or its feeAdmin (${feeAdmin})`
+    }`,
+  )
 }
 
 /**
