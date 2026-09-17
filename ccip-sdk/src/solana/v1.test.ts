@@ -376,7 +376,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       ).simulateTransaction = async () => {
         simulations++
         return {
-          value: { err: { InstructionError: [0, 'ComputationalBudgetExceeded'] }, logs: [] },
+          value: { err: { InstructionError: [1, 'ComputationalBudgetExceeded'] }, logs: [] },
         }
       }
 
@@ -402,7 +402,9 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         connection as unknown as { simulateTransaction: () => Promise<unknown> }
       ).simulateTransaction = async () => {
         simulations++
-        return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+        return {
+          value: { err: { InstructionError: [1, 'ProgramFailedToComplete'] }, logs: [] },
+        }
       }
 
       await assert.rejects(
@@ -417,6 +419,33 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal(simulations, 1)
     })
 
+    it('simulateAndSendTxs splits a metered program failure in resource mode', async () => {
+      const { connection } = mockConnection()
+      let simulations = 0
+      ;(
+        connection as unknown as { simulateTransaction: () => Promise<unknown> }
+      ).simulateTransaction = async () => {
+        if (++simulations === 1) {
+          return {
+            value: {
+              err: { InstructionError: [1, 'ProgramFailedToComplete'] },
+              logs: ['Program failed: exceeded CUs meter at BPF instruction'],
+            },
+          }
+        }
+        return { value: { logs: [], unitsConsumed: 5 } }
+      }
+
+      await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+        undefined,
+        'resource',
+      )
+      assert.equal(simulations, 3)
+    })
+
     it('simulateAndSendTxs preserves program-error splitting in partial mode', async () => {
       const { connection } = mockConnection()
       let simulations = 0
@@ -424,7 +453,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         connection as unknown as { simulateTransaction: () => Promise<unknown> }
       ).simulateTransaction = async () => {
         if (++simulations === 1) {
-          return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+          return { value: { err: { InstructionError: [1, 'Custom'] }, logs: [] } }
         }
         return { value: { logs: [], unitsConsumed: 5 } }
       }
@@ -445,12 +474,12 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         switch (++simulations) {
           case 1:
             return {
-              value: { err: { InstructionError: [0, 'ComputationalBudgetExceeded'] }, logs: [] },
+              value: { err: { InstructionError: [1, 'ComputationalBudgetExceeded'] }, logs: [] },
             }
           case 2:
             return { value: { logs: [], unitsConsumed: 5 } }
           default:
-            return { value: { err: { InstructionError: [0, 'Custom'] }, logs: [] } }
+            return { value: { err: { InstructionError: [1, 'Custom'] }, logs: [] } }
         }
       }
 
@@ -462,6 +491,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         (error: unknown) => {
           assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
           assert.deepEqual(error.context.committedHashes, ['v0-signature'])
+          assert.equal(error.context.committedInstructionCount, 1)
           return true
         },
       )
