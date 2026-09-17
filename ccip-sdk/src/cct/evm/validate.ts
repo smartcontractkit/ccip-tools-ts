@@ -86,6 +86,20 @@ export function validateUint8(operation: string, param: string, value: unknown):
 }
 
 /**
+ * Asserts `value` is an integer in `[0, 2^32 − 1]` (a Solidity `uint32`).
+ * @throws {@link CCTParamsInvalidError} if `value` is not such an integer
+ */
+export function validateUint32(operation: string, param: string, value: unknown): void {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff)
+    return
+  throw new CCTParamsInvalidError(
+    operation,
+    param,
+    `must be an integer in [0, 2^32 − 1], got ${String(value)}`,
+  )
+}
+
+/**
  * Shared `uintN` range check: the three widths below differ only in their bound and their message,
  * so the comparison itself lives here once.
  * @throws {@link CCTParamsInvalidError} if `value` is not a `bigint` in `[0, 2^bits − 1]`

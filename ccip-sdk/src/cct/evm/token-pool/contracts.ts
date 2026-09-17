@@ -17,6 +17,7 @@
 import { Interface, ZeroAddress, getAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import type { TokenTransferFeeConfig } from '../../../chain.ts'
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
 import {
@@ -321,6 +322,33 @@ export async function readTokenPoolAllowedFinality(
   return resultToObject(await pool.getAllowedFinalityConfig())
 }
 
+/** Reads a v2.0.0 pool's token and its token-transfer fee config in two `eth_call`s. */
+export async function readTokenPoolTokenTransferFeeConfig(
+  chain: EVMChain,
+  poolAddress: string,
+  destChainSelector: bigint,
+  finality: string,
+  tokenArgs: string,
+): Promise<TokenTransferFeeConfig> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const tokenAddress = await pool.getToken()
+  const config = await pool.getTokenTransferFeeConfig(
+    tokenAddress,
+    destChainSelector,
+    finality,
+    tokenArgs,
+  )
+  return {
+    destGasOverhead: Number(config.destGasOverhead),
+    destBytesOverhead: Number(config.destBytesOverhead),
+    finalityFeeUSDCents: Number(config.finalityFeeUSDCents),
+    fastFinalityFeeUSDCents: Number(config.fastFinalityFeeUSDCents),
+    finalityTransferFeeBps: Number(config.finalityTransferFeeBps),
+    fastFinalityTransferFeeBps: Number(config.fastFinalityTransferFeeBps),
+    isEnabled: config.isEnabled,
+  }
+}
+
 /**
  * `TokenPool`'s allowlist getters, identical across v1.5.0–v1.6.1 and both ABI families. Absent
  * from v2.0.0, which dropped the allowlist — callers must resolve the version first.
@@ -380,16 +408,37 @@ export async function readTokenPoolRateLimitAdmin(
   poolAddress: string,
   version: TokenPoolVersion,
 ): Promise<string> {
-  if (version === TokenPoolVersion.V2_0_0) {
-    const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
-    // getDynamicConfig returns (router, rateLimitAdmin, feeAdmin); index the raw Result rather
-    // than resultToObject it, which would turn the named tuple into an object (see
-    // get-token-pool-state.ts).
-    const dynamicConfig = await pool.getDynamicConfig()
-    return getAddress(dynamicConfig[1] as string)
-  }
+  if (version === TokenPoolVersion.V2_0_0)
+    return (await readTokenPoolDynamicConfig(chain, poolAddress)).rateLimitAdmin
   const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
   return getAddress(resultToObject(await pool.getRateLimitAdmin()))
+}
+
+/** The v2.0.0 pool's mutable router and delegated admin roles. */
+export type TokenPoolDynamicConfig = {
+  router: string
+  rateLimitAdmin: string
+  feeAdmin: string
+}
+
+/** Reads a v2.0.0 pool's dynamic config in one `eth_call`. */
+export async function readTokenPoolDynamicConfig(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<TokenPoolDynamicConfig> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  // Index the raw Result: resultToObject would turn this named tuple into an object.
+  const dynamicConfig = await pool.getDynamicConfig()
+  return {
+    router: getAddress(dynamicConfig[0] as string),
+    rateLimitAdmin: getAddress(dynamicConfig[1] as string),
+    feeAdmin: getAddress(dynamicConfig[2] as string),
+  }
+}
+
+/** Reads the v2.0.0 pool's delegated token-transfer-fee admin in one `eth_call`. */
+export async function readTokenPoolFeeAdmin(chain: EVMChain, poolAddress: string): Promise<string> {
+  return (await readTokenPoolDynamicConfig(chain, poolAddress)).feeAdmin
 }
 
 /**
@@ -477,10 +526,16 @@ export async function readTokenPoolAcceptsLiquidity(
 export async function readTokenPoolToken(
   chain: EVMChain,
   poolAddress: string,
-): Promise<{ token: string; erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI> }> {
+): Promise<{
+  token: string
+  erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>
+}> {
   const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
   const token = getAddress(resultToObject(await pool.getToken()))
-  return { token, erc20: getTypedContract(chain, token, FACTORY_BURN_MINT_ERC20_V1_5_1_ABI) }
+  return {
+    token,
+    erc20: getTypedContract(chain, token, FACTORY_BURN_MINT_ERC20_V1_5_1_ABI),
+  }
 }
 
 /**
