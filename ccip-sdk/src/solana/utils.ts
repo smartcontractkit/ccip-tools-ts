@@ -593,7 +593,12 @@ function isComputeBudgetError(error: unknown): boolean {
   if (typeof structured === 'string') return structured === 'ComputationalBudgetExceeded'
   if (structured && typeof structured === 'object' && 'InstructionError' in structured) {
     const detail = (structured as { InstructionError?: unknown }).InstructionError
-    return Array.isArray(detail) && detail[1] === 'ComputationalBudgetExceeded'
+    if (!Array.isArray(detail)) return false
+    return (
+      detail[1] === 'ComputationalBudgetExceeded' ||
+      (detail[1] === 'ProgramFailedToComplete' &&
+        error.logs?.some((log) => log.includes('exceeded CUs meter')) === true)
+    )
   }
   return false
 }
@@ -627,6 +632,7 @@ export async function simulateAndSendTxs(
   const { connection } = ctx
   let mainHash: string
   const committedHashes: string[] = []
+  let committedInstructionCount = 0
   try {
     for (
       let [start, end] = [0, instructions.length];
@@ -723,12 +729,13 @@ export async function simulateAndSendTxs(
       }
       await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
       committedHashes.push(signature)
+      committedInstructionCount = end
       if (includesMain) mainHash = signature
     }
     return mainHash!
   } catch (error) {
     if (!committedHashes.length) throw error
-    throw new CCIPPartialTransactionSubmissionError(committedHashes, {
+    throw new CCIPPartialTransactionSubmissionError(committedHashes, committedInstructionCount, {
       cause: error instanceof Error ? error : undefined,
     })
   }
