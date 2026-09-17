@@ -1,5 +1,5 @@
 import { unpackMint } from '@solana/spl-token'
-import { type TransactionInstruction, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -177,7 +177,13 @@ export class RegisterAdmin extends SolanaOperation<
     const administrator = opts.administrator ?? mintAuthority
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
-    if (await chain.connection.getAccountInfo(tokenAdminRegistry)) {
+    const registryAccount = await chain.connection.getAccountInfo(tokenAdminRegistry)
+    if (
+      registryAccount &&
+      (registryAccount.executable ||
+        !registryAccount.owner.equals(SystemProgram.programId) ||
+        registryAccount.data.length !== 0)
+    ) {
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
