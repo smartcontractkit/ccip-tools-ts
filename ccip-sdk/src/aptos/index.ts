@@ -150,6 +150,24 @@ function createAptosFetchClient(fetchFn: typeof fetch): Client {
 }
 
 /**
+ * Aptos-specific {@link ChainContext} extras. Optional and local to this module on
+ * purpose: the shared ChainContext stays family-agnostic, while Aptos' GraphQL index
+ * (the indexer behind `provider.queryIndexer`, used by the getLogs fast path and the
+ * execution-failure scans) accepts its own URL override.
+ */
+export type AptosChainContext = ChainContext & {
+  /**
+   * Aptos GraphQL indexer base URL, honored verbatim by the provider's
+   * `queryIndexer` calls. Honored when the chain builds its own `AptosConfig`
+   * (i.e. no explicit `client` in the settings); when omitted, the Aptos SDK's
+   * per-network default applies (see `AptosConfig.getRequestUrl` — and note a
+   * `Network.CUSTOM` config throws without one). The fullnode URL is never used
+   * to infer an indexer URL.
+   */
+  indexerUrl?: string
+}
+
+/**
  * Aptos chain implementation supporting Aptos networks.
  */
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
@@ -255,12 +273,13 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * `Aptos` instance and want no shim to be installed.
    *
    * @param settings - Aptos configuration settings (AptosSettings or AptosConfig).
-   * @param ctx - context containing logger and optional fetch override.
+   * @param ctx - context containing logger, an optional fetch override, and an
+   *   optional {@link AptosChainContext.indexerUrl} indexer URL override.
    * @returns A new AptosChain instance.
    */
   static async fromAptosConfig(
     settings: AptosSettings | AptosConfig,
-    ctx?: ChainContext,
+    ctx?: AptosChainContext,
   ): Promise<AptosChain> {
     // Detect whether the caller explicitly set a custom HTTP client adapter:
     // - For raw AptosSettings: `client` is undefined unless explicitly set.
@@ -280,7 +299,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         network: settings.network,
         fullnode: settings.fullnode,
         faucet: settings.faucet,
-        indexer: settings.indexer,
+        // The ctx indexer URL is the authoritative override; otherwise the SDK's
+        // per-network default applies (the fullnode URL is never used to infer one).
+        indexer: ctx?.indexerUrl ?? settings.indexer,
         pepper: settings.pepper,
         prover: settings.prover,
         clientConfig: settings.clientConfig,
@@ -303,7 +324,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    */
   static async fromUrl(
     url: string | Network | readonly [string, Network],
-    ctx?: ChainContext,
+    ctx?: AptosChainContext,
   ): Promise<AptosChain> {
     let network: Network
     if (Array.isArray(url)) {
@@ -315,10 +336,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     else throw new CCIPAptosNetworkUnknownError(util.inspect(redactEndpointUrl(url)))
     // Pass raw AptosSettings (not a pre-built AptosConfig) so fromAptosConfig can
     // detect the absence of an explicit `client` and install the fetch shim.
+    // No indexer inference from the fullnode URL: the SDK's per-network default
+    // applies unless ctx.indexerUrl overrides it (wired in fromAptosConfig).
     const settings: AptosSettings = {
       network,
       fullnode: typeof url === 'string' && url.includes('://') ? url : undefined,
-      // indexer: url.includes('://') ? `${url}/v1/graphql` : undefined,
     }
     return this.fromAptosConfig(settings, ctx)
   }

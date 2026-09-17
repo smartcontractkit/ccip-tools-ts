@@ -131,6 +131,28 @@ describe('TON utils unit tests', () => {
       assert.equal(parsed.hostname, 'toncenter.com', 'Should use mainnet URL')
     })
 
+    it('should prefer a provided baseUrl, carrying its query (api_key)', async () => {
+      let capturedUrl = ''
+      const mockFetch = (async (url: string) => {
+        capturedUrl = url
+        return {
+          json: async () => ({
+            transactions: [{ account: '0:abc', lt: '123', hash: 'def' }],
+          }),
+        }
+      }) as unknown as typeof fetch
+
+      await lookupTxByRawHash('abcd', NetworkType.Mainnet, mockFetch, {
+        baseUrl: 'https://private-index.example/api/v3?api_key=s3cr3t',
+      })
+
+      const parsed = new URL(capturedUrl)
+      assert.equal(parsed.origin, 'https://private-index.example')
+      assert.equal(parsed.pathname, '/api/v3/transactions')
+      assert.equal(parsed.searchParams.get('api_key'), 's3cr3t')
+      assert.equal(parsed.searchParams.get('hash'), 'abcd')
+    })
+
     it('should throw CCIPTransactionNotFoundError when no transactions found', async () => {
       const mockFetch = (async () => ({
         json: async () => ({ transactions: [] }),

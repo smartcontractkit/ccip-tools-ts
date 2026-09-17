@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
 import {
   type GetTokenTransferFeeConfigParams,
   GetTokenTransferFeeConfig,
@@ -12,7 +12,10 @@ import {
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
-const IFACE = TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0]
+const POOL_TYPE: Record<TokenPoolFamily, string> = {
+  BurnMint: 'BurnMintTokenPool',
+  LockRelease: 'LockReleaseTokenPool',
+}
 const CONFIG = {
   destGasOverhead: 100_000,
   destBytesOverhead: 32,
@@ -24,30 +27,33 @@ const CONFIG = {
 }
 
 function stubChain({
+  family = 'BurnMint',
   version = TokenPoolVersion.V2_0_0,
   onCall,
 }: {
+  family?: TokenPoolFamily
   version?: TokenPoolVersion
   onCall?: () => void
 } = {}): EVMChain {
+  const iface = TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0]
   return {
     provider: {
       call: async ({ data }: { data: string }) => {
         onCall?.()
-        if (data.slice(0, 10) === IFACE.getFunction('getToken')!.selector)
-          return IFACE.encodeFunctionResult('getToken', [TOKEN])
-        assert.equal(data.slice(0, 10), IFACE.getFunction('getTokenTransferFeeConfig')!.selector)
-        assert.deepEqual(Array.from(IFACE.decodeFunctionData('getTokenTransferFeeConfig', data)), [
+        if (data.slice(0, 10) === iface.getFunction('getToken')!.selector)
+          return iface.encodeFunctionResult('getToken', [TOKEN])
+        assert.equal(data.slice(0, 10), iface.getFunction('getTokenTransferFeeConfig')!.selector)
+        assert.deepEqual(Array.from(iface.decodeFunctionData('getTokenTransferFeeConfig', data)), [
           TOKEN,
           1n,
           '0x00000000',
           '0x',
         ])
-        return IFACE.encodeFunctionResult('getTokenTransferFeeConfig', [CONFIG])
+        return iface.encodeFunctionResult('getTokenTransferFeeConfig', [CONFIG])
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    typeAndVersion: () => Promise.resolve(parseTypeAndVersion(`BurnMintTokenPool ${version}`)),
+    typeAndVersion: () => Promise.resolve(parseTypeAndVersion(`${POOL_TYPE[family]} ${version}`)),
   } as unknown as EVMChain
 }
 
@@ -61,9 +67,11 @@ const query = (chain: EVMChain, overrides: Partial<GetTokenTransferFeeConfigPara
 
 describe('GetTokenTransferFeeConfig (cct/evm)', () => {
   describe('query', () => {
-    it('reads and decodes a v2.0.0 pool config', async () => {
-      assert.deepEqual(await query(stubChain()), CONFIG)
-    })
+    for (const family of ['BurnMint', 'LockRelease'] as const) {
+      it(`reads and decodes a ${family} v2.0.0 pool config`, async () => {
+        assert.deepEqual(await query(stubChain({ family })), CONFIG)
+      })
+    }
   })
 
   describe('validation', () => {

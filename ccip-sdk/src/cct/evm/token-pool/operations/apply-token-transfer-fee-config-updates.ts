@@ -24,6 +24,7 @@ import {
   validateArray,
   validateBoolean,
   validateNonZeroAddress,
+  validateUint32,
   validateUint64,
 } from '../../validate.ts'
 import {
@@ -79,12 +80,6 @@ const encodeApplyTokenTransferFeeConfigUpdates: Encoder = (
     ]),
   )
 
-function validateUint32(operation: string, param: string, value: unknown): void {
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff)
-    return
-  throw new CCTParamsInvalidError(operation, param, 'must be an integer in [0, 4294967295]')
-}
-
 function validateFeeConfig(operation: string, param: string, value: unknown): void {
   const config = parseRecord(operation, param, value, 'token transfer fee config')
   for (const field of [
@@ -92,8 +87,10 @@ function validateFeeConfig(operation: string, param: string, value: unknown): vo
     'destBytesOverhead',
     'finalityFeeUSDCents',
     'fastFinalityFeeUSDCents',
-  ])
+  ]) {
     validateUint32(operation, `${param}.${field}`, config[field])
+  }
+
   for (const field of ['finalityTransferFeeBps', 'fastFinalityTransferFeeBps']) {
     const value = config[field]
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 10000)

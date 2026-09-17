@@ -406,7 +406,7 @@ describe('EVMTokenManager (cct/evm)', () => {
     })
   })
 
-  describe('transferOwnership', () => {
+  describe('transferPoolOwnership', () => {
     it('probes the pool type/version, then builds transferOwnership to the pool', async () => {
       const probed: string[] = []
       const cct = EVMTokenManager.fromChain(
@@ -417,7 +417,7 @@ describe('EVMTokenManager (cct/evm)', () => {
           }) as unknown as EVMChain['typeAndVersion'],
         }),
       )
-      const unsigned = await cct.generateUnsignedTransferOwnership({
+      const unsigned = await cct.generateUnsignedTransferPoolOwnership({
         poolAddress: POOL,
         newOwner: TOKEN,
       })
@@ -438,7 +438,7 @@ describe('EVMTokenManager (cct/evm)', () => {
         }),
       )
       await assert.rejects(
-        cct.generateUnsignedTransferOwnership({ poolAddress: POOL, newOwner: TOKEN }),
+        cct.generateUnsignedTransferPoolOwnership({ poolAddress: POOL, newOwner: TOKEN }),
         (err: unknown) => err instanceof CCTContractTypeInvalidError,
       )
     })

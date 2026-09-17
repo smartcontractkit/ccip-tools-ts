@@ -21,6 +21,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   BLOCK_TIME_NOT_FOUND: 'Wait and retry. Block time data may not be available yet.',
   BLOCK_BEFORE_TIMESTAMP_NOT_FOUND: 'No block exists before the specified timestamp.',
   TRANSACTION_NOT_FINALIZED: 'Wait for transaction finality.',
+  TRANSACTION_TOO_LARGE:
+    'Transaction exceeds its version wire size limit (1232 bytes for v0, 4096 for v1). Reduce the message data or split into smaller transactions.',
 
   MESSAGE_INVALID: 'Verify the message format matches the expected CCIP message structure.',
   MESSAGE_DECODE_FAILED:
