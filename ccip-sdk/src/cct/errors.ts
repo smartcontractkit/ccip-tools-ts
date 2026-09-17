@@ -58,6 +58,7 @@ export class CCTParamsInvalidError extends CCIPError {
  */
 export class CCTTokenAccountMintMismatchError extends CCIPError {
   override readonly name = 'CCTTokenAccountMintMismatchError'
+  /** Creates a token-account mint-mismatch error. */
   constructor(tokenAccount: string, requestedMint: string, resolvedMint: string) {
     super(
       CCIPErrorCode.CCT_TOKEN_ACCOUNT_MINT_MISMATCH,
