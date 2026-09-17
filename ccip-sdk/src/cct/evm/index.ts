@@ -61,6 +61,11 @@ import {
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
 import {
+  type GetAllowedFinalityConfigParams,
+  type GetAllowedFinalityConfigResult,
+  GetAllowedFinalityConfig,
+} from './token-pool/operations/get-allowed-finality-config.ts'
+import {
   type GetRebalancerParams,
   type GetRebalancerResult,
   GetRebalancer,
@@ -83,6 +88,10 @@ import {
   type RemoveRemotePoolParams,
   RemoveRemotePool,
 } from './token-pool/operations/remove-remote-pool.ts'
+import {
+  type SetAllowedFinalityConfigParams,
+  SetAllowedFinalityConfig,
+} from './token-pool/operations/set-allowed-finality-config.ts'
 import {
   type SetChainRateLimiterConfigsParams,
   SetChainRateLimiterConfigs,
@@ -180,6 +189,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
+  readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
+  readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
   readonly #provideLiquidity = new ProvideLiquidity()
@@ -869,6 +880,95 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setDynamicConfig(opts: EVMExecuteParams<SetDynamicConfigParams>): Promise<TransactionResult> {
     return this.#setDynamicConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setAllowedFinalityConfig` tx (for multisig / offline signing).
+   * Configures the **v2.0.0-only** FTF minimum block depth and optional FCR/safe-finality mode.
+   *
+   * @remarks This replaces the whole finality config: `allowedFinality.finalityDepth` is an integer
+   * in `[0, 65535]`, and `0` disables FTF; omitting `allowedFinality.finalitySafe` disables FCR.
+   * To preserve one setting while changing the other, first call {@link getAllowedFinalityConfig}.
+   * The pool owner is the only permitted caller; when `sender` is supplied it is checked against
+   * `owner()` before calldata is returned.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` is zero, or `sender`
+   * is supplied and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetAllowedFinalityConfig({
+   *   poolAddress: '0xPool...',
+   *   allowedFinality: { finalityDepth: 5, finalitySafe: true },
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetAllowedFinalityConfig(
+    opts: SetAllowedFinalityConfigParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#setAllowedFinalityConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets the finality modes a **v2.0.0** pool accepts, signing + submitting as its owner.
+   *
+   * @remarks This replaces the whole finality config: `allowedFinality.finalityDepth` is an integer
+   * in `[0, 65535]`, and `0` disables FTF; omitting `allowedFinality.finalitySafe` disables FCR.
+   * To preserve one setting while changing the other, first call {@link getAllowedFinalityConfig}.
+   * `sender` defaults to the wallet address and, when supplied, must equal it.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setAllowedFinalityConfig({
+   *   poolAddress: '0xPool...',
+   *   allowedFinality: { finalityDepth: 5, finalitySafe: true },
+   *   wallet,
+   * })
+   * ```
+   */
+  setAllowedFinalityConfig(
+    opts: EVMExecuteParams<SetAllowedFinalityConfigParams>,
+  ): Promise<TransactionResult> {
+    return this.#setAllowedFinalityConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the finality modes a **v2.0.0+** pool accepts.
+   *
+   * @remarks `finalityDepth` is the FTF minimum block depth (`0` when disabled); `finalitySafe`
+   * is `true` when FCR/safe finality is allowed.
+   *
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const allowedFinality = await cct.getAllowedFinalityConfig({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getAllowedFinalityConfig(
+    opts: GetAllowedFinalityConfigParams,
+  ): Promise<GetAllowedFinalityConfigResult> {
+    return this.#getAllowedFinalityConfig.query(this.chain, opts)
   }
 
   /**
@@ -2294,6 +2394,11 @@ export type {
   GetRebalancerParams,
   GetRebalancerResult,
 } from './token-pool/operations/get-rebalancer.ts'
+export type {
+  GetAllowedFinalityConfigParams,
+  GetAllowedFinalityConfigResult,
+} from './token-pool/operations/get-allowed-finality-config.ts'
+export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set-allowed-finality-config.ts'
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
