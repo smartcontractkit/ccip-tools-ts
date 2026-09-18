@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { SendTransactionError, TransactionExpiredTimeoutError } from '@solana/web3.js'
+import {
+  type Connection,
+  type VersionedTransaction,
+  Keypair,
+  PublicKey,
+  SendTransactionError,
+  TransactionExpiredTimeoutError,
+  TransactionInstruction,
+} from '@solana/web3.js'
 
+import { ChainFamily } from '../../networks.ts'
+import type { SolanaChain } from '../../solana/index.ts'
+import type { Wallet } from '../../solana/types.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
-import { createCCTSubmitError } from './submit.ts'
+import { createCCTSubmitError, submit } from './submit.ts'
 
 const OP = 'setPool'
 
@@ -70,5 +81,42 @@ describe('Submit error mapping (cct/solana)', () => {
 
     assert.ok(err instanceof CCTTxFailedError)
     assert.equal(err.isTransient, false)
+  })
+
+  it('maps a confirmed execution failure and does not return a hash', async () => {
+    const payer = Keypair.generate()
+    const wallet = {
+      publicKey: payer.publicKey,
+      signTransaction: async (tx: VersionedTransaction) => {
+        tx.sign([payer])
+        return tx
+      },
+    } as unknown as Wallet
+    const chain = {
+      connection: {
+        getLatestBlockhash: async () => ({
+          blockhash: PublicKey.default.toBase58(),
+          lastValidBlockHeight: 1,
+        }),
+        simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+        sendTransaction: async () => 'failed-signature',
+        confirmTransaction: async () => ({ value: { err: { InstructionError: [0, 'Custom'] } } }),
+      } as unknown as Connection,
+    } as unknown as SolanaChain
+
+    await assert.rejects(
+      () =>
+        submit(
+          chain,
+          wallet,
+          {
+            family: ChainFamily.Solana,
+            instructions: [new TransactionInstruction({ keys: [], programId: PublicKey.default })],
+            mainIndex: 0,
+          },
+          OP,
+        ),
+      (error: unknown) => error instanceof CCTTxFailedError && !error.isTransient,
+    )
   })
 })
