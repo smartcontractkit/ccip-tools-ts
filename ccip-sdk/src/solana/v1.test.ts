@@ -265,7 +265,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     const OVERSIZED = [sampleInstruction(48, 300)] // v0 wire > 1232B, v1 wire < 4096B
     const SMALL = [sampleInstruction(4)]
 
-    function mockConnection(opts: { confirmationError?: unknown; splitBatches?: boolean } = {}) {
+    function mockConnection(opts: { confirmationError?: unknown } = {}) {
       const captured: Record<string, unknown> = {}
       const connection = {
         getLatestBlockhash: async () => ({
@@ -274,9 +274,6 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
         simulateTransaction: async (tx: VersionedTransaction) => {
           captured.simulatedTx = tx
-          if (opts.splitBatches && tx.message.compiledInstructions.length > 2) {
-            return { value: { err: 'too large', logs: [] } }
-          }
           return { value: { logs: [], unitsConsumed: 5 } }
         },
         _rpcRequest: async (method: string, args: unknown[]) => {
@@ -285,7 +282,6 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         sendTransaction: async (tx: VersionedTransaction) => {
           captured.sentV0 = tx
-          captured.sentV0Count = ((captured.sentV0Count as number | undefined) ?? 0) + 1
           return 'v0-signature'
         },
         sendRawTransaction: async (wire: Uint8Array) => {
@@ -294,7 +290,6 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         confirmTransaction: async (confirm: { signature: string }) => {
           captured.confirmedSignature = confirm.signature
-          captured.confirmedCount = ((captured.confirmedCount as number | undefined) ?? 0) + 1
           return { value: { err: opts.confirmationError ?? null } }
         },
       } as unknown as Connection
