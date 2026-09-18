@@ -216,35 +216,41 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
       )
     })
 
-    it('rejects when no administrator is pending', async () => {
-      await assert.rejects(
-        () =>
-          new AcceptAdmin().generate(
-            stubChain({
-              provider: stubProvider({ administrator: OTHER }) as never, // pendingAdministrator omitted -> zero
-            }),
-            { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER },
-          ),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'acceptAdmin' &&
-          err.context.param === 'sender' &&
-          /nothing to accept/.test(err.message),
+    // The registry state below is what an earlier `registerAdmin` in the same plan creates, so
+    // `generate` reports it instead of refusing: the calldata is `acceptAdminRole(token)` either
+    // way, and this transaction is built to be signed after that one lands.
+    it('reports, rather than throws, when no administrator is pending', async () => {
+      const unsigned = await new AcceptAdmin().generate(
+        stubChain({
+          provider: stubProvider({ administrator: OTHER }) as never, // pendingAdministrator omitted -> zero
+        }),
+        { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER },
       )
+
+      assert.equal(unsigned.transactions[0]!.data, SELECTOR + word(TOKEN))
+      assert.equal(unsigned.preconditions?.length, 1)
+      assert.equal(unsigned.preconditions![0]!.param, 'sender')
+      assert.match(unsigned.preconditions![0]!.reason, /nothing to accept/)
     })
 
-    it('rejects when sender is not the pending administrator', async () => {
-      await assert.rejects(
-        () =>
-          new AcceptAdmin().generate(
-            stubChain({ provider: stubProvider({ pendingAdministrator: OTHER }) as never }),
-            { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER },
-          ),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.param === 'sender' &&
-          /must be the pending token administrator/.test(err.message),
+    it('reports when sender is not the pending administrator', async () => {
+      const unsigned = await new AcceptAdmin().generate(
+        stubChain({ provider: stubProvider({ pendingAdministrator: OTHER }) as never }),
+        { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER },
       )
+
+      assert.equal(unsigned.transactions[0]!.data, SELECTOR + word(TOKEN))
+      assert.equal(unsigned.preconditions![0]!.param, 'sender')
+      assert.match(unsigned.preconditions![0]!.reason, /must be the pending token administrator/)
+    })
+
+    it('omits preconditions entirely when the registry is ready', async () => {
+      const unsigned = await new AcceptAdmin().generate(stubChain(), {
+        tokenAddress: TOKEN,
+        address: ADDRESS,
+        sender: SENDER,
+      })
+      assert.equal(unsigned.preconditions, undefined)
     })
   })
 
@@ -329,6 +335,52 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
           err.context.operation === 'acceptAdmin' &&
           err.context.param === 'sender',
       )
+    })
+
+    // `generate` records these two states rather than throwing; `execute` is where "now" is the
+    // question being asked, so it must still reject — with the same error the pre-preconditions
+    // build raised, so nothing downstream of `execute` sees a behaviour change.
+    it('rejects when no administrator is pending', async () => {
+      await assert.rejects(
+        () =>
+          new AcceptAdmin().execute(
+            stubChain({ provider: stubProvider({ administrator: OTHER }) as never }),
+            { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER, wallet: fakeSigner() },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender' &&
+          /nothing to accept/.test(err.message),
+      )
+    })
+
+    it('rejects when sender is not the pending administrator', async () => {
+      await assert.rejects(
+        () =>
+          new AcceptAdmin().execute(
+            stubChain({ provider: stubProvider({ pendingAdministrator: OTHER }) as never }),
+            { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER, wallet: fakeSigner() },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          /must be the pending token administrator/.test(err.message),
+      )
+    })
+
+    it('does not submit a tx whose precondition is unmet', async () => {
+      // The rejection above must happen *before* signing — a broadcast tx that is going to revert
+      // with OnlyPendingAdministrator is exactly what the check exists to prevent.
+      let sent = false
+      const wallet = { ...fakeSigner(), sendTransaction: () => ((sent = true), Promise.reject()) }
+      await assert.rejects(() =>
+        new AcceptAdmin().execute(
+          stubChain({ provider: stubProvider({ pendingAdministrator: OTHER }) as never }),
+          { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER, wallet },
+        ),
+      )
+      assert.equal(sent, false)
     })
 
     it('rejects a sender that does not match the executing wallet', async () => {

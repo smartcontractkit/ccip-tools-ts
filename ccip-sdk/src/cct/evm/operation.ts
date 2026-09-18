@@ -32,6 +32,41 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
 }
 
 /**
+ * Records an on-chain requirement the current state does not meet, without discarding the
+ * calldata.
+ *
+ * @remarks For requirements whose failure says nothing about the *calldata* — the bytes are fully
+ * determined and correct either way — only about whether the chain is ready for it right now. A
+ * `generateUnsigned*` caller is building a transaction to be reviewed and signed later, so "not
+ * yet" is information, not an error: an earlier transaction in the same plan is often exactly
+ * what makes it true. {@link EVMOperation.execute} rejects these, since there "now" is the
+ * question being asked.
+ *
+ * Requirements that invalidate the calldata itself still throw {@link CCTParamsInvalidError} from
+ * `validate`/`parse`, as before.
+ */
+export function withUnmetPrecondition(
+  tx: UnsignedEVMTx,
+  param: string,
+  reason: string,
+): UnsignedEVMTx {
+  return { ...tx, preconditions: [...(tx.preconditions ?? []), { param, reason }] }
+}
+
+/**
+ * Rejects a transaction whose recorded requirements the chain does not currently meet — the
+ * execute-path counterpart to {@link withUnmetPrecondition}.
+ *
+ * @remarks Reports the first unmet requirement, matching the error a pre-`preconditions` build
+ * raised for the same state, so `execute` callers see no change in behaviour or message.
+ * @throws {@link CCTParamsInvalidError} if `tx` carries any unmet precondition
+ */
+export function assertPreconditionsMet(operation: string, tx: UnsignedEVMTx): void {
+  const unmet = tx.preconditions?.[0]
+  if (unmet) throw new CCTParamsInvalidError(operation, unmet.param, unmet.reason)
+}
+
+/**
  * The deploy-side inputs a block explorer needs to verify a contract's source: its name and
  * ABI-encoded constructor args, captured while deploying with no extra RPC.
  * @remarks A constructor-args companion, *not* proof of verification — nothing here is read back
@@ -134,14 +169,19 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     return sender
   }
 
-  /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
+  /**
+   * {@link generate}, then sign and submit; returns the confirmed tx hash.
+   *
+   * @remarks Any {@link UnmetPrecondition} the builder recorded is fatal here, unlike on the
+   * `generateUnsigned*` path: submitting now means the current chain state is the one that
+   * counts, and sending a transaction whose requirement is unmet just buys an on-chain revert.
+   * @throws {@link CCTParamsInvalidError} if the chain does not currently satisfy a requirement
+   * the op recorded while building
+   */
   async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<TransactionResult> {
-    const { response } = await submit(
-      chain,
-      params.wallet,
-      await this.generate(chain, params),
-      this.name,
-    )
+    const unsigned = await this.generate(chain, params)
+    assertPreconditionsMet(this.name, unsigned)
+    const { response } = await submit(chain, params.wallet, unsigned, this.name)
     return { hash: response.hash }
   }
 }
