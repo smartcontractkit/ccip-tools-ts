@@ -44,7 +44,10 @@ function sampleInstruction(numAccounts: number, dataLength = 16): TransactionIns
 }
 
 /** Deserializes wire bytes with web3.js' own v1 codec (the test oracle). */
-function deserializeV1(messageBytes: Uint8Array): { message: MessageV1; signatures: Uint8Array[] } {
+function deserializeV1(messageBytes: Uint8Array): {
+  message: MessageV1
+  signatures: Uint8Array[]
+} {
   const tx = VersionedTransaction.deserialize(messageBytes) as VersionedTransaction
   assert.equal(tx.message.version, 1)
   return { message: tx.message as MessageV1, signatures: tx.signatures }
@@ -226,7 +229,11 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
           payerKey: PAYER.publicKey,
           recentBlockhash: RECENT_BLOCKHASH,
           instructions: [
-            new TransactionInstruction({ keys, programId: PROGRAM, data: Buffer.alloc(4) }),
+            new TransactionInstruction({
+              keys,
+              programId: PROGRAM,
+              data: Buffer.alloc(4),
+            }),
           ],
         }),
       /max 255/,
@@ -258,7 +265,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     const OVERSIZED = [sampleInstruction(48, 300)] // v0 wire > 1232B, v1 wire < 4096B
     const SMALL = [sampleInstruction(4)]
 
-    function mockConnection() {
+    function mockConnection(opts: { confirmationError?: unknown; splitBatches?: boolean } = {}) {
       const captured: Record<string, unknown> = {}
       const connection = {
         getLatestBlockhash: async () => ({
@@ -267,6 +274,9 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
         simulateTransaction: async (tx: VersionedTransaction) => {
           captured.simulatedTx = tx
+          if (opts.splitBatches && tx.message.compiledInstructions.length > 2) {
+            return { value: { err: 'too large', logs: [] } }
+          }
           return { value: { logs: [], unitsConsumed: 5 } }
         },
         _rpcRequest: async (method: string, args: unknown[]) => {
@@ -275,6 +285,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         sendTransaction: async (tx: VersionedTransaction) => {
           captured.sentV0 = tx
+          captured.sentV0Count = ((captured.sentV0Count as number | undefined) ?? 0) + 1
           return 'v0-signature'
         },
         sendRawTransaction: async (wire: Uint8Array) => {
@@ -283,6 +294,8 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         confirmTransaction: async (confirm: { signature: string }) => {
           captured.confirmedSignature = confirm.signature
+          captured.confirmedCount = ((captured.confirmedCount as number | undefined) ?? 0) + 1
+          return { value: { err: opts.confirmationError ?? null } }
         },
       } as unknown as Connection
       return { connection, captured }
@@ -308,7 +321,10 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       )
       assert.equal(result.unitsConsumed, 7)
       assert.equal(captured.simulatedTx, undefined, 'no v0 simulation was attempted')
-      const { method, args } = captured.rpc as { method: string; args: [string, unknown] }
+      const { method, args } = captured.rpc as {
+        method: string
+        args: [string, unknown]
+      }
       assert.equal(method, 'simulateTransaction')
       const wire = Buffer.from(args[0], 'base64')
       const tx = VersionedTransaction.deserialize(wire)
@@ -365,6 +381,22 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal(signature, 'v0-signature')
       assert.equal(captured.sentWire, undefined, 'no raw v1 transaction was sent')
       assert.equal((captured.sentV0 as VersionedTransaction).message.version, 0)
+    })
+
+    it('rejects v0 and v1 transactions whose confirmation reports an execution error', async () => {
+      for (const instructions of [SMALL, OVERSIZED]) {
+        const { connection } = mockConnection({
+          confirmationError: { InstructionError: [0, 'Custom'] },
+        })
+        await assert.rejects(
+          () =>
+            simulateAndSendTxs({ connection }, wallet, {
+              instructions,
+              mainIndex: 0,
+            }),
+          /InstructionError/,
+        )
+      }
     })
   })
 })
