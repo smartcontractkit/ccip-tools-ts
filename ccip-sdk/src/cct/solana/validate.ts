@@ -11,7 +11,11 @@ import {
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import {
+  CCTParamsInvalidError,
+  CCTTokenAccountMintMismatchError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
@@ -411,6 +415,7 @@ export async function validatePoolLiquidityConfig(
 /**
  * Resolves an existing token account, defaulting to the holder's associated token account.
  * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+ * @throws {@link CCTTokenAccountMintMismatchError} If an explicitly supplied token account belongs to a different mint.
  */
 export async function resolveExistingTokenAccount(
   connection: Connection,
@@ -433,6 +438,14 @@ export async function resolveExistingTokenAccount(
       throw new CCIPTokenAccountNotFoundError(tokenAddress.toBase58(), holder.toBase58())
     }
     throw error
+  }
+
+  if (tokenAccount && !tokenAccountInfo.mint.equals(tokenAddress)) {
+    throw new CCTTokenAccountMintMismatchError(
+      account.toBase58(),
+      tokenAddress.toBase58(),
+      tokenAccountInfo.mint.toBase58(),
+    )
   }
 
   return { tokenAccount: account, tokenProgram, account: tokenAccountInfo }
