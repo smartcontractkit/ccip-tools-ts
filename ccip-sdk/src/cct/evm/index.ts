@@ -119,10 +119,22 @@ import {
   WithdrawLiquidity,
 } from './token-pool/operations/withdraw-liquidity.ts'
 import {
+  type AcceptDefaultAdminTransferParams,
+  AcceptDefaultAdminTransfer,
+} from './token/operations/accept-default-admin-transfer.ts'
+import {
   type AcceptTokenOwnershipParams,
   AcceptTokenOwnership,
 } from './token/operations/accept-token-ownership.ts'
 import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
+import {
+  type BeginDefaultAdminTransferParams,
+  BeginDefaultAdminTransfer,
+} from './token/operations/begin-default-admin-transfer.ts'
+import {
+  type CancelDefaultAdminTransferParams,
+  CancelDefaultAdminTransfer,
+} from './token/operations/cancel-default-admin-transfer.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
   type GetBurnersParams,
@@ -145,6 +157,7 @@ import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/oper
 import { type MintParams, Mint } from './token/operations/mint.ts'
 import { type RevokeBurnRoleParams, RevokeBurnRole } from './token/operations/revoke-burn-role.ts'
 import { type RevokeMintRoleParams, RevokeMintRole } from './token/operations/revoke-mint-role.ts'
+import { type SetCCIPAdminParams, SetCCIPAdmin } from './token/operations/set-ccip-admin.ts'
 import {
   type TransferTokenOwnershipParams,
   TransferTokenOwnership,
@@ -168,6 +181,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #isBurner = new IsBurner()
   readonly #transferTokenOwnership = new TransferTokenOwnership()
   readonly #acceptTokenOwnership = new AcceptTokenOwnership()
+  readonly #beginDefaultAdminTransfer = new BeginDefaultAdminTransfer()
+  readonly #acceptDefaultAdminTransfer = new AcceptDefaultAdminTransfer()
+  readonly #cancelDefaultAdminTransfer = new CancelDefaultAdminTransfer()
+  readonly #setCCIPAdmin = new SetCCIPAdmin()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -571,11 +588,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * of the pool's owner ({@link generateUnsignedTransferPoolOwnership}) — moving one leaves the
    * other untouched. Same two-step and zero-address semantics, completed by
    * {@link acceptTokenOwnership}, and the same `owner()` pre-flight of `sender`.
-   * @remarks **v1.x only, and not enforced.** A v2.0.0 `CrossChainToken` has no
-   * `transferOwnership`; it uses `AccessControlDefaultAdminRules` (`beginDefaultAdminTransfer`, on
-   * a mandatory delay), which this SDK does not yet wrap. Passing one is not detected — its
-   * `owner()` aliases the default admin, so the pre-flight passes and the tx reverts once
-   * broadcast.
+   * @remarks v1.x only: a v2.0.0 `CrossChainToken` uses
+   * {@link generateUnsignedBeginDefaultAdminTransfer} instead and is rejected before calldata is
+   * built.
+   * @throws {@link CCTOperationUnsupportedError} if `tokenAddress` is a v2.0.0 CrossChainToken
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`,
    * or if `sender` is given and is not the token owner
    * @example
@@ -657,6 +673,242 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<AcceptTokenOwnershipParams>,
   ): Promise<TransactionResult> {
     return this.#acceptTokenOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `beginDefaultAdminTransfer` tx (for multisig / offline signing), scheduling
+   * a CrossChainToken default-admin transfer. The proposed admin accepts only after the token's
+   * mandatory delay; {@link generateUnsignedAcceptDefaultAdminTransfer} builds that second tx.
+   *
+   * @remarks v2.0.0 and later supported CrossChainToken versions. `newAdmin = 0x0` deliberately
+   * schedules default-admin renunciation, completed with `renounceRole`, not
+   * {@link acceptDefaultAdminTransfer}. Replacing a pending transfer is valid and cancels the old
+   * proposal on-chain.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any address is invalid, the token has no current
+   * default admin, or `sender` is not it
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedBeginDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedBeginDefaultAdminTransfer(
+    opts: BeginDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#beginDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Schedules a CrossChainToken default-admin transfer, signing + submitting with `opts.wallet`
+   * (the current default admin).
+   *
+   * @remarks See {@link generateUnsignedBeginDefaultAdminTransfer} for version, delay, and
+   * renunciation rules. `sender` defaults to the wallet address, so the default-admin gate runs
+   * before broadcast.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, the token has no current default admin, or the wallet is not it
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.beginDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  beginDefaultAdminTransfer(
+    opts: EVMExecuteParams<BeginDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#beginDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `acceptDefaultAdminTransfer` tx (for multisig / offline signing), completing
+   * a pending CrossChainToken transfer. The contract enforces its mandatory delay when mined.
+   *
+   * @remarks The pending admin and schedule are public, so this rejects a missing transfer or a
+   * known `sender` other than the pending admin before signing. It cannot safely reject a schedule
+   * that has not passed yet: an offline tx may be executed after it does.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if no transfer is pending, it schedules renunciation, or
+   * `sender` is not its pending default admin
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   sender: '0xPendingAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptDefaultAdminTransfer(
+    opts: AcceptDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#acceptDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a delayed CrossChainToken default-admin transfer, signing + submitting with
+   * `opts.wallet` (the pending default admin).
+   *
+   * @remarks See {@link generateUnsignedAcceptDefaultAdminTransfer} for pending-transfer and
+   * delay rules. The contract is the final authority on whether its schedule has passed.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, no transfer is pending, or the wallet is not its pending default admin
+   * @throws {@link CCIPExecTxRevertedError} if the mandatory delay has not passed or the tx reverts
+   * on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.acceptDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   wallet, // pending default admin
+   * })
+   * ```
+   */
+  acceptDefaultAdminTransfer(
+    opts: EVMExecuteParams<AcceptDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `cancelDefaultAdminTransfer` tx (for multisig / offline signing), canceling
+   * a pending CrossChainToken default-admin transfer.
+   *
+   * @remarks A cancellation with no pending transfer is rejected even though OpenZeppelin would
+   * mine it as a silent no-op.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if no transfer is pending, the token has no current
+   * default admin, or `sender` is not it
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCancelDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedCancelDefaultAdminTransfer(
+    opts: CancelDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#cancelDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Cancels a pending CrossChainToken default-admin transfer, signing + submitting with
+   * `opts.wallet` (the current default admin).
+   *
+   * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for pending-transfer rules.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, no transfer is pending, the token has no current default admin, or the wallet is not it
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.cancelDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  cancelDefaultAdminTransfer(
+    opts: EVMExecuteParams<CancelDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#cancelDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned v2.0.0 `setCCIPAdmin` tx (for multisig / offline signing). The current
+   * default admin sets the separate CCIP admin (including zero to clear it), which
+   * TokenAdminRegistry can use through
+   * `registerAdminViaGetCCIPAdmin`.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if an address is invalid or `sender` is not the current
+   * default admin
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetCCIPAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xCCIPAdmin...',
+   *   sender: '0xDefaultAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedSetCCIPAdmin(opts: SetCCIPAdminParams): Promise<UnsignedEVMTx> {
+    return this.#setCCIPAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets a v2.0.0 CrossChainToken CCIP admin, signing + submitting with `opts.wallet` (the current
+   * default admin).
+   *
+   * @remarks `sender` defaults to the wallet address, so the default-admin gate runs before
+   * broadcast.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, or the wallet is not the current default admin
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setCCIPAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xCCIPAdmin...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  setCCIPAdmin(opts: EVMExecuteParams<SetCCIPAdminParams>): Promise<TransactionResult> {
+    return this.#setCCIPAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -2331,6 +2583,10 @@ export type {
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { BeginDefaultAdminTransferParams } from './token/operations/begin-default-admin-transfer.ts'
+export type { AcceptDefaultAdminTransferParams } from './token/operations/accept-default-admin-transfer.ts'
+export type { CancelDefaultAdminTransferParams } from './token/operations/cancel-default-admin-transfer.ts'
+export type { SetCCIPAdminParams } from './token/operations/set-ccip-admin.ts'
 export type { ApproveTokenParams } from './token/operations/approve-token.ts'
 export type { GrantMintAndBurnRolesParams } from './token/operations/grant-mint-and-burn-roles.ts'
 export type { GrantMintRoleParams } from './token/operations/grant-mint-role.ts'

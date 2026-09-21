@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { Interface, getAddress, isError } from 'ethers'
+import { Interface, ZeroAddress, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
@@ -56,6 +56,34 @@ export const TOKEN_INTERFACES: Record<TokenVersion, Interface> = {
 /** Returns the cached token {@link Interface} for `version`. */
 export function getTokenInterface(version: TokenVersion): Interface {
   return TOKEN_INTERFACES[version]
+}
+
+/** Resolves a CrossChainToken version for v2-only operations. */
+export async function resolveCrossChainToken(
+  chain: EVMChain,
+  address: string,
+): Promise<TokenVersion> {
+  const [contractType, version] = await chain.typeAndVersion(address)
+  if (contractType !== CROSS_CHAIN_TOKEN_TYPE)
+    throw new CCTContractTypeInvalidError(address, CROSS_CHAIN_TOKEN_TYPE, contractType)
+  if (!Object.values(TokenVersion).includes(version as TokenVersion))
+    throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
+  return version as TokenVersion
+}
+
+/** Floor-matches an encoder table, with v2.0.0 as the first CrossChainToken version. */
+export function resolveTokenEncoder<F>(
+  encoders: Partial<Record<TokenVersion, F | null>>,
+  version: TokenVersion,
+  operation: string,
+): F {
+  const versions = Object.values(TokenVersion)
+  for (let i = versions.indexOf(version); i >= 0; i--) {
+    const encoder = encoders[versions[i]!]
+    if (encoder === null) break
+    if (encoder !== undefined) return encoder
+  }
+  throw new CCTOperationUnsupportedError(operation, version)
 }
 
 /**
@@ -197,6 +225,57 @@ export async function readTokenRoleHolders(
 
 /** The one `typeAndVersion` contract type that is a token but *not* an Ownable2Step one. */
 const CROSS_CHAIN_TOKEN_TYPE = 'CrossChainToken'
+
+/** AccessControlDefaultAdminRules getters declared by CrossChainToken v2.0.0. */
+type CrossChainTokenDefaultAdminReader = Pick<
+  TypedContract<typeof CROSS_CHAIN_TOKEN_V2_0_0_ABI>,
+  'defaultAdmin' | 'pendingDefaultAdmin'
+>
+
+/** Reads the current default admin of a CrossChainToken. */
+export async function readTokenDefaultAdmin(
+  chain: EVMChain,
+  tokenAddress: string,
+): Promise<string> {
+  const token: CrossChainTokenDefaultAdminReader = getTypedContract(
+    chain,
+    tokenAddress,
+    CROSS_CHAIN_TOKEN_V2_0_0_ABI,
+  )
+  return getAddress(resultToObject(await token.defaultAdmin()))
+}
+
+/** Reads a CrossChainToken's pending default admin and its acceptance timestamp. */
+export async function readPendingTokenDefaultAdmin(
+  chain: EVMChain,
+  tokenAddress: string,
+): Promise<{ newAdmin: string; schedule: bigint }> {
+  const token: CrossChainTokenDefaultAdminReader = getTypedContract(
+    chain,
+    tokenAddress,
+    CROSS_CHAIN_TOKEN_V2_0_0_ABI,
+  )
+  const [newAdmin, schedule] = await token.pendingDefaultAdmin()
+  return { newAdmin: getAddress(newAdmin as string), schedule }
+}
+
+/** Confirms a CrossChainToken has a default admin and, when supplied, checks `sender` against it. */
+export async function assertTokenDefaultAdmin(
+  operation: string,
+  chain: EVMChain,
+  tokenAddress: string,
+  sender?: string,
+): Promise<void> {
+  const admin = await readTokenDefaultAdmin(chain, tokenAddress)
+  if (admin === ZeroAddress)
+    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'has no current default admin')
+  if (sender === undefined || getAddress(sender) === admin) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current default admin (${admin})`,
+  )
+}
 
 /**
  * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built: it declares
