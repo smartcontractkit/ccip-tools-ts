@@ -178,12 +178,13 @@ export class RegisterAdmin extends SolanaOperation<
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
     const registryAccount = await chain.connection.getAccountInfo(tokenAdminRegistry)
-    if (
+    const registryInitialized =
       registryAccount &&
       (registryAccount.executable ||
         !registryAccount.owner.equals(SystemProgram.programId) ||
         registryAccount.data.length !== 0)
-    ) {
+
+    if (registryInitialized) {
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
@@ -223,7 +224,9 @@ export class RegisterAdmin extends SolanaOperation<
     }
 
     chain.logger.debug(
-      `${this.name}: method = ${method}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}`,
+      `${
+        this.name
+      }: method = ${method}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}`,
     )
 
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
