@@ -3,10 +3,19 @@ import { describe, it } from 'node:test'
 
 import { ZeroAddress, getIcapAddress, makeError } from 'ethers'
 
-import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
+import {
+  CCIPExecTxRevertedError,
+  CCIPTypeVersionInvalidError,
+  CCIPWalletInvalidError,
+} from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { parseTypeAndVersion } from '../../../../utils.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTContractVersionUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
 import { AuthorizeLockboxCallers } from './authorize-callers.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
@@ -31,30 +40,59 @@ const LEN_1 = '0000000000000000000000000000000000000000000000000000000000000001'
 // 20-byte address left-padded to a 32-byte word.
 const word = (addr: string) => '000000000000000000000000' + addr.slice(2)
 
-/** Minimal EVMChain stub — the build path ignores it; execute uses only these. */
-function stubChain(): EVMChain {
+/** What the stubbed chain was asked to do, in order, so the pre-flight's position is assertable. */
+type Seen = { calls: string[] }
+const newSeen = (): Seen => ({ calls: [] })
+
+/**
+ * Minimal EVMChain stub. The only read the build path makes is `typeAndVersion` on the lockbox,
+ * which defaults to a deployed, supported `ERC20LockBox`; `readError` replaces it with a failure,
+ * standing in for an address with no contract code (`BAD_DATA`) or a reverting read.
+ */
+function stubChain({
+  type = 'ERC20LockBox',
+  version = '2.0.0',
+  readError,
+  seen = newSeen(),
+}: {
+  type?: string
+  version?: string
+  readError?: Error
+  seen?: Seen
+} = {}): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
+    typeAndVersion: (address: string) => {
+      seen.calls.push(`typeAndVersion:${address}`)
+      if (readError) return Promise.reject(readError)
+      return Promise.resolve(parseTypeAndVersion(`${type} ${version}`))
+    },
   } as unknown as EVMChain
 }
 
-/** Fake ethers Signer for a plain (non-deployment) tx. */
-function fakeSigner(opts: { waitError?: Error } = {}) {
+/** ethers' shape for a call whose target has no code: an empty return that cannot be decoded. */
+const noCodeError = () =>
+  makeError('could not decode result data', 'BAD_DATA', { value: '0x', info: {} })
+
+/** Fake ethers Signer for a plain (non-deployment) tx; records broadcasts in `seen`. */
+function fakeSigner(opts: { waitError?: Error; seen?: Seen } = {}) {
   return {
     signTransaction: () => Promise.resolve('0x'),
     getAddress: () => Promise.resolve(SENDER),
     populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
-    sendTransaction: () =>
-      Promise.resolve({
+    sendTransaction: () => {
+      opts.seen?.calls.push('sendTransaction')
+      return Promise.resolve({
         hash: HASH,
         wait: () =>
           opts.waitError
             ? Promise.reject(opts.waitError)
             : Promise.resolve({ status: 1, contractAddress: null }),
-      }),
+      })
+    },
   }
 }
 
@@ -226,6 +264,112 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
   })
 
+  describe('lockbox pre-flight', () => {
+    it('reads the lockbox typeAndVersion before building calldata', async () => {
+      const seen = newSeen()
+      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
+        lockbox: LOCKBOX,
+        addedCallers: [POOL],
+      })
+      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`])
+    })
+
+    it('rejects an address with no contract code', async () => {
+      const readError = noCodeError()
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.param === 'lockbox' &&
+          err.cause === readError,
+      )
+    })
+
+    it('rejects a reverting typeAndVersion read, keeping it as the cause', async () => {
+      const readError = makeError('execution reverted', 'CALL_EXCEPTION', {
+        action: 'call',
+        data: '0x',
+        reason: null,
+        transaction: { to: LOCKBOX, data: '0x' },
+        invocation: null,
+        revert: null,
+      })
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'lockbox' &&
+          err.cause === readError,
+      )
+    })
+
+    it('propagates a transport failure unwrapped, rather than blaming the address', async () => {
+      // a rate limit or a dead RPC says nothing about the lockbox; only CALL_EXCEPTION/BAD_DATA do
+      const readError = makeError('request timeout', 'TIMEOUT', {
+        operation: 'call',
+        reason: 'timeout',
+      })
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) => err === readError,
+      )
+    })
+
+    it('rejects a contract whose typeAndVersion string is unparseable', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ type: 'garbage', version: 'x' }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) => err instanceof CCIPTypeVersionInvalidError,
+      )
+    })
+
+    it('rejects a deployed contract that is not an ERC20LockBox', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ type: 'LockReleaseTokenPool' }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === LOCKBOX &&
+          err.context.expected === 'ERC20LockBox' &&
+          err.context.actual === 'LockReleaseTokenPool',
+      )
+    })
+
+    it('rejects an unsupported ERC20LockBox version', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain({ version: '3.0.0' }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+          }),
+        (err: unknown) =>
+          err instanceof CCTContractVersionUnsupportedError &&
+          err.context.contractType === 'ERC20LockBox' &&
+          err.context.version === '3.0.0' &&
+          err.context.address === LOCKBOX,
+      )
+    })
+  })
+
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
@@ -248,6 +392,29 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
           err instanceof CCIPExecTxRevertedError &&
           err.context.operation === 'authorizeLockboxCallers',
       )
+    })
+
+    it('revokes a caller and returns the tx hash', async () => {
+      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
+        lockbox: LOCKBOX,
+        removedCallers: [POOL],
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('does not sign or broadcast when the lockbox is not deployed', async () => {
+      const seen = newSeen()
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().execute(stubChain({ readError: noCodeError() }), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+            wallet: fakeSigner({ seen }),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
+      )
+      assert.deepEqual(seen.calls, [])
     })
 
     it('rejects a non-signer wallet', async () => {

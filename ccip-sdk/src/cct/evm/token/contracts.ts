@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { Interface, getAddress, isError } from 'ethers'
+import { Interface, getAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
@@ -27,7 +27,7 @@ import FACTORY_BURN_MINT_ERC20_V1_6_2_ABI from '../artifacts/abi/V1_6_2/factory-
 import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-token.ts'
 import CROSS_CHAIN_TOKEN_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/cross-chain-token.ts'
 import type { DeployArtifact } from '../operation.ts'
-import { getTypedContract } from '../query.ts'
+import { getTypedContract, isMissingFunction } from '../query.ts'
 
 /**
  * Known token versions, low to high. `2.0.0` is `CrossChainToken`; `1.5.1` / `1.6.2`
@@ -91,15 +91,6 @@ export function getTokenArtifact(version: TokenVersion): DeployArtifact {
   const artifact = TOKEN_ARTIFACTS[version]
   if (!artifact) throw new CCTContractVersionUnsupportedError('token', version)
   return artifact
-}
-
-/**
- * True for the two failure shapes a call to a function a contract does not declare produces:
- * `CALL_EXCEPTION` (revert) and `BAD_DATA` (node answers `0x`). Deliberately narrow — a transport
- * error or rate limit must not be read as "this contract lacks the function".
- */
-function isMissingFunction(err: unknown): boolean {
-  return isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')
 }
 
 /** The two role predicates, declared identically by every BurnMintERC677 token. */

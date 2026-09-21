@@ -1828,7 +1828,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `ERC20LockBox` `applyAuthorizedCallerUpdates` tx (for multisig / offline
    * signing) that adds/removes authorized callers. Authorize a `LockReleaseTokenPool` here so it
    * can lock/release against the lockbox.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @remarks `lockbox` is checked on-chain before any calldata is built: a call to an EOA or an
+   * undeployed address executes nothing yet mines successfully, so an address that is not a
+   * deployed `ERC20LockBox` is rejected here rather than returning an unsigned tx that silently
+   * authorizes nobody.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, or if
+   * nothing at `lockbox` answers `typeAndVersion()`
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
    * @example
    * ```typescript
    * // `sender` must be the lockbox owner
@@ -1848,8 +1855,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
+   * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox` before the
+   * wallet is asked to sign; see {@link generateUnsignedAuthorizeLockboxCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, or if
+   * nothing at `lockbox` answers `typeAndVersion()`
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
    * ```typescript
