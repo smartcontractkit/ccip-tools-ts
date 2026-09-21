@@ -70,9 +70,9 @@ const OTHER_CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia').chainId)
  * {@link fakeSigner} with a provider on `chainId`, and counters proving a rejected write never
  * reached the wallet.
  */
-function walletOnChain(chainId: number) {
+function walletOnChain(chainId: number, address?: string) {
   const calls = { signed: 0, sent: 0 }
-  const base = fakeSigner()
+  const base = fakeSigner(address)
   return {
     calls,
     wallet: {
@@ -997,11 +997,12 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.deepEqual(calls, { signed: 0, sent: 0 })
     })
 
-    it('rejects transferOwnership when the wallet is on another chain, writing nothing', async () => {
-      const { wallet, calls } = walletOnChain(OTHER_CHAIN_ID)
+    it('rejects transferPoolOwnership when the wallet is on another chain, writing nothing', async () => {
+      // The pool owner the stub reports, so validation passes and the chain check is what rejects.
+      const { wallet, calls } = walletOnChain(OTHER_CHAIN_ID, CURRENT_ADMIN)
       const cct = EVMTokenManager.fromChain(stubChain())
       await assert.rejects(
-        () => cct.transferOwnership({ poolAddress: POOL, newOwner: TOKEN, wallet }),
+        () => cct.transferPoolOwnership({ poolAddress: POOL, newOwner: NEW_ADMIN, wallet }),
         (err: unknown) => err instanceof CCIPWalletChainMismatchError,
       )
       assert.deepEqual(calls, { signed: 0, sent: 0 })

@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import { type RevokeMintRoleParams, RevokeMintRole } from './revoke-mint-role.ts'
 
@@ -46,6 +46,7 @@ function stubChain({
   const results: Record<string, unknown[]> = { isMinter: [holdsRole], owner: [owner] }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
