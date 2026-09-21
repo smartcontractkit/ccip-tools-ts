@@ -169,6 +169,18 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       )
     })
 
+    for (const param of ['token', 'rmnProxy', 'router'] as const) {
+      it(`rejects the zero address for ${param}`, async () => {
+        await assert.rejects(
+          () => new DeployTokenPool().generate(stubChain(), { ...base, [param]: ZeroAddress }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'deployTokenPool' &&
+            err.context.param === param,
+        )
+      })
+    }
+
     it('rejects decimals outside 0–255', async () => {
       await assert.rejects(
         () => new DeployTokenPool().generate(stubChain(), { ...base, localTokenDecimals: 256 }),
