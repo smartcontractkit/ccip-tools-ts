@@ -12,6 +12,7 @@ import HIDTransport from '@ledgerhq/hw-transport-node-hid'
 import {
   type Message,
   type MessageV0,
+  type MessageV1,
   type VersionedTransaction,
   Keypair,
   PublicKey,
@@ -72,7 +73,7 @@ export class LedgerSolanaWallet {
     this.logger.debug('Ledger: Request to sign message from', this.publicKey.toBase58())
     // serializeMessage on v0, serialize on v1
 
-    let msg: Message | MessageV0
+    let msg: Message | MessageV0 | MessageV1
     if (tx instanceof Transaction) {
       msg = tx.compileMessage()
     } else {

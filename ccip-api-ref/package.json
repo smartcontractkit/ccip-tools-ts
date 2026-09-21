@@ -39,7 +39,7 @@
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/types": "^3.10.2",
-    "@types/react-dom": "^19.2.4",
+    "@types/react-dom": "^19.2.5",
     "@typescript/native": "npm:typescript@7.0.2",
     "docusaurus-plugin-typedoc": "^1.4.2",
     "typedoc": "^0.28.20",
