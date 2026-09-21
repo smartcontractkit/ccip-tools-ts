@@ -322,12 +322,23 @@ export async function readTokenPoolAllowedFinality(
   return resultToObject(await pool.getAllowedFinalityConfig())
 }
 
-/** Fee parameters a v2.0.0 pool applies to a destination-chain transfer. */
+/**
+ * Fee parameters a v2.0.0 pool resolves for one destination chain and requested finality mode.
+ *
+ * @remarks This is the selected standard- or fast-finality tier, not the raw stored pair of tiers.
+ * When `isEnabled` is `false`, every numeric field is zero. See {@link TokenTransferFeeConfig} for
+ * the raw configuration returned by `getTokenTransferFeeConfig`.
+ */
 export type TokenPoolFee = {
+  /** USD surcharge, in cents, added to the CCIP fee for the selected finality tier. */
   feeUSDCents: bigint
+  /** Gas overhead added to the destination-chain execution-cost estimate. */
   destGasOverhead: number
+  /** Byte overhead added to the destination-chain data-availability-cost estimate. */
   destBytesOverhead: number
+  /** Transfer amount deducted as a fee, in basis points (`0..9999`; one BPS is 0.01%). */
   tokenFeeBps: number
+  /** Whether the destination chain has an enabled token-transfer fee configuration. */
   isEnabled: boolean
 }
 

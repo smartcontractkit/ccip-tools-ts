@@ -29,7 +29,11 @@ export type GetFeeParams = {
   finality?: FinalityRequested
 }
 
-/** Fee parameters returned by a v2.0.0+ pool. */
+/**
+ * Fee parameters resolved for the requested finality tier by a v2.0.0+ pool.
+ *
+ * Use `getTokenTransferFeeConfig` for the raw configuration containing both finality tiers.
+ */
 export type GetFeeResult = TokenPoolFee
 
 /** Reads the fee parameters a v2.0.0+ pool applies to one destination chain and finality. */
