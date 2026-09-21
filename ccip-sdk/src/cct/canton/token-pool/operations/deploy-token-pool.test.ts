@@ -10,7 +10,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type GenerateDeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
@@ -19,6 +18,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../../token-admin-registry/shared.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
+import { type GenerateDeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
 const fp = (hex: string) => '1220' + hex.repeat(32)
 const POOL_OWNER = `poolOwner::${fp('ab')}`
@@ -174,6 +174,7 @@ describe('deployTokenPool command building', () => {
   it('discloses the resolved TAR contract', async () => {
     const tx = await op.generate(mockChain('canton:TestNet'), baseParams())
     assert.equal(tx.commands.disclosedContracts?.length, 1)
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     assert.equal(tx.commands.disclosedContracts?.[0]?.contractId, TAR_CID)
   })
 
@@ -272,6 +273,7 @@ describe('deployTokenPool deps resolution', () => {
 function mockChainWithSubmit(events: unknown[]): CantonChain {
   const chain = mockChain('canton:TestNet')
   return {
+    // oxlint-disable-next-line typescript/no-misused-spread
     ...chain,
     provider: {
       submitAndWaitForTransaction: async () => ({
@@ -323,10 +325,7 @@ describe('deployTokenPool execute result parsing', () => {
     assert.equal(result.poolCid, 'pool-cid-1')
     assert.deepEqual(result.rateLimiterCids, ['rl-cid-1', 'rl-cid-2'])
     assert.equal(result.tokenConfigCid, 'token-config-cid-1')
-    assert.equal(
-      result.poolInstanceAddress,
-      hashedRawInstanceAddress(`pool-1@${POOL_OWNER}`),
-    )
+    assert.equal(result.poolInstanceAddress, hashedRawInstanceAddress(`pool-1@${POOL_OWNER}`))
   })
 
   it('throws when the response has no created pool contract', async () => {

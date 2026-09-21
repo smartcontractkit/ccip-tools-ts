@@ -35,6 +35,10 @@
       "types": "./dist/cct/solana/index.d.ts",
       "default": "./dist/cct/solana/index.js"
     },
+    "./cct/canton": {
+      "types": "./dist/cct/canton/index.d.ts",
+      "default": "./dist/cct/canton/index.js"
+    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },

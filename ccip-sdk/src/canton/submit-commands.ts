@@ -5,8 +5,8 @@ import type {
   JsPrepareSubmissionRequest,
   JsSubmitAndWaitForTransactionResponse,
 } from './client/index.ts'
-import type { CantonChain } from './index.ts'
 import type { TransactionSigner } from './types.ts'
+import type { CantonChain } from './index.ts'
 
 const CANTON_SEND_PACKAGE_NAMES = [
   'ccip-core',

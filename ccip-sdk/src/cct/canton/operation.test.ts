@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
-import type { CantonChain } from '../../canton/index.ts'
 import type { JsCommands } from '../../canton/client/index.ts'
-import { CantonOperation, type CantonExecuteParams } from './operation.ts'
+import type { CantonChain } from '../../canton/index.ts'
+import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { CCTTxFailedError } from '../errors.ts'
+import { type CantonExecuteParams, CantonOperation } from './operation.ts'
 
 class NoopOperation extends CantonOperation<Record<string, never>> {
   readonly name = 'noop'

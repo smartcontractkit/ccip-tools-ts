@@ -46,7 +46,7 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
-import { getDataBytes, sleep } from '../utils.ts'
+import { sleep } from '../utils.ts'
 import {
   CANTON_DECIMALS,
   formatCantonDecimalAmountUnits,
@@ -65,8 +65,6 @@ import {
 import {
   type CantonClient,
   type JsCommands,
-  type JsPrepareSubmissionRequest,
-  type JsSubmitAndWaitForTransactionResponse,
   type JsTransaction,
   createCantonClient,
 } from './client/index.ts'
@@ -86,7 +84,6 @@ import {
   extractCantonSentEventFieldsFromLogData,
   extractCreatedContractId,
   extractFieldValue,
-  extractRecordField,
   flattenCantonRecord,
   normalizeCantonEncodedMessage,
   normalizeCantonMessageId,
@@ -153,11 +150,7 @@ export {
   selectFeeTokenHoldingCids,
   sumCantonHoldingAmounts,
 } from './defaults.ts'
-export {
-  decodeDamlRecord,
-  extractFieldValue,
-  extractRecordField,
-} from './events.ts'
+export { decodeDamlRecord, extractFieldValue, extractRecordField } from './events.ts'
 
 // Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {
@@ -1462,7 +1455,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     return { receipt, log }
   }
-
 
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the

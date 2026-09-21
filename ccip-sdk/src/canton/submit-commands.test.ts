@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { submitCantonCommands } from './submit-commands.ts'
-import type { CantonChain } from './index.ts'
 import type { TransactionSigner } from './types.ts'
+import type { CantonChain } from './index.ts'
 
 function mockChain(getPreferredPackageIds: (...args: unknown[]) => Promise<string[]>): CantonChain {
   return {
@@ -37,7 +37,8 @@ describe('submitCantonCommands package-name resolution', () => {
         commands: [
           {
             CreateAndExerciseCommand: {
-              templateId: '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool',
+              templateId:
+                '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool',
               createArguments: {},
               choice: 'Initialize',
               choiceArgument: {},

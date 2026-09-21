@@ -261,7 +261,7 @@ export class EdsDisclosureProvider {
         this.timeoutMs,
         { addresses: [instanceAddress] },
       )
-      const contract = resp?.disclosures?.[0]
+      const contract = resp.disclosures?.[0]
       if (!contract?.contractId || !contract.createdEventBlob) return null
       return edsContractToSdk(contract)
     } catch {

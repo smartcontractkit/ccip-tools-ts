@@ -18,8 +18,9 @@ import { Query } from '../query.ts'
  * `IsAdministrator`, `GetRequiredCCVs`) through the JSON Ledger API. No wallet
  * is required.
  */
-export abstract class CantonQuery<
-  Params extends object,
+export abstract class CantonQuery<Params extends object, Result, Parsed = Params> extends Query<
+  CantonChain,
+  Params,
   Result,
-  Parsed = Params,
-> extends Query<CantonChain, Params, Result, Parsed> {}
+  Parsed
+> {}

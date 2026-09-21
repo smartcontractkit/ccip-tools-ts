@@ -48,14 +48,14 @@ export function parseInstrumentId(
     // String form: "adminParty::fingerprint::tokenId" — the admin party is the
     // first two `::` segments (hint::fingerprint), the id is the trailing segment.
     const parts = value.split('::')
-    if (parts.length < 3) {
+    if (parts.length !== 3) {
       throw new CCTParamsInvalidError(
         operation,
         param,
         `instrument ID string must be "hint::1220<fingerprint>::tokenId", got "${value}"`,
       )
     }
-    const tokenId = parts.slice(2).join('::')
+    const tokenId = parts[2]!
     const admin = `${parts[0]}::${parts[1]}`
     if (!isCantonPartyId(admin)) {
       throw new CCTParamsInvalidError(
@@ -84,26 +84,4 @@ export function parseInstrumentId(
     throw new CCTParamsInvalidError(operation, param, 'instrument ID id must be a non-empty string')
   }
   return { admin: value.admin, id: value.id }
-}
-
-/**
- * Validate and return a Canton contract ID (a ledger contract ID string, e.g.
- * `#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry:00...`).
- * Contract IDs are opaque ledger-assigned strings; we only check presence.
- */
-export function parseContractCid(operation: string, param: string, value: string): string {
-  if (!value || typeof value !== 'string') {
-    throw new CCTParamsInvalidError(operation, param, 'contract ID is required')
-  }
-  return value
-}
-
-/**
- * Validate that a value is a non-empty string.
- */
-export function parseNonEmptyString(operation: string, param: string, value: string): string {
-  if (!value || typeof value !== 'string') {
-    throw new CCTParamsInvalidError(operation, param, `${param} is required`)
-  }
-  return value
 }

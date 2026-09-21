@@ -167,6 +167,7 @@ export class DeployTokenPool extends CantonOperation<
 
   /** Validates party IDs, instrument ID, instance ID, decimals, observers, and lanes. */
   protected override validate(p: GenerateDeployTokenPoolParams): void {
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (p.poolType !== 'burnMint' && p.poolType !== 'lockRelease') {
       throw new CCTParamsInvalidError(
         this.name,
@@ -187,6 +188,7 @@ export class DeployTokenPool extends CantonOperation<
         `expected a non-negative integer, got ${p.decimals}`,
       )
     }
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (!p.observers || p.observers.length === 0) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -204,6 +206,7 @@ export class DeployTokenPool extends CantonOperation<
       )
     }
     parsePartyId(this.name, 'admin', p.admin)
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     for (const [i, l] of (p.lanes ?? []).entries()) {
       if (!l.remoteChainSelector) {
         throw new CCTParamsInvalidError(
@@ -219,6 +222,7 @@ export class DeployTokenPool extends CantonOperation<
           'remote token address is required',
         )
       }
+      // oxlint-disable-next-line typescript/no-unnecessary-condition
       if (!l.inbound || !l.outbound || !l.inboundCustomFinality) {
         throw new CCTParamsInvalidError(
           this.name,
@@ -294,6 +298,7 @@ export class DeployTokenPool extends CantonOperation<
         )
       }
       disclosedContracts.push({
+        // oxlint-disable-next-line typescript/no-unnecessary-condition
         templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
         contractId: tokenConfig.contractId,
         createdEventBlob: tokenConfig.createdEventBlob,
@@ -306,6 +311,7 @@ export class DeployTokenPool extends CantonOperation<
       tokenAdminRegistryCid: tarContract.contractId,
       existingTokenConfigCid: p.existingTokenConfigCid,
       admin: p.admin,
+      // oxlint-disable-next-line typescript/no-unnecessary-condition
       lanes: p.lanes ?? [],
     })
 

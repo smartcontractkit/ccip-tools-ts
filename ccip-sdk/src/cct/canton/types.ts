@@ -7,8 +7,8 @@
  * @packageDocumentation
  */
 
-import type { TransactionResult } from '../operation.ts'
 import type { JsSubmitAndWaitForTransactionResponse } from '../../canton/client/index.ts'
+import type { TransactionResult } from '../operation.ts'
 
 /**
  * Result of a confirmed Canton CCT write: the shared `TransactionResult.hash`

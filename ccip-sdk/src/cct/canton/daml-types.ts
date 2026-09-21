@@ -47,35 +47,13 @@ export type FinalityConfigArg =
 
 // ─── CCIP.Registry.RateLimiterV2 ───────────────────────────────────────────
 
-/** `RateLimitDirection` — Daml enum, bare-string JSON encoding. */
-export type RateLimitDirectionArg = 'RateLimitDirection_Inbound' | 'RateLimitDirection_Outbound'
-
-/** `RateLimitMode` — Daml enum, bare-string JSON encoding. */
-export type RateLimitModeArg = 'RateLimitMode_DefaultFinality' | 'RateLimitMode_CustomFinality'
-
-/** `RateLimiter` template create arguments (registry family). */
-export type RateLimiterArg = {
-  instanceId: string
-  poolInstanceId: string
-  poolOwner: string
-  remoteChainSelector: string
-  direction: RateLimitDirectionArg
-  mode: RateLimitModeArg
-  isEnabled: boolean
-  capacity: string
-  rate: string
-  tokens: string
-  /** ISO-8601 timestamp (Daml `Time`). */
-  lastUpdated: string
-  observers: string[]
-}
-
 // ─── CCIP.Registry.BurnMintTokenPoolV2(Types) ───────────────────────────────
 // LockReleaseTokenPool shares the identical field shape.
 
 /** `TransferTimeout` — Indefinite | RelativeHours Int64. */
 export type TransferTimeoutArg =
-  DamlVariant<'Indefinite', Record<string, never>> | DamlVariant<'RelativeHours', string>
+  | DamlVariant<'Indefinite', Record<string, never>>
+  | DamlVariant<'RelativeHours', string>
 
 /** `BurnMintTokenPoolDeps` (TAR / RMNRemote / FeeQuoter references). */
 export type PoolDepsArg = {
@@ -151,31 +129,4 @@ export type ChainUpdateArg = {
 export type ApplyChainUpdatesArg = {
   remoteChainSelectorsToRemove: string[]
   chainsToAdd: ChainUpdateArg[]
-}
-
-/** `SetRateLimitConfig` choice argument. */
-export type SetRateLimitConfigArg = {
-  caller: string
-  rateLimiterCid: string
-  newIsEnabled: boolean
-  newCapacity: string
-  newRate: string
-}
-
-/** `SetDynamicConfig` choice argument. */
-export type SetDynamicConfigArg = {
-  /** Daml `Optional Party`; null (None) clears the rate-limit admin. */
-  rateLimitAdmin: string | null
-}
-
-/** `GetRequiredCCVs` choice argument (pool read choice). */
-export type GetRequiredCCVsArg = {
-  remoteChainSelector: string
-  sourceAmount: string
-  finality: FinalityConfigArg
-  extraData: string
-  /** `CCIP.InterfacesV2.TokenPool.TransferDirection` — variant: Inbound | Outbound. */
-  direction: DamlVariant<string, Record<string, never>>
-  context: ChoiceContextArg
-  caller: string
 }
