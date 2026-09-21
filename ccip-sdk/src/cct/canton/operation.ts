@@ -12,12 +12,12 @@
  * @packageDocumentation
  */
 
-import { CCIPError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { JsCommands } from '../../canton/client/index.ts'
 import { getTemplateEntityName } from '../../canton/events.ts'
 import type { CantonChain } from '../../canton/index.ts'
 import { submitCantonCommands } from '../../canton/submit-commands.ts'
-import { type CantonWallet, isCantonWallet, type UnsignedCantonTx } from '../../canton/types.ts'
+import { type UnsignedCantonTx, isCantonWallet } from '../../canton/types.ts'
+import { CCIPError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import { CCTTxFailedError } from '../errors.ts'
 import { Operation } from '../operation.ts'
 import type { CantonTransactionResult } from './types.ts'
@@ -104,16 +104,10 @@ export abstract class CantonOperation<
    * `chain.edsDisclosureProvider` and construct the exercise command(s) +
    * `actAs` (from `params.sender`) + `disclosedContracts`.
    */
-  protected abstract buildCommands(
-    chain: CantonChain,
-    params: Parsed,
-  ): Promise<JsCommands>
+  protected abstract buildCommands(chain: CantonChain, params: Parsed): Promise<JsCommands>
 
   /** Run {@link prepare} and {@link buildCommands}; no signing. */
-  async generate(
-    chain: CantonChain,
-    params: CantonGenerateParams<P>,
-  ): Promise<UnsignedCantonTx> {
+  async generate(chain: CantonChain, params: CantonGenerateParams<P>): Promise<UnsignedCantonTx> {
     const commands = await this.buildCommands(chain, this.prepare(params))
     return { family: chain.network.family, commands }
   }
@@ -147,8 +141,12 @@ export abstract class CantonOperation<
       throw error
     }
 
+    // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (!response.transaction) {
-      throw new CCTTxFailedError(this.name, 'submitted transaction response has no transaction field')
+      throw new CCTTxFailedError(
+        this.name,
+        'submitted transaction response has no transaction field',
+      )
     }
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
@@ -169,7 +167,7 @@ export function extractCreatedContractIds(
   const events = (response.transaction as { events?: unknown[] } | undefined)?.events ?? []
   const ids: string[] = []
   for (const event of events) {
-    const created = (event as { CreatedEvent?: Record<string, unknown> })?.CreatedEvent
+    const created = (event as { CreatedEvent?: Record<string, unknown> }).CreatedEvent
     if (!created || typeof created['contractId'] !== 'string') continue
     if (getTemplateEntityName(created) === entityName) {
       ids.push(created['contractId'])
@@ -185,7 +183,7 @@ export function extractExerciseResult(
 ): unknown {
   const events = (response.transaction as { events?: unknown[] } | undefined)?.events ?? []
   for (const event of events) {
-    const exercised = (event as { ExercisedEvent?: Record<string, unknown> })?.ExercisedEvent
+    const exercised = (event as { ExercisedEvent?: Record<string, unknown> }).ExercisedEvent
     if (exercised?.['choice'] === choice && exercised['exerciseResult'] != null) {
       return exercised['exerciseResult']
     }

@@ -52,8 +52,7 @@ export interface CantonNetworkConfig {
  */
 export const CANTON_NETWORKS: Readonly<Record<string, CantonNetworkConfig>> = {
   'canton:TestNet': {
-    ccipOwner:
-      'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
+    ccipOwner: 'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
     tokenAdminRegistry:
       'tokenadminregistry-nbehb@ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
     feeQuoter:
@@ -68,8 +67,7 @@ export const CANTON_NETWORKS: Readonly<Record<string, CantonNetworkConfig>> = {
   // config), Sep 2026. Raw instance IDs cross-checked: keccak256(raw) matches
   // the deployment's hashed instance addresses.
   'canton:MainNet': {
-    ccipOwner:
-      'ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
+    ccipOwner: 'ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
     tokenAdminRegistry:
       'tokenadminregistry-wjmat@ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
     feeQuoter:

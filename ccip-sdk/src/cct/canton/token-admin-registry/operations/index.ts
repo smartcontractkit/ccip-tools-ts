@@ -5,7 +5,7 @@
  */
 
 export {
-  GetTokenAdminRegistry,
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
+  GetTokenAdminRegistry,
 } from './get-token-admin-registry.ts'

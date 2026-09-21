@@ -14,6 +14,7 @@
  */
 
 import type { CantonChain } from '../../canton/index.ts'
+import { getCantonNetworkConfig } from '../../canton/networks.ts'
 import type { ChainContext } from '../../chain.ts'
 import type { ChainFamily } from '../../networks.ts'
 import { TokenManager } from '../token-manager.ts'
@@ -22,15 +23,16 @@ import {
   type GetTokenAdminRegistryResult,
   GetTokenAdminRegistry,
 } from './token-admin-registry/operations/index.ts'
+import { deriveTokenConfigInstanceAddress } from './token-admin-registry/shared.ts'
 import {
-  type ExecuteDeployTokenPoolParams,
-  type ExecuteDeployTokenPoolResult,
   type ApplyChainUpdatesParams,
   type DeployTokenPoolParams,
-  type GenerateApplyChainUpdatesResult,
   type ExecuteApplyChainUpdatesParams,
   type ExecuteApplyChainUpdatesResult,
+  type ExecuteDeployTokenPoolParams,
+  type ExecuteDeployTokenPoolResult,
   type GenerateApplyChainUpdatesParams,
+  type GenerateApplyChainUpdatesResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
   type GetRateLimiterStateParams,
@@ -42,6 +44,7 @@ import {
   GetRateLimiterState,
   GetTokenPoolState,
 } from './token-pool/operations/index.ts'
+import { normalizeRemoteAddress } from './token-pool/shared.ts'
 
 /**
  * Canton CCT manager. Holds a {@link CantonChain} and exposes the CCT admin
@@ -153,3 +156,7 @@ export type {
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
 }
+
+// Network constants + address helpers used to compose deploy/lane params.
+export { getCantonNetworkConfig, deriveTokenConfigInstanceAddress, normalizeRemoteAddress }
+export type { CantonNetworkConfig } from '../../canton/networks.ts'

@@ -12,8 +12,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ChainFamily } from '../../../../networks.ts'
 import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
 
@@ -42,10 +42,7 @@ function tokenConfigArg(opts: {
       field('instanceId', text(`${ADMIN}::usdc`)),
       field('registryOwner', party(PARTY)),
       field('isCCIPManaged', { Sum: { Bool: opts.isCCIPManaged ?? true } }),
-      field(
-        'instrumentId',
-        { fields: [field('admin', party(ADMIN)), field('id', text('usdc'))] },
-      ),
+      field('instrumentId', { fields: [field('admin', party(ADMIN)), field('id', text('usdc'))] }),
       field('admin', opts.admin ? some(party(opts.admin)) : none()),
       field('pendingAdmin', opts.pendingAdmin ? some(party(opts.pendingAdmin)) : none()),
       field(

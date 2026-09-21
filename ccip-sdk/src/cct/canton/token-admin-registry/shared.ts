@@ -6,7 +6,6 @@
  */
 
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
-import type { JsCommands } from '../../../canton/client/index.ts'
 import { hashedUtf8Hex } from '../../../shared/codec.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 
@@ -88,6 +87,7 @@ export async function resolveTar(
   tarInstanceAddress: string,
 ): Promise<ResolvedTar> {
   const disclosed = await chain.edsDisclosureProvider
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- test mocks omit this provider
     ?.fetchContractDisclosure(TAR_TEMPLATE_ID, tarInstanceAddress)
     .catch(() => null)
   if (disclosed) {
@@ -121,5 +121,3 @@ export async function resolveTar(
   }
   return { tarContract: toContractRef(contract), ccipOwner: contract.signatories[0] }
 }
-
-
