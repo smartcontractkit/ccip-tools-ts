@@ -974,7 +974,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` holds neither role
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    *
    * @example
