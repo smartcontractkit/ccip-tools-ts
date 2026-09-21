@@ -975,10 +975,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned **v2.0.0** pool token-transfer-fee update transaction.
    *
-   * @remarks Each destination selector appears once across `updates` and `disables`. Setting an
-   * update's `isEnabled` to `false` stores a disabled config; `disables` removes its config. The
-   * pool owner or delegated `feeAdmin` may submit it; `sender`, when supplied, is pre-flighted
-   * against those roles.
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The pool owner may submit it, and
+   * `sender`, when supplied, is pre-flighted against that role.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
@@ -1003,7 +1002,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *     },
    *   }],
    *   disables: [],
-   *   sender: '0xFeeAdmin...',
+   *   sender: '0xOwner...',
    * })
    * ```
    */
@@ -1016,9 +1015,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Updates or disables token-transfer fees for destination chains on a **v2.0.0** pool.
    *
-   * @remarks Each destination selector appears once across `updates` and `disables`. Setting an
-   * update's `isEnabled` to `false` stores a disabled config; `disables` removes its config. The
-   * signing wallet must be the pool owner or delegated `feeAdmin`.
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The signing wallet must be the pool
+   * owner.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
@@ -1048,7 +1047,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *     },
    *   }],
    *   disables: [5009297550715157269n],
-   *   wallet, // pool owner or configured feeAdmin
+   *   wallet, // pool owner
    * })
    * ```
    */
@@ -2628,7 +2627,7 @@ export type {
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
-export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
 export type {
   ChainRateLimitUpdate,
   SetChainRateLimiterConfigsParams,
