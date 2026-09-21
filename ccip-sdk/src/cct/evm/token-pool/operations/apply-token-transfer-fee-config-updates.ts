@@ -2,16 +2,14 @@
  * applyTokenTransferFeeConfigUpdates — updates or disables v2.0.0 pool token-transfer fees per
  * destination chain in one call.
  *
- * @remarks The pool owner or its `feeAdmin` may call this operation. Updates are applied before
- * disables; a selector must therefore appear in exactly one list. An update with `isEnabled:
- * false` stores a disabled config; `disables` removes one.
- *
- * @see {@link SetDynamicConfig} to appoint or revoke the delegated `feeAdmin`.
+ * @remarks Only the pool owner may call this operation. Updates are applied before disables; a
+ * selector must therefore appear in exactly one list. Every update must be enabled; `disables`
+ * removes an existing config.
  *
  * @packageDocumentation
  */
 
-import { type Interface, ZeroAddress, getAddress } from 'ethers'
+import type { Interface } from 'ethers'
 
 import type { TokenTransferFeeConfig } from '../../../../chain.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -29,9 +27,8 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
+  assertPoolOwner,
   getTokenPoolInterface,
-  readTokenPoolFeeAdmin,
-  readTokenPoolOwner,
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
@@ -40,7 +37,7 @@ import {
 export type TokenTransferFeeConfigUpdate = {
   /** Destination CCIP chain selector (`uint64`). */
   remoteChainSelector: bigint
-  /** Complete fee configuration for this destination chain. */
+  /** Complete enabled fee configuration for this remote chain. */
   tokenTransferFeeConfig: TokenTransferFeeConfig
 }
 
@@ -52,10 +49,7 @@ export type ApplyTokenTransferFeeConfigUpdatesParams = {
   updates?: TokenTransferFeeConfigUpdate[]
   /** Remote chains whose token-transfer fees to disable; defaults to none. */
   disables?: bigint[]
-  /**
-   * Pool owner or delegated `feeAdmin`; optional when generating an unsigned transaction.
-   * @see {@link SetDynamicConfig} to configure `feeAdmin`.
-   */
+  /** Pool owner; optional when generating an unsigned transaction. */
   sender?: string
 }
 
@@ -88,23 +82,34 @@ function validateFeeConfig(operation: string, param: string, value: unknown): vo
     'destBytesOverhead',
     'finalityFeeUSDCents',
     'fastFinalityFeeUSDCents',
-  ]) {
+  ])
     validateUint32(operation, `${param}.${field}`, config[field])
-  }
+  if (config.destGasOverhead === 0)
+    throw new CCTParamsInvalidError(
+      operation,
+      `${param}.destGasOverhead`,
+      'must be greater than zero',
+    )
 
   for (const field of ['finalityTransferFeeBps', 'fastFinalityTransferFeeBps']) {
     const value = config[field]
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 10000)
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 10000)
       throw new CCTParamsInvalidError(
         operation,
         `${param}.${field}`,
-        'must be an integer in [0, 10000]',
+        'must be an integer in [0, 9999]',
       )
   }
   validateBoolean(operation, `${param}.isEnabled`, config.isEnabled)
+  if (!config.isEnabled)
+    throw new CCTParamsInvalidError(
+      operation,
+      `${param}.isEnabled`,
+      'must be true; use disables to remove a config',
+    )
 }
 
-/** Applies v2.0.0 token-transfer fee configuration updates. Owner- or `feeAdmin`-only. */
+/** Applies enabled v2.0.0 token-transfer fee configuration updates. Owner-only. */
 export class ApplyTokenTransferFeeConfigUpdates extends EVMOperation<
   ApplyTokenTransferFeeConfigUpdatesParams,
   ParsedParams
@@ -177,49 +182,29 @@ export class ApplyTokenTransferFeeConfigUpdates extends EVMOperation<
   }
 
   /**
-   * Resolves the v2.0.0 interface and, when known, verifies the owner-or-`feeAdmin` sender. The
-   * encoder is resolved before role reads, so older pools fail without unnecessary RPCs.
+   * Resolves the v2.0.0 interface and, when known, verifies the owner sender. The encoder is
+   * resolved before the role read, so older pools fail without unnecessary RPCs.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is neither the pool owner
-   * nor its configured `feeAdmin`
+   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the pool owner
    */
   protected async buildUnsigned(chain: EVMChain, params: ParsedParams): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     if (params.sender !== undefined)
-      await this.#assertFeeRole(chain, params.poolAddress, params.sender)
+      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
   }
 
-  async #assertFeeRole(chain: EVMChain, poolAddress: string, sender: string): Promise<void> {
-    const [owner, feeAdmin] = await Promise.all([
-      readTokenPoolOwner(chain, poolAddress),
-      readTokenPoolFeeAdmin(chain, poolAddress),
-    ])
-    const signer = getAddress(sender)
-    if (signer === owner || (feeAdmin !== ZeroAddress && signer === feeAdmin)) return
-    throw new CCTParamsInvalidError(
-      this.name,
-      'sender',
-      `must be the pool owner (${owner})${
-        feeAdmin === ZeroAddress
-          ? ' — this pool has no feeAdmin set'
-          : ` or its feeAdmin (${feeAdmin})`
-      }`,
-    )
-  }
-
   /**
-   * Signs and submits as the pool owner or delegated `feeAdmin`, defaulting `sender` to the
-   * signing wallet.
+   * Signs and submits as the pool owner, defaulting `sender` to the signing wallet.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any parameter is invalid, `sender` differs from the
-   * wallet, or the wallet is neither the owner nor its configured `feeAdmin`
+   * wallet, or the wallet is not the pool owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time

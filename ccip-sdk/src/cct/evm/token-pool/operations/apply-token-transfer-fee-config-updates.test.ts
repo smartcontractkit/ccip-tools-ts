@@ -43,13 +43,11 @@ function stubChain({
   family = 'BurnMint',
   version = TokenPoolVersion.V2_0_0,
   owner = OWNER,
-  feeAdmin = FEE_ADMIN,
   onCall,
 }: {
   family?: TokenPoolFamily
   version?: TokenPoolVersion
   owner?: string
-  feeAdmin?: string
   onCall?: () => void
 } = {}): EVMChain {
   const iface = TOKEN_POOL_INTERFACES[family][version]
@@ -60,8 +58,6 @@ function stubChain({
         const selector = data.slice(0, 10)
         if (selector === iface.getFunction('owner')?.selector)
           return iface.encodeFunctionResult('owner', [owner])
-        if (selector === iface.getFunction('getDynamicConfig')?.selector)
-          return iface.encodeFunctionResult('getDynamicConfig', [POOL, ZeroAddress, feeAdmin])
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
           data: '0x',
@@ -124,13 +120,19 @@ describe('ApplyTokenTransferFeeConfigUpdates (cct/evm)', () => {
       })
     }
 
-    it('allows the delegated fee admin', async () => {
-      assert.equal((await generate(stubChain(), { sender: FEE_ADMIN })).transactions[0]!.data, DATA)
+    it('rejects the delegated fee admin', async () => {
+      await assert.rejects(
+        () => generate(stubChain(), { sender: FEE_ADMIN }),
+        (error: unknown) =>
+          error instanceof CCTParamsInvalidError && error.context.param === 'sender',
+      )
     })
 
     it('omits from and skips role reads without sender', async () => {
       let calls = 0
-      const unsigned = await generate(stubChain({ onCall: () => calls++ }), { sender: undefined })
+      const unsigned = await generate(stubChain({ onCall: () => calls++ }), {
+        sender: undefined,
+      })
       assert.equal(unsigned.transactions[0]!.from, undefined)
       assert.equal(calls, 1)
     })
@@ -154,7 +156,9 @@ describe('ApplyTokenTransferFeeConfigUpdates (cct/evm)', () => {
       [{ poolAddress: ZeroAddress }, 'poolAddress'],
       [{ updates: [], disables: [] }, 'updates'],
       [
-        { updates: [{ remoteChainSelector: 0n, tokenTransferFeeConfig: CONFIG }] },
+        {
+          updates: [{ remoteChainSelector: 0n, tokenTransferFeeConfig: CONFIG }],
+        },
         'updates[0].remoteChainSelector',
       ],
       [
@@ -162,11 +166,36 @@ describe('ApplyTokenTransferFeeConfigUpdates (cct/evm)', () => {
           updates: [
             {
               remoteChainSelector: 1n,
-              tokenTransferFeeConfig: { ...CONFIG, finalityTransferFeeBps: 65536 },
+              tokenTransferFeeConfig: {
+                ...CONFIG,
+                finalityTransferFeeBps: 10000,
+              },
             },
           ],
         },
         'updates[0].tokenTransferFeeConfig.finalityTransferFeeBps',
+      ],
+      [
+        {
+          updates: [
+            {
+              remoteChainSelector: 1n,
+              tokenTransferFeeConfig: { ...CONFIG, destGasOverhead: 0 },
+            },
+          ],
+        },
+        'updates[0].tokenTransferFeeConfig.destGasOverhead',
+      ],
+      [
+        {
+          updates: [
+            {
+              remoteChainSelector: 1n,
+              tokenTransferFeeConfig: { ...CONFIG, isEnabled: false },
+            },
+          ],
+        },
+        'updates[0].tokenTransferFeeConfig.isEnabled',
       ],
       [{ disables: [1n] }, 'disables[0]'],
       [{ disables: [2n, 2n] }, 'disables[1]'],
@@ -195,7 +224,7 @@ describe('ApplyTokenTransferFeeConfigUpdates (cct/evm)', () => {
       })
     }
 
-    it('rejects a sender that is neither owner nor fee admin', async () => {
+    it('rejects a sender that is neither owner', async () => {
       await assert.rejects(
         () => generate(stubChain(), { sender: '0x' + '44'.repeat(20) }),
         (error: unknown) =>
@@ -207,13 +236,10 @@ describe('ApplyTokenTransferFeeConfigUpdates (cct/evm)', () => {
   describe('execute', () => {
     const params = { poolAddress: POOL, updates: UPDATES, disables: DISABLES }
 
-    it('signs and submits as the fee admin', async () => {
-      assert.deepEqual(
-        await op.execute(stubChain(), { ...params, wallet: fakeSigner(FEE_ADMIN) }),
-        {
-          hash: HASH,
-        },
-      )
+    it('signs and submits as the owner', async () => {
+      assert.deepEqual(await op.execute(stubChain(), { ...params, wallet: fakeSigner(OWNER) }), {
+        hash: HASH,
+      })
     })
 
     it('maps on-chain reverts', async () => {
