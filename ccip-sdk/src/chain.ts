@@ -499,9 +499,9 @@ export type TokenTransferFeeConfig = {
   finalityFeeUSDCents: number
   /** USD surcharge (in cents) added to the CCIP fee under FTF (block depth `finality > 0`). */
   fastFinalityFeeUSDCents: number
-  /** BPS rate deducted from the transferred token amount under standard finality. */
+  /** BPS rate deducted under standard finality (`0..9999`; 1 BPS = 0.01%, 10000 = 100% is invalid). */
   finalityTransferFeeBps: number
-  /** BPS rate deducted from the transferred token amount under FTF. */
+  /** BPS rate deducted under FTF (`0..9999`; 1 BPS = 0.01%, 10000 = 100% is invalid). */
   fastFinalityTransferFeeBps: number
   /** Whether token transfer fees are enabled for this pool. */
   isEnabled: boolean
