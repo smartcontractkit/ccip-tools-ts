@@ -1,9 +1,9 @@
 /**
  * EVM token contract layer for CCT: cached {@link Interface}s per {@link TokenVersion}
  * ({@link getTokenInterface}) for read/write ops, the deployable `CrossChainToken` (v2.0.0)
- * artifact ({@link getTokenArtifact}), the token's role reads — the narrow predicate a role-gated
- * write pre-flights ({@link readTokenRole}) and the informational role-set enumerations
- * ({@link readTokenRoleHolders}) — and the owner read every owner-gated write pre-flights `sender`
+ * artifact ({@link getTokenArtifact}), the v1 token role reads ({@link readV1TokenRole}) and
+ * role-set enumerations ({@link readV1TokenRoleHolders}), plus the owner read every owner-gated
+ * write pre-flights `sender`
  * against ({@link readTokenOwner}) plus the guard built on it ({@link assertTokenOwner}). `2.0.0`
  * is `CrossChainToken`; `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors
  * `token-pool/contracts.ts`.
@@ -116,7 +116,7 @@ export function resolveTokenEncoder<F>(
  * Pinned to v1.5.1: the role functions, `mint`, the role reads and `transferOwnership` /
  * `acceptOwnership` are identical at v1.6.2 and on `HyperLiquidCompatibleERC20 1.6.2`, so there is
  * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, ruled out by
- * {@link readTokenRole} and {@link assertOwnable2StepToken}.
+ * {@link readV1TokenRole} and {@link assertOwnable2StepToken}.
  */
 export function getErc20Token(): Interface {
   return TOKEN_INTERFACES[TokenVersion.V1_5_1]
@@ -266,7 +266,7 @@ type TokenOwnerGetter = Pick<TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1
  * `token-pool/contracts.ts`.
  * @remarks On the BurnMintERC677 family the owner *is* the mint/burn role admin — `grantMintRole`
  * and its siblings are `onlyOwner`.
- * @remarks Unlike {@link readTokenRole}, this is *not* also a family check: every one of those
+ * @remarks Unlike {@link readV1TokenRole}, this is *not* also a family check: every one of those
  * contracts answers `owner()`, so it narrows nothing about the token's type.
  * @param chain - Chain to read from.
  * @param tokenAddress - Token contract to read `owner()` from.

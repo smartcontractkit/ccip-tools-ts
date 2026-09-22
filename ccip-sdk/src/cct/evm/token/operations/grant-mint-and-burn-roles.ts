@@ -1,7 +1,6 @@
 /**
- * grantMintAndBurnRoles: grants a BurnMintERC677 token's mint *and* burn roles to one account in
- * a single transaction — the call a token owner makes for a newly deployed pool, which needs both.
- * Owner-gated (`onlyOwner`); the owner is the token's mint/burn role admin.
+ * grantMintAndBurnRoles: grants a supported CCT token's mint *and* burn roles to one account in
+ * a single transaction — the call for a newly deployed pool, which needs both.
  *
  * @packageDocumentation
  */
@@ -53,13 +52,14 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
    * Rejected only when the account holds both roles already: holding one still builds, since
    * completing the pair is what this call is for.
    *
-   * The role reads run first because they are also the family check ({@link readTokenRole}), which
+   * The role reads run first because they are also the family check ({@link resolveTokenRoleHandler}), which
    * `owner()` cannot make: a token pool and a v2.0.0 `CrossChainToken` declare `owner()` too, and
    * v2.0.0 declares `grantMintAndBurnRoles` itself. Both checks run here rather than in
    * {@link execute}, so the offline / multisig path gets them.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677 token
+   * nor a supported CrossChainToken
    * @throws {@link CCTParamsInvalidError} if `burnAndMinter` already holds both roles, or `sender`
-   * is given and is not the token owner
+   * lacks the version's role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -92,8 +92,8 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
   }
 
   /**
-   * Signs and submits as the token owner, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * Signs and submits as the token's v1 owner or v2 mint/burn role admin, defaulting `sender` to the
+   * signing wallet. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or

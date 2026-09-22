@@ -1,6 +1,5 @@
 /**
- * grantMintRole: grants a BurnMintERC677 token's mint role to one account. Owner-gated
- * (`onlyOwner`); the owner is the token's mint/burn role admin.
+ * grantMintRole: grants a supported CCT token's mint role to one account.
  *
  * @packageDocumentation
  */
@@ -55,6 +54,12 @@ export class GrantMintRole extends EVMOperation<GrantMintRoleParams> {
    * Reads the current role state, then checks the supplied sender against the role's actual
    * on-chain admin. v1.x is owner-gated; CrossChainToken v2 uses AccessControl's
    * `BURN_MINT_ADMIN_ROLE`. Both paths reject a redundant grant before it becomes a mined no-op.
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677 token
+   * nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
+   * @throws {@link CCTParamsInvalidError} if `minter` already holds the role or `sender` lacks
+   * the role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
