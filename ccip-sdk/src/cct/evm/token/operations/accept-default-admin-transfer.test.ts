@@ -108,10 +108,13 @@ describe('AcceptDefaultAdminTransfer (cct/evm)', () => {
       )
     })
 
-    it('rejects a pending zero admin, which OpenZeppelin completes through renounceRole', async () => {
+    it('gives renounceRole guidance for a pending zero admin even when sender is set', async () => {
       await assert.rejects(
-        () => generate(stubChain({ pendingAdmin: ZeroAddress }), { sender: undefined }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && /renunciation/.test(err.message),
+        () => generate(stubChain({ pendingAdmin: ZeroAddress })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'tokenAddress' &&
+          /renunciation/.test(err.message),
       )
     })
   })

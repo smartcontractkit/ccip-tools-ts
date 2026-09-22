@@ -42,6 +42,11 @@ export const TokenVersion = {
 /** A known token version. */
 export type TokenVersion = (typeof TokenVersion)[keyof typeof TokenVersion]
 
+/** Narrows an on-chain version string to a version with a vendored token ABI. */
+export function isTokenVersion(version: string): version is TokenVersion {
+  return Object.values(TokenVersion).some((known) => known === version)
+}
+
 /**
  * Cached token {@link Interface}s per {@link TokenVersion}, built once from the vendored ABIs
  * (no per-call `new Interface`) — for read/write (e.g. ownership) ops. Mirrors
@@ -66,12 +71,20 @@ export async function resolveCrossChainToken(
   const [contractType, version] = await chain.typeAndVersion(address)
   if (contractType !== CROSS_CHAIN_TOKEN_TYPE)
     throw new CCTContractTypeInvalidError(address, CROSS_CHAIN_TOKEN_TYPE, contractType)
-  if (!Object.values(TokenVersion).includes(version as TokenVersion))
-    throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
-  return version as TokenVersion
+  if (!isTokenVersion(version))
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
+  return version
 }
 
-/** Floor-matches an encoder table, with v2.0.0 as the first CrossChainToken version. */
+/**
+ * Floor-matches an encoder table, with v2.0.0 as the first CrossChainToken version. An absent
+ * entry inherits the closest lower encoder; `null` marks a removal ceiling.
+ *
+ * @throws {@link CCTOperationUnsupportedError} if no encoder exists at or below `version`, or a
+ * `null` ceiling is encountered first
+ */
 export function resolveTokenEncoder<F>(
   encoders: Partial<Record<TokenVersion, F | null>>,
   version: TokenVersion,

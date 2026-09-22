@@ -47,6 +47,7 @@ export class CancelDefaultAdminTransfer extends EVMOperation<CancelDefaultAdminT
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
    * @throws {@link CCTParamsInvalidError} if no transfer is pending or `sender` is not the admin
    */
   protected async buildUnsigned(
