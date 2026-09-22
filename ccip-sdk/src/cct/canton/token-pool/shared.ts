@@ -159,7 +159,7 @@ export function buildFactoryExercise(input: BuildFactoryExerciseInput): JsComman
         },
       },
     ],
-    commandId: `${commandIdPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    commandId: `${commandIdPrefix}-${crypto.randomUUID()}`,
     actAs,
     disclosedContracts: [
       {
@@ -224,7 +224,7 @@ export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
         },
       },
     ],
-    commandId: `${commandIdPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    commandId: `${commandIdPrefix}-${crypto.randomUUID()}`,
     actAs,
     disclosedContracts: [
       {
@@ -446,15 +446,22 @@ function encodeRateLimiterDeploySpec(s: RateLimiterDeploySpec): RateLimiterDeplo
 
 /**
  * Normalize an address for on-ledger storage in a pool's remote chain config:
- * strip an optional `0x` prefix and left-pad 20-byte (EVM) addresses to 32
- * bytes. Canonical form is 32-byte-padded bare hex: inbound executes compare
+ * strip an optional `0x` prefix and left-pad to 32 bytes (throws on anything
+ * over 32 bytes or non-hex). Canonical form is 32-byte-padded bare hex: inbound executes compare
  * the stored value verbatim against the message's 32-byte-padded
  * sourcePoolAddress/sourceTokenAddress, while outbound sends strip the padding
  * again for sub-32-byte destination chains (validateDestChainAddress).
  */
 export function normalizeRemoteAddress(s: string): string {
   const bare = s.startsWith('0x') ? s.slice(2) : s
-  return bare.length === 40 ? bare.padStart(64, '0') : bare
+  if (!/^[0-9a-fA-F]+$/.test(bare) || bare.length > 64) {
+    throw new CCTParamsInvalidError(
+      'normalizeRemoteAddress',
+      'address',
+      `expected a hex address of at most 32 bytes, got "${s}"`,
+    )
+  }
+  return bare.padStart(64, '0')
 }
 
 /** Encode a {@link LaneDeploySpec} for the `Initialize` choice argument. */

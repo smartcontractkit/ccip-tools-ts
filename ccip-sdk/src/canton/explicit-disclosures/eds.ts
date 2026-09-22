@@ -1,3 +1,4 @@
+import { CCIPError } from '../../errors/index.ts'
 import { get, post } from '../client/client.ts'
 import type { DisclosedContract } from './types.ts'
 
@@ -244,7 +245,8 @@ export class EdsDisclosureProvider {
    * only stakeholder is ccipOwner: callers whose participant does not host
    * ccipOwner cannot ACS-read these contracts, so the disclosure comes from
    * the service instead. Unknown address (404) or empty response → `null`
-   * (caller falls back to ACS resolution).
+   * (caller falls back to ACS resolution); other failures (network, 5xx)
+   * throw rather than being swallowed.
    *
    * The response carries no signatories — callers derive the owner from the
    * raw address form (`instanceId@owner`) when needed.
@@ -264,8 +266,11 @@ export class EdsDisclosureProvider {
       const contract = resp.disclosures?.[0]
       if (!contract?.contractId || !contract.createdEventBlob) return null
       return edsContractToSdk(contract)
-    } catch {
-      return null
+    } catch (err) {
+      // Unknown address (404) → null so the caller falls back to ACS
+      // resolution; anything else (network, 5xx, parse) must surface.
+      if (err instanceof CCIPError && err.context['statusCode'] === 404) return null
+      throw err
     }
   }
 
