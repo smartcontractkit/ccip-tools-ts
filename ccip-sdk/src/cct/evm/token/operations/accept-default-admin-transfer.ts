@@ -48,6 +48,7 @@ export class AcceptDefaultAdminTransfer extends EVMOperation<AcceptDefaultAdminT
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
    * @throws {@link CCTParamsInvalidError} if no transfer is pending, it schedules renunciation, or
    * `sender` is not its pending default admin
    */
@@ -64,18 +65,18 @@ export class AcceptDefaultAdminTransfer extends EVMOperation<AcceptDefaultAdminT
         'tokenAddress',
         `has no pending default-admin transfer`,
       )
-    if (sender !== undefined && getAddress(sender) !== newAdmin)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must be the pending default admin (${newAdmin})`,
-      )
     // A zero pending admin is the separate, deliberate renunciation path and cannot accept.
     if (newAdmin === ZeroAddress)
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
         'has a pending default-admin renunciation, which must be completed with renounceRole',
+      )
+    if (sender !== undefined && getAddress(sender) !== newAdmin)
+      throw new CCTParamsInvalidError(
+        this.name,
+        'sender',
+        `must be the pending default admin (${newAdmin})`,
       )
     return callTx(tokenAddress, iface.encodeFunctionData('acceptDefaultAdminTransfer', []))
   }

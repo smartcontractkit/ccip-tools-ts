@@ -50,6 +50,7 @@ export class BeginDefaultAdminTransfer extends EVMOperation<BeginDefaultAdminTra
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
    * @throws {@link CCTParamsInvalidError} if the token has no default admin or `sender` is not it
    */
   protected async buildUnsigned(
