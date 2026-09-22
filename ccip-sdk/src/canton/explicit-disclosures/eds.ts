@@ -1,5 +1,6 @@
 import {
   type CantonAddress,
+  type PartyId,
   InstanceAddress,
   RawInstanceAddress,
   parseInstanceAddress,
@@ -41,10 +42,11 @@ export interface EdsTokenTransfer {
   holdingContractIds: string[]
 }
 
-/** CCIP message shape accepted by the global and external EDS endpoints. */
+/** Outgoing CCIP message shape to be sent from Canton
+ * accepted by the global and external EDS endpoints. */
 export interface EdsMessage {
   destinationChainSelector: string
-  sender: string
+  sender: PartyId
   receiver: string
   payload: string
   tokenTransfer: EdsTokenTransfer | null
@@ -302,7 +304,7 @@ export class EdsDisclosureProvider {
   /** Fetch global execute disclosures for an encoded CCIP message. */
   async fetchExecutionDisclosures(
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsExecuteResult> {
     const resp = await post<EdsGlobalExecuteResponse>(
       this.edsBaseUrl,
@@ -322,7 +324,7 @@ export class EdsDisclosureProvider {
   async fetchTokenPoolExecuteDisclosure(
     address: CantonAddress,
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsTokenPoolDisclosureResult> {
     const resp = await post<EdsTokenPoolDisclosureResponse>(
       this.externalBaseUrlFor(address),
@@ -338,7 +340,7 @@ export class EdsDisclosureProvider {
   async fetchCcvExecuteDisclosure(
     address: CantonAddress,
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsExternalDisclosureResult> {
     const resp = await post<EdsExternalDisclosureResponse>(
       this.externalBaseUrlFor(address),
@@ -355,7 +357,7 @@ export class EdsDisclosureProvider {
    * using the PerPartyRouterFactory.
    */
   async fetchPerPartyRouterFactoryDisclosures(
-    partyID: string,
+    partyID: PartyId,
   ): Promise<EdsPerPartyRouterFactoryResult> {
     const resp = await post<EdsPerPartyRouterFactoryResponse>(
       this.edsBaseUrl,

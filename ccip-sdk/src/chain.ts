@@ -214,7 +214,7 @@ export type WithCantonConfig = {
  * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
  */
 export type CantonConfig = {
-  /** User ledger party for actAs, ACS queries, and transaction visibility (often differs from ccipParty). */
+  /** User ledger party for actAs, ACS queries, and transaction visibility. */
   party: string
 
   /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
@@ -267,13 +267,6 @@ export type CantonConfig = {
     ccipReceiver: string
     ccipSender: string
   }>
-
-  /**
-   * Optional CCIPSender instance id for Canton-source sends (ccip-cli `-r` on Canton lanes).
-   * Used only for CLI/SDK routing; on-ledger Send resolves CCIPSender from `party` via ACS.
-   * CLI `-r` overrides this value.
-   */
-  senderInstanceId?: string
 
   /**
    * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.

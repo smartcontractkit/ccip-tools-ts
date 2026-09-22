@@ -12,29 +12,32 @@ import {
   addressesMatch,
   addressesMissing,
   parseInstanceAddress,
+  parsePartyId,
 } from './addressCodec.ts'
 
-const RAW = new RawInstanceAddress('myinstance', 'party')
-const RAW_HEX = '0x1de8dc5eac0fc0963920530b6ada91adc253413ea1d55c2e32fa5f14fe16bef9'
+const PARTY = 'ccvOwner::122096accf0a84fc7d80d5fce5ea3135317a03eb22e62e0d8cdd7548865f984f11ff'
+const OWNER = parsePartyId(PARTY)
+const RAW = new RawInstanceAddress('myinstance', OWNER)
+const RAW_HEX = '0x62e74422c681ee066405d8349868be980b51b21b02ebecedb66c0c5ab699edf3'
 const ZERO = new InstanceAddress(new Uint8Array(INSTANCE_ADDRESS_LENGTH))
 
 describe('RawInstanceAddress', () => {
   it('joins instanceId and owner with @', () => {
-    assert.equal(RAW.toString(), 'myinstance@party')
-    assert.equal(String(RAW), 'myinstance@party')
-    assert.equal(JSON.stringify(RAW), '"myinstance@party"')
+    assert.equal(RAW.toString(), `myinstance@${PARTY}`)
+    assert.equal(String(RAW), `myinstance@${PARTY}`)
+    assert.equal(JSON.stringify(RAW), `"myinstance@${PARTY}"`)
   })
 
   it('exposes the parts', () => {
     assert.equal(RAW.instanceId, 'myinstance')
-    assert.equal(RAW.owner, 'party')
+    assert.equal(RAW.owner, PARTY)
   })
 
   it('parses valid addresses', () => {
-    const parsed = RawInstanceAddress.fromString('myinstance@party')
-    assert.equal(parsed.toString(), 'myinstance@party')
+    const parsed = RawInstanceAddress.fromString(`myinstance@${PARTY}`)
+    assert.equal(parsed.toString(), `myinstance@${PARTY}`)
     assert.equal(parsed.instanceId, 'myinstance')
-    assert.equal(parsed.owner, 'party')
+    assert.equal(parsed.owner, PARTY)
   })
 
   it('rejects addresses with no or multiple @', () => {
@@ -43,18 +46,17 @@ describe('RawInstanceAddress', () => {
     }
   })
 
-  it('rejects empty parts', () => {
+  it('rejects empty parts and invalid owners', () => {
     for (const invalid of ['@owner', 'instance@', '']) {
       assert.throws(() => RawInstanceAddress.fromString(invalid), CCIPError)
-      assert.throws(
-        () => new RawInstanceAddress(invalid.split('@')[0] ?? '', invalid.split('@')[1] ?? ''),
-        CCIPError,
-      )
     }
+    // owner must be a valid PartyId
+    assert.throws(() => RawInstanceAddress.fromString('myinstance@not-a-party'), CCIPError)
+    assert.throws(() => new RawInstanceAddress('myinstance', parsePartyId('')), CCIPError)
   })
 
   it('returns the Daml unpack binding', () => {
-    assert.deepEqual(RAW.binding(), { unpack: 'myinstance@party' })
+    assert.deepEqual(RAW.binding(), { unpack: `myinstance@${PARTY}` })
   })
 })
 
@@ -75,8 +77,8 @@ describe('RawInstanceAddress.fromHex', () => {
   })
 
   it('round-trips a string through hex and back', () => {
-    const hex = hexlify(new TextEncoder().encode('myinstance@party'))
-    assert.equal(RawInstanceAddress.fromHex(hex).toString(), 'myinstance@party')
+    const hex = hexlify(new TextEncoder().encode(`myinstance@${PARTY}`))
+    assert.equal(RawInstanceAddress.fromHex(hex).toString(), `myinstance@${PARTY}`)
   })
 
   it('rejects invalid hex and invalid addresses', () => {
@@ -95,9 +97,9 @@ describe('parseInstanceAddress', () => {
     'committeeverifier-vnmkd@ccvOwner::122096accf0a84fc7d80d5fce5ea3135317a03eb22e62e0d8cdd7548865f984f11ff'
 
   it('parses raw addresses', () => {
-    const parsed = parseInstanceAddress('myinstance@party')
+    const parsed = parseInstanceAddress(`myinstance@${PARTY}`)
     assert.ok(parsed instanceof RawInstanceAddress)
-    assert.equal(parsed.toString(), 'myinstance@party')
+    assert.equal(parsed.toString(), `myinstance@${PARTY}`)
   })
 
   it('parses hex-encoded raw addresses', () => {
@@ -128,8 +130,8 @@ describe('RawInstanceAddress.toInstanceAddress', () => {
 
   it('hashes another raw string consistently', () => {
     assert.equal(
-      RawInstanceAddress.fromString('test@alice').toInstanceAddress().hex(),
-      '0x84cd68a6fe04112b5a8921090b5c4c397d7c79ff67f8bda8113c44c7c8e78e93',
+      RawInstanceAddress.fromString(`test@${PARTY}`).toInstanceAddress().hex(),
+      '0x98b2d34aabdb95b742412a4fe191df6c825a29839cb4994d5c2ec07436ead301',
     )
   })
 })
@@ -206,9 +208,12 @@ describe('InstanceAddress.compare / equals', () => {
 })
 
 describe('addressesMatch / addressesContains / addressesMissing', () => {
-  const A = new RawInstanceAddress('alpha', 'alice')
-  const B = new RawInstanceAddress('beta', 'bob')
-  const C = new RawInstanceAddress('gamma', 'carol')
+  const ALICE = parsePartyId(`alice::1220${'a'.repeat(64)}`)
+  const BOB = parsePartyId(`bob::1220${'b'.repeat(64)}`)
+  const CAROL = parsePartyId(`carol::1220${'c'.repeat(64)}`)
+  const A = new RawInstanceAddress('alpha', ALICE)
+  const B = new RawInstanceAddress('beta', BOB)
+  const C = new RawInstanceAddress('gamma', CAROL)
 
   describe('addressesMatch', () => {
     it('returns true for equal lists in any order', () => {

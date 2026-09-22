@@ -1,7 +1,51 @@
 import { getBytes, hexlify, toUtf8String } from 'ethers'
 
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
-import { getDataBytes, hashedUtf8Hex } from '../utils.ts'
+import { getDataBytes, hashedUtf8Hex, isCantonPartyId } from '../utils.ts'
+
+/*
+ * Canton Types
+ * */
+
+declare const partyIdBrand: unique symbol
+
+/**
+ * Branded Canton party ID (`hint::1220<64-hex-fingerprint>`, not a 3-part instrument id).
+ *
+ * At runtime this is a plain string; the brand guarantees that every value of this
+ * type has been validated by {@link parsePartyId} — it is always non-empty and
+ * matches the Canton party ID format. Being a string subtype, a `PartyId` can be
+ * used anywhere a plain `string` is expected.
+ */
+export type PartyId = string & { readonly [partyIdBrand]: true }
+
+/**
+ * Validates a string as a Canton party ID.
+ *
+ * @throws {@link CCIPError} with code `ADDRESS_INVALID` if the input is empty or does
+ * not match the Canton party ID format.
+ */
+export function parsePartyId(party: string): PartyId {
+  if (!party) {
+    throw new CCIPError(CCIPErrorCode.ADDRESS_INVALID, 'Invalid PartyId: cannot be empty', {
+      context: { party },
+    })
+  }
+  if (!isCantonPartyId(party)) {
+    throw new CCIPError(
+      CCIPErrorCode.ADDRESS_INVALID,
+      'Invalid PartyId: must match Canton party ID format',
+      {
+        context: { party },
+      },
+    )
+  }
+  return party as PartyId
+}
+
+/*
+ * Canton Addresses
+ * */
 
 export interface CantonAddress {
   instanceAddress(): InstanceAddress
@@ -107,20 +151,20 @@ export class InstanceAddress implements CantonAddress {
 /**
  * Raw instance address in `"instanceId@owner"` unpack form.
  *
- * Instances are always valid: the constructor rejects empty parts.
+ * `owner` is a validated {@link PartyId}; the constructor rejects empty instance IDs.
  */
 export class RawInstanceAddress implements CantonAddress {
   /** Instance ID part (before the `@`). */
   readonly instanceId: string
   /** Owner party part (after the `@`). */
-  readonly owner: string
+  readonly owner: PartyId
 
   /**
    * Builds a raw instance address from its parts.
    *
    * @throws {@link CCIPError} with code `ADDRESS_INVALID` if either part is empty.
    */
-  constructor(instanceId: string, owner: string) {
+  constructor(instanceId: string, owner: PartyId) {
     if (!instanceId || !owner) {
       throw new CCIPError(
         CCIPErrorCode.ADDRESS_INVALID,
@@ -165,7 +209,7 @@ export class RawInstanceAddress implements CantonAddress {
         },
       )
     }
-    return new RawInstanceAddress(instanceId, owner)
+    return new RawInstanceAddress(instanceId, parsePartyId(owner))
   }
 
   /**
