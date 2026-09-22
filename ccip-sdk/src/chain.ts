@@ -72,6 +72,7 @@ import {
   util,
   withRetry,
 } from './utils.ts'
+import type { VerifierTransport } from './verifiers/transport.ts'
 
 /** All valid field names for GenericExtraArgsV2. */
 const V2_FIELDS = new Set(['gasLimit', 'allowOutOfOrderExecution'])
@@ -167,6 +168,16 @@ export type ChainContext = WithLogger & {
    * Default: `undefined` (use the built-in public indexers for the chain's network)
    */
   verificationsIndexer?: readonly string[]
+
+  /**
+   * Byte transport used to read CCV attestations directly from a verifier's aggregator
+   * (`getCCVsForEncodedMessage` / direct verifier fetch). The SDK owns the protobuf schema and the
+   * failover/dedup assembly; this transport only moves bytes. Node consumers inject a
+   * `@grpc/grpc-js` transport; when omitted, the browser-safe grpc-web default is used.
+   *
+   * Default: `undefined` (use `webGrpcVerifierTransport()`)
+   */
+  verifierTransport?: VerifierTransport
 
   /**
    * Abort signal for cancelling in-flight requests and watch loops on this chain.
@@ -852,6 +863,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
   /** Default CCIP v2 indexer base URLs for getVerifications (undefined → network defaults) */
   readonly verificationsIndexer?: readonly string[]
+  /** Byte transport for direct CCV verifier fetch (undefined → browser-safe grpc-web default) */
+  readonly verifierTransport?: VerifierTransport
   /**
    * Fires when the chain should tear down: either {@link Chain.destroy} was
    * called, or the ChainContext abort signal fired. Listeners registered with
@@ -867,7 +880,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPChainFamilyMismatchError} if network family doesn't match the Chain subclass
    */
   constructor(network: NetworkInfo, ctx?: ChainContext) {
-    const { logger = console, apiClient, apiRetryConfig, verificationsIndexer, abort } = ctx ?? {}
+    const {
+      logger = console,
+      apiClient,
+      apiRetryConfig,
+      verificationsIndexer,
+      verifierTransport,
+      abort,
+    } = ctx ?? {}
 
     if (network.family !== (this.constructor as ChainStatic).family)
       throw new CCIPChainFamilyMismatchError(
@@ -878,6 +898,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     this.network = network as NetworkInfo<F>
     this.logger = logger
     this.verificationsIndexer = verificationsIndexer
+    this.verifierTransport = verifierTransport
 
     const ac = new AbortController()
     // Composite: `destroy()` aborts the inner controller, the context abort
@@ -2551,6 +2572,19 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string
     message: GetRequiredCCVsMessage
   }): Promise<GetRequiredCCVsResult>
+
+  /**
+   * Read the CCV policy the destination enforces for an already-encoded message.
+   *
+   * @param opts.offRamp - Destination OffRamp address
+   * @param opts.encodedMessage - The encoded message, as emitted on the source chain
+   * @returns The required and optional CCVs, and the optional threshold
+   */
+  getCCVsForEncodedMessage?(opts: { offRamp: string; encodedMessage: BytesLike }): Promise<{
+    requiredCCVs: readonly string[]
+    optionalCCVs: readonly string[]
+    optionalThreshold: number
+  }>
 }
 
 /**

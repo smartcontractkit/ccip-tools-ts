@@ -35,6 +35,54 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 
 ## Options
 
+### Verification Sources
+
+| Option                              | Type  | Default | Description                                                                                                             |
+| ----------------------------------- | ----- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `--verifier`, `--verifier-endpoint` | array | -       | Fetch CCV attestations from a verifier's own aggregator when the CCIP API and indexer cannot cover the required CCV set |
+| `--ccv-data`                        | array | -       | Supply an attestation directly as `<ccv-address>=<0x-hex>`, when no fetch source is reachable                           |
+
+A CCV that no indexer has onboarded cannot be executed from the managed sources: the indexer returns
+404 for its messages and the CCIP API reports no verification, even though the attestation is
+available on the verifier's own public endpoint. `--verifier` reads it from there.
+
+**Endpoint format:** `[<ccv-address>=]<scheme>://<host>[:port]`, repeatable, also comma-separated.
+Schemes are `grpc://` (aggregator over TLS, with `grpcs://` as an alias) and `grpc+plaintext://`
+(aggregator, no TLS). The scheme selects the transport explicitly, because a bare `host:port` cannot
+express whether the listener speaks TLS.
+
+Several endpoints for one CCV are redundant replicas of a single committee. Repeat the same address;
+they are tried in the order given, stopping at the first that serves an attestation:
+
+```bash
+ccip-cli manual-exec <src-tx> \
+  --verifier 0xAAA...=grpc://aggregator-primary:443 \
+  --verifier 0xAAA...=grpc://aggregator-backup:443
+```
+
+Several CCVs each get their own endpoints. All required CCVs are fetched, and coverage against the
+destination's required and optional policy is checked before anything is signed, so a missing
+attestation is a local error naming the CCV rather than an onchain `RequiredCCVMissing` revert:
+
+```bash
+ccip-cli manual-exec <src-tx> \
+  --verifier 0xAAA...=grpc://a-primary:443 --verifier 0xAAA...=grpc://a-backup:443 \
+  --verifier 0xBBB...=grpc://b-primary:443
+```
+
+Omit the address to apply one endpoint to every required CCV. The CCIP API and indexer are always
+tried first; `--verifier` endpoints are used only if those come up short. For a CCV no indexer has
+onboarded they never cover it, so the verifier is always used.
+
+When no source is reachable, supply the bytes yourself. This is the bottom of the ladder:
+
+```bash
+ccip-cli manual-exec <src-tx> --no-api --ccv-data 0xAAA...=0x0001000100407602...
+```
+
+Validity is decided onchain by the CCV's `verifyMessage`, so bytes obtained out of band are as safe
+as fetched ones: wrong bytes can only waste the sender's gas, never make a bad message execute.
+
 ### Message Selection
 
 | Option        | Type   | Default | Description                                                                            |

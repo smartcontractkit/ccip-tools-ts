@@ -27,6 +27,10 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
+    "./verifiers": {
+      "types": "./dist/verifiers/index.d.ts",
+      "default": "./dist/verifiers/index.js"
+    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
@@ -84,6 +88,7 @@
     "ethers": "6.17.0",
     "micro-memoize": "^5.2.0",
     "oauth4webapi": "^3.8.8",
+    "protobufjs": "^7.6.6",
     "type-fest": "^5.9.0",
     "yaml": "2.9.0"
   },

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Solana: supports reading and sending Version-1 transactions (Agave 4.x devnet and later), up to 4096 bytes per message
 - Tests: the whole suite runs as one parallel `node --test` invocation — networked e2e/integration suites moved to disjoint low-activity lanes/fixtures with per-network endpoint sets configurable via `RPC_*` env vars (one per network, comma-separated lists allowed, wired to CI secrets), so suites never contend on a rate-limited endpoint and the full run finishes in ~5min
 - Aptos and Sui now support detecting execution failures — bundled Sui fixes: deep-history `getLogs` walks ascending checkpoint slices instead of paging from the tip, empty `getOwnedObjects` pointer lookups are memoized instead of retried for ~30s, and `offRamp` receipt filters no longer drop successful Aptos/Sui receipts
+- CLI: `manual-exec --verifier [<ccv>=]<scheme>://<host>[:port]` fetches CCV attestations straight from a verifier's aggregator over gRPC, so a message whose CCV is not onboarded in the indexer can still be executed; repeat the flag for one CCV to give it failover endpoints
+- CLI: `manual-exec --ccv-data <ccv>=<0x-hex>` supplies an attestation obtained out of band; either way the collected set is checked against the destination's CCV policy before signing, so a missing verifier fails locally instead of reverting onchain
+- SDK: `@chainlink/ccip-sdk/verifiers` exposes the CCV attestation-fetch (transport port + browser-safe grpc-web default), so fetching a verifier's attestations directly from its aggregator is reusable from the SDK; the CLI injects a Node gRPC client via context
 
 ## [1.13.0] - 2026-08-25
 

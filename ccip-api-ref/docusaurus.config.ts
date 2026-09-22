@@ -147,9 +147,19 @@ const config: Config = {
       'docusaurus-plugin-typedoc',
       {
         id: 'typedoc-sdk',
-        entryPoints: ['../ccip-sdk/src/index.ts'],
+        entryPoints: [
+          '../ccip-sdk/src/index.ts',
+          '../ccip-sdk/src/viem.ts',
+          '../ccip-sdk/src/all-chains.ts',
+          '../ccip-sdk/src/verifiers/index.ts',
+        ],
         tsconfig: '../ccip-sdk/tsconfig.json',
         out: 'docs-sdk',
+        // Merge every entry point into one flat namespace so the subpath exports
+        // (viem, all-chains, verifiers) are documented alongside the root export
+        // and API pages keep their flat URLs (classes/, functions/, ...).
+        plugin: ['typedoc-plugin-markdown', 'typedoc-plugin-merge-modules'],
+        mergeModulesMergeMode: 'project',
         // Use api-reference.md instead of index.md so introduction.mdx can be the root route
         entryFileName: 'api-reference.md',
         sidebar: {

@@ -95,6 +95,7 @@ export {
   type Logger,
   type MessageInput,
   type OffchainTokenData,
+  type VerifierResult,
   type WithLogger,
   CCIPVersion,
   ExecutionState,
