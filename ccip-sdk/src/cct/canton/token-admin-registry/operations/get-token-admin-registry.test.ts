@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
@@ -73,7 +73,9 @@ function contract(arg: Record<string, unknown>, contractId = '#cfg-usdc'): Canto
 
 /** Mocked chain: returns `contract` when the instance address matches. */
 function chainWith(contract: CantonActiveContract | null): CantonChain {
-  return {
+  // Real CantonChain instance (private fields make object-literal casts
+  // impossible); Object.assign overrides only what the test exercises.
+  return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
@@ -82,7 +84,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
     ): Promise<CantonActiveContract | null> {
       return contract && instanceAddress === TOKEN_CONFIG_INSTANCE_ADDRESS ? contract : null
     },
-  } as unknown as CantonChain
+  })
 }
 
 describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {

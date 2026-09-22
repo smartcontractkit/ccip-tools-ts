@@ -3,10 +3,12 @@ import { describe, it } from 'node:test'
 
 import { submitCantonCommands } from './submit-commands.ts'
 import type { TransactionSigner } from './types.ts'
-import type { CantonChain } from './index.ts'
+import { CantonChain } from './index.ts'
 
 function mockChain(getPreferredPackageIds: (...args: unknown[]) => Promise<string[]>): CantonChain {
-  return {
+  // Real CantonChain instance (private fields make object-literal casts
+  // impossible); Object.assign overrides only what the test exercises.
+  return Object.assign(Object.create(CantonChain.prototype), {
     provider: {
       getConnectedSynchronizers: async () => [{ synchronizerId: 'sync-1' }],
       getPreferredPackageIds,
@@ -18,7 +20,7 @@ function mockChain(getPreferredPackageIds: (...args: unknown[]) => Promise<strin
         transaction: { updateId: 'update-1' },
       }),
     },
-  } as unknown as CantonChain
+  })
 }
 
 const signer: TransactionSigner = { sign: async () => ({ signatures: [] }) }

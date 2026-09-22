@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID } from '../shared.ts'
@@ -99,7 +99,9 @@ function poolContract(
 }
 
 function chainWith(contract: CantonActiveContract | null): CantonChain {
-  return {
+  // Real CantonChain instance (private fields make object-literal casts
+  // impossible); Object.assign overrides only what the test exercises.
+  return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
@@ -108,7 +110,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
     ): Promise<CantonActiveContract | null> {
       return contract && instanceAddress === POOL_INSTANCE_ADDRESS ? contract : null
     },
-  } as unknown as CantonChain
+  })
 }
 
 describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
-import type { CantonChain } from '../../../../canton/index.ts'
+import { CantonChain } from '../../../../canton/index.ts'
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { ChainFamily } from '../../../../networks.ts'
@@ -37,8 +37,10 @@ const LANE_RATE_LIMITER = { instanceId: 'rl-in', isEnabled: true, capacity: 100n
  * branch of `resolveTar`), `findActiveContractByInstanceAddress` returns a
  * fake TAR contract regardless of the requested InstanceAddress.
  */
-function mockChain(chainId: string): CantonChain {
-  return {
+function mockChain(chainId: string, overrides: Record<string, unknown> = {}): CantonChain {
+  // Real CantonChain instance (private fields make object-literal casts
+  // impossible); Object.assign overrides only what the test exercises.
+  return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton, chainId },
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
@@ -50,7 +52,8 @@ function mockChain(chainId: string): CantonChain {
       templateId: '#pkg-id:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry',
       signatories: [CCIP_OWNER],
     }),
-  } as unknown as CantonChain
+    ...overrides,
+  })
 }
 
 function baseParams(
@@ -271,16 +274,13 @@ describe('deployTokenPool deps resolution', () => {
 })
 
 function mockChainWithSubmit(events: unknown[]): CantonChain {
-  const chain = mockChain('canton:TestNet')
-  return {
-    // oxlint-disable-next-line typescript/no-misused-spread
-    ...chain,
+  return mockChain('canton:TestNet', {
     provider: {
       submitAndWaitForTransaction: async () => ({
         transaction: { updateId: 'update-1', events },
       }),
     },
-  } as unknown as CantonChain
+  })
 }
 
 /** Real ledger events echo the concrete package-id form, never the symbolic `#<pkg-name>:…` one. */
