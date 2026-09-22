@@ -326,7 +326,7 @@ export class DeployTokenPool extends CantonOperation<
           },
         },
       ],
-      commandId: `cct-deploy-${p.poolType}-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      commandId: `cct-deploy-${p.poolType}-pool-${crypto.randomUUID()}`,
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
       actAs: [...new Set([p.poolOwner, p.admin])],

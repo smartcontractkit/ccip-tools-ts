@@ -81,6 +81,9 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
     ): Promise<CantonActiveContract | null> {
       return contract && instanceAddress === RL_INSTANCE_ADDRESS ? contract : null
     },
+    // CantonChain has private fields + ~80 members, so a partial mock can't
+    // satisfy `as CantonChain` (TS2352) — the double cast is the standard
+    // partial-mock escape hatch (same pattern as the cct/evm+solana tests).
   } as unknown as CantonChain
 }
 
