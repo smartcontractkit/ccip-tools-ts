@@ -40,7 +40,17 @@ export type AcceptPoolOwnershipParams = {
 /** Encodes `acceptOwnership` calldata against the resolved pool {@link Interface}. */
 type Encoder = (iface: Interface, params: AcceptPoolOwnershipParams) => UnsignedEVMTx
 
-const encodeAcceptOwnership: Encoder = (iface, { poolAddress }) =>
+/**
+ * The `acceptOwnership` calldata this operation sends, as a pure function.
+ *
+ * @remarks Exported so a caller can produce this transaction for a pool that does not exist yet —
+ * batching a deployment with the accept that completes its ownership hand-off in the same
+ * transaction. {@link AcceptPoolOwnership} itself cannot: it resolves the pool's type first, which
+ * needs deployed code.
+ *
+ * @param iface - the pool's interface, from `getTokenPoolInterface(type, version)`
+ */
+export const encodeAcceptPoolOwnership: Encoder = (iface, { poolAddress }) =>
   callTx(poolAddress, iface.encodeFunctionData('acceptOwnership', []))
 
 /** Completes a pending TokenPool ownership transfer via Ownable2Step `acceptOwnership`. */
@@ -52,7 +62,7 @@ export class AcceptPoolOwnership extends EVMOperation<AcceptPoolOwnershipParams>
    * ceiling — `acceptOwnership()` takes no arguments and survived into v2.0.0 unchanged.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder>> = {
-    [TokenPoolVersion.V1_5_0]: encodeAcceptOwnership,
+    [TokenPoolVersion.V1_5_0]: encodeAcceptPoolOwnership,
   }
 
   /** Validates the pool address before any RPC; there is no other parameter to check. */

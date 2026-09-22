@@ -57,7 +57,18 @@ export type TransferPoolOwnershipParams = {
 /** Encodes `transferOwnership` calldata against the resolved pool {@link Interface}. */
 type Encoder = (iface: Interface, params: TransferPoolOwnershipParams) => UnsignedEVMTx
 
-const encodeTransferOwnership: Encoder = (iface, { poolAddress, newOwner }) =>
+/**
+ * The `transferOwnership` calldata this operation sends, as a pure function.
+ *
+ * @remarks Exported so a caller can produce this transaction for a pool that does not exist yet —
+ * batching a deployment with the call that hands the new contract to its owner. {@link
+ * TransferPoolOwnership} itself cannot: it resolves the pool's type and reads its `owner()` first,
+ * both of which need deployed code. Using this directly forgoes those checks, so it is for the
+ * pre-deployment case only; prefer the operation whenever the pool exists.
+ *
+ * @param iface - the pool's interface, from `getTokenPoolInterface(type, version)`
+ */
+export const encodeTransferPoolOwnership: Encoder = (iface, { poolAddress, newOwner }) =>
   callTx(poolAddress, iface.encodeFunctionData('transferOwnership', [newOwner]))
 
 /** Proposes a new TokenPool owner via Ownable2Step `transferOwnership`. Owner-only. */
@@ -71,7 +82,7 @@ export class TransferPoolOwnership extends EVMOperation<TransferPoolOwnershipPar
    * custom errors without touching the selector or its semantics.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder>> = {
-    [TokenPoolVersion.V1_5_0]: encodeTransferOwnership,
+    [TokenPoolVersion.V1_5_0]: encodeTransferPoolOwnership,
   }
 
   /**
