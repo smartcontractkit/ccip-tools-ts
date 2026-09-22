@@ -36,17 +36,17 @@ export const LOCKBOX_INTERFACE = new Interface(ERC20_LOCKBOX_V2_0_0_ABI)
 /** `ERC20LockBox` creation bytecode for `deployLockbox`. */
 export const LOCKBOX_BYTECODE = ERC20_LOCKBOX_V2_0_0_BYTECODE
 
+/** Contract type an `ERC20LockBox` reports from `typeAndVersion`, e.g. `ERC20LockBox 2.0.0`. */
+const LOCKBOX_TYPE = 'ERC20LockBox'
+
 /** `ERC20LockBox` deploy artifact: contract name + ctor {@link Interface} + creation bytecode. */
 export function getLockboxArtifact(): DeployArtifact {
   return {
-    contract: 'ERC20LockBox',
+    contract: LOCKBOX_TYPE,
     iface: LOCKBOX_INTERFACE,
     bytecode: LOCKBOX_BYTECODE,
   }
 }
-
-/** Contract type an `ERC20LockBox` reports from `typeAndVersion`, e.g. `ERC20LockBox 2.0.0`. */
-const LOCKBOX_TYPE = 'ERC20LockBox'
 
 /**
  * Lockbox versions this SDK supports. One entry, and one deployable ABI behind it, so this is a
