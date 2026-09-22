@@ -249,6 +249,35 @@ export function assertLockReleasePool(
 }
 
 /**
+ * Guards an op that needs the *one* lockbox a LockRelease pool escrows through: a LockRelease
+ * pool, and not the siloed variant.
+ *
+ * @remarks Stricter than {@link assertLockReleasePool}, which both variants satisfy. A
+ * `SiloedLockReleaseTokenPool` escrows per remote chain and declares `getLockBox(uint64)` with no
+ * no-arg overload, so there is no single lockbox to name; rejecting it on its *type* (rather than
+ * letting the call revert) is what makes {@link readTokenPoolLockbox} safe to call.
+ * @param operation - Operation name, for the error's context.
+ * @param poolAddress - Token pool being read.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if `type` is a BurnMint pool, or is siloed
+ */
+export function assertNonSiloedLockReleasePool(
+  operation: string,
+  poolAddress: string,
+  type: TokenPoolType,
+): void {
+  assertLockReleasePool(operation, poolAddress, type)
+  if (type !== 'SiloedLockReleaseTokenPool') return
+  throw new CCTContractTypeInvalidError(
+    poolAddress,
+    'LockReleaseTokenPool',
+    type,
+    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's escrow against the pool directly",
+    { context: { operation } },
+  )
+}
+
+/**
  * Cached pool {@link Interface}s per {@link TokenPoolFamily} and {@link TokenPoolVersion},
  * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
  * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
@@ -445,6 +474,24 @@ export async function assertPoolRebalancer(
       ? `no rebalancer is configured on ${poolAddress}, so it accepts liquidity calls from nobody; the pool owner must appoint one with setRebalancer`
       : `must be the current pool rebalancer (${rebalancer})`,
   )
+}
+
+/**
+ * Reads a non-siloed v2.0.0 LockRelease pool's `getLockBox()` — the `ERC20LockBox` it escrows
+ * through — in one `eth_call`.
+ *
+ * @remarks No dispatch, but callers must resolve the pool first and gate on both halves of the
+ * result: `getLockBox()` exists only at v2.0.0 (pre-2.0.0 pools hold liquidity themselves) and
+ * only on the non-siloed LockRelease type — {@link assertNonSiloedLockReleasePool} for the type,
+ * an explicit v2.0.0 check for the version. Otherwise this reads as a bare revert instead of
+ * naming which of the two is wrong. Same reasoning as {@link readTokenPoolRebalancer}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Non-siloed v2.0.0 LockRelease pool to read `getLockBox()` from.
+ * @returns The pool's lockbox, checksummed. Set in the constructor and immutable thereafter.
+ */
+export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getLockBox()))
 }
 
 /**
