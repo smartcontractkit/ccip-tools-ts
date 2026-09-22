@@ -6,27 +6,38 @@
  * @packageDocumentation
  */
 
+import type { Interface } from 'ethers'
+
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { assertTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
+import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
+import { resolveTokenRoleHandler } from '../roles.ts'
 
 /** Parameters for {@link GrantMintAndBurnRoles}. */
 export type GrantMintAndBurnRolesParams = {
-  /** BurnMintERC677 token (v1.5.1 / v1.6.2) whose roles are being changed. */
+  /** BurnMintERC677 v1.x or CrossChainToken v2.0.0 whose roles are being changed. */
   tokenAddress: string
   /** Account receiving both roles, typically the token's pool; must not already hold both. */
   burnAndMinter: string
-  /** Current token owner (the role admin); sets `tx.from` for offline / multisig signing. */
+  /** Role admin; token owner for v1.x, `BURN_MINT_ADMIN_ROLE` holder for v2; sets `tx.from`. */
   sender?: string
 }
 
-/** Grants both mint and burn roles on a BurnMintERC677 token via `grantMintAndBurnRoles`. */
+type Encoder = (iface: Interface, params: GrantMintAndBurnRolesParams) => UnsignedEVMTx
+
+const encodeGrantMintAndBurnRoles: Encoder = (iface, { tokenAddress, burnAndMinter }) =>
+  callTx(tokenAddress, iface.encodeFunctionData('grantMintAndBurnRoles', [burnAndMinter]))
+
+/** Grants both mint and burn roles on a supported CCT token. */
 export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesParams> {
   readonly name = 'grantMintAndBurnRoles'
+  private readonly encoders: Partial<Record<TokenVersion, Encoder>> = {
+    [TokenVersion.V1_5_1]: encodeGrantMintAndBurnRoles,
+  }
 
   /**
    * Validates both addresses before any RPC. Neither may be zero: a tx to `0x0` hits no code, and
@@ -52,11 +63,14 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, burnAndMinter, sender }: GrantMintAndBurnRolesParams,
+    params: GrantMintAndBurnRolesParams,
   ): Promise<UnsignedEVMTx> {
+    const { tokenAddress, burnAndMinter, sender } = params
+    const version = await resolveToken(chain, tokenAddress)
+    const roleHandler = resolveTokenRoleHandler(version, this.name)
     const [isMinter, isBurner] = await Promise.all([
-      readTokenRole(chain, tokenAddress, 'isMinter', burnAndMinter),
-      readTokenRole(chain, tokenAddress, 'isBurner', burnAndMinter),
+      roleHandler.hasRole(chain, tokenAddress, 'mint', burnAndMinter),
+      roleHandler.hasRole(chain, tokenAddress, 'burn', burnAndMinter),
     ])
     if (isMinter && isBurner)
       throw new CCTParamsInvalidError(
@@ -64,12 +78,17 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
         'burnAndMinter',
         `already holds the mint and burn roles on ${tokenAddress}; granting them again changes nothing`,
       )
-    if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
+    if (sender !== undefined)
+      await Promise.all([
+        roleHandler.assertAdmin(this.name, chain, tokenAddress, 'mint', sender),
+        roleHandler.assertAdmin(this.name, chain, tokenAddress, 'burn', sender),
+      ])
 
-    return callTx(
-      tokenAddress,
-      getErc20Token().encodeFunctionData('grantMintAndBurnRoles', [burnAndMinter]),
-    )
+    return resolveTokenEncoder(
+      this.encoders,
+      version,
+      this.name,
+    )(getTokenInterface(version), params)
   }
 
   /**

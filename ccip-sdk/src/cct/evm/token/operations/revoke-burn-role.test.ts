@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, id, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -22,6 +22,13 @@ const FRESH = new Interface([
   'function owner() view returns (address)',
 ])
 const expectedData = (burner = ACCOUNT) => FRESH.encodeFunctionData('revokeBurnRole', [burner])
+const V2 = new Interface([
+  'function revokeRole(bytes32 role, address account)',
+  'function hasRole(bytes32 role, address account) view returns (bool)',
+  'function getRoleAdmin(bytes32 role) view returns (bytes32)',
+])
+const BURNER_ROLE = id('BURNER_ROLE')
+const BURN_MINT_ADMIN_ROLE = id('BURN_MINT_ADMIN_ROLE')
 
 /** The `eth_call`s the op makes, in order, as decoded function names. */
 type Seen = { calls: string[] }
@@ -46,12 +53,32 @@ function stubChain({
   const results: Record<string, unknown[]> = { isBurner: [holdsRole], owner: [owner] }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.reject(missingFunction()),
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
         const fn = FRESH.getFunction(data.slice(0, 10))!.name
         seen.calls.push(fn)
         return Promise.resolve(FRESH.encodeFunctionResult(fn, results[fn]))
+      },
+    },
+    nextNonce: () => Promise.resolve(0),
+    rollbackNonce: () => {},
+  } as unknown as EVMChain
+}
+
+function stubV2Chain(): EVMChain {
+  return {
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    provider: {
+      call: ({ data }: { data: string }) => {
+        const fn = V2.getFunction(data.slice(0, 10))!.name
+        const [role] = V2.decodeFunctionData(fn, data)
+        assert.ok(role === BURNER_ROLE || role === BURN_MINT_ADMIN_ROLE)
+        return Promise.resolve(
+          V2.encodeFunctionResult(fn, [fn === 'hasRole' ? true : BURN_MINT_ADMIN_ROLE]),
+        )
       },
     },
     nextNonce: () => Promise.resolve(0),
@@ -103,6 +130,14 @@ describe('RevokeBurnRole (cct/evm)', () => {
       assert.equal(tx.data, expectedData())
       // the role read comes first: it is also the family check, so it gates the owner read
       assert.deepEqual(seen.calls, ['isBurner', 'owner'])
+    })
+
+    it('encodes revokeRole(BURNER_ROLE, address) for a CrossChainToken', async () => {
+      const unsigned = await generate(stubV2Chain())
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        V2.encodeFunctionData('revokeRole', [BURNER_ROLE, ACCOUNT]),
+      )
     })
 
     it('omits from when sender is not supplied, but still probes the token', async () => {

@@ -13,7 +13,8 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
-import { getErc20Token, readTokenRole } from '../contracts.ts'
+import { getErc20Token } from '../contracts.ts'
+import { readV1TokenRole } from '../roles.ts'
 
 /** Parameters for {@link Mint}. */
 export type MintParams = {
@@ -60,7 +61,7 @@ export class Mint extends EVMOperation<MintParams> {
     chain: EVMChain,
     { tokenAddress, account, amount, sender }: MintParams,
   ): Promise<UnsignedEVMTx> {
-    const isMinter = await readTokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
+    const isMinter = await readV1TokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
     if (sender !== undefined && !isMinter)
       throw new CCTParamsInvalidError(
         this.name,

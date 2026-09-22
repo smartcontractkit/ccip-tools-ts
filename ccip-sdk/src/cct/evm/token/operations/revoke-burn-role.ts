@@ -5,27 +5,42 @@
  * @packageDocumentation
  */
 
+import type { Interface } from 'ethers'
+
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { assertTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
+import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
+import { CrossChainTokenRole, resolveTokenRoleHandler } from '../roles.ts'
 
 /** Parameters for {@link RevokeBurnRole}. */
 export type RevokeBurnRoleParams = {
-  /** BurnMintERC677 token (v1.5.1 / v1.6.2) whose roles are being changed. */
+  /** BurnMintERC677 v1.x or CrossChainToken v2.0.0 whose roles are being changed. */
   tokenAddress: string
   /** Account losing the burn role; must currently hold it. */
   burner: string
-  /** Current token owner (the role admin); sets `tx.from` for offline / multisig signing. */
+  /** Role admin; token owner for v1.x, `BURN_MINT_ADMIN_ROLE` holder for v2; sets `tx.from`. */
   sender?: string
 }
 
-/** Removes the burn role from an account on a BurnMintERC677 token via `revokeBurnRole`. */
+type Encoder = (iface: Interface, params: RevokeBurnRoleParams) => UnsignedEVMTx
+
+const encodeV1: Encoder = (iface, { tokenAddress, burner }) =>
+  callTx(tokenAddress, iface.encodeFunctionData('revokeBurnRole', [burner]))
+
+const encodeV2: Encoder = (iface, { tokenAddress, burner }) =>
+  callTx(tokenAddress, iface.encodeFunctionData('revokeRole', [CrossChainTokenRole.BURNER, burner]))
+
+/** Removes the burn role from an account on a supported CCT token. */
 export class RevokeBurnRole extends EVMOperation<RevokeBurnRoleParams> {
   readonly name = 'revokeBurnRole'
+  private readonly encoders: Partial<Record<TokenVersion, Encoder>> = {
+    [TokenVersion.V1_5_1]: encodeV1,
+    [TokenVersion.V2_0_0]: encodeV2,
+  }
 
   /**
    * Validates both addresses before any RPC. Neither may be zero: a tx to `0x0` hits no code, and
@@ -49,17 +64,25 @@ export class RevokeBurnRole extends EVMOperation<RevokeBurnRoleParams> {
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, burner, sender }: RevokeBurnRoleParams,
+    params: RevokeBurnRoleParams,
   ): Promise<UnsignedEVMTx> {
-    if (!(await readTokenRole(chain, tokenAddress, 'isBurner', burner)))
+    const { tokenAddress, burner, sender } = params
+    const version = await resolveToken(chain, tokenAddress)
+    const roleHandler = resolveTokenRoleHandler(version, this.name)
+    if (!(await roleHandler.hasRole(chain, tokenAddress, 'burn', burner)))
       throw new CCTParamsInvalidError(
         this.name,
         'burner',
         `does not hold the burn role on ${tokenAddress}; revoking it changes nothing`,
       )
-    if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
+    if (sender !== undefined)
+      await roleHandler.assertAdmin(this.name, chain, tokenAddress, 'burn', sender)
 
-    return callTx(tokenAddress, getErc20Token().encodeFunctionData('revokeBurnRole', [burner]))
+    return resolveTokenEncoder(
+      this.encoders,
+      version,
+      this.name,
+    )(getTokenInterface(version), params)
   }
 
   /**

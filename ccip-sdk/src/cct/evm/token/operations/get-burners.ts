@@ -8,7 +8,7 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { readTokenRoleHolders } from '../contracts.ts'
+import { readV1TokenRoleHolders } from '../roles.ts'
 
 /** Parameters for {@link GetBurners}. */
 export type GetBurnersParams = {
@@ -39,6 +39,6 @@ export class GetBurners extends EVMQuery<GetBurnersParams, GetBurnersResult> {
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    */
   protected read(chain: EVMChain, { tokenAddress }: GetBurnersParams): Promise<string[]> {
-    return readTokenRoleHolders(chain, tokenAddress, 'getBurners')
+    return readV1TokenRoleHolders(chain, tokenAddress, 'getBurners')
   }
 }

@@ -1590,21 +1590,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `grantMintAndBurnRoles` tx (for multisig / offline signing): grants a
    * BurnMintERC677 token's mint **and** burn roles to one account, in a single transaction. This
    * is the call that lets a freshly deployed burn/mint pool bridge the token.
-   * @remarks v1.5.1 / v1.6.2 tokens only — v2.0.0's `CrossChainToken` gates mint/burn through
-   * AccessControl, which ships separately. Rejected only when `burnAndMinter` already holds
+   *
+   * @remarks Supported by v1.5.1 / v1.6.2 and v2.0.0 `CrossChainToken`; v2 enforces the
+   * mint/burn role admin through AccessControl. Rejected only when `burnAndMinter` already holds
    * *both* roles; holding just one still builds, since this call is what completes the pair.
-   * @remarks {@link deployToken} deploys v2.0.0, so it is not a source of a token these ops
-   * accept: a v1.5.1 / v1.6.2 `FactoryBurnMintERC20` comes from the CCIP token factory or your
-   * own deployment, outside this SDK.
+   *
    * @see {@link deployTokenPool} — the primary use case is granting these roles to a freshly
    * deployed pool
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burnAndMinter` already holds both roles
+   *
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burnAndMinter` already holds both roles
+   *
    * @example
    * ```typescript
    * // build only — sign later (multisig / offline). `sender` must be the token owner.
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantMintAndBurnRoles({
    *   tokenAddress: '0xToken...',
    *   burnAndMinter: '0xPool...', // the token's burn/mint pool
@@ -1618,21 +1620,25 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Grants a BurnMintERC677 token's mint and burn roles to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * `opts.wallet` (the v1 token owner or v2 mint/burn role admin).
+   *
    * @remarks See {@link generateUnsignedGrantMintAndBurnRoles} for the version and redundancy
-   * rules. `sender` defaults to the wallet's address, so the owner gate always runs before this
-   * submits.
+   * rules. `sender` defaults to the wallet's address, so the role-admin gate always runs before
+   * this submits.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burnAndMinter` already holds
-   * both roles
+   * the wallet's address, the wallet lacks the version's role-admin permission, or
+   * `burnAndMinter` already holds both roles
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantMintAndBurnRoles({
    *   tokenAddress: '0xToken...',
    *   burnAndMinter: '0xPool...',
@@ -1651,22 +1657,29 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * BurnMintERC677 token's mint role to one account. Pair it with
    * {@link generateUnsignedGrantBurnRole}, or use
    * {@link generateUnsignedGrantMintAndBurnRoles} to grant both in one transaction.
-   * @remarks v1.5.1 / v1.6.2 tokens only; a redundant grant is rejected, since the chain would
-   * mine it as a silent no-op rather than revert.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `minter` already holds the mint role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `grantMintRole` and require the token owner; a v2.0.0
+   * `CrossChainToken` encodes `grantRole(MINTER_ROLE, minter)` and requires its mint-role admin.
+   * A redundant grant is rejected, since the chain would mine it as a silent no-op rather than
+   * revert.
+   *
+   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
+   * deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `minter` already holds the mint role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xMinter...',
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
-   * deployed pool
    */
   generateUnsignedGrantMintRole(opts: GrantMintRoleParams): Promise<UnsignedEVMTx> {
     return this.#grantMintRole.generate(this.chain, opts)
@@ -1674,18 +1687,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Grants a BurnMintERC677 token's mint role to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
-   * @remarks See {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
+   * `opts.wallet` (the v1 token owner or v2 mint-role admin).
+   *
+   * @see {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `minter` already holds the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `minter`
+   * already holds the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xMinter...',
@@ -1702,22 +1720,28 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * BurnMintERC677 token's burn role to one account. Pair it with
    * {@link generateUnsignedGrantMintRole}, or use
    * {@link generateUnsignedGrantMintAndBurnRoles} to grant both in one transaction.
-   * @remarks v1.5.1 / v1.6.2 tokens only; a redundant grant is rejected — see
-   * {@link generateUnsignedGrantMintRole}.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burner` already holds the burn role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `grantBurnRole` and require the token owner; a v2.0.0
+   * `CrossChainToken` encodes `grantRole(BURNER_ROLE, burner)` and requires its burn-role admin.
+   * A redundant grant is rejected — see {@link generateUnsignedGrantMintRole}.
+   *
+   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
+   * deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burner` already holds the burn role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xBurner...',
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
-   * deployed pool
    */
   generateUnsignedGrantBurnRole(opts: GrantBurnRoleParams): Promise<UnsignedEVMTx> {
     return this.#grantBurnRole.generate(this.chain, opts)
@@ -1725,18 +1749,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Grants a BurnMintERC677 token's burn role to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * `opts.wallet` (the v1 token owner or v2 burn-role admin).
+   *
    * @remarks See {@link generateUnsignedGrantBurnRole} for the version and redundancy rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burner` already holds the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `burner`
+   * already holds the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xBurner...',
@@ -1751,21 +1780,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned `revokeMintRole` tx (for multisig / offline signing): removes a
    * BurnMintERC677 token's mint role from one account.
-   * @remarks v1.5.1 / v1.6.2 tokens only; revoking a role the account does not hold is rejected,
-   * since the chain would mine it as a silent no-op and tell you nothing.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `minter` does not currently hold the mint role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `revokeMintRole`; a v2.0.0 `CrossChainToken` encodes
+   * `revokeRole(MINTER_ROLE, minter)`. A missing role is rejected, since the chain would mine a
+   * silent no-op.
+   *
+   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `minter` does not currently hold the mint role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRevokeMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xOldPool...', // must currently hold the role
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
    */
   generateUnsignedRevokeMintRole(opts: RevokeMintRoleParams): Promise<UnsignedEVMTx> {
     return this.#revokeMintRole.generate(this.chain, opts)
@@ -1774,17 +1809,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Removes a BurnMintERC677 token's mint role from one account, signing + submitting with
    * `opts.wallet` (the token owner).
+   *
    * @remarks See {@link generateUnsignedRevokeMintRole} for the version and role-state rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `minter` does not hold the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `minter` does
+   * not hold the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.revokeMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xOldPool...',
@@ -1799,21 +1839,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned `revokeBurnRole` tx (for multisig / offline signing): removes a
    * BurnMintERC677 token's burn role from one account.
-   * @remarks v1.5.1 / v1.6.2 tokens only; revoking a role the account does not hold is rejected —
-   * see {@link generateUnsignedRevokeMintRole}.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burner` does not currently hold the burn role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `revokeBurnRole`; a v2.0.0 `CrossChainToken` encodes
+   * `revokeRole(BURNER_ROLE, burner)`. A missing role is rejected — see
+   * {@link generateUnsignedRevokeMintRole}.
+   *
+   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burner` does not currently hold the burn role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRevokeBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xOldPool...', // must currently hold the role
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
    */
   generateUnsignedRevokeBurnRole(opts: RevokeBurnRoleParams): Promise<UnsignedEVMTx> {
     return this.#revokeBurnRole.generate(this.chain, opts)
@@ -1822,17 +1868,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Removes a BurnMintERC677 token's burn role from one account, signing + submitting with
    * `opts.wallet` (the token owner).
+   *
    * @remarks See {@link generateUnsignedRevokeBurnRole} for the version and role-state rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if a v1 `tokenAddress` is not a BurnMintERC677
+   * token
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burner` does not hold the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `burner` does
+   * not hold the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.revokeBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xOldPool...',

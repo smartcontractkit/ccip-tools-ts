@@ -42,6 +42,17 @@ export const TokenVersion = {
 /** A known token version. */
 export type TokenVersion = (typeof TokenVersion)[keyof typeof TokenVersion]
 
+/** The only supported CrossChainToken contract type and version. */
+const CROSS_CHAIN_TOKEN_TYPE = 'CrossChainToken'
+
+function parseCrossChainTokenVersion(address: string, version: string): TokenVersion {
+  if (version !== TokenVersion.V2_0_0)
+    throw new CCTContractVersionUnsupportedError(CROSS_CHAIN_TOKEN_TYPE, version, {
+      context: { address },
+    })
+  return TokenVersion.V2_0_0
+}
+
 /**
  * Cached token {@link Interface}s per {@link TokenVersion}, built once from the vendored ABIs
  * (no per-call `new Interface`) — for read/write (e.g. ownership) ops. Mirrors
@@ -66,9 +77,7 @@ export async function resolveCrossChainToken(
   const [contractType, version] = await chain.typeAndVersion(address)
   if (contractType !== CROSS_CHAIN_TOKEN_TYPE)
     throw new CCTContractTypeInvalidError(address, CROSS_CHAIN_TOKEN_TYPE, contractType)
-  if (!Object.values(TokenVersion).includes(version as TokenVersion))
-    throw new CCTContractVersionUnsupportedError(contractType, version, { context: { address } })
-  return version as TokenVersion
+  return parseCrossChainTokenVersion(address, version)
 }
 
 /** Floor-matches an encoder table, with v2.0.0 as the first CrossChainToken version. */
@@ -130,101 +139,20 @@ function isMissingFunction(err: unknown): boolean {
   return isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')
 }
 
-/** The two role predicates, declared identically by every BurnMintERC677 token. */
-type TokenRoleReader = Pick<
-  TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
-  'isMinter' | 'isBurner'
->
-
 /**
- * Reads whether `account` holds one of a BurnMintERC677 token's roles, in a single `eth_call`.
- *
- * Doubles as the family check every role/mint write needs: only the BurnMintERC677 family
- * declares these predicates, so a v2.0.0 `CrossChainToken`, a token pool, or an EOA fails here
- * before an op can hand back calldata aimed at code that cannot run it. No `version` parameter —
- * both predicates are identical at v1.5.1 and v1.6.2 (see {@link getErc20Token}).
- * @param chain - Chain to read from.
- * @param tokenAddress - Token contract to read from.
- * @param read - Which role predicate to call.
- * @param account - Address to test.
- * @returns Whether `account` currently holds that role.
- * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` does not declare `read` — it is
- * not a BurnMintERC677 token
+ * Resolves the encoder version for a token operation. Pre-v2 tokens retain the v1.5.1 encoder:
+ * v1.5.1 may not implement `typeAndVersion()`, and the operation's v1 read remains its family
+ * check. A reported CrossChainToken must be a supported version.
  */
-export async function readTokenRole(
-  chain: EVMChain,
-  tokenAddress: string,
-  read: 'isMinter' | 'isBurner',
-  account: string,
-): Promise<boolean> {
-  const token: TokenRoleReader = getTypedContract(
-    chain,
-    tokenAddress,
-    FACTORY_BURN_MINT_ERC20_V1_5_1_ABI,
-  )
-  try {
-    return await token[read](account)
-  } catch (err) {
-    if (!isMissingFunction(err)) throw err
-    throw new CCTContractTypeInvalidError(
-      tokenAddress,
-      'BurnMintERC677 token (FactoryBurnMintERC20 v1.5.1 / v1.6.2)',
-      // the type is genuinely unknown: the contract answered nothing
-      'unknown',
-      `it does not declare ${read}(address) — a v2.0.0 CrossChainToken gates mint/burn through AccessControl instead, and support for it ships separately`,
-      { cause: err instanceof Error ? err : undefined },
-    )
-  }
+export async function resolveToken(chain: EVMChain, tokenAddress: string): Promise<TokenVersion> {
+  const detected = await chain.typeAndVersion(tokenAddress).catch((error) => {
+    if (isMissingFunction(error)) return undefined
+    throw error
+  })
+  if (detected === undefined || detected[0] !== CROSS_CHAIN_TOKEN_TYPE) return TokenVersion.V1_5_1
+
+  return parseCrossChainTokenVersion(tokenAddress, detected[1])
 }
-
-/** The two role-set getters, declared identically by every BurnMintERC677 token. */
-type TokenRoleHolderReader = Pick<
-  TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
-  'getMinters' | 'getBurners'
->
-
-/**
- * Reads the full set of accounts holding one of a BurnMintERC677 token's roles, in a single
- * `eth_call`.
- *
- * Informational, for audit and UX; checking one address is {@link readTokenRole}, not this set
- * plus a client-side scan. Same family check and version reasoning as that read: only this family
- * enumerates its role members, and both getters are identical at v1.5.1 and v1.6.2.
- * @param chain - Chain to read from.
- * @param tokenAddress - Token contract to read from.
- * @param read - Which role set to enumerate.
- * @returns The current holders, checksummed, in the order the token returns them.
- * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` does not declare `read` — it is
- * not a BurnMintERC677 token
- */
-export async function readTokenRoleHolders(
-  chain: EVMChain,
-  tokenAddress: string,
-  read: 'getMinters' | 'getBurners',
-): Promise<string[]> {
-  const token: TokenRoleHolderReader = getTypedContract(
-    chain,
-    tokenAddress,
-    FACTORY_BURN_MINT_ERC20_V1_5_1_ABI,
-  )
-  try {
-    // the abitype handle types an `address[]` return as `(string | Addressable)[]`
-    return (await token[read]()).map((holder) => getAddress(holder as string))
-  } catch (err) {
-    if (!isMissingFunction(err)) throw err
-    throw new CCTContractTypeInvalidError(
-      tokenAddress,
-      'BurnMintERC677 token (FactoryBurnMintERC20 v1.5.1 / v1.6.2)',
-      // the type is genuinely unknown: the contract answered nothing
-      'unknown',
-      `it does not declare ${read}() — a v2.0.0 CrossChainToken gates mint/burn through AccessControl, which does not enumerate role members`,
-      { cause: err instanceof Error ? err : undefined },
-    )
-  }
-}
-
-/** The one `typeAndVersion` contract type that is a token but *not* an Ownable2Step one. */
-const CROSS_CHAIN_TOKEN_TYPE = 'CrossChainToken'
 
 /** AccessControlDefaultAdminRules getters declared by CrossChainToken v2.0.0. */
 type CrossChainTokenDefaultAdminReader = Pick<

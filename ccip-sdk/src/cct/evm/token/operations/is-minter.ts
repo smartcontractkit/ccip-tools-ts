@@ -8,7 +8,7 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { readTokenRole } from '../contracts.ts'
+import { readV1TokenRole } from '../roles.ts'
 
 /** Parameters for {@link IsMinter}. */
 export type IsMinterParams = {
@@ -45,6 +45,6 @@ export class IsMinter extends EVMQuery<IsMinterParams, IsMinterResult> {
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    */
   protected read(chain: EVMChain, { tokenAddress, account }: IsMinterParams): Promise<boolean> {
-    return readTokenRole(chain, tokenAddress, 'isMinter', account)
+    return readV1TokenRole(chain, tokenAddress, 'isMinter', account)
   }
 }
