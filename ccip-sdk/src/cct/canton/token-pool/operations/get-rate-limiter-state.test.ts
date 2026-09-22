@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
@@ -72,7 +72,9 @@ function rateLimiterContract(
 }
 
 function chainWith(contract: CantonActiveContract | null): CantonChain {
-  return {
+  // Real CantonChain instance (private fields make object-literal casts
+  // impossible); Object.assign overrides only what the test exercises.
+  return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
@@ -81,10 +83,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
     ): Promise<CantonActiveContract | null> {
       return contract && instanceAddress === RL_INSTANCE_ADDRESS ? contract : null
     },
-    // CantonChain has private fields + ~80 members, so a partial mock can't
-    // satisfy `as CantonChain` (TS2352) — the double cast is the standard
-    // partial-mock escape hatch (same pattern as the cct/evm+solana tests).
-  } as unknown as CantonChain
+  })
 }
 
 describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
