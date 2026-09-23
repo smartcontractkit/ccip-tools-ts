@@ -17,6 +17,7 @@ import {
   ComputeBudgetProgram,
   PublicKey,
   SendTransactionError,
+  SolanaJSONRPCError,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js'
@@ -37,7 +38,12 @@ import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import type { UnsignedSolanaTx, Wallet } from './types.ts'
-import { PACKET_DATA_SIZE, compileV1Message, serializeV1Transaction } from './v1.ts'
+import {
+  MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+  PACKET_DATA_SIZE,
+  compileV1Message,
+  serializeV1Transaction,
+} from './v1.ts'
 import type { SolanaLog } from './index.ts'
 
 /**
@@ -438,8 +444,8 @@ class SimulationFailedError extends SendTransactionError {
  *
  * Prefers a v0 transaction (supports address lookup tables); when the v0 wire does
  * not fit the 1232-byte packet (or v0 can't represent the accounts), falls back to a
- * v1 transaction (SIMD-0385: all accounts static, compute-unit limit inlined into
- * the message's transactionConfig, 4096-byte wire limit) simulated via raw RPC.
+ * v1 transaction (SIMD-0385: all accounts static, compute-unit and loaded-accounts
+ * data-size limits inlined into the message's transactionConfig, 4096-byte wire limit) simulated via raw RPC.
  * @param params - Simulation parameters including connection and payer.
  * @returns Simulation result with estimated compute units.
  */
@@ -508,6 +514,7 @@ export async function simulateTransaction(
       recentBlockhash,
       instructions: rest.instructions,
       computeUnitLimit,
+      loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
     })
     const wire = serializeV1Transaction(
       message,
@@ -540,6 +547,7 @@ export async function simulateTransaction(
       recentBlockhash,
       instructions: rest.tx.instructions,
       computeUnitLimit,
+      loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
     })
     const wire = serializeV1Transaction(
       message,
@@ -559,7 +567,13 @@ export async function simulateTransaction(
 async function simulateRawV1(connection: Connection, wire: Uint8Array) {
   const res = await (
     connection as unknown as {
-      _rpcRequest(method: string, args: unknown[]): Promise<{ result?: { value?: unknown } }>
+      _rpcRequest(
+        method: string,
+        args: unknown[],
+      ): Promise<{
+        result?: { value?: unknown }
+        error?: { code: unknown; message: string; data?: unknown }
+      }>
     }
   )._rpcRequest('simulateTransaction', [
     Buffer.from(wire).toString('base64'),
@@ -570,6 +584,19 @@ async function simulateRawV1(connection: Connection, wire: Uint8Array) {
       sigVerify: false,
     },
   ])
+  if (res.error) {
+    const err = new SolanaJSONRPCError(res.error, 'failed to simulate v1 transaction')
+    // invalid params: the RPC can't decode or sanitize the v1 envelope (e.g. a cluster without
+    // v1 support), so it doesn't fit any envelope it accepts; callers then fall back to smaller
+    // transactions or buffering, as for an oversized v0 one
+    if (res.error.code === -32602) {
+      throw new CCIPTransactionTooLargeError(
+        `Transaction too large for v0, and rejected as v1: ${res.error.message}`,
+        { cause: err },
+      )
+    }
+    throw err
+  }
   const value = res.result?.value
   if (!value) {
     throw new CCIPDataFormatUnsupportedError(
@@ -702,19 +729,21 @@ export async function simulateAndSendTxs(
       [start, end] = [end, instructions.length]
     ) {
       let ixs, includesMain, addressLookupTableAccounts, simulated
+      let loadedAccountsDataSize: number | undefined
       for (;;) {
         ixs = instructions.slice(start, end)
         includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
         addressLookupTableAccounts = includesMain ? lookupTables : undefined
         try {
-          simulated =
-            (
-              await simulateTransaction(ctx, {
-                payerKey: wallet.publicKey,
-                instructions: ixs,
-                addressLookupTableAccounts,
-              })
-            ).unitsConsumed || 0
+          const simulation = await simulateTransaction(ctx, {
+            payerKey: wallet.publicKey,
+            instructions: ixs,
+            addressLookupTableAccounts,
+          })
+          simulated = simulation.unitsConsumed || 0
+          // returned by current RPCs, but not declared in web3.js' response type
+          loadedAccountsDataSize = (simulation as { loadedAccountsDataSize?: number })
+            .loadedAccountsDataSize
           break
         } catch (err) {
           const next = nextSliceEnd(err, start, end, split)
@@ -730,7 +759,7 @@ export async function simulateAndSendTxs(
       const blockhash = await connection.getLatestBlockhash('confirmed')
 
       // Prefer a v0 transaction (supports address lookup tables); fall back to a v1
-      // transaction (all accounts static, compute-unit limit inlined into the message's
+      // transaction (all accounts static, resource limits inlined into the message's
       // transactionConfig, 4096-byte wire limit instead of 1232) when the v0 wire does
       // not fit the packet or v0 can't represent the accounts
       let txV0: VersionedTransaction | undefined
@@ -760,11 +789,17 @@ export async function simulateAndSendTxs(
         const signed = await wallet.signTransaction(txV0)
         signature = await connection.sendTransaction(signed)
       } else {
+        // v1 budgets 0 for an unset limit instead of a default (SIMD-0385), so always set
+        // both from the simulation (up to the per-tx maximums when it didn't report them)
         const messageV1 = compileV1Message({
           payerKey: wallet.publicKey,
           recentBlockhash: blockhash.blockhash,
           instructions: ixs,
-          computeUnitLimit,
+          computeUnitLimit:
+            computeUnitLimit ?? (simulated ? Math.ceil(simulated * 1.1) : 1_400_000),
+          loadedAccountsDataSizeLimit: loadedAccountsDataSize
+            ? Math.min(Math.ceil(loadedAccountsDataSize * 1.1), MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES)
+            : MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
         })
         const txV1 = new VersionedTransaction(messageV1)
         // v1 signing flows through the standard tx.sign()/partialSign() paths, which

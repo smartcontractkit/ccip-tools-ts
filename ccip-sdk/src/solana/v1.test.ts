@@ -8,6 +8,7 @@ import {
   Keypair,
   PACKET_DATA_SIZE,
   PublicKey,
+  SolanaJSONRPCError,
   SystemProgram,
   TransactionExpiredTimeoutError,
   TransactionInstruction,
@@ -17,10 +18,19 @@ import {
 } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 
-import { CCIPArgumentInvalidError, CCIPPartialTransactionSubmissionError } from '../errors/index.ts'
+import {
+  CCIPArgumentInvalidError,
+  CCIPPartialTransactionSubmissionError,
+  CCIPTransactionTooLargeError,
+} from '../errors/index.ts'
 import type { Wallet } from './types.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
-import { compileV1Message, serializeMessageV1, serializeV1Transaction } from './v1.ts'
+import {
+  MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+  compileV1Message,
+  serializeMessageV1,
+  serializeV1Transaction,
+} from './v1.ts'
 
 // deterministic keypair for reproducible accounts
 function keypairFromSeed(seed: string): Keypair {
@@ -32,6 +42,8 @@ function keypairFromSeed(seed: string): Keypair {
 const PAYER = keypairFromSeed('payer')
 const PROGRAM = new PublicKey('Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C')
 const RECENT_BLOCKHASH = '11111111111111111111111111111112'
+// v1 has no default resource limits; tests which don't care use these
+const LIMITS = { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 1_000_000 }
 
 function sampleInstruction(numAccounts: number, dataLength = 16): TransactionInstruction {
   const keys = Array.from({ length: numAccounts }, (_, i) => ({
@@ -56,6 +68,7 @@ function deserializeV1(messageBytes: Uint8Array): { message: MessageV1; signatur
 describe('Solana v1 transaction support (SIMD-0385)', () => {
   it('serializeMessageV1 round-trips through web3.js MessageV1 deserialization', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(5), sampleInstruction(3, 40)],
@@ -83,22 +96,31 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
 
   it('serializes config fields present in the mask at their wire positions', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(2)],
     })
     assert.deepEqual(message.transactionConfig, {
-      computeUnitLimit: null,
+      computeUnitLimit: 200_000,
       heapSize: null,
-      loadedAccountsDataSizeLimit: null,
+      loadedAccountsDataSizeLimit: 1_000_000,
       priorityFee: null,
     })
-    const deserialized = deserializeV1(serializeV1Transaction(message, [null]))
+    const wire = Buffer.from(serializeV1Transaction(message, [null]))
+    // compute-unit (bit 2) and loaded-accounts data-size (bit 3) limits: both are always set,
+    // since v1 budgets 0 for an unset limit (SIMD-0385)
+    assert.equal(wire.readUInt32LE(4), 0b01100)
+    const configOffset = 42 + message.staticAccountKeys.length * 32
+    assert.equal(wire.readUInt32LE(configOffset), 200_000)
+    assert.equal(wire.readUInt32LE(configOffset + 4), 1_000_000)
+    const deserialized = deserializeV1(wire)
     assert.deepEqual(deserialized.message.transactionConfig, message.transactionConfig)
   })
 
   it('uses the v1 envelope: message first, signatures at the tail, no count prefix', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(4)],
@@ -150,6 +172,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     )
 
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions,
@@ -175,6 +198,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       data: Buffer.alloc(4),
     })
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [ix],
@@ -192,6 +216,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
 
   it('rejects invalid signatures and oversized v1 wires', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(4)],
@@ -204,6 +229,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     for (;;) {
       count += 1000
       const padded = compileV1Message({
+        ...LIMITS,
         payerKey: PAYER.publicKey,
         recentBlockhash: RECENT_BLOCKHASH,
         instructions: [sampleInstruction(4, count)],
@@ -217,7 +243,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     }
   })
 
-  it('rejects more than 255 static account keys (v1 format limit)', () => {
+  it('rejects more than 64 static account keys (SIMD-0385 limit)', () => {
     const keys = Array.from({ length: 300 }, (_, i) => ({
       pubkey: i === 0 ? PAYER.publicKey : keypairFromSeed(`acct${i}`).publicKey,
       isSigner: i === 0,
@@ -226,19 +252,49 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     assert.throws(
       () =>
         compileV1Message({
+          ...LIMITS,
           payerKey: PAYER.publicKey,
           recentBlockhash: RECENT_BLOCKHASH,
           instructions: [
             new TransactionInstruction({ keys, programId: PROGRAM, data: Buffer.alloc(4) }),
           ],
         }),
-      /max 255/,
+      /max 64/,
+    )
+    // within v0's u8 account indexes, but above the v1 cap
+    assert.throws(
+      () =>
+        compileV1Message({
+          ...LIMITS,
+          payerKey: PAYER.publicKey,
+          recentBlockhash: RECENT_BLOCKHASH,
+          instructions: [sampleInstruction(65)],
+        }),
+      /max 64/,
     )
   })
 
-  it('rejects more than 255 instructions (v1 format limit)', () => {
+  it('rejects more than 12 signatures (SIMD-0385 limit)', () => {
+    const signers = Array.from({ length: 13 }, (_, i) => ({
+      pubkey: i === 0 ? PAYER.publicKey : keypairFromSeed(`signer${i}`).publicKey,
+      isSigner: true,
+      isWritable: true,
+    }))
+    const message = compileV1Message({
+      ...LIMITS,
+      payerKey: PAYER.publicKey,
+      recentBlockhash: RECENT_BLOCKHASH,
+      instructions: [
+        new TransactionInstruction({ keys: signers, programId: PROGRAM, data: Buffer.alloc(4) }),
+      ],
+    })
+    assert.equal(message.header.numRequiredSignatures, 13)
+    assert.throws(() => serializeV1Transaction(message, new Array(13).fill(null)), /max 12/)
+  })
+
+  it('rejects more than 64 instructions (SIMD-0385 limit)', () => {
     const instructions = Array.from(
-      { length: 300 },
+      { length: 65 },
       (_, i) =>
         new TransactionInstruction({
           keys: [{ pubkey: PAYER.publicKey, isSigner: true, isWritable: true }],
@@ -247,14 +303,15 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
     )
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions,
     })
-    assert.equal(message.compiledInstructions.length, 300)
-    // the u8 instruction count would wrap (300 -> 44); serialize must reject it
-    // instead of emitting a corrupt wire
-    assert.throws(() => serializeV1Transaction(message, [null]), /max 255/)
+    assert.equal(message.compiledInstructions.length, 65)
+    // the u8 instruction count still fits, but the cluster would fail sanitization;
+    // serialize must reject it locally so callers can split it instead
+    assert.throws(() => serializeV1Transaction(message, [null]), /max 64/)
   })
 
   describe('simulateTransaction / simulateAndSendTxs v1 fallback', () => {
@@ -316,9 +373,39 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       const wire = Buffer.from(args[0], 'base64')
       const tx = VersionedTransaction.deserialize(wire)
       assert.equal(tx.message.version, 1)
-      assert.ok(
-        (tx.message as MessageV1).transactionConfig.computeUnitLimit,
-        'compute-unit limit is inlined into the transactionConfig',
+      // simulate at the per-tx maximums, like @solana/kit's resource-limit estimator
+      assert.deepEqual((tx.message as MessageV1).transactionConfig, {
+        computeUnitLimit: 1_400_000,
+        heapSize: null,
+        loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+        priorityFee: null,
+      })
+    })
+
+    it('simulateTransaction reports a v1 envelope the RPC rejects as too large', async () => {
+      const { connection } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          error: { code: -32602, message: 'failed to deserialize VersionedTransaction' },
+        })
+      await assert.rejects(
+        simulateTransaction({ connection }, { payerKey: PAYER.publicKey, instructions: OVERSIZED }),
+        (err: unknown) => {
+          assert.ok(err instanceof CCIPTransactionTooLargeError)
+          assert.match(err.message, /too large/, 'execute() escalates to buffering on it')
+          assert.ok(err.cause instanceof SolanaJSONRPCError)
+          return true
+        },
+      )
+    })
+
+    it('simulateTransaction rethrows other v1 RPC errors as-is', async () => {
+      const { connection } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({ error: { code: -32005, message: 'Node is unhealthy' } })
+      await assert.rejects(
+        simulateTransaction({ connection }, { payerKey: PAYER.publicKey, instructions: OVERSIZED }),
+        (err: unknown) => err instanceof SolanaJSONRPCError && err.code === -32005,
       )
     })
 
@@ -386,12 +473,34 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal(wire[0], 0x81, 'v1 envelope: message first')
       const tx = VersionedTransaction.deserialize(wire)
       assert.equal(tx.message.version, 1)
+      // both limits are set even though the simulation used <= 200k CUs, as v1 budgets 0
+      // for unset limits; the loaded-accounts one falls back to the max when unreported
+      assert.deepEqual((tx.message as MessageV1).transactionConfig, {
+        computeUnitLimit: Math.ceil(7 * 1.1),
+        heapSize: null,
+        loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+        priorityFee: null,
+      })
       // the tail signature must verify over the serialized v1 message bytes
       const messageBytes = wire.slice(0, wire.length - 64)
       assert.ok(
         nacl.sign.detached.verify(messageBytes, tx.signatures[0]!, PAYER.publicKey.toBytes()),
         'the payer signature verifies over the v1 message',
       )
+    })
+
+    it('simulateAndSendTxs sizes the v1 loaded-accounts limit from the simulation', async () => {
+      const { connection, captured } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          result: { value: { logs: [], unitsConsumed: 300_000, loadedAccountsDataSize: 100_000 } },
+        })
+      await simulateAndSendTxs({ connection }, wallet, { instructions: OVERSIZED, mainIndex: 0 })
+      const tx = VersionedTransaction.deserialize(captured.sentWire as Uint8Array)
+      const { computeUnitLimit, loadedAccountsDataSizeLimit } = (tx.message as MessageV1)
+        .transactionConfig
+      assert.equal(computeUnitLimit, Math.ceil(300_000 * 1.1))
+      assert.equal(loadedAccountsDataSizeLimit, Math.ceil(100_000 * 1.1))
     })
 
     it('simulateAndSendTxs keeps using the v0 path when the tx fits the packet', async () => {
@@ -543,6 +652,33 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         { signature: 'v0-signature', start: 1, end: 2 },
       ])
       assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
+    })
+
+    it('simulateAndSendTxs splits in resource mode when the RPC rejects v1', async () => {
+      const { connection, captured } = mockConnection()
+      let v1Simulations = 0
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => {
+          v1Simulations++
+          return { error: { code: -32602, message: 'failed to deserialize VersionedTransaction' } }
+        }
+      const sent = mockSendV0(connection)
+
+      // each fits a v0 packet alone, but not together: the pair only fits v1
+      const MEDIUM = sampleInstruction(10, 450)
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [MEDIUM, MEDIUM], mainIndex: 1 },
+        { split: 'resource' },
+      )
+      assert.equal(v1Simulations, 1)
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+      assert.equal(sent.length, 2)
+      assert.equal(captured.sentWire, undefined, 'no v1 transaction was sent')
     })
 
     it('simulateAndSendTxs applies computeUnits only to the main instruction slice', async () => {
