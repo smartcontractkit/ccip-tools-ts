@@ -1,5 +1,5 @@
 import { unpackMint } from '@solana/spl-token'
-import { type TransactionInstruction, PublicKey } from '@solana/web3.js'
+import { type TransactionInstruction, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -177,7 +177,14 @@ export class RegisterAdmin extends SolanaOperation<
     const administrator = opts.administrator ?? mintAuthority
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
-    if (await chain.connection.getAccountInfo(tokenAdminRegistry)) {
+    const registryAccount = await chain.connection.getAccountInfo(tokenAdminRegistry)
+    const registryInitialized =
+      registryAccount &&
+      (registryAccount.executable ||
+        !registryAccount.owner.equals(SystemProgram.programId) ||
+        registryAccount.data.length !== 0)
+
+    if (registryInitialized) {
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
@@ -217,7 +224,9 @@ export class RegisterAdmin extends SolanaOperation<
     }
 
     chain.logger.debug(
-      `${this.name}: method = ${method}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}`,
+      `${
+        this.name
+      }: method = ${method}, router = ${router.toBase58()}, token = ${tokenMint.toBase58()}`,
     )
 
     return { family: ChainFamily.Solana, instructions, mainIndex: 0 }
