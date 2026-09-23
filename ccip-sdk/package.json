@@ -62,6 +62,7 @@
     "@types/node": "26.4.1",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.14",
+    "protobufjs": "^7.6.6",
     "typescript": "7.0.2",
     "viem": "^2.56.3"
   },

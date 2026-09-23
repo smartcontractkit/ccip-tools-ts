@@ -219,6 +219,16 @@ export type VerifierResult = {
 }
 
 /**
+ * The CCV policy a CCIP v2.0 destination enforces for a message (`OffRamp.getCCVsForMessage`):
+ * every required CCV, plus at least `optionalThreshold` of the optional ones, must be attested.
+ */
+export type VerificationPolicy = {
+  optionalCCVs: readonly string[]
+  requiredCCVs: readonly string[]
+  optionalThreshold: number
+}
+
+/**
  * Verification data for a ccip message (onchain CommitReport, or offchain Verifications)
  */
 export type CCIPVerifications =
@@ -230,11 +240,7 @@ export type CCIPVerifications =
     }
   | {
       /** Policy for this request */
-      verificationPolicy: {
-        optionalCCVs: readonly string[]
-        requiredCCVs: readonly string[]
-        optionalThreshold: number
-      }
+      verificationPolicy: VerificationPolicy
       /** Verifications array; one for each requiredCCV is needed for exec */
       verifications: VerifierResult[]
     }

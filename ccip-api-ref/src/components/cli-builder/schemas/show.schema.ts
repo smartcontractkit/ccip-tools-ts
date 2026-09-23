@@ -40,6 +40,18 @@ export const showSchema: CommandSchema<'show'> = {
       description: 'Wait for finality, commit, and first execution before returning',
       group: 'output',
     },
+    {
+      type: 'array',
+      name: 'verifier',
+      alias: 'verifiers',
+      label: 'Verifier Endpoints',
+      description:
+        'CCIP v2.0: verifier endpoint URLs to read CCV attestations from when the CCIP API and ' +
+        'indexers lack them; https:// (grpc-web), grpc:// (gRPC over TLS) or grpc+plaintext://.',
+      group: 'verification',
+      itemType: 'string',
+      placeholder: 'grpc://aggregator.example:443',
+    },
     ...rpcOptions,
     ...outputOptions,
   ],
