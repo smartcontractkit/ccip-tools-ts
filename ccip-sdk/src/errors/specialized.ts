@@ -166,6 +166,8 @@ export class CCIPTransactionTooLargeError extends CCIPError {
  *   if (error instanceof CCIPPartialTransactionSubmissionError) {
  *     console.log(error.context.committedSlices) // [{ signature, start, end }, ...]
  *     console.log(error.context.committedInstructionCount)
+ *     // sent but unconfirmed: it may still land, so check it before resubmitting
+ *     if (error.context.pendingSignature) console.log(error.context.pendingSignature)
  *   }
  * }
  * ```

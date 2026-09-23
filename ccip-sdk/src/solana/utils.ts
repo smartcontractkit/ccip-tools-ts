@@ -717,7 +717,8 @@ export async function simulateAndSendTxs(
   { instructions, mainIndex, lookupTables }: Omit<UnsignedSolanaTx, 'family'>,
   { computeUnits, split = 'partial' }: { computeUnits?: number; split?: SolanaSplitMode } = {},
 ): Promise<{ hash: string; slices: SolanaSentSlice[] }> {
-  if (!instructions.length) throw new CCIPArgumentInvalidError('instructions', 'empty')
+  if (!instructions.length)
+    throw new CCIPArgumentInvalidError('instructions', 'must contain at least one instruction')
   const { connection } = ctx
   let hash: string | undefined
   let pendingSignature: string | undefined

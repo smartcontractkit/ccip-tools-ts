@@ -150,7 +150,7 @@ export {
   encodeTokenTransferV1,
 } from './evm/messageCodec.ts'
 import { SolanaChain } from './solana/index.ts'
-export type { UnsignedSolanaTx } from './solana/index.ts'
+export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'

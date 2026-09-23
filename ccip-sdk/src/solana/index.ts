@@ -137,6 +137,8 @@ import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
+  type SolanaSentSlice,
+  type SolanaSplitMode,
   convertRateLimiter,
   getErrorFromLogs,
   hexDiscriminator,
@@ -145,7 +147,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-export type { UnsignedSolanaTx }
+export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
