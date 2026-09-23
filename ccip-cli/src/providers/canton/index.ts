@@ -19,7 +19,6 @@ export {
   type CantonCliConfig,
   loadCantonConfig,
   resolveCliIndexer,
-  resolveCliRouter,
 } from './config.ts'
 export {
   createCliAuthProvider,

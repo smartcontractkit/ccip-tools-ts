@@ -40,7 +40,7 @@ import { type BytesLike, AbiCoder, formatUnits, randomBytes, toUtf8Bytes } from 
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
-import { fetchChainsFromRpcs, loadChainWallet, resolveRouter } from '../providers/index.ts'
+import { fetchChainsFromRpcs, loadChainWallet } from '../providers/index.ts'
 import { showRequests } from './show.ts'
 import { type Ctx, Format } from './types.ts'
 import {
@@ -76,8 +76,7 @@ export const builder = (yargs: Argv) =>
     .option('router', {
       alias: 'r',
       type: 'string',
-      describe:
-        'Router contract address on EVM source, or CCIPSender instance id on Canton source (defaults to canton-config senderInstanceId)',
+      describe: 'Router contract address on source',
     })
     .options({
       receiver: {
@@ -243,19 +242,15 @@ async function sendMessage(
   const { output, logger } = ctx
   const sourceNetwork = networkInfo(argv.source)
   const destNetwork = networkInfo(argv.dest)
-  const router = resolveRouter(argv, sourceNetwork, logger)
-  if (!router) {
-    throw new CCIPArgumentInvalidError(
-      'router',
-      sourceNetwork.family === ChainFamily.Canton
-        ? 'required on Canton source: pass -r or set senderInstanceId in canton-config'
-        : 'required: pass -r with the source router contract address',
-    )
-  }
 
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
-  decodeAddress(router, sourceNetwork.family)
+
+  const router = argv.router ? argv.router : ""
+  // On Canton, router can be empty
+  if (sourceNetwork.family !== "CANTON") {
+    decodeAddress(router, sourceNetwork.family)
+  }
 
   let data: BytesLike | undefined
   if (argv.data) {
