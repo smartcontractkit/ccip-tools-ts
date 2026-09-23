@@ -1,3 +1,4 @@
+import { type BytesLike, hexlify } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import type { CCIPAPIClient } from './api/index.ts'
@@ -8,15 +9,17 @@ import {
   CCIPHttpError,
   CCIPMessageNotVerifiedYetError,
 } from './errors/index.ts'
-import { fetchWithTimeout } from './fetch.ts'
+import { fetchWithTimeout, redactEndpointUrl } from './fetch.ts'
 import { NetworkType } from './networks.ts'
 import {
   type CCIPRequest,
   type CCIPVerifications,
+  type VerificationPolicy,
   type VerifierResult,
   CCIPVersion,
 } from './types.ts'
-import { signalToPromise } from './utils.ts'
+import { linkAbortSignals, signalToPromise } from './utils.ts'
+import { type VerifierTransport, grpcWebTransport, readVerifier } from './verifiers/index.ts'
 
 /** Default CCIP v2 indexer base URLs for mainnet. */
 export const MAINNET_INDEXER_URLS: readonly string[] = [
@@ -58,8 +61,29 @@ export type FetchVerificationsOpts = {
   pollInterval?: number
   /** Custom fetch used for indexer requests; defaults to `globalThis.fetch`. */
   fetch?: typeof globalThis.fetch
-  /** Per-request timeout in milliseconds for indexer requests (default: 30000). */
+  /** Per-request timeout in milliseconds for indexer and verifier requests (default: 30000). */
   timeoutMs?: number
+  /**
+   * The destination's CCV policy. When given, results from every source are merged (one per
+   * destination CCV) and the call resolves only once they cover it: every required CCV, plus
+   * `optionalThreshold` of the optional ones. Without it, the first source to answer wins.
+   */
+  policy?: VerificationPolicy
+  /** Results already at hand (e.g. attestations obtained out of band); they win over fetched ones. */
+  known?: readonly VerifierResult[]
+  /**
+   * Verifier endpoint URLs to read attestations from directly (see {@link readVerifier}). They are
+   * the last source: tried in order, and only while the API and indexers leave `policy` uncovered.
+   */
+  verifiers?: readonly string[]
+  /** Transport for `verifiers` (default: {@link grpcWebTransport}). */
+  verifierTransport?: VerifierTransport
+  /**
+   * Renders a destination CCV address, as a string or raw bytes, in the destination family's
+   * canonical format, so results and policy match regardless of each source's encoding
+   * (default: hex).
+   */
+  getAddress?: (address: BytesLike) => string
 }
 
 /**
@@ -101,8 +125,11 @@ function assertIndexerUrls(indexer: unknown): asserts indexer is readonly string
 /**
  * Fetch CCV verifications for a CCIP v2.0 message.
  *
- * Races the optional API client against all provided indexer URLs via
- * {@link Promise.any}, returning the first successful response.
+ * Sources, by precedence: `opts.known`; then the API client raced against every indexer URL via
+ * {@link Promise.any}; then `opts.verifiers`, one at a time. Without `opts.policy` the first managed
+ * source to answer wins. With it, partial answers are merged per destination CCV until the policy
+ * is covered, and the verifiers are contacted only if the API and indexers leave it uncovered, so
+ * routine reads stay on managed infrastructure.
  *
  * When `opts.watch` is supplied the function retries on
  * {@link CCIPMessageNotVerifiedYetError} at `opts.pollInterval` ms intervals
@@ -110,8 +137,10 @@ function assertIndexerUrls(indexer: unknown): asserts indexer is readonly string
  *
  * @param messageId - The CCIP message ID (hex string)
  * @param opts - See {@link FetchVerificationsOpts}
- * @returns The verifier results served by the first source to respond successfully
- * @throws {@link CCIPMessageNotVerifiedYetError} if all sources fail or signal fires
+ * @returns The verifier results, one per destination CCV
+ * @throws {@link CCIPMessageNotVerifiedYetError} if the sources don't cover `opts.policy` (or,
+ *   without one, all fail) and `opts.watch` is not live; its context names the missing CCVs and
+ *   why each verifier endpoint failed
  * @throws {@link CCIPArgumentInvalidError} if `opts.indexer` contains a non-string entry
  */
 export async function fetchVerifications(
@@ -122,51 +151,130 @@ export async function fetchVerifications(
     watch,
     pollInterval = 5_000,
     fetch: fetchFn,
-    timeoutMs,
+    timeoutMs = 30_000,
+    policy,
+    known = [],
+    verifiers = [],
+    verifierTransport = grpcWebTransport(fetchFn),
+    getAddress = (address) => (typeof address === 'string' ? address : hexlify(address)),
   }: FetchVerificationsOpts = {},
 ): Promise<VerifierResult[]> {
   if (indexer === NetworkType.Mainnet) indexer = MAINNET_INDEXER_URLS
   else if (indexer === NetworkType.Testnet) indexer = TESTNET_INDEXER_URLS
 
   assertIndexerUrls(indexer)
+  const indexerUrls = indexer
 
+  const fetchIndexer = async (baseUrl: string): Promise<VerifierResult[]> => {
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/verifierresults/${messageId}`
+    const res = await fetchWithTimeout(url, 'fetchVerifications', {
+      signal: watch,
+      fetch: fetchFn,
+      timeoutMs,
+    })
+    if (!res.ok) throw new CCIPHttpError(res.status, res.statusText, { context: { url } })
+    const json = (await res.json()) as IndexerResponse
+    if (!json.success) throw new CCIPMessageNotVerifiedYetError(messageId)
+    return json.results.map(({ verifierResult: vr }) => ({
+      ccvData: vr.ccv_data,
+      sourceAddress: vr.verifier_source_address,
+      destAddress: vr.verifier_dest_address,
+      timestamp: vr.timestamp ? Math.floor(new Date(vr.timestamp).getTime() / 1000) : undefined,
+    }))
+  }
+
+  // One result per destination CCV, the first source to supply it wins. Keys are canonical in the
+  // destination family, and case-folded when hex, so sources and policy match whatever encoding
+  // each one uses.
+  const key = (address: string) => {
+    try {
+      address = getAddress(address)
+    } catch {
+      // not canonicalizable; match as given
+    }
+    return address.startsWith('0x') ? address.toLowerCase() : address
+  }
+  const collected = new Map<string, VerifierResult>()
+  const collect = (results: readonly VerifierResult[]) => {
+    for (const result of results) {
+      const k = key(result.destAddress)
+      if (!collected.has(k)) collected.set(k, result)
+    }
+  }
+  const missingRequired = () => policy?.requiredCCVs.filter((c) => !collected.has(key(c))) ?? []
+  const optionalCovered = () =>
+    policy?.optionalCCVs.filter((c) => collected.has(key(c))).length ?? 0
+  const covered = () =>
+    policy
+      ? !missingRequired().length && optionalCovered() >= policy.optionalThreshold
+      : collected.size > 0
+  // results outside the policy are kept, as sources serve them: a family's policy read may not
+  // resolve every CCV the OffRamp enforces (e.g. Solana's token pool CCVs)
+  const selected = () => [...collected.values()]
+
+  collect(known)
   // Polling loop: retry on CCIPMessageNotVerifiedYetError only when watch is supplied.
   let lastErr
   do {
+    if (policy && covered()) return selected()
+
+    let managedErr
     try {
-      return await Promise.any([
-        ...(apiClient != null ? [apiClient.getVerifications(messageId, { signal: watch })] : []),
-        ...indexer.map(async (baseUrl) => {
-          const url = `${baseUrl.replace(/\/+$/, '')}/v1/verifierresults/${messageId}`
-          const res = await fetchWithTimeout(url, 'fetchVerifications', {
-            signal: watch,
-            fetch: fetchFn,
-            timeoutMs,
-          })
-          if (!res.ok) throw new CCIPHttpError(res.status, res.statusText, { context: { url } })
-          const json = (await res.json()) as IndexerResponse
-          if (!json.success) throw new CCIPMessageNotVerifiedYetError(messageId)
-          const verifications: VerifierResult[] = json.results.map(({ verifierResult: vr }) => ({
-            ccvData: vr.ccv_data,
-            sourceAddress: vr.verifier_source_address,
-            destAddress: vr.verifier_dest_address,
-            timestamp: vr.timestamp
-              ? Math.floor(new Date(vr.timestamp).getTime() / 1000)
-              : undefined,
-          }))
-          return verifications
+      await Promise.any(
+        [
+          ...(apiClient != null
+            ? [() => apiClient.getVerifications(messageId, { signal: watch })]
+            : []),
+          ...indexerUrls.map((url) => () => fetchIndexer(url)),
+        ].map(async (source) => {
+          collect(await source())
+          // a partial answer is kept, but doesn't settle the race
+          if (policy && !covered()) throw new CCIPMessageNotVerifiedYetError(messageId)
         }),
-      ]).catch((err: AggregateError) => {
-        if (watch?.aborted) throw err.errors[0] ?? err
-        throw new CCIPMessageNotVerifiedYetError(messageId, { cause: err })
-      })
-    } catch (err) {
-      lastErr = err
-      if (!(err instanceof CCIPMessageNotVerifiedYetError) || !watch) throw err
-      await signalToPromise(AbortSignal.any([watch, AbortSignal.timeout(pollInterval)])).catch(
-        () => {},
       )
+      return selected()
+    } catch (err) {
+      if (watch?.aborted) throw (err as AggregateError).errors[0] ?? err
+      managedErr = err as Error
     }
+
+    const verifierFailures: { url: string; reason: string }[] = []
+    for (const url of verifiers) {
+      if (covered()) break
+      const link = linkAbortSignals([watch, AbortSignal.timeout(timeoutMs)])
+      try {
+        collect(
+          await readVerifier(url, messageId, {
+            transport: verifierTransport,
+            getAddress,
+            signal: link.signal,
+          }),
+        )
+      } catch (err) {
+        verifierFailures.push({
+          url: redactEndpointUrl(url),
+          reason: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        link.unlink()
+      }
+    }
+    if (covered()) return selected()
+
+    lastErr = new CCIPMessageNotVerifiedYetError(messageId, {
+      cause: managedErr,
+      context: {
+        ...(policy && { missingCCVs: missingRequired() }),
+        ...(policy?.optionalThreshold && {
+          optionalCovered: `${optionalCovered()}/${policy.optionalThreshold}`,
+        }),
+        ...(verifierFailures.length && { verifierFailures }),
+      },
+    })
+    if (!watch) throw lastErr
+    await signalToPromise(AbortSignal.any([watch, AbortSignal.timeout(pollInterval)])).catch(
+      () => {},
+    )
   } while (!watch.aborted)
   throw lastErr
 }

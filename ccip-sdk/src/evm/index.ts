@@ -47,7 +47,6 @@ import {
   type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
-import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
@@ -159,7 +158,7 @@ import { estimateExecGas, findBalancesSlot } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import { type MessageV1TokenTransfer, encodeMessageV1 } from './messageCodec.ts'
-import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
+import type { CCIPMessage_V1_6_EVM, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import {
   type PoolInterfaceVersion,
@@ -2543,9 +2542,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const encodedMessage = hexlify(
-        getDataBytes((request.message as CCIPMessage_V2_0).encodedMessage),
-      )
+      // the policy is computed from the message exactly as emitted (token transfer, extraArgs,
+      // finality); reconstructing it from decoded fields can drop the transfer's pool CCVs
+      const encodedMessage = await this.resolveEncodedMessage(request)
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
@@ -2561,17 +2560,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         optionalThreshold: Number(optionalThreshold),
       }
 
-      // race API client + indexer URLs
-      const verifications = await fetchVerifications(request.message.messageId, {
-        apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : opts.watch
-              ? this.abort
-              : undefined,
-      })
+      const verifications = await this.fetchCCVResults(
+        request.message.messageId,
+        verificationPolicy,
+        opts,
+      )
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
       // v1.2..v1.5 EVM (only) have separate CommitStore
@@ -3097,37 +3090,6 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       destPoolData: result.destPoolData,
       destTokenAmount: result.destTokenAmount,
     }
-  }
-
-  /**
-   * Read the CCV policy the destination enforces for an already-encoded message.
-   *
-   * Calls `OffRamp.getCCVsForMessage(bytes)` with the message exactly as it was emitted, so the
-   * token transfer, extraArgs and finality it carries are the ones the policy is computed from.
-   * Reconstructing the message instead can drop the token transfer and yield the lane default.
-   *
-   * @param opts.offRamp - Destination OffRamp address
-   * @param opts.encodedMessage - The encoded message, as emitted on the source chain
-   * @returns The required and optional CCVs, and the optional threshold
-   */
-  override async getCCVsForEncodedMessage(opts: {
-    offRamp: string
-    encodedMessage: BytesLike
-  }): Promise<{
-    requiredCCVs: readonly string[]
-    optionalCCVs: readonly string[]
-    optionalThreshold: number
-  }> {
-    const contract = new Contract(
-      opts.offRamp,
-      interfaces.OffRamp_v2_0,
-      this.provider,
-    ) as unknown as TypedContract<typeof OffRamp_2_0_ABI>
-    const ccvs = await contract.getCCVsForMessage(hexlify(getDataBytes(opts.encodedMessage)))
-    const [requiredCCVs, optionalCCVs, optionalThreshold] = ccvs.map(
-      resultToObject,
-    ) as unknown as CleanAddressable<typeof ccvs>
-    return { requiredCCVs, optionalCCVs, optionalThreshold: Number(optionalThreshold) }
   }
 
   /**

@@ -4,7 +4,7 @@ import type { PickDeep } from 'type-fest'
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
 import type { UnsignedCantonTx } from './canton/types.ts'
-import { getOnchainCommitReport } from './commits.ts'
+import { fetchVerifications, getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
   CCIPArgumentInvalidError,
@@ -60,6 +60,8 @@ import {
   type Logger,
   type MessageInput,
   type OffchainTokenData,
+  type VerificationPolicy,
+  type VerifierResult,
   type WithLogger,
   CCIPVersion,
   ExecutionState,
@@ -170,12 +172,13 @@ export type ChainContext = WithLogger & {
   verificationsIndexer?: readonly string[]
 
   /**
-   * Byte transport used to read CCV attestations directly from a verifier's aggregator
-   * (`getCCVsForEncodedMessage` / direct verifier fetch). The SDK owns the protobuf schema and the
-   * failover/dedup assembly; this transport only moves bytes. Node consumers inject a
-   * `@grpc/grpc-js` transport; when omitted, the browser-safe grpc-web default is used.
+   * Transport for reading CCV attestations directly from the verifier endpoints passed as
+   * `verifiers` to {@link Chain.getVerifications} / {@link Chain.execute}. The SDK owns the
+   * verifier schema and when to call it; the transport only moves one call's bytes. Inject one to
+   * reach endpoints the default can't, e.g. a native gRPC client for `grpc://` URLs.
    *
-   * Default: `undefined` (use `webGrpcVerifierTransport()`)
+   * Default: `undefined` (use {@link grpcWebTransport}: grpc-web over `fetch`, for `http(s)://`
+   * endpoints served by a grpc-web proxy)
    */
   verifierTransport?: VerifierTransport
 
@@ -814,6 +817,24 @@ export type SendMessageOpts = {
 }
 
 /**
+ * Extra sources of CCV verifications for a CCIP v2.0 message, beyond the CCIP API and indexers.
+ * Consulted only where those leave the destination's CCV policy uncovered.
+ */
+export type VerificationSourcesOpts = {
+  /**
+   * Verifier endpoint URLs to read attestations from directly, tried in order until the policy is
+   * covered. Each URL is passed verbatim to {@link ChainContext.verifierTransport}; the default
+   * accepts `http(s)://` endpoints served by a grpc-web proxy in front of the verifier.
+   */
+  verifiers?: readonly string[]
+  /**
+   * Attestations obtained out of band, keyed by destination CCV address. They win over fetched
+   * ones; the CCV's `verifyMessage` still decides their validity onchain.
+   */
+  ccvData?: Readonly<Record<string, BytesLike>>
+}
+
+/**
  * Common options for {@link Chain.generateUnsignedExecute} and {@link Chain.execute} methods.
  */
 export type ExecuteOpts = (
@@ -823,13 +844,15 @@ export type ExecuteOpts = (
       /** input payload to execute message; contains proofs for v1 and verifications for v2 */
       input: ExecutionInput
     }
-  | {
+  | ({
       /**
        * messageId of message to execute; requires `apiClient`.
-       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API; for
+       * a v2.0 message given `verifiers` or `ccvData`, it instead collects the verifications
+       * against this destination's CCV policy (see {@link Chain.getVerifications}).
        */
       messageId: string
-    }
+    } & VerificationSourcesOpts)
 ) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
@@ -863,7 +886,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   readonly apiRetryConfig: Required<ApiRetryConfig> | null
   /** Default CCIP v2 indexer base URLs for getVerifications (undefined → network defaults) */
   readonly verificationsIndexer?: readonly string[]
-  /** Byte transport for direct CCV verifier fetch (undefined → browser-safe grpc-web default) */
+  /** Transport for direct verifier reads (undefined → grpc-web over `fetch`) */
   readonly verifierTransport?: VerifierTransport
   /**
    * Fires when the chain should tear down: either {@link Chain.destroy} was
@@ -1231,10 +1254,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   } & Pick<LogFilter, 'page'>): Promise<ExecutionInput> {
     if ('verifications' in verifications) {
       // >=v2 verifications is enough for execution
-      return {
-        encodedMessage: (request.message as CCIPMessage<typeof CCIPVersion.V2_0>).encodedMessage,
-        ...verifications,
-      }
+      return { encodedMessage: await this.resolveEncodedMessage(request), ...verifications }
     }
     // other messages in same batch are available from `source` side;
     // not needed for chain families supporting only >=v2
@@ -1748,6 +1768,29 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       opts_ = opts
     } else if (!this.apiClient) {
       throw new CCIPApiClientNotAvailableError()
+    } else if (
+      'messageId' in opts &&
+      (opts.verifiers?.length || Object.keys(opts.ccvData ?? {}).length)
+    ) {
+      // v2 with extra verification sources: collect the verifications against this destination's
+      // CCV policy (API, indexers, then those sources) rather than taking the API's as final
+      const [request, { offRamp, encodedMessage }] = await Promise.all([
+        this.apiClient.getMessageById(opts.messageId),
+        this.apiClient.getEncodedMessage(opts.messageId),
+      ])
+      const collected = await this.getVerifications({
+        offRamp,
+        request: { ...request, message: { ...request.message, encodedMessage } as CCIPMessage },
+        verifiers: opts.verifiers,
+        ccvData: opts.ccvData,
+      })
+      if (!('verifications' in collected))
+        throw new CCIPNotImplementedError(`${this.constructor.name}.getVerifications for v2.0`)
+      opts_ = {
+        ...opts,
+        offRamp,
+        input: { encodedMessage, verifications: collected.verifications },
+      }
     } else {
       const messageId =
         'messageId' in opts
@@ -1884,10 +1927,21 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * })
    * console.log(`Committed at block: ${verifications.log.blockNumber}`)
    * ```
+   *
+   * @example CCIP v2.0: fall back to a verifier the indexers don't carry
+   * ```typescript
+   * const { verificationPolicy, verifications } = await dest.getVerifications({
+   *   offRamp,
+   *   request,
+   *   verifiers: ['https://verifier.example'], // grpc-web proxy in front of its aggregator
+   * })
+   * ```
    */
   async getVerifications({
     offRamp,
     request,
+    verifiers: _verifiers,
+    ccvData: _ccvData,
     ...hints
   }: {
     /** address of offRamp or commitStore contract */
@@ -1899,8 +1953,65 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     >
     /** Optional list of CCIP v2 indexer base URLs to query for CCV verifications, or a NetworkType to use default URLs */
     indexer?: readonly string[] | NetworkType
-  } & Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
+  } & VerificationSourcesOpts &
+    Pick<LogFilter, 'page' | 'watch' | 'startBlock'>): Promise<CCIPVerifications> {
     return getOnchainCommitReport(this, offRamp, request, hints)
+  }
+
+  /**
+   * The MessageV1Codec-encoded form of a CCIP v2.0 request's message: taken from the request when
+   * it carries one (decoded from source logs), else fetched from the CCIP API (whose
+   * `getMessageById` requests don't).
+   *
+   * @param request - The v2.0 request
+   * @returns The 0x-prefixed encoded message
+   * @throws {@link CCIPApiClientNotAvailableError} if it must be fetched and the API is disabled
+   */
+  protected async resolveEncodedMessage(
+    request: PickDeep<CCIPRequest, 'message.messageId'>,
+  ): Promise<string> {
+    const { encodedMessage } = request.message as Partial<CCIPMessage<typeof CCIPVersion.V2_0>>
+    if (encodedMessage) return hexlify(getDataBytes(encodedMessage))
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    return (await this.apiClient.getEncodedMessage(request.message.messageId)).encodedMessage
+  }
+
+  /**
+   * Collect a CCIP v2.0 message's CCV results against the destination `policy`, from every source:
+   * `opts.ccvData`, then the CCIP API raced against the indexers, then `opts.verifiers` (read via
+   * {@link ChainContext.verifierTransport}). For families' `getVerifications` implementations.
+   *
+   * @param messageId - The message id
+   * @param policy - This destination's CCV policy for the message
+   * @param opts - The `getVerifications` options
+   * @returns The results covering `policy`
+   * @throws {@link CCIPMessageNotVerifiedYetError} if the sources can't cover `policy`
+   */
+  protected fetchCCVResults(
+    messageId: string,
+    policy: VerificationPolicy,
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<VerifierResult[]> {
+    const getAddress = (address: BytesLike) => (this.constructor as ChainStatic).getAddress(address)
+    return fetchVerifications(messageId, {
+      policy,
+      known: Object.entries(opts.ccvData ?? {}).map(([ccv, data]) => ({
+        ccvData: hexlify(getDataBytes(data)),
+        destAddress: getAddress(ccv),
+        sourceAddress: '',
+      })),
+      apiClient: this.apiClient,
+      indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
+      verifiers: opts.verifiers,
+      verifierTransport: this.verifierTransport,
+      getAddress,
+      watch:
+        opts.watch instanceof AbortSignal
+          ? AbortSignal.any([opts.watch, this.abort])
+          : opts.watch
+            ? this.abort
+            : undefined,
+    })
   }
 
   /**
@@ -2572,19 +2683,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     offRamp: string
     message: GetRequiredCCVsMessage
   }): Promise<GetRequiredCCVsResult>
-
-  /**
-   * Read the CCV policy the destination enforces for an already-encoded message.
-   *
-   * @param opts.offRamp - Destination OffRamp address
-   * @param opts.encodedMessage - The encoded message, as emitted on the source chain
-   * @returns The required and optional CCVs, and the optional threshold
-   */
-  getCCVsForEncodedMessage?(opts: { offRamp: string; encodedMessage: BytesLike }): Promise<{
-    requiredCCVs: readonly string[]
-    optionalCCVs: readonly string[]
-    optionalThreshold: number
-  }>
 }
 
 /**

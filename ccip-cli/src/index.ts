@@ -113,38 +113,6 @@ const globalOpts = {
     describe:
       'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
   },
-  verifier: {
-    type: 'array',
-    string: true,
-    alias: 'verifier-endpoint',
-    describe:
-      'Fetch CCV attestations from a verifier when the CCIP API and indexer cannot cover the ' +
-      'required CCV set (e.g. a CCV no indexer has onboarded): ' +
-      '[<ccv-address>=]<scheme>://<host>[:port], repeatable. Schemes: grpc (aggregator over TLS), ' +
-      'grpc+plaintext (aggregator, no TLS). Repeat an address to give it failover endpoints, tried ' +
-      'in order. Omit the address to apply one endpoint to every required CCV.',
-    coerce: (entries: unknown[]): string[] =>
-      entries.flatMap((e) => {
-        if (typeof e !== 'string') {
-          throw new Error(`--verifier expects strings, got ${typeof e}`)
-        }
-        return e.split(',').map((s) => s.trim())
-      }),
-  },
-  'ccv-data': {
-    type: 'array',
-    string: true,
-    describe:
-      'Supply a CCV attestation directly as <ccv-address>=<0x-hex>, repeatable. The bottom of the ' +
-      'source ladder: use it when the CCIP API, the indexer and the verifier endpoint are all ' +
-      'unavailable, or to execute bytes obtained out of band. Validity is decided onchain by the ' +
-      "CCV's verifyMessage, so wrong bytes can only waste gas.",
-    coerce: (entries: unknown[]): string[] =>
-      entries.flatMap((e) => {
-        if (typeof e !== 'string') throw new Error(`--ccv-data expects strings, got ${typeof e}`)
-        return e.split(',').map((x) => x.trim())
-      }),
-  },
   indexer: {
     type: 'array',
     string: true,

@@ -151,12 +151,11 @@ const config: Config = {
           '../ccip-sdk/src/index.ts',
           '../ccip-sdk/src/viem.ts',
           '../ccip-sdk/src/all-chains.ts',
-          '../ccip-sdk/src/verifiers/index.ts',
         ],
         tsconfig: '../ccip-sdk/tsconfig.json',
         out: 'docs-sdk',
         // Merge every entry point into one flat namespace so the subpath exports
-        // (viem, all-chains, verifiers) are documented alongside the root export
+        // (viem, all-chains) are documented alongside the root export
         // and API pages keep their flat URLs (classes/, functions/, ...).
         plugin: ['typedoc-plugin-markdown', 'typedoc-plugin-merge-modules'],
         mergeModulesMergeMode: 'project',

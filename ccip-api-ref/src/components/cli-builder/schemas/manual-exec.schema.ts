@@ -29,27 +29,24 @@ export const manualExecSchema: CommandSchema<'manual-exec'> = {
     {
       type: 'array',
       name: 'verifier',
-      alias: 'verifier-endpoint',
+      alias: 'verifiers',
       label: 'Verifier Endpoints',
       description:
-        'Fetch CCV attestations from a verifier when the CCIP API and indexer cannot cover the ' +
-        'required CCV set. Format: [<ccv-address>=]<scheme>://<host>[:port]. Schemes: grpc:// ' +
-        '(aggregator over TLS), grpc+plaintext:// (no TLS). Repeat the same address to give it ' +
-        'failover endpoints, tried in order. Use different addresses for different CCVs, or omit ' +
-        'the address to apply one endpoint to every required CCV.',
+        "Verifier endpoint URLs to read CCV attestations from directly, when the CCIP API and indexers don't " +
+        "cover the destination's CCV policy (e.g. a CCV no indexer has onboarded). Tried in order until " +
+        'covered. https:// or http:// for a grpc-web proxy; grpc:// or grpcs:// (TLS) or ' +
+        'grpc+plaintext:// for a native gRPC aggregator.',
       group: 'verification',
       itemType: 'string',
-      placeholder: '0x345AEDB0...=grpc://aggregator.example:443',
+      placeholder: 'grpc://aggregator.example:443',
     },
     {
       type: 'array',
       name: 'ccv-data',
       label: 'Supplied CCV Attestations',
       description:
-        'Supply a CCV attestation directly as <ccv-address>=<0x-hex>. The bottom of the source ' +
-        'ladder: use it when the CCIP API, the indexer and the verifier endpoint are all ' +
-        'unavailable, or to execute bytes obtained out of band. The CCV verifyMessage decides ' +
-        'validity onchain, so wrong bytes can only waste gas.',
+        'CCV attestations obtained out of band, as <dest-ccv-address>=<0x-hex>; they win over fetched ' +
+        "ones. The CCV's verifyMessage still decides validity onchain, so wrong bytes can only waste gas.",
       group: 'verification',
       itemType: 'string',
       placeholder: '0x345AEDB0...=0x00010001...',

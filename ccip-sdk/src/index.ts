@@ -43,6 +43,7 @@ export type {
   TokenTransferFeeConfig,
   TokenTransferFeeOpts,
   TotalFeesEstimate,
+  VerificationSourcesOpts,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -95,6 +96,7 @@ export {
   type Logger,
   type MessageInput,
   type OffchainTokenData,
+  type VerificationPolicy,
   type VerifierResult,
   type WithLogger,
   CCIPVersion,
@@ -103,6 +105,13 @@ export {
   MessageStatus,
 } from './types.ts'
 export type { WithRetryConfig } from './utils.ts'
+export {
+  type VerifierCall,
+  type VerifierTransport,
+  VERIFIER_METHOD,
+  grpcWebTransport,
+  readVerifier,
+} from './verifiers/index.ts'
 export {
   bytesToBuffer,
   decodeAddress,

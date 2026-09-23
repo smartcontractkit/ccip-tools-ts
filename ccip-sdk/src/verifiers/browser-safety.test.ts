@@ -20,13 +20,14 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 
-/** Recursively list every `.ts` file under `dir`, excluding tests. */
+/** Recursively list every shipped `.ts` file under `dir`: tests and `__mocks__` excluded, as in the build. */
 function tsFiles(dir: string): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...tsFiles(full))
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(full)
+    if (entry.isDirectory()) {
+      if (entry.name !== '__mocks__' && entry.name !== '__tests__') out.push(...tsFiles(full))
+    } else if (entry.name.endsWith('.ts') && !entry.name.includes('.test.')) out.push(full)
   }
   return out
 }

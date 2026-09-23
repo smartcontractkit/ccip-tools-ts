@@ -39,6 +39,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs, resolveIndexer } from '../providers/index.ts'
+import { verifiersOption } from '../verifiers/options.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
@@ -77,6 +78,7 @@ export const builder = (yargs: Argv) =>
         type: 'boolean',
         describe: 'Wait for (first) execution',
       },
+      ...verifiersOption,
     })
 
 /**

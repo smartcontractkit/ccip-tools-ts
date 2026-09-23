@@ -4,21 +4,19 @@ import { after, before, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
-  VERIFIER_METHOD,
-  decodeGetVerifierResultsResponse,
-  encodeGetVerifierResultsRequest,
-  readAggregator,
-} from '@chainlink/ccip-sdk/src/verifiers/index.ts'
+  CCIPMessageNotVerifiedYetError,
+  fetchVerifications,
+  readVerifier,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import * as grpc from '@grpc/grpc-js'
 import { loadSync } from '@grpc/proto-loader'
 
 import { grpcVerifierTransport } from './grpc-transport.ts'
 
 /**
- * Proves the CLI's grpc-js passthrough transport interoperates with the SDK schema over a REAL
- * gRPC (HTTP/2) server: the SDK encodes the request, grpc-js frames it, a real server decodes and
- * answers, and the SDK decodes the response. Exercises the exact refactored path end to end without
- * the committee stack.
+ * Proves the CLI's grpc-js passthrough transport interoperates with the SDK's hand-written codec
+ * over a REAL gRPC (HTTP/2) server built from verifier.proto: the SDK encodes the request, grpc-js
+ * frames it, the server decodes and answers, and the SDK decodes the response.
  */
 
 const CCV = '0x345aedb0988ff1e897c26f9ad3ae84603ed517e2'
@@ -82,42 +80,69 @@ describe('grpcVerifierTransport (real gRPC round-trip)', () => {
     server.forceShutdown()
   })
 
-  it('encodes (SDK) → transports (grpc-js) → decodes (SDK) a real response', async () => {
-    const transport = grpcVerifierTransport()
-    const bytes = await transport.unary({
-      method: VERIFIER_METHOD,
-      endpoint: {
-        type: 'aggregator',
-        target: `127.0.0.1:${port}`,
-        tls: false,
-        raw: `grpc+plaintext://127.0.0.1:${port}`,
-      },
-      request: encodeGetVerifierResultsRequest(MSG),
-      timeoutMs: 5_000,
+  it('reads a real response: SDK encodes → grpc-js transports → SDK decodes', async () => {
+    const results = await readVerifier(`grpc+plaintext://127.0.0.1:${port}`, MSG, {
+      transport: grpcVerifierTransport(),
     })
-    const results = decodeGetVerifierResultsResponse(bytes)
-    assert.equal(results.length, 1)
-    const r = results[0]
-    assert.ok(r)
-    assert.equal(r.ccvData, '0xdeadbeef')
-    assert.equal(r.destAddress, CCV)
-    assert.equal(r.timestamp, 1_690_000_000)
+    assert.deepEqual(results, [
+      { ccvData: '0xdeadbeef', destAddress: CCV, sourceAddress: CCV, timestamp: 1_690_000_000 },
+    ])
   })
 
-  it('assembles via readAggregator with the injected grpc transport', async () => {
-    const read = await readAggregator(
-      [
-        {
-          type: 'aggregator',
-          target: `127.0.0.1:${port}`,
-          tls: false,
-          raw: `grpc+plaintext://127.0.0.1:${port}`,
-        },
-      ],
-      MSG,
-      { transport: grpcVerifierTransport() },
+  it('serves as the last source of fetchVerifications, failing over past a dead endpoint', async () => {
+    const results = await fetchVerifications(MSG, {
+      indexer: [],
+      apiClient: null,
+      policy: { requiredCCVs: [CCV], optionalCCVs: [], optionalThreshold: 0 },
+      verifiers: ['grpc+plaintext://127.0.0.1:1', `grpc+plaintext://127.0.0.1:${port}`],
+      verifierTransport: grpcVerifierTransport(),
+    })
+    assert.equal(results[0]?.ccvData, '0xdeadbeef')
+  })
+
+  it("reports an unreachable endpoint without grpc-js's empty resolution note", async () => {
+    await assert.rejects(
+      fetchVerifications(MSG, {
+        indexer: [],
+        apiClient: null,
+        policy: { requiredCCVs: [CCV], optionalCCVs: [], optionalThreshold: 0 },
+        verifiers: ['grpc+plaintext://127.0.0.1:1'],
+        verifierTransport: grpcVerifierTransport(),
+        timeoutMs: 5_000,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        const [failure] = err.context.verifierFailures as { url: string; reason: string }[]
+        assert.equal(failure?.url, 'grpc+plaintext://127.0.0.1:1')
+        assert.match(failure!.reason, /UNAVAILABLE/)
+        assert.doesNotMatch(failure!.reason, /Resolution note:\s*$/)
+        return true
+      },
     )
-    assert.equal(read.servedBy, `grpc+plaintext://127.0.0.1:${port}`)
-    assert.equal(read.results[0]?.ccvData, '0xdeadbeef')
+  })
+
+  it('cancels the call when its signal aborts', async () => {
+    await assert.rejects(
+      grpcVerifierTransport()({
+        url: `grpc+plaintext://127.0.0.1:${port}`,
+        method: '/chainlink_ccv.verifier.v1.Verifier/GetVerifierResultsForMessage',
+        body: new Uint8Array(),
+        signal: AbortSignal.abort(),
+      }),
+    )
+  })
+
+  it('hands http(s):// endpoints to the grpc-web transport', async () => {
+    const seen: string[] = []
+    const transport = grpcVerifierTransport(({ url }) => {
+      seen.push(url)
+      return Promise.resolve(new Uint8Array())
+    })
+    await transport({ url: 'https://proxy.example', method: '/m', body: new Uint8Array() })
+    assert.deepEqual(seen, ['https://proxy.example'])
+    await assert.rejects(
+      transport({ url: 'ftp://proxy.example', method: '/m', body: new Uint8Array() }),
+      /unsupported scheme/,
+    )
   })
 })

@@ -39,7 +39,6 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
-import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
@@ -1720,16 +1719,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
         optionalThreshold: ccvs.optionalThreshold,
       }
-      const verifications = await fetchVerifications(request.message.messageId, {
-        apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : opts.watch
-              ? this.abort
-              : undefined,
-      })
+      const verifications = await this.fetchCCVResults(
+        request.message.messageId,
+        verificationPolicy,
+        opts,
+      )
       return { verificationPolicy, verifications }
     }
     const coveringPdas = await this._getCommitReportPdaAccounts(

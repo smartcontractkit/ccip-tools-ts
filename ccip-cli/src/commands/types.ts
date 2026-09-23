@@ -1,5 +1,4 @@
-import type { Logger } from '@chainlink/ccip-sdk/src/index.ts'
-import type { VerifierTransport } from '@chainlink/ccip-sdk/src/verifiers/index.ts'
+import type { Logger, VerifierTransport } from '@chainlink/ccip-sdk/src/index.ts'
 
 /** Output format options for CLI commands. */
 export const Format = {
@@ -30,9 +29,8 @@ export type Ctx = {
   logger: Logger
   verbose?: boolean
   /**
-   * Byte transport for direct CCV verifier fetch, injected into every chain built from this
-   * context. The CLI sets the `@grpc/grpc-js` transport; the SDK falls back to its browser-safe
-   * grpc-web default when this is undefined.
+   * Transport for reading CCV attestations from `--verifier` endpoints, passed to every chain built
+   * from this context: native gRPC (`@grpc/grpc-js`) or grpc-web, by URL scheme.
    */
   verifierTransport?: VerifierTransport
 }
