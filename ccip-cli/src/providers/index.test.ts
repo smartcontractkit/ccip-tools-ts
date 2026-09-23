@@ -12,11 +12,7 @@ import {
 
 import type { Ctx } from '../commands/index.ts'
 import { resolveCliIndexer } from './canton/index.ts'
-import {
-  fetchChainsFromRpcs,
-  filterEndpointsForFamily,
-  isCantonLedgerUrl,
-} from './index.ts'
+import { fetchChainsFromRpcs, filterEndpointsForFamily, isCantonLedgerUrl } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Shared helpers

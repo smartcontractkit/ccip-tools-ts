@@ -246,9 +246,9 @@ async function sendMessage(
   const getChain = fetchChainsFromRpcs(ctx, argv)
   const source = await getChain(sourceNetwork.name)
 
-  const router = argv.router ? argv.router : ""
+  const router = argv.router ? argv.router : ''
   // On Canton, router can be empty
-  if (sourceNetwork.family !== "CANTON") {
+  if (sourceNetwork.family !== 'CANTON') {
     decodeAddress(router, sourceNetwork.family)
   }
 

@@ -7,7 +7,6 @@ import {
   type ChainTransaction,
   type EVMChain,
   type Logger,
-  type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPError,

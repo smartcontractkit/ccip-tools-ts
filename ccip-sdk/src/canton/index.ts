@@ -1389,9 +1389,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       actAs: commands.actAs,
       readAs: commands.readAs,
       disclosedContracts: commands.disclosedContracts,
-      synchronizerId: commands.synchronizerId ? commands.synchronizerId : "", // must be provided, even if empty
+      synchronizerId: commands.synchronizerId ? commands.synchronizerId : '', // must be provided, even if empty
       hashingSchemeVersion: 'HASHING_SCHEME_VERSION_V3',
-      packageIdSelectionPreference: [] // must be provided, even if empty
+      packageIdSelectionPreference: [], // must be provided, even if empty
     }
 
     const prepareResponse = await this.provider.prepareSubmission(prepareRequest)
