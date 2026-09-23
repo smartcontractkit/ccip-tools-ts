@@ -37,7 +37,7 @@ import {
 import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
 import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
-import type { UnsignedSolanaTx, Wallet } from './types.ts'
+import { type UnsignedSolanaTx, type Wallet, canSignV1Transactions } from './types.ts'
 import {
   MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
   PACKET_DATA_SIZE,
@@ -454,11 +454,14 @@ export async function simulateTransaction(
   {
     payerKey,
     computeUnitsOverride,
+    allowV1 = true,
     ...rest
   }: {
     payerKey: PublicKey
     computeUnitsOverride?: number
     addressLookupTableAccounts?: AddressLookupTableAccount[]
+    /** false when the signer can't sign v1 (see {@link canSignV1Transactions}): never fall back to v1 */
+    allowV1?: boolean
   } & ({ instructions: TransactionInstruction[] } | { tx: Transaction | VersionedTransaction }),
 ) {
   // Add max compute units for simulation
@@ -505,6 +508,11 @@ export async function simulateTransaction(
 
     if (tx) {
       return finish((await connection.simulateTransaction(tx, config)).value, 1)
+    }
+    if (!allowV1) {
+      throw new CCIPTransactionTooLargeError(
+        `Transaction too large for v0 (${PACKET_DATA_SIZE} bytes), and the signer can't sign v1`,
+      )
     }
 
     // v1 fallback: no address lookup tables — every account static; zero-filled
@@ -698,6 +706,9 @@ function nextSliceEnd(
  *       in which case they will be split into multiple transactions
  *   - mainIndex - Index of the main instruction
  *   - lookupTables - lookupTables to be used for main instruction
+ * A slice too large for v0 is sent as v1 only if the wallet can sign it (see
+ * {@link canSignV1Transactions}); otherwise it is too large, and is split or rejected per `split`.
+ *
  * @param opts - Optional parameters:
  *   - computeUnits - compute-unit limit for the transaction carrying the main instruction;
  *       other transactions use their simulated consumption
@@ -720,6 +731,7 @@ export async function simulateAndSendTxs(
   if (!instructions.length)
     throw new CCIPArgumentInvalidError('instructions', 'must contain at least one instruction')
   const { connection } = ctx
+  const allowV1 = canSignV1Transactions(wallet)
   let hash: string | undefined
   let pendingSignature: string | undefined
   const slices: SolanaSentSlice[] = []
@@ -740,6 +752,7 @@ export async function simulateAndSendTxs(
             payerKey: wallet.publicKey,
             instructions: ixs,
             addressLookupTableAccounts,
+            allowV1,
           })
           simulated = simulation.unitsConsumed || 0
           // returned by current RPCs, but not declared in web3.js' response type
@@ -762,7 +775,8 @@ export async function simulateAndSendTxs(
       // Prefer a v0 transaction (supports address lookup tables); fall back to a v1
       // transaction (all accounts static, resource limits inlined into the message's
       // transactionConfig, 4096-byte wire limit instead of 1232) when the v0 wire does
-      // not fit the packet or v0 can't represent the accounts
+      // not fit the packet or v0 can't represent the accounts; a wallet that can't sign v1
+      // never gets here, as its simulation already rejected such a slice as too large
       let txV0: VersionedTransaction | undefined
       try {
         const txMsg = new TransactionMessage({

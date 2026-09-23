@@ -23,7 +23,7 @@ import {
   CCIPPartialTransactionSubmissionError,
   CCIPTransactionTooLargeError,
 } from '../errors/index.ts'
-import type { Wallet } from './types.ts'
+import { type Wallet, canSignV1Transactions } from './types.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import {
   MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
@@ -651,6 +651,72 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         { signature: 'v1-signature', start: 0, end: 1 },
         { signature: 'v0-signature', start: 1, end: 2 },
       ])
+      assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
+    })
+
+    // e.g. Ledger's Solana app, which parses v1 as a malformed v0 message (LedgerHQ/app-solana#248)
+    const v0OnlyWallet = Object.assign(Object.create(wallet) as Wallet, {
+      supportedTransactionVersions: new Set(['legacy', 0] as const),
+    })
+
+    it('canSignV1Transactions follows supportedTransactionVersions', () => {
+      assert.equal(canSignV1Transactions(wallet), true, 'undeclared: every version')
+      assert.equal(canSignV1Transactions(v0OnlyWallet), false)
+      assert.equal(
+        canSignV1Transactions({ ...wallet, supportedTransactionVersions: null }),
+        false,
+        'null: legacy only',
+      )
+      assert.equal(
+        canSignV1Transactions({
+          ...wallet,
+          supportedTransactionVersions: new Set([0, 1] as const),
+        }),
+        true,
+      )
+    })
+
+    it('simulateAndSendTxs never builds v1 for a wallet that cannot sign it', async () => {
+      const { connection, captured } = mockConnection()
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, v0OnlyWallet, { instructions: OVERSIZED, mainIndex: 0 }),
+        (err: unknown) =>
+          err instanceof CCIPTransactionTooLargeError && /can't sign v1/.test(err.message),
+      )
+      assert.equal(captured.rpc, undefined, 'no v1 simulation was attempted')
+      assert.equal(captured.sentWire, undefined, 'no v1 transaction was sent')
+    })
+
+    it('simulateAndSendTxs splits into v0 transactions for a wallet that cannot sign v1', async () => {
+      const { connection, captured } = mockConnection()
+      const sent = mockSendV0(connection)
+
+      // each fits a v0 packet alone, but not together: the pair only fits v1
+      const MEDIUM = sampleInstruction(10, 450)
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        v0OnlyWallet,
+        { instructions: [MEDIUM, MEDIUM], mainIndex: 1 },
+        { split: 'resource' },
+      )
+      assert.equal(captured.rpc, undefined, 'no v1 simulation was attempted')
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+      assert.ok(sent.every((tx) => tx.message.version === 0))
+    })
+
+    it('simulateAndSendTxs still uses v1 for a wallet declaring it', async () => {
+      const { connection, captured } = mockConnection()
+      const v1Wallet = Object.assign(Object.create(wallet) as Wallet, {
+        supportedTransactionVersions: new Set(['legacy', 0, 1] as const),
+      })
+      const { hash } = await simulateAndSendTxs({ connection }, v1Wallet, {
+        instructions: OVERSIZED,
+        mainIndex: 0,
+      })
+      assert.equal(hash, 'v1-signature')
       assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
     })
 
