@@ -52,6 +52,7 @@ import {
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
+  CCIPPartialTransactionSubmissionError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
@@ -61,6 +62,7 @@ import {
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
+  CCIPTransactionTooLargeError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import {
@@ -1406,7 +1408,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * {@inheritDoc Chain.sendMessage}
+   *
+   * Token approvals and `ccipSend` go in a single transaction when they fit, and are split only
+   * on transaction-size or compute-budget failures: a program error (e.g. insufficient fee) is
+   * thrown before the approvals are sent, unless they had to be split off first.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   * @throws {@link CCIPPartialTransactionSubmissionError} if `ccipSend` fails after the approvals
+   *   were split into (and confirmed in) an earlier transaction
    */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
@@ -1415,7 +1423,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       sender: opts.wallet.publicKey.toBase58(),
     })
 
-    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned, opts.txGasLimit)
+    const { hash } = await simulateAndSendTxs(this, opts.wallet, unsigned, {
+      computeUnits: opts.txGasLimit,
+      split: 'resource',
+    })
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
@@ -1448,7 +1459,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * {@inheritDoc Chain.execute}
+   *
+   * Not atomic: buffering and lookup-table instructions are split across as many transactions as
+   * needed, on any simulation failure, each confirmed before the next one is simulated; a failure
+   * in a later transaction leaves the earlier ones (e.g. buffered report chunks) committed.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   * @throws {@link CCIPPartialTransactionSubmissionError} if a transaction fails after earlier
+   *   ones (e.g. buffering) confirmed, and no retry strategy is left
    */
   async execute(
     opts: Parameters<Chain['execute']>[0] & {
@@ -1467,18 +1484,25 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })
-        hash = await simulateAndSendTxs(this, wallet, unsigned, opts.txGasLimit ?? opts.gasLimit)
+        ;({ hash } = await simulateAndSendTxs(this, wallet, unsigned, {
+          computeUnits: opts.txGasLimit ?? opts.gasLimit,
+        }))
       } catch (err) {
         if (!(err instanceof Error)) throw err
-        const message = [err.message, err.cause instanceof Error ? err.cause.message : ''].join(
-          '\n',
-        )
-        if (message.includes('AlreadyContainsChunk')) {
+        // a partial submission wraps the failure which picks the retry strategy
+        const cause =
+          err instanceof CCIPPartialTransactionSubmissionError && err.cause instanceof Error
+            ? err.cause
+            : err
+        if (cause.message.includes('AlreadyContainsChunk')) {
           // stale buffer from a previous failed attempt; close it and retry
           if (!opts.clearLeftoverAccounts) {
             opts = { ...opts, clearLeftoverAccounts: true }
           } else throw err
-        } else if (['encoding overruns Uint8Array', 'too large'].some((e) => message.includes(e))) {
+        } else if (
+          cause instanceof CCIPTransactionTooLargeError ||
+          ['encoding overruns Uint8Array', 'too large'].some((e) => cause.message.includes(e))
+        ) {
           // in case of failure to serialize a report, first try buffering (because it gets
           // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
           // deactivation before they can be closed/recycled)

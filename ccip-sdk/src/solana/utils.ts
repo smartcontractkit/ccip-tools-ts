@@ -25,6 +25,7 @@ import { dataLength, dataSlice, encodeBase64, hexlify } from 'ethers'
 
 import type { RateLimiterState } from '../chain.ts'
 import {
+  CCIPArgumentInvalidError,
   CCIPDataFormatUnsupportedError,
   CCIPPartialTransactionSubmissionError,
   CCIPTokenMintInvalidError,
@@ -407,6 +408,32 @@ export function getErrorFromLogs(
 }
 
 /**
+ * A failed simulation, thrown as the same {@link SendTransactionError} `sendTransaction` throws,
+ * keeping the structured Solana error for callers.
+ */
+class SimulationFailedError extends SendTransactionError {
+  readonly simulationError: NonNullable<SimulatedTransactionResponse['err']>
+  /** index of the caller's first instruction in the simulated tx (1 after a prepended compute-budget ix) */
+  readonly instructionOffset: number
+
+  /** Creates a simulation failed error. */
+  constructor(
+    simulationError: NonNullable<SimulatedTransactionResponse['err']>,
+    instructionOffset: number,
+    logs: string[] | null,
+  ) {
+    super({
+      action: 'simulate',
+      signature: '',
+      transactionMessage: jsonStringify(simulationError),
+      logs: logs ?? undefined,
+    })
+    this.simulationError = simulationError
+    this.instructionOffset = instructionOffset
+  }
+}
+
+/**
  * Simulates a Solana transaction to estimate compute units.
  *
  * Prefers a v0 transaction (supports address lookup tables); when the v0 wire does
@@ -442,25 +469,15 @@ export async function simulateTransaction(
     sigVerify: false,
   }
 
-  const finish = (result: SimulatedTransactionResponse) => {
+  // instructionOffset: 1 when computeBudgetIx was prepended (v0), 0 otherwise
+  const finish = (result: SimulatedTransactionResponse, instructionOffset: number) => {
     logger.debug('Simulation results:', {
       logs: result.logs,
       unitsConsumed: result.unitsConsumed,
       returnData: result.returnData,
       err: result.err,
     })
-    if (result.err) {
-      // Same error sendTransaction sends, retaining the structured simulation error for callers.
-      throw Object.assign(
-        new SendTransactionError({
-          action: 'simulate',
-          signature: '',
-          transactionMessage: jsonStringify(result.err),
-          logs: result.logs!,
-        }),
-        { simulationError: result.err },
-      )
-    }
+    if (result.err) throw new SimulationFailedError(result.err, instructionOffset, result.logs)
     return result
   }
 
@@ -481,7 +498,7 @@ export async function simulateTransaction(
     }
 
     if (tx) {
-      return finish((await connection.simulateTransaction(tx, config)).value)
+      return finish((await connection.simulateTransaction(tx, config)).value, 1)
     }
 
     // v1 fallback: no address lookup tables — every account static; zero-filled
@@ -496,7 +513,7 @@ export async function simulateTransaction(
       message,
       new Array(message.header.numRequiredSignatures).fill(null),
     )
-    return finish(await simulateRawV1(connection, wire))
+    return finish(await simulateRawV1(connection, wire), 0)
   }
 
   if (!('version' in rest.tx)) {
@@ -515,7 +532,7 @@ export async function simulateTransaction(
     }
 
     if (tx) {
-      return finish((await connection.simulateTransaction(tx, config)).value)
+      return finish((await connection.simulateTransaction(tx, config)).value, 1)
     }
 
     const message = compileV1Message({
@@ -528,11 +545,11 @@ export async function simulateTransaction(
       message,
       new Array(message.header.numRequiredSignatures).fill(null),
     )
-    return finish(await simulateRawV1(connection, wire))
+    return finish(await simulateRawV1(connection, wire), 0)
   }
 
   // already-versioned transaction: simulate as-is
-  return finish((await connection.simulateTransaction(rest.tx, config)).value)
+  return finish((await connection.simulateTransaction(rest.tx, config)).value, 0)
 }
 
 /**
@@ -586,26 +603,66 @@ export function simulationProvider(
   }
 }
 
+/**
+ * Returns the `InstructionError` of a failed simulation: the failed instruction's index relative
+ * to the caller's instructions (negative if it's a prepended compute-budget ix), and its error.
+ */
+function getInstructionError(err: unknown): { index: number; error: unknown } | undefined {
+  if (!(err instanceof SimulationFailedError)) return
+  const { simulationError, instructionOffset } = err
+  if (typeof simulationError !== 'object' || !('InstructionError' in simulationError)) return
+  const detail = simulationError.InstructionError
+  if (!Array.isArray(detail) || typeof detail[0] !== 'number') return
+  return { index: detail[0] - instructionOffset, error: detail[1] as unknown }
+}
+
 /** Returns whether a simulation error was caused by Solana compute-budget exhaustion. */
-function isComputeBudgetError(error: unknown): boolean {
-  if (!(error instanceof SendTransactionError)) return false
-  const structured = (error as { simulationError?: unknown }).simulationError
-  if (typeof structured === 'string') return structured === 'ComputationalBudgetExceeded'
-  if (structured && typeof structured === 'object' && 'InstructionError' in structured) {
-    const detail = (structured as { InstructionError?: unknown }).InstructionError
-    if (!Array.isArray(detail)) return false
-    return (
-      detail[1] === 'ComputationalBudgetExceeded' ||
-      (detail[1] === 'ProgramFailedToComplete' &&
-        error.logs?.some((log) => log.includes('exceeded CUs meter')) === true)
-    )
-  }
-  return false
+function isComputeBudgetError(err: unknown): boolean {
+  const failed = getInstructionError(err)?.error
+  return (
+    failed === 'ComputationalBudgetExceeded' ||
+    // a program exhausting the budget mid-execution; the BPF meter log tells it apart
+    (failed === 'ProgramFailedToComplete' &&
+      (err as SendTransactionError).logs?.some((log) => log.includes('exceeded CUs meter')) ===
+        true)
+  )
+}
+
+/** How {@link simulateAndSendTxs} may split instructions across transactions. */
+export type SolanaSplitMode = 'partial' | 'resource' | 'atomic'
+
+/** A transaction confirmed by {@link simulateAndSendTxs}, carrying `instructions[start:end]`. */
+export type SolanaSentSlice = { signature: string; start: number; end: number }
+
+/**
+ * Returns the end of the next slice to try after simulating `instructions[start:end]` failed
+ * with `err`, or undefined if `split` doesn't allow splitting on it (or splitting can't help).
+ * An instruction error cuts the slice right before the failed instruction, since the ones before
+ * it succeeded; other splittable errors (e.g. size) drop the last instruction.
+ */
+function nextSliceEnd(
+  err: unknown,
+  start: number,
+  end: number,
+  split: SolanaSplitMode,
+): number | undefined {
+  if (split === 'atomic' || end - start <= 1) return
+  if (
+    split === 'resource' &&
+    !(err instanceof CCIPTransactionTooLargeError) &&
+    !isComputeBudgetError(err)
+  )
+    return
+  const failed = getInstructionError(err)?.index
+  if (failed == null || failed < 0 || failed >= end - start) return end - 1
+  // the first instruction fails on its own: a shorter slice would fail the same way
+  if (failed > 0) return start + failed
 }
 
 /**
  * Sign, simulate, send and confirm as many instructions as possible on each transaction.
- * The default `'partial'` mode may confirm a valid instruction prefix before a later failure.
+ * Each slice is confirmed before the next one is simulated, so a failure in a later slice leaves
+ * the earlier ones committed.
  *
  * @param ctx - Context object containing connection and logger
  * @param wallet - Wallet to sign and pay for txs
@@ -614,39 +671,43 @@ function isComputeBudgetError(error: unknown): boolean {
  *       in which case they will be split into multiple transactions
  *   - mainIndex - Index of the main instruction
  *   - lookupTables - lookupTables to be used for main instruction
- * @param computeUnits - max computeUnits limit to be used for main instruction
- * @param splitMode - `'partial'` splits after any simulation failure, `'resource'` splits only
- *   compute-budget and transaction-size failures, and `'atomic'` never splits.
- * @returns - signature of successful transaction including main instruction
+ * @param opts - Optional parameters:
+ *   - computeUnits - compute-unit limit for the transaction carrying the main instruction;
+ *       other transactions use their simulated consumption
+ *   - split - which simulation failures split the instructions across transactions:
+ *       `'partial'` (default) any, `'resource'` only compute-budget and transaction-size
+ *       failures (program errors are rethrown), `'atomic'` none
+ * @returns hash - signature of the transaction carrying the main instruction (the last one if
+ *   `mainIndex` is unset); slices - every confirmed transaction with its instruction range
  *
+ * @throws {@link CCIPArgumentInvalidError} If `instructions` is empty
  * @throws {@link CCIPPartialTransactionSubmissionError} If a later transaction fails after
- * earlier transactions confirmed; `context.committedHashes` contains their signatures.
+ * earlier transactions confirmed; `context.committedSlices` lists them.
  */
 export async function simulateAndSendTxs(
   ctx: { connection: Connection } & WithLogger,
   wallet: Wallet,
   { instructions, mainIndex, lookupTables }: Omit<UnsignedSolanaTx, 'family'>,
-  computeUnits?: number,
-  splitMode: 'partial' | 'resource' | 'atomic' = 'partial',
-): Promise<string> {
+  { computeUnits, split = 'partial' }: { computeUnits?: number; split?: SolanaSplitMode } = {},
+): Promise<{ hash: string; slices: SolanaSentSlice[] }> {
+  if (!instructions.length) throw new CCIPArgumentInvalidError('instructions', 'empty')
   const { connection } = ctx
-  let mainHash: string
-  const committedHashes: string[] = []
-  let committedInstructionCount = 0
+  let hash: string | undefined
+  let pendingSignature: string | undefined
+  const slices: SolanaSentSlice[] = []
   try {
     for (
       let [start, end] = [0, instructions.length];
       start < instructions.length;
       [start, end] = [end, instructions.length]
     ) {
-      let computeUnitLimit, addressLookupTableAccounts, ixs, includesMain
-      do {
+      let ixs, includesMain, addressLookupTableAccounts, simulated
+      for (;;) {
         ixs = instructions.slice(start, end)
         includesMain = mainIndex != null && start <= mainIndex && mainIndex < end
         addressLookupTableAccounts = includesMain ? lookupTables : undefined
-
         try {
-          const simulated =
+          simulated =
             (
               await simulateTransaction(ctx, {
                 payerKey: wallet.publicKey,
@@ -654,29 +715,17 @@ export async function simulateAndSendTxs(
                 addressLookupTableAccounts,
               })
             ).unitsConsumed || 0
-
-          if (computeUnits != null) {
-            computeUnitLimit = computeUnits
-          } else if (simulated <= 200000) {
-            computeUnitLimit = undefined
-          } else {
-            computeUnitLimit = Math.ceil(simulated * 1.1)
-          }
           break
         } catch (err) {
-          // Only partial mode treats every simulation failure as a split boundary.
-          if (
-            (splitMode === 'partial' ||
-              (splitMode === 'resource' &&
-                (isComputeBudgetError(err) || err instanceof CCIPTransactionTooLargeError))) &&
-            end - 1 > start
-          ) {
-            end--
-            continue
-          }
-          throw err
+          const next = nextSliceEnd(err, start, end, split)
+          if (next == null) throw err
+          end = next
         }
-      } while (end > start)
+      }
+
+      let computeUnitLimit
+      if (includesMain && computeUnits != null) computeUnitLimit = computeUnits
+      else if (simulated > 200000) computeUnitLimit = Math.ceil(simulated * 1.1)
 
       const blockhash = await connection.getLatestBlockhash('confirmed')
 
@@ -725,16 +774,18 @@ export async function simulateAndSendTxs(
           serializeV1Transaction(messageV1, txV1.signatures),
         )
       }
+      pendingSignature = signature
       await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
-      committedHashes.push(signature)
-      committedInstructionCount = end
-      if (includesMain) mainHash = signature
+      pendingSignature = undefined
+      slices.push({ signature, start, end })
+      if (includesMain) hash = signature
     }
-    return mainHash!
+    return { hash: hash ?? slices.at(-1)!.signature, slices }
   } catch (error) {
-    if (!committedHashes.length) throw error
-    throw new CCIPPartialTransactionSubmissionError(committedHashes, committedInstructionCount, {
+    if (!slices.length) throw error
+    throw new CCIPPartialTransactionSubmissionError(slices, {
       cause: error instanceof Error ? error : undefined,
+      pendingSignature,
     })
   }
 }

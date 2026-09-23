@@ -4,10 +4,12 @@ import { describe, it } from 'node:test'
 import {
   type Connection,
   type MessageV1,
+  ComputeBudgetProgram,
   Keypair,
   PACKET_DATA_SIZE,
   PublicKey,
   SystemProgram,
+  TransactionExpiredTimeoutError,
   TransactionInstruction,
   TransactionMessage,
   V1_TRANSACTION_SIZE_LIMIT,
@@ -15,7 +17,7 @@ import {
 } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 
-import { CCIPPartialTransactionSubmissionError } from '../errors/index.ts'
+import { CCIPArgumentInvalidError, CCIPPartialTransactionSubmissionError } from '../errors/index.ts'
 import type { Wallet } from './types.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { compileV1Message, serializeMessageV1, serializeV1Transaction } from './v1.ts'
@@ -334,13 +336,48 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal((captured.simulatedTx as VersionedTransaction).message.version, 0)
     })
 
+    /** Replaces the v0 simulation mock; `impl` gets the simulated tx and the 1-based call count. */
+    function mockSimulate(
+      connection: Connection,
+      impl: (tx: VersionedTransaction, call: number) => Record<string, unknown>,
+    ) {
+      const calls = { count: 0 }
+      ;(
+        connection as unknown as {
+          simulateTransaction: (tx: VersionedTransaction) => Promise<unknown>
+        }
+      ).simulateTransaction = async (tx) => ({ value: impl(tx, ++calls.count) })
+      return calls
+    }
+
+    /** Collects every sent v0 tx, returning `sig-1`, `sig-2`, ... */
+    function mockSendV0(connection: Connection) {
+      const sent: VersionedTransaction[] = []
+      ;(
+        connection as unknown as { sendTransaction: (tx: VersionedTransaction) => Promise<string> }
+      ).sendTransaction = async (tx) => `sig-${sent.push(tx)}`
+      return sent
+    }
+
+    const OK = { logs: [], unitsConsumed: 5 }
+    // fails unless it's the first instruction of its tx, like one depending on an earlier tx
+    const DEPENDENT = new TransactionInstruction({
+      keys: [{ pubkey: PAYER.publicKey, isSigner: true, isWritable: true }],
+      programId: PROGRAM,
+      data: Buffer.from([0xee]),
+    })
+    // raw index of DEPENDENT in a simulated v0 tx (index 0 is the prepended compute-budget ix)
+    const dependentIndex = (tx: VersionedTransaction) =>
+      tx.message.compiledInstructions.findIndex(({ data }) => data[0] === 0xee)
+
     it('simulateAndSendTxs signs and sends a v1 transaction when v0 is oversized', async () => {
       const { connection, captured } = mockConnection()
-      const signature = await simulateAndSendTxs({ connection }, wallet, {
+      const { hash, slices } = await simulateAndSendTxs({ connection }, wallet, {
         instructions: OVERSIZED,
         mainIndex: 0,
       })
-      assert.equal(signature, 'v1-signature')
+      assert.equal(hash, 'v1-signature')
+      assert.deepEqual(slices, [{ signature: 'v1-signature', start: 0, end: 1 }])
       assert.equal(captured.sentV0, undefined, 'no v0 transaction was sent')
       assert.equal(captured.confirmedSignature, 'v1-signature')
 
@@ -359,129 +396,192 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
 
     it('simulateAndSendTxs keeps using the v0 path when the tx fits the packet', async () => {
       const { connection, captured } = mockConnection()
-      const signature = await simulateAndSendTxs({ connection }, wallet, {
+      const { hash } = await simulateAndSendTxs({ connection }, wallet, {
         instructions: SMALL,
         mainIndex: 0,
       })
-      assert.equal(signature, 'v0-signature')
+      assert.equal(hash, 'v0-signature')
       assert.equal(captured.sentWire, undefined, 'no raw v1 transaction was sent')
       assert.equal((captured.sentV0 as VersionedTransaction).message.version, 0)
     })
 
-    it('simulateAndSendTxs does not split a compute-budget failure in atomic mode', async () => {
+    it('simulateAndSendTxs returns the last signature when mainIndex is unset', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        simulations++
-        return {
-          value: { err: { InstructionError: [1, 'ComputationalBudgetExceeded'] }, logs: [] },
-        }
-      }
-
-      await assert.rejects(
-        simulateAndSendTxs(
-          { connection },
-          wallet,
-          {
-            instructions: [...SMALL, ...SMALL],
-            mainIndex: 0,
-          },
-          undefined,
-          'atomic',
-        ),
-      )
-      assert.equal(simulations, 1)
+      const { hash } = await simulateAndSendTxs({ connection }, wallet, { instructions: SMALL })
+      assert.equal(hash, 'v0-signature')
     })
 
-    it('simulateAndSendTxs rethrows a program error in resource mode', async () => {
+    it('simulateAndSendTxs rejects an empty instruction list', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        simulations++
-        return {
-          value: { err: { InstructionError: [1, 'ProgramFailedToComplete'] }, logs: [] },
-        }
-      }
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, { instructions: [] }),
+        CCIPArgumentInvalidError,
+      )
+    })
+
+    it('simulateAndSendTxs does not split a compute-budget failure in atomic mode', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [2, 'ComputationalBudgetExceeded'] },
+        logs: [],
+      }))
 
       await assert.rejects(
         simulateAndSendTxs(
           { connection },
           wallet,
           { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
-          undefined,
-          'resource',
+          { split: 'atomic' },
         ),
       )
-      assert.equal(simulations, 1)
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
+    })
+
+    it('simulateAndSendTxs rethrows a program error in resource mode', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [2, 'ProgramFailedToComplete'] },
+        logs: [],
+      }))
+
+      await assert.rejects(
+        simulateAndSendTxs(
+          { connection },
+          wallet,
+          { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+          { split: 'resource' },
+        ),
+      )
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
     })
 
     it('simulateAndSendTxs splits a metered program failure in resource mode', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        if (++simulations === 1) {
-          return {
-            value: {
-              err: { InstructionError: [1, 'ProgramFailedToComplete'] },
+      const simulations = mockSimulate(connection, (_, call) =>
+        call === 1
+          ? {
+              err: { InstructionError: [2, 'ProgramFailedToComplete'] },
               logs: ['Program failed: exceeded CUs meter at BPF instruction'],
-            },
-          }
-        }
-        return { value: { logs: [], unitsConsumed: 5 } }
-      }
+            }
+          : OK,
+      )
+      mockSendV0(connection)
+
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+        { split: 'resource' },
+      )
+      assert.equal(simulations.count, 3)
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+    })
+
+    it('simulateAndSendTxs cuts right before the failed instruction in partial mode', async () => {
+      const { connection } = mockConnection()
+      const simulations = mockSimulate(connection, (tx) => {
+        const index = dependentIndex(tx)
+        return index > 1 ? { err: { InstructionError: [index, { Custom: 1 }] }, logs: [] } : OK
+      })
+      mockSendV0(connection)
+
+      const { hash, slices } = await simulateAndSendTxs({ connection }, wallet, {
+        instructions: [...SMALL, ...SMALL, ...SMALL, DEPENDENT, ...SMALL],
+        mainIndex: 3,
+      })
+      // one failed simulation per split point, instead of one per dropped instruction
+      assert.equal(simulations.count, 3)
+      assert.equal(hash, 'sig-2')
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 3 },
+        { signature: 'sig-2', start: 3, end: 5 },
+      ])
+    })
+
+    it('simulateAndSendTxs does not shrink a slice whose first instruction fails', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [1, { Custom: 1 }] },
+        logs: [],
+      }))
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL, ...SMALL],
+          mainIndex: 0,
+        }),
+      )
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
+    })
+
+    it('simulateAndSendTxs maps v1 instruction errors without a compute-budget offset', async () => {
+      const { connection, captured } = mockConnection()
+      let v1Simulations = 0
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          result: {
+            value:
+              ++v1Simulations === 1
+                ? { err: { InstructionError: [1, { Custom: 1 }] }, logs: [] }
+                : { logs: [], unitsConsumed: 7 },
+          },
+        })
+
+      const { slices } = await simulateAndSendTxs({ connection }, wallet, {
+        instructions: [...OVERSIZED, ...SMALL],
+        mainIndex: 1,
+      })
+      assert.equal(v1Simulations, 2)
+      assert.deepEqual(slices, [
+        { signature: 'v1-signature', start: 0, end: 1 },
+        { signature: 'v0-signature', start: 1, end: 2 },
+      ])
+      assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
+    })
+
+    it('simulateAndSendTxs applies computeUnits only to the main instruction slice', async () => {
+      const { connection } = mockConnection()
+      mockSimulate(connection, (_, call) =>
+        call === 1
+          ? { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
+          : OK,
+      )
+      const sent = mockSendV0(connection)
 
       await simulateAndSendTxs(
         { connection },
         wallet,
-        { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
-        undefined,
-        'resource',
+        { instructions: [...SMALL, ...SMALL], mainIndex: 1 },
+        { computeUnits: 123_456 },
       )
-      assert.equal(simulations, 3)
-    })
-
-    it('simulateAndSendTxs preserves program-error splitting in partial mode', async () => {
-      const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        if (++simulations === 1) {
-          return { value: { err: { InstructionError: [1, 'Custom'] }, logs: [] } }
-        }
-        return { value: { logs: [], unitsConsumed: 5 } }
-      }
-
-      await simulateAndSendTxs({ connection }, wallet, {
-        instructions: [...SMALL, ...SMALL],
-        mainIndex: 0,
+      const computeUnitLimits = sent.map((tx) => {
+        const { staticAccountKeys, compiledInstructions } = tx.message
+        const ix = compiledInstructions.find(({ programIdIndex }) =>
+          staticAccountKeys[programIdIndex]!.equals(ComputeBudgetProgram.programId),
+        )
+        return ix && Buffer.from(ix.data).readUInt32LE(1)
       })
-      assert.equal(simulations, 3)
+      assert.deepEqual(computeUnitLimits, [undefined, 123_456])
     })
 
     it('simulateAndSendTxs reports confirmed slices when a later slice fails', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        switch (++simulations) {
+      mockSimulate(connection, (_, call) => {
+        switch (call) {
           case 1:
-            return {
-              value: { err: { InstructionError: [1, 'ComputationalBudgetExceeded'] }, logs: [] },
-            }
+            return { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
           case 2:
-            return { value: { logs: [], unitsConsumed: 5 } }
+            return OK
           default:
-            return { value: { err: { InstructionError: [1, 'Custom'] }, logs: [] } }
+            return { err: { InstructionError: [1, 'Custom'] }, logs: [] }
         }
-      }
+      })
 
       await assert.rejects(
         simulateAndSendTxs({ connection }, wallet, {
@@ -490,8 +590,40 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
         (error: unknown) => {
           assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
+          assert.deepEqual(error.context.committedSlices, [
+            { signature: 'v0-signature', start: 0, end: 1 },
+          ])
           assert.deepEqual(error.context.committedHashes, ['v0-signature'])
           assert.equal(error.context.committedInstructionCount, 1)
+          assert.equal(error.context.pendingSignature, undefined)
+          return true
+        },
+      )
+    })
+
+    it('simulateAndSendTxs reports a sent but unconfirmed transaction', async () => {
+      const { connection } = mockConnection()
+      mockSimulate(connection, (_, call) =>
+        call === 1
+          ? { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
+          : OK,
+      )
+      mockSendV0(connection)
+      let confirmations = 0
+      ;(connection as unknown as { confirmTransaction: () => Promise<void> }).confirmTransaction =
+        async () => {
+          if (++confirmations === 2) throw new TransactionExpiredTimeoutError('sig-2', 30)
+        }
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL],
+          mainIndex: 1,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
+          assert.equal(error.context.pendingSignature, 'sig-2')
+          assert.ok(error.cause instanceof TransactionExpiredTimeoutError)
           return true
         },
       )
