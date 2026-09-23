@@ -22,7 +22,7 @@ export type GrantMintAndBurnRolesParams = {
   tokenAddress: string
   /** Account receiving both roles, typically the token's pool; must not already hold both. */
   burnAndMinter: string
-  /** Role admin; token owner for v1.x, `BURN_MINT_ADMIN_ROLE` holder for v2; sets `tx.from`. */
+  /** Role admin; v1 token owner or v2 role-admin holder (normally `BURN_MINT_ADMIN_ROLE`); sets `tx.from`. */
   sender?: string
 }
 
@@ -58,6 +58,8 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
    * {@link execute}, so the offline / multisig path gets them.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677 token
    * nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @throws {@link CCTParamsInvalidError} if `burnAndMinter` already holds both roles, or `sender`
    * lacks the version's role-admin permission
    */

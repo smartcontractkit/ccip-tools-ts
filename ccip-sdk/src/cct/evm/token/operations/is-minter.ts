@@ -8,11 +8,12 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { readV1TokenRole } from '../roles.ts'
+import { resolveToken } from '../contracts.ts'
+import { resolveTokenRoleHandler } from '../roles.ts'
 
 /** Parameters for {@link IsMinter}. */
 export type IsMinterParams = {
-  /** BurnMintERC677 token (v1.5.1 / v1.6.2) to read. */
+  /** Supported CCT token whose mint role is read. */
   tokenAddress: string
   /** Account to test for the mint role. */
   account: string
@@ -21,7 +22,7 @@ export type IsMinterParams = {
 /** Result of {@link IsMinter}: whether `account` currently holds the token's mint role. */
 export type IsMinterResult = boolean
 
-/** Reads whether an account holds a BurnMintERC677 token's mint role, via `isMinter(address)`. */
+/** Reads whether an account holds a supported CCT token's mint role. */
 export class IsMinter extends EVMQuery<IsMinterParams, IsMinterResult> {
   readonly name = 'isMinter'
 
@@ -39,12 +40,13 @@ export class IsMinter extends EVMQuery<IsMinterParams, IsMinterResult> {
   }
 
   /**
-   * Reads the role predicate in a single `eth_call`.
-   * @remarks No version resolution: `isMinter(address)` is identical at v1.5.1 and v1.6.2, and a
-   * contract that does not declare it is reported by {@link readTokenRole}.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
+   * Reads the role predicate using v1 `isMinter(address)` or v2 AccessControl `hasRole`.
    */
-  protected read(chain: EVMChain, { tokenAddress, account }: IsMinterParams): Promise<boolean> {
-    return readV1TokenRole(chain, tokenAddress, 'isMinter', account)
+  protected async read(
+    chain: EVMChain,
+    { tokenAddress, account }: IsMinterParams,
+  ): Promise<boolean> {
+    const version = await resolveToken(chain, tokenAddress)
+    return resolveTokenRoleHandler(version, this.name).hasRole(chain, tokenAddress, 'mint', account)
   }
 }

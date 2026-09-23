@@ -1,6 +1,6 @@
 /** Version-specific CCT mint/burn role reads, enumeration, and authorization. */
 
-import { getAddress, id, isError } from 'ethers'
+import { getAddress, id } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
@@ -12,6 +12,7 @@ import {
   type TokenVersion as TokenVersionType,
   TokenVersion,
   assertTokenOwner,
+  isMissingFunction,
   resolveTokenEncoder,
 } from './contracts.ts'
 
@@ -23,10 +24,6 @@ export const CrossChainTokenRole = {
   MINTER: id('MINTER_ROLE'),
   BURNER: id('BURNER_ROLE'),
 } as const
-
-function isMissingFunction(err: unknown): boolean {
-  return isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')
-}
 
 type V1TokenRoleReader = Pick<
   TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
@@ -140,7 +137,7 @@ const V2_TOKEN_ROLE_HANDLER: TokenRoleHandler = {
     throw new CCTParamsInvalidError(
       operation,
       'sender',
-      `must hold the admin role for ${roleId} on ${tokenAddress}`,
+      `must hold the ${role}-role admin (role ${adminRole}) on ${tokenAddress}`,
     )
   },
 }

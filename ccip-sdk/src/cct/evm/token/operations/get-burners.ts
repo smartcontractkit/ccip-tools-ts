@@ -35,7 +35,7 @@ export class GetBurners extends EVMQuery<GetBurnersParams, GetBurnersResult> {
   /**
    * Enumerates the role set in a single `eth_call`.
    * @remarks No version resolution: `getBurners()` is identical at v1.5.1 and v1.6.2, and a
-   * contract that does not declare it is reported by {@link readTokenRoleHolders}.
+   * contract that does not declare it is reported by {@link readV1TokenRoleHolders}.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    */
   protected read(chain: EVMChain, { tokenAddress }: GetBurnersParams): Promise<string[]> {

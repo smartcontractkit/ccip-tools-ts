@@ -292,7 +292,8 @@ describe('GrantMintRole (cct/evm)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'sender' &&
-          /must hold the admin role/.test(String(err.context.reason)),
+          String(err.context.reason) ===
+            `must hold the mint-role admin (role ${BURN_MINT_ADMIN_ROLE}) on ${TOKEN}`,
       )
     })
   })

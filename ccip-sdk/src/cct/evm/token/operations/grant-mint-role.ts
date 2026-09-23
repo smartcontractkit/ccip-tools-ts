@@ -21,7 +21,7 @@ export type GrantMintRoleParams = {
   tokenAddress: string
   /** Account receiving the mint role; must not already hold it. */
   minter: string
-  /** Role admin; token owner for v1.x, `BURN_MINT_ADMIN_ROLE` holder for v2; sets `tx.from`. */
+  /** Role admin; v1 token owner or v2 role-admin holder (normally `BURN_MINT_ADMIN_ROLE`); sets `tx.from`. */
   sender?: string
 }
 

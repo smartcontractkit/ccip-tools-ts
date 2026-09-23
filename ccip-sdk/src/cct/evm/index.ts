@@ -1600,6 +1600,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
    * role-admin permission, or `burnAndMinter` already holds both roles
    *
@@ -1629,6 +1630,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet lacks the version's role-admin permission, or
    * `burnAndMinter` already holds both roles
@@ -1668,6 +1670,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
    * role-admin permission, or `minter` already holds the mint role
    *
@@ -1694,6 +1697,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet lacks the version's role-admin permission, or `minter`
    * already holds the role
@@ -1730,6 +1734,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
    * role-admin permission, or `burner` already holds the burn role
    *
@@ -1756,6 +1761,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet lacks the version's role-admin permission, or `burner`
    * already holds the role
@@ -1789,6 +1795,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
    * role-admin permission, or `minter` does not currently hold the mint role
    *
@@ -1815,6 +1822,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet lacks the version's role-admin permission, or `minter` does
    * not hold the role
@@ -1848,6 +1856,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
    * role-admin permission, or `burner` does not currently hold the burn role
    *
@@ -1874,6 +1883,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet lacks the version's role-admin permission, or `burner` does
    * not hold the role
@@ -1988,14 +1998,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads whether `account` holds a BurnMintERC677 token's mint role, via `isMinter(address)`.
-   * @remarks The pre-flight for a {@link mint}: the token's `mint` is `onlyMinter`, and the owner
-   * is only the role admin, who need not hold the role. Prefer this over scanning
-   * {@link getMinters} — one call, and it stays a single call as the role set grows.
+   * Reads whether `account` holds a supported CCT token's mint role.
+   * @remarks v1 uses `isMinter(address)`; v2 uses AccessControl `hasRole`. Use this individual
+   * membership check rather than {@link getMinters}, which is v1-only.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
    * address
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @example
    * ```typescript
    * if (await cct.isMinter({ tokenAddress: '0xToken...', account: '0xOpsKey...' })) {
@@ -2008,13 +2019,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads whether `account` holds a BurnMintERC677 token's burn role, via `isBurner(address)`.
-   * @remarks Same shape and caveats as {@link isMinter}; the burn-role counterpart of the set
-   * read {@link getBurners}.
+   * Reads whether `account` holds a supported CCT token's burn role.
+   * @remarks v1 uses `isBurner(address)`; v2 uses AccessControl `hasRole`. Use this individual
+   * membership check rather than {@link getBurners}, which is v1-only.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
    * address
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @example
    * ```typescript
    * const poolCanBurn = await cct.isBurner({ tokenAddress: '0xToken...', account: '0xPool...' })

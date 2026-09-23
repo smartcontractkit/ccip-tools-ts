@@ -51,7 +51,7 @@ export class Mint extends EVMOperation<MintParams> {
    * Gated on `isMinter(sender)`, not `owner()`: `mint` is `onlyMinter`, and the owner is only the
    * role admin, who need not hold the role. The read runs even with no `sender` to compare
    * (against the zero address, answer discarded) because it is also the family check
-   * ({@link readTokenRole}) — a `mint` built for an address with no code would otherwise mine
+   * ({@link readV1TokenRole}) — a `mint` built for an address with no code would otherwise mine
    * successfully and mint nothing. It runs here rather than in {@link execute} so the offline /
    * multisig path is gated too. A mint past a capped token's `maxSupply` is not pre-flighted.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token

@@ -150,7 +150,7 @@ export function getTokenArtifact(version: TokenVersion): DeployArtifact {
  * `CALL_EXCEPTION` (revert) and `BAD_DATA` (node answers `0x`). Deliberately narrow — a transport
  * error or rate limit must not be read as "this contract lacks the function".
  */
-function isMissingFunction(err: unknown): boolean {
+export function isMissingFunction(err: unknown): boolean {
   return isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')
 }
 

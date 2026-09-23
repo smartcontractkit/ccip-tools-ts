@@ -21,7 +21,7 @@ export type RevokeBurnRoleParams = {
   tokenAddress: string
   /** Account losing the burn role; must currently hold it. */
   burner: string
-  /** Role admin; token owner for v1.x, `BURN_MINT_ADMIN_ROLE` holder for v2; sets `tx.from`. */
+  /** Role admin; v1 token owner or v2 role-admin holder (normally `BURN_MINT_ADMIN_ROLE`); sets `tx.from`. */
   sender?: string
 }
 
@@ -59,6 +59,8 @@ export class RevokeBurnRole extends EVMOperation<RevokeBurnRoleParams> {
    * revoking a role never held is rejected even though the chain would mine it as a silent no-op.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677 token
    * nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @throws {@link CCTParamsInvalidError} if `burner` does not hold the burn role, or `sender`
    * lacks the version's role-admin permission
    */
