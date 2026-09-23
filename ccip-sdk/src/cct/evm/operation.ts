@@ -32,33 +32,42 @@ export function callTx(to: string, data: string): UnsignedEVMTx {
 }
 
 /**
- * Records an on-chain requirement the current state does not meet, without discarding the
- * calldata.
+ * How a build should treat an on-chain requirement the current state does not meet.
  *
- * @remarks For requirements whose failure says nothing about the *calldata* — the bytes are fully
- * determined and correct either way — only about whether the chain is ready for it right now. A
- * `generateUnsigned*` caller is building a transaction to be reviewed and signed later, so "not
- * yet" is information, not an error: an earlier transaction in the same plan is often exactly
- * what makes it true. {@link EVMOperation.execute} rejects these, since there "now" is the
- * question being asked.
- *
- * Requirements that invalidate the calldata itself still throw {@link CCTParamsInvalidError} from
- * `validate`/`parse`, as before.
+ * @remarks Applies only to pre-flight checks — reads of chain state an op performs to confirm the
+ * chain is ready for its calldata (is the token registered, is `sender` the current admin). It has
+ * no effect on parameter validation: a malformed address or an out-of-range `uint256` still throws
+ * from `validate`/`parse` under either mode, because those invalidate the calldata itself.
  */
-export function withUnmetPrecondition(
-  tx: UnsignedEVMTx,
-  param: string,
-  reason: string,
-): UnsignedEVMTx {
-  return { ...tx, preconditions: [...(tx.preconditions ?? []), { param, reason }] }
+export type PreflightMode =
+  /** Throw {@link CCTParamsInvalidError} on the first unmet requirement. The default. */
+  | 'throw'
+  /**
+   * Return the calldata with the unmet requirements attached as
+   * {@link UnsignedEVMTx.preconditions}.
+   *
+   * For building a transaction to be reviewed and signed later, where "not ready yet" is
+   * information rather than an error — an earlier transaction in the same plan is often exactly
+   * what makes the requirement true. {@link EVMOperation.execute} rejects them regardless of this
+   * setting, since there "now" is the question being asked.
+   */
+  | 'report'
+
+/** Mixin for op params that run pre-flight checks against chain state. */
+export type PreflightParams = {
+  /**
+   * How to treat a pre-flight check the chain does not currently satisfy. Defaults to `'throw'`,
+   * matching the behaviour of ops that predate this option.
+   */
+  preflight?: PreflightMode
 }
 
 /**
  * Rejects a transaction whose recorded requirements the chain does not currently meet — the
- * execute-path counterpart to {@link withUnmetPrecondition}.
+ * execute-path counterpart to `'report'`.
  *
- * @remarks Reports the first unmet requirement, matching the error a pre-`preconditions` build
- * raised for the same state, so `execute` callers see no change in behaviour or message.
+ * @remarks Reports the first unmet requirement, matching the error the same state raises under
+ * `'throw'`, so a caller sees one error for one chain state either way.
  * @throws {@link CCTParamsInvalidError} if `tx` carries any unmet precondition
  */
 export function assertPreconditionsMet(operation: string, tx: UnsignedEVMTx): void {
@@ -131,6 +140,32 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     chain: EVMChain,
     params: Parsed,
   ): Promise<UnsignedEVMTx> | UnsignedEVMTx
+
+  /**
+   * Reports a pre-flight check the chain does not currently satisfy, honouring the caller's
+   * {@link PreflightMode}: throws under `'throw'` (the default), or returns `tx` with the
+   * requirement attached under `'report'`.
+   *
+   * @remarks Called from {@link buildUnsigned} *after* the calldata is encoded, so the `'report'`
+   * path has something to attach to. Only for requirements whose failure says nothing about the
+   * calldata — the bytes are correct either way, the question is whether the chain is ready for
+   * them right now. Anything that invalidates the calldata belongs in `validate`/`parse`, which
+   * throws under both modes.
+   * @param tx - The already-encoded transaction to attach to (or discard, when throwing).
+   * @param preflight - The caller's mode; `undefined` means `'throw'`.
+   * @param param - Parameter to blame, e.g. `'sender'`.
+   * @param reason - Why the current state does not satisfy the requirement.
+   * @throws {@link CCTParamsInvalidError} unless `preflight` is `'report'`
+   */
+  protected unmetPreflight(
+    tx: UnsignedEVMTx,
+    preflight: PreflightMode | undefined,
+    param: string,
+    reason: string,
+  ): UnsignedEVMTx {
+    if (preflight !== 'report') throw new CCTParamsInvalidError(this.name, param, reason)
+    return { ...tx, preconditions: [...(tx.preconditions ?? []), { param, reason }] }
+  }
 
   /** Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing. */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {

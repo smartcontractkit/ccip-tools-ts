@@ -131,7 +131,7 @@ import { EVMChain } from './evm/index.ts'
 export { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from './networks.ts'
 import SELECTORS from './selectors.ts'
 export { SELECTORS }
-export type { UnsignedEVMTx } from './evm/index.ts'
+export type { UnmetPrecondition, UnsignedEVMTx } from './evm/index.ts'
 export {
   type MessageV1,
   type MessageV1TokenTransfer,

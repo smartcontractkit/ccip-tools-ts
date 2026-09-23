@@ -15,9 +15,9 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type EVMExecuteParams,
+  type PreflightParams,
   EVMOperation,
   callTx,
-  withUnmetPrecondition,
 } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
@@ -31,7 +31,7 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
  * address, since that is the only address that can ever satisfy the pending-administrator check
  * for a signed submission (see {@link AcceptAdmin.execute}).
  */
-export type AcceptAdminParams = {
+export type AcceptAdminParams = PreflightParams & {
   /** Token whose pending registry admin role is being accepted. */
   tokenAddress: string
   /**
@@ -66,16 +66,18 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
     validateAddress(this.name, 'address', p.address)
     validateAddress(this.name, 'sender', p.sender)
     // Non-zero as well as well-formed, and checked here rather than left to the comparison in
-    // `buildUnsigned`: that comparison no longer throws, and it was the only thing rejecting a
-    // zero `sender` — which `isAddress` accepts in its ICAP spelling, and which no key can sign.
+    // `buildUnsigned`: that comparison was the only thing rejecting a zero `sender` — which
+    // `isAddress` accepts in its ICAP spelling — and it stops rejecting anything under
+    // `preflight: 'report'`. A zero `sender` is a bad parameter, not chain state, so it belongs
+    // here where both modes throw.
     validateNonZeroAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
    * Builds `acceptAdminRole` calldata against the TokenAdminRegistry resolved from `address`,
-   * checking `sender` against the registry's pending administrator and recording any mismatch as
-   * an {@link UnmetPrecondition} on the returned tx — see {@link withUnmetPrecondition}.
+   * checking `sender` against the registry's pending administrator. A mismatch throws, or is
+   * attached to the returned tx under `preflight: 'report'` — see {@link EVMOperation.unmetPreflight}.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -94,20 +96,23 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
     ])
     const tx = callTx(to, data)
 
-    // Recorded, not thrown: the calldata is `acceptAdminRole(token)` either way — correct and
-    // complete regardless of who is pending right now. Whether the registry is ready is a
-    // question about *when* this gets submitted, and `registerAdmin`/`transferAdmin` earlier in
-    // the same plan is the usual reason it is not ready yet. `execute` still rejects both.
+    // Pre-flight, not calldata: `acceptAdminRole(token)` is correct and complete regardless of who
+    // is pending right now. Whether the registry is ready is a question about *when* this gets
+    // submitted, and `registerAdmin`/`transferAdmin` earlier in the same plan is the usual reason
+    // it is not ready yet — which is what `preflight: 'report'` is for. `execute` rejects either
+    // way.
     if (pendingAdministrator === ZeroAddress) {
-      return withUnmetPrecondition(
+      return this.unmetPreflight(
         tx,
+        p.preflight,
         'sender',
         `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
       )
     }
     if (pendingAdministrator !== p.sender) {
-      return withUnmetPrecondition(
+      return this.unmetPreflight(
         tx,
+        p.preflight,
         'sender',
         `must be the pending token administrator (${pendingAdministrator})`,
       )

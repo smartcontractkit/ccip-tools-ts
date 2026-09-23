@@ -21,9 +21,9 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type EVMExecuteParams,
+  type PreflightParams,
   EVMOperation,
   callTx,
-  withUnmetPrecondition,
 } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
@@ -37,7 +37,7 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
  * `sender` to the signing wallet's own address, the only address that can satisfy the
  * current-administrator check for a signed submission (see {@link TransferAdmin.execute}).
  */
-export type TransferAdminParams = {
+export type TransferAdminParams = PreflightParams & {
   /** Token whose registry admin role is being handed over. */
   tokenAddress: string
   /** The administrator proposed to accept the token's registry admin role. Pass {@link ZeroAddress}
@@ -82,17 +82,20 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     validateAddress(this.name, 'address', p.address)
     validateAddress(this.name, 'sender', p.sender)
     // Non-zero as well as well-formed, and checked here rather than left to the registry
-    // comparison in `buildUnsigned`: that comparison no longer throws, and it was the only thing
-    // rejecting a zero `sender` — which `isAddress` accepts in its ICAP spelling, and which no
-    // key can sign. (`newAdmin` stays zero-permitting: that spelling cancels a pending transfer.)
+    // comparison in `buildUnsigned`: that comparison was the only thing rejecting a zero `sender`
+    // — which `isAddress` accepts in its ICAP spelling — and it stops rejecting anything under
+    // `preflight: 'report'`. A zero `sender` is a bad parameter, not chain state, so it belongs
+    // here where both modes throw. (`newAdmin` stays zero-permitting: that cancels a pending
+    // transfer.)
     validateNonZeroAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
    * Builds `transferAdminRole` calldata against the TAR resolved from `address`, checking the
-   * registry's own state — is the token registered, and is `sender` its current administrator —
-   * and recording anything unmet as an {@link UnmetPrecondition} on the returned tx.
+   * registry's own state — is the token registered, and is `sender` its current administrator.
+   * Anything unmet throws, or is attached to the returned tx under `preflight: 'report'` — see
+   * {@link EVMOperation.unmetPreflight}.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -115,7 +118,7 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     chain.logger.debug(`${this.name}: registry = ${to}, token = ${p.tokenAddress}`)
     const tx = callTx(to, data)
 
-    // Recorded rather than thrown — see `accept-admin.ts` for the reasoning. The calldata is
+    // Pre-flight, not calldata — see `accept-admin.ts` for the reasoning. The calldata is
     // `transferAdminRole(token, newAdmin)` whoever administers the token today; a plan that
     // registers and accepts first is precisely how an unregistered token stops being one.
     //
@@ -124,8 +127,9 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     // caller for not being an administrator that does not exist, instead of naming the actual
     // problem — the token was never registered.
     if (administrator === ZeroAddress) {
-      return withUnmetPrecondition(
+      return this.unmetPreflight(
         tx,
+        p.preflight,
         'sender',
         pending
           ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
@@ -133,8 +137,9 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
       )
     }
     if (administrator !== p.sender) {
-      return withUnmetPrecondition(
+      return this.unmetPreflight(
         tx,
+        p.preflight,
         'sender',
         `must be the current token administrator (${administrator})`,
       )

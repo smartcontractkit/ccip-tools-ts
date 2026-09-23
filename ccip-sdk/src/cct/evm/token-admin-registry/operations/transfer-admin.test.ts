@@ -166,9 +166,10 @@ describe('TransferAdmin (cct/evm)', () => {
     })
 
     it('rejects a zero-address sender before any RPC', async () => {
-      // `isAddress` permits the zero address (and its ICAP spelling), and nothing downstream
-      // rejects it any more: the registry comparisons in `buildUnsigned` only report. So a zero
-      // `sender` has to die in `parse`, or it reaches the caller as a `from` no key can sign.
+      // `isAddress` permits the zero address (and its ICAP spelling), and under
+      // `preflight: 'report'` the registry comparisons no longer reject it. So a zero `sender` has
+      // to die in `parse` — under either mode — or it reaches the caller as a `from` no key can
+      // sign.
       let called = false
       const chain = stubChain(ZeroAddress, { onAddress: () => (called = true) })
       await assert.rejects(
@@ -182,15 +183,50 @@ describe('TransferAdmin (cct/evm)', () => {
       )
       assert.equal(called, false, 'validation fails before TAR discovery')
     })
+
+    it('rejects a sender that is not the current administrator', async () => {
+      await assert.rejects(
+        () => generate(stubChain(CURRENT_ADMIN), { sender: OTHER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('must be the current token administrator'),
+      )
+    })
+
+    it('rejects a token that is not registered', async () => {
+      await assert.rejects(
+        () => generate(stubChain(ZeroAddress), { sender: OTHER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('is not registered'),
+      )
+    })
+
+    it('distinguishes a registration still pending acceptance from not-registered', async () => {
+      await assert.rejects(
+        () =>
+          generate(stubChain(ZeroAddress, { pendingAdministrator: NEW_ADMIN }), { sender: OTHER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('still pending acceptance') &&
+          err.context.reason.includes(NEW_ADMIN),
+      )
+    })
   })
 
-  // The registry states below are all reachable from within a single plan — a `registerAdmin` or
-  // an earlier `transferAdmin` puts the registry there — so `generate` records them against the
-  // calldata rather than refusing to produce it. `execute`, where "now" is the question, still
-  // rejects with the same error.
-  describe('unmet preconditions', () => {
-    it('reports a sender that is not the current administrator', async () => {
-      const unsigned = await generate(stubChain(CURRENT_ADMIN), { sender: OTHER })
+  // Every state below is reachable from within a single plan — a `registerAdmin` or an earlier
+  // `transferAdmin` puts the registry there — which is what this mode exists for.
+  describe("preflight: 'report'", () => {
+    it('returns the calldata and records a sender that is not the current administrator', async () => {
+      const unsigned = await generate(stubChain(CURRENT_ADMIN), {
+        sender: OTHER,
+        preflight: 'report',
+      })
       assert.equal(unsigned.transactions[0]!.data, EXPECTED_DATA)
       assert.equal(unsigned.preconditions?.length, 1)
       assert.equal(unsigned.preconditions![0]!.param, 'sender')
@@ -199,8 +235,11 @@ describe('TransferAdmin (cct/evm)', () => {
       )
     })
 
-    it('reports a token that is not registered', async () => {
-      const unsigned = await generate(stubChain(ZeroAddress), { sender: OTHER })
+    it('records a token that is not registered', async () => {
+      const unsigned = await generate(stubChain(ZeroAddress), {
+        sender: OTHER,
+        preflight: 'report',
+      })
       assert.equal(unsigned.transactions[0]!.data, EXPECTED_DATA)
       assert.ok(unsigned.preconditions![0]!.reason.includes('is not registered'))
     })
@@ -208,6 +247,7 @@ describe('TransferAdmin (cct/evm)', () => {
     it('distinguishes a registration still pending acceptance from not-registered', async () => {
       const unsigned = await generate(stubChain(ZeroAddress, { pendingAdministrator: NEW_ADMIN }), {
         sender: OTHER,
+        preflight: 'report',
       })
       const { reason } = unsigned.preconditions![0]!
       assert.ok(reason.includes('still pending acceptance'))
@@ -215,11 +255,11 @@ describe('TransferAdmin (cct/evm)', () => {
     })
 
     it('omits preconditions entirely when sender is the current administrator', async () => {
-      const unsigned = await generate(stubChain(CURRENT_ADMIN))
+      const unsigned = await generate(stubChain(CURRENT_ADMIN), { preflight: 'report' })
       assert.equal(unsigned.preconditions, undefined)
     })
 
-    it('execute still rejects an unmet precondition, without submitting', async () => {
+    it('execute rejects under this mode too, without submitting', async () => {
       let sent = false
       const wallet = {
         ...fakeSigner(OTHER),
@@ -232,6 +272,7 @@ describe('TransferAdmin (cct/evm)', () => {
             newAdmin: NEW_ADMIN,
             address: ADDRESS,
             sender: OTHER,
+            preflight: 'report',
             wallet,
           }),
         (err: unknown) =>

@@ -359,15 +359,32 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.equal(tx.data, EXPECTED_TRANSFER_ADMIN)
     })
 
-    it('surfaces an unmet precondition instead of rejecting', async () => {
-      // The op records rather than throws when the registry is not in the required state; this
-      // asserts the facade passes that through to the caller alongside the calldata.
+    it('rejects a sender that is not the current registry administrator', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      await assert.rejects(
+        () =>
+          cct.generateUnsignedTransferAdmin({
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            address: ROUTER,
+            sender: NEW_ADMIN,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'transferAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+
+    it("surfaces the unmet requirement under preflight: 'report'", async () => {
+      // Asserts the facade forwards the mode and passes `preconditions` back out with the calldata.
       const cct = EVMTokenManager.fromChain(stubChain())
       const unsigned = await cct.generateUnsignedTransferAdmin({
         tokenAddress: TOKEN,
         newAdmin: NEW_ADMIN,
         address: ROUTER,
         sender: NEW_ADMIN,
+        preflight: 'report',
       })
       assert.equal(unsigned.transactions[0]!.data, EXPECTED_TRANSFER_ADMIN)
       assert.equal(unsigned.preconditions?.length, 1)
@@ -529,9 +546,26 @@ describe('EVMTokenManager (cct/evm)', () => {
       assert.equal(called, false, 'validation fails before TAR discovery')
     })
 
-    it('surfaces an unmet precondition instead of rejecting', async () => {
-      // As with transferAdmin above: not-pending-yet is registry state, reported against the
-      // calldata so a plan that accepts after registering can still be built.
+    it('rejects when sender is not the pending administrator', async () => {
+      const cct = EVMTokenManager.fromChain(
+        stubChain({ provider: acceptAdminProvider(POOL) as never }),
+      )
+      await assert.rejects(
+        cct.generateUnsignedAcceptAdmin({
+          tokenAddress: TOKEN,
+          address: ROUTER,
+          sender: TOKEN,
+        }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+
+    it("surfaces the unmet requirement under preflight: 'report'", async () => {
+      // As with transferAdmin above: not-pending-yet is registry state, so a plan that accepts
+      // after registering can still be built.
       const cct = EVMTokenManager.fromChain(
         stubChain({ provider: acceptAdminProvider(POOL) as never }),
       )
@@ -539,6 +573,7 @@ describe('EVMTokenManager (cct/evm)', () => {
         tokenAddress: TOKEN,
         address: ROUTER,
         sender: TOKEN,
+        preflight: 'report',
       })
       assert.equal(unsigned.transactions[0]!.data, EXPECTED_ACCEPT_ADMIN)
       assert.equal(unsigned.preconditions?.length, 1)
