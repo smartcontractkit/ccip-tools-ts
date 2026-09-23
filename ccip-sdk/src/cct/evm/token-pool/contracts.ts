@@ -322,6 +322,25 @@ export async function readTokenPoolAllowedFinality(
 }
 
 /**
+ * Reads the `AdvancedPoolHooks` contract bound to a v2.0.0 pool in one `eth_call`.
+ *
+ * @remarks Callers must resolve and require v2.0.0 first: the hooks binding was introduced with
+ * that pool interface. The getter is declared on the v2.0.0 `TokenPool` base and inherited
+ * unchanged by every pool family, so the BurnMint ABI resolves it for a LockRelease pool too.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 token pool to read.
+ * @returns The bound hooks contract, checksummed; the zero address when none is bound, which
+ * means the pool enforces no allowlist and no CCV requirements.
+ */
+export async function readTokenPoolAdvancedPoolHooks(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getAdvancedPoolHooks()))
+}
+
+/**
  * `TokenPool`'s allowlist getters, identical across v1.5.0–v1.6.1 and both ABI families. Absent
  * from v2.0.0, which dropped the allowlist — callers must resolve the version first.
  */
