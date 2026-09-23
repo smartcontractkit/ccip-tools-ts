@@ -467,7 +467,9 @@ export async function simulateTransaction(
   const maxComputeUnits = 1_400_000
   const recentBlockhash = '11111111111111111111111111111112'
   const computeUnitLimit = computeUnitsOverride || maxComputeUnits
-  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })
+  const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
+    units: computeUnitLimit,
+  })
 
   const config: SimulateTransactionConfig = {
     commitment: 'confirmed',
@@ -685,7 +687,11 @@ export async function simulateAndSendTxs(
         recentBlockhash: blockhash.blockhash,
         instructions: [
           ...(computeUnitLimit
-            ? [ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit })]
+            ? [
+                ComputeBudgetProgram.setComputeUnitLimit({
+                  units: computeUnitLimit,
+                }),
+              ]
             : []),
           ...ixs,
         ],
@@ -715,7 +721,17 @@ export async function simulateAndSendTxs(
         serializeV1Transaction(messageV1, txV1.signatures),
       )
     }
-    await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+    const confirmation = await connection.confirmTransaction(
+      { signature, ...blockhash },
+      'confirmed',
+    )
+    if (confirmation.value.err) {
+      throw new SendTransactionError({
+        action: 'send',
+        signature,
+        transactionMessage: jsonStringify(confirmation.value.err),
+      })
+    }
     if (includesMain) mainHash = signature
   }
   return mainHash!
