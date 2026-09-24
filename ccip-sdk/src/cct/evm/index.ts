@@ -2548,6 +2548,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export * from '../errors.ts'
+export type { PreflightMode, PreflightParams } from './operation.ts'
 export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
 export type {
   RegisterAdminMethod,

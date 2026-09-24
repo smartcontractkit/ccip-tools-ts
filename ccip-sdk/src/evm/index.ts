@@ -167,8 +167,8 @@ import {
   simulateLockOrBurn as simulateLockOrBurn_,
   simulateReleaseOrMint,
 } from './simulate.ts'
-import { type UnsignedEVMTx, resultToObject } from './types.ts'
-export type { UnsignedEVMTx }
+import { type UnmetPrecondition, type UnsignedEVMTx, resultToObject } from './types.ts'
+export type { UnmetPrecondition, UnsignedEVMTx }
 
 /**
  * `USDCSourcePoolDataCodec.LOCK_RELEASE_FLAG = bytes4(keccak256("NO_CCTP_USE_LOCK_RELEASE"))` —

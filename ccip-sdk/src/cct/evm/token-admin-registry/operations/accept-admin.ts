@@ -12,22 +12,26 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
-import { validateAddress } from '../../validate.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
+import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
 /**
  * Parameters for `acceptAdmin`.
  * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
- * for {@link AcceptAdmin.generate}: the pre-tx check below has nothing to compare
- * `pendingAdministrator` against without it, so an omitted `sender` is rejected in
- * {@link AcceptAdmin.parse}. {@link AcceptAdmin.execute} relaxes this — it defaults `sender`
- * to the signing wallet's own address, since that is the only address that can ever satisfy
- * the pending-administrator check for a signed submission (see {@link AcceptAdmin.execute}).
+ * for {@link AcceptAdmin.generate}: the pending-administrator check below has nothing to compare
+ * against without it, so an omitted `sender` is rejected in {@link AcceptAdmin.parse}.
+ * {@link AcceptAdmin.execute} relaxes this — it defaults `sender` to the signing wallet's own
+ * address, since that is the only address that can ever satisfy the pending-administrator check
+ * for a signed submission (see {@link AcceptAdmin.execute}).
  */
-export type AcceptAdminParams = {
+export type AcceptAdminParams = PreflightParams & {
   /** Token whose pending registry admin role is being accepted. */
   tokenAddress: string
   /**
@@ -61,12 +65,19 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'address', p.address)
     validateAddress(this.name, 'sender', p.sender)
+    // Non-zero as well as well-formed, and checked here rather than left to the comparison in
+    // `buildUnsigned`: that comparison was the only thing rejecting a zero `sender` — which
+    // `isAddress` accepts in its ICAP spelling — and it stops rejecting anything under
+    // `preflight: 'report'`. A zero `sender` is a bad parameter, not chain state, so it belongs
+    // here where both modes throw.
+    validateNonZeroAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
-   * Confirms `sender` is the pending administrator, then builds `acceptAdminRole` calldata
-   * against the TokenAdminRegistry resolved from `address`.
+   * Builds `acceptAdminRole` calldata against the TokenAdminRegistry resolved from `address`,
+   * checking `sender` against the registry's pending administrator. A mismatch throws, or is
+   * attached to the returned tx under `preflight: 'report'` — see {@link EVMOperation.unmetPreflight}.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -79,26 +90,34 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
       p.tokenAddress,
     )
 
+    // TAR.acceptAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
+    const data = getTokenAdminRegistryInterface().encodeFunctionData('acceptAdminRole', [
+      p.tokenAddress,
+    ])
+    const tx = callTx(to, data)
+
+    // Pre-flight, not calldata: `acceptAdminRole(token)` is correct and complete regardless of who
+    // is pending right now. Whether the registry is ready is a question about *when* this gets
+    // submitted, and `registerAdmin`/`transferAdmin` earlier in the same plan is the usual reason
+    // it is not ready yet — which is what `preflight: 'report'` is for. `execute` rejects either
+    // way.
     if (pendingAdministrator === ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
+      return this.unmetPreflight(
+        tx,
+        p.preflight,
         'sender',
         `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
       )
     }
     if (pendingAdministrator !== p.sender) {
-      throw new CCTParamsInvalidError(
-        this.name,
+      return this.unmetPreflight(
+        tx,
+        p.preflight,
         'sender',
         `must be the pending token administrator (${pendingAdministrator})`,
       )
     }
-
-    // TAR.acceptAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
-    const data = getTokenAdminRegistryInterface().encodeFunctionData('acceptAdminRole', [
-      p.tokenAddress,
-    ])
-    return callTx(to, data)
+    return tx
   }
 
   /**
@@ -107,7 +126,8 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
    * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
    * rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or
+   * if the registry does not currently satisfy a requirement {@link buildUnsigned} recorded
    */
   override async execute(
     chain: EVMChain,
