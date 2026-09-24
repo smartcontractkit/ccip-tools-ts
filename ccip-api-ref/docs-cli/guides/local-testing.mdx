@@ -24,18 +24,21 @@ This affects three cases:
   Environment, `anvil --fork-url … --chain-id …`)
 - a public network added to the registry after your installed CLI was released
 
-The first needs a new chain; the second needs a **fork registration**, which is a different thing:
-see [Forks](#forks).
+The first needs a new chain; the second needs a **fork**, which is a different thing: see
+[Forks](#forks).
 
-Register those chains with `--chain-selectors`. Everything else — `send`, `show`, `manual-exec` —
-then works on the lane as it would on a bundled chain.
+Add those chains with `--chain-selectors`. Everything else — `send`, `show`, `manual-exec` — then
+works on the lane as it would on a bundled chain.
 
 Local networks are never indexed by the hosted CCIP API, so `--no-api` is required for any local
 lane. Pass an RPC for each side of the lane.
 
-## Register a Chain
+## Add a Chain
 
-The shorthand is `<chainId>=<selector>`. It defaults to family `EVM` and network type `TESTNET`:
+The shorthand is `<chainId>=<selector>`. The family is inferred from the chain id's format — `2337`
+is EVM, `aptos:4` Aptos, `sui:4` Sui, `-217` TON, `canton:LocalNet` Canton, a base58 genesis hash
+Solana — and the network type defaults to `TESTNET` (a hex chain id, as `eth_chainId` reports it,
+works too):
 
 ```bash
 ccip-cli send -s 1337 -d 2337 \
@@ -58,11 +61,16 @@ ccip-cli show 0xc0ac87bc918dd987391814e9353ddc7551c0f3f51dbe41c0cc7acc609c1b3cda
   --no-api
 ```
 
-The flag is repeatable, and reads from `CCIP_CHAIN_SELECTORS` like every other option:
+The flag is repeatable, and each value may be a comma- or space-separated list. It reads from
+`CCIP_CHAIN_SELECTORS` like every other option; the flag, when given, replaces the variable:
 
 ```bash
-export CCIP_CHAIN_SELECTORS=2337=12922642891491394802
+export CCIP_CHAIN_SELECTORS="2337=12922642891491394802,735711155111=ethereum-testnet-sepolia"
 ```
+
+A Sui or TON chain added this way resolves by selector — as a lane's destination, or when decoding a
+message — but the CLI can't match it to an RPC: Sui and TON RPCs are identified by fixed network
+identities, not by chain id.
 
 ## Forks
 
@@ -71,20 +79,21 @@ chain selector on-chain, so it must keep that identity — giving it a fresh sel
 decoding, because a decoded message's selector then resolves to the real network rather than to your
 fork's RPC.
 
-Register it with `fork:` and the CLI re-keys the forked chain to the fork's chain id:
+Name the forked chain after the `=`, and the CLI re-keys it to the fork's chain id:
 
 ```bash
 # a Sepolia fork served at chain id 735711155111
 ccip-cli show 0xSourceTxHash \
-  --chain-selectors 735711155111=fork:ethereum-testnet-sepolia \
+  --chain-selectors 735711155111=ethereum-testnet-sepolia \
   --rpcs $TENDERLY_VIRTUAL_ENV_RPC \
   --rpcs https://arb-sepolia.example.com \
   --no-api
 ```
 
-The forked chain can be named by chain id, selector, or name — `fork:11155111`,
-`fork:16015286601757825753`, and `fork:ethereum-testnet-sepolia` are equivalent. Add `name` to label
-the fork:
+The forked chain's selector works as well: `735711155111=16015286601757825753` is the same fork,
+because a selector that a known chain already owns always means that chain. A number after the `=`
+is always a selector, never a chain id. `735711155111=11155111` is rejected, since `11155111` is
+Sepolia's chain id, and the error names the fix. Add `name` to label the fork:
 
 ```json
 [{ "chainId": 735711155111, "forkOf": "ethereum-testnet-sepolia", "name": "tenderly-sepolia" }]
@@ -94,12 +103,16 @@ The fork **takes over** the forked chain's identity: `11155111` stops resolving 
 process, and the selector, name, and family now point at the fork. That is deliberate: a selector
 identifies exactly one chain, so you cannot address a network and its fork in the same invocation.
 
+Forgot the flag? An RPC whose chain id is not in the table is skipped, and the resulting
+`RPC_NOT_FOUND` or `TRANSACTION_NOT_FOUND` error's `help:` line names that chain id (and the RPC's
+host) with the value to pass.
+
 A fork may also take over a chain id that is already bundled, as long as it is not a mainnet one.
 `hardhat node --fork` keeps chain id `31337` (bundled as `anvil-devnet`, with a selector that does
 not match the forked network), so a Hardhat fork of Sepolia needs:
 
 ```bash
---chain-selectors 31337=fork:ethereum-testnet-sepolia
+--chain-selectors 31337=ethereum-testnet-sepolia
 ```
 
 Without it the RPC resolves to `anvil-devnet` and decoding later fails with `RPC_NOT_FOUND`, because
@@ -111,7 +124,7 @@ nothing.
 Tenderly does not default a Virtual Environment to its parent's chain id: the REST API **requires**
 `virtual_network_config.chain_config.chain_id`, the dashboard defaults to a custom id, and Tenderly's
 own docs recommend prefixing `7357` to the parent's id (a Sepolia fork becomes `735711155111`). So a
-Virtual Environment almost always needs `fork:`.
+Virtual Environment almost always needs a fork entry.
 
 Read the id from the environment itself rather than assuming one:
 
@@ -171,9 +184,9 @@ really is produced there. The bare `anvil` devnet in this guide has no committee
 unexecuted and `manual-exec` fails with `COMMIT_NOT_FOUND`, exactly as it does on a fork of a public
 network where no CCIP DON is watching. That is correct behaviour, not a bug.
 
-## Register from a File
+## Add from a File
 
-For non-EVM families, mainnet chains, or more than a couple of entries, pass a JSON or YAML file.
+For names, mainnet chains, or more than a couple of entries, pass a JSON or YAML file.
 The `selectors:` shape of the `chain-selectors` registry is accepted as-is, so `test_selectors.yml`
 can be used unmodified:
 
@@ -204,35 +217,48 @@ An array of entries and a `chainId -> entry` map both work, in JSON or YAML, inl
 ]
 ```
 
-| Field           | Required | Default       | Notes                                                                                                                                                                        |
-| --------------- | -------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chainId`       | yes      | -             | Map keys are used as the chain id when given                                                                                                                                 |
-| `chainSelector` | yes\*    | -             | Also accepted as `selector`                                                                                                                                                  |
-| `forkOf`        | no       | -             | Register a fork instead of a new chain, by id/selector/name of the forked chain; also accepted as `fork_of`. The fork inherits its selector, so `chainSelector` is not given |
-| `name`          | no       | `custom-<id>` | Usable anywhere a chain name is                                                                                                                                              |
-| `family`        | no       | `EVM`         | `EVM`, `SVM`, `APTOS`, `SUI`, `TON`, `CANTON`                                                                                                                                |
-| `networkType`   | no       | `TESTNET`     | Also accepted as `network_type`                                                                                                                                              |
+| Field           | Required | Default           | Notes                                                                                                                                                     |
+| --------------- | -------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chainId`       | yes      | -                 | Map keys are used as the chain id when given                                                                                                              |
+| `chainSelector` | yes\*    | -                 | Also accepted as `selector`. A selector a known chain owns makes the entry a fork of that chain                                                           |
+| `forkOf`        | yes\*    | -                 | A fork of a known chain, by name or selector; also accepted as `fork_of`. The fork inherits the forked chain's selector, family and network type          |
+| `name`          | no       | `custom-<id>`     | For a fork, defaults to the forked chain's name. Must be unique, and must not look like a chain id or number                                              |
+| `family`        | no       | from the chain id | `EVM`, `SVM` (or `SOLANA`), `APTOS`, `SUI`, `TON`, `CANTON`, any case. With `APTOS`, `SUI` or `CANTON`, a bare id gets its prefix (`4` becomes `aptos:4`) |
+| `networkType`   | no       | `TESTNET`         | Also accepted as `network_type`, any case                                                                                                                 |
 
-`*` Required for a new chain; omit it when `forkOf` is set.
+`*` Exactly one of `chainSelector` and `forkOf`.
 
-Registering a chain id that is already bundled overrides it. Registering a selector that another
-chain already owns is rejected.
+Adding a chain id that is already bundled replaces it, unless it is a mainnet chain: the CLI refuses
+to point a mainnet chain id at another chain. A per-family registry file such as
+`selectors_aptos.yml`, keyed by bare ids (`1`, `2`, …), loads once each entry sets `family: aptos`:
+the ids get their prefix.
 
 ## From the SDK
 
-The CLI flag is a wrapper around `registerChains`. Call it before any chain resolution:
+The CLI flag writes into the SDK's exported `SELECTORS` table, keyed by chain id. Do the same from
+code, before resolving the chain; every resolution reads the live table:
 
 ```typescript
-import { networkInfo, registerChains } from '@chainlink/ccip-sdk'
+import { SELECTORS, networkInfo } from '@chainlink/ccip-sdk'
 
 // a new chain (from-scratch devnet)
-registerChains([{ chainId: 2337, chainSelector: 12922642891491394802n, name: 'local-anvil-dst' }])
+SELECTORS['2337'] = {
+  selector: 12922642891491394802n,
+  name: 'local-anvil-dst',
+  family: 'EVM',
+  network_type: 'TESTNET',
+}
 networkInfo(12922642891491394802n).chainId // 2337
 
-// a fork served under a different chain id
-registerChains([{ chainId: 735711155111, forkOf: 'ethereum-testnet-sepolia' }])
-networkInfo(735711155111n).chainSelector // 16015286601757825753n
+// a fork served under a different chain id: MOVE the forked chain's entry
+SELECTORS['735711155111'] = SELECTORS['11155111']!
+delete SELECTORS['11155111']
+networkInfo(16015286601757825753n).chainId // 735711155111
 ```
+
+Move a fork's entry rather than copying it: with both keys present, a selector resolves to whichever
+chain id the table lists first. The SDK doesn't validate entries, so the CLI's checks — unique names,
+no mainnet takeover — are yours to keep.
 
 ## See Also
 
