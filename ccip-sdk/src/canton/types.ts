@@ -1,5 +1,6 @@
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
+import { type PartyId, parsePartyId } from './addressCodec.ts'
 import type { JsCommands, SinglePartySignatures } from './client/index.ts'
 
 /**
@@ -76,7 +77,7 @@ export interface UnsignedCantonTx {
  * The ledger stores `admin` as `party::fingerprint` and `id` as the token name.
  */
 export interface CantonInstrumentId {
-  admin: string
+  admin: PartyId
   id: string
 }
 
@@ -162,5 +163,9 @@ export function parseCantonInstrumentId(instrument: string): CantonInstrumentId 
       `invalid Canton instrument ID "${instrument}": expected party::fingerprint::tokenId`,
     )
   }
-  return { admin: [parts[0], parts[1]].join('::'), id: parts[2]! }
+  const adminPartyId = parsePartyId([parts[0], parts[1]].join('::'))
+  return {
+    admin: adminPartyId,
+    id: parts[2]!,
+  }
 }

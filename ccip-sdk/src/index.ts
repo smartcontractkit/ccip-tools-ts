@@ -168,12 +168,10 @@ export {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
   DEFAULT_CANTON_LINK_INSTRUMENT_ID,
-  DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   formatCantonLinkFeeToken,
   resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
-  resolveSenderInstanceId,
 } from './canton/defaults.ts'
 // Canton authentication (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {
