@@ -11,6 +11,7 @@ import {
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPError,
+  CCIPErrorCode,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
@@ -165,12 +166,40 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   const chains: Record<string, Promise<Chain>> = {}
   const pendingChainsCbs: Record<
     string,
-    readonly [resolve: (value: Chain) => void, reject: (reason?: unknown) => void]
+    readonly [
+      resolve: (value: Chain) => void,
+      reject: (reason?: unknown) => void,
+      family: ChainFamily,
+    ]
   > = {}
+  /** chain ids reported by RPCs but missing from the selector table, to the RPC's host */
+  const unregistered = new Map<string, string>()
   const finished: Partial<Record<ChainFamily, true>> = {}
   const initFamily$: Partial<Record<ChainFamily, Promise<unknown>>> = {}
   let endpoints$: Promise<Set<string>> | undefined
   let txFoundIn: string | undefined
+
+  /**
+   * Recovery hint for a chain or tx not found while some RPCs report chain ids missing from the
+   * selector table: typically a fork served under its own chain id, which `--chain-selectors` maps.
+   */
+  const unregisteredHint = (name?: string): string | undefined => {
+    if (!unregistered.size) return
+    const ids = [...unregistered].map(([id, host]) => `${id} (${host})`).join(', ')
+    const chainId = unregistered.size === 1 ? [...unregistered.keys()][0]! : '<chainId>'
+    return (
+      `RPCs report chain ids missing from the selector table, so they were not used: ${ids}. ` +
+      `If one serves ${name ?? 'this transaction'}, register it: ` +
+      `--chain-selectors ${chainId}=${name ?? '<selector|forked chain name>'}`
+    )
+  }
+  const rpcNotFound = (name: string) => {
+    const recovery = unregisteredHint(name)
+    return new CCIPRpcNotFoundError(
+      name,
+      recovery ? { recovery, context: { unregisteredChainIds: [...unregistered.keys()] } } : {},
+    )
+  }
 
   /**
    * Resolve the Canton config's `auth` block (if present) into a `jwt` (string
@@ -247,7 +276,24 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
                 txOnlyRacers.add(chain) // lost race, but may still find tx before winner and take its place
               }
             },
-            () => {},
+            (err: unknown) => {
+              if (!CCIPError.isCCIPError(err) || err.code !== CCIPErrorCode.CHAIN_NOT_FOUND) return
+              const chainId = String(err.context.chainIdOrSelector)
+              let host
+              try {
+                host = new URL(url).host // not the path: RPC paths may embed credentials
+              } catch {
+                host = 'rpc'
+              }
+              unregistered.set(chainId, host)
+              ctx.logger.debug(
+                'RPC',
+                host,
+                'reports chain id',
+                chainId,
+                'not in the selector table',
+              )
+            },
           )
         }
         let txs$
@@ -292,12 +338,17 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
               }
             }
             Object.entries(pendingChainsCbs)
-              .filter(([name]) => networkInfo(name).family === F)
+              .filter(([, [, , family]]) => family === F)
               .forEach(([name, [_, reject]]) => {
-                if (bestError && CCIPError.isCCIPError(bestError)) {
+                // an unregistered RPC's CHAIN_NOT_FOUND names ITS chain id, not the one asked for
+                if (
+                  bestError &&
+                  CCIPError.isCCIPError(bestError) &&
+                  bestError.code !== CCIPErrorCode.CHAIN_NOT_FOUND
+                ) {
                   reject(bestError)
                 } else {
-                  reject(new CCIPRpcNotFoundError(name))
+                  reject(rpcNotFound(name))
                 }
               })
           }),
@@ -314,11 +365,11 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   const chainGetter = async (idOrSelectorOrName: number | string | bigint): Promise<Chain> => {
     const network = networkInfo(idOrSelectorOrName)
     if (network.name in chains) return chains[network.name]!
-    if (finished[network.family]) throw new CCIPRpcNotFoundError(network.name)
+    if (finished[network.family]) throw rpcNotFound(network.name)
 
     const { promise, resolve, reject } = Promise.withResolvers<Chain>()
     chains[network.name] = promise
-    pendingChainsCbs[network.name] = [resolve, reject]
+    pendingChainsCbs[network.name] = [resolve, reject, network.family]
 
     void promise
       .finally(() => {
@@ -336,9 +387,15 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
     Object.values(supportedChains)
       .filter((C) => C.isTxHash(txHash))
       .map((C) => loadChainFamily(C.family, txHash) as Promise<[Chain, ChainTransaction]>),
-  ).catch((err) =>
-    Promise.reject(new CCIPTransactionNotFoundError(txHash, { context: { aggregateErr: err } })),
-  )
+  ).catch((err) => {
+    const recovery = unregisteredHint()
+    return Promise.reject(
+      new CCIPTransactionNotFoundError(txHash, {
+        context: { aggregateErr: err },
+        ...(recovery && { recovery }),
+      }),
+    )
+  })
   return [chainGetter, txResult]
 }
 
