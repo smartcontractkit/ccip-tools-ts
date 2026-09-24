@@ -151,6 +151,39 @@ export class CCIPTransactionTooLargeError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a multi-transaction submission fails after prior transactions confirmed.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await submitTransactions()
+ * } catch (error) {
+ *   if (error instanceof CCIPPartialTransactionSubmissionError) {
+ *     console.log(error.context.committedHashes)
+ *     console.log(error.context.committedInstructionCount)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPPartialTransactionSubmissionError extends CCIPError {
+  override readonly name = 'CCIPPartialTransactionSubmissionError'
+  constructor(
+    committedHashes: string[],
+    committedInstructionCount: number,
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.PARTIAL_TRANSACTION_SUBMISSION,
+      'Transaction submission partially completed',
+      {
+        ...options,
+        context: { ...options?.context, committedHashes, committedInstructionCount },
+      },
+    )
+  }
+}
+
 // CCIP Message
 
 /**

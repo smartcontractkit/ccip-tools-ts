@@ -6,6 +6,7 @@ import { rpcEndpoints } from '../../../scripts/test-endpoints.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const CLI_PATH = path.join(__dirname, '..', 'index.ts')
+
 // Spawned CLI children run with the ccip-cli package root as cwd — the same
 // cwd the suite ran under when each workspace's tests were invoked separately.
 // It matters for the CLI's cwd-relative defaults: `--rpcs-file` falls back to
@@ -14,13 +15,33 @@ export const CLI_PATH = path.join(__dirname, '..', 'index.ts')
 // whole tree runs from one root-level `node --test` invocation.
 const CLI_CWD = path.join(__dirname, '..', '..')
 
+/**
+ * Environment for the spawned CLI: `process.env` minus every `RPC_*` entry.
+ *
+ * Each invocation is pointed at its own lane's endpoints (see
+ * buildShowArgs/buildLaneArgs), but the CLI also folds *every* `RPC_*` env var
+ * into that same endpoint set — and CI exports one per configured network.
+ * Inheriting them undid the per-lane lists twice over: the CLI raced every
+ * configured network's endpoints for every family the invocation resolves
+ * (turning a two-endpoint lane into twenty, and handing every hash-format
+ * family — EVM, Sui and Aptos all claim a 32-byte hex hash — URLs of networks
+ * the lane never touches), and an endpoint that never answers stalls the "not
+ * found on any chain" determination these tests assert on. The values are meant
+ * for a user's shell, not for a suite that already knows which networks its
+ * fixture touches.
+ */
+const CLI_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('RPC_')),
+)
+
 // Per-network endpoint groups, resolved from RPC_* env vars with the central
 // keyless defaults from scripts/test-endpoints.ts. Every e2e invocation passes
-// ONLY the endpoints of the chains its fixture lives on (see
-// buildShowArgs/buildLaneArgs): the CLI races `--rpc` endpoints per family, and
-// an endpoint that never answers stalls every "not found on any chain"
-// determination until it does — so racing twenty endpoints per invocation both
-// slowed startup and made the whole list's health part of every test. A
+// ONLY the endpoints of the chains its fixture lives on (buildShowArgs /
+// buildLaneArgs below, plus the RPC_* stripping in CLI_ENV above): the CLI
+// races `--rpc` endpoints per family, and an endpoint that never answers stalls
+// every "not found on any chain" determination until it does — so racing twenty
+// endpoints per invocation both slowed startup and made the whole list's health
+// part of every test. A
 // per-lane list also keeps a suite's requests inside the network locks it
 // actually holds.
 
@@ -67,7 +88,7 @@ export async function spawnCLI(
   timeout = 60000,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', [CLI_PATH, ...args], { cwd: CLI_CWD, env: { ...process.env } })
+    const child = spawn('node', [CLI_PATH, ...args], { cwd: CLI_CWD, env: CLI_ENV })
 
     let stdout = ''
     let stderr = ''

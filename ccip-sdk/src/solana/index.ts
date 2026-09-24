@@ -38,7 +38,6 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
-import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
@@ -1473,14 +1472,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         hash = await simulateAndSendTxs(this, wallet, unsigned, opts.txGasLimit ?? opts.gasLimit)
       } catch (err) {
         if (!(err instanceof Error)) throw err
-        if (err.message.includes('AlreadyContainsChunk')) {
+        const message = [err.message, err.cause instanceof Error ? err.cause.message : ''].join(
+          '\n',
+        )
+        if (message.includes('AlreadyContainsChunk')) {
           // stale buffer from a previous failed attempt; close it and retry
           if (!opts.clearLeftoverAccounts) {
             opts = { ...opts, clearLeftoverAccounts: true }
           } else throw err
-        } else if (
-          ['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
-        ) {
+        } else if (['encoding overruns Uint8Array', 'too large'].some((e) => message.includes(e))) {
           // in case of failure to serialize a report, first try buffering (because it gets
           // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
           // deactivation before they can be closed/recycled)
@@ -1722,16 +1722,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
         optionalThreshold: ccvs.optionalThreshold,
       }
-      const verifications = await fetchVerifications(request.message.messageId, {
-        apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : opts.watch
-              ? this.abort
-              : undefined,
-      })
+      const verifications = await this.fetchCCVResults(
+        request.message.messageId,
+        verificationPolicy,
+        opts,
+      )
       return { verificationPolicy, verifications }
     }
     const coveringPdas = await this._getCommitReportPdaAccounts(
