@@ -1,6 +1,6 @@
-import { hexlify } from "ethers";
-import { memoize } from "micro-memoize";
-import type { SetRequired } from "type-fest";
+import { hexlify } from 'ethers'
+import { memoize } from 'micro-memoize'
+import type { SetRequired } from 'type-fest'
 
 import {
   CCIPApiClientNotAvailableError,
@@ -12,13 +12,13 @@ import {
   CCIPMessageNotVerifiedYetError,
   CCIPUnexpectedPaginationError,
   CCIPVersionUnsupportedError,
-} from "../errors/index.ts";
-import { calculateManualExecProof } from "../execution.ts";
-import { fetchWithTimeout } from "../fetch.ts";
-import { HttpStatus } from "../http-status.ts";
-import { decodeMessageV1 } from "../messages.ts";
-import { type NetworkInfo, ChainFamily, NetworkType } from "../networks.ts";
-import { decodeMessage } from "../requests.ts";
+} from '../errors/index.ts'
+import { calculateManualExecProof } from '../execution.ts'
+import { fetchWithTimeout } from '../fetch.ts'
+import { HttpStatus } from '../http-status.ts'
+import { decodeMessageV1 } from '../messages.ts'
+import { type NetworkInfo, ChainFamily, NetworkType } from '../networks.ts'
+import { decodeMessage } from '../requests.ts'
 import {
   type CCIPMessage,
   type CCIPRequest,
@@ -31,8 +31,8 @@ import {
   type WithLogger,
   CCIPVersion,
   MessageStatus,
-} from "../types.ts";
-import { decodeAddress, getDataBytes, jsonParse } from "../utils.ts";
+} from '../types.ts'
+import { decodeAddress, getDataBytes, jsonParse } from '../utils.ts'
 import type {
   APIErrorResponse,
   LaneLatencyResponse,
@@ -44,7 +44,7 @@ import type {
   RawMessageResponse,
   RawMessagesResponse,
   RawNetworkInfo,
-} from "./types.ts";
+} from './types.ts'
 
 export type {
   APICCIPRequestMetadata,
@@ -53,67 +53,60 @@ export type {
   MessageSearchFilters,
   MessageSearchPage,
   MessageSearchResult,
-} from "./types.ts";
+} from './types.ts'
 
 /** Default CCIP API base URL */
-export const DEFAULT_API_BASE_URL = "https://api.ccip.chain.link";
+export const DEFAULT_API_BASE_URL = 'https://api.ccip.chain.link'
 
 /** Default timeout for API requests in milliseconds */
-export const DEFAULT_TIMEOUT_MS = 30000;
+export const DEFAULT_TIMEOUT_MS = 30000
 
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = "1.13.1-9e6a7f16";
+export const SDK_VERSION = '1.13.1-9e6a7f16'
 // generate:end
 
 /** SDK telemetry header name */
-export const SDK_VERSION_HEADER = "X-SDK-Version";
+export const SDK_VERSION_HEADER = 'X-SDK-Version'
 
 /**
  * Context for CCIPAPIClient initialization.
  */
 export type CCIPAPIClientContext = WithLogger & {
   /** Custom fetch function (defaults to globalThis.fetch) */
-  fetch?: typeof fetch;
+  fetch?: typeof fetch
   /** Request timeout in milliseconds (defaults to 30000ms) */
-  timeoutMs?: number;
-};
+  timeoutMs?: number
+}
 
 const validateChainFamily = (value: string, logger: Logger): ChainFamily => {
-  const validFamilies = Object.values(ChainFamily) as string[];
+  const validFamilies = Object.values(ChainFamily) as string[]
   if (validFamilies.includes(value)) {
-    return value as ChainFamily;
+    return value as ChainFamily
   }
-  logger.warn(
-    `Unexpected chainFamily value from API: "${value}", using UNKNOWN`,
-  );
-  return ChainFamily.Unknown;
-};
+  logger.warn(`Unexpected chainFamily value from API: "${value}", using UNKNOWN`)
+  return ChainFamily.Unknown
+}
 
-const validateMessageStatus = (
-  value: string,
-  logger: Logger,
-): MessageStatus => {
-  const validStatuses = Object.values(MessageStatus) as string[];
+const validateMessageStatus = (value: string, logger: Logger): MessageStatus => {
+  const validStatuses = Object.values(MessageStatus) as string[]
   if (validStatuses.includes(value)) {
-    return value as MessageStatus;
+    return value as MessageStatus
   }
-  logger.warn(`Unexpected message status from API: "${value}", using UNKNOWN`);
-  return MessageStatus.Unknown;
-};
+  logger.warn(`Unexpected message status from API: "${value}", using UNKNOWN`)
+  return MessageStatus.Unknown
+}
 
 const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
     chainSelector: BigInt(o.chainSelector),
-    networkType: o.name.includes("-mainnet")
-      ? NetworkType.Mainnet
-      : NetworkType.Testnet,
-    ...(!("family" in o) && {
+    networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
+    ...(!('family' in o) && {
       family: validateChainFamily(o.chainFamily, logger),
     }),
-  }) as unknown as NetworkInfo;
-};
+  }) as unknown as NetworkInfo
+}
 
 /**
  * Client for interacting with the CCIP REST API.
@@ -151,23 +144,22 @@ const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
  */
 export class CCIPAPIClient {
   /** Base URL for API requests */
-  readonly baseUrl: string;
+  readonly baseUrl: string
   /** Logger instance */
-  readonly logger: Logger;
+  readonly logger: Logger
   /** Request timeout in milliseconds */
-  readonly timeoutMs: number;
+  readonly timeoutMs: number
   /** Fetch function used for HTTP requests */
-  private readonly _fetch: typeof fetch;
+  private readonly _fetch: typeof fetch
 
   static {
     CCIPAPIClient.fromUrl = memoize(
-      (baseUrl?: string, ctx?: CCIPAPIClientContext) =>
-        new CCIPAPIClient(baseUrl, ctx),
+      (baseUrl?: string, ctx?: CCIPAPIClientContext) => new CCIPAPIClient(baseUrl, ctx),
       {
         maxArgs: 1,
         transformKey: ([baseUrl]) => [baseUrl ?? DEFAULT_API_BASE_URL],
       },
-    );
+    )
   }
 
   /**
@@ -176,33 +168,33 @@ export class CCIPAPIClient {
    * @param ctx - Optional context with logger and custom fetch
    */
   constructor(baseUrl?: string, ctx?: CCIPAPIClientContext) {
-    if (typeof baseUrl === "boolean" || (baseUrl as unknown) === null)
-      throw new CCIPApiClientNotAvailableError({ context: { baseUrl } }); // shouldn't happen
-    this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL;
-    this.logger = ctx?.logger ?? console;
-    this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis);
+    if (typeof baseUrl === 'boolean' || (baseUrl as unknown) === null)
+      throw new CCIPApiClientNotAvailableError({ context: { baseUrl } }) // shouldn't happen
+    this.baseUrl = baseUrl ?? DEFAULT_API_BASE_URL
+    this.logger = ctx?.logger ?? console
+    this.timeoutMs = ctx?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this._fetch = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
 
     this.getMessageById = memoize(this.getMessageById.bind(this), {
       async: true,
       expires: 4_000,
       maxArgs: 1,
       maxSize: 100,
-    });
+    })
 
     this.getExecutionInput = memoize(this.getExecutionInput.bind(this), {
       async: true,
       expires: 4_000,
       maxArgs: 1,
       maxSize: 100,
-    });
+    })
 
     this.fetchExecutionInputs = memoize(this.fetchExecutionInputs.bind(this), {
       async: true,
       expires: 4_000,
       maxArgs: 1,
       maxSize: 100,
-    });
+    })
   }
 
   /**
@@ -214,7 +206,7 @@ export class CCIPAPIClient {
    * @returns New CCIPAPIClient instance
    */
   static fromUrl(baseUrl?: string, ctx?: CCIPAPIClientContext): CCIPAPIClient {
-    return new CCIPAPIClient(baseUrl, ctx);
+    return new CCIPAPIClient(baseUrl, ctx)
   }
 
   /**
@@ -236,11 +228,11 @@ export class CCIPAPIClient {
       fetch: this._fetch,
       init: {
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           [SDK_VERSION_HEADER]: `CCIP SDK v${SDK_VERSION}`,
         },
       },
-    });
+    })
   }
 
   /**
@@ -315,51 +307,43 @@ export class CCIPAPIClient {
     numberOfBlocks?: number,
     options?: { sourceTokenAddress?: string; signal?: AbortSignal },
   ): Promise<LaneLatencyResponse> {
-    const url = new URL(`${this.baseUrl}/v2/lanes/latency`);
-    url.searchParams.set("sourceChainSelector", sourceChainSelector.toString());
-    url.searchParams.set("destChainSelector", destChainSelector.toString());
+    const url = new URL(`${this.baseUrl}/v2/lanes/latency`)
+    url.searchParams.set('sourceChainSelector', sourceChainSelector.toString())
+    url.searchParams.set('destChainSelector', destChainSelector.toString())
     if (numberOfBlocks) {
-      url.searchParams.set("numOfBlocks", numberOfBlocks.toString());
+      url.searchParams.set('numOfBlocks', numberOfBlocks.toString())
     }
     if (options?.sourceTokenAddress) {
-      url.searchParams.set("sourceTokenAddress", options.sourceTokenAddress);
+      url.searchParams.set('sourceTokenAddress', options.sourceTokenAddress)
     }
 
-    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`);
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetchWithTimeout(
-      url.toString(),
-      "getLaneLatency",
-      options?.signal,
-    );
+    const response = await this._fetchWithTimeout(url.toString(), 'getLaneLatency', options?.signal)
 
     if (!response.ok) {
       // Try to parse structured error response from API
-      let apiError: APIErrorResponse | undefined;
+      let apiError: APIErrorResponse | undefined
       try {
-        apiError = jsonParse<APIErrorResponse>(await response.text());
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
 
       // Throw specific error for lane not found
       if (response.status === HttpStatus.NOT_FOUND) {
-        throw new CCIPLaneNotFoundError(
-          sourceChainSelector,
-          destChainSelector,
-          {
-            context: apiError
-              ? {
-                  apiErrorCode: apiError.error,
-                  apiErrorMessage: apiError.message,
-                }
-              : undefined,
-          },
-        );
+        throw new CCIPLaneNotFoundError(sourceChainSelector, destChainSelector, {
+          context: apiError
+            ? {
+                apiErrorCode: apiError.error,
+                apiErrorMessage: apiError.message,
+              }
+            : undefined,
+        })
       }
 
       // Keyed on the body's error code, not the status: the API returns 400 for INVALID_PARAMETERS too
-      if (apiError?.error === "INSUFFICIENT_DATA") {
+      if (apiError?.error === 'INSUFFICIENT_DATA') {
         throw new CCIPLaneLatencyInsufficientDataError(
           sourceChainSelector,
           destChainSelector,
@@ -370,7 +354,7 @@ export class CCIPAPIClient {
               apiErrorMessage: apiError.message,
             },
           },
-        );
+        )
       }
 
       // Generic HTTP error for other cases
@@ -381,15 +365,15 @@ export class CCIPAPIClient {
               apiErrorMessage: apiError.message,
             }
           : undefined,
-      });
+      })
     }
 
-    const raw = jsonParse<RawLaneLatencyResponse>(await response.text());
+    const raw = jsonParse<RawLaneLatencyResponse>(await response.text())
 
     // Log full raw response for debugging
-    this.logger.debug("getLaneLatency raw response:", raw);
+    this.logger.debug('getLaneLatency raw response:', raw)
 
-    return { totalMs: Number(raw.totalMs) };
+    return { totalMs: Number(raw.totalMs) }
   }
 
   /**
@@ -432,22 +416,18 @@ export class CCIPAPIClient {
   async getMessageById(
     messageId: string,
     options?: { signal?: AbortSignal },
-  ): Promise<SetRequired<CCIPRequest, "metadata">> {
-    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`;
+  ): Promise<SetRequired<CCIPRequest, 'metadata'>> {
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}`
 
-    this.logger.debug(`CCIPAPIClient: GET ${url}`);
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
-    const response = await this._fetchWithTimeout(
-      url,
-      "getMessageById",
-      options?.signal,
-    );
+    const response = await this._fetchWithTimeout(url, 'getMessageById', options?.signal)
 
     if (!response.ok) {
       // Try to parse structured error response from API
-      let apiError: APIErrorResponse | undefined;
+      let apiError: APIErrorResponse | undefined
       try {
-        apiError = jsonParse<APIErrorResponse>(await response.text());
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -461,7 +441,7 @@ export class CCIPAPIClient {
                 apiErrorMessage: apiError.message,
               }
             : undefined,
-        });
+        })
       }
 
       // Generic HTTP error for other cases
@@ -472,12 +452,12 @@ export class CCIPAPIClient {
               apiErrorMessage: apiError.message,
             }
           : undefined,
-      });
+      })
     }
 
-    const raw = await response.text();
-    this.logger.debug("getMessageById raw response:", raw);
-    return this._transformMessageResponse(raw);
+    const raw = await response.text()
+    this.logger.debug('getMessageById raw response:', raw)
+    return this._transformMessageResponse(raw)
   }
 
   /**
@@ -496,22 +476,22 @@ export class CCIPAPIClient {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<VerifierResult[]> {
-    const apiRes = await this.getMessageById(messageId, options);
+    const apiRes = await this.getMessageById(messageId, options)
 
-    if (!("verifiers" in apiRes.message)) {
-      throw new CCIPMessageNotVerifiedYetError(messageId);
+    if (!('verifiers' in apiRes.message)) {
+      throw new CCIPMessageNotVerifiedYetError(messageId)
     }
 
     const verifiers = apiRes.message.verifiers as {
       items?: {
-        destAddress: string;
-        sourceAddress: string;
-        isRequired: boolean;
-        verification?: { data: string; timestamp: string };
-      }[];
-    };
+        destAddress: string
+        sourceAddress: string
+        isRequired: boolean
+        verification?: { data: string; timestamp: string }
+      }[]
+    }
     if (!verifiers.items?.every((f) => f.verification?.data || !f.isRequired))
-      throw new CCIPMessageNotVerifiedYetError(messageId);
+      throw new CCIPMessageNotVerifiedYetError(messageId)
 
     const verifications: VerifierResult[] = (verifiers.items ?? [])
       .filter((item) => item.verification?.data)
@@ -522,9 +502,9 @@ export class CCIPAPIClient {
         ...(item.verification?.timestamp && {
           timestamp: new Date(item.verification.timestamp).getTime() / 1e3,
         }),
-      }));
+      }))
 
-    return verifications;
+    return verifications
   }
 
   /**
@@ -536,31 +516,31 @@ export class CCIPAPIClient {
     messageId: string,
     raw: Extract<RawExecutionInputsResult, { encodedMessage: string }>,
     options?: { signal?: AbortSignal },
-  ): Promise<Pick<VerifierResult, "ccvData" | "destAddress">[]> {
-    const ccvData = raw.ccvData ?? [];
-    const verifierAddresses = raw.verifierAddresses;
+  ): Promise<Pick<VerifierResult, 'ccvData' | 'destAddress'>[]> {
+    const ccvData = raw.ccvData ?? []
+    const verifierAddresses = raw.verifierAddresses
     const hasCompleteExecutionInputs =
       ccvData.length > 0 &&
       ccvData.length === verifierAddresses.length &&
-      raw.verificationComplete !== false;
+      raw.verificationComplete !== false
 
     if (hasCompleteExecutionInputs) {
       return ccvData.map((data, i) => ({
         ccvData: data,
         destAddress: verifierAddresses[i]!,
-      }));
+      }))
     }
 
     this.logger.debug(
-      "getExecutionInput: execution-inputs CCV data incomplete; falling back to getMessageById verifiers",
+      'getExecutionInput: execution-inputs CCV data incomplete; falling back to getMessageById verifiers',
       {
         messageId,
         verificationComplete: raw.verificationComplete,
         ccvCount: ccvData.length,
         verifierAddressCount: verifierAddresses.length,
       },
-    );
-    return this.getVerifications(messageId, options);
+    )
+    return this.getVerifications(messageId, options)
   }
 
   /**
@@ -637,59 +617,42 @@ export class CCIPAPIClient {
     filters?: MessageSearchFilters,
     options?: { limit?: number; cursor?: string; signal?: AbortSignal },
   ): Promise<MessageSearchPage> {
-    const url = new URL(`${this.baseUrl}/v2/messages`);
+    const url = new URL(`${this.baseUrl}/v2/messages`)
 
     if (options?.cursor) {
       // Cursor encodes all original filters — only send cursor (and optional limit)
-      url.searchParams.set("cursor", options.cursor);
+      url.searchParams.set('cursor', options.cursor)
     } else if (filters) {
-      if (filters.sender) url.searchParams.set("sender", filters.sender);
-      if (filters.receiver) url.searchParams.set("receiver", filters.receiver);
+      if (filters.sender) url.searchParams.set('sender', filters.sender)
+      if (filters.receiver) url.searchParams.set('receiver', filters.receiver)
       if (filters.sourceChainSelector != null)
-        url.searchParams.set(
-          "sourceChainSelector",
-          filters.sourceChainSelector.toString(),
-        );
+        url.searchParams.set('sourceChainSelector', filters.sourceChainSelector.toString())
       if (filters.destChainSelector != null)
-        url.searchParams.set(
-          "destChainSelector",
-          filters.destChainSelector.toString(),
-        );
+        url.searchParams.set('destChainSelector', filters.destChainSelector.toString())
       if (filters.sourceTransactionHash)
-        url.searchParams.set(
-          "sourceTransactionHash",
-          filters.sourceTransactionHash,
-        );
+        url.searchParams.set('sourceTransactionHash', filters.sourceTransactionHash)
       if (filters.sourceTokenAddress)
-        url.searchParams.set("sourceTokenAddress", filters.sourceTokenAddress);
+        url.searchParams.set('sourceTokenAddress', filters.sourceTokenAddress)
       if (filters.readyForManualExecOnly != null)
-        url.searchParams.set(
-          "readyForManualExecOnly",
-          String(filters.readyForManualExecOnly),
-        );
-      if (filters.q) url.searchParams.set("q", filters.q);
+        url.searchParams.set('readyForManualExecOnly', String(filters.readyForManualExecOnly))
+      if (filters.q) url.searchParams.set('q', filters.q)
     }
 
-    if (options?.limit != null)
-      url.searchParams.set("limit", options.limit.toString());
+    if (options?.limit != null) url.searchParams.set('limit', options.limit.toString())
 
-    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`);
+    this.logger.debug(`CCIPAPIClient: GET ${url.toString()}`)
 
-    const response = await this._fetchWithTimeout(
-      url.toString(),
-      "searchMessages",
-      options?.signal,
-    );
+    const response = await this._fetchWithTimeout(url.toString(), 'searchMessages', options?.signal)
 
     if (!response.ok) {
       // 404 → empty results (search found nothing)
       if (response.status === HttpStatus.NOT_FOUND) {
-        return { data: [], hasNextPage: false };
+        return { data: [], hasNextPage: false }
       }
 
-      let apiError: APIErrorResponse | undefined;
+      let apiError: APIErrorResponse | undefined
       try {
-        apiError = jsonParse<APIErrorResponse>(await response.text());
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON
       }
@@ -698,20 +661,17 @@ export class CCIPAPIClient {
         context: apiError
           ? { apiErrorCode: apiError.error, apiErrorMessage: apiError.message }
           : undefined,
-      });
+      })
     }
 
-    const raw = jsonParse<RawMessagesResponse>(await response.text());
+    const raw = jsonParse<RawMessagesResponse>(await response.text())
 
-    this.logger.debug("searchMessages raw response:", raw);
+    this.logger.debug('searchMessages raw response:', raw)
 
     return {
       data: raw.data.map((msg) => {
-        const sourceInfo = ensureNetworkInfo(
-          msg.sourceNetworkInfo,
-          this.logger,
-        );
-        const destInfo = ensureNetworkInfo(msg.destNetworkInfo, this.logger);
+        const sourceInfo = ensureNetworkInfo(msg.sourceNetworkInfo, this.logger)
+        const destInfo = ensureNetworkInfo(msg.destNetworkInfo, this.logger)
         return {
           ...msg,
           status: validateMessageStatus(msg.status, this.logger),
@@ -720,11 +680,11 @@ export class CCIPAPIClient {
           sender: decodeAddress(msg.sender, sourceInfo.family),
           receiver: decodeAddress(msg.receiver, destInfo.family),
           origin: decodeAddress(msg.origin, sourceInfo.family),
-        };
+        }
       }),
       hasNextPage: raw.pagination.hasNextPage,
       cursor: raw.pagination.cursor ?? undefined,
-    };
+    }
   }
 
   /**
@@ -769,16 +729,16 @@ export class CCIPAPIClient {
     filters?: MessageSearchFilters,
     options?: { limit?: number; cursor?: string; signal?: AbortSignal },
   ): AsyncGenerator<MessageSearchResult> {
-    let cursor: string | undefined = options?.cursor;
+    let cursor: string | undefined = options?.cursor
     do {
       const page = await this.searchMessages(filters, {
         limit: options?.limit,
         cursor,
         signal: options?.signal,
-      });
-      yield* page.data;
-      cursor = page.cursor;
-    } while (cursor);
+      })
+      yield* page.data
+      cursor = page.cursor
+    } while (cursor)
   }
 
   /**
@@ -816,24 +776,21 @@ export class CCIPAPIClient {
    * }
    * ```
    */
-  async getMessageIdsInTx(
-    txHash: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<string[]> {
+  async getMessageIdsInTx(txHash: string, options?: { signal?: AbortSignal }): Promise<string[]> {
     const result = await this.searchMessages(
       { sourceTransactionHash: txHash },
       { limit: 100, signal: options?.signal },
-    );
+    )
 
     if (result.data.length === 0) {
-      throw new CCIPMessageNotFoundInTxError(txHash);
+      throw new CCIPMessageNotFoundInTxError(txHash)
     }
 
     if (result.hasNextPage) {
-      throw new CCIPUnexpectedPaginationError(txHash, result.data.length);
+      throw new CCIPUnexpectedPaginationError(txHash, result.data.length)
     }
 
-    return result.data.map((msg) => msg.messageId);
+    return result.data.map((msg) => msg.messageId)
   }
 
   /**
@@ -864,19 +821,19 @@ export class CCIPAPIClient {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<ExecutionInput & Lane & { offRamp: string }> {
-    const raw = await this.fetchExecutionInputs(messageId, options);
+    const raw = await this.fetchExecutionInputs(messageId, options)
 
-    const offRamp = raw.offramp;
-    let lane: Lane;
-    if ("encodedMessage" in raw) {
+    const offRamp = raw.offramp
+    let lane: Lane
+    if ('encodedMessage' in raw) {
       // CCIP 2.0 messages use MessageV1Codec, which is chain-independent serialization.
       // Canton API responses omit the `0x` prefix (Daml BytesHex); normalize for ethers.
-      const encodedMessage = hexlify(getDataBytes(raw.encodedMessage));
+      const encodedMessage = hexlify(getDataBytes(raw.encodedMessage))
       const {
         sourceChainSelector,
         destChainSelector,
         onRampAddress: onRamp,
-      } = decodeMessageV1(encodedMessage);
+      } = decodeMessageV1(encodedMessage)
       return {
         sourceChainSelector,
         destChainSelector,
@@ -884,57 +841,39 @@ export class CCIPAPIClient {
         offRamp,
         version: CCIPVersion.V2_0,
         encodedMessage,
-        verifications: await this.resolveV2ExecutionVerifications(
-          messageId,
-          raw,
-          options,
-        ),
-      };
+        verifications: await this.resolveV2ExecutionVerifications(messageId, raw, options),
+      }
     }
 
-    const messagesInBatch = raw.messageBatch.map(decodeMessage);
-    const message = messagesInBatch.find(
-      (message) => message.messageId === messageId,
-    )!;
-    if ("onramp" in raw && raw.onramp && raw.version) {
+    const messagesInBatch = raw.messageBatch.map(decodeMessage)
+    const message = messagesInBatch.find((message) => message.messageId === messageId)!
+    if ('onramp' in raw && raw.onramp && raw.version) {
       lane = {
         sourceChainSelector: raw.sourceChainSelector,
         destChainSelector: raw.destChainSelector,
         onRamp: raw.onramp,
         version: raw.version as CCIPVersion,
-      };
+      }
     } else {
-      ({ lane } = await this.getMessageById(messageId));
+      ;({ lane } = await this.getMessageById(messageId))
     }
 
-    const proof = calculateManualExecProof(
-      messagesInBatch,
-      lane,
-      messageId,
-      raw.merkleRoot,
-      this,
-    );
+    const proof = calculateManualExecProof(messagesInBatch, lane, messageId, raw.merkleRoot, this)
 
-    const rawMessage = raw.messageBatch.find(
-      (message) => message.messageId === messageId,
-    )!;
-    const offchainTokenData: OffchainTokenData[] = rawMessage.tokenAmounts.map(
-      () => undefined,
-    );
-    if (rawMessage.usdcData?.status === "complete")
+    const rawMessage = raw.messageBatch.find((message) => message.messageId === messageId)!
+    const offchainTokenData: OffchainTokenData[] = rawMessage.tokenAmounts.map(() => undefined)
+    if (rawMessage.usdcData?.status === 'complete')
       offchainTokenData[0] = {
-        _tag: "usdc",
+        _tag: 'usdc',
         message: rawMessage.usdcData.message_bytes_hex!,
         attestation: rawMessage.usdcData.attestation!,
-      };
-    else if (
-      rawMessage.lbtcData?.status === "NOTARIZATION_STATUS_SESSION_APPROVED"
-    )
+      }
+    else if (rawMessage.lbtcData?.status === 'NOTARIZATION_STATUS_SESSION_APPROVED')
       offchainTokenData[0] = {
-        _tag: "lbtc",
+        _tag: 'lbtc',
         message_hash: rawMessage.lbtcData.message_hash!,
         attestation: rawMessage.lbtcData.attestation!,
-      };
+      }
 
     return {
       offRamp,
@@ -942,7 +881,7 @@ export class CCIPAPIClient {
       message,
       offchainTokenData,
       ...proof,
-    } as ExecutionInput & Lane & { offRamp: string };
+    } as ExecutionInput & Lane & { offRamp: string }
   }
 
   /**
@@ -964,17 +903,16 @@ export class CCIPAPIClient {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<{ offRamp: string; encodedMessage: string }> {
-    const raw = await this.fetchExecutionInputs(messageId, options);
-    if (!("encodedMessage" in raw))
+    const raw = await this.fetchExecutionInputs(messageId, options)
+    if (!('encodedMessage' in raw))
       throw new CCIPVersionUnsupportedError(
-        ("version" in raw && typeof raw.version === "string" && raw.version) ||
-          "<2.0",
+        ('version' in raw && typeof raw.version === 'string' && raw.version) || '<2.0',
         { context: { messageId } },
-      );
+      )
     return {
       offRamp: raw.offramp,
       encodedMessage: hexlify(getDataBytes(raw.encodedMessage)),
-    };
+    }
   }
 
   /** `GET /v2/messages/{id}/execution-inputs`, parsed but not interpreted. */
@@ -982,22 +920,16 @@ export class CCIPAPIClient {
     messageId: string,
     options?: { signal?: AbortSignal },
   ): Promise<RawExecutionInputsResult> {
-    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(
-      messageId,
-    )}/execution-inputs`;
+    const url = `${this.baseUrl}/v2/messages/${encodeURIComponent(messageId)}/execution-inputs`
 
-    this.logger.debug(`CCIPAPIClient: GET ${url}`);
+    this.logger.debug(`CCIPAPIClient: GET ${url}`)
 
-    const response = await this._fetchWithTimeout(
-      url,
-      "getExecutionInput",
-      options?.signal,
-    );
+    const response = await this._fetchWithTimeout(url, 'getExecutionInput', options?.signal)
     if (!response.ok) {
       // Try to parse structured error response from API
-      let apiError: APIErrorResponse | undefined;
+      let apiError: APIErrorResponse | undefined
       try {
-        apiError = jsonParse<APIErrorResponse>(await response.text());
+        apiError = jsonParse<APIErrorResponse>(await response.text())
       } catch {
         // Response body not JSON, use HTTP status only
       }
@@ -1011,7 +943,7 @@ export class CCIPAPIClient {
                 apiErrorMessage: apiError.message,
               }
             : undefined,
-        });
+        })
       }
 
       // Generic HTTP error for other cases
@@ -1022,12 +954,12 @@ export class CCIPAPIClient {
               apiErrorMessage: apiError.message,
             }
           : undefined,
-      });
+      })
     }
 
-    const raw = jsonParse<RawExecutionInputsResult>(await response.text());
-    this.logger.debug("getExecutionInput raw response:", raw);
-    return raw;
+    const raw = jsonParse<RawExecutionInputsResult>(await response.text())
+    this.logger.debug('getExecutionInput raw response:', raw)
+    return raw
   }
 
   /**
@@ -1035,12 +967,9 @@ export class CCIPAPIClient {
    * Populates all derivable CCIPRequest fields from API data.
    * @internal
    */
-  _transformMessageResponse(
-    text: string,
-  ): SetRequired<CCIPRequest, "metadata"> {
+  _transformMessageResponse(text: string): SetRequired<CCIPRequest, 'metadata'> {
     // Build message with extraArgs spread and tokenAmounts included
-    const raw = decodeMessage(text) as CCIPMessage &
-      Omit<RawMessageResponse, keyof CCIPMessage>;
+    const raw = decodeMessage(text) as CCIPMessage & Omit<RawMessageResponse, keyof CCIPMessage>
 
     const {
       sourceNetworkInfo,
@@ -1059,48 +988,40 @@ export class CCIPAPIClient {
       sendBlockNumber,
       sendLogIndex,
       ...message
-    } = raw;
+    } = raw
 
-    const sendDate = new Date(sendTimestamp);
-    const sendTimestamp_ = isNaN(sendDate.getTime())
-      ? 0
-      : Math.floor(sendDate.getTime() / 1000);
+    const sendDate = new Date(sendTimestamp)
+    const sendTimestamp_ = isNaN(sendDate.getTime()) ? 0 : Math.floor(sendDate.getTime() / 1000)
 
-    const receiptDate = receiptTimestamp && new Date(receiptTimestamp);
+    const receiptDate = receiptTimestamp && new Date(receiptTimestamp)
     const receiptTimestamp_ =
       receiptDate && !isNaN(receiptDate.getTime())
         ? Math.floor(receiptDate.getTime() / 1000)
-        : undefined;
+        : undefined
 
     // Build lane - all fields available from API
-    const source = ensureNetworkInfo(sourceNetworkInfo, this.logger);
-    const dest = ensureNetworkInfo(destNetworkInfo, this.logger);
+    const source = ensureNetworkInfo(sourceNetworkInfo, this.logger)
+    const dest = ensureNetworkInfo(destNetworkInfo, this.logger)
     const lane = {
       source,
       sourceChainSelector: source.chainSelector,
       dest,
       destChainSelector: dest.chainSelector,
       onRamp: onramp,
-      version: (version
-        ?.replace(/-dev$/, "")
-        .replace(/^(\d+\.\d+)(?:\.\d+)?$/, "$1.0") ??
+      version: (version?.replace(/-dev$/, '').replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0') ??
         CCIPVersion.V1_6) as CCIPVersion,
-    };
+    }
 
     // Build log from API data
     const log: ChainLog = {
       transactionHash: sendTransactionHash,
       address: raw.onramp,
       data: { message: jsonParse(text) },
-      topics: [
-        lane.version < CCIPVersion.V1_6
-          ? "CCIPSendRequested"
-          : "CCIPMessageSent",
-      ],
+      topics: [lane.version < CCIPVersion.V1_6 ? 'CCIPSendRequested' : 'CCIPMessageSent'],
       index: Number(sendLogIndex),
       blockNumber: Number(sendBlockNumber),
       blockTimestamp: sendTimestamp_,
-    };
+    }
 
     // Build tx from API data
     const tx = {
@@ -1108,8 +1029,8 @@ export class CCIPAPIClient {
       timestamp: sendTimestamp_,
       from: origin,
       blockNumber: Number(sendBlockNumber),
-    };
-    log.tx = tx;
+    }
+    log.tx = tx
 
     // Note: We use type assertions for partial nested objects since Partial<CCIPRequest>
     // requires complete types when provided. These are intentionally partial.
@@ -1130,6 +1051,6 @@ export class CCIPAPIClient {
         destNetworkInfo: ensureNetworkInfo(destNetworkInfo, this.logger),
         offRamp: offramp,
       },
-    };
+    }
   }
 }

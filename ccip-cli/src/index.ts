@@ -9,171 +9,158 @@
 // `JSON.parse` — --format=json emits large integers (chainSelector, amounts, fees) as plain JSON
 // numbers, which loses precision above 2^53 in plain `JSON.parse` (see --format's --help text).
 
-const stderrConsole = new console.Console(process.stderr);
-console.log = stderrConsole.log.bind(stderrConsole);
-console.debug = stderrConsole.debug.bind(stderrConsole);
-console.info = stderrConsole.info.bind(stderrConsole);
+const stderrConsole = new console.Console(process.stderr)
+console.log = stderrConsole.log.bind(stderrConsole)
+console.debug = stderrConsole.debug.bind(stderrConsole)
+console.info = stderrConsole.info.bind(stderrConsole)
 
-import { realpathSync } from "fs";
-import { createRequire } from "module";
-import https from "node:https";
-import util from "node:util";
-import { pathToFileURL } from "url";
+import { realpathSync } from 'fs'
+import { createRequire } from 'module'
+import https from 'node:https'
+import util from 'node:util'
+import { pathToFileURL } from 'url'
 
-import updateNotifier from "update-notifier";
-import yargs, {
-  type ArgumentsCamelCase,
-  type InferredOptionTypes,
-} from "yargs";
-import { hideBin } from "yargs/helpers";
+import updateNotifier from 'update-notifier'
+import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
+import { hideBin } from 'yargs/helpers'
 
-import { Format } from "./commands/index.ts";
+import { Format } from './commands/index.ts'
 
-util.inspect.defaultOptions.depth = 6; // print down to tokenAmounts in requests
-Error.stackTraceLimit = 50; // show more stack frames for better debugging
+util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
+Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = "1.13.1-9e6a7f16";
+const VERSION = '1.13.1-9e6a7f16'
 // generate:end
 
-const require = createRequire(import.meta.url);
-const pkg = require("../package.json") as { name: string; version: string };
+const require = createRequire(import.meta.url)
+const pkg = require('../package.json') as { name: string; version: string }
 
-const useColor = !process.env.NO_COLOR && process.stderr.isTTY;
-const dim = (s: string) => (useColor ? `\x1b[2m${s}\x1b[22m` : s);
-const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[39m` : s);
-const cyan = (s: string) => (useColor ? `\x1b[36m${s}\x1b[39m` : s);
-const yellow = (s: string) => (useColor ? `\x1b[33m${s}\x1b[39m` : s);
+const useColor = !process.env.NO_COLOR && process.stderr.isTTY
+const dim = (s: string) => (useColor ? `\x1b[2m${s}\x1b[22m` : s)
+const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[39m` : s)
+const cyan = (s: string) => (useColor ? `\x1b[36m${s}\x1b[39m` : s)
+const yellow = (s: string) => (useColor ? `\x1b[33m${s}\x1b[39m` : s)
 
-const FOUR_HOURS = 1000 * 60 * 60 * 4;
+const FOUR_HOURS = 1000 * 60 * 60 * 4
 const notifier = updateNotifier({
   pkg,
   updateCheckInterval: FOUR_HOURS,
   shouldNotifyInNpmScript: true,
-});
+})
 
 // Show update notification after command output completes
-process.on("exit", () => {
+process.on('exit', () => {
   try {
     notifier.notify({
       defer: false,
       isGlobal: true,
       message:
-        `Update available: ${dim("{currentVersion}")} → ${green(
-          "{latestVersion}",
-        )}\n` +
+        `Update available: ${dim('{currentVersion}')} → ${green('{latestVersion}')}\n` +
         `Run ${cyan(`npm install -g ${pkg.name}`)} to update\n` +
-        `${yellow(
-          "Changelog",
-        )}: https://github.com/smartcontractkit/ccip-tools-ts/releases`,
-    });
+        `${yellow('Changelog')}: https://github.com/smartcontractkit/ccip-tools-ts/releases`,
+    })
   } catch {
     // never let update check crash the CLI
   }
-});
+})
 
 const globalOpts = {
   rpcs: {
-    type: "array",
-    alias: "rpc",
-    describe: "List of RPC endpoint URLs, ws[s] or http[s]",
+    type: 'array',
+    alias: 'rpc',
+    describe: 'List of RPC endpoint URLs, ws[s] or http[s]',
     string: true,
   },
-  "rpcs-file": {
-    type: "string",
-    default: "./.env",
-    describe: "File containing a list of RPCs endpoints to use",
+  'rpcs-file': {
+    type: 'string',
+    default: './.env',
+    describe: 'File containing a list of RPCs endpoints to use',
     // demandOption: true,
   },
   format: {
-    alias: "f",
+    alias: 'f',
     describe:
       "Output to console format: pretty tables, node's console.log or JSON " +
-      "(large ints are plain JSON numbers; parse with jsonParse from @chainlink/ccip-sdk, not JSON.parse)",
+      '(large ints are plain JSON numbers; parse with jsonParse from @chainlink/ccip-sdk, not JSON.parse)',
     choices: Object.values(Format),
     default: Format.pretty,
   },
   verbose: {
-    alias: "v",
-    describe: "enable debug logging",
-    type: "boolean",
+    alias: 'v',
+    describe: 'enable debug logging',
+    type: 'boolean',
   },
   api: {
-    type: "string",
-    describe: "CCIP API URL (use --no-api to disable, enabled by default)",
-    defaultDescription: "true",
+    type: 'string',
+    describe: 'CCIP API URL (use --no-api to disable, enabled by default)',
+    defaultDescription: 'true',
     coerce: (arg: string | undefined): string | boolean => {
-      if (arg === "false" || arg === "no") return false;
-      if (arg == null || arg === "true" || arg === "yes") return true;
-      return arg; // it's a URL string
+      if (arg === 'false' || arg === 'no') return false
+      if (arg == null || arg === 'true' || arg === 'yes') return true
+      return arg // it's a URL string
     },
   },
   interactive: {
-    type: "boolean",
+    type: 'boolean',
     default: true,
     describe:
-      "Enable interactive prompts (use --no-interactive to disable for automation and AI agents)",
+      'Enable interactive prompts (use --no-interactive to disable for automation and AI agents)',
   },
-  "canton-config": {
-    type: "string",
+  'canton-config': {
+    type: 'string',
     describe:
-      "Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)",
+      'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
   },
   indexer: {
-    type: "array",
+    type: 'array',
     string: true,
     describe:
-      "CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution (e.g. https://indexer-1.ccip.chain.link)",
+      'CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution (e.g. https://indexer-1.ccip.chain.link)',
     // yargs applies boolean negation regardless of the declared type, so `--no-indexer` yields
     // `[false]` and passes `.strict()`. Reject it here with a readable message instead of letting a
     // non-string reach the SDK.
     coerce: (urls: unknown[]): string[] =>
       urls.map((url) => {
-        if (typeof url !== "string") {
+        if (typeof url !== 'string') {
           throw new Error(
             `--indexer expects base URL strings, got ${typeof url}. To skip indexers, pass --indexer with no values.`,
-          );
+          )
         }
-        return url;
+        return url
       }),
   },
-} as const;
+} as const
 
 /** Type for global CLI options. */
-export type GlobalOpts = ArgumentsCamelCase<
-  InferredOptionTypes<typeof globalOpts>
->;
+export type GlobalOpts = ArgumentsCamelCase<InferredOptionTypes<typeof globalOpts>>
 
 function preprocessArgv(argv: string[]): string[] {
   const result = argv.flatMap((arg) => {
-    if (arg === "--no-api") return "--api=false";
-    if (arg === "--json") return ["--format=json"];
-    if (arg === "--no-estimate-gas-limit") return "--estimate-gas-limit=-100";
-    return arg;
-  });
-  if (!process.stdin.isTTY && !result.includes("--no-interactive"))
-    result.push("--no-interactive");
-  return result;
+    if (arg === '--no-api') return '--api=false'
+    if (arg === '--json') return ['--format=json']
+    if (arg === '--no-estimate-gas-limit') return '--estimate-gas-limit=-100'
+    return arg
+  })
+  if (!process.stdin.isTTY && !result.includes('--no-interactive')) result.push('--no-interactive')
+  return result
 }
 
 async function main() {
   await yargs(preprocessArgv(hideBin(process.argv)))
-    .scriptName(process.env.CLI_NAME || "ccip-cli")
-    .env("CCIP")
+    .scriptName(process.env.CLI_NAME || 'ccip-cli')
+    .env('CCIP')
     .options(globalOpts)
     .check((_argv) => {
-      const raw = process.argv;
-      const hasJson = raw.includes("--json");
-      const hasFormat = raw.some(
-        (a) => a === "--format" || a === "-f" || a.startsWith("--format="),
-      );
-      if (hasJson && hasFormat)
-        throw new Error("--json and --format are mutually exclusive");
-      return true;
+      const raw = process.argv
+      const hasJson = raw.includes('--json')
+      const hasFormat = raw.some((a) => a === '--format' || a === '-f' || a.startsWith('--format='))
+      if (hasJson && hasFormat) throw new Error('--json and --format are mutually exclusive')
+      return true
     })
-    .commandDir("commands", {
-      extensions: [new URL(import.meta.url).pathname.split(".").pop()!],
+    .commandDir('commands', {
+      extensions: [new URL(import.meta.url).pathname.split('.').pop()!],
       exclude: /\.test\.[tj]s$/,
     })
     .completion()
@@ -181,33 +168,33 @@ async function main() {
     .strict()
     .help()
     .version(VERSION)
-    .alias({ h: "help", V: "version" })
-    .parse();
+    .alias({ h: 'help', V: 'version' })
+    .parse()
 }
 
 function wasCalledAsScript() {
-  const realPath = realpathSync(process.argv[1]!);
-  const realPathAsUrl = pathToFileURL(realPath).href;
-  return import.meta.url === realPathAsUrl;
+  const realPath = realpathSync(process.argv[1]!)
+  const realPathAsUrl = pathToFileURL(realPath).href
+  return import.meta.url === realPathAsUrl
 }
 
 if (import.meta.main || wasCalledAsScript()) {
-  const later = setTimeout(() => {}, 2 ** 31 - 1); // keep event-loop alive
+  const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
-      console.error(err);
-      throw err;
+      console.error(err)
+      throw err
     })
     .finally(() => {
-      clearTimeout(later);
-      https.globalAgent.destroy(); // cleanup kept-alive sockets
+      clearTimeout(later)
+      https.globalAgent.destroy() // cleanup kept-alive sockets
       setTimeout(() => {
-        util.inspect.defaultOptions.depth = 3;
+        util.inspect.defaultOptions.depth = 3
         console.debug(
-          "Pending handles after main completion:",
+          'Pending handles after main completion:',
           (process as any)._getActiveHandles().length,
-        );
-        process.exit();
-      }, 5e3).unref();
-    });
+        )
+        process.exit()
+      }, 5e3).unref()
+    })
 }
