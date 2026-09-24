@@ -116,9 +116,15 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     // CCIP Router 1.2.0 from the CCIP Directory
     // (https://docs.chain.link/ccip/directory/testnet).
     'https://testnet.hashio.io/api',
-  RPC_ETHEREUM_MAINNET: 'https://gateway.tenderly.co/public/mainnet',
+  RPC_ETHEREUM_MAINNET: [
+    'https://eth-mainnet.public.blastapi.io',
+    'https://gateway.tenderly.co/public/mainnet',
+  ].join(','),
   RPC_BASE_MAINNET: 'https://mainnet.base.org',
-  RPC_POLYGON_MAINNET: 'https://gateway.tenderly.co/public/polygon',
+  RPC_POLYGON_MAINNET: [
+    'https://gateway.tenderly.co/public/polygon',
+    'https://polygon.rpc.thirdweb.com',
+  ].join(','),
   RPC_ARBITRUM_MAINNET: 'https://gateway.tenderly.co/public/arbitrum',
   RPC_MONAD_MAINNET:
     // Monad has no wide-eth_getLogs public endpoint (tenderly 500 blocks,
