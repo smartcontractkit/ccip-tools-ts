@@ -1,12 +1,13 @@
 import './index.ts' // Register supported chains
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, mock } from 'node:test'
 
 import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
-import { getOnchainCommitReport } from './commits.ts'
+import { fetchVerifications, getOnchainCommitReport } from './commits.ts'
+import { CCIPArgumentInvalidError, CCIPMessageNotVerifiedYetError } from './errors/index.ts'
 import CommitStore_1_2_ABI from './evm/abi/CommitStore_1_2.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
@@ -20,6 +21,7 @@ import {
   type Lane,
   CCIPVersion,
 } from './types.ts'
+import { fakeTransport } from './verifiers/__mocks__/verifier.ts'
 
 // Mock Chain class for testing
 class MockChain extends Chain {
@@ -684,6 +686,340 @@ describe('getOnchainCommitReport', () => {
     assert.equal(
       result.report.merkleRoot,
       '0xcccc000000000000000000000000000000000000000000000000000000000000',
+    )
+  })
+})
+
+const MESSAGE_ID = '0x7059dfb1000000000000000000000000000000000000000000000000000000ab'
+const INDEXER = 'https://indexer.example'
+
+/** Minimal successful indexer `/v1/verifierresults/:id` payload. */
+function indexerPayload(destAddress = '0x345AEDB0988Ff1e897c26f9ad3AE84603Ed517E2') {
+  return {
+    success: true,
+    messageID: MESSAGE_ID,
+    results: [
+      {
+        verifierResult: {
+          message_id: MESSAGE_ID,
+          message_ccv_addresses: [destAddress],
+          ccv_data: '0xdeadbeef',
+          timestamp: '2026-08-21T20:37:52.000Z',
+          verifier_source_address: '0x1111111111111111111111111111111111111111',
+          verifier_dest_address: destAddress,
+        },
+      },
+    ],
+  }
+}
+
+type FetchArgs = [input: string, init?: RequestInit]
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+describe('fetchVerifications', () => {
+  afterEach(() => {
+    mock.restoreAll()
+  })
+
+  it('should map an indexer response to VerifierResult[]', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse(indexerPayload())),
+    )
+
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: fetchFn as unknown as typeof globalThis.fetch,
+    })
+
+    assert.equal(res.length, 1)
+    assert.equal(res[0]!.ccvData, '0xdeadbeef')
+    assert.equal(res[0]!.destAddress, '0x345AEDB0988Ff1e897c26f9ad3AE84603Ed517E2')
+    assert.equal(res[0]!.sourceAddress, '0x1111111111111111111111111111111111111111')
+    // timestamp is seconds, not milliseconds
+    assert.equal(res[0]!.timestamp, Math.floor(Date.parse('2026-08-21T20:37:52.000Z') / 1000))
+  })
+
+  it('should use the injected fetch and hit the documented indexer path', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse(indexerPayload())),
+    )
+
+    await fetchVerifications(MESSAGE_ID, {
+      indexer: [`${INDEXER}/`], // trailing slash must be normalised away
+      apiClient: null,
+      fetch: fetchFn as unknown as typeof globalThis.fetch,
+    })
+
+    assert.equal(fetchFn.mock.callCount(), 1)
+    const url = fetchFn.mock.calls[0]!.arguments[0]
+    assert.equal(url, `${INDEXER}/v1/verifierresults/${MESSAGE_ID}`)
+  })
+
+  it('should send no credentials on the public indexer read', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse(indexerPayload())),
+    )
+
+    await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: fetchFn as unknown as typeof globalThis.fetch,
+    })
+
+    const init = fetchFn.mock.calls[0]!.arguments[1]
+    const headers = new Headers(init?.headers ?? {})
+    for (const name of ['authorization', 'x-api-key', 'x-hmac-signature', 'cookie']) {
+      assert.equal(headers.get(name), null, `unexpected ${name} header on a public read`)
+    }
+  })
+
+  it('should throw CCIPMessageNotVerifiedYetError when the indexer has no result', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse({ success: false, messageID: MESSAGE_ID, results: [] })),
+    )
+
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [INDEXER],
+        apiClient: null,
+        fetch: fetchFn as unknown as typeof globalThis.fetch,
+      }),
+      CCIPMessageNotVerifiedYetError,
+    )
+  })
+
+  it('should not poll when no watch signal is supplied', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse({ success: false, messageID: MESSAGE_ID, results: [] })),
+    )
+
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [INDEXER],
+        apiClient: null,
+        fetch: fetchFn as unknown as typeof globalThis.fetch,
+      }),
+      CCIPMessageNotVerifiedYetError,
+    )
+    // exactly one attempt: the poll loop is gated on `watch`
+    assert.equal(fetchFn.mock.callCount(), 1)
+  })
+
+  it('should retry while watch is live, then give up when it aborts', async () => {
+    const fetchFn = mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(jsonResponse({ success: false, messageID: MESSAGE_ID, results: [] })),
+    )
+    const watch = AbortSignal.timeout(120)
+
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [INDEXER],
+        apiClient: null,
+        watch,
+        pollInterval: 20,
+        fetch: fetchFn as unknown as typeof globalThis.fetch,
+      }),
+    )
+    // polled more than once before the signal fired
+    assert.ok(
+      fetchFn.mock.callCount() > 1,
+      `expected multiple poll attempts, got ${fetchFn.mock.callCount()}`,
+    )
+  })
+
+  it('should reject a non-string indexer entry as a non-transient argument error', async () => {
+    // `--no-indexer` on the CLI's array-typed option yields [false]. Before the guard this reached
+    // `baseUrl.replace` and threw inside an async callback of Promise.any, so it was wrapped into a
+    // transient CCIPMessageNotVerifiedYetError: the caller was told to wait and retry on an invalid
+    // argument. The guard must fail fast and must NOT be classified as transient.
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [false] as unknown as readonly string[],
+        apiClient: null,
+      }),
+      (err: unknown) => {
+        assert.ok(
+          err instanceof CCIPArgumentInvalidError,
+          `expected CCIPArgumentInvalidError, got ${String(err)}`,
+        )
+        assert.ok(
+          !(err instanceof CCIPMessageNotVerifiedYetError),
+          'must not be mis-reported as a not-verified-yet error',
+        )
+        assert.equal(err.isTransient, false, 'must not be retryable')
+        return true
+      },
+    )
+  })
+
+  it('should return the first successful source when one indexer fails', async () => {
+    const fetchFn = mock.fn((url: string, _init?: RequestInit) =>
+      url.includes('bad')
+        ? Promise.resolve(jsonResponse({ error: 'boom' }, 500))
+        : Promise.resolve(jsonResponse(indexerPayload())),
+    )
+
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: ['https://bad.example', INDEXER],
+      apiClient: null,
+      fetch: fetchFn as unknown as typeof globalThis.fetch,
+    })
+
+    assert.equal(res.length, 1)
+    assert.equal(res[0]!.ccvData, '0xdeadbeef')
+  })
+})
+
+describe('fetchVerifications against a CCV policy', () => {
+  const A = '0x345AEDB0988Ff1e897c26f9ad3AE84603Ed517E2'
+  const B = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB'
+  const C = '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC'
+  const PROXY_A = 'https://a.verifier.example'
+  const PROXY_B = 'https://b.verifier.example'
+
+  /** Indexer serving results for the given dest CCVs. */
+  const indexerServing = (...ccvs: string[]) =>
+    mock.fn((..._args: FetchArgs) =>
+      Promise.resolve(
+        jsonResponse({
+          ...indexerPayload(),
+          results: ccvs.flatMap((ccv) => indexerPayload(ccv).results),
+        }),
+      ),
+    )
+
+  it('merges a partial indexer answer with a verifier, contacting only the verifier it needs', async () => {
+    const transport = fakeTransport({ [PROXY_B]: [{ ccvData: '0xbb', destAddress: B }] })
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+      policy: { requiredCCVs: [A, B], optionalCCVs: [], optionalThreshold: 0 },
+      verifiers: [PROXY_B],
+      verifierTransport: transport,
+    })
+    assert.deepEqual(
+      res.map((r) => r.destAddress.toLowerCase()),
+      [A.toLowerCase(), B.toLowerCase()],
+    )
+    assert.deepEqual(transport.calls, [PROXY_B])
+  })
+
+  it('does not contact the verifiers when the managed sources cover the policy', async () => {
+    const transport = fakeTransport({})
+    await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+      policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+      verifiers: [PROXY_A],
+      verifierTransport: transport,
+    })
+    assert.deepEqual(transport.calls, [])
+  })
+
+  it('tries verifiers in order and stops once covered (failover)', async () => {
+    const transport = fakeTransport({
+      'https://primary.example': new Error('connection refused'),
+      'https://backup.example': [{ ccvData: '0xaa', destAddress: A }],
+    })
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [],
+      apiClient: null,
+      policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+      verifiers: ['https://primary.example', 'https://backup.example', 'https://unused.example'],
+      verifierTransport: transport,
+    })
+    assert.equal(res[0]!.ccvData, '0xaa')
+    assert.deepEqual(transport.calls, ['https://primary.example', 'https://backup.example'])
+  })
+
+  it("never counts one CCV's attestation for another", async () => {
+    // a shared endpoint serving only A's blob must leave B missing, not fill it with A's bytes
+    const transport = fakeTransport({ [PROXY_A]: [{ ccvData: '0xaa', destAddress: A }] })
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [],
+        apiClient: null,
+        policy: { requiredCCVs: [A, B], optionalCCVs: [], optionalThreshold: 0 },
+        verifiers: [PROXY_A],
+        verifierTransport: transport,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        assert.deepEqual(err.context.missingCCVs, [B])
+        return true
+      },
+    )
+  })
+
+  it('names each failed verifier in the error context', async () => {
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [],
+        apiClient: null,
+        policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+        verifiers: [PROXY_A],
+        verifierTransport: fakeTransport({ [PROXY_A]: new Error('connection refused') }),
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        assert.deepEqual(err.context.verifierFailures, [
+          { url: `${PROXY_A}/`, reason: 'connection refused' }, // redacted form
+        ])
+        return true
+      },
+    )
+  })
+
+  it('lets known attestations win, and skips the network when they already cover the policy', async () => {
+    const fetchFn = indexerServing(A)
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: fetchFn as unknown as typeof globalThis.fetch,
+      policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+      known: [{ ccvData: '0x5157', destAddress: A.toLowerCase(), sourceAddress: '' }],
+    })
+    assert.equal(res[0]!.ccvData, '0x5157')
+    assert.equal(fetchFn.mock.callCount(), 0)
+  })
+
+  it('requires the optional threshold, keeping results for CCVs outside the policy', async () => {
+    const transport = fakeTransport({
+      [PROXY_A]: [
+        { ccvData: '0xcc', destAddress: C },
+        { ccvData: '0xdd', destAddress: '0x' + 'dd'.repeat(20) },
+      ],
+    })
+    const policy = { requiredCCVs: [A], optionalCCVs: [B, C], optionalThreshold: 1 }
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [INDEXER],
+        apiClient: null,
+        fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+        policy,
+      }),
+      CCIPMessageNotVerifiedYetError,
+    )
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+      policy,
+      verifiers: [PROXY_A],
+      verifierTransport: transport,
+    })
+    assert.deepEqual(
+      res.map((r) => r.ccvData),
+      ['0xdeadbeef', '0xcc', '0xdd'],
     )
   })
 })

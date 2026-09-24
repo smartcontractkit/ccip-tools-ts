@@ -7,7 +7,7 @@ import {
   CCIPNotImplementedError,
   bytesToBuffer,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid/lib/TransportNodeHid'
 import {
   type PublicKey,
   type SignatureScheme,

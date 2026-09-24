@@ -13,6 +13,7 @@ import {
   CCIPMessageNotFoundInTxError,
   CCIPTimeoutError,
   CCIPUnexpectedPaginationError,
+  CCIPVersionUnsupportedError,
   HttpStatus,
 } from '../errors/index.ts'
 import { EVMChain } from '../evm/index.ts'
@@ -1094,6 +1095,45 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.verifications[0]!.destAddress, cantonCcv)
       assert.equal(result.verifications[0]!.ccvData, ccvProof)
       assert.equal(customFetch.mock.callCount(), 2)
+    })
+  })
+
+  describe('getEncodedMessage', () => {
+    const messageId = '0x387873167bf01283a4803b13698c1ce9d3990c2f72c192477f78cbf6902eec31'
+    const respond = (body: unknown) =>
+      mock.fn(() =>
+        Promise.resolve({ ok: true, text: () => Promise.resolve(JSON.stringify(body)) }),
+      )
+
+    it('returns the encoded message and OffRamp even while verifications are incomplete', async () => {
+      const customFetch = respond({
+        offramp: '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1',
+        encodedMessage: '01abcd',
+        verificationComplete: false,
+        ccvData: [],
+        verifierAddresses: ['0x8f3ee3c77D2B27c32306a89D367654F959Db223D'],
+      })
+      const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+      const result = await client.getEncodedMessage(messageId)
+
+      assert.deepEqual(result, {
+        offRamp: '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1',
+        encodedMessage: '0x01abcd',
+      })
+      // execution-inputs only: no fallback to getMessageById for verifiers
+      assert.equal(customFetch.mock.callCount(), 1)
+    })
+
+    it('rejects a pre-v2.0 message, which has no encoded form', async () => {
+      const client = new CCIPAPIClient(undefined, {
+        fetch: respond({
+          offramp: '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1',
+          merkleRoot: '0x' + '00'.repeat(32),
+          messageBatch: [],
+          version: '1.6.0',
+        }) as any,
+      })
+      await assert.rejects(client.getEncodedMessage(messageId), CCIPVersionUnsupportedError)
     })
   })
 

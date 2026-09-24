@@ -7,8 +7,8 @@ import {
   CCIPNotImplementedError,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
-import SolanaLedger from '@ledgerhq/hw-app-solana'
-import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import SolanaLedger from '@ledgerhq/hw-app-solana/lib/Solana'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid/lib/TransportNodeHid'
 import {
   type Message,
   type MessageV0,

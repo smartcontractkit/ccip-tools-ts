@@ -25,6 +25,32 @@ export const manualExecSchema: CommandSchema<'manual-exec'> = {
   ],
 
   options: [
+    // Verification Sources
+    {
+      type: 'array',
+      name: 'verifier',
+      alias: 'verifiers',
+      label: 'Verifier Endpoints',
+      description:
+        "Verifier endpoint URLs to read CCV attestations from directly, when the CCIP API and indexers don't " +
+        "cover the destination's CCV policy (e.g. a CCV no indexer has onboarded). Tried in order until " +
+        'covered. https:// or http:// for a grpc-web proxy; grpc:// or grpcs:// (TLS) or ' +
+        'grpc+plaintext:// for a native gRPC aggregator.',
+      group: 'verification',
+      itemType: 'string',
+      placeholder: 'grpc://aggregator.example:443',
+    },
+    {
+      type: 'array',
+      name: 'ccv-data',
+      label: 'Supplied CCV Attestations',
+      description:
+        'CCV attestations obtained out of band, as <dest-ccv-address>=<0x-hex>; they win over fetched ' +
+        "ones. The CCV's verifyMessage still decides validity onchain, so wrong bytes can only waste gas.",
+      group: 'verification',
+      itemType: 'string',
+      placeholder: '0x345AEDB0...=0x00010001...',
+    },
     // Message Selection
     {
       type: 'number',

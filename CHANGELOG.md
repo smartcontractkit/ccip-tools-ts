@@ -8,8 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Solana: supports reading and sending Version-1 transactions (Agave 4.x devnet and later), up to 4096 bytes per message
+- Solana: `simulateAndSendTxs` supports `partial`, `resource`, and `atomic` split modes. Partial submissions expose confirmed hashes and instruction count through `CCIPPartialTransactionSubmissionError.context`
 - Tests: the whole suite runs as one parallel `node --test` invocation — networked e2e/integration suites moved to disjoint low-activity lanes/fixtures with per-network endpoint sets configurable via `RPC_*` env vars (one per network, comma-separated lists allowed, wired to CI secrets), so suites never contend on a rate-limited endpoint and the full run finishes in ~5min
 - Aptos and Sui now support detecting execution failures — bundled Sui fixes: deep-history `getLogs` walks ascending checkpoint slices instead of paging from the tip, empty `getOwnedObjects` pointer lookups are memoized instead of retried for ~30s, and `offRamp` receipt filters no longer drop successful Aptos/Sui receipts
+- SDK: CCIP v2.0 `getVerifications` merges partial answers from the CCIP API and indexers per destination CCV, and resolves only once the destination's CCV policy is covered; new `verifiers` (endpoint URLs, tried in order as the last source) and `ccvData` (attestations obtained out of band) options, also on `execute({ messageId })`. Verifiers are read through `ChainContext.verifierTransport`, a one-function port; the default `grpcWebTransport` is browser-safe grpc-web over `fetch` (for a grpc-web proxy in front of the verifier), and the schema is a hand-written codec, so the SDK takes no gRPC or protobuf dependency
+- SDK: `CCIPAPIClient.getEncodedMessage` returns a v2.0 message's encoded form and OffRamp before its verifications are complete; `getVerifications` and `getExecutionInput` use it when a request came from `getMessageById`, which lacks it
+- CLI: `manual-exec` and `show` take `--verifier <url>` to read CCV attestations straight from a verifier (e.g. a CCV no indexer has onboarded): `https://` for grpc-web, `grpc://`/`grpcs://`/`grpc+plaintext://` for native gRPC via `@grpc/grpc-js`, loaded only when used; `manual-exec --ccv-data <ccv>=<0x-hex>` supplies an attestation obtained out of band. A set that doesn't cover the policy fails locally, naming the missing CCVs, instead of reverting onchain
 
 ## [1.13.0] - 2026-08-25
 
@@ -29,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `getMessageById` and `getExecutionReceipts` accept `since` too
 - Aptos: fix `getLogs` never emitting the event exactly at a full page boundary, and no longer split a ledger version's events across rounds on multi-topic streams
 - TON: remove the per-address `getTransactions` window cache (made redundant by `since`); long-lived watch streams no longer retain parsed account history in memory
+- CLI: a passwordless Foundry keystore (or JSON wallet) can be unlocked with `--no-interactive` by setting the password variable to an empty value; only an unset variable is treated as missing
 
 ## [1.12.0] - 2026-08-19
 
