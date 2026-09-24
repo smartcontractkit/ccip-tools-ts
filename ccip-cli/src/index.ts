@@ -117,7 +117,19 @@ const globalOpts = {
     type: 'array',
     string: true,
     describe:
-      'Additional CCIP v2 indexer base URLs to query for CCV verifications (e.g. https://indexer-1.ccip.chain.link)',
+      'CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution (e.g. https://indexer-1.ccip.chain.link)',
+    // yargs applies boolean negation regardless of the declared type, so `--no-indexer` yields
+    // `[false]` and passes `.strict()`. Reject it here with a readable message instead of letting a
+    // non-string reach the SDK.
+    coerce: (urls: unknown[]): string[] =>
+      urls.map((url) => {
+        if (typeof url !== 'string') {
+          throw new Error(
+            `--indexer expects base URL strings, got ${typeof url}. To skip indexers, pass --indexer with no values.`,
+          )
+        }
+        return url
+      }),
   },
 } as const
 

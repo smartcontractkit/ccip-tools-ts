@@ -541,6 +541,7 @@ async function sendMessage(
       'tx-hash-or-id': request.tx.hash,
       'log-index': undefined,
       logIndex: undefined,
+      verifiers: undefined,
     },
     { request },
   )
