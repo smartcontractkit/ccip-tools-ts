@@ -23,7 +23,9 @@ function mockChain(getPreferredPackageIds: (...args: unknown[]) => Promise<strin
   })
 }
 
-const signer: TransactionSigner = { sign: async () => ({ signatures: [] }) }
+const signer: TransactionSigner = {
+  signTxHash: async () => ({ party: 'party::1220ab', signatures: [] }),
+}
 
 describe('submitCantonCommands package-name resolution', () => {
   it('includes a CreateAndExerciseCommand template package in packageIdSelectionPreference', async () => {
