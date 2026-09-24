@@ -744,7 +744,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @throws {@link CCIPLogDataInvalidError} if log data is not valid bytes
    * @throws {@link CCIPMessageDecodeError} if message cannot be decoded
    * @throws {@link CCIPChainNotFoundError} if the message's chain selectors can't be resolved;
-   *   register unbundled chains (e.g. a local devnet) with `registerChains`
+   *   add unbundled chains (e.g. a local devnet) to `SELECTORS`
    */
   static decodeMessage(log: {
     topics?: readonly string[]

@@ -11,6 +11,38 @@ type Selectors = Record<
   }
 >
 
+/**
+ * CCIP chain selector table, keyed by chain id (EVM: `'1'`, Aptos: `'aptos:1'`, Solana: genesis
+ * hash, TON: `'-239'`, Canton: `'canton:MainNet'`), bundled from the public `chain-selectors`
+ * registry.
+ *
+ * It is also the extension point for chains missing from it: a local devnet, a fork served under
+ * another chain id, or a network newer than this release. Add or replace entries at runtime; every
+ * resolution (`networkInfo`, message decoding, `Chain.fromUrl`) reads the live table.
+ *
+ * A selector identifies exactly one chain. To re-key a chain (e.g. a fork, whose contracts keep
+ * emitting the forked chain's selector), move its entry: leaving both makes selector lookups
+ * ambiguous.
+ *
+ * @example
+ * ```typescript
+ * import { SELECTORS, networkInfo } from '@chainlink/ccip-sdk'
+ *
+ * // a local devnet
+ * SELECTORS['2337'] = {
+ *   selector: 12922642891491394802n,
+ *   name: 'local-anvil-dst',
+ *   family: 'EVM',
+ *   network_type: 'TESTNET',
+ * }
+ * networkInfo(12922642891491394802n).chainId // 2337
+ *
+ * // a Sepolia fork served under chain id 735711155111 (Tenderly Virtual Environment)
+ * SELECTORS['735711155111'] = SELECTORS['11155111']!
+ * delete SELECTORS['11155111']
+ * networkInfo('ethereum-testnet-sepolia').chainId // 735711155111
+ * ```
+ */
 const SELECTORS: Selectors = {
   // generate:
   // fetch('https://github.com/smartcontractkit/chain-selectors/raw/main/selectors.yml')

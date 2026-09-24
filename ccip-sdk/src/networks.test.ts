@@ -1,166 +1,120 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { CCIPChainNotFoundError, CCIPChainRegistrationError } from './errors/pure.ts'
-import {
-  type ChainRegistration,
-  ChainFamily,
-  NetworkType,
-  clearRegisteredChains,
-  networkInfo,
-  registerChains,
-} from './networks.ts'
+import { CCIPChainNotFoundError } from './errors/pure.ts'
+import { ChainFamily, NetworkType, networkInfo } from './networks.ts'
+import SELECTORS from './selectors.ts'
 
 // the local-anvil devnet from the scratch-mode harness: chainId 2337 is not in the bundled table
 const LOCAL_CHAIN_ID = 2337
 const LOCAL_SELECTOR = 12922642891491394802n
 const SEPOLIA_SELECTOR = 16015286601757825753n
+// a Tenderly Virtual Environment's recommended id for a Sepolia fork (> 2^32: not an array index)
+const FORK_CHAIN_ID = 735711155111
 
-// registrations layer over the bundled table without mutating it, so a full reset restores it
-const unregister = clearRegisteredChains
+// tests write into the shared table: restore it after each one
+const bundled = { ...SELECTORS }
+function restoreSelectors() {
+  for (const id of Object.keys(SELECTORS)) if (!Object.hasOwn(bundled, id)) delete SELECTORS[id]
+  Object.assign(SELECTORS, bundled)
+}
 
-describe('registerChains', () => {
-  afterEach(unregister)
+describe('networkInfo over a mutated SELECTORS table', () => {
+  afterEach(restoreSelectors)
 
-  it('resolves a chain that is not in the bundled table, by id, selector and name', () => {
+  it('resolves an added chain by id, selector and name', () => {
     assert.throws(() => networkInfo(LOCAL_CHAIN_ID), CCIPChainNotFoundError)
     assert.throws(() => networkInfo(LOCAL_SELECTOR), CCIPChainNotFoundError)
 
-    const [info] = registerChains([
-      { chainId: LOCAL_CHAIN_ID, chainSelector: LOCAL_SELECTOR, name: 'local-anvil-dst' },
-    ])
+    SELECTORS[LOCAL_CHAIN_ID] = {
+      selector: LOCAL_SELECTOR,
+      name: 'local-anvil-dst',
+      family: ChainFamily.EVM,
+      network_type: NetworkType.Testnet,
+    }
 
-    assert.deepEqual(info, {
+    assert.deepEqual(networkInfo(LOCAL_CHAIN_ID), {
       chainId: LOCAL_CHAIN_ID,
       chainSelector: LOCAL_SELECTOR,
       name: 'local-anvil-dst',
       family: ChainFamily.EVM,
       networkType: NetworkType.Testnet,
     })
-    // every resolution form must see it, including the reverse selector -> chainId scan
-    assert.equal(networkInfo(LOCAL_CHAIN_ID).chainSelector, LOCAL_SELECTOR)
     assert.equal(networkInfo(LOCAL_SELECTOR).chainId, LOCAL_CHAIN_ID)
     assert.equal(networkInfo(String(LOCAL_SELECTOR)).chainId, LOCAL_CHAIN_ID)
+    assert.equal(networkInfo(BigInt(LOCAL_CHAIN_ID)).chainId, LOCAL_CHAIN_ID)
     assert.equal(networkInfo('local-anvil-dst').chainId, LOCAL_CHAIN_ID)
   })
 
-  it('busts the memoized miss recorded before registration', () => {
-    assert.throws(() => networkInfo(LOCAL_SELECTOR), CCIPChainNotFoundError)
-    registerChains([{ chainId: LOCAL_CHAIN_ID, chainSelector: LOCAL_SELECTOR }])
-    assert.equal(networkInfo(LOCAL_SELECTOR).chainId, LOCAL_CHAIN_ID)
+  it('sees an entry replaced after it was resolved (no stale cache)', () => {
+    const before = networkInfo(1337)
+    assert.equal(networkInfo(before.chainSelector).chainId, 1337)
+
+    SELECTORS[1337] = { ...SELECTORS[1337]!, selector: LOCAL_SELECTOR }
+
+    assert.equal(networkInfo(1337).chainSelector, LOCAL_SELECTOR)
+    assert.equal(networkInfo(LOCAL_SELECTOR).chainId, 1337)
+    assert.throws(() => networkInfo(before.chainSelector), CCIPChainNotFoundError)
   })
 
-  it('defaults name/family/networkType, and accepts non-EVM families', () => {
-    const [evm, aptos] = registerChains([
-      { chainId: 4242, chainSelector: '4242424242424242424' },
-      {
-        chainId: 'aptos:99',
-        chainSelector: 4242424242424242425n,
-        family: ChainFamily.Aptos,
-        networkType: NetworkType.Mainnet,
-      },
-    ])
-    assert.equal(evm!.name, 'custom-4242')
-    assert.equal(evm!.family, ChainFamily.EVM)
-    assert.equal(evm!.networkType, NetworkType.Testnet)
-    assert.equal(aptos!.family, ChainFamily.Aptos)
-    assert.equal(aptos!.networkType, NetworkType.Mainnet)
-    assert.equal(aptos!.chainId, 'aptos:99')
-  })
-
-  it('does not perturb bundled chains', () => {
-    const sepolia = networkInfo(11155111)
-    registerChains([{ chainId: LOCAL_CHAIN_ID, chainSelector: LOCAL_SELECTOR }])
-    assert.deepEqual(networkInfo(11155111), sepolia)
-    assert.equal(networkInfo(16015286601757825753n).name, 'ethereum-testnet-sepolia')
-  })
-
-  it('rejects a selector already owned by another chain', () => {
-    assert.throws(
-      () => registerChains([{ chainId: LOCAL_CHAIN_ID, chainSelector: 16015286601757825753n }]),
-      CCIPChainRegistrationError,
-    )
-    assert.throws(() => networkInfo(LOCAL_CHAIN_ID), CCIPChainNotFoundError)
-  })
-
-  it('rejects a selector already owned by another chain, unless it is an explicit fork', () => {
-    assert.throws(
-      () => registerChains([{ chainId: 73571, chainSelector: SEPOLIA_SELECTOR }]),
-      CCIPChainRegistrationError,
-    )
-    assert.equal(
-      registerChains([{ chainId: 73571, forkOf: 11155111 }])[0]!.chainSelector,
-      SEPOLIA_SELECTOR,
-    )
-  })
-
-  it('rejects invalid entries', () => {
-    for (const entry of [
-      { chainId: LOCAL_CHAIN_ID, chainSelector: 'not-a-number' },
-      { chainId: LOCAL_CHAIN_ID, chainSelector: 0n },
-      { chainId: '', chainSelector: LOCAL_SELECTOR },
-      { chainId: LOCAL_CHAIN_ID, chainSelector: LOCAL_SELECTOR, family: 'BITCOIN' },
-      { chainId: LOCAL_CHAIN_ID, chainSelector: LOCAL_SELECTOR, networkType: 'STAGING' },
-    ] as ChainRegistration[]) {
-      assert.throws(() => registerChains([entry]), CCIPChainRegistrationError)
-    }
-  })
-})
-
-describe('registerChains — forks', () => {
-  afterEach(unregister)
-
-  it('re-keys a known chain to the fork chain id, keeping its selector, name and family', () => {
-    const [fork] = registerChains([{ chainId: 73571, forkOf: 'ethereum-testnet-sepolia' }])
-    assert.deepEqual(fork, {
-      chainId: 73571,
-      chainSelector: SEPOLIA_SELECTOR,
-      name: 'ethereum-testnet-sepolia',
+  it('sees an entry edited in place', () => {
+    const entry: (typeof SELECTORS)[string] = {
+      selector: LOCAL_SELECTOR,
+      name: 'local-anvil-dst',
       family: ChainFamily.EVM,
-      networkType: NetworkType.Testnet,
-    })
-    // all three resolution forms agree on the fork — a message decoded from the fork carries the
-    // ORIGINAL selector, so this is what makes it resolve back to the fork's RPC
-    assert.equal(networkInfo(73571).chainSelector, SEPOLIA_SELECTOR)
-    assert.equal(networkInfo(SEPOLIA_SELECTOR).chainId, 73571)
-    assert.equal(networkInfo('ethereum-testnet-sepolia').chainId, 73571)
-    // the forked chain id no longer resolves: a selector identifies exactly one chain
-    assert.throws(() => networkInfo(11155111), CCIPChainNotFoundError)
-  })
-
-  it('accepts the forked chain by id, selector or name, and an optional name override', () => {
-    for (const forkOf of [11155111, SEPOLIA_SELECTOR, 'ethereum-testnet-sepolia'] as const) {
-      const [fork] = registerChains([{ chainId: 73571, forkOf }])
-      assert.equal(fork!.chainSelector, SEPOLIA_SELECTOR)
-      unregister()
+      network_type: NetworkType.Testnet,
     }
-    const [named] = registerChains([{ chainId: 73571, forkOf: 11155111, name: 'tenderly-sepolia' }])
-    assert.equal(named!.name, 'tenderly-sepolia')
-    assert.equal(networkInfo('tenderly-sepolia').chainSelector, SEPOLIA_SELECTOR)
+    SELECTORS[LOCAL_CHAIN_ID] = entry
+    assert.equal(networkInfo(LOCAL_CHAIN_ID).networkType, NetworkType.Testnet)
+    entry.network_type = NetworkType.Mainnet // same object: only a field changes
+    assert.equal(networkInfo(LOCAL_CHAIN_ID).networkType, NetworkType.Mainnet)
   })
 
-  it('rejects an unknown forked chain', () => {
-    assert.throws(
-      () => registerChains([{ chainId: 73571, forkOf: 'no-such-chain' }]),
-      CCIPChainRegistrationError,
-    )
+  it('sees a removed entry', () => {
+    networkInfo(SEPOLIA_SELECTOR)
+    delete SELECTORS[11155111]
+    assert.throws(() => networkInfo(11155111), CCIPChainNotFoundError)
+    assert.throws(() => networkInfo(SEPOLIA_SELECTOR), CCIPChainNotFoundError)
+    assert.throws(() => networkInfo('ethereum-testnet-sepolia'), CCIPChainNotFoundError)
   })
 
-  it('refuses to give a fork a mainnet chain id', () => {
-    assert.throws(
-      () => registerChains([{ chainId: 1, forkOf: 'ethereum-testnet-sepolia' }]),
-      CCIPChainRegistrationError,
-    )
-    assert.equal(networkInfo(1).name, 'ethereum-mainnet')
+  it('returns the same object for an unchanged entry, however it is resolved', () => {
+    const sepolia = networkInfo(11155111)
+    assert.equal(networkInfo(1), networkInfo(1))
+    assert.equal(networkInfo(SEPOLIA_SELECTOR), sepolia)
+    assert.equal(networkInfo('ethereum-testnet-sepolia'), sepolia)
+    assert.equal(networkInfo('11155111'), sepolia)
   })
 
-  it('takes over a bundled local chain id (hardhat node --fork keeps 31337)', () => {
-    assert.equal(networkInfo(31337).name, 'anvil-devnet') // bundled, wrong selector for a fork
-    const [fork] = registerChains([{ chainId: 31337, forkOf: 'ethereum-testnet-sepolia' }])
-    assert.equal(fork!.chainSelector, SEPOLIA_SELECTOR)
-    assert.equal(networkInfo(SEPOLIA_SELECTOR).chainId, 31337)
-    // the fork overlays the bundled id without mutating the table; a reset restores anvil-devnet
-    unregister()
-    assert.equal(networkInfo(31337).name, 'anvil-devnet')
+  it('resolves a name without a hyphen', () => {
+    SELECTORS[LOCAL_CHAIN_ID] = {
+      selector: LOCAL_SELECTOR,
+      name: 'localdst',
+      family: ChainFamily.EVM,
+      network_type: NetworkType.Testnet,
+    }
+    assert.equal(networkInfo('localdst').chainId, LOCAL_CHAIN_ID)
+  })
+
+  it('resolves non-numeric chain ids before names', () => {
+    assert.equal(networkInfo('aptos:1').name, 'aptos-mainnet')
+    assert.equal(networkInfo('canton:TestNet').name, 'canton-testnet')
+    assert.equal(networkInfo('EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG').name, 'solana-devnet')
+  })
+
+  it('does not resolve Object.prototype keys as chains', () => {
+    for (const key of ['constructor', 'toString', '__proto__', 'hasOwnProperty'])
+      assert.throws(() => networkInfo(key), CCIPChainNotFoundError, key)
+  })
+
+  it('re-keys a moved entry (a fork served under another chain id)', () => {
+    SELECTORS[FORK_CHAIN_ID] = SELECTORS[11155111]!
+    delete SELECTORS[11155111]
+
+    // a message decoded on the fork carries Sepolia's selector: it must resolve to the fork's id
+    assert.equal(networkInfo(SEPOLIA_SELECTOR).chainId, FORK_CHAIN_ID)
+    assert.equal(networkInfo('ethereum-testnet-sepolia').chainId, FORK_CHAIN_ID)
+    assert.equal(networkInfo(FORK_CHAIN_ID).chainSelector, SEPOLIA_SELECTOR)
+    assert.throws(() => networkInfo(11155111), CCIPChainNotFoundError)
   })
 })

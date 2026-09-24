@@ -24,7 +24,7 @@ import updateNotifier from 'update-notifier'
 import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
-import { coerceChainSelectors, registerParsedChains } from './chain-selectors.ts'
+import { coerceChainSelectors, registerChainSelectors } from './chain-selectors.ts'
 import { Format } from './commands/index.ts'
 import { formatCCIPError } from './commands/utils.ts'
 
@@ -137,11 +137,11 @@ const globalOpts = {
     type: 'array',
     string: true,
     describe:
-      'Register chains missing from the bundled selector table: "<chainId>=<selector>" for a new ' +
-      'chain (local devnet; defaults to family=EVM, networkType=TESTNET), or ' +
-      '"<chainId>=fork:<chainId|selector|name>" for a fork of a known chain served under a ' +
-      'different chain id (Tenderly Virtual Environment, anvil --fork --chain-id). ' +
-      'Also accepts inline JSON or a path to a JSON/YAML file',
+      'Add chains missing from the bundled selector table: "<chainId>=<selector>" for a new chain ' +
+      '(local devnet; family inferred from the chain id format, networkType TESTNET), or ' +
+      '"<chainId>=<chain name>" for a fork of a known chain served under another chain id ' +
+      '(Tenderly Virtual Environment, anvil --fork --chain-id); a known selector is a fork too. ' +
+      'Takes comma/space-separated lists, inline JSON, or a JSON/YAML file',
     // parse each value at option-resolution time so a malformed one is an attributed option error;
     // the side-effecting registration runs later, in middleware (see below)
     coerce: coerceChainSelectors,
@@ -170,7 +170,7 @@ async function main() {
     .middleware((argv) => {
       // side-effecting registration only; parsing already happened in the option's coerce. Must run
       // before any command resolves a chain (applyBeforeValidation = true)
-      registerParsedChains(argv.chainSelectors)
+      registerChainSelectors(argv.chainSelectors)
     }, true)
     .check((_argv) => {
       const raw = process.argv

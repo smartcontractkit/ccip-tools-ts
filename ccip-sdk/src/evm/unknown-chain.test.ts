@@ -4,7 +4,7 @@ import { afterEach, describe, it } from 'node:test'
 import { ZeroAddress, ZeroHash } from 'ethers'
 
 import { CCIPChainNotFoundError } from '../errors/pure.ts'
-import { clearRegisteredChains, registerChains } from '../networks.ts'
+import SELECTORS from '../selectors.ts'
 import { interfaces } from './const.ts'
 import { encodeMessageV1 } from './messageCodec.ts'
 import { EVMChain } from './index.ts'
@@ -45,7 +45,9 @@ function v2MessageSentLog(destChainSelector: bigint) {
 }
 
 describe('EVMChain.decodeMessage on an unbundled chain', () => {
-  afterEach(clearRegisteredChains)
+  afterEach(() => {
+    delete SELECTORS[DST_CHAIN_ID]
+  })
 
   it('surfaces the real CHAIN_NOT_FOUND instead of masking it as MESSAGE_INVALID', () => {
     const log = v2MessageSentLog(DST_SELECTOR)
@@ -63,9 +65,12 @@ describe('EVMChain.decodeMessage on an unbundled chain', () => {
   })
 
   it('decodes the same log once the chain is registered', () => {
-    registerChains([
-      { chainId: DST_CHAIN_ID, chainSelector: DST_SELECTOR, name: 'local-anvil-dst' },
-    ])
+    SELECTORS[DST_CHAIN_ID] = {
+      selector: DST_SELECTOR,
+      name: 'local-anvil-dst',
+      family: 'EVM',
+      network_type: 'TESTNET',
+    }
     const message = EVMChain.decodeMessage(v2MessageSentLog(DST_SELECTOR))
     assert.ok(message)
     assert.equal(message.sourceChainSelector, SRC_SELECTOR)
