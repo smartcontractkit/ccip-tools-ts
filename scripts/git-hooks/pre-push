@@ -73,6 +73,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   # Iterate in the current shell (no pipeline) so `refuse` propagates.
   while read -r sha status; do
+    [ -n "$sha" ] || continue # rev-list found nothing; the empty here-doc line is not a commit
     case "$status" in
       G | U) ;;
       X | Y | R)
