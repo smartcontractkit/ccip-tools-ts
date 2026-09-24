@@ -4,7 +4,9 @@
  * Only the pieces the SDK needs beyond the 1.6.0 offramp IDL: the `SourceChain` and
  * `ReferenceAddresses` accounts (whose layouts changed in v2), the
  * `ExecutionStateChangedV2` event, and the `get_ccvs_for_msg` view (which now also
- * requires the RMN Remote CPI accounts).
+ * requires the RMN Remote CPI accounts). The `ExecuteParams` types describe the
+ * `execute_v2` instruction data, whose accounts come from account resolution
+ * (see `resolution.ts`).
  *
  * v2 `SourceChain` dropped the `state` field (`minSeqNr`) and reshaped `SourceChainConfig`
  * (replaced the single `on_ramp` with `on_ramps` Vec and added the CCV vecs). v2
@@ -164,6 +166,27 @@ export type CcipOfframpV2 = {
       type: {
         kind: 'struct'
         fields: [{ name: 'beBytes'; type: { array: ['u8', 32] } }]
+      }
+    },
+    {
+      name: 'ExecutionInputsV2'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'encodedMessage'; type: 'bytes' },
+          { name: 'ccvs'; type: { vec: 'publicKey' } },
+          { name: 'verifierResults'; type: { vec: 'bytes' } },
+        ]
+      }
+    },
+    {
+      name: 'ExecuteParams'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'execInputs'; type: { option: { defined: 'ExecutionInputsV2' } } },
+          { name: 'resolutionMetadata'; type: 'bytes' },
+        ]
       }
     },
     {
@@ -332,6 +355,27 @@ export const IDL: CcipOfframpV2 = {
       type: {
         kind: 'struct',
         fields: [{ name: 'beBytes', type: { array: ['u8', 32] } }],
+      },
+    },
+    {
+      name: 'ExecutionInputsV2',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'encodedMessage', type: 'bytes' },
+          { name: 'ccvs', type: { vec: 'publicKey' } },
+          { name: 'verifierResults', type: { vec: 'bytes' } },
+        ],
+      },
+    },
+    {
+      name: 'ExecuteParams',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'execInputs', type: { option: { defined: 'ExecutionInputsV2' } } },
+          { name: 'resolutionMetadata', type: 'bytes' },
+        ],
       },
     },
     {

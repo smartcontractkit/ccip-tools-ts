@@ -10,7 +10,13 @@ import { camelToSnakeCase } from './utils.ts'
 
 type Layout_<T = unknown> = { encode: (type: T, buffer: Buffer) => number }
 
-function sighash(nameSpace: string, ixName: string): Buffer {
+/**
+ * Computes an Anchor instruction discriminator: `sha256("<nameSpace>:<snake_name>")[..8]`.
+ * @param nameSpace - Anchor namespace, `global` for instructions.
+ * @param ixName - Instruction name, in camelCase or snake_case.
+ * @returns The 8-byte discriminator.
+ */
+export function sighash(nameSpace: string, ixName: string): Buffer {
   const name = camelToSnakeCase(ixName)
   const preimage = `${nameSpace}:${name}`
   return Buffer.from(sha256(toUtf8Bytes(preimage)).slice(2, 18), 'hex')
