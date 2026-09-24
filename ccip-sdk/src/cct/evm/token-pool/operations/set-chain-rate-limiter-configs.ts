@@ -16,10 +16,15 @@
 import { type Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
-import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import type { UnmetPrecondition, UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateArray, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -63,7 +68,7 @@ export type ChainRateLimitUpdate = {
 }
 
 /** Parameters for {@link SetChainRateLimiterConfigs}. */
-export type SetChainRateLimiterConfigsParams = {
+export type SetChainRateLimiterConfigsParams = PreflightParams & {
   /** Token pool contract whose lane limits are being set. */
   poolAddress: string
   /** Lanes to re-limit; at least one, with no repeated `remoteChainSelector`. */
@@ -290,9 +295,12 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params, version)
-    if (params.sender !== undefined)
-      await this.#assertRateLimitRole(chain, params.poolAddress, params.sender, version)
-    return unsigned
+    if (params.sender === undefined) return unsigned
+    return this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await this.#checkRateLimitRole(chain, params.poolAddress, params.sender, version),
+    )
   }
 
   /**
@@ -304,14 +312,16 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
    * @remarks `version` selects which getter reports `rateLimitAdmin` (standalone pre-2.0.0, folded
    * into `getDynamicConfig` at 2.0.0). Both roles are read directly, not via the
    * `getTokenPoolState` query op — see {@link readTokenPoolOwner} for why.
-   * @throws {@link CCTParamsInvalidError} if `sender` holds neither role
+   * @remarks Local rather than a shared `checkPoolOwner`, for the reason named in that helper's
+   * remarks: this gate is a disjunction, and collapsing it would lock out a delegated admin.
+   * @returns The unmet requirement, or `undefined` if `sender` holds either role.
    */
-  async #assertRateLimitRole(
+  async #checkRateLimitRole(
     chain: EVMChain,
     poolAddress: string,
     sender: string,
     version: TokenPoolVersion,
-  ): Promise<void> {
+  ): Promise<UnmetPrecondition | undefined> {
     const [owner, rateLimitAdmin] = await Promise.all([
       readTokenPoolOwner(chain, poolAddress),
       readTokenPoolRateLimitAdmin(chain, poolAddress, version),
@@ -321,16 +331,14 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
     // an unset rateLimitAdmin is the zero address; exclude it before comparing or a zero-address
     // `sender` would match it
     const isRateLimitAdmin = rateLimitAdmin !== ZeroAddress && rateLimitAdmin === signer
-    if (owner !== signer && !isRateLimitAdmin) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must be the pool owner (${owner})${
-          rateLimitAdmin === ZeroAddress
-            ? ' — this pool has no rateLimitAdmin set'
-            : ` or its rateLimitAdmin (${rateLimitAdmin})`
-        }`,
-      )
+    if (owner === signer || isRateLimitAdmin) return undefined
+    return {
+      param: 'sender',
+      reason: `must be the pool owner (${owner})${
+        rateLimitAdmin === ZeroAddress
+          ? ' — this pool has no rateLimitAdmin set'
+          : ` or its rateLimitAdmin (${rateLimitAdmin})`
+      }`,
     }
   }
 

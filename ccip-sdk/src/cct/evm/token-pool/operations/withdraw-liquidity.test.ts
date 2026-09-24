@@ -256,6 +256,48 @@ describe('WithdrawLiquidity (cct/evm)', () => {
           err instanceof CCTParamsInvalidError && /no rebalancer is configured/.test(err.message),
       )
     })
+
+    // Both of this op's requirements are things an earlier step of the same plan creates —
+    // `setRebalancer` for the role, `provideLiquidity` for the balance — so both report.
+    describe("preflight: 'report'", () => {
+      it('records the rebalancer mismatch and returns the calldata', async () => {
+        const unsigned = await generate(stubChain({ rebalancer: OWNER }), { preflight: 'report' })
+
+        assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
+        assert.deepEqual(unsigned.preconditions, [
+          { param: 'sender', reason: `must be the current pool rebalancer (${OWNER})` },
+        ])
+      })
+
+      it('records the liquidity shortfall, which throws CCTTxFailedError by default', async () => {
+        const unsigned = await generate(stubChain({ poolBalance: AMOUNT - 1n }), {
+          preflight: 'report',
+        })
+
+        assert.equal(unsigned.preconditions?.length, 1)
+        assert.equal(unsigned.preconditions![0]!.param, 'amount')
+        assert.match(unsigned.preconditions![0]!.reason, /InsufficientLiquidity/)
+      })
+
+      it('accumulates both requirements rather than stopping at the first', async () => {
+        const unsigned = await generate(
+          stubChain({ rebalancer: OWNER, poolBalance: AMOUNT - 1n }),
+          { preflight: 'report' },
+        )
+
+        assert.deepEqual(
+          unsigned.preconditions?.map(({ param }) => param),
+          ['sender', 'amount'],
+        )
+      })
+
+      it('leaves preconditions absent when the pool is ready', async () => {
+        const unsigned = await generate(stubChain({ poolBalance: AMOUNT * 5n }), {
+          preflight: 'report',
+        })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+    })
   })
 
   describe('execute', () => {

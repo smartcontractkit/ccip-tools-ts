@@ -2,7 +2,7 @@
  * Shared internals of the three remote-pool write ops — `setRemotePool` (v1.5.0),
  * `addRemotePool` and `removeRemotePool` (v1.5.1+): the parameter shape they have in common,
  * `remotePoolAddress` parsing, and the per-lane membership read the add/remove preconditions
- * are checked against. The owner gate itself is `assertPoolOwner` in `../contracts.ts`,
+ * are checked against. The owner gate itself is `checkPoolOwner` in `../contracts.ts`,
  * shared with every other owner-gated pool write.
  *
  * @packageDocumentation
@@ -14,6 +14,7 @@ import { CCIPTokenPoolChainConfigNotFoundError } from '../../../errors/index.ts'
 import type { EVMChain } from '../../../evm/index.ts'
 import { networkInfo } from '../../../networks.ts'
 import { decodeAddress } from '../../../utils.ts'
+import type { PreflightParams } from '../operation.ts'
 import { parseHexBytes, validateNonZeroAddress, validateUint64 } from '../validate.ts'
 
 /**
@@ -24,7 +25,7 @@ import { parseHexBytes, validateNonZeroAddress, validateUint64 } from '../valida
  * contracts take it as `bytes` for exactly that reason, so it is accepted here as hex of any
  * (even-digit) length rather than validated as an EVM address.
  */
-export type RemotePoolParams = {
+export type RemotePoolParams = PreflightParams & {
   /** Local token pool contract being reconfigured. */
   poolAddress: string
   /** CCIP selector of the lane's remote chain (`uint64`). */

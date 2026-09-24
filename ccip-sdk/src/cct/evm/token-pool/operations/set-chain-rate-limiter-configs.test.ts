@@ -307,6 +307,18 @@ describe('SetChainRateLimiterConfigs (cct/evm)', () => {
       )
     })
 
+    it("records the role mismatch instead of throwing under preflight: 'report'", async () => {
+      const unsigned = await generate(stubChain(), {
+        sender: '0x' + '88'.repeat(20),
+        preflight: 'report',
+      })
+
+      assert.ok(unsigned.transactions[0]!.data)
+      assert.equal(unsigned.preconditions?.length, 1)
+      assert.equal(unsigned.preconditions![0]!.param, 'sender')
+      assert.match(unsigned.preconditions![0]!.reason, /must be the pool owner/)
+    })
+
     it('skips the role reads entirely when sender is omitted', async () => {
       let calls = 0
       // no `owner`/`getDynamicConfig` answers at all: any role read would revert

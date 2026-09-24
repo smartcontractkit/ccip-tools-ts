@@ -3,9 +3,10 @@
  * wallet-sender pre-flight ({@link EVMOperation.resolveWalletSender}). Deployment ops extend
  * {@link EVMDeployOperation}, which also resolves the deployed address.
  *
- * @remarks The pool-owner pre-flight lives in the token-pool layer as a free helper
- * (`assertPoolOwner` in `token-pool/contracts.ts`), so this generic base
- * carries no dependency on a specific operation.
+ * @remarks The pre-flight *checks* live next to the contracts they read (`checkPoolOwner` in
+ * `token-pool/contracts.ts`, `checkTokenOwner` in `token/contracts.ts`), so this generic base
+ * carries no dependency on a specific operation. Each returns an {@link UnmetPrecondition} rather
+ * than throwing; {@link EVMOperation.recordPreflight} here decides what happens to it.
  *
  * @packageDocumentation
  */
@@ -14,7 +15,7 @@ import { type Interface, getAddress } from 'ethers'
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { type EVMChain, isSigner } from '../../evm/index.ts'
-import type { UnsignedEVMTx } from '../../evm/types.ts'
+import type { UnmetPrecondition, UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
 import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
@@ -142,29 +143,38 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
   ): Promise<UnsignedEVMTx> | UnsignedEVMTx
 
   /**
-   * Reports a pre-flight check the chain does not currently satisfy, honouring the caller's
-   * {@link PreflightMode}: throws under `'throw'` (the default), or returns `tx` with the
-   * requirement attached under `'report'`.
+   * Records the outcome of one pre-flight check, honouring the caller's {@link PreflightMode}:
+   * a met requirement returns `tx` untouched, an unmet one throws under `'throw'` (the default)
+   * or is attached to `tx` under `'report'`.
    *
    * @remarks Called from {@link buildUnsigned} *after* the calldata is encoded, so the `'report'`
    * path has something to attach to. Only for requirements whose failure says nothing about the
    * calldata — the bytes are correct either way, the question is whether the chain is ready for
    * them right now. Anything that invalidates the calldata belongs in `validate`/`parse`, which
    * throws under both modes.
+   *
+   * Chain ops that run several checks thread `tx` through one call each, rather than gathering
+   * findings first. That keeps `'throw'` byte-for-byte what it was: the first unmet requirement
+   * throws before the next check's RPC is issued, so the default mode makes exactly the reads,
+   * in the order, it always did. Only `'report'` pays for the rest.
    * @param tx - The already-encoded transaction to attach to (or discard, when throwing).
    * @param preflight - The caller's mode; `undefined` means `'throw'`.
-   * @param param - Parameter to blame, e.g. `'sender'`.
-   * @param reason - Why the current state does not satisfy the requirement.
-   * @throws {@link CCTParamsInvalidError} unless `preflight` is `'report'`
+   * @param unmet - What the check found, or `undefined` if the chain satisfies it.
+   * @param raise - Error to throw under `'throw'`. Defaults to {@link CCTParamsInvalidError}; the
+   * liquidity checks pass their own so a converted call site keeps throwing the class it always
+   * threw.
+   * @throws whatever `raise` builds, unless `preflight` is `'report'`
    */
-  protected unmetPreflight(
+  protected recordPreflight(
     tx: UnsignedEVMTx,
     preflight: PreflightMode | undefined,
-    param: string,
-    reason: string,
+    unmet: UnmetPrecondition | undefined,
+    raise?: (unmet: UnmetPrecondition) => Error,
   ): UnsignedEVMTx {
-    if (preflight !== 'report') throw new CCTParamsInvalidError(this.name, param, reason)
-    return { ...tx, preconditions: [...(tx.preconditions ?? []), { param, reason }] }
+    if (!unmet) return tx
+    if (preflight !== 'report')
+      throw raise?.(unmet) ?? new CCTParamsInvalidError(this.name, unmet.param, unmet.reason)
+    return { ...tx, preconditions: [...(tx.preconditions ?? []), unmet] }
   }
 
   /** Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing. */

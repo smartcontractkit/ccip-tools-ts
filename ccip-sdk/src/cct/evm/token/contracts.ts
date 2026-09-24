@@ -15,12 +15,8 @@ import { Interface, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { resultToObject } from '../../../evm/types.ts'
-import {
-  CCTContractTypeInvalidError,
-  CCTContractVersionUnsupportedError,
-  CCTParamsInvalidError,
-} from '../../errors.ts'
+import { type UnmetPrecondition, resultToObject } from '../../../evm/types.ts'
+import { CCTContractTypeInvalidError, CCTContractVersionUnsupportedError } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import FACTORY_BURN_MINT_ERC20_V1_6_2_ABI from '../artifacts/abi/V1_6_2/factory-burn-mint-erc20.ts'
 import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-token.ts'
@@ -214,21 +210,21 @@ export async function readTokenOwner(chain: EVMChain, tokenAddress: string): Pro
 
 /**
  * Pre-flights `sender` against the token's on-chain `owner()` for an owner-gated write, so an
- * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an opaque
- * `OnlyOwner` revert after a multisig has already reviewed and signed.
- * @param operation - Operation name, for the error's `operation` field.
+ * unauthorized caller is named here instead of surfacing as an opaque `OnlyOwner` revert after a
+ * multisig has already reviewed and signed.
+ * @remarks Returns the finding rather than throwing it, so the caller's {@link PreflightMode}
+ * decides — see {@link EVMOperation.recordPreflight}.
  * @param chain - Chain to read the owner from.
  * @param tokenAddress - Token being written to.
  * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the token owner
+ * @returns The unmet requirement, or `undefined` if `sender` is the token owner.
  */
-export async function assertTokenOwner(
-  operation: string,
+export async function checkTokenOwner(
   chain: EVMChain,
   tokenAddress: string,
   sender: string,
-): Promise<void> {
+): Promise<UnmetPrecondition | undefined> {
   const owner = await readTokenOwner(chain, tokenAddress)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(operation, 'sender', `must be the current token owner (${owner})`)
+  if (getAddress(sender) === owner) return undefined
+  return { param: 'sender', reason: `must be the current token owner (${owner})` }
 }

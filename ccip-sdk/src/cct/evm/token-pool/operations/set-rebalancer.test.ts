@@ -200,6 +200,35 @@ describe('SetRebalancer (cct/evm)', () => {
       )
     })
 
+    // The canonical `checkPoolOwner` conversion: eight owner-gated pool writes share this helper
+    // and this exact call shape, so what holds here holds for all of them.
+    describe("preflight: 'report'", () => {
+      it('returns the calldata and records the owner mismatch instead of throwing', async () => {
+        const unsigned = await generate(stubChain({ owner: NOT_THE_OWNER }), {
+          preflight: 'report',
+        })
+
+        assert.equal(unsigned.transactions[0]!.to, POOL)
+        assert.equal(unsigned.transactions[0]!.data, dataFor(REBALANCER))
+        assert.deepEqual(unsigned.preconditions, [
+          { param: 'sender', reason: `must be the current token pool owner (${NOT_THE_OWNER})` },
+        ])
+      })
+
+      it('leaves preconditions absent when the sender does own the pool', async () => {
+        const unsigned = await generate(stubChain(), { preflight: 'report' })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+
+      it('still rejects a malformed address, which is a parameter and not chain state', async () => {
+        await assert.rejects(
+          () => generate(stubChain(), { poolAddress: ZeroAddress, preflight: 'report' }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError && err.context.param === 'poolAddress',
+        )
+      })
+    })
+
     it('rejects the incumbent rebalancer, which cannot reassign its own role', async () => {
       await assert.rejects(
         () => generate(stubChain(), { sender: REBALANCER }),

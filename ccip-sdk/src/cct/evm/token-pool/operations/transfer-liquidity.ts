@@ -24,19 +24,24 @@
 import { type Interface, MaxUint256, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
-import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import type { UnmetPrecondition, UnsignedEVMTx } from '../../../../evm/types.ts'
 import {
   CCTContractTypeInvalidError,
   CCTParamsInvalidError,
   CCTTxFailedError,
 } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolLiquidity,
   readTokenPoolRebalancer,
@@ -46,7 +51,7 @@ import {
 } from '../contracts.ts'
 
 /** Parameters for {@link TransferLiquidity}. */
-export type TransferLiquidityParams = {
+export type TransferLiquidityParams = PreflightParams & {
   /** Destination LockRelease pool — the one being written to, and the one that receives the
    * liquidity. Must be non-zero: it is the tx `to`. */
   poolAddress: string
@@ -82,31 +87,35 @@ const encodeTransferLiquidity: Encoder = (iface, { poolAddress, from, amount }) 
   callTx(poolAddress, iface.encodeFunctionData('transferLiquidity', [from, amount]))
 
 /** Migrates liquidity from an older LockRelease pool into this one (v1.5.0–v1.6.1). Owner-only. */
+/** What the *source* pool's three pre-flight checks are decided from, read in one batch. */
+type SourcePoolState = {
+  /** The token the destination pool escrows. */
+  destinationToken: string
+  /** The source pool's escrowed token and its balance of it. */
+  source: { token: string; liquidity: bigint }
+  /** The source pool's configured rebalancer — the only address it pays out to. */
+  rebalancer: string
+}
+
 /**
- * Pre-flights what the *source* pool decides: that it is a LockRelease pool escrowing the same
- * token as the destination, that it pays out to the destination, and that it holds the amount.
+ * Reads everything the source-pool checks compare, in one batch.
  *
- * @remarks The token check is the one with no on-chain counterpart. A mismatch does not revert:
- * the destination takes whatever `from.withdrawLiquidity` pays out, so it silently receives an
- * asset it does not escrow.
- * @param operation - Operation name, for the errors' `operation` field.
+ * @remarks Split from the checks themselves so all three are decided from a single round of RPC
+ * regardless of {@link PreflightMode} — under `'throw'` the first failing check still throws, and
+ * under `'report'` the other two cost nothing extra.
+ * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param destination - The pool being written to, which must be `from`'s rebalancer.
  * @param from - Source pool.
- * @param amount - Transfer amount, or `undefined` for the transfer-all sentinel, where the pool
- * substitutes the source's own balance and there is nothing to compare.
- * @throws {@link CCTContractTypeInvalidError} if `from` is not a LockRelease pool
- * @throws {@link CCTParamsInvalidError} if `from` escrows a different token or does not have
- * `destination` as its rebalancer
- * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+ * @throws {@link CCTContractTypeInvalidError} if `from` is not a LockRelease pool — a contract
+ * shape, not chain state, so it throws under either mode
  */
-async function assertSourcePool(
+async function readSourcePool(
   operation: string,
   chain: EVMChain,
   destination: string,
   from: string,
-  amount: bigint | undefined,
-): Promise<void> {
+): Promise<SourcePoolState> {
   const { type } = await resolveTokenPool(chain, from)
   assertLockReleasePool(operation, from, type)
 
@@ -115,23 +124,63 @@ async function assertSourcePool(
     readTokenPoolLiquidity(chain, from),
     readTokenPoolRebalancer(chain, from),
   ])
-  if (source.token !== destinationToken)
-    throw new CCTParamsInvalidError(
-      operation,
-      'from',
-      `${from} escrows ${source.token} but ${destination} escrows ${destinationToken}; transferring between them would move a token the destination pool does not manage`,
-    )
-  if (rebalancer !== getAddress(destination))
-    throw new CCTParamsInvalidError(
-      operation,
-      'from',
-      `pool ${destination} must be the rebalancer of ${from} to withdraw from it, but its rebalancer is ${rebalancer}; call setRebalancer on ${from} first`,
-    )
-  if (amount !== undefined && source.liquidity < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `source pool ${from} holds ${source.liquidity} of ${source.token}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
-    )
+  return { destinationToken, source, rebalancer }
+}
+
+/**
+ * Checks that `from` escrows the same token the destination does.
+ *
+ * @remarks The one check with no on-chain counterpart. A mismatch does not revert: the destination
+ * takes whatever `from.withdrawLiquidity` pays out, so it silently receives an asset it does not
+ * escrow.
+ * @returns The unmet requirement, or `undefined` if both pools escrow the same token.
+ */
+function checkSourceToken(
+  { destinationToken, source }: SourcePoolState,
+  destination: string,
+  from: string,
+): UnmetPrecondition | undefined {
+  if (source.token === destinationToken) return undefined
+  return {
+    param: 'from',
+    reason: `${from} escrows ${source.token} but ${destination} escrows ${destinationToken}; transferring between them would move a token the destination pool does not manage`,
+  }
+}
+
+/**
+ * Checks that the destination pool is `from`'s rebalancer — the wiring `setRebalancer` installs,
+ * and the most likely thing an earlier step of the same plan is there to do.
+ * @returns The unmet requirement, or `undefined` if the wiring is in place.
+ */
+function checkSourceRebalancer(
+  { rebalancer }: SourcePoolState,
+  destination: string,
+  from: string,
+): UnmetPrecondition | undefined {
+  if (rebalancer === getAddress(destination)) return undefined
+  return {
+    param: 'from',
+    reason: `pool ${destination} must be the rebalancer of ${from} to withdraw from it, but its rebalancer is ${rebalancer}; call setRebalancer on ${from} first`,
+  }
+}
+
+/**
+ * Checks that `from` holds `amount`.
+ * @param amount - Transfer amount, or `undefined` for the transfer-all sentinel, where the pool
+ * substitutes the source's own balance and there is nothing to compare.
+ * @returns The unmet requirement, or `undefined` if the source holds enough (or there is nothing
+ * to compare).
+ */
+function checkSourceLiquidity(
+  { source }: SourcePoolState,
+  from: string,
+  amount: bigint | undefined,
+): UnmetPrecondition | undefined {
+  if (amount === undefined || source.liquidity >= amount) return undefined
+  return {
+    param: 'amount',
+    reason: `source pool ${from} holds ${source.liquidity} of ${source.token}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
+  }
 }
 
 export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
@@ -201,18 +250,36 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
         'amount',
         `MaxUint256 means "transfer everything" only from v1.6.1; a ${version} pool would try to withdraw that amount and revert with InsufficientLiquidity`,
       )
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    let tx = encode(getTokenPoolInterface(type, version), params)
 
-    await assertSourcePool(
-      this.name,
-      chain,
-      params.poolAddress,
-      params.from,
-      params.amount === MaxUint256 ? undefined : params.amount,
+    const state = await readSourcePool(this.name, chain, params.poolAddress, params.from)
+    tx = this.recordPreflight(
+      tx,
+      params.preflight,
+      checkSourceToken(state, params.poolAddress, params.from),
     )
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    tx = this.recordPreflight(
+      tx,
+      params.preflight,
+      checkSourceRebalancer(state, params.poolAddress, params.from),
+    )
+    // Keeps raising CCTTxFailedError under `'throw'`, the class this shortfall always raised.
+    tx = this.recordPreflight(
+      tx,
+      params.preflight,
+      checkSourceLiquidity(
+        state,
+        params.from,
+        params.amount === MaxUint256 ? undefined : params.amount,
+      ),
+      ({ reason }) => new CCTTxFailedError(this.name, reason),
+    )
+    if (params.sender === undefined) return tx
+    return this.recordPreflight(
+      tx,
+      params.preflight,
+      await checkPoolOwner(chain, params.poolAddress, params.sender),
+    )
   }
 
   /**

@@ -7,14 +7,18 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { assertTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
+import { checkTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
 
 /** Parameters for {@link GrantBurnRole}. */
-export type GrantBurnRoleParams = {
+export type GrantBurnRoleParams = PreflightParams & {
   /** BurnMintERC677 token (v1.5.1 / v1.6.2) whose roles are being changed. */
   tokenAddress: string
   /** Account receiving the burn role; must not already hold it. */
@@ -49,17 +53,26 @@ export class GrantBurnRole extends EVMOperation<GrantBurnRoleParams> {
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, burner, sender }: GrantBurnRoleParams,
+    { tokenAddress, burner, sender, preflight }: GrantBurnRoleParams,
   ): Promise<UnsignedEVMTx> {
-    if (await readTokenRole(chain, tokenAddress, 'isBurner', burner))
-      throw new CCTParamsInvalidError(
-        this.name,
-        'burner',
-        `already holds the burn role on ${tokenAddress}; granting it again changes nothing`,
-      )
-    if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
-
-    return callTx(tokenAddress, getErc20Token().encodeFunctionData('grantBurnRole', [burner]))
+    // encoded before the role read, not after, so `preflight: 'report'` has a tx to attach
+    // findings to. Local and pure — no RPC, and nothing `validate` allowed can make it fail.
+    const unsigned = callTx(
+      tokenAddress,
+      getErc20Token().encodeFunctionData('grantBurnRole', [burner]),
+    )
+    const tx = this.recordPreflight(
+      unsigned,
+      preflight,
+      (await readTokenRole(chain, tokenAddress, 'isBurner', burner))
+        ? {
+            param: 'burner',
+            reason: `already holds the burn role on ${tokenAddress}; granting it again changes nothing`,
+          }
+        : undefined,
+    )
+    if (sender === undefined) return tx
+    return this.recordPreflight(tx, preflight, await checkTokenOwner(chain, tokenAddress, sender))
   }
 
   /**

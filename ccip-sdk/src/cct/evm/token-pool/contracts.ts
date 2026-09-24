@@ -18,13 +18,11 @@ import { Interface, ZeroAddress, getAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { resultToObject } from '../../../evm/types.ts'
+import { type UnmetPrecondition, resultToObject } from '../../../evm/types.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
-  CCTParamsInvalidError,
-  CCTTxFailedError,
 } from '../../errors.ts'
 import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts'
@@ -161,34 +159,31 @@ type PoolOwnerGetter = Pick<TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI
 
 /**
  * Pre-flights `sender` against the pool's on-chain `owner()` for an owner-gated write, so an
- * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an opaque
+ * unauthorized caller is named here instead of surfacing as an opaque
  * `OwnableUnauthorizedAccount` revert after a multisig has already reviewed and signed.
  *
+ * @remarks Returns the finding rather than throwing it, so the caller's
+ * {@link PreflightMode} decides — see {@link EVMOperation.recordPreflight}, which turns this into
+ * the {@link CCTParamsInvalidError} it used to throw, or attaches it to the built tx.
  * @remarks A single `owner()` call, not the full `getTokenPoolState` query: `owner` is the only
  * field this needs and the only one whose getter never changed spelling, so reading it directly
  * costs one `eth_call` instead of a second `typeAndVersion` resolution plus every admin field.
  * @remarks For an owner-*only* gate. Not for a gate that accepts more than the owner —
  * `setChainRateLimiterConfigs` takes `owner` **or** `rateLimitAdmin`, and collapsing that
  * disjunction to this helper would lock out a delegated rate-limit admin.
- * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read the owner from.
  * @param poolAddress - Token pool being written to.
  * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the pool owner
+ * @returns The unmet requirement, or `undefined` if `sender` is the pool owner.
  */
-export async function assertPoolOwner(
-  operation: string,
+export async function checkPoolOwner(
   chain: EVMChain,
   poolAddress: string,
   sender: string,
-): Promise<void> {
+): Promise<UnmetPrecondition | undefined> {
   const owner = await readTokenPoolOwner(chain, poolAddress)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current token pool owner (${owner})`,
-  )
+  if (getAddress(sender) === owner) return undefined
+  return { param: 'sender', reason: `must be the current token pool owner (${owner})` }
 }
 
 /**
@@ -378,24 +373,22 @@ export async function readTokenPoolRebalancer(
  * @param chain - Chain to read the rebalancer from.
  * @param poolAddress - Token pool being written to.
  * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the pool's rebalancer, or no
- * rebalancer is configured
+ * @returns The unmet requirement, or `undefined` if `sender` is the pool's rebalancer.
  */
-export async function assertPoolRebalancer(
-  operation: string,
+export async function checkPoolRebalancer(
   chain: EVMChain,
   poolAddress: string,
   sender: string,
-): Promise<void> {
+): Promise<UnmetPrecondition | undefined> {
   const rebalancer = await readTokenPoolRebalancer(chain, poolAddress)
-  if (rebalancer !== ZeroAddress && getAddress(sender) === rebalancer) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    rebalancer === ZeroAddress
-      ? `no rebalancer is configured on ${poolAddress}, so it accepts liquidity calls from nobody; the pool owner must appoint one with setRebalancer`
-      : `must be the current pool rebalancer (${rebalancer})`,
-  )
+  if (rebalancer !== ZeroAddress && getAddress(sender) === rebalancer) return undefined
+  return {
+    param: 'sender',
+    reason:
+      rebalancer === ZeroAddress
+        ? `no rebalancer is configured on ${poolAddress}, so it accepts liquidity calls from nobody; the pool owner must appoint one with setRebalancer`
+        : `must be the current pool rebalancer (${rebalancer})`,
+  }
 }
 
 /**
@@ -452,31 +445,31 @@ export async function readTokenPoolToken(
  * @param poolAddress - LockRelease pool being deposited into.
  * @param account - The depositing rebalancer.
  * @param amount - Deposit amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if `account` holds less than `amount`, or has approved the
- * pool for less than `amount`
+ * @returns The unmet requirement, blamed on `sender` (the depositor whose balance and allowance
+ * these are), or `undefined` if the deposit is funded.
  */
-export async function assertLiquidityFunding(
-  operation: string,
+export async function checkLiquidityFunding(
   chain: EVMChain,
   poolAddress: string,
   account: string,
   amount: bigint,
-): Promise<void> {
+): Promise<UnmetPrecondition | undefined> {
   const { token, erc20 } = await readTokenPoolToken(chain, poolAddress)
   const [balance, allowance] = await Promise.all([
     erc20.balanceOf(account),
     erc20.allowance(account, poolAddress),
   ])
   if (balance < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `${account} holds ${balance} of ${token}, but ${amount} is required; mint or transfer tokens first`,
-    )
+    return {
+      param: 'sender',
+      reason: `${account} holds ${balance} of ${token}, but ${amount} is required; mint or transfer tokens first`,
+    }
   if (allowance < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `${account} has approved ${allowance} of ${token} to pool ${poolAddress}, but ${amount} is required; the deposit is a transferFrom, so grant the allowance first with approveToken({ tokenAddress: '${token}', spender: '${poolAddress}', amount: ${amount}n })`,
-    )
+    return {
+      param: 'sender',
+      reason: `${account} has approved ${allowance} of ${token} to pool ${poolAddress}, but ${amount} is required; the deposit is a transferFrom, so grant the allowance first with approveToken({ tokenAddress: '${token}', spender: '${poolAddress}', amount: ${amount}n })`,
+    }
+  return undefined
 }
 
 /**
@@ -489,20 +482,20 @@ export async function assertLiquidityFunding(
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool being withdrawn from.
  * @param amount - Withdrawal amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if the pool's balance is below `amount`
+ * @returns The unmet requirement, blamed on `amount` (the pool's balance is not a parameter, and
+ * `amount` is the side of the comparison a caller controls), or `undefined` if the pool holds it.
  */
-export async function assertPoolLiquidity(
-  operation: string,
+export async function checkPoolLiquidity(
   chain: EVMChain,
   poolAddress: string,
   amount: bigint,
-): Promise<void> {
+): Promise<UnmetPrecondition | undefined> {
   const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress)
-  if (liquidity >= amount) return
-  throw new CCTTxFailedError(
-    operation,
-    `pool ${poolAddress} holds ${liquidity} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
-  )
+  if (liquidity >= amount) return undefined
+  return {
+    param: 'amount',
+    reason: `pool ${poolAddress} holds ${liquidity} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+  }
 }
 
 /**

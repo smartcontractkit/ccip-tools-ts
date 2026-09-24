@@ -328,6 +328,50 @@ describe('ProvideLiquidity (cct/evm)', () => {
         'allowance',
       ])
     })
+
+    // The op with both kinds of requirement side by side: the rebalancer role and the funding are
+    // things `setRebalancer` / `mint` / `approveToken` write earlier in a plan, while
+    // `acceptLiquidity` was fixed when the pool was deployed and no plan can change it.
+    describe("preflight: 'report'", () => {
+      it('records the rebalancer mismatch and returns the calldata', async () => {
+        const unsigned = await generate(stubChain({ rebalancer: OWNER }), { preflight: 'report' })
+
+        assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
+        assert.deepEqual(unsigned.preconditions, [
+          { param: 'sender', reason: `must be the current pool rebalancer (${OWNER})` },
+        ])
+      })
+
+      it('records a missing allowance, which throws CCTTxFailedError by default', async () => {
+        const unsigned = await generate(stubChain({ allowance: 0n }), { preflight: 'report' })
+
+        assert.equal(unsigned.preconditions?.length, 1)
+        assert.equal(unsigned.preconditions![0]!.param, 'sender')
+        assert.match(unsigned.preconditions![0]!.reason, /approveToken/)
+      })
+
+      it('accumulates the role and the funding rather than stopping at the first', async () => {
+        const unsigned = await generate(stubChain({ rebalancer: OWNER, balance: 0n }), {
+          preflight: 'report',
+        })
+        assert.equal(unsigned.preconditions?.length, 2)
+      })
+
+      it('still rejects a pool deployed with acceptLiquidity = false, which is immutable', async () => {
+        await assert.rejects(
+          () => generate(stubChain({ acceptsLiquidity: false }), { preflight: 'report' }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === 'poolAddress' &&
+            /immutable/.test(err.message),
+        )
+      })
+
+      it('leaves preconditions absent when the deposit is ready to send', async () => {
+        const unsigned = await generate(stubChain(), { preflight: 'report' })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+    })
   })
 
   describe('execute', () => {

@@ -15,7 +15,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import {
   parseHexBytes,
   parseRecord,
@@ -27,7 +32,7 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -64,7 +69,7 @@ type ChainUpdateCommon = {
 }
 
 /** The top-level parameters both shapes share; each version adds its own lane arrays. */
-type ApplyChainUpdatesBaseParams = {
+type ApplyChainUpdatesBaseParams = PreflightParams & {
   /** Token pool whose lanes are being configured. */
   poolAddress: string
   /**
@@ -493,10 +498,15 @@ export class ApplyChainUpdates extends EVMOperation<
 
     this.assertRateBounds(params, version)
 
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-
-    return encode(getTokenPoolInterface(type, version), params)
+    // encoded before the owner read, not after, so `preflight: 'report'` has a tx to attach the
+    // finding to. Local and pure — it costs no RPC and cannot fail on anything `parse` allowed.
+    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    if (params.sender === undefined) return unsigned
+    return this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await checkPoolOwner(chain, params.poolAddress, params.sender),
+    )
   }
 
   /**

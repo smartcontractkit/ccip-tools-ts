@@ -349,6 +349,55 @@ describe('TransferLiquidity (cct/evm)', () => {
           err.context.param === 'sender',
       )
     })
+
+    // This op has the most plan-shaped requirement in the SDK: the rebalancer wiring its own error
+    // tells you to install with `setRebalancer` — which an earlier step of the plan is exactly what
+    // does. Under `'throw'` nothing here changes; under `'report'` the whole picture comes back at
+    // once, because the source-pool reads are batched either way.
+    describe("preflight: 'report'", () => {
+      it('records the missing rebalancer wiring and returns the calldata', async () => {
+        const unsigned = await generate(stubChain({ sourceRebalancer: NOT_THE_OWNER }), {
+          preflight: 'report',
+        })
+
+        assert.equal(unsigned.transactions[0]!.data, dataFor(OLD_POOL, AMOUNT))
+        assert.equal(unsigned.preconditions?.length, 1)
+        assert.equal(unsigned.preconditions![0]!.param, 'from')
+        assert.match(unsigned.preconditions![0]!.reason, /call setRebalancer on/)
+      })
+
+      it('accumulates every unmet requirement in check order', async () => {
+        const unsigned = await generate(
+          stubChain({
+            sourceToken: OTHER_TOKEN,
+            sourceRebalancer: NOT_THE_OWNER,
+            sourceLiquidity: AMOUNT - 1n,
+            owner: NOT_THE_OWNER,
+          }),
+          { preflight: 'report' },
+        )
+
+        assert.deepEqual(
+          unsigned.preconditions?.map(({ param }) => param),
+          ['from', 'from', 'amount', 'sender'],
+        )
+      })
+
+      it('still rejects a siloed source pool, a contract shape rather than chain state', async () => {
+        await assert.rejects(
+          () =>
+            generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.5.1' }), {
+              preflight: 'report',
+            }),
+          (err: unknown) => err instanceof CCTContractTypeInvalidError,
+        )
+      })
+
+      it('leaves preconditions absent when both pools are wired and funded', async () => {
+        const unsigned = await generate(stubChain(), { preflight: 'report' })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+    })
   })
 
   describe('execute', () => {

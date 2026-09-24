@@ -537,6 +537,64 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
     })
   })
 
+  // `registerAdmin` is the first step of the canonical plan, so it is usually the one op whose
+  // requirements ARE met at build time. It still needs `'report'`: a plan re-run against a
+  // registry that moved on should surface that as a finding, not kill the build.
+  describe("preflight: 'report'", () => {
+    const params = {
+      tokenAddress: TOKEN,
+      registryModule: REGISTRY_MODULE,
+      address: ROUTER,
+      sender: ADMIN,
+      preflight: 'report',
+    } as const
+
+    it('records the token-authority mismatch and returns the calldata', async () => {
+      const unsigned = await new RegisterAdmin().generate(
+        stubChain({ getterAddress: OTHER }),
+        params,
+      )
+
+      assert.equal(unsigned.transactions[0]!.to, REGISTRY_MODULE)
+      assert.equal(unsigned.transactions[0]!.data, OWNER_DATA)
+      assert.equal(unsigned.preconditions?.length, 1)
+      assert.equal(unsigned.preconditions![0]!.param, 'sender')
+      assert.match(unsigned.preconditions![0]!.reason, /must equal token\.owner\(\)/)
+    })
+
+    it('accumulates the authority mismatch and an existing administrator', async () => {
+      const unsigned = await new RegisterAdmin().generate(
+        stubChain({
+          getterAddress: OTHER,
+          tokenConfig: {
+            administrator: ADMIN,
+            pendingAdministrator: ZeroAddress,
+            tokenPool: ZeroAddress,
+          },
+        }),
+        params,
+      )
+
+      assert.deepEqual(
+        unsigned.preconditions?.map(({ param }) => param),
+        ['sender', 'tokenAddress'],
+      )
+    })
+
+    it('still rejects an unregistered registry module, which no plan step installs', async () => {
+      await assert.rejects(
+        () => new RegisterAdmin().generate(stubChain({ isModule: false }), params),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'registryModule',
+      )
+    })
+
+    it('leaves preconditions absent on an unregistered token the sender owns', async () => {
+      const unsigned = await new RegisterAdmin().generate(stubChain(), params)
+      assert.equal(unsigned.preconditions, undefined)
+    })
+  })
+
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new RegisterAdmin().execute(stubChain(), {

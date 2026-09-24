@@ -20,15 +20,20 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertLiquidityFunding,
   assertLockReleasePool,
-  assertPoolRebalancer,
+  checkLiquidityFunding,
+  checkPoolRebalancer,
   getTokenPoolInterface,
   readTokenPoolAcceptsLiquidity,
   resolveEncoder,
@@ -36,7 +41,7 @@ import {
 } from '../contracts.ts'
 
 /** Parameters for {@link ProvideLiquidity}. */
-export type ProvideLiquidityParams = {
+export type ProvideLiquidityParams = PreflightParams & {
   /** LockRelease pool to deposit into. Must be non-zero — it is the tx `to`, and a call to `0x0`
    * hits no code, so it would mine as a successful no-op. */
   poolAddress: string
@@ -106,23 +111,33 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
     const unsigned = encode(getTokenPoolInterface(type, version), params)
 
     const hasAcceptFlag = version === TokenPoolVersion.V1_5_0 || version === TokenPoolVersion.V1_5_1
+    // Not reportable, under either mode: `acceptLiquidity` is fixed at deployment, so no earlier
+    // transaction in any plan can make this true later. Reporting it would promise a wait that
+    // ends only in `LiquidityNotAccepted`.
     if (hasAcceptFlag && !(await readTokenPoolAcceptsLiquidity(chain, params.poolAddress)))
       throw new CCTParamsInvalidError(
         this.name,
         'poolAddress',
         `pool ${params.poolAddress} was deployed with acceptLiquidity = false, which is immutable, so it rejects every deposit with LiquidityNotAccepted`,
       )
-    if (params.sender !== undefined) {
-      await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
-      await assertLiquidityFunding(
-        this.name,
-        chain,
-        params.poolAddress,
-        params.sender,
-        params.amount,
-      )
-    }
-    return unsigned
+    if (params.sender === undefined) return unsigned
+
+    let tx = this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await checkPoolRebalancer(chain, params.poolAddress, params.sender),
+    )
+    // `setRebalancer` earlier in a plan satisfies the check above, and `mint` / `approveToken`
+    // earlier in a plan satisfies this one — which is why both report rather than throw under
+    // `'report'`. The funding shortfall keeps raising CCTTxFailedError under `'throw'`, the class
+    // it has always raised.
+    tx = this.recordPreflight(
+      tx,
+      params.preflight,
+      await checkLiquidityFunding(chain, params.poolAddress, params.sender, params.amount),
+      ({ reason }) => new CCTTxFailedError(this.name, reason),
+    )
+    return tx
   }
 
   /**

@@ -279,6 +279,15 @@ describe('SetRemotePool (cct/evm)', () => {
           err.context.param === 'sender',
       )
     })
+
+    it("records the owner mismatch instead of throwing under preflight: 'report'", async () => {
+      const unsigned = await generate(stubChain({ owner: NOT_THE_OWNER }), { preflight: 'report' })
+
+      assert.equal(unsigned.transactions[0]!.to, POOL)
+      assert.deepEqual(unsigned.preconditions, [
+        { param: 'sender', reason: `must be the current token pool owner (${NOT_THE_OWNER})` },
+      ])
+    })
   })
 
   describe('execute', () => {

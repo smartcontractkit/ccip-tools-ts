@@ -195,6 +195,46 @@ describe('GrantMintRole (cct/evm)', () => {
     })
   })
 
+  // `deployToken` then `grantMintRole` is the plan this unblocks: at build time the grant's
+  // requirements are about state the earlier step has not written yet.
+  describe("preflight: 'report'", () => {
+    it('records the owner mismatch and returns the calldata', async () => {
+      const unsigned = await generate(stubChain(), {
+        sender: NOT_THE_OWNER,
+        preflight: 'report',
+      })
+
+      assert.equal(unsigned.transactions[0]!.data, expectedData())
+      assert.deepEqual(unsigned.preconditions, [
+        { param: 'sender', reason: `must be the current token owner (${OWNER})` },
+      ])
+    })
+
+    it('accumulates the redundant grant and the owner mismatch', async () => {
+      const unsigned = await generate(stubChain({ holdsRole: true }), {
+        sender: NOT_THE_OWNER,
+        preflight: 'report',
+      })
+
+      assert.deepEqual(
+        unsigned.preconditions?.map(({ param }) => param),
+        ['minter', 'sender'],
+      )
+    })
+
+    it('leaves preconditions absent when the owner can grant a role nobody holds', async () => {
+      const unsigned = await generate(stubChain(), { preflight: 'report' })
+      assert.equal(unsigned.preconditions, undefined)
+    })
+
+    it('still rejects a contract that is not a BurnMintERC677 token', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ callError: missingFunction() }), { preflight: 'report' }),
+        (err: unknown) => err instanceof CCTContractTypeInvalidError,
+      )
+    })
+  })
+
   describe('execute', () => {
     it('submits as the token owner and returns the tx hash', async () => {
       const { hash } = await op.execute(stubChain(), {

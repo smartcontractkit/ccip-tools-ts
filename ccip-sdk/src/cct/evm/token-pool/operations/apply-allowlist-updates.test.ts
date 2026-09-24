@@ -325,6 +325,41 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
         REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
       )
     })
+
+    // Membership is state an earlier `applyAllowlistUpdates` in the same plan writes, so it
+    // reports. Whether the pool has an allowlist at all was decided at deployment, so it does not.
+    describe("preflight: 'report'", () => {
+      it('records both membership findings and returns the calldata', async () => {
+        const unsigned = await generate(
+          stubChain({ allowlist: [ADDS[0]!], owner: '0x' + '99'.repeat(20) }),
+          { preflight: 'report' },
+        )
+
+        assert.equal(unsigned.transactions[0]!.data, DATA)
+        assert.deepEqual(
+          unsigned.preconditions?.map(({ param }) => param),
+          ['sender', 'removes', 'adds'],
+        )
+      })
+
+      it('still rejects a pool that can never have an allowlist', async () => {
+        await assert.rejects(
+          () =>
+            generate(stubChain({ allowlistEnabled: false, allowlist: [] }), {
+              preflight: 'report',
+            }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === 'poolAddress' &&
+            /immutable/.test(err.message),
+        )
+      })
+
+      it('leaves preconditions absent when every update is a real change', async () => {
+        const unsigned = await generate(stubChain(), { preflight: 'report' })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+    })
   })
 
   describe('execute', () => {

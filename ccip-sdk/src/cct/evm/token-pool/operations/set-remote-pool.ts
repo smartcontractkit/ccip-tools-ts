@@ -19,7 +19,7 @@ import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -88,10 +88,16 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return encode(getTokenPoolInterface(type, version), params)
+    // encoded before the owner read, not after, so `preflight: 'report'` has a tx to attach the
+    // finding to. Local and pure — it costs no RPC and cannot fail on anything `parse` allowed.
+    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    // owner-gated on-chain; surface it here instead of as an on-chain revert
+    if (params.sender === undefined) return unsigned
+    return this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await checkPoolOwner(chain, params.poolAddress, params.sender),
+    )
   }
 
   /**

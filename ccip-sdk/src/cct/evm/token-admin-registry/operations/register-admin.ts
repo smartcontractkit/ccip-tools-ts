@@ -13,7 +13,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import {
   RegistryModuleOwnerCustomVersion,
@@ -65,7 +70,7 @@ const REGISTRATION: Record<
 export type RegisterAdminMethodV1_5_0 = Exclude<RegisterAdminMethod, 'access-control-default-admin'>
 
 /** Fields every registration path needs, whatever the module version. */
-type RegisterAdminBaseParams = {
+type RegisterAdminBaseParams = PreflightParams & {
   /** Token to register. Stays unregistered until `acceptAdmin` is called by the proposed admin. */
   tokenAddress: string
   /**
@@ -153,6 +158,8 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
     const registry = await chain.getTokenAdminRegistryFor(p.address)
 
     // The TAR reverts `OnlyRegistryModuleOrOwner` from deep inside the module call; check here.
+    // Not reportable under either mode: registry modules are deployed and registered by the CCIP
+    // operator, never by a step of a CCT plan, so there is no earlier transaction to wait for.
     if (!(await isRegistryModule(chain, registry, p.registryModule))) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -173,7 +180,16 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
       )
     }
 
-    // Pre-flight the module's own authorization check (see REGISTRATION), so a mismatch fails
+    // Encoded here, before the remaining state reads, so `preflight: 'report'` has a tx to attach
+    // findings to. Local and pure — no RPC, and the version it dispatches on is already resolved.
+    let tx = callTx(
+      p.registryModule,
+      getRegistryModuleOwnerCustomInterface(onChainVersion).encodeFunctionData(moduleFn, [
+        p.tokenAddress,
+      ]),
+    )
+
+    // Pre-flight the module's own authorization check (see REGISTRATION), so a mismatch is named
     // here rather than as a `CanOnlySelfRegister`/`RequiredRoleNotFound` revert. Needs `sender`.
     if (p.sender !== undefined) {
       if (method === REGISTRATION_METHODS.ACCESS_CONTROL_DEFAULT_ADMIN) {
@@ -186,13 +202,16 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
         const token = new Contract(p.tokenAddress, accessControlInterface, chain.provider)
         const role = (await token.getFunction('DEFAULT_ADMIN_ROLE')()) as string
         const hasRole = (await token.getFunction('hasRole')(role, p.sender)) as boolean
-        if (!hasRole) {
-          throw new CCTParamsInvalidError(
-            this.name,
-            'sender',
-            `must hold the token's DEFAULT_ADMIN_ROLE (AccessControl.hasRole) for registrationMethod "access-control-default-admin"`,
-          )
-        }
+        tx = this.recordPreflight(
+          tx,
+          p.preflight,
+          hasRole
+            ? undefined
+            : {
+                param: 'sender',
+                reason: `must hold the token's DEFAULT_ADMIN_ROLE (AccessControl.hasRole) for registrationMethod "access-control-default-admin"`,
+              },
+        )
       } else {
         const tokenGetter = REGISTRATION[method].tokenGetter!
         const tokenGetterInterface = new Interface([
@@ -203,13 +222,16 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
           tokenGetterInterface,
           chain.provider,
         ).getFunction(tokenGetter)()) as string
-        if (getAddress(admin) !== getAddress(p.sender)) {
-          throw new CCTParamsInvalidError(
-            this.name,
-            'sender',
-            `must equal token.${tokenGetter}() (${admin}) for registrationMethod "${method}"`,
-          )
-        }
+        tx = this.recordPreflight(
+          tx,
+          p.preflight,
+          getAddress(admin) === getAddress(p.sender)
+            ? undefined
+            : {
+                param: 'sender',
+                reason: `must equal token.${tokenGetter}() (${admin}) for registrationMethod "${method}"`,
+              },
+        )
       }
     }
 
@@ -220,26 +242,26 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
       registry,
       p.tokenAddress,
     )
-    if (administrator !== ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        `token already has registry administrator ${administrator} — use transferAdmin to hand the role over, or setPool if you are already the admin`,
-      )
-    }
-    if (pendingAdministrator !== ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        `a registration proposing ${pendingAdministrator} is already pending — that address must call acceptAdmin (re-registering would silently replace the proposal)`,
-      )
-    }
-
-    const data = getRegistryModuleOwnerCustomInterface(onChainVersion).encodeFunctionData(
-      moduleFn,
-      [p.tokenAddress],
+    tx = this.recordPreflight(
+      tx,
+      p.preflight,
+      administrator === ZeroAddress
+        ? undefined
+        : {
+            param: 'tokenAddress',
+            reason: `token already has registry administrator ${administrator} — use transferAdmin to hand the role over, or setPool if you are already the admin`,
+          },
     )
-    return callTx(p.registryModule, data)
+    return this.recordPreflight(
+      tx,
+      p.preflight,
+      pendingAdministrator === ZeroAddress
+        ? undefined
+        : {
+            param: 'tokenAddress',
+            reason: `a registration proposing ${pendingAdministrator} is already pending — that address must call acceptAdmin (re-registering would silently replace the proposal)`,
+          },
+    )
   }
 
   /**

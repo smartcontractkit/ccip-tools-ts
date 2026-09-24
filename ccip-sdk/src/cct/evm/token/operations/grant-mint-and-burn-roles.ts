@@ -8,14 +8,18 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { assertTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
+import { checkTokenOwner, getErc20Token, readTokenRole } from '../contracts.ts'
 
 /** Parameters for {@link GrantMintAndBurnRoles}. */
-export type GrantMintAndBurnRolesParams = {
+export type GrantMintAndBurnRolesParams = PreflightParams & {
   /** BurnMintERC677 token (v1.5.1 / v1.6.2) whose roles are being changed. */
   tokenAddress: string
   /** Account receiving both roles, typically the token's pool; must not already hold both. */
@@ -52,24 +56,30 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, burnAndMinter, sender }: GrantMintAndBurnRolesParams,
+    { tokenAddress, burnAndMinter, sender, preflight }: GrantMintAndBurnRolesParams,
   ): Promise<UnsignedEVMTx> {
+    // encoded before the role reads, not after, so `preflight: 'report'` has a tx to attach
+    // findings to. Local and pure — no RPC, and nothing `validate` allowed can make it fail.
+    const unsigned = callTx(
+      tokenAddress,
+      getErc20Token().encodeFunctionData('grantMintAndBurnRoles', [burnAndMinter]),
+    )
     const [isMinter, isBurner] = await Promise.all([
       readTokenRole(chain, tokenAddress, 'isMinter', burnAndMinter),
       readTokenRole(chain, tokenAddress, 'isBurner', burnAndMinter),
     ])
-    if (isMinter && isBurner)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'burnAndMinter',
-        `already holds the mint and burn roles on ${tokenAddress}; granting them again changes nothing`,
-      )
-    if (sender !== undefined) await assertTokenOwner(this.name, chain, tokenAddress, sender)
-
-    return callTx(
-      tokenAddress,
-      getErc20Token().encodeFunctionData('grantMintAndBurnRoles', [burnAndMinter]),
+    const tx = this.recordPreflight(
+      unsigned,
+      preflight,
+      isMinter && isBurner
+        ? {
+            param: 'burnAndMinter',
+            reason: `already holds the mint and burn roles on ${tokenAddress}; granting them again changes nothing`,
+          }
+        : undefined,
     )
+    if (sender === undefined) return tx
+    return this.recordPreflight(tx, preflight, await checkTokenOwner(chain, tokenAddress, sender))
   }
 
   /**

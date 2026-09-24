@@ -9,14 +9,18 @@ import { ZeroAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
 import { getErc20Token, readTokenRole } from '../contracts.ts'
 
 /** Parameters for {@link Mint}. */
-export type MintParams = {
+export type MintParams = PreflightParams & {
   /** BurnMintERC677 token (v1.5.1 / v1.6.2) to mint. */
   tokenAddress: string
   /** Account credited with the newly minted supply. */
@@ -58,17 +62,26 @@ export class Mint extends EVMOperation<MintParams> {
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, account, amount, sender }: MintParams,
+    { tokenAddress, account, amount, sender, preflight }: MintParams,
   ): Promise<UnsignedEVMTx> {
+    const unsigned = callTx(
+      tokenAddress,
+      getErc20Token().encodeFunctionData('mint', [account, amount]),
+    )
     const isMinter = await readTokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
-    if (sender !== undefined && !isMinter)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must hold the mint role on ${tokenAddress} — grant it with grantMintRole (or grantMintAndBurnRoles) as the token owner`,
-      )
-
-    return callTx(tokenAddress, getErc20Token().encodeFunctionData('mint', [account, amount]))
+    // `grantMintRole` earlier in the same plan is the usual reason the role is missing at build
+    // time, which is what `preflight: 'report'` is for. The family check above is not reportable
+    // and throws either way — a token with no `isMinter` is the wrong contract, not a pending one.
+    return this.recordPreflight(
+      unsigned,
+      preflight,
+      sender !== undefined && !isMinter
+        ? {
+            param: 'sender',
+            reason: `must hold the mint role on ${tokenAddress} — grant it with grantMintRole (or grantMintAndBurnRoles) as the token owner`,
+          }
+        : undefined,
+    )
   }
 
   /**

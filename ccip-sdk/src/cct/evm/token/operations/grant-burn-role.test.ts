@@ -193,6 +193,18 @@ describe('GrantBurnRole (cct/evm)', () => {
           /must be the current token owner/.test(String(err.context.reason)),
       )
     })
+
+    it("records the owner mismatch instead of throwing under preflight: 'report'", async () => {
+      const unsigned = await generate(stubChain(), {
+        sender: NOT_THE_OWNER,
+        preflight: 'report',
+      })
+
+      assert.equal(unsigned.transactions[0]!.data, expectedData())
+      assert.deepEqual(unsigned.preconditions, [
+        { param: 'sender', reason: `must be the current token owner (${OWNER})` },
+      ])
+    })
   })
 
   describe('execute', () => {

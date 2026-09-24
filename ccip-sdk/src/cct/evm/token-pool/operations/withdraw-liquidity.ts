@@ -16,21 +16,27 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import { CCTTxFailedError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolLiquidity,
-  assertPoolRebalancer,
+  checkPoolLiquidity,
+  checkPoolRebalancer,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
 
 /** Parameters for {@link WithdrawLiquidity}. */
-export type WithdrawLiquidityParams = {
+export type WithdrawLiquidityParams = PreflightParams & {
   /** LockRelease pool to withdraw from. Must be non-zero — it is the tx `to`, and a call to `0x0`
    * hits no code, so it would mine as a successful no-op. */
   poolAddress: string
@@ -93,10 +99,22 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
     assertLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params)
+    let tx = unsigned
     if (params.sender !== undefined)
-      await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
-    await assertPoolLiquidity(this.name, chain, params.poolAddress, params.amount)
-    return unsigned
+      tx = this.recordPreflight(
+        tx,
+        params.preflight,
+        await checkPoolRebalancer(chain, params.poolAddress, params.sender),
+      )
+    // `setRebalancer` earlier in a plan satisfies the check above, and `provideLiquidity` earlier
+    // in a plan satisfies this one — which is why both report rather than throw under `'report'`.
+    // The shortfall keeps raising CCTTxFailedError under `'throw'`, the class it always raised.
+    return this.recordPreflight(
+      tx,
+      params.preflight,
+      await checkPoolLiquidity(chain, params.poolAddress, params.amount),
+      ({ reason }) => new CCTTxFailedError(this.name, reason),
+    )
   }
 
   /**

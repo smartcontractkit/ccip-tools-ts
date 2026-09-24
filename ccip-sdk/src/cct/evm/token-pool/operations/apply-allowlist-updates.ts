@@ -23,11 +23,16 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolAllowlist,
   resolveEncoder,
@@ -35,7 +40,7 @@ import {
 } from '../contracts.ts'
 
 /** Parameters for {@link ApplyAllowlistUpdates}. */
-export type ApplyAllowlistUpdatesParams = {
+export type ApplyAllowlistUpdatesParams = PreflightParams & {
   /** Token pool contract address whose allowlist is being updated. */
   poolAddress: string
   /**
@@ -62,7 +67,7 @@ export type ApplyAllowlistUpdatesParams = {
  * Normalized params for {@link ApplyAllowlistUpdates}: every allowlist entry checksummed and
  * duplicate-free, so {@link buildUnsigned} and the encoder never re-derive them.
  */
-type ParsedApplyAllowlistUpdatesParams = {
+type ParsedApplyAllowlistUpdatesParams = PreflightParams & {
   poolAddress: string
   removes: string[]
   adds: string[]
@@ -168,7 +173,13 @@ export class ApplyAllowlistUpdates extends EVMOperation<
         `${overlap} is also in removes; removes are applied first on-chain, so it would end up allowlisted — list it in one array only`,
       )
     }
-    return { poolAddress: params.poolAddress, removes, adds, sender: params.sender }
+    return {
+      poolAddress: params.poolAddress,
+      removes,
+      adds,
+      sender: params.sender,
+      preflight: params.preflight,
+    }
   }
 
   /**
@@ -208,11 +219,22 @@ export class ApplyAllowlistUpdates extends EVMOperation<
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
+    // encoded before the state reads, not after, so `preflight: 'report'` has a tx to attach
+    // findings to. Local and pure — no RPC, and nothing `parse` allowed can make it fail.
+    let unsigned = encode(getTokenPoolInterface(type, version), params)
+
+    // owner-gated on-chain; surface it here instead of as an on-chain revert
     if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
+      unsigned = this.recordPreflight(
+        unsigned,
+        params.preflight,
+        await checkPoolOwner(chain, params.poolAddress, params.sender),
+      )
 
     const { enabled, entries } = await readTokenPoolAllowlist(chain, params.poolAddress)
+    // Not reportable, under either mode: `allowlistEnabled` is fixed at deployment, so no earlier
+    // transaction in any plan can make this true later. Reporting it would promise a wait that
+    // ends only in `AllowListNotEnabled`.
     if (!enabled)
       throw new CCTParamsInvalidError(
         this.name,
@@ -222,24 +244,32 @@ export class ApplyAllowlistUpdates extends EVMOperation<
 
     const allowlisted = new Set(entries)
     const absent = params.removes.find((address) => !allowlisted.has(address))
-    if (absent !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'removes',
-        `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); the pool would ignore it and the tx would change nothing`,
-      )
+    unsigned = this.recordPreflight(
+      unsigned,
+      params.preflight,
+      absent === undefined
+        ? undefined
+        : {
+            param: 'removes',
+            reason: `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); the pool would ignore it and the tx would change nothing`,
+          },
+    )
     const present = params.adds.find((address) => allowlisted.has(address))
-    if (present !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'adds',
-        `${present} is already allowlisted; the pool would ignore it and the tx would change nothing`,
-      )
+    unsigned = this.recordPreflight(
+      unsigned,
+      params.preflight,
+      present === undefined
+        ? undefined
+        : {
+            param: 'adds',
+            reason: `${present} is already allowlisted; the pool would ignore it and the tx would change nothing`,
+          },
+    )
 
     chain.logger.debug(
       `${this.name}: pool = ${params.poolAddress}, allowlisted = ${entries.length}, removes = ${params.removes.length}, adds = ${params.adds.length}`,
     )
-    return encode(getTokenPoolInterface(type, version), params)
+    return unsigned
   }
 
   /**

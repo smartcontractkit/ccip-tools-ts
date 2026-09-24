@@ -95,7 +95,7 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
    * Builds `transferAdminRole` calldata against the TAR resolved from `address`, checking the
    * registry's own state — is the token registered, and is `sender` its current administrator.
    * Anything unmet throws, or is attached to the returned tx under `preflight: 'report'` — see
-   * {@link EVMOperation.unmetPreflight}.
+   * {@link EVMOperation.recordPreflight}.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -127,24 +127,23 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     // caller for not being an administrator that does not exist, instead of naming the actual
     // problem — the token was never registered.
     if (administrator === ZeroAddress) {
-      return this.unmetPreflight(
-        tx,
-        p.preflight,
-        'sender',
-        pending
+      return this.recordPreflight(tx, p.preflight, {
+        param: 'sender',
+        reason: pending
           ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
           : `token ${p.tokenAddress} is not registered in the TokenAdminRegistry at ${to}; call registerAdmin first`,
-      )
+      })
     }
-    if (administrator !== p.sender) {
-      return this.unmetPreflight(
-        tx,
-        p.preflight,
-        'sender',
-        `must be the current token administrator (${administrator})`,
-      )
-    }
-    return tx
+    return this.recordPreflight(
+      tx,
+      p.preflight,
+      administrator === p.sender
+        ? undefined
+        : {
+            param: 'sender',
+            reason: `must be the current token administrator (${administrator})`,
+          },
+    )
   }
 
   /**

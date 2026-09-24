@@ -16,19 +16,24 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
 
 /** Parameters for {@link SetRebalancer}. */
-export type SetRebalancerParams = {
+export type SetRebalancerParams = PreflightParams & {
   /** LockRelease pool whose rebalancer role is being assigned. Must be non-zero — it is the tx
    * `to`, and a call to `0x0` hits no code, so it would mine as a successful no-op. */
   poolAddress: string
@@ -97,9 +102,12 @@ export class SetRebalancer extends EVMOperation<SetRebalancerParams> {
     assertLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    if (params.sender === undefined) return unsigned
+    return this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await checkPoolOwner(chain, params.poolAddress, params.sender),
+    )
   }
 
   /**

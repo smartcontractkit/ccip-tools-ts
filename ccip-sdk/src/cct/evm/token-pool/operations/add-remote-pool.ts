@@ -14,12 +14,11 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -92,22 +91,34 @@ export class AddRemotePool extends EVMOperation<AddRemotePoolParams, ParsedAddRe
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
+    // encoded before the state reads, not after, so `preflight: 'report'` has a tx to attach
+    // findings to. Local and pure — no RPC, and nothing `parse` allowed can make it fail.
+    let unsigned = encode(getTokenPoolInterface(type, version), params)
+
+    // owner-gated on-chain; surface it here instead of as an on-chain revert
     if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
+      unsigned = this.recordPreflight(
+        unsigned,
+        params.preflight,
+        await checkPoolOwner(chain, params.poolAddress, params.sender),
+      )
 
     const registered = await readRegisteredRemotePools(chain, params)
-    if (isRegisteredRemotePool(registered, params.remotePoolAddress, params.remoteChainSelector))
-      throw new CCTParamsInvalidError(
-        this.name,
-        'remotePoolAddress',
-        `is already registered on chain selector ${params.remoteChainSelector} (registered: ${registered.join(', ')}); adding it again reverts`,
-      )
+    unsigned = this.recordPreflight(
+      unsigned,
+      params.preflight,
+      isRegisteredRemotePool(registered, params.remotePoolAddress, params.remoteChainSelector)
+        ? {
+            param: 'remotePoolAddress',
+            reason: `is already registered on chain selector ${params.remoteChainSelector} (registered: ${registered.join(', ')}); adding it again reverts`,
+          }
+        : undefined,
+    )
 
     chain.logger.debug(
       `${this.name}: pool = ${params.poolAddress}, lane = ${params.remoteChainSelector}, registered = ${registered.length}`,
     )
-    return encode(getTokenPoolInterface(type, version), params)
+    return unsigned
   }
 
   /**

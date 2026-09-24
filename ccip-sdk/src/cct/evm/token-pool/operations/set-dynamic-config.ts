@@ -28,11 +28,16 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import {
+  type EVMExecuteParams,
+  type PreflightParams,
+  EVMOperation,
+  callTx,
+} from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -45,7 +50,7 @@ import {
  * would mean reading the current value at build time, which is exactly what this op refuses to do
  * (see the module remarks).
  */
-export type SetDynamicConfigParams = {
+export type SetDynamicConfigParams = PreflightParams & {
   /** Token pool to reconfigure. Must be non-zero — it is the tx `to`, and a call to `0x0` hits no
    * code, so it would mine as a successful no-op. */
   poolAddress: string
@@ -138,9 +143,12 @@ export class SetDynamicConfig extends EVMOperation<SetDynamicConfigParams> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    if (params.sender === undefined) return unsigned
+    return this.recordPreflight(
+      unsigned,
+      params.preflight,
+      await checkPoolOwner(chain, params.poolAddress, params.sender),
+    )
   }
 
   /**

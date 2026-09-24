@@ -77,7 +77,8 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
   /**
    * Builds `acceptAdminRole` calldata against the TokenAdminRegistry resolved from `address`,
    * checking `sender` against the registry's pending administrator. A mismatch throws, or is
-   * attached to the returned tx under `preflight: 'report'` — see {@link EVMOperation.unmetPreflight}.
+   * attached to the returned tx under `preflight: 'report'` — see
+   * {@link EVMOperation.recordPreflight}.
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -102,22 +103,21 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
     // it is not ready yet — which is what `preflight: 'report'` is for. `execute` rejects either
     // way.
     if (pendingAdministrator === ZeroAddress) {
-      return this.unmetPreflight(
-        tx,
-        p.preflight,
-        'sender',
-        `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
-      )
+      return this.recordPreflight(tx, p.preflight, {
+        param: 'sender',
+        reason: `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
+      })
     }
-    if (pendingAdministrator !== p.sender) {
-      return this.unmetPreflight(
-        tx,
-        p.preflight,
-        'sender',
-        `must be the pending token administrator (${pendingAdministrator})`,
-      )
-    }
-    return tx
+    return this.recordPreflight(
+      tx,
+      p.preflight,
+      pendingAdministrator === p.sender
+        ? undefined
+        : {
+            param: 'sender',
+            reason: `must be the pending token administrator (${pendingAdministrator})`,
+          },
+    )
   }
 
   /**

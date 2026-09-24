@@ -200,6 +200,28 @@ describe('Mint (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, expectedData())
       assert.ok(!seen.calls.includes('owner'), 'mint is onlyMinter, not onlyOwner')
     })
+
+    // `grantMintRole` then `mint` is the plan this unblocks: at build time the role has not been
+    // granted yet, so the gate below is information rather than an error.
+    describe("preflight: 'report'", () => {
+      it('records the missing mint role and returns the calldata', async () => {
+        const unsigned = await generate(stubChain({ isMinter: false }), {
+          sender: NOT_A_MINTER,
+          preflight: 'report',
+        })
+
+        assert.equal(unsigned.transactions[0]!.to, TOKEN)
+        assert.equal(unsigned.transactions[0]!.data, expectedData())
+        assert.equal(unsigned.preconditions?.length, 1)
+        assert.equal(unsigned.preconditions![0]!.param, 'sender')
+        assert.match(unsigned.preconditions![0]!.reason, /must hold the mint role/)
+      })
+
+      it('leaves preconditions absent when the sender already holds the role', async () => {
+        const unsigned = await generate(stubChain(), { preflight: 'report' })
+        assert.equal(unsigned.preconditions, undefined)
+      })
+    })
   })
 
   describe('execute', () => {

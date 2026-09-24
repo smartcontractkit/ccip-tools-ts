@@ -349,6 +349,20 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       )
     })
 
+    it("records the owner mismatch instead of throwing under preflight: 'report'", async () => {
+      const { chain } = stubChain(TokenPoolVersion.V1_5_1, 'BurnMint', NOT_OWNER)
+      const unsigned = await op.generate(chain, {
+        ...paramsV1_5_1(),
+        preflight: 'report',
+      })
+
+      assert.ok(unsigned.transactions[0]!.data)
+      assert.deepEqual(
+        unsigned.preconditions?.map(({ param }) => param),
+        ['sender'],
+      )
+    })
+
     it('rejects a sender that is not the pool owner', async () => {
       const { chain } = stubChain(TokenPoolVersion.V1_5_1, 'BurnMint', NOT_OWNER)
       await assert.rejects(
