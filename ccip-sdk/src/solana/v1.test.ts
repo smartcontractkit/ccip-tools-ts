@@ -4,10 +4,13 @@ import { describe, it } from 'node:test'
 import {
   type Connection,
   type MessageV1,
+  ComputeBudgetProgram,
   Keypair,
   PACKET_DATA_SIZE,
   PublicKey,
+  SolanaJSONRPCError,
   SystemProgram,
+  TransactionExpiredTimeoutError,
   TransactionInstruction,
   TransactionMessage,
   V1_TRANSACTION_SIZE_LIMIT,
@@ -15,10 +18,19 @@ import {
 } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 
-import { CCIPPartialTransactionSubmissionError } from '../errors/index.ts'
-import type { Wallet } from './types.ts'
+import {
+  CCIPArgumentInvalidError,
+  CCIPPartialTransactionSubmissionError,
+  CCIPTransactionTooLargeError,
+} from '../errors/index.ts'
+import { type Wallet, canSignV1Transactions } from './types.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
-import { compileV1Message, serializeMessageV1, serializeV1Transaction } from './v1.ts'
+import {
+  MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+  compileV1Message,
+  serializeMessageV1,
+  serializeV1Transaction,
+} from './v1.ts'
 
 // deterministic keypair for reproducible accounts
 function keypairFromSeed(seed: string): Keypair {
@@ -30,6 +42,8 @@ function keypairFromSeed(seed: string): Keypair {
 const PAYER = keypairFromSeed('payer')
 const PROGRAM = new PublicKey('Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C')
 const RECENT_BLOCKHASH = '11111111111111111111111111111112'
+// v1 has no default resource limits; tests which don't care use these
+const LIMITS = { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 1_000_000 }
 
 function sampleInstruction(numAccounts: number, dataLength = 16): TransactionInstruction {
   const keys = Array.from({ length: numAccounts }, (_, i) => ({
@@ -45,10 +59,7 @@ function sampleInstruction(numAccounts: number, dataLength = 16): TransactionIns
 }
 
 /** Deserializes wire bytes with web3.js' own v1 codec (the test oracle). */
-function deserializeV1(messageBytes: Uint8Array): {
-  message: MessageV1
-  signatures: Uint8Array[]
-} {
+function deserializeV1(messageBytes: Uint8Array): { message: MessageV1; signatures: Uint8Array[] } {
   const tx = VersionedTransaction.deserialize(messageBytes) as VersionedTransaction
   assert.equal(tx.message.version, 1)
   return { message: tx.message as MessageV1, signatures: tx.signatures }
@@ -57,6 +68,7 @@ function deserializeV1(messageBytes: Uint8Array): {
 describe('Solana v1 transaction support (SIMD-0385)', () => {
   it('serializeMessageV1 round-trips through web3.js MessageV1 deserialization', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(5), sampleInstruction(3, 40)],
@@ -84,22 +96,31 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
 
   it('serializes config fields present in the mask at their wire positions', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(2)],
     })
     assert.deepEqual(message.transactionConfig, {
-      computeUnitLimit: null,
+      computeUnitLimit: 200_000,
       heapSize: null,
-      loadedAccountsDataSizeLimit: null,
+      loadedAccountsDataSizeLimit: 1_000_000,
       priorityFee: null,
     })
-    const deserialized = deserializeV1(serializeV1Transaction(message, [null]))
+    const wire = Buffer.from(serializeV1Transaction(message, [null]))
+    // compute-unit (bit 2) and loaded-accounts data-size (bit 3) limits: both are always set,
+    // since v1 budgets 0 for an unset limit (SIMD-0385)
+    assert.equal(wire.readUInt32LE(4), 0b01100)
+    const configOffset = 42 + message.staticAccountKeys.length * 32
+    assert.equal(wire.readUInt32LE(configOffset), 200_000)
+    assert.equal(wire.readUInt32LE(configOffset + 4), 1_000_000)
+    const deserialized = deserializeV1(wire)
     assert.deepEqual(deserialized.message.transactionConfig, message.transactionConfig)
   })
 
   it('uses the v1 envelope: message first, signatures at the tail, no count prefix', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(4)],
@@ -151,6 +172,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     )
 
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions,
@@ -176,6 +198,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       data: Buffer.alloc(4),
     })
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [ix],
@@ -193,6 +216,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
 
   it('rejects invalid signatures and oversized v1 wires', () => {
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions: [sampleInstruction(4)],
@@ -205,6 +229,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     for (;;) {
       count += 1000
       const padded = compileV1Message({
+        ...LIMITS,
         payerKey: PAYER.publicKey,
         recentBlockhash: RECENT_BLOCKHASH,
         instructions: [sampleInstruction(4, count)],
@@ -218,7 +243,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     }
   })
 
-  it('rejects more than 255 static account keys (v1 format limit)', () => {
+  it('rejects more than 64 static account keys (SIMD-0385 limit)', () => {
     const keys = Array.from({ length: 300 }, (_, i) => ({
       pubkey: i === 0 ? PAYER.publicKey : keypairFromSeed(`acct${i}`).publicKey,
       isSigner: i === 0,
@@ -227,23 +252,49 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     assert.throws(
       () =>
         compileV1Message({
+          ...LIMITS,
           payerKey: PAYER.publicKey,
           recentBlockhash: RECENT_BLOCKHASH,
           instructions: [
-            new TransactionInstruction({
-              keys,
-              programId: PROGRAM,
-              data: Buffer.alloc(4),
-            }),
+            new TransactionInstruction({ keys, programId: PROGRAM, data: Buffer.alloc(4) }),
           ],
         }),
-      /max 255/,
+      /max 64/,
+    )
+    // within v0's u8 account indexes, but above the v1 cap
+    assert.throws(
+      () =>
+        compileV1Message({
+          ...LIMITS,
+          payerKey: PAYER.publicKey,
+          recentBlockhash: RECENT_BLOCKHASH,
+          instructions: [sampleInstruction(65)],
+        }),
+      /max 64/,
     )
   })
 
-  it('rejects more than 255 instructions (v1 format limit)', () => {
+  it('rejects more than 12 signatures (SIMD-0385 limit)', () => {
+    const signers = Array.from({ length: 13 }, (_, i) => ({
+      pubkey: i === 0 ? PAYER.publicKey : keypairFromSeed(`signer${i}`).publicKey,
+      isSigner: true,
+      isWritable: true,
+    }))
+    const message = compileV1Message({
+      ...LIMITS,
+      payerKey: PAYER.publicKey,
+      recentBlockhash: RECENT_BLOCKHASH,
+      instructions: [
+        new TransactionInstruction({ keys: signers, programId: PROGRAM, data: Buffer.alloc(4) }),
+      ],
+    })
+    assert.equal(message.header.numRequiredSignatures, 13)
+    assert.throws(() => serializeV1Transaction(message, new Array(13).fill(null)), /max 12/)
+  })
+
+  it('rejects more than 64 instructions (SIMD-0385 limit)', () => {
     const instructions = Array.from(
-      { length: 300 },
+      { length: 65 },
       (_, i) =>
         new TransactionInstruction({
           keys: [{ pubkey: PAYER.publicKey, isSigner: true, isWritable: true }],
@@ -252,21 +303,22 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
     )
     const message = compileV1Message({
+      ...LIMITS,
       payerKey: PAYER.publicKey,
       recentBlockhash: RECENT_BLOCKHASH,
       instructions,
     })
-    assert.equal(message.compiledInstructions.length, 300)
-    // the u8 instruction count would wrap (300 -> 44); serialize must reject it
-    // instead of emitting a corrupt wire
-    assert.throws(() => serializeV1Transaction(message, [null]), /max 255/)
+    assert.equal(message.compiledInstructions.length, 65)
+    // the u8 instruction count still fits, but the cluster would fail sanitization;
+    // serialize must reject it locally so callers can split it instead
+    assert.throws(() => serializeV1Transaction(message, [null]), /max 64/)
   })
 
   describe('simulateTransaction / simulateAndSendTxs v1 fallback', () => {
     const OVERSIZED = [sampleInstruction(48, 300)] // v0 wire > 1232B, v1 wire < 4096B
     const SMALL = [sampleInstruction(4)]
 
-    function mockConnection(opts: { confirmationError?: unknown } = {}) {
+    function mockConnection() {
       const captured: Record<string, unknown> = {}
       const connection = {
         getLatestBlockhash: async () => ({
@@ -291,7 +343,6 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         confirmTransaction: async (confirm: { signature: string }) => {
           captured.confirmedSignature = confirm.signature
-          return { value: { err: opts.confirmationError ?? null } }
         },
       } as unknown as Connection
       return { connection, captured }
@@ -317,17 +368,44 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       )
       assert.equal(result.unitsConsumed, 7)
       assert.equal(captured.simulatedTx, undefined, 'no v0 simulation was attempted')
-      const { method, args } = captured.rpc as {
-        method: string
-        args: [string, unknown]
-      }
+      const { method, args } = captured.rpc as { method: string; args: [string, unknown] }
       assert.equal(method, 'simulateTransaction')
       const wire = Buffer.from(args[0], 'base64')
       const tx = VersionedTransaction.deserialize(wire)
       assert.equal(tx.message.version, 1)
-      assert.ok(
-        (tx.message as MessageV1).transactionConfig.computeUnitLimit,
-        'compute-unit limit is inlined into the transactionConfig',
+      // simulate at the per-tx maximums, like @solana/kit's resource-limit estimator
+      assert.deepEqual((tx.message as MessageV1).transactionConfig, {
+        computeUnitLimit: 1_400_000,
+        heapSize: null,
+        loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+        priorityFee: null,
+      })
+    })
+
+    it('simulateTransaction reports a v1 envelope the RPC rejects as too large', async () => {
+      const { connection } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          error: { code: -32602, message: 'failed to deserialize VersionedTransaction' },
+        })
+      await assert.rejects(
+        simulateTransaction({ connection }, { payerKey: PAYER.publicKey, instructions: OVERSIZED }),
+        (err: unknown) => {
+          assert.ok(err instanceof CCIPTransactionTooLargeError)
+          assert.match(err.message, /too large/, 'execute() escalates to buffering on it')
+          assert.ok(err.cause instanceof SolanaJSONRPCError)
+          return true
+        },
+      )
+    })
+
+    it('simulateTransaction rethrows other v1 RPC errors as-is', async () => {
+      const { connection } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({ error: { code: -32005, message: 'Node is unhealthy' } })
+      await assert.rejects(
+        simulateTransaction({ connection }, { payerKey: PAYER.publicKey, instructions: OVERSIZED }),
+        (err: unknown) => err instanceof SolanaJSONRPCError && err.code === -32005,
       )
     })
 
@@ -345,13 +423,48 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal((captured.simulatedTx as VersionedTransaction).message.version, 0)
     })
 
+    /** Replaces the v0 simulation mock; `impl` gets the simulated tx and the 1-based call count. */
+    function mockSimulate(
+      connection: Connection,
+      impl: (tx: VersionedTransaction, call: number) => Record<string, unknown>,
+    ) {
+      const calls = { count: 0 }
+      ;(
+        connection as unknown as {
+          simulateTransaction: (tx: VersionedTransaction) => Promise<unknown>
+        }
+      ).simulateTransaction = async (tx) => ({ value: impl(tx, ++calls.count) })
+      return calls
+    }
+
+    /** Collects every sent v0 tx, returning `sig-1`, `sig-2`, ... */
+    function mockSendV0(connection: Connection) {
+      const sent: VersionedTransaction[] = []
+      ;(
+        connection as unknown as { sendTransaction: (tx: VersionedTransaction) => Promise<string> }
+      ).sendTransaction = async (tx) => `sig-${sent.push(tx)}`
+      return sent
+    }
+
+    const OK = { logs: [], unitsConsumed: 5 }
+    // fails unless it's the first instruction of its tx, like one depending on an earlier tx
+    const DEPENDENT = new TransactionInstruction({
+      keys: [{ pubkey: PAYER.publicKey, isSigner: true, isWritable: true }],
+      programId: PROGRAM,
+      data: Buffer.from([0xee]),
+    })
+    // raw index of DEPENDENT in a simulated v0 tx (index 0 is the prepended compute-budget ix)
+    const dependentIndex = (tx: VersionedTransaction) =>
+      tx.message.compiledInstructions.findIndex(({ data }) => data[0] === 0xee)
+
     it('simulateAndSendTxs signs and sends a v1 transaction when v0 is oversized', async () => {
       const { connection, captured } = mockConnection()
-      const signature = await simulateAndSendTxs({ connection }, wallet, {
+      const { hash, slices } = await simulateAndSendTxs({ connection }, wallet, {
         instructions: OVERSIZED,
         mainIndex: 0,
       })
-      assert.equal(signature, 'v1-signature')
+      assert.equal(hash, 'v1-signature')
+      assert.deepEqual(slices, [{ signature: 'v1-signature', start: 0, end: 1 }])
       assert.equal(captured.sentV0, undefined, 'no v0 transaction was sent')
       assert.equal(captured.confirmedSignature, 'v1-signature')
 
@@ -360,6 +473,14 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       assert.equal(wire[0], 0x81, 'v1 envelope: message first')
       const tx = VersionedTransaction.deserialize(wire)
       assert.equal(tx.message.version, 1)
+      // both limits are set even though the simulation used <= 200k CUs, as v1 budgets 0
+      // for unset limits; the loaded-accounts one falls back to the max when unreported
+      assert.deepEqual((tx.message as MessageV1).transactionConfig, {
+        computeUnitLimit: Math.ceil(7 * 1.1),
+        heapSize: null,
+        loadedAccountsDataSizeLimit: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
+        priorityFee: null,
+      })
       // the tail signature must verify over the serialized v1 message bytes
       const messageBytes = wire.slice(0, wire.length - 64)
       assert.ok(
@@ -368,144 +489,301 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       )
     })
 
+    it('simulateAndSendTxs sizes the v1 loaded-accounts limit from the simulation', async () => {
+      const { connection, captured } = mockConnection()
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          result: { value: { logs: [], unitsConsumed: 300_000, loadedAccountsDataSize: 100_000 } },
+        })
+      await simulateAndSendTxs({ connection }, wallet, { instructions: OVERSIZED, mainIndex: 0 })
+      const tx = VersionedTransaction.deserialize(captured.sentWire as Uint8Array)
+      const { computeUnitLimit, loadedAccountsDataSizeLimit } = (tx.message as MessageV1)
+        .transactionConfig
+      assert.equal(computeUnitLimit, Math.ceil(300_000 * 1.1))
+      assert.equal(loadedAccountsDataSizeLimit, Math.ceil(100_000 * 1.1))
+    })
+
     it('simulateAndSendTxs keeps using the v0 path when the tx fits the packet', async () => {
       const { connection, captured } = mockConnection()
-      const signature = await simulateAndSendTxs({ connection }, wallet, {
+      const { hash } = await simulateAndSendTxs({ connection }, wallet, {
         instructions: SMALL,
         mainIndex: 0,
       })
-      assert.equal(signature, 'v0-signature')
+      assert.equal(hash, 'v0-signature')
       assert.equal(captured.sentWire, undefined, 'no raw v1 transaction was sent')
       assert.equal((captured.sentV0 as VersionedTransaction).message.version, 0)
     })
 
-    it('simulateAndSendTxs does not split a compute-budget failure in atomic mode', async () => {
+    it('simulateAndSendTxs returns the last signature when mainIndex is unset', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        simulations++
-        return {
-          value: {
-            err: { InstructionError: [1, 'ComputationalBudgetExceeded'] },
-            logs: [],
-          },
-        }
-      }
-
-      await assert.rejects(
-        simulateAndSendTxs(
-          { connection },
-          wallet,
-          {
-            instructions: [...SMALL, ...SMALL],
-            mainIndex: 0,
-          },
-          undefined,
-          'atomic',
-        ),
-      )
-      assert.equal(simulations, 1)
+      const { hash } = await simulateAndSendTxs({ connection }, wallet, { instructions: SMALL })
+      assert.equal(hash, 'v0-signature')
     })
 
-    it('simulateAndSendTxs rethrows a program error in resource mode', async () => {
+    it('simulateAndSendTxs rejects an empty instruction list', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        simulations++
-        return {
-          value: {
-            err: { InstructionError: [1, 'ProgramFailedToComplete'] },
-            logs: [],
-          },
-        }
-      }
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, { instructions: [] }),
+        CCIPArgumentInvalidError,
+      )
+    })
+
+    it('simulateAndSendTxs does not split a compute-budget failure in atomic mode', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [2, 'ComputationalBudgetExceeded'] },
+        logs: [],
+      }))
 
       await assert.rejects(
         simulateAndSendTxs(
           { connection },
           wallet,
           { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
-          undefined,
-          'resource',
+          { split: 'atomic' },
         ),
       )
-      assert.equal(simulations, 1)
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
+    })
+
+    it('simulateAndSendTxs rethrows a program error in resource mode', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [2, 'ProgramFailedToComplete'] },
+        logs: [],
+      }))
+
+      await assert.rejects(
+        simulateAndSendTxs(
+          { connection },
+          wallet,
+          { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+          { split: 'resource' },
+        ),
+      )
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
     })
 
     it('simulateAndSendTxs splits a metered program failure in resource mode', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        if (++simulations === 1) {
-          return {
-            value: {
-              err: { InstructionError: [1, 'ProgramFailedToComplete'] },
+      const simulations = mockSimulate(connection, (_, call) =>
+        call === 1
+          ? {
+              err: { InstructionError: [2, 'ProgramFailedToComplete'] },
               logs: ['Program failed: exceeded CUs meter at BPF instruction'],
-            },
-          }
+            }
+          : OK,
+      )
+      mockSendV0(connection)
+
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
+        { split: 'resource' },
+      )
+      assert.equal(simulations.count, 3)
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+    })
+
+    it('simulateAndSendTxs cuts right before the failed instruction in partial mode', async () => {
+      const { connection } = mockConnection()
+      const simulations = mockSimulate(connection, (tx) => {
+        const index = dependentIndex(tx)
+        return index > 1 ? { err: { InstructionError: [index, { Custom: 1 }] }, logs: [] } : OK
+      })
+      mockSendV0(connection)
+
+      const { hash, slices } = await simulateAndSendTxs({ connection }, wallet, {
+        instructions: [...SMALL, ...SMALL, ...SMALL, DEPENDENT, ...SMALL],
+        mainIndex: 3,
+      })
+      // one failed simulation per split point, instead of one per dropped instruction
+      assert.equal(simulations.count, 3)
+      assert.equal(hash, 'sig-2')
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 3 },
+        { signature: 'sig-2', start: 3, end: 5 },
+      ])
+    })
+
+    it('simulateAndSendTxs does not shrink a slice whose first instruction fails', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, () => ({
+        err: { InstructionError: [1, { Custom: 1 }] },
+        logs: [],
+      }))
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL, ...SMALL],
+          mainIndex: 0,
+        }),
+      )
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
+    })
+
+    it('simulateAndSendTxs maps v1 instruction errors without a compute-budget offset', async () => {
+      const { connection, captured } = mockConnection()
+      let v1Simulations = 0
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => ({
+          result: {
+            value:
+              ++v1Simulations === 1
+                ? { err: { InstructionError: [1, { Custom: 1 }] }, logs: [] }
+                : { logs: [], unitsConsumed: 7 },
+          },
+        })
+
+      const { slices } = await simulateAndSendTxs({ connection }, wallet, {
+        instructions: [...OVERSIZED, ...SMALL],
+        mainIndex: 1,
+      })
+      assert.equal(v1Simulations, 2)
+      assert.deepEqual(slices, [
+        { signature: 'v1-signature', start: 0, end: 1 },
+        { signature: 'v0-signature', start: 1, end: 2 },
+      ])
+      assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
+    })
+
+    // e.g. Ledger's Solana app, which parses v1 as a malformed v0 message (LedgerHQ/app-solana#248)
+    const v0OnlyWallet = Object.assign(Object.create(wallet) as Wallet, {
+      supportedTransactionVersions: new Set(['legacy', 0] as const),
+    })
+
+    it('canSignV1Transactions follows supportedTransactionVersions', () => {
+      assert.equal(canSignV1Transactions(wallet), true, 'undeclared: every version')
+      assert.equal(canSignV1Transactions(v0OnlyWallet), false)
+      assert.equal(
+        canSignV1Transactions({ ...wallet, supportedTransactionVersions: null }),
+        false,
+        'null: legacy only',
+      )
+      assert.equal(
+        canSignV1Transactions({
+          ...wallet,
+          supportedTransactionVersions: new Set([0, 1] as const),
+        }),
+        true,
+      )
+    })
+
+    it('simulateAndSendTxs never builds v1 for a wallet that cannot sign it', async () => {
+      const { connection, captured } = mockConnection()
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, v0OnlyWallet, { instructions: OVERSIZED, mainIndex: 0 }),
+        (err: unknown) =>
+          err instanceof CCIPTransactionTooLargeError && /can't sign v1/.test(err.message),
+      )
+      assert.equal(captured.rpc, undefined, 'no v1 simulation was attempted')
+      assert.equal(captured.sentWire, undefined, 'no v1 transaction was sent')
+    })
+
+    it('simulateAndSendTxs splits into v0 transactions for a wallet that cannot sign v1', async () => {
+      const { connection, captured } = mockConnection()
+      const sent = mockSendV0(connection)
+
+      // each fits a v0 packet alone, but not together: the pair only fits v1
+      const MEDIUM = sampleInstruction(10, 450)
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        v0OnlyWallet,
+        { instructions: [MEDIUM, MEDIUM], mainIndex: 1 },
+        { split: 'resource' },
+      )
+      assert.equal(captured.rpc, undefined, 'no v1 simulation was attempted')
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+      assert.ok(sent.every((tx) => tx.message.version === 0))
+    })
+
+    it('simulateAndSendTxs still uses v1 for a wallet declaring it', async () => {
+      const { connection, captured } = mockConnection()
+      const v1Wallet = Object.assign(Object.create(wallet) as Wallet, {
+        supportedTransactionVersions: new Set(['legacy', 0, 1] as const),
+      })
+      const { hash } = await simulateAndSendTxs({ connection }, v1Wallet, {
+        instructions: OVERSIZED,
+        mainIndex: 0,
+      })
+      assert.equal(hash, 'v1-signature')
+      assert.ok(captured.sentWire, 'the oversized instruction went out as v1')
+    })
+
+    it('simulateAndSendTxs splits in resource mode when the RPC rejects v1', async () => {
+      const { connection, captured } = mockConnection()
+      let v1Simulations = 0
+      ;(connection as unknown as { _rpcRequest: () => Promise<unknown> })._rpcRequest =
+        async () => {
+          v1Simulations++
+          return { error: { code: -32602, message: 'failed to deserialize VersionedTransaction' } }
         }
-        return { value: { logs: [], unitsConsumed: 5 } }
-      }
+      const sent = mockSendV0(connection)
+
+      // each fits a v0 packet alone, but not together: the pair only fits v1
+      const MEDIUM = sampleInstruction(10, 450)
+      const { slices } = await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [MEDIUM, MEDIUM], mainIndex: 1 },
+        { split: 'resource' },
+      )
+      assert.equal(v1Simulations, 1)
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 2 },
+      ])
+      assert.equal(sent.length, 2)
+      assert.equal(captured.sentWire, undefined, 'no v1 transaction was sent')
+    })
+
+    it('simulateAndSendTxs applies computeUnits only to the main instruction slice', async () => {
+      const { connection } = mockConnection()
+      mockSimulate(connection, (_, call) =>
+        call === 1
+          ? { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
+          : OK,
+      )
+      const sent = mockSendV0(connection)
 
       await simulateAndSendTxs(
         { connection },
         wallet,
-        { instructions: [...SMALL, ...SMALL], mainIndex: 0 },
-        undefined,
-        'resource',
+        { instructions: [...SMALL, ...SMALL], mainIndex: 1 },
+        { computeUnits: 123_456 },
       )
-      assert.equal(simulations, 3)
-    })
-
-    it('simulateAndSendTxs preserves program-error splitting in partial mode', async () => {
-      const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        if (++simulations === 1) {
-          return {
-            value: { err: { InstructionError: [1, 'Custom'] }, logs: [] },
-          }
-        }
-        return { value: { logs: [], unitsConsumed: 5 } }
-      }
-
-      await simulateAndSendTxs({ connection }, wallet, {
-        instructions: [...SMALL, ...SMALL],
-        mainIndex: 0,
+      const computeUnitLimits = sent.map((tx) => {
+        const { staticAccountKeys, compiledInstructions } = tx.message
+        const ix = compiledInstructions.find(({ programIdIndex }) =>
+          staticAccountKeys[programIdIndex]!.equals(ComputeBudgetProgram.programId),
+        )
+        return ix && Buffer.from(ix.data).readUInt32LE(1)
       })
-      assert.equal(simulations, 3)
+      assert.deepEqual(computeUnitLimits, [undefined, 123_456])
     })
 
     it('simulateAndSendTxs reports confirmed slices when a later slice fails', async () => {
       const { connection } = mockConnection()
-      let simulations = 0
-      ;(
-        connection as unknown as { simulateTransaction: () => Promise<unknown> }
-      ).simulateTransaction = async () => {
-        switch (++simulations) {
+      mockSimulate(connection, (_, call) => {
+        switch (call) {
           case 1:
-            return {
-              value: {
-                err: { InstructionError: [1, 'ComputationalBudgetExceeded'] },
-                logs: [],
-              },
-            }
+            return { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
           case 2:
-            return { value: { logs: [], unitsConsumed: 5 } }
+            return OK
           default:
-            return {
-              value: { err: { InstructionError: [1, 'Custom'] }, logs: [] },
-            }
+            return { err: { InstructionError: [1, 'Custom'] }, logs: [] }
         }
-      }
+      })
 
       await assert.rejects(
         simulateAndSendTxs({ connection }, wallet, {
@@ -514,8 +792,40 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         }),
         (error: unknown) => {
           assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
+          assert.deepEqual(error.context.committedSlices, [
+            { signature: 'v0-signature', start: 0, end: 1 },
+          ])
           assert.deepEqual(error.context.committedHashes, ['v0-signature'])
           assert.equal(error.context.committedInstructionCount, 1)
+          assert.equal(error.context.pendingSignature, undefined)
+          return true
+        },
+      )
+    })
+
+    it('simulateAndSendTxs reports a sent but unconfirmed transaction', async () => {
+      const { connection } = mockConnection()
+      mockSimulate(connection, (_, call) =>
+        call === 1
+          ? { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
+          : OK,
+      )
+      mockSendV0(connection)
+      let confirmations = 0
+      ;(connection as unknown as { confirmTransaction: () => Promise<void> }).confirmTransaction =
+        async () => {
+          if (++confirmations === 2) throw new TransactionExpiredTimeoutError('sig-2', 30)
+        }
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL],
+          mainIndex: 1,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof CCIPPartialTransactionSubmissionError)
+          assert.equal(error.context.pendingSignature, 'sig-2')
+          assert.ok(error.cause instanceof TransactionExpiredTimeoutError)
           return true
         },
       )

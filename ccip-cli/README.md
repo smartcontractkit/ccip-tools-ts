@@ -302,7 +302,7 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 > The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
 
 **Required fields:** `party`, `ccipParty`, `edsUrl`, `transferInstructionUrl` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
-**Optional fields:** `jwt`, `auth`, `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `senderInstanceId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
+**Optional fields:** `jwt`, `auth`, `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
 
 #### Canton authentication
 

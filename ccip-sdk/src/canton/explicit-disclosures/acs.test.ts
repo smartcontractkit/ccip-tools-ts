@@ -78,7 +78,6 @@ const SENDER_TEMPLATE_ID = 'pkg-sender:CCIP.CCIPSender:CCIPSender'
 
 const EXECUTE_CCV_RAW =
   'committeeverifier-tqkny@ccvOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
-const EXECUTE_CCV_HEX = keccak256Utf8(EXECUTE_CCV_RAW)
 const OTHER_CCV_RAW =
   'other-ccv@ccvOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
 const EXECUTOR_TEMPLATE_ID = 'pkg-executor:CCIP.Executor:Executor'
@@ -231,8 +230,7 @@ describe('canton/acs', () => {
     )
   })
 
-  it('resolveReceiverForExecute prefers receivers whose requiredCCVs match configured ccvs', async () => {
-    const matchingCid = 'matching-ccv-receiver-cid'
+  it('resolveReceiverForExecute returns the first finality-matching receiver (no CCV-based preference)', async () => {
     const entries = [
       makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
         partyOwner: PARTY,
@@ -246,7 +244,7 @@ describe('canton/acs', () => {
         receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
         requiredCCVs: [OTHER_CCV_RAW, OTHER_CCV_RAW],
       }),
-      makeAcsEntry(RECEIVER_TEMPLATE_ID, matchingCid, 'matching-blob', PARTY, {
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'matching-ccv-receiver-cid', 'matching-blob', PARTY, {
         owner: PARTY,
         receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
         requiredCCVs: [EXECUTE_CCV_RAW],
@@ -255,34 +253,10 @@ describe('canton/acs', () => {
 
     const provider = new AcsDisclosureProvider(makeStubClient(entries), {
       party: PARTY,
-      ccvs: [EXECUTE_CCV_HEX],
     })
     const resolved = await provider.resolveReceiverForExecute(1)
 
-    assert.equal(resolved?.contractId, matchingCid)
-  })
-
-  it('resolveReceiverForExecute falls back to non-empty requiredCCVs when ccvs is unset', async () => {
-    const configuredCid = 'configured-receiver-cid'
-    const entries = [
-      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
-        partyOwner: PARTY,
-      }),
-      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'empty-receiver-cid', 'empty-blob', PARTY, {
-        owner: PARTY,
-        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
-      }),
-      makeAcsEntry(RECEIVER_TEMPLATE_ID, configuredCid, 'configured-blob', PARTY, {
-        owner: PARTY,
-        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
-        requiredCCVs: [OTHER_CCV_RAW],
-      }),
-    ]
-
-    const provider = new AcsDisclosureProvider(makeStubClient(entries), { party: PARTY })
-    const resolved = await provider.resolveReceiverForExecute(1)
-
-    assert.equal(resolved?.contractId, configuredCid)
+    assert.equal(resolved?.contractId, 'empty-receiver-cid')
   })
 
   it('resolveReceiverForExecute resolves keccak256(party) message receiver hints', async () => {
@@ -300,7 +274,6 @@ describe('canton/acs', () => {
 
     const provider = new AcsDisclosureProvider(makeStubClient(entries), {
       party: PARTY,
-      ccvs: [EXECUTE_CCV_HEX],
     })
     const resolved = await provider.resolveReceiverForExecute(1, hashedParty)
 
@@ -324,5 +297,52 @@ describe('canton/acs', () => {
     const resolved = await provider.resolveReceiverForExecute(1, `0x${longReceiverCid}`)
 
     assert.equal(resolved?.contractId, longReceiverCid)
+  })
+
+  it('resolveReceiverForExecute skips receivers with invalid requiredCCVs raw addresses and warns', async () => {
+    const INVALID_CCV_RAW = '0x427111c826ffde67e298f89743fb9a95b1bf88eb897235706593a6a393fff8e2'
+    const validCid = 'valid-ccv-receiver-cid'
+    const entries = [
+      makeAcsEntry(ROUTER_TEMPLATE_ID, ROUTER_CONTRACT_ID, ROUTER_BLOB, PARTY, {
+        partyOwner: PARTY,
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, 'invalid-ccv-receiver-cid', 'invalid-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [INVALID_CCV_RAW],
+      }),
+      makeAcsEntry(RECEIVER_TEMPLATE_ID, validCid, 'valid-blob', PARTY, {
+        owner: PARTY,
+        receiverFinalityConfig: { tag: 'BlockDepth', value: 1 },
+        requiredCCVs: [EXECUTE_CCV_RAW],
+      }),
+    ]
+
+    const warnings: unknown[][] = []
+    const provider = new AcsDisclosureProvider(makeStubClient(entries), {
+      party: PARTY,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (...args: unknown[]) => {
+          warnings.push(args)
+        },
+        error: () => {},
+      },
+    })
+    const resolved = await provider.resolveReceiverForExecute(1)
+
+    // The receiver with the malformed CCV is skipped; the next matching one is used
+    assert.equal(resolved?.contractId, validCid)
+
+    assert.equal(warnings.length, 1)
+    const warning = String(warnings[0]?.[0])
+    assert.match(warning, /skipping CCIP\.CCIPReceiver:CCIPReceiver/)
+    assert.match(warning, /invalid-ccv-receiver-cid/)
+    assert.match(warning, /Invalid raw instance address/)
+    assert.ok(
+      warning.includes(INVALID_CCV_RAW),
+      `warning should include the invalid CCV address: ${warning}`,
+    )
   })
 })

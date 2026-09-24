@@ -8,7 +8,6 @@ import {
   formatCantonLinkFeeToken,
   resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
-  resolveSenderInstanceId,
   selectFeeTokenHoldingCids,
   sumCantonHoldingAmounts,
 } from './defaults.ts'
@@ -35,13 +34,6 @@ describe('canton defaults resolvers', () => {
 
   it('resolveFeeTransferFactoryAmount reads canton-config', () => {
     assert.equal(resolveFeeTransferFactoryAmount({ feeTransferFactoryAmount: '2.5' }), '2.5')
-  })
-
-  it('resolveSenderInstanceId reads canton-config', () => {
-    assert.equal(
-      resolveSenderInstanceId({ senderInstanceId: 'prod-ccipsender' }),
-      'prod-ccipsender',
-    )
   })
 
   it('formatCantonLinkFeeToken builds ccipParty::link-token', () => {

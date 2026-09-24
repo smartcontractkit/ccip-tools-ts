@@ -76,22 +76,3 @@ export function resolveCliIndexer(
   const url = cantonConfig?.indexerUrl?.trim()
   return url ? [url] : undefined
 }
-
-/**
- * Router / sender instance id for `ccip-cli send -r`.
- * On Canton source lanes this is the CCIPSender instance id (e.g. `prod-ccipsender`);
- * on EVM it must be the router contract address. CLI `-r` wins when set.
- * Prefer {@link resolveRouter} from `./index.ts` in CLI commands.
- */
-export function resolveCliRouter(
-  cliRouter: string | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
-  sourceIsCanton: boolean,
-): string | undefined {
-  if (cliRouter?.trim()) return cliRouter.trim()
-  if (sourceIsCanton) {
-    const fromConfig = cantonConfig?.senderInstanceId?.trim()
-    if (fromConfig) return fromConfig
-  }
-  return cliRouter
-}

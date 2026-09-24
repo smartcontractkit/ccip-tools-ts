@@ -3,6 +3,7 @@ import type {
   PublicKey,
   Transaction,
   TransactionInstruction,
+  TransactionVersion,
   VersionedTransaction,
 } from '@solana/web3.js'
 
@@ -29,7 +30,23 @@ export type UnsignedSolanaTx = {
 /** Minimal Solana wallet interface (anchor.Wallet=) */
 export type Wallet = {
   readonly publicKey: PublicKey
+  /**
+   * Transaction versions the wallet can sign, as in `@solana/wallet-adapter` (`null`: legacy
+   * only). Unset means every version, like a keypair's. Without `1` (e.g. Ledger, which can't
+   * parse v1 yet), a transaction too large for v0 is split into smaller v0 ones, or rejected
+   * as too large, instead of falling back to v1.
+   */
+  readonly supportedTransactionVersions?: ReadonlySet<TransactionVersion> | null
   signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T>
+}
+
+/**
+ * Whether a wallet can sign v1 transactions: it either doesn't declare
+ * `supportedTransactionVersions`, or declares `1` among them.
+ */
+export function canSignV1Transactions(wallet: Wallet): boolean {
+  const versions = wallet.supportedTransactionVersions
+  return versions === undefined || !!versions?.has(1)
 }
 
 /** Typeguard for Solana Wallet */
