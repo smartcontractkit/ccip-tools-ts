@@ -15,7 +15,8 @@
  * themselves.
  *
  * @remarks The `ILockBox` signature carries a `uint64 remoteChainSelector` that this lockbox
- * ignores, so the op takes no parameter for it and encodes zero; see {@link IGNORED_SELECTOR}.
+ * ignores, so the op takes no parameter for it and encodes zero; see
+ * {@link IGNORED_CHAIN_SELECTOR}.
  *
  * @packageDocumentation
  */
@@ -24,11 +25,10 @@ import { MaxUint256 } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
-  IGNORED_SELECTOR,
+  IGNORED_CHAIN_SELECTOR,
   LOCKBOX_INTERFACE,
   assertLockbox,
   assertLockboxCaller,
@@ -36,7 +36,11 @@ import {
   assertLockboxToken,
 } from '../contracts.ts'
 
-/** Parameters for {@link WithdrawFromLockbox}. */
+/**
+ * Parameters for {@link WithdrawFromLockbox}.
+ * @remarks There is no `remoteChainSelector`: `ERC20LockBox` v2.0.0 ignores it, so the op
+ * always encodes {@link IGNORED_CHAIN_SELECTOR} (zero).
+ */
 export type WithdrawFromLockboxParams = {
   /** `ERC20LockBox` to withdraw from. Must be non-zero — it is the tx `to`, and a call to `0x0`
    * hits no code, so it would mine as a successful no-op. */
@@ -106,30 +110,10 @@ export class WithdrawFromLockbox extends EVMOperation<WithdrawFromLockboxParams>
       await assertLockboxLiquidity(this.name, erc20, lockbox, token, amount)
     const data = LOCKBOX_INTERFACE.encodeFunctionData('withdraw', [
       token,
-      IGNORED_SELECTOR,
+      IGNORED_CHAIN_SELECTOR,
       amount,
       recipient,
     ])
     return callTx(lockbox, data)
-  }
-
-  /**
-   * Signs and submits as the withdrawing caller, defaulting `sender` to the signing wallet — the
-   * only address that can satisfy {@link buildUnsigned}'s caller check for a broadcast tx. Note
-   * that this is *not* where the tokens go: `recipient` is explicit. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather than
-   * signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or the wallet is not an authorized caller of the lockbox
-   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<WithdrawFromLockboxParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

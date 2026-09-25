@@ -2199,7 +2199,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
    * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
-   * below `amount`, or the tx reverts
+   * below `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    * @example
    * ```typescript
    * await cct.approveToken({ tokenAddress: token, spender: lockbox, amount, wallet })
@@ -2249,7 +2252,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
-   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`, or the tx reverts
+   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    * @example
    * ```typescript
    * const { hash } = await cct.withdrawFromLockbox({

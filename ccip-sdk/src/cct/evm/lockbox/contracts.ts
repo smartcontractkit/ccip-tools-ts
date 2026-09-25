@@ -113,7 +113,7 @@ export async function assertLockbox(
  * one would imply per-lane escrow that does not exist here. If a future lockbox reads the field,
  * the ops gain an optional parameter defaulting to this, which is additive.
  */
-export const IGNORED_SELECTOR = 0n
+export const IGNORED_CHAIN_SELECTOR = 0n
 
 /** An `ERC20LockBox` handle typed for the reads the liquidity ops pre-flight. */
 type LockboxReader = Pick<
@@ -192,10 +192,7 @@ export async function assertLockboxCaller(
   account: string,
 ): Promise<void> {
   const box: LockboxReader = getTypedContract(chain, lockbox, ERC20_LOCKBOX_V2_0_0_ABI)
-  // the abitype handle types an `address[]` return as `(string | Addressable)[]`
-  const callers = resultToObject(await box.getAllAuthorizedCallers()).map((c) =>
-    getAddress(c as string),
-  )
+  const callers = resultToObject(await box.getAllAuthorizedCallers()).map((c) => getAddress(c))
   if (callers.includes(getAddress(account))) return
   throw new CCTParamsInvalidError(
     operation,

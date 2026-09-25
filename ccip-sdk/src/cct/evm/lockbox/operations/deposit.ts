@@ -18,18 +18,18 @@
  * `authorizeLockboxCallers` → `setPool` → configure lanes → this.
  *
  * @remarks The `ILockBox` signature carries a `uint64 remoteChainSelector` that this lockbox
- * ignores, so the op takes no parameter for it and encodes zero; see {@link IGNORED_SELECTOR}.
+ * ignores, so the op takes no parameter for it and encodes zero; see
+ * {@link IGNORED_CHAIN_SELECTOR}.
  *
  * @packageDocumentation
  */
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
-  IGNORED_SELECTOR,
+  IGNORED_CHAIN_SELECTOR,
   LOCKBOX_INTERFACE,
   assertLockbox,
   assertLockboxCaller,
@@ -37,7 +37,11 @@ import {
   assertLockboxToken,
 } from '../contracts.ts'
 
-/** Parameters for {@link DepositToLockbox}. */
+/**
+ * Parameters for {@link DepositToLockbox}.
+ * @remarks There is no `remoteChainSelector`: `ERC20LockBox` v2.0.0 ignores it, so the op
+ * always encodes {@link IGNORED_CHAIN_SELECTOR} (zero).
+ */
 export type DepositToLockboxParams = {
   /** `ERC20LockBox` to deposit into. Must be non-zero — it is the tx `to`, and a call to `0x0`
    * hits no code, so it would mine as a successful no-op. */
@@ -96,27 +100,11 @@ export class DepositToLockbox extends EVMOperation<DepositToLockboxParams> {
       await assertLockboxCaller(this.name, chain, lockbox, sender)
       await assertLockboxFunding(this.name, erc20, lockbox, token, sender, amount)
     }
-    const data = LOCKBOX_INTERFACE.encodeFunctionData('deposit', [token, IGNORED_SELECTOR, amount])
+    const data = LOCKBOX_INTERFACE.encodeFunctionData('deposit', [
+      token,
+      IGNORED_CHAIN_SELECTOR,
+      amount,
+    ])
     return callTx(lockbox, data)
-  }
-
-  /**
-   * Signs and submits as the depositor, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s caller and funding checks for a broadcast
-   * tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected
-   * rather than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or the wallet is not an authorized caller of the lockbox
-   * @throws {@link CCTTxFailedError} if the wallet's balance, or its allowance to the lockbox, is
-   * below `amount`
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<DepositToLockboxParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
