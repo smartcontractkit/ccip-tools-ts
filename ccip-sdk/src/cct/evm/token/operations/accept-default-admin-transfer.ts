@@ -10,8 +10,7 @@ import { type Interface, ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenVersion,
@@ -79,20 +78,5 @@ export class AcceptDefaultAdminTransfer extends EVMOperation<AcceptDefaultAdminT
         `must be the pending default admin (${newAdmin})`,
       )
     return callTx(tokenAddress, iface.encodeFunctionData('acceptDefaultAdminTransfer', []))
-  }
-
-  /**
-   * Signs and submits as the pending default admin.
-   *
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` differs from the wallet or it is not pending
-   * @throws {@link CCIPExecTxRevertedError} if the mandatory delay has not passed or the tx reverts
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<AcceptDefaultAdminTransferParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

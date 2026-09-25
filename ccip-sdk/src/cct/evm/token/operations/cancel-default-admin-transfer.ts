@@ -10,8 +10,7 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenVersion,
@@ -65,21 +64,5 @@ export class CancelDefaultAdminTransfer extends EVMOperation<CancelDefaultAdminT
       )
     if (sender !== undefined) await assertTokenDefaultAdmin(this.name, chain, tokenAddress, sender)
     return callTx(tokenAddress, iface.encodeFunctionData('cancelDefaultAdminTransfer', []))
-  }
-
-  /**
-   * Signs and submits as the current default admin.
-   *
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` differs from the wallet or it is not the
-   * current default admin
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<CancelDefaultAdminTransferParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

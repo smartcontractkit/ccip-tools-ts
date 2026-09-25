@@ -16,6 +16,7 @@ export {
 // Specialized errors - Block & Transaction
 export {
   CCIPBlockNotFoundError,
+  CCIPPartialTransactionSubmissionError,
   CCIPTransactionNotFoundError,
   CCIPTransactionTooLargeError,
 } from './specialized.ts'
