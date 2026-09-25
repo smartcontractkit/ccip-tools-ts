@@ -77,7 +77,9 @@ export class CCTTokenAccountMintMismatchError extends CCIPError {
  * Thrown when a CCT write fails before broadcast, the transaction reverts after mining,
  * or it mines without the expected effect (e.g. a deployment that produced no contract
  * address). Pre-broadcast failures (signing/RPC) may set `isTransient: true` for network
- * errors; reverts and post-mining anomalies are permanent and include `context.txHash`.
+ * errors; reverts and post-mining anomalies are permanent and include `context.txHash`. For a
+ * split Solana operation, `context.committedHashes` contains confirmed prior transaction hashes;
+ * state is partially applied and those transactions are permanent.
  *
  * @example
  * ```typescript
@@ -94,17 +96,23 @@ export class CCTTxFailedError extends CCIPError {
   override readonly name = 'CCTTxFailedError'
   /** Creates a tx-failed error. */
   constructor(operation: string, reason: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.CCT_TX_FAILED, `${operation} failed: ${reason}`, {
-      ...options,
-      isTransient: options?.isTransient ?? false,
-      context: { ...options?.context, operation, reason },
-    })
+    super(
+      CCIPErrorCode.CCT_TX_FAILED,
+      `${partialApplicationPrefix(options?.context)}${operation} failed: ${reason}`,
+      {
+        ...options,
+        isTransient: options?.isTransient ?? false,
+        context: { ...options?.context, operation, reason },
+      },
+    )
   }
 }
 
 /**
  * Thrown when a transaction was broadcast but not confirmed within the timeout.
- * Transient — it may still mine; check `context.txHash` before resubmitting.
+ * Transient — it may still mine; check `context.txHash` before resubmitting. For a split Solana
+ * operation, `context.committedHashes` contains confirmed prior transaction hashes; state is
+ * partially applied and those transactions are permanent.
  *
  * @example
  * ```typescript
@@ -123,7 +131,7 @@ export class CCTTxNotConfirmedError extends CCIPError {
   constructor(operation: string, txHash: string, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.CCT_TX_NOT_CONFIRMED,
-      `${operation} transaction not confirmed within timeout: ${txHash}`,
+      `${partialApplicationPrefix(options?.context)}${operation} transaction not confirmed within timeout: ${txHash}`,
       {
         ...options,
         isTransient: true,
@@ -132,6 +140,13 @@ export class CCTTxNotConfirmedError extends CCIPError {
       },
     )
   }
+}
+
+function partialApplicationPrefix(context?: Record<string, unknown>): string {
+  const committedHashes = context?.committedHashes
+  return Array.isArray(committedHashes) && committedHashes.length
+    ? `partially applied: ${committedHashes.length} transaction(s) confirmed; `
+    : ''
 }
 
 // Contract version dispatch

@@ -11,6 +11,7 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js'
 
+import { CCIPPartialTransactionSubmissionError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { Wallet } from '../../solana/types.ts'
@@ -21,7 +22,9 @@ const OP = 'setPool'
 
 describe('Submit error mapping (cct/solana)', () => {
   it('maps post-broadcast confirmation errors with a signature to not-confirmed', () => {
-    const cause = Object.assign(new Error('transaction was not confirmed'), { signature: 'abc' })
+    const cause = Object.assign(new Error('transaction was not confirmed'), {
+      signature: 'abc',
+    })
     const err = createCCTSubmitError(OP, cause)
 
     assert.ok(err instanceof CCTTxNotConfirmedError)
@@ -49,7 +52,9 @@ describe('Submit error mapping (cct/solana)', () => {
   })
 
   it('maps signed on-chain failures to permanent tx failed', () => {
-    const cause = Object.assign(new Error('custom program error: 0x1'), { signature: 'jkl' })
+    const cause = Object.assign(new Error('custom program error: 0x1'), {
+      signature: 'jkl',
+    })
     const err = createCCTSubmitError(OP, cause)
 
     assert.ok(err instanceof CCTTxFailedError)
@@ -77,11 +82,42 @@ describe('Submit error mapping (cct/solana)', () => {
   })
 
   it('maps raw program errors to permanent tx failed', () => {
-    const err = createCCTSubmitError(OP, { InstructionError: [0, { Custom: 6002 }] })
+    const err = createCCTSubmitError(OP, {
+      InstructionError: [0, { Custom: 6002 }],
+    })
 
     assert.ok(err instanceof CCTTxFailedError)
     assert.equal(err.isTransient, false)
     assert.match(err.message, /InstructionError/)
+  })
+
+  it('preserves committed slices and maps a pending partial submission to not-confirmed', () => {
+    const err = createCCTSubmitError(
+      OP,
+      new CCIPPartialTransactionSubmissionError([{ signature: 'confirmed', start: 0, end: 2 }], {
+        cause: new Error('blockhash expired'),
+        pendingSignature: 'pending',
+      }),
+    )
+
+    assert.ok(err instanceof CCTTxNotConfirmedError)
+    assert.equal(err.context.txHash, 'pending')
+    assert.deepEqual(err.context.committedHashes, ['confirmed'])
+    assert.deepEqual(err.context.committedSlices, [{ signature: 'confirmed', start: 0, end: 2 }])
+  })
+
+  it('uses a partial submission cause to classify a pre-broadcast failure', () => {
+    const err = createCCTSubmitError(
+      OP,
+      new CCIPPartialTransactionSubmissionError([{ signature: 'confirmed', start: 0, end: 2 }], {
+        cause: new Error('blockhash expired'),
+      }),
+    )
+
+    assert.ok(err instanceof CCTTxFailedError)
+    assert.equal(err.isTransient, true)
+    assert.deepEqual(err.context.committedHashes, ['confirmed'])
+    assert.deepEqual(err.context.committedSlices, [{ signature: 'confirmed', start: 0, end: 2 }])
   })
 
   it('maps a confirmed execution failure and does not return a hash', async () => {
@@ -99,9 +135,13 @@ describe('Submit error mapping (cct/solana)', () => {
           blockhash: PublicKey.default.toBase58(),
           lastValidBlockHeight: 1,
         }),
-        simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+        simulateTransaction: async () => ({
+          value: { err: null, logs: [], unitsConsumed: 1 },
+        }),
         sendTransaction: async () => 'failed-signature',
-        confirmTransaction: async () => ({ value: { err: { InstructionError: [0, 'Custom'] } } }),
+        confirmTransaction: async () => ({
+          value: { err: { InstructionError: [0, 'Custom'] } },
+        }),
       } as unknown as Connection,
     } as unknown as SolanaChain
 
@@ -112,7 +152,12 @@ describe('Submit error mapping (cct/solana)', () => {
           wallet,
           {
             family: ChainFamily.Solana,
-            instructions: [new TransactionInstruction({ keys: [], programId: PublicKey.default })],
+            instructions: [
+              new TransactionInstruction({
+                keys: [],
+                programId: PublicKey.default,
+              }),
+            ],
             mainIndex: 0,
           },
           OP,

@@ -13,30 +13,61 @@ import {
   TransactionExpiredTimeoutError,
 } from '@solana/web3.js'
 
-import { CCIPWalletInvalidError, shouldRetry } from '../../errors/index.ts'
+import {
+  CCIPPartialTransactionSubmissionError,
+  CCIPWalletInvalidError,
+  shouldRetry,
+} from '../../errors/index.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
-import { simulateAndSendTxs } from '../../solana/utils.ts'
+import {
+  type SolanaSentSlice,
+  type SolanaSplitMode,
+  simulateAndSendTxs,
+} from '../../solana/utils.ts'
 import { jsonStringify } from '../../utils.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
 import type { TransactionResult } from '../operation.ts'
 
-/** Signs, simulates, sends, and confirms a Solana CCT transaction. */
+/**
+ * Signs, simulates, sends, and confirms a Solana CCT operation.
+ *
+ * The split mode controls whether an oversized or over-budget instruction list may be split.
+ * Each slice is simulated before submission; a later failure retains confirmed slices in the
+ * mapped CCT error context.
+ *
+ * @param chain Solana connection and logger context.
+ * @param wallet Wallet that signs and pays for the transaction.
+ * @param unsigned Instructions to submit.
+ * @param operation CCT operation name used in mapped errors.
+ * @param computeUnits Optional compute-unit limit for the slice containing the main instruction.
+ * @param split Controls whether simulation failures may split the transaction.
+ * @param includeSlices Include every confirmed slice in the result for resource-splitting operations.
+ *
+ * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+ * @throws {@link CCTTxFailedError} If size validation, simulation, submission, or confirmation fails.
+ * For split operations, its context may include `committedHashes`.
+ * @throws {@link CCTTxNotConfirmedError} If a broadcast transaction is not confirmed.
+ */
 export async function submit(
   chain: SolanaChain,
   wallet: unknown,
   unsigned: UnsignedSolanaTx,
   operation: string,
   computeUnits?: number,
-): Promise<TransactionResult> {
+  split: SolanaSplitMode = 'atomic',
+  includeSlices = false,
+): Promise<TransactionResult & { slices?: SolanaSentSlice[] }> {
   if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
   try {
-    const tx = await simulateAndSendTxs(chain, wallet, unsigned, {
+    const result = await simulateAndSendTxs(chain, wallet, unsigned, {
       computeUnits,
+      split,
     })
-    return { hash: tx.hash }
+    return includeSlices ? result : { hash: result.hash }
   } catch (error) {
+    if (error instanceof CCTTxFailedError || error instanceof CCTTxNotConfirmedError) throw error
     throw createCCTSubmitError(operation, error)
   }
 }
@@ -45,17 +76,31 @@ export async function submit(
 export function createCCTSubmitError(
   operation: string,
   error: unknown,
+  context?: Record<string, unknown>,
 ): CCTTxFailedError | CCTTxNotConfirmedError {
-  const signature = getSignature(error)
-  if (signature && isNotConfirmedError(error)) {
-    return new CCTTxNotConfirmedError(operation, signature, {
-      cause: error instanceof Error ? error : undefined,
+  const partial = error instanceof CCIPPartialTransactionSubmissionError ? error : undefined
+  const cause = partial?.cause ?? error
+  const mergedContext = { ...context, ...partial?.context }
+  const pendingSignature = partial?.context.pendingSignature
+  if (typeof pendingSignature === 'string') {
+    return new CCTTxNotConfirmedError(operation, pendingSignature, {
+      cause: cause instanceof Error ? cause : undefined,
+      context: mergedContext,
     })
   }
 
-  return new CCTTxFailedError(operation, getReason(error), {
-    cause: error instanceof Error ? error : undefined,
-    isTransient: isTransientSubmitError(error),
+  const signature = getSignature(cause)
+  if (signature && isNotConfirmedError(cause)) {
+    return new CCTTxNotConfirmedError(operation, signature, {
+      cause: cause instanceof Error ? cause : undefined,
+      context: mergedContext,
+    })
+  }
+
+  return new CCTTxFailedError(operation, getReason(cause), {
+    cause: cause instanceof Error ? cause : undefined,
+    isTransient: isTransientSubmitError(cause),
+    context: mergedContext,
   })
 }
 

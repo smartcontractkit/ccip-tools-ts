@@ -71,7 +71,11 @@ export type GenerateCreateLookupTableResult = UnsignedSolanaTx & {
 export type ExecuteCreateLookupTableParams = SolanaExecuteParams<CreateLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `createLookupTable`. */
-export type ExecuteCreateLookupTableResult = TransactionResult & { lookupTableAddress: string }
+export type ExecuteCreateLookupTableResult = TransactionResult & {
+  /** Every confirmed transaction signature when resource splitting was required. */
+  hashes: string[]
+  lookupTableAddress: string
+}
 
 /** Builds and submits Solana ALT create instructions, optionally with extend instructions. */
 export class CreateLookupTable extends SolanaOperation<
@@ -80,6 +84,7 @@ export class CreateLookupTable extends SolanaOperation<
   ParsedCreateLookupTableParams
 > {
   readonly name = 'createLookupTable'
+  protected override readonly splitMode = 'resource'
 
   /** Parses params before `buildUnsigned()` performs any RPC. */
   protected override parse(params: GenerateCreateLookupTableParams): ParsedCreateLookupTableParams {
@@ -189,7 +194,11 @@ export class CreateLookupTable extends SolanaOperation<
     }
 
     const tx = await this.buildUnsigned(chain, parsed)
-    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
-    return { ...hash, lookupTableAddress: tx.lookupTableAddress }
+    const result = await submit(chain, wallet, tx, this.name, computeUnits, this.splitMode, true)
+    return {
+      hash: result.hash,
+      hashes: result.slices!.map(({ signature }) => signature),
+      lookupTableAddress: tx.lookupTableAddress,
+    }
   }
 }
