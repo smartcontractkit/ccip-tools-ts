@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Keypair, PublicKey } from '@solana/web3.js'
+import { Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js'
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
@@ -23,7 +23,10 @@ class TestOperation extends SolanaOperation<{ value: string }> {
     params: { payer: string; value: string },
   ): Promise<UnsignedSolanaTx> {
     this.captured = params.payer
-    return Promise.resolve({ family: ChainFamily.Solana, instructions: [] })
+    return Promise.resolve({
+      family: ChainFamily.Solana,
+      instructions: [new TransactionInstruction({ keys: [], programId: PublicKey.default })],
+    })
   }
 }
 
@@ -58,7 +61,18 @@ class ParsedTestOperation extends SolanaOperation<
   }
 }
 
-const chain = { logger: console, connection: {} } as unknown as SolanaChain
+const chain = {
+  logger: console,
+  connection: {
+    getLatestBlockhash: async () => ({
+      blockhash: PublicKey.default.toBase58(),
+      lastValidBlockHeight: 1,
+    }),
+    simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+    sendTransaction: async () => 'signature',
+    confirmTransaction: async () => ({ value: { err: null } }),
+  },
+} as unknown as SolanaChain
 
 describe('SolanaOperation', () => {
   it('validates, parses, then builds without mutating input', async () => {

@@ -862,7 +862,11 @@ export async function simulateAndSendTxs(
         )
       }
       pendingSignature = signature
-      await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+      const confirmation = await connection.confirmTransaction(
+        { signature, ...blockhash },
+        'confirmed',
+      )
+      if (confirmation.value.err) throw confirmation.value.err
       pendingSignature = undefined
       slices.push({ signature, start, end })
       if (includesMain) hash = signature

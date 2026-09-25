@@ -32,9 +32,10 @@ export async function submit(
   if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
   try {
-    return {
-      hash: await simulateAndSendTxs(chain, wallet, unsigned, computeUnits),
-    }
+    const tx = await simulateAndSendTxs(chain, wallet, unsigned, {
+      computeUnits,
+    })
+    return { hash: tx.hash }
   } catch (error) {
     throw createCCTSubmitError(operation, error)
   }
