@@ -343,6 +343,7 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         },
         confirmTransaction: async (confirm: { signature: string }) => {
           captured.confirmedSignature = confirm.signature
+          return { value: { err: null } }
         },
       } as unknown as Connection
       return { connection, captured }
@@ -812,10 +813,12 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
       )
       mockSendV0(connection)
       let confirmations = 0
-      ;(connection as unknown as { confirmTransaction: () => Promise<void> }).confirmTransaction =
-        async () => {
-          if (++confirmations === 2) throw new TransactionExpiredTimeoutError('sig-2', 30)
-        }
+      ;(
+        connection as unknown as { confirmTransaction: () => Promise<{ value: { err: null } }> }
+      ).confirmTransaction = async () => {
+        if (++confirmations === 2) throw new TransactionExpiredTimeoutError('sig-2', 30)
+        return { value: { err: null } }
+      }
 
       await assert.rejects(
         simulateAndSendTxs({ connection }, wallet, {
@@ -829,6 +832,33 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
           return true
         },
       )
+    })
+
+    it('stops later batches when confirmation reports an execution error', async () => {
+      const { connection } = mockConnection()
+      mockSimulate(connection, (_, call) =>
+        call === 1
+          ? { err: { InstructionError: [2, 'ComputationalBudgetExceeded'] }, logs: [] }
+          : OK,
+      )
+      let sent = 0
+      ;(connection as unknown as { sendTransaction: () => Promise<string> }).sendTransaction =
+        async () => `sig-${++sent}`
+      ;(
+        connection as unknown as {
+          confirmTransaction: () => Promise<{
+            value: { err: { InstructionError: [number, string] } }
+          }>
+        }
+      ).confirmTransaction = async () => ({ value: { err: { InstructionError: [0, 'Custom'] } } })
+
+      await assert.rejects(
+        simulateAndSendTxs({ connection }, wallet, {
+          instructions: [...SMALL, ...SMALL],
+          mainIndex: 1,
+        }),
+      )
+      assert.equal(sent, 1)
     })
   })
 })
