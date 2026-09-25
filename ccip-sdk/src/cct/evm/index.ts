@@ -1164,8 +1164,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The deployed address is only known once mined, so it is NOT returned here — use
    * {@link deployAdvancedPoolHooks} to receive it. The same applies to the constructor args
    * needed for explorer verification.
-   * @remarks `allowlist` is a permanent choice: `[]` disables the allowlist for the contract's
-   * whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
+   * @remarks `allowlist` is a permanent choice: omitting it (or passing `[]`) disables the
+   * allowlist for the contract's whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
    *
    * @throws {@link CCTParamsInvalidError} if any address is invalid, zero or duplicated, or
    * `thresholdAmount` is not a `uint256`
@@ -1173,10 +1173,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // allowlist, thresholdAmount and policyEngine default to off
    * const unsigned = await cct.generateUnsignedDeployAdvancedPoolHooks({
-   *   allowlist: [],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   sender: '0xDeployer...',
    * })
@@ -1206,10 +1204,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // thresholdAmount and policyEngine default to off
    * const { hash, contractAddress, verification } = await cct.deployAdvancedPoolHooks({
    *   allowlist: ['0xSender...'],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   wallet,
    * })
