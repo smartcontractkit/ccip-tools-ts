@@ -88,7 +88,7 @@ export async function cleanUpBuffers(
         lookupTable,
       })
       try {
-        sig = await simulateAndSendTxs(ctx, wallet, { instructions: [closeIx] })
+        ;({ hash: sig } = await simulateAndSendTxs(ctx, wallet, { instructions: [closeIx] }))
         logger.info('🗑️  Closed lookup table', altAddr, ': tx =>', sig)
       } catch (err) {
         const info = await connection.getAddressLookupTable(lookupTable)
@@ -211,7 +211,7 @@ export async function cleanUpBuffers(
           })
 
           try {
-            const sig = await simulateAndSendTxs(ctx, wallet, {
+            const { hash: sig } = await simulateAndSendTxs(ctx, wallet, {
               instructions: [deactivateIx],
             })
             logger.info('⤵️  Deactivated lookup table', lookupTable.toBase58(), ': tx =>', sig)
