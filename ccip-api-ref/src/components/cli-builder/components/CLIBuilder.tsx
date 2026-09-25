@@ -20,6 +20,7 @@ import type {
   StringOption,
 } from '../types/index.ts'
 import { CommandPreview } from './CommandPreview.tsx'
+import { GROUP_ORDER } from './groups.ts'
 import { ArrayInput, BooleanInput, ChainSelect, SelectInput, StringInput } from './inputs/index.ts'
 import { GROUP_LABELS, OptionGroup } from './OptionGroup.tsx'
 
@@ -135,10 +136,7 @@ function CLIBuilderForm({
     return groups
   }, [schema.options])
 
-  // Get ordered group names
-  const groupOrder = ['message', 'gas', 'solana', 'wallet', 'output', 'rpc', 'other']
-
-  const orderedGroups = groupOrder.filter((g) => groupedOptions[g]?.length > 0)
+  const orderedGroups = GROUP_ORDER.filter((g) => groupedOptions[g]?.length > 0)
 
   return (
     <div className={`${styles.cliBuilder} ${className ?? ''}`}>

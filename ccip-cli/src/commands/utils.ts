@@ -30,6 +30,7 @@ import {
 } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
+import { grpcVerifierTransport } from '../verifiers/grpc-transport.ts'
 import type { Ctx } from './types.ts'
 
 /**
@@ -822,5 +823,14 @@ export function getCtx(argv: {
 
   if (argv.verbose) logger.debug('Verbose mode enabled')
 
-  return [{ abort: ac.signal, output, logger, verbose: argv.verbose }, ac.abort.bind(ac)]
+  return [
+    {
+      abort: ac.signal,
+      output,
+      logger,
+      verbose: argv.verbose,
+      verifierTransport: grpcVerifierTransport(),
+    },
+    ac.abort.bind(ac),
+  ]
 }
