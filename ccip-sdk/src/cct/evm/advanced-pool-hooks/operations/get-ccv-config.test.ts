@@ -29,27 +29,31 @@ function stubChain(): EVMChain {
 const op = new GetCCVConfig()
 
 describe('GetCCVConfig (cct/evm advanced-pool-hooks)', () => {
-  it('reads one remote chain config', async () => {
-    assert.deepEqual(
-      await op.query(stubChain(), { advancedPoolHooks: HOOKS, remoteChainSelector: 1n }),
-      {
-        outboundCCVs: [CCV],
-        thresholdOutboundCCVs: [],
-        inboundCCVs: [],
-        thresholdInboundCCVs: [],
-      },
-    )
-  })
-
-  for (const [params, param] of [
-    [{ advancedPoolHooks: ZeroAddress, remoteChainSelector: 1n }, 'advancedPoolHooks'],
-    [{ advancedPoolHooks: HOOKS, remoteChainSelector: -1n }, 'remoteChainSelector'],
-  ] as const) {
-    it(`rejects ${param} before RPC`, async () => {
-      await assert.rejects(
-        () => op.query(stubChain(), params),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+  describe('query', () => {
+    it('reads one remote chain config', async () => {
+      assert.deepEqual(
+        await op.query(stubChain(), { advancedPoolHooks: HOOKS, remoteChainSelector: 1n }),
+        {
+          outboundCCVs: [CCV],
+          thresholdOutboundCCVs: [],
+          inboundCCVs: [],
+          thresholdInboundCCVs: [],
+        },
       )
     })
-  }
+  })
+
+  describe('validation', () => {
+    for (const [params, param] of [
+      [{ advancedPoolHooks: ZeroAddress, remoteChainSelector: 1n }, 'advancedPoolHooks'],
+      [{ advancedPoolHooks: HOOKS, remoteChainSelector: -1n }, 'remoteChainSelector'],
+    ] as const) {
+      it(`rejects ${param} before RPC`, async () => {
+        await assert.rejects(
+          () => op.query(stubChain(), params),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      })
+    }
+  })
 })

@@ -29,23 +29,27 @@ function stubChain(): EVMChain {
 const op = new GetAllCCVConfigs()
 
 describe('GetAllCCVConfigs (cct/evm advanced-pool-hooks)', () => {
-  it('lists configured remote chain configs', async () => {
-    assert.deepEqual(await op.query(stubChain(), { advancedPoolHooks: HOOKS }), [
-      {
-        remoteChainSelector: 1n,
-        outboundCCVs: [CCV],
-        thresholdOutboundCCVs: [],
-        inboundCCVs: [],
-        thresholdInboundCCVs: [],
-      },
-    ])
+  describe('query', () => {
+    it('lists configured remote chain configs', async () => {
+      assert.deepEqual(await op.query(stubChain(), { advancedPoolHooks: HOOKS }), [
+        {
+          remoteChainSelector: 1n,
+          outboundCCVs: [CCV],
+          thresholdOutboundCCVs: [],
+          inboundCCVs: [],
+          thresholdInboundCCVs: [],
+        },
+      ])
+    })
   })
 
-  it('rejects a zero hooks address before RPC', async () => {
-    await assert.rejects(
-      () => op.query(stubChain(), { advancedPoolHooks: ZeroAddress }),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'advancedPoolHooks',
-    )
+  describe('validation', () => {
+    it('rejects a zero hooks address before RPC', async () => {
+      await assert.rejects(
+        () => op.query(stubChain(), { advancedPoolHooks: ZeroAddress }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'advancedPoolHooks',
+      )
+    })
   })
 })

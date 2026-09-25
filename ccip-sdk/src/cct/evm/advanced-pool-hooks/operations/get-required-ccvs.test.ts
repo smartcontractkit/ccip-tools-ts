@@ -38,19 +38,23 @@ const params = {
 }
 
 describe('GetRequiredCCVs (cct/evm advanced-pool-hooks)', () => {
-  it('resolves the configured CCVs for a direction', async () => {
-    assert.deepEqual(await op.query(stubChain(), params), [CCV])
+  describe('query', () => {
+    it('resolves the configured CCVs for a direction', async () => {
+      assert.deepEqual(await op.query(stubChain(), params), [CCV])
+    })
   })
 
-  for (const [overrides, param] of [
-    [{ amount: -1n }, 'amount'],
-    [{ direction: 'sideways' }, 'direction'],
-  ] as const) {
-    it(`rejects ${param} before RPC`, async () => {
-      await assert.rejects(
-        () => op.query(stubChain(), { ...params, ...overrides } as never),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
-      )
-    })
-  }
+  describe('validation', () => {
+    for (const [overrides, param] of [
+      [{ amount: -1n }, 'amount'],
+      [{ direction: 'sideways' }, 'direction'],
+    ] as const) {
+      it(`rejects ${param} before RPC`, async () => {
+        await assert.rejects(
+          () => op.query(stubChain(), { ...params, ...overrides } as never),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      })
+    }
+  })
 })
