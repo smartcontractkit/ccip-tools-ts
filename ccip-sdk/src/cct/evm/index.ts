@@ -1801,9 +1801,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Mint/burn are role-gated (`MINTER_ROLE`/`BURNER_ROLE`); the token grants neither
    * to any pool at deploy. `preMint` mints initial supply to `preMintRecipient`, but before a
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployToken({
@@ -2312,9 +2314,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
    * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`) → {@link setPool} →
    * configure lanes.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployTokenPool({
@@ -2359,9 +2363,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
    * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
    * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployLockbox({
