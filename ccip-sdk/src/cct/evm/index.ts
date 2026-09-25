@@ -80,6 +80,10 @@ import {
   ApplyChainUpdates,
 } from './token-pool/operations/apply-chain-updates.ts'
 import {
+  type ApplyTokenTransferFeeConfigUpdatesParams,
+  ApplyTokenTransferFeeConfigUpdates,
+} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
+import {
   type DeployTokenPoolParams,
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
@@ -93,6 +97,12 @@ import {
   type GetAllowedFinalityConfigResult,
   GetAllowedFinalityConfig,
 } from './token-pool/operations/get-allowed-finality-config.ts'
+import {
+  type GetDynamicConfigParams,
+  type GetDynamicConfigResult,
+  GetDynamicConfig,
+} from './token-pool/operations/get-dynamic-config.ts'
+import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
 import {
   type GetRebalancerParams,
   type GetRebalancerResult,
@@ -108,6 +118,11 @@ import {
   type GetTokenPoolStateResult,
   GetTokenPoolState,
 } from './token-pool/operations/get-token-pool-state.ts'
+import {
+  type GetTokenTransferFeeConfigParams,
+  type GetTokenTransferFeeConfigResult,
+  GetTokenTransferFeeConfig,
+} from './token-pool/operations/get-token-transfer-fee-config.ts'
 import {
   type ProvideLiquidityParams,
   ProvideLiquidity,
@@ -146,6 +161,10 @@ import {
   type UpdateAdvancedPoolHooksParams,
   UpdateAdvancedPoolHooks,
 } from './token-pool/operations/update-advanced-pool-hooks.ts'
+import {
+  type WithdrawFeeTokensParams,
+  WithdrawFeeTokens,
+} from './token-pool/operations/withdraw-fee-tokens.ts'
 import {
   type WithdrawLiquidityParams,
   WithdrawLiquidity,
@@ -220,14 +239,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
+  readonly #applyTokenTransferFeeConfigUpdates = new ApplyTokenTransferFeeConfigUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
+  readonly #getDynamicConfig = new GetDynamicConfig()
+  readonly #getFee = new GetFee()
+  readonly #getTokenTransferFeeConfig = new GetTokenTransferFeeConfig()
   readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
   readonly #getAdvancedPoolHooks = new GetAdvancedPoolHooks()
   readonly #updateAdvancedPoolHooks = new UpdateAdvancedPoolHooks()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
   readonly #provideLiquidity = new ProvideLiquidity()
+  readonly #withdrawFeeTokens = new WithdrawFeeTokens()
   readonly #withdrawLiquidity = new WithdrawLiquidity()
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
@@ -990,6 +1014,148 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned **v2.0.0** pool token-transfer-fee update transaction.
+   *
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The pool owner may submit it, and
+   * `sender`, when supplied, is pre-flighted against that role.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApplyTokenTransferFeeConfigUpdates({
+   *   poolAddress: '0xPool...',
+   *   updates: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     tokenTransferFeeConfig: {
+   *       destGasOverhead: 100_000,
+   *       destBytesOverhead: 32,
+   *       finalityFeeUSDCents: 10,
+   *       fastFinalityFeeUSDCents: 20,
+   *       finalityTransferFeeBps: 25,
+   *       fastFinalityTransferFeeBps: 50,
+   *       isEnabled: true,
+   *     },
+   *   }],
+   *   disables: [],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedApplyTokenTransferFeeConfigUpdates(
+    opts: ApplyTokenTransferFeeConfigUpdatesParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#applyTokenTransferFeeConfigUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Updates or disables token-transfer fees for destination chains on a **v2.0.0** pool.
+   *
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The signing wallet must be the pool
+   * owner.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.applyTokenTransferFeeConfigUpdates({
+   *   poolAddress: '0xPool...',
+   *   updates: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     tokenTransferFeeConfig: {
+   *       destGasOverhead: 100_000,
+   *       destBytesOverhead: 32,
+   *       finalityFeeUSDCents: 10,
+   *       fastFinalityFeeUSDCents: 20,
+   *       finalityTransferFeeBps: 25,
+   *       fastFinalityTransferFeeBps: 50,
+   *       isEnabled: true,
+   *     },
+   *   }],
+   *   disables: [5009297550715157269n],
+   *   wallet, // pool owner
+   * })
+   * ```
+   */
+  applyTokenTransferFeeConfigUpdates(
+    opts: EVMExecuteParams<ApplyTokenTransferFeeConfigUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyTokenTransferFeeConfigUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned **v2.0.0** pool fee-token withdrawal transaction.
+   *
+   * @remarks The pool owner or delegated `feeAdmin` may transfer the full balances of the selected
+   * fee tokens to `recipient`. On LockRelease pools, bridge liquidity remains in the external
+   * lockbox and is not withdrawable here.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedWithdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   sender: '0xFeeAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFeeTokens(opts: WithdrawFeeTokensParams): Promise<UnsignedEVMTx> {
+    return this.#withdrawFeeTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws the selected fee-token balances from a **v2.0.0** pool to `recipient`.
+   *
+   * @remarks The signing wallet must be the pool owner or delegated `feeAdmin`.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.withdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   wallet, // pool owner or configured feeAdmin
+   * })
+   * ```
+   */
+  withdrawFeeTokens(opts: EVMExecuteParams<WithdrawFeeTokensParams>): Promise<TransactionResult> {
+    return this.#withdrawFeeTokens.execute(this.chain, opts)
+  }
+
+  /**
    * Reads the finality modes a **v2.0.0+** pool accepts.
    *
    * @remarks `finalityDepth` is the FTF minimum block depth (`0` when disabled); `finalitySafe`
@@ -1021,8 +1187,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The deployed address is only known once mined, so it is NOT returned here — use
    * {@link deployAdvancedPoolHooks} to receive it. The same applies to the constructor args
    * needed for explorer verification.
-   * @remarks `allowlist` is a permanent choice: `[]` disables the allowlist for the contract's
-   * whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
+   * @remarks `allowlist` is a permanent choice: omitting it (or passing `[]`) disables the
+   * allowlist for the contract's whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
    *
    * @throws {@link CCTParamsInvalidError} if any address is invalid, zero or duplicated, or
    * `thresholdAmount` is not a `uint256`
@@ -1030,10 +1196,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // allowlist, thresholdAmount and policyEngine default to off
    * const unsigned = await cct.generateUnsignedDeployAdvancedPoolHooks({
-   *   allowlist: [],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   sender: '0xDeployer...',
    * })
@@ -1063,10 +1227,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // thresholdAmount and policyEngine default to off
    * const { hash, contractAddress, verification } = await cct.deployAdvancedPoolHooks({
    *   allowlist: ['0xSender...'],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   wallet,
    * })
@@ -1309,6 +1472,74 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getAdvancedPoolHooks(opts: GetAdvancedPoolHooksParams): Promise<GetAdvancedPoolHooksResult> {
     return this.#getAdvancedPoolHooks.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a **v2.0.0+** pool's router and delegated admin roles.
+   *
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getDynamicConfig({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getDynamicConfig(opts: GetDynamicConfigParams): Promise<GetDynamicConfigResult> {
+    return this.#getDynamicConfig.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the fee parameters a **v2.0.0+** pool applies to a destination chain and finality.
+   *
+   * @remarks `getFee` reports the configured USD-cent and basis-point values, not a fee amount.
+   * `finality` defaults to `'finalized'`.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const fee = await cct.getFee({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getFee(opts: GetFeeParams): Promise<GetFeeResult> {
+    return this.#getFee.query(this.chain, opts)
+  }
+
+  /**
+   * Reads token-transfer fee configuration for a destination chain from a **v2.0.0+** pool.
+   *
+   * @remarks The pool token is read automatically. `finality` and `tokenArgs` default to
+   * `'finalized'` and `'0x'`, respectively, which are correct for standard pools.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getTokenTransferFeeConfig({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getTokenTransferFeeConfig(
+    opts: GetTokenTransferFeeConfigParams,
+  ): Promise<GetTokenTransferFeeConfigResult> {
+    return this.#getTokenTransferFeeConfig.query(this.chain, opts)
   }
 
   /**
@@ -2715,18 +2946,32 @@ export type {
   ChainUpdateV1_5_1,
 } from './token-pool/operations/apply-chain-updates.ts'
 export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
+export type {
+  GetDynamicConfigParams,
+  GetDynamicConfigResult,
+} from './token-pool/operations/get-dynamic-config.ts'
+export type { GetFeeParams, GetFeeResult } from './token-pool/operations/get-fee.ts'
+export type {
+  GetTokenTransferFeeConfigParams,
+  GetTokenTransferFeeConfigResult,
+} from './token-pool/operations/get-token-transfer-fee-config.ts'
+export type {
+  ApplyTokenTransferFeeConfigUpdatesParams,
+  TokenTransferFeeConfigUpdate,
+} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
-export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
 export type {
   ChainRateLimitUpdate,
   SetChainRateLimiterConfigsParams,
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
 export type { ProvideLiquidityParams } from './token-pool/operations/provide-liquidity.ts'
+export type { WithdrawFeeTokensParams } from './token-pool/operations/withdraw-fee-tokens.ts'
 export type { WithdrawLiquidityParams } from './token-pool/operations/withdraw-liquidity.ts'
 export type { TransferLiquidityParams } from './token-pool/operations/transfer-liquidity.ts'
 export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'

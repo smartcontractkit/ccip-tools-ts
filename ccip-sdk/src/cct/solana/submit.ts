@@ -17,6 +17,7 @@ import { CCIPWalletInvalidError, shouldRetry } from '../../errors/index.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
 import { simulateAndSendTxs } from '../../solana/utils.ts'
+import { jsonStringify } from '../../utils.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
 import type { TransactionResult } from '../operation.ts'
 
@@ -31,7 +32,10 @@ export async function submit(
   if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
   try {
-    return { hash: await simulateAndSendTxs(chain, wallet, unsigned, computeUnits) }
+    const tx = await simulateAndSendTxs(chain, wallet, unsigned, {
+      computeUnits,
+    })
+    return { hash: tx.hash }
   } catch (error) {
     throw createCCTSubmitError(operation, error)
   }
@@ -69,7 +73,9 @@ function isNotConfirmedError(error: unknown): boolean {
 }
 
 function getReason(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object') return jsonStringify(error)
+  return String(error)
 }
 
 function getSignature(error: unknown): string | undefined {

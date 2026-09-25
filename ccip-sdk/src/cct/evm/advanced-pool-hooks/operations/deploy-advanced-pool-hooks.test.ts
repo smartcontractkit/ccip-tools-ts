@@ -102,6 +102,20 @@ describe('DeployAdvancedPoolHooks (cct/evm advanced-pool-hooks operation)', () =
       assert.equal(unsigned.transactions[0]!.data, ADVANCED_POOL_HOOKS_V2_0_0 + args.slice(2))
     })
 
+    it('defaults every omitted param to its disabled value', async () => {
+      const unsigned = await new DeployAdvancedPoolHooks().generate(stubChain(), {})
+      const args = ORACLE.encodeDeploy([[], 0n, ZeroAddress, []])
+      assert.equal(unsigned.transactions[0]!.data, ADVANCED_POOL_HOOKS_V2_0_0 + args.slice(2))
+    })
+
+    it('defaults only the omitted params when some are given', async () => {
+      const unsigned = await new DeployAdvancedPoolHooks().generate(stubChain(), {
+        authorizedCallers: [POOL],
+      })
+      const args = ORACLE.encodeDeploy([[], 0n, ZeroAddress, [POOL]])
+      assert.equal(unsigned.transactions[0]!.data, ADVANCED_POOL_HOOKS_V2_0_0 + args.slice(2))
+    })
+
     it('encodes ctor args identically through the vendored ABI and the signature oracle', async () => {
       const vendored = new Interface(ADVANCED_POOL_HOOKS_V2_0_0_ABI).encodeDeploy([
         POPULATED.allowlist,

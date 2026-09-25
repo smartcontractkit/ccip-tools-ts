@@ -12,6 +12,7 @@ import LOCKBOX_V2_0_0 from '../../artifacts/bytecode/V2_0_0/erc20-lockbox.ts'
 import { DeployLockbox } from './deploy-lockbox.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
+const OTHER = '0x' + '99'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
 const DEPLOYED = '0x' + '77'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
@@ -114,6 +115,30 @@ describe('DeployLockbox (cct/evm lockbox operation)', () => {
         contractAddress: DEPLOYED,
         verification: { contract: 'ERC20LockBox', encodedConstructorArgs: '0x' + W_TOKEN },
       })
+    })
+
+    it('accepts a sender matching the signing wallet', async () => {
+      const result = await new DeployLockbox().execute(stubChain(), {
+        token: TOKEN,
+        sender: SENDER,
+        wallet: fakeSigner({ contractAddress: DEPLOYED }),
+      })
+      assert.equal(result.hash, HASH)
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new DeployLockbox().execute(stubChain(), {
+            token: TOKEN,
+            sender: OTHER,
+            wallet: fakeSigner({ contractAddress: DEPLOYED }),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployLockbox' &&
+          err.context.param === 'sender',
+      )
     })
 
     it('throws CCTTxFailedError when the receipt carries no contract address', async () => {

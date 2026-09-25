@@ -37,6 +37,7 @@ import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs, loadChainWallet, resolveIndexer } from '../providers/index.ts'
+import { ccvDataOption, verifiersOption } from '../verifiers/options.ts'
 import { type Ctx, Format } from './types.ts'
 import {
   getCtx,
@@ -68,6 +69,8 @@ export const builder = (yargs: Argv) =>
     })
     .check((argv) => isSupportedTxHash(argv.txHashOrId ?? argv['tx-hash-or-id']))
     .options({
+      ...verifiersOption,
+      ...ccvDataOption,
       'log-index': {
         type: 'number',
         describe: 'Log index of message to execute (if more than one in request tx)',
