@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-api-ref",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "private": true,
   "description": "API Reference documentation for CCIP SDK and CLI",
   "scripts": {
@@ -32,18 +32,18 @@
     "docusaurus-theme-openapi-docs": "^5.2.0",
     "focus-trap-react": "^12.0.3",
     "prism-react-renderer": "^2.4.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "scheduler": "^0.27.0"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "scheduler": "^0.28.0"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/types": "^3.10.2",
-    "@types/react-dom": "^19.2.7",
+    "@types/react-dom": "^19.3.0",
     "@typescript/native": "npm:typescript@7.0.2",
-    "docusaurus-plugin-typedoc": "^1.4.2",
+    "docusaurus-plugin-typedoc": "^1.4.3",
     "typedoc": "^0.28.20",
-    "typedoc-plugin-markdown": "^4.13.0",
+    "typedoc-plugin-markdown": "^4.13.1",
     "typedoc-plugin-merge-modules": "^7.0.0"
   },
   "browserslist": {
