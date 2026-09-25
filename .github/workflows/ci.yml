@@ -41,6 +41,12 @@ jobs:
           node-version: 24
           cache: 'npm'
 
+      # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
+      # binary for node 24 on ubuntu-latest, so npm ci compiles it from source
+      # and fails without libusb ("libusb.h: No such file or directory").
+      - name: Install node-hid build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libudev-dev
+
       # Older foundry-toolchain pins ran foundryup via `bash` and broke when it became
       # a compiled binary ("cannot execute binary file"); v1.9.1 executes it directly
       # and pins the foundryup installer internally, so no vendor script is piped here.
@@ -50,9 +56,11 @@ jobs:
       - name: Verify anvil is available
         run: anvil --version
 
-      - name: Install Surfpool v1.1.2 (for SVM fork tests)
+      # >= 1.5.0 forks as Agave 4.x (solana-core 4.1.2) and accepts version-1
+      # transactions, which the SDK sends when a tx exceeds the v0 packet limit
+      - name: Install Surfpool v1.5.0 (for SVM fork tests)
         run: |
-          curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.1.2/surfpool-linux-x64.tar.gz \
+          curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.5.0/surfpool-linux-x64.tar.gz \
             | tar xz -C /usr/local/bin
 
       - name: Verify surfpool is available
@@ -183,6 +191,11 @@ jobs:
         with:
           name: coverage-report
           path: .coverage
+          # `.coverage` is a dot-directory, which upload-artifact skips unless
+          # asked for them: without this the step always ran (the `if` matched)
+          # and then warned "No files were found with the provided path",
+          # uploading nothing.
+          include-hidden-files: true
 
       - name: Upload test report inputs
         if: always()

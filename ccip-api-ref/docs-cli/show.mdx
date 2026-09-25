@@ -37,10 +37,11 @@ The `show` command retrieves and displays comprehensive information about a CCIP
 
 ## Options
 
-| Option        | Type    | Default | Description                                                                                                                                |
-| ------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--log-index` | number  | -       | Select a specific message by log index when multiple CCIP messages exist in one transaction. If omitted, an interactive menu is displayed. |
-| `--wait`      | boolean | -       | Wait for finality, commit, and first execution of pending requests before returning.                                                       |
+| Option        | Type    | Default | Description                                                                                                                                                          |
+| ------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--log-index` | number  | -       | Select a specific message by log index when multiple CCIP messages exist in one transaction. If omitted, an interactive menu is displayed.                           |
+| `--wait`      | boolean | -       | Wait for finality, commit, and first execution of pending requests before returning.                                                                                 |
+| `--verifier`  | array   | -       | CCIP v2.0: verifier endpoint URLs to read CCV attestations from when the CCIP API and indexers lack them (see [manual-exec](/cli/manual-exec#verification-sources)). |
 
 See [Configuration](/cli/configuration) for global options (`--rpcs`, `--format`, etc.).
 

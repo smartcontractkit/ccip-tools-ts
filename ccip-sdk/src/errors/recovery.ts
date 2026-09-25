@@ -21,6 +21,10 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   BLOCK_TIME_NOT_FOUND: 'Wait and retry. Block time data may not be available yet.',
   BLOCK_BEFORE_TIMESTAMP_NOT_FOUND: 'No block exists before the specified timestamp.',
   TRANSACTION_NOT_FINALIZED: 'Wait for transaction finality.',
+  TRANSACTION_TOO_LARGE:
+    'Transaction exceeds its version wire size limit (1232 bytes for v0, 4096 for v1). Reduce the message data or split into smaller transactions.',
+  PARTIAL_TRANSACTION_SUBMISSION:
+    'Inspect committedSlices (and pendingSignature, if set) before reconciling state. Retrying replays the whole submission.',
 
   MESSAGE_INVALID: 'Verify the message format matches the expected CCIP message structure.',
   MESSAGE_DECODE_FAILED:
@@ -225,6 +229,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   // Cross-Chain Token
   CCT_PARAMS_INVALID:
     'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TOKEN_ACCOUNT_MINT_MISMATCH: 'Use a token account whose mint matches the requested mint.',
   CCT_TX_FAILED:
     'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
   CCT_TX_NOT_CONFIRMED:

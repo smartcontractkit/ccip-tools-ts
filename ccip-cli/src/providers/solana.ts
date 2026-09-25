@@ -7,11 +7,12 @@ import {
   CCIPNotImplementedError,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
-import SolanaLedger from '@ledgerhq/hw-app-solana'
-import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import SolanaLedger from '@ledgerhq/hw-app-solana/lib/Solana'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid/lib/TransportNodeHid'
 import {
   type Message,
   type MessageV0,
+  type TransactionVersion,
   type VersionedTransaction,
   Keypair,
   PublicKey,
@@ -25,6 +26,12 @@ export class LedgerSolanaWallet {
   publicKey: PublicKey
   wallet: SolanaLedger.default
   path: string
+  /**
+   * Ledger's Solana app can't parse v1 transactions yet: it rejects them as malformed v0
+   * messages (`0x6a80`, https://github.com/LedgerHQ/app-solana/issues/248). Declaring it makes
+   * the SDK split transactions too large for v0, or reject them, instead of using v1.
+   */
+  readonly supportedTransactionVersions: ReadonlySet<TransactionVersion> = new Set(['legacy', 0])
   private logger: Logger
 
   /**
@@ -70,11 +77,14 @@ export class LedgerSolanaWallet {
    */
   async signTransaction<T extends Transaction | VersionedTransaction>(tx: T) {
     this.logger.debug('Ledger: Request to sign message from', this.publicKey.toBase58())
-    // serializeMessage on v0, serialize on v1
 
     let msg: Message | MessageV0
     if (tx instanceof Transaction) {
       msg = tx.compileMessage()
+    } else if (tx.message.version === 1) {
+      throw new CCIPNotImplementedError(
+        'signing v1 transactions on Ledger (https://github.com/LedgerHQ/app-solana/issues/248)',
+      )
     } else {
       msg = tx.message
     }

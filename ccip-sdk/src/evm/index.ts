@@ -47,7 +47,6 @@ import {
   type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
-import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPBlockNotFoundError,
@@ -115,6 +114,7 @@ import {
   getAddressBytes,
   getBlockNumberAtOrAfter,
   getDataBytes,
+  linkAbortSignals,
   parseTypeAndVersion,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
@@ -158,7 +158,7 @@ import { estimateExecGas, findBalancesSlot } from './gas.ts'
 import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import { type MessageV1TokenTransfer, encodeMessageV1 } from './messageCodec.ts'
-import type { CCIPMessage_V1_6_EVM, CCIPMessage_V2_0, CleanAddressable } from './messages.ts'
+import type { CCIPMessage_V1_6_EVM, CleanAddressable } from './messages.ts'
 import { encodeEVMOffchainTokenData } from './offchain.ts'
 import {
   type PoolInterfaceVersion,
@@ -577,21 +577,29 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // 90s comfortably exceeds any legitimate slow call (a chunked
         // eth_getLogs under active pacing).
         const timeoutSignal = AbortSignal.timeout(90_000)
-        let requestSignal: AbortSignal = timeoutSignal
+        // The cancel bridge and the 90s bound are followed through a LINK, not
+        // composed into a fresh AbortSignal.any composite: a composite over a
+        // kTimeout source is never listened to directly (undici attaches to the
+        // downstream merge), so its following never activates and it pins in
+        // Node's gcPersistentSignals for the process's lifetime — one composite
+        // per RPC request. The `using` link detaches on return instead (see
+        // linkAbortSignals).
+        let linkSource: AbortSignal | undefined
         if (signal) {
           const cancel = new AbortController()
           try {
             signal.addListener(() => cancel.abort())
-            requestSignal = AbortSignal.any([cancel.signal, timeoutSignal])
+            linkSource = cancel.signal
           } catch {
-            requestSignal = AbortSignal.abort() // already cancelled by ethers
+            linkSource = AbortSignal.abort() // already cancelled by ethers
           }
         }
+        using link = linkSource ? linkAbortSignals([linkSource, timeoutSignal]) : null
         const resp = await fetchFn(r.url, {
           method: r.method || 'POST',
           headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, String(v)])),
           body: r.body ?? undefined,
-          signal: requestSignal,
+          signal: link?.signal ?? timeoutSignal,
         })
         const headers: Record<string, string> = {}
         resp.headers.forEach((v, k) => {
@@ -2545,9 +2553,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      const encodedMessage = hexlify(
-        getDataBytes((request.message as CCIPMessage_V2_0).encodedMessage),
-      )
+      // the policy is computed from the message exactly as emitted (token transfer, extraArgs,
+      // finality); reconstructing it from decoded fields can drop the transfer's pool CCVs
+      const encodedMessage = await this.resolveEncodedMessage(request)
       const contract = new Contract(
         offRamp,
         interfaces.OffRamp_v2_0,
@@ -2563,17 +2571,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         optionalThreshold: Number(optionalThreshold),
       }
 
-      // race API client + indexer URLs
-      const verifications = await fetchVerifications(request.message.messageId, {
-        apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.network.networkType,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : opts.watch
-              ? this.abort
-              : undefined,
-      })
+      const verifications = await this.fetchCCVResults(
+        request.message.messageId,
+        verificationPolicy,
+        opts,
+      )
       return { verificationPolicy, verifications }
     } else if (request.lane.version < CCIPVersion.V1_6) {
       // v1.2..v1.5 EVM (only) have separate CommitStore
