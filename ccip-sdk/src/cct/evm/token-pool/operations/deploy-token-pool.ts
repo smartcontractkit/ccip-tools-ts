@@ -24,13 +24,13 @@ export type { DeployableTokenPoolType }
 
 /** Fields shared by every deployable token pool. */
 interface DeployTokenPoolBaseParams {
-  /** Address of the token the pool manages. */
+  /** Non-zero address of the token the pool manages. */
   token: string
   /** The token's `decimals` (uint8). */
   localTokenDecimals: number
-  /** RMN proxy address. */
+  /** Non-zero RMN proxy address. */
   rmnProxy: string
-  /** CCIP router address. */
+  /** Non-zero CCIP router address. */
   router: string
   /** Advanced pool hooks; defaults to the zero address. */
   advancedPoolHooks?: string
@@ -105,10 +105,10 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
         'type',
         `unsupported pool type ${String(params.type)}`,
       )
-    validateAddress(this.name, 'token', params.token)
+    validateNonZeroAddress(this.name, 'token', params.token)
     validateUint8(this.name, 'localTokenDecimals', params.localTokenDecimals)
-    validateAddress(this.name, 'rmnProxy', params.rmnProxy)
-    validateAddress(this.name, 'router', params.router)
+    validateNonZeroAddress(this.name, 'rmnProxy', params.rmnProxy)
+    validateNonZeroAddress(this.name, 'router', params.router)
     if (params.advancedPoolHooks !== undefined)
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     if (params.type === 'LockReleaseTokenPool')

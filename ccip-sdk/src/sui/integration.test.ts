@@ -4,7 +4,7 @@ import { before, describe, it } from 'node:test'
 // Register every chain family (notably Solana, for decodeAddress on the pool's
 // SVM remotes) the way SDK consumers do via the package root
 import '../index.ts'
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
@@ -22,15 +22,6 @@ import { SuiChain } from './index.ts'
 // would serialize this 3-minute suite against every other fuji user.
 await useResource(['sui-testnet'])
 
-// Integration tests issue live RPC calls against public endpoints. Sui's public
-// JSON-RPC fullnodes were deprecated; the default is BlockVision's public
-// gateway, which is archival (the CCIP publish tx is available) but aggressively
-// rate-limited — the SDK's adaptive limiter paces through it.
-// `https://sui-testnet-rpc.publicnode.com` is faster and fine for reads, but it
-// prunes tx contents (offramp discovery via MCMS upgrade scan can't enumerate
-// created packages there).
-// Override via RPC_* env vars.
-const SUI_TESTNET_RPC = rpcEndpoint('RPC_SUI_TESTNET')
 const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 
 // ── Live sui-testnet CCIP deployment (1.6.x) ──
@@ -68,6 +59,39 @@ const TOKEN_SEND_MESSAGE_ID = '0xd5e9fb64d36e13e692858b82b5fa309d1b900d5526356f4
 const FULL_TOKEN_SEND_TX = 'F7c2UALq5iurHWvw5i6nemE8cqg6jrV6L2GYi4sHztsU'
 const FULL_TOKEN_SEND_MESSAGE_ID =
   '0x657fa335d971bc95fa082ff831f18db38e2d49174b394d93ef820316bdaa9da5'
+
+/**
+ * Retention-aware health probe for the public Sui gateways, passed to
+ * {@link raceRpcEndpoint}: it replays the fixture send tx with its events, the
+ * very data the scans below consume. A gateway that pruned it (`suiscan` and
+ * `publicnode` both do), or that stopped answering altogether (the keyed
+ * BlockVision URL behind CI's RPC_SUI_TESTNET secret started returning 403 to
+ * every call), therefore never binds the suite — the healthy candidate does.
+ */
+const suiTestnetHealthy = (url: string) =>
+  fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'sui_getTransactionBlock',
+      params: [FULL_TOKEN_SEND_TX, { showEvents: true }],
+    }),
+    signal: AbortSignal.timeout(20_000),
+  })
+    .then((res) => res.json() as Promise<{ result?: { events?: unknown[] } }>)
+    .then((json) => !!json.result?.events?.length)
+
+// Integration tests issue live RPC calls against public endpoints. Sui's public
+// JSON-RPC fullnodes no longer serve JSON-RPC at all, so the defaults are the
+// gateways in `DEFAULT_RPC_ENDPOINTS.RPC_SUI_TESTNET` (which the race also keeps
+// as a fallback tier behind anything RPC_SUI_TESTNET configures — the keyed
+// BlockVision URL this file used to bind unconditionally started answering 403,
+// failing every test in it at once). BlockVision has the retention the fixture
+// and the MCMS history need, but throttles; suiscan/publicnode are faster and
+// fail only the history-dependent discovery paths.
+const SUI_TESTNET_RPC = await raceRpcEndpoint('RPC_SUI_TESTNET', suiTestnetHealthy)
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 

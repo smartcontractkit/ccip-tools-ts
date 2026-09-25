@@ -2,10 +2,10 @@
  * EVM lockbox contract layer for CCT: the cached `ERC20LockBox` {@link Interface}
  * ({@link LOCKBOX_INTERFACE}) for calldata encoding, its deploy artifact
  * ({@link getLockboxArtifact}), and the pre-tx reads every lockbox write runs before building
- * calldata — the on-chain identity check ({@link assertLockbox}), the escrowed token
- * ({@link assertLockboxToken}), the authorized-caller set ({@link assertLockboxCaller}) and the
- * ERC-20 position behind the transfer ({@link assertLockboxFunding} /
- * {@link assertLockboxLiquidity}).
+ * calldata — the on-chain identity check ({@link assertLockbox}), ownership
+ * ({@link assertLockboxOwner}), the escrowed token ({@link assertLockboxToken}), the
+ * authorized-caller set ({@link assertLockboxCaller}) and the ERC-20 position behind the
+ * transfer ({@link assertLockboxFunding} / {@link assertLockboxLiquidity}).
  *
  * Mirrors `token/contracts.ts` in shape, and `token-pool/contracts.ts` in the split between
  * `read*` helpers and the `assert*` guards the ops call.
@@ -75,7 +75,7 @@ const LOCKBOX_VERSIONS: string[] = ['2.0.0']
  * contract at `lockbox`, or it does not answer the call
  * @throws {@link CCTContractTypeInvalidError} if the contract is not an `ERC20LockBox`
  * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
- * @throws `CCIPTypeVersionInvalidError` if the contract answers with a string that is not a
+ * @throws {@link CCIPTypeVersionInvalidError} if the contract answers with a string that is not a
  * `type version` pair at all, as `chain.typeAndVersion` raises it
  */
 export async function assertLockbox(
@@ -275,5 +275,47 @@ export async function assertLockboxLiquidity(
   throw new CCTTxFailedError(
     operation,
     `lockbox ${lockbox} holds ${balance} of ${token}, but ${amount} is required; it would revert InsufficientBalance`,
+  )
+}
+
+/** The one `ERC20LockBox` getter {@link readLockboxOwner} calls. */
+type LockboxOwnerGetter = Pick<TypedContract<typeof ERC20_LOCKBOX_V2_0_0_ABI>, 'owner'>
+
+/**
+ * Reads an `ERC20LockBox`'s `owner()` in one `eth_call`.
+ * @remarks Callers run {@link assertLockbox} first: `owner()` is declared by pools and tokens too,
+ * so it says nothing about whether `lockbox` is a lockbox.
+ * @param chain - Chain to read from.
+ * @param lockbox - Lockbox contract to read `owner()` from.
+ * @returns The current owner, checksummed.
+ */
+export async function readLockboxOwner(chain: EVMChain, lockbox: string): Promise<string> {
+  const contract: LockboxOwnerGetter = getTypedContract(chain, lockbox, ERC20_LOCKBOX_V2_0_0_ABI)
+  return getAddress(resultToObject(await contract.owner()))
+}
+
+/**
+ * Pre-flights `sender` against the lockbox's on-chain `owner()` for an owner-gated write, so an
+ * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an
+ * `OnlyCallableByOwner` revert after a multisig has already reviewed and signed. The lockbox-side
+ * counterpart of `assertPoolOwner` and `assertTokenOwner`.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param lockbox - Lockbox being written to.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the lockbox owner
+ */
+export async function assertLockboxOwner(
+  operation: string,
+  chain: EVMChain,
+  lockbox: string,
+  sender: string,
+): Promise<void> {
+  const owner = await readLockboxOwner(chain, lockbox)
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current lockbox owner (${owner})`,
   )
 }

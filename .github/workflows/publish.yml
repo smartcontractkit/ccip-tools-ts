@@ -25,6 +25,12 @@ jobs:
       with:
         node-version: 24
 
+    # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
+    # binary for node 24 on ubuntu-latest, so npm ci compiles it from source
+    # and fails without libusb ("libusb.h: No such file or directory").
+    - name: Install node-hid build dependencies
+      run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libudev-dev
+
     - name: Install dependencies and build
       run: npm ci
 
@@ -60,6 +66,12 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
+      # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
+      # binary for node 24 on ubuntu-latest, so npm ci compiles it from source
+      # and fails without libusb ("libusb.h: No such file or directory").
+      - name: Install node-hid build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libudev-dev
+
       - run: npm ci
 
       - name: Publish @chainlink/ccip-sdk
@@ -87,6 +99,12 @@ jobs:
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
         run: npm install -g npm@latest
+
+      # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
+      # binary for node 24 on ubuntu-latest, so npm ci compiles it from source
+      # and fails without libusb ("libusb.h: No such file or directory").
+      - name: Install node-hid build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libudev-dev
 
       - run: npm ci
 
