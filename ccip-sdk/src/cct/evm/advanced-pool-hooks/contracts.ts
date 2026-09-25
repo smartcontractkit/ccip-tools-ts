@@ -11,13 +11,15 @@
  * @packageDocumentation
  */
 
-import { Interface } from 'ethers'
+import { Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { CCTContractTypeInvalidError } from '../../errors.ts'
+import { resultToObject } from '../../../evm/types.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
 import type { DeployArtifact } from '../operation.ts'
+import { getTypedContract } from '../query.ts'
 
 /** The `typeAndVersion` contract type an `AdvancedPoolHooks` reports (`"AdvancedPoolHooks 2.0.0"`). */
 export const ADVANCED_POOL_HOOKS_TYPE = 'AdvancedPoolHooks'
@@ -27,6 +29,51 @@ export const ADVANCED_POOL_HOOKS_INTERFACE = new Interface(ADVANCED_POOL_HOOKS_V
 
 /** `AdvancedPoolHooks` creation bytecode for `deployAdvancedPoolHooks`. */
 export const ADVANCED_POOL_HOOKS_BYTECODE = ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE
+
+/**
+ * The four CCV lists for one remote chain. Base lists apply to every transfer; threshold lists add
+ * requirements at or above the hooks contract's configured threshold. `address(0)` selects the
+ * default CCV. A threshold list requires its corresponding base list, and no address may repeat
+ * within or across a direction's base/threshold pair.
+ */
+export type CCVConfig = {
+  /** CCVs required for every outbound transfer. */
+  outboundCCVs: string[]
+  /** Additional outbound CCVs required at or above the threshold. */
+  thresholdOutboundCCVs: string[]
+  /** CCVs required for every inbound transfer. */
+  inboundCCVs: string[]
+  /** Additional inbound CCVs required at or above the threshold. */
+  thresholdInboundCCVs: string[]
+}
+
+/** A remote CCIP chain selector (`uint64`) plus its complete CCV configuration. */
+export type CCVConfigUpdate = CCVConfig & { remoteChainSelector: bigint }
+
+/** Reads an `AdvancedPoolHooks` owner's address in one `eth_call`. */
+export async function readAdvancedPoolHooksOwner(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<string> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return getAddress(resultToObject(await hooks.owner()))
+}
+
+/** Rejects a known sender that is not the `AdvancedPoolHooks` owner. */
+export async function assertAdvancedPoolHooksOwner(
+  operation: string,
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  sender: string,
+): Promise<void> {
+  const owner = await readAdvancedPoolHooksOwner(chain, advancedPoolHooks)
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current AdvancedPoolHooks owner (${owner})`,
+  )
+}
 
 /**
  * `AdvancedPoolHooks` deploy artifact: contract name + ctor {@link Interface} + creation bytecode.

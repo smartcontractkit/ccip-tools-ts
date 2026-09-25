@@ -1,0 +1,42 @@
+/** Reads every configured remote-chain CCV requirement from `AdvancedPoolHooks`. */
+
+import type { EVMChain } from '../../../../evm/index.ts'
+import { resultToObject } from '../../../../evm/types.ts'
+import { EVMQuery } from '../../query.ts'
+import { validateNonZeroAddress } from '../../validate.ts'
+import {
+  type CCVConfigUpdate,
+  ADVANCED_POOL_HOOKS_INTERFACE,
+  assertAdvancedPoolHooksContract,
+} from '../contracts.ts'
+
+/** Parameters for {@link GetAllCCVConfigs}. */
+export type GetAllCCVConfigsParams = {
+  /** Hooks contract to read. */
+  advancedPoolHooks: string
+}
+
+/** Complete CCV configs for configured remote chains, in the contract's enumerable-set order. */
+export type GetAllCCVConfigsResult = CCVConfigUpdate[]
+
+/** Lists every configured remote-chain CCV config. */
+export class GetAllCCVConfigs extends EVMQuery<GetAllCCVConfigsParams, GetAllCCVConfigsResult> {
+  readonly name = 'getAllCCVConfigs'
+
+  protected prepare(params: GetAllCCVConfigsParams): GetAllCCVConfigsParams {
+    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    return params
+  }
+
+  protected async read(
+    chain: EVMChain,
+    { advancedPoolHooks }: GetAllCCVConfigsParams,
+  ): Promise<GetAllCCVConfigsResult> {
+    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
+    const data = ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('getAllCCVConfigs')
+    const result = await chain.provider.call({ to: advancedPoolHooks, data })
+    return resultToObject(
+      ADVANCED_POOL_HOOKS_INTERFACE.decodeFunctionResult('getAllCCVConfigs', result)[0],
+    ) as GetAllCCVConfigsResult
+  }
+}
