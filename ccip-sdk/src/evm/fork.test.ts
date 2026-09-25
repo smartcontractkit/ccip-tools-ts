@@ -44,24 +44,50 @@ const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae7
 
 // ── sendMessage constants ──
 
-// v1.5 lane: Sepolia -> Fuji (OnRamp 0x1249…025B)
-const FUJI_SELECTOR = 14767482510784806043n
+// v1.5 lanes: the Sep-2026 2.0 migration wave replaced every hub lane on the Sepolia
+// router (Fuji went EVM2EVMOnRamp 1.5.0 → OnRamp 2.0.0), so the surviving 1.5.x lanes
+// are the long-tail L2/bitcoin testnets below. They migrate too, eventually, so the
+// send test resolves one at runtime from a candidate list instead of pinning a dest
+// (same pattern as LEGACY_V1_5_CANDIDATES in integration.test.ts). All candidates
+// below were verified EVM2EVMOnRamp 1.5.0 on SEPOLIA_ROUTER on 2026-09-23.
+const CRONOS_ZKEVM_SELECTOR = 16487132492576884721n // sepolia → cronos-zkevm-testnet-sepolia
+const LISK_SELECTOR = 5298399861320400553n // sepolia → sepolia-lisk-1
+const METAL_SELECTOR = 6286293440461807648n // sepolia → metal-testnet
+const ZORA_SELECTOR = 16244020411108056671n // sepolia → zora-testnet
+const TRON_NILE_SELECTOR = 2052925811360307749n // sepolia → tron-testnet-nile-evm
+const V1_5_SEPOLIA_CANDIDATES = [
+  { dest: CRONOS_ZKEVM_SELECTOR, label: 'sepolia → cronos-zkevm' },
+  { dest: LISK_SELECTOR, label: 'sepolia → lisk' },
+  { dest: METAL_SELECTOR, label: 'sepolia → metal' },
+  { dest: ZORA_SELECTOR, label: 'sepolia → zora' },
+  { dest: TRON_NILE_SELECTOR, label: 'sepolia → tron-nile' },
+] as const
 // keccak256 of the CCIPSendRequested(tuple) event signature from the v1.5 OnRamp ABI
 const CCIP_SEND_REQUESTED_TOPIC =
   interfaces.EVM2EVMOnRamp_v1_5.getEvent('CCIPSendRequested')!.topicHash
 
-// v1.6 lane: Sepolia -> Aptos testnet (OnRamp 0x23a5…9DeE)
+// v1.6 lane: Sepolia -> Aptos testnet (multi-lane OnRamp 0x23a5…9DeE, still 1.6.0)
 const APTOS_TESTNET_SELECTOR = 743186221051783445n
 // keccak256 of the CCIPMessageSent(uint64,uint64,tuple) event signature from the v1.6 OnRamp ABI
 const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent')!.topicHash
 
-// Token with pool support on the Sepolia -> Aptos lane
-const APTOS_SUPPORTED_TOKEN = '0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05'
+// Tokens whose pools on the Sepolia -> Aptos lane still carry the aptos-testnet
+// remote. The old fixture (CCIP-BnM 0xFd57…2a05) lost its remote when its pool was
+// migrated to a 2.0 pool without the remote re-added (2026-09), so keep a candidate
+// list and probe each with getFee — the same checkSendMessage path sendMessage runs —
+// before sending (all three verified sendable 2026-09-23).
+const APTOS_TOKEN_CANDIDATES = [
+  '0xa42ba090720aee0602ad4381fadcc9380ad3d888', // CCTEST — BurnMintTokenPool 1.6.1
+  '0xc1ecdf50c7235d9ca08ba2a65548f8431fba5f1b', // CCTEST — BurnMintTokenPool 1.6.1
+  '0x227f0db66e9bf42a28e1e38438c5f19d0adb2df0', // CCTDENC — BurnMintTokenPool 2.0.0
+] as const
 
 // ── getLaneFeatures / ViemTransportProvider constants ──
 
-// v2.0 router for Sepolia -> Fuji lane
+// v2.0 router for Sepolia -> Fuji lane (the 1.2.0 router's Fuji lane migrated to
+// OnRamp 2.0.0 in Sep 2026; this router is the dedicated 2.0 deployment)
 const SEPOLIA_V2_0_ROUTER = '0x784d49a71BB4C48eB7dA4cD7e6Ecb424f9b5EAB1'
+const FUJI_SELECTOR = 14767482510784806043n
 // Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
 const FTF_TOKEN_SEPOLIA = '0xa41a773a7b68e80d4760a176cfec8f50e80d65a7'
 
@@ -146,7 +172,13 @@ async function startForkWithRetries(instance: ReturnType<typeof Instance.anvil>)
   }
 }
 
-describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
+// Generous describe-level budget: a throttled public fork upstream can stall a single
+// test 10x+ (one execute test hit 155s under an RPC storm while its normal runtime is
+// ~12s). The per-test timeouts below bound each test, so a stall fails that test loudly
+// instead of blowing the describe budget and CANCELLING all remaining suites (node
+// --test reports the rest as "did not finish before its parent"). 600s matches
+// dest-liquidity.fork.test.ts.
+describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
   let sepoliaChain: EVMChain | undefined
   let fujiChain: EVMChain | undefined
   let arbSepChain: EVMChain | undefined
@@ -218,13 +250,69 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
   // ── State-mutating tests (sendMessage / execute / ViemTransportProvider) ──
 
   describe('sendMessage', () => {
-    it('should send via v1.5 lane (Sepolia -> Fuji) and emit CCIPSendRequested', async () => {
+    // Resolve a surviving v1.5 lane at runtime (see V1_5_SEPOLIA_CANDIDATES): the
+    // router maps each dest to whatever OnRamp generation currently serves it, so
+    // query each candidate dest's OnRamp + typeAndVersion and take the first 1.5.x.
+    let v1_5Lane: { dest: bigint; label: string } | undefined
+    async function findV1_5SepoliaLane() {
+      if (v1_5Lane) return v1_5Lane
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      for (const candidate of V1_5_SEPOLIA_CANDIDATES) {
+        const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_ROUTER, candidate.dest)
+        const [type, version] = await sepoliaChain.typeAndVersion(onRamp)
+        if (type === 'EVM2EVMOnRamp' && version.startsWith('1.5')) {
+          v1_5Lane = candidate
+          return candidate
+        }
+        testLogger.debug(`  v1.5 candidate ${candidate.label} migrated: ${type} ${version}`)
+      }
+      assert.fail(
+        'no EVM2EVMOnRamp 1.5.x lane remains on the sepolia router; ' +
+          'update V1_5_SEPOLIA_CANDIDATES (query each router getOnRamp + typeAndVersion)',
+      )
+    }
+
+    // First token on the Sepolia→Aptos lane whose pool still carries the aptos
+    // remote (see APTOS_TOKEN_CANDIDATES). The probe runs the exact checkSendMessage
+    // path the send will run (via getFee), so a token that quotes is a token that sends.
+    async function firstSendableAptosToken(
+      walletAddress: string,
+      amount: bigint,
+    ): Promise<(typeof APTOS_TOKEN_CANDIDATES)[number]> {
+      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
+      for (const token of APTOS_TOKEN_CANDIDATES) {
+        try {
+          await sepoliaChain.getFee({
+            router: SEPOLIA_ROUTER,
+            destChainSelector: APTOS_TESTNET_SELECTOR,
+            message: {
+              receiver: walletAddress,
+              data: '0xcafe',
+              tokenAmounts: [{ token, amount }],
+              extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
+            },
+          })
+          return token
+        } catch (err) {
+          testLogger.debug(
+            `  aptos token candidate ${token} not sendable: ${(err as Error).message}`,
+          )
+        }
+      }
+      assert.fail(
+        'no token on the sepolia→aptos lane has a pool with the aptos remote configured; ' +
+          'update APTOS_TOKEN_CANDIDATES',
+      )
+    }
+
+    it('should send via a v1.5 lane and emit CCIPSendRequested', { timeout: 60_000 }, async () => {
       assert.ok(sepoliaChain, 'chain should be initialized')
       const walletAddress = await wallet.getAddress()
+      const lane = await findV1_5SepoliaLane()
 
       const request = await sepoliaChain.sendMessage({
         router: SEPOLIA_ROUTER,
-        destChainSelector: FUJI_SELECTOR,
+        destChainSelector: lane.dest,
         message: { receiver: walletAddress, data: '0x1337' },
         wallet,
       })
@@ -232,7 +320,7 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.ok(request.message.messageId, 'messageId should be defined')
       assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
       assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
-      assert.equal(request.lane.destChainSelector, FUJI_SELECTOR)
+      assert.equal(request.lane.destChainSelector, lane.dest)
       assert.ok(request.tx.hash, 'tx hash should be defined')
 
       // Verify the v1.5 CCIPSendRequested event was emitted
@@ -246,150 +334,168 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should send via v1.6 lane (Sepolia -> Aptos) and emit CCIPMessageSent', async () => {
-      assert.ok(sepoliaChain, 'chain should be initialized')
-      const walletAddress = await wallet.getAddress()
+    it(
+      'should send via v1.6 lane (Sepolia -> Aptos) and emit CCIPMessageSent',
+      { timeout: 60_000 },
+      async () => {
+        assert.ok(sepoliaChain, 'chain should be initialized')
+        const walletAddress = await wallet.getAddress()
 
-      const request = await sepoliaChain.sendMessage({
-        router: SEPOLIA_ROUTER,
-        destChainSelector: APTOS_TESTNET_SELECTOR,
-        message: { receiver: walletAddress, data: '0xdead', extraArgs: { gasLimit: 0n } },
-        wallet,
-      })
+        const request = await sepoliaChain.sendMessage({
+          router: SEPOLIA_ROUTER,
+          destChainSelector: APTOS_TESTNET_SELECTOR,
+          message: { receiver: walletAddress, data: '0xdead', extraArgs: { gasLimit: 0n } },
+          wallet,
+        })
 
-      assert.ok(request.message.messageId, 'messageId should be defined')
-      assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
-      assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
-      assert.equal(request.lane.destChainSelector, APTOS_TESTNET_SELECTOR)
-      assert.ok(request.tx.hash, 'tx hash should be defined')
+        assert.ok(request.message.messageId, 'messageId should be defined')
+        assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
+        assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
+        assert.equal(request.lane.destChainSelector, APTOS_TESTNET_SELECTOR)
+        assert.ok(request.tx.hash, 'tx hash should be defined')
 
-      // Verify the v1.6 CCIPMessageSent event was emitted
-      assert.ok(request.log, 'request should contain the event log')
-      assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
-      assert.ok(request.log.address, 'log should have the onRamp address')
-      assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
-      assert.ok(
-        String(request.message.data).includes('dead'),
-        'message data should contain sent payload',
-      )
-    })
+        // Verify the v1.6 CCIPMessageSent event was emitted
+        assert.ok(request.log, 'request should contain the event log')
+        assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
+        assert.ok(request.log.address, 'log should have the onRamp address')
+        assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
+        assert.ok(
+          String(request.message.data).includes('dead'),
+          'message data should contain sent payload',
+        )
+      },
+    )
 
-    it('should send v1.6 token transfer with extraArgs (Sepolia -> Aptos)', async () => {
-      assert.ok(sepoliaChain, 'chain should be initialized')
-      const provider = wallet.provider as JsonRpcProvider
-      const walletAddress = await wallet.getAddress()
+    it(
+      'should send v1.6 token transfer with extraArgs (Sepolia -> Aptos)',
+      { timeout: 60_000 },
+      async () => {
+        assert.ok(sepoliaChain, 'chain should be initialized')
+        const provider = wallet.provider as JsonRpcProvider
+        const walletAddress = await wallet.getAddress()
 
-      const amount = parseUnits('0.1', 18)
-      await setERC20Balance(provider, APTOS_SUPPORTED_TOKEN, walletAddress, amount)
+        const amount = parseUnits('0.1', 18)
+        const token = await firstSendableAptosToken(walletAddress, amount)
+        await setERC20Balance(provider, token, walletAddress, amount)
 
-      const request = await sepoliaChain.sendMessage({
-        router: SEPOLIA_ROUTER,
-        destChainSelector: APTOS_TESTNET_SELECTOR,
-        message: {
-          receiver: walletAddress,
-          data: '0xcafe',
-          tokenAmounts: [{ token: APTOS_SUPPORTED_TOKEN, amount }],
-          extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
-        },
-        wallet,
-      })
+        const request = await sepoliaChain.sendMessage({
+          router: SEPOLIA_ROUTER,
+          destChainSelector: APTOS_TESTNET_SELECTOR,
+          message: {
+            receiver: walletAddress,
+            data: '0xcafe',
+            tokenAmounts: [{ token, amount }],
+            extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
+          },
+          wallet,
+        })
 
-      // Event log assertions
-      assert.ok(request.log, 'request should contain the event log')
-      assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
-      assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
+        // Event log assertions
+        assert.ok(request.log, 'request should contain the event log')
+        assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
+        assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
 
-      // Message assertions
-      assert.ok(request.message.messageId, 'messageId should be defined')
-      assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
-      assert.ok(
-        String(request.message.data).includes('cafe'),
-        'message data should contain sent payload',
-      )
-      assert.ok(request.message.feeToken, 'feeToken should be defined')
+        // Message assertions
+        assert.ok(request.message.messageId, 'messageId should be defined')
+        assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
+        assert.ok(
+          String(request.message.data).includes('cafe'),
+          'message data should contain sent payload',
+        )
+        assert.ok(request.message.feeToken, 'feeToken should be defined')
 
-      // ExtraArgs assertions (decoded from extraArgs bytes in v1.6 event)
-      const msg = request.message as Record<string, unknown>
-      assert.equal(msg.gasLimit, 0n, 'gasLimit should round-trip as 0')
-      assert.equal(
-        msg.allowOutOfOrderExecution,
-        true,
-        'allowOutOfOrderExecution should round-trip as true',
-      )
+        // ExtraArgs assertions (decoded from extraArgs bytes in v1.6 event)
+        const msg = request.message as Record<string, unknown>
+        assert.equal(msg.gasLimit, 0n, 'gasLimit should round-trip as 0')
+        assert.equal(
+          msg.allowOutOfOrderExecution,
+          true,
+          'allowOutOfOrderExecution should round-trip as true',
+        )
 
-      // Token transfer assertions
-      const tokenAmounts = request.message.tokenAmounts as unknown as Record<string, unknown>[]
-      assert.equal(tokenAmounts.length, 1, 'should have one token transfer')
-      assert.equal(
-        (tokenAmounts[0] as { amount: bigint }).amount,
-        amount,
-        'token amount should round-trip',
-      )
-      assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
-      assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
-    })
+        // Token transfer assertions
+        const tokenAmounts = request.message.tokenAmounts as unknown as Record<string, unknown>[]
+        assert.equal(tokenAmounts.length, 1, 'should have one token transfer')
+        assert.equal(
+          (tokenAmounts[0] as { amount: bigint }).amount,
+          amount,
+          'token amount should round-trip',
+        )
+        assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
+        assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
+      },
+    )
   })
 
   describe('execute', () => {
-    it('should manually execute a failed v1.6 message (Fuji -> Sepolia)', async () => {
-      assert.ok(fujiChain, 'source chain should be initialized')
-      assert.ok(sepoliaChain, 'dest chain should be initialized')
+    it(
+      'should manually execute a failed v1.6 message (Fuji -> Sepolia)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(fujiChain, 'source chain should be initialized')
+        assert.ok(sepoliaChain, 'dest chain should be initialized')
 
-      // 1. Get source transaction and extract CCIPRequest
-      const tx = await fujiChain.getTransaction(SOURCE_TX_HASH)
-      const requests = await fujiChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === MESSAGE_ID) ?? requests[0]!
-      assert.equal(request.message.messageId, MESSAGE_ID, 'should find the expected message')
+        // 1. Get source transaction and extract CCIPRequest
+        const tx = await fujiChain.getTransaction(SOURCE_TX_HASH)
+        const requests = await fujiChain.getMessagesInTx(tx)
+        const request = requests.find((r) => r.message.messageId === MESSAGE_ID) ?? requests[0]!
+        assert.equal(request.message.messageId, MESSAGE_ID, 'should find the expected message')
 
-      // 2. Discover OffRamp on destination chain
-      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
-      assert.ok(offRamp, 'offRamp should be discovered')
+        // 2. Discover OffRamp on destination chain
+        const offRamp = await discoverOffRamp(
+          fujiChain,
+          sepoliaChain,
+          request.lane.onRamp,
+          fujiChain,
+        )
+        assert.ok(offRamp, 'offRamp should be discovered')
 
-      // 3. Get commit store and commit report
-      const verifications = await sepoliaChain.getVerifications({ offRamp, request })
-      assert.ok('report' in verifications, 'commit should have a merkle root')
-      assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
+        // 3. Get commit store and commit report
+        const verifications = await sepoliaChain.getVerifications({ offRamp, request })
+        assert.ok('report' in verifications, 'commit should have a merkle root')
+        assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
 
-      // 4. Get all messages in the commit batch from source
-      const messagesInBatch = await fujiChain.getMessagesInBatch(request, verifications.report, {
-        page: 999,
-      })
+        // 4. Get all messages in the commit batch from source
+        const messagesInBatch = await fujiChain.getMessagesInBatch(request, verifications.report, {
+          page: 999,
+        })
 
-      // 5. Calculate manual execution proof
-      const execReportProof = calculateManualExecProof(
-        messagesInBatch,
-        request.lane,
-        request.message.messageId,
-        verifications.report.merkleRoot,
-        sepoliaChain,
-      )
+        // 5. Calculate manual execution proof
+        const execReportProof = calculateManualExecProof(
+          messagesInBatch,
+          request.lane,
+          request.message.messageId,
+          verifications.report.merkleRoot,
+          sepoliaChain,
+        )
 
-      // 6. Get offchain token data
-      const offchainTokenData = await fujiChain.getOffchainTokenData(request)
+        // 6. Get offchain token data
+        const offchainTokenData = await fujiChain.getOffchainTokenData(request)
 
-      // 7. Build execution report and execute
-      const input = {
-        ...execReportProof,
-        message: request.message,
-        offchainTokenData,
-      } as ExecutionInput
-      const execution = await sepoliaChain.execute({
-        offRamp,
-        input,
-        wallet,
-        gasLimit: 500_000,
-      })
+        // 7. Build execution report and execute
+        const input = {
+          ...execReportProof,
+          message: request.message,
+          offchainTokenData,
+        } as ExecutionInput
+        const execution = await sepoliaChain.execute({
+          offRamp,
+          input,
+          wallet,
+          gasLimit: 500_000,
+        })
 
-      assert.equal(execution.receipt.messageId, MESSAGE_ID, 'receipt messageId should match')
-      assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-      assert.ok(
-        execution.receipt.state === ExecutionState.Success,
-        'execution state should be Success',
-      )
-    })
+        assert.equal(execution.receipt.messageId, MESSAGE_ID, 'receipt messageId should match')
+        assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
+        assert.ok(
+          execution.receipt.state === ExecutionState.Success,
+          'execution state should be Success',
+        )
+      },
+    )
 
-    it('should execute via getExecutionInput (Fuji -> Sepolia)', async () => {
+    it('should execute via getExecutionInput (Fuji -> Sepolia)', { timeout: 120_000 }, async () => {
       assert.ok(fujiChain, 'source chain should be initialized')
       assert.ok(sepoliaChain, 'dest chain should be initialized')
 
@@ -433,174 +539,194 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)', async () => {
-      assert.ok(fujiInstance, 'fuji anvil should be running')
+    it(
+      'should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(fujiInstance, 'fuji anvil should be running')
 
-      // Create a fuji chain with staging API client (execution-inputs endpoint)
-      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
-      const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
-        apiClient: stagingApi,
-        logger: testLogger,
-      })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+        // Create a fuji chain with staging API client (execution-inputs endpoint)
+        const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+        const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
+          apiClient: stagingApi,
+          logger: testLogger,
+        })
+        const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
 
-      // Execute via messageId only — triggers API-driven path
-      const execution = await fujiWithApi.execute({
-        messageId: V2_API_EXEC_MSG.messageId,
-        wallet: w,
-        gasLimit: 500_000,
-      })
+        // Execute via messageId only — triggers API-driven path
+        const execution = await fujiWithApi.execute({
+          messageId: V2_API_EXEC_MSG.messageId,
+          wallet: w,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${V2_API_EXEC_MSG.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
-      )
-      assert.equal(
-        execution.receipt.messageId,
-        V2_API_EXEC_MSG.messageId,
-        'receipt messageId should match',
-      )
-      assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-      assert.equal(execution.receipt.state, ExecutionState.Success)
+        console.log(
+          `  executed ${V2_API_EXEC_MSG.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
+        )
+        assert.equal(
+          execution.receipt.messageId,
+          V2_API_EXEC_MSG.messageId,
+          'receipt messageId should match',
+        )
+        assert.ok(execution.log.transactionHash, 'should have tx hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+        assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      fujiWithApi.provider.destroy()
-    })
+        fujiWithApi.provider.destroy()
+      },
+    )
 
-    it('should execute a v1.5 message via API-driven path (Sepolia -> Fuji)', async () => {
-      assert.ok(fujiInstance, 'fuji anvil should be running')
+    it(
+      'should execute a v1.5 message via API-driven path (Sepolia -> Fuji)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(fujiInstance, 'fuji anvil should be running')
 
-      const messageId = '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07'
+        const messageId = '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07'
 
-      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
-      const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
-        apiClient: stagingApi,
-        logger: testLogger,
-      })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+        const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+        const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
+          apiClient: stagingApi,
+          logger: testLogger,
+        })
+        const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
 
-      const execution = await fujiWithApi.execute({
-        messageId,
-        wallet: w,
-        gasLimit: 500_000,
-      })
+        const execution = await fujiWithApi.execute({
+          messageId,
+          wallet: w,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${messageId.slice(0, 10)}… via API (v1.5 Sepolia→Fuji) → state=${execution.receipt.state}`,
-      )
-      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
-      assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-      assert.equal(execution.receipt.state, ExecutionState.Success)
+        console.log(
+          `  executed ${messageId.slice(0, 10)}… via API (v1.5 Sepolia→Fuji) → state=${execution.receipt.state}`,
+        )
+        assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+        assert.ok(execution.log.transactionHash, 'should have tx hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+        assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      fujiWithApi.provider.destroy()
-    })
+        fujiWithApi.provider.destroy()
+      },
+    )
 
     // TON-source messages were historically problematic due to data quality issues
     // on AtlasDB. This test verifies the API workaround that resolves the issue.
-    it('should execute a TON-source message via API-driven path (TON -> Sepolia)', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+    it(
+      'should execute a TON-source message via API-driven path (TON -> Sepolia)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-      const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
+        const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
 
-      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const sepoliaProvider = new JsonRpcProvider(
-        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-      )
-      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-        apiClient: stagingApi,
-        logger: testLogger,
-      })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+        const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+        const sepoliaProvider = new JsonRpcProvider(
+          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+        )
+        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+          apiClient: stagingApi,
+          logger: testLogger,
+        })
+        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
 
-      // Execute via messageId only — triggers API-driven path
-      const execution = await sepoliaWithApi.execute({
-        messageId,
-        wallet: w,
-        gasLimit: 500_000,
-      })
+        // Execute via messageId only — triggers API-driven path
+        const execution = await sepoliaWithApi.execute({
+          messageId,
+          wallet: w,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
-      )
-      assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
-      assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-      assert.equal(execution.receipt.state, ExecutionState.Success)
+        console.log(
+          `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
+        )
+        assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+        assert.ok(execution.log.transactionHash, 'should have tx hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+        assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.provider.destroy()
-    })
+        sepoliaWithApi.provider.destroy()
+      },
+    )
 
     // Another problematic TON-source message with gasLimit=1 and data payload.
     // Validates the API-driven manual execution path for TON → Sepolia.
-    it('should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+    it(
+      'should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-      const msg = TON_TO_SEPOLIA[0]!
+        const msg = TON_TO_SEPOLIA[0]!
 
-      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const sepoliaProvider = new JsonRpcProvider(
-        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-      )
-      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-        apiClient: stagingApi,
-        logger: testLogger,
-      })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+        const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+        const sepoliaProvider = new JsonRpcProvider(
+          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+        )
+        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+          apiClient: stagingApi,
+          logger: testLogger,
+        })
+        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
 
-      const execution = await sepoliaWithApi.execute({
-        messageId: msg.messageId,
-        wallet: w,
-        gasLimit: 500_000,
-      })
+        const execution = await sepoliaWithApi.execute({
+          messageId: msg.messageId,
+          wallet: w,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
-      )
-      assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
-      assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-      assert.equal(execution.receipt.state, ExecutionState.Success)
+        console.log(
+          `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
+        )
+        assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
+        assert.ok(execution.log.transactionHash, 'should have tx hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+        assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.provider.destroy()
-    })
+        sepoliaWithApi.provider.destroy()
+      },
+    )
 
     // Solana Devnet → Sepolia message whose lane.version reported by the API is "1.6.2".
     // The CCIPVersion enum only knows "1.6.0", so the API-driven manual-exec codepath
     // must normalize patch-level versions to avoid breaking downstream handling
     // (e.g. leaf hasher selection in calculateManualExecProof).
-    it('should execute a Solana-source message via API-driven path (Solana Devnet -> Sepolia)', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+    it(
+      'should execute a Solana-source message via API-driven path (Solana Devnet -> Sepolia)',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-      const msg = SOLANA_DEVNET_TO_SEPOLIA[0]!
+        const msg = SOLANA_DEVNET_TO_SEPOLIA[0]!
 
-      const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
-      const sepoliaProvider = new JsonRpcProvider(
-        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-      )
-      const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-        apiClient: stagingApi,
-        logger: testLogger,
-      })
-      const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+        const stagingApi = new CCIPAPIClient('https://api.ccip.cldev.cloud', { logger: testLogger })
+        const sepoliaProvider = new JsonRpcProvider(
+          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
+        )
+        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+          apiClient: stagingApi,
+          logger: testLogger,
+        })
+        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
 
-      const execution = await sepoliaWithApi.execute({
-        messageId: msg.messageId,
-        wallet: w,
-        gasLimit: 500_000,
-      })
+        const execution = await sepoliaWithApi.execute({
+          messageId: msg.messageId,
+          wallet: w,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${msg.messageId.slice(0, 10)}… via API (Solana source) → state=${execution.receipt.state}`,
-      )
-      assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
-      assert.ok(execution.log.transactionHash, 'should have tx hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-      assert.equal(execution.receipt.state, ExecutionState.Success)
+        console.log(
+          `  executed ${msg.messageId.slice(0, 10)}… via API (Solana source) → state=${execution.receipt.state}`,
+        )
+        assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
+        assert.ok(execution.log.transactionHash, 'should have tx hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+        assert.equal(execution.receipt.state, ExecutionState.Success)
 
-      sepoliaWithApi.provider.destroy()
-    })
+        sepoliaWithApi.provider.destroy()
+      },
+    )
   })
 
   describe('ViemTransportProvider — revert data forwarding', () => {
@@ -637,113 +763,121 @@ describe('EVM Fork Tests', { skip, timeout: 180_000 }, () => {
     // used elsewhere in the suite holds cached nonces from prior tests, which become
     // stale once other chains on the same fork consume nonces for this wallet.
 
-    it('decodes TokenMaxCapacityExceeded custom error on pool-capacity revert', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-      const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
-      const walletAddress = await wallet.getAddress()
+    it(
+      'decodes TokenMaxCapacityExceeded custom error on pool-capacity revert',
+      { timeout: 60_000 },
+      async () => {
+        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+        const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
+        const walletAddress = await wallet.getAddress()
 
-      // Amount = 10× pool's outbound capacity (see overCapacityAmount). Dynamic so the
-      // test survives rate-limit reconfig upstream. `sendMessage` handles approve internally.
-      const oversizedAmount = await overCapacityAmount()
-      const ethersProvider = wallet.provider as JsonRpcProvider
-      await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
+        // Amount = 10× pool's outbound capacity (see overCapacityAmount). Dynamic so the
+        // test survives rate-limit reconfig upstream. `sendMessage` handles approve internally.
+        const oversizedAmount = await overCapacityAmount()
+        const ethersProvider = wallet.provider as JsonRpcProvider
+        await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
 
-      // Build a viem PublicClient pointed at the same Anvil fork, wrap with
-      // ViemTransportProvider, and bind a Wallet to it. Every RPC call
-      // (estimateGas, eth_call, eth_sendTransaction) now flows through the adapter.
-      const viemClient = createPublicClient({
-        chain: { id: SEPOLIA_CHAIN_ID, name: 'Sepolia Fork' } as never,
-        transport: http(anvilUrl),
-      })
-      const viemProvider = new ViemTransportProvider(viemClient as never)
-      const viemWallet = new Wallet(ANVIL_PRIVATE_KEY, viemProvider)
-      const viemChain = await EVMChain.fromProvider(viemProvider, {
-        apiClient: null,
-        logger: testLogger,
-      })
-      // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
-      viemChain.checkSendMessage = async () => true as const
-
-      let caught: unknown
-      try {
-        await viemChain.sendMessage({
-          router: SEPOLIA_V2_0_ROUTER,
-          destChainSelector: FUJI_SELECTOR,
-          message: {
-            receiver: walletAddress,
-            tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
-            extraArgs: { gasLimit: 0n },
-          },
-          wallet: viemWallet,
+        // Build a viem PublicClient pointed at the same Anvil fork, wrap with
+        // ViemTransportProvider, and bind a Wallet to it. Every RPC call
+        // (estimateGas, eth_call, eth_sendTransaction) now flows through the adapter.
+        const viemClient = createPublicClient({
+          chain: { id: SEPOLIA_CHAIN_ID, name: 'Sepolia Fork' } as never,
+          transport: http(anvilUrl),
         })
-      } catch (err) {
-        caught = err
-      }
+        const viemProvider = new ViemTransportProvider(viemClient as never)
+        const viemWallet = new Wallet(ANVIL_PRIVATE_KEY, viemProvider)
+        const viemChain = await EVMChain.fromProvider(viemProvider, {
+          apiClient: null,
+          logger: testLogger,
+        })
+        // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
+        viemChain.checkSendMessage = async () => true as const
 
-      assert.ok(caught, 'sendMessage should throw on over-capacity amount')
+        let caught: unknown
+        try {
+          await viemChain.sendMessage({
+            router: SEPOLIA_V2_0_ROUTER,
+            destChainSelector: FUJI_SELECTOR,
+            message: {
+              receiver: walletAddress,
+              tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
+              extraArgs: { gasLimit: 0n },
+            },
+            wallet: viemWallet,
+          })
+        } catch (err) {
+          caught = err
+        }
 
-      const parsed = EVMChain.parse(caught)
-      assert.ok(parsed, 'EVMChain.parse should return a decoded envelope')
+        assert.ok(caught, 'sendMessage should throw on over-capacity amount')
 
-      const flat = stringifyParsed(parsed)
-      assert.match(
-        flat,
-        /TokenMaxCapacityExceeded/,
-        `viem-adapter path should surface the decoded custom error name. Parsed: ${flat}`,
-      )
+        const parsed = EVMChain.parse(caught)
+        assert.ok(parsed, 'EVMChain.parse should return a decoded envelope')
 
-      viemChain.provider.destroy()
-    })
+        const flat = stringifyParsed(parsed)
+        assert.match(
+          flat,
+          /TokenMaxCapacityExceeded/,
+          `viem-adapter path should surface the decoded custom error name. Parsed: ${flat}`,
+        )
+
+        viemChain.provider.destroy()
+      },
+    )
 
     // Cross-check: same over-capacity send via the ethers-direct chain (sepoliaChain)
     // must produce an equivalent decoded output. Proves the viem adapter achieves
     // functional parity with the ethers-direct baseline.
-    it('produces equivalent decoded output on ethers-direct path', async () => {
-      assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-      const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
-      const walletAddress = await wallet.getAddress()
+    it(
+      'produces equivalent decoded output on ethers-direct path',
+      { timeout: 60_000 },
+      async () => {
+        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+        const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
+        const walletAddress = await wallet.getAddress()
 
-      const oversizedAmount = await overCapacityAmount()
-      const ethersProvider = wallet.provider as JsonRpcProvider
-      await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
+        const oversizedAmount = await overCapacityAmount()
+        const ethersProvider = wallet.provider as JsonRpcProvider
+        await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
 
-      // Dedicated EVMChain for this test (see describe-block preamble).
-      const ethersChainLocal = await EVMChain.fromProvider(new JsonRpcProvider(anvilUrl), {
-        apiClient: null,
-        logger: testLogger,
-      })
-      // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
-      ethersChainLocal.checkSendMessage = async () => true as const
-      const ethersWalletLocal = new Wallet(ANVIL_PRIVATE_KEY, ethersChainLocal.provider)
-
-      let caught: unknown
-      try {
-        await ethersChainLocal.sendMessage({
-          router: SEPOLIA_V2_0_ROUTER,
-          destChainSelector: FUJI_SELECTOR,
-          message: {
-            receiver: walletAddress,
-            tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
-            extraArgs: { gasLimit: 0n },
-          },
-          wallet: ethersWalletLocal,
+        // Dedicated EVMChain for this test (see describe-block preamble).
+        const ethersChainLocal = await EVMChain.fromProvider(new JsonRpcProvider(anvilUrl), {
+          apiClient: null,
+          logger: testLogger,
         })
-      } catch (err) {
-        caught = err
-      }
+        // Bypass SDK preflight so the on-chain TokenMaxCapacityExceeded revert reaches EVMChain.parse.
+        ethersChainLocal.checkSendMessage = async () => true as const
+        const ethersWalletLocal = new Wallet(ANVIL_PRIVATE_KEY, ethersChainLocal.provider)
 
-      assert.ok(caught, 'sendMessage should throw on oversized amount (ethers-direct)')
-      const parsed = EVMChain.parse(caught)
-      assert.ok(parsed, 'EVMChain.parse should decode the revert on ethers-direct path')
+        let caught: unknown
+        try {
+          await ethersChainLocal.sendMessage({
+            router: SEPOLIA_V2_0_ROUTER,
+            destChainSelector: FUJI_SELECTOR,
+            message: {
+              receiver: walletAddress,
+              tokenAmounts: [{ token: FTF_TOKEN_SEPOLIA, amount: oversizedAmount }],
+              extraArgs: { gasLimit: 0n },
+            },
+            wallet: ethersWalletLocal,
+          })
+        } catch (err) {
+          caught = err
+        }
 
-      const flat = stringifyParsed(parsed)
-      assert.match(
-        flat,
-        /TokenMaxCapacityExceeded/,
-        `ethers-direct path should surface the decoded custom error name. Parsed: ${flat}`,
-      )
+        assert.ok(caught, 'sendMessage should throw on oversized amount (ethers-direct)')
+        const parsed = EVMChain.parse(caught)
+        assert.ok(parsed, 'EVMChain.parse should decode the revert on ethers-direct path')
 
-      ethersChainLocal.provider.destroy()
-    })
+        const flat = stringifyParsed(parsed)
+        assert.match(
+          flat,
+          /TokenMaxCapacityExceeded/,
+          `ethers-direct path should surface the decoded custom error name. Parsed: ${flat}`,
+        )
+
+        ethersChainLocal.provider.destroy()
+      },
+    )
   })
 })

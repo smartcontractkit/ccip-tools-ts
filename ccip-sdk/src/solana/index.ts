@@ -38,7 +38,6 @@ import {
   type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
-import { fetchVerifications } from '../commits.ts'
 import {
   CCIPAddressInvalidError,
   CCIPArgumentInvalidError,
@@ -52,6 +51,7 @@ import {
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
   CCIPLogsAddressRequiredError,
+  CCIPPartialTransactionSubmissionError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
@@ -60,6 +60,7 @@ import {
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
+  CCIPTransactionTooLargeError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import {
@@ -138,6 +139,8 @@ import {
 } from './token-admin-registry.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
+  type SolanaSentSlice,
+  type SolanaSplitMode,
   convertRateLimiter,
   getErrorFromLogs,
   hexDiscriminator,
@@ -146,7 +149,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-export type { UnsignedSolanaTx }
+export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
 
 const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
@@ -405,7 +408,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async getTransaction(hash: string): Promise<SolanaTransaction> {
     const tx = await this.connection.getTransaction(hash, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: 1,
     })
     if (!tx)
       throw new CCIPTransactionNotFoundError(hash, { context: { network: this.network.name } })
@@ -828,7 +831,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
         for (const { signature } of sigs) {
           const tx = await this.connection.getTransaction(signature, {
-            maxSupportedTransactionVersion: 0,
+            maxSupportedTransactionVersion: 1,
             commitment: 'confirmed',
           })
           if (!tx) continue
@@ -1409,7 +1412,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * {@inheritDoc Chain.sendMessage}
+   *
+   * Token approvals and `ccipSend` go in a single transaction when they fit, and are split only
+   * on transaction-size or compute-budget failures: a program error (e.g. insufficient fee) is
+   * thrown before the approvals are sent, unless they had to be split off first.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   * @throws {@link CCIPPartialTransactionSubmissionError} if `ccipSend` fails after the approvals
+   *   were split into (and confirmed in) an earlier transaction
    */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
     if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
@@ -1418,7 +1427,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       sender: opts.wallet.publicKey.toBase58(),
     })
 
-    const hash = await simulateAndSendTxs(this, opts.wallet, unsigned, opts.txGasLimit)
+    const { hash } = await simulateAndSendTxs(this, opts.wallet, unsigned, {
+      computeUnits: opts.txGasLimit,
+      split: 'resource',
+    })
     return (await this.getMessagesInTx(await this.getTransaction(hash)))[0]!
   }
 
@@ -1451,7 +1463,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * {@inheritDoc Chain.execute}
+   *
+   * Not atomic: buffering and lookup-table instructions are split across as many transactions as
+   * needed, on any simulation failure, each confirmed before the next one is simulated; a failure
+   * in a later transaction leaves the earlier ones (e.g. buffered report chunks) committed.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
+   * @throws {@link CCIPPartialTransactionSubmissionError} if a transaction fails after earlier
+   *   ones (e.g. buffering) confirmed, and no retry strategy is left
    */
   async execute(
     opts: Parameters<Chain['execute']>[0] & {
@@ -1470,16 +1488,24 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           ...opts,
           payer: wallet.publicKey.toBase58(),
         })
-        hash = await simulateAndSendTxs(this, wallet, unsigned, opts.txGasLimit ?? opts.gasLimit)
+        ;({ hash } = await simulateAndSendTxs(this, wallet, unsigned, {
+          computeUnits: opts.txGasLimit ?? opts.gasLimit,
+        }))
       } catch (err) {
         if (!(err instanceof Error)) throw err
-        if (err.message.includes('AlreadyContainsChunk')) {
+        // a partial submission wraps the failure which picks the retry strategy
+        const cause =
+          err instanceof CCIPPartialTransactionSubmissionError && err.cause instanceof Error
+            ? err.cause
+            : err
+        if (cause.message.includes('AlreadyContainsChunk')) {
           // stale buffer from a previous failed attempt; close it and retry
           if (!opts.clearLeftoverAccounts) {
             opts = { ...opts, clearLeftoverAccounts: true }
           } else throw err
         } else if (
-          ['encoding overruns Uint8Array', 'too large'].some((e) => err.message.includes(e))
+          cause instanceof CCIPTransactionTooLargeError ||
+          ['encoding overruns Uint8Array', 'too large'].some((e) => cause.message.includes(e))
         ) {
           // in case of failure to serialize a report, first try buffering (because it gets
           // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
@@ -1722,16 +1748,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
         optionalThreshold: ccvs.optionalThreshold,
       }
-      const verifications = await fetchVerifications(request.message.messageId, {
-        apiClient: this.apiClient,
-        indexer: opts.indexer ?? this.network.networkType,
-        watch:
-          opts.watch instanceof AbortSignal
-            ? AbortSignal.any([opts.watch, this.abort])
-            : opts.watch
-              ? this.abort
-              : undefined,
-      })
+      const verifications = await this.fetchCCVResults(
+        request.message.messageId,
+        verificationPolicy,
+        opts,
+      )
       return { verificationPolicy, verifications }
     }
     const coveringPdas = await this._getCommitReportPdaAccounts(

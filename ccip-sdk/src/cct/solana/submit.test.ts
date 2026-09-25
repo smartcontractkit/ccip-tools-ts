@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
-  AddressLookupTableAccount,
-  ComputeBudgetProgram,
+  type Connection,
+  type VersionedTransaction,
   Keypair,
+  PublicKey,
   SendTransactionError,
   TransactionExpiredTimeoutError,
   TransactionInstruction,
@@ -12,6 +13,7 @@ import {
 
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
+import type { Wallet } from '../../solana/types.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
 import { createCCTSubmitError, submit } from './submit.ts'
 
@@ -78,115 +80,59 @@ describe('Submit error mapping (cct/solana)', () => {
     assert.equal(err.isTransient, true)
   })
 
-  it('maps program errors to permanent tx failed', () => {
-    const err = createCCTSubmitError(OP, new Error('custom program error: 0x1'))
+  it('maps raw program errors to permanent tx failed', () => {
+    const err = createCCTSubmitError(OP, {
+      InstructionError: [0, { Custom: 6002 }],
+    })
 
     assert.ok(err instanceof CCTTxFailedError)
     assert.equal(err.isTransient, false)
+    assert.match(err.message, /InstructionError/)
   })
 
-  it('does not submit a slice when its simulation rejects', async () => {
-    let sends = 0
-    const chain = {
-      logger: { debug() {}, info() {}, warn() {}, error() {} },
-      connection: {
-        simulateTransaction: async () => ({
-          value: { err: { InstructionError: [2, { Custom: 4 }] }, logs: [] },
-        }),
-        sendTransaction: async () => {
-          sends++
-          return 'unused'
-        },
-      },
-    } as unknown as SolanaChain
+  it('maps a confirmed execution failure and does not return a hash', async () => {
+    const payer = Keypair.generate()
     const wallet = {
-      publicKey: Keypair.generate().publicKey,
-      signTransaction: async <T>(tx: T) => tx,
-    }
-
-    await assert.rejects(
-      submit(
-        chain,
-        wallet,
-        {
-          family: ChainFamily.Solana,
-          instructions: [
-            ComputeBudgetProgram.setComputeUnitLimit({ units: 1 }),
-            ComputeBudgetProgram.setComputeUnitLimit({ units: 2 }),
-          ],
-          mainIndex: 0,
-        },
-        OP,
-      ),
-      CCTTxFailedError,
-    )
-    assert.equal(sends, 0)
-  })
-
-  it('reports confirmed slices when a later slice fails', async () => {
-    const hash = 'confirmed-slice'
-    let simulations = 0
-    const simulationLookupCounts: number[] = []
-    const lookupAddress = Keypair.generate().publicKey
-    const lookupTable = new AddressLookupTableAccount({
-      key: Keypair.generate().publicKey,
-      state: {
-        deactivationSlot: 0xffff_ffff_ffff_ffffn,
-        lastExtendedSlot: 0,
-        lastExtendedSlotStartIndex: 0,
-        authority: undefined,
-        addresses: [lookupAddress],
+      publicKey: payer.publicKey,
+      signTransaction: async (tx: VersionedTransaction) => {
+        tx.sign([payer])
+        return tx
       },
-    })
+    } as unknown as Wallet
     const chain = {
-      logger: { debug() {}, info() {}, warn() {}, error() {} },
       connection: {
-        simulateTransaction: async (tx: { message: { addressTableLookups: unknown[] } }) => {
-          simulationLookupCounts.push(tx.message.addressTableLookups.length)
-          return {
-            value: {
-              err: ++simulations === 1 ? null : { InstructionError: [1, { Custom: 4 }] },
-              logs: [],
-            },
-          }
-        },
         getLatestBlockhash: async () => ({
-          blockhash: Keypair.generate().publicKey.toBase58(),
+          blockhash: PublicKey.default.toBase58(),
           lastValidBlockHeight: 1,
         }),
-        sendTransaction: async () => hash,
-        confirmTransaction: async () => ({ value: { err: null } }),
-      },
+        simulateTransaction: async () => ({
+          value: { err: null, logs: [], unitsConsumed: 1 },
+        }),
+        sendTransaction: async () => 'failed-signature',
+        confirmTransaction: async () => ({
+          value: { err: { InstructionError: [0, 'Custom'] } },
+        }),
+      } as unknown as Connection,
     } as unknown as SolanaChain
-    const wallet = {
-      publicKey: Keypair.generate().publicKey,
-      signTransaction: async <T>(tx: T) => tx,
-    }
-    const instruction = () =>
-      new TransactionInstruction({
-        programId: Keypair.generate().publicKey,
-        keys: [{ pubkey: lookupAddress, isSigner: false, isWritable: false }],
-        data: Buffer.alloc(700),
-      })
 
     await assert.rejects(
-      submit(
-        chain,
-        wallet,
-        {
-          family: ChainFamily.Solana,
-          instructions: [instruction(), instruction()],
-          lookupTables: [lookupTable],
-          mainIndex: 0,
-        },
-        OP,
-      ),
-      (error: unknown) =>
-        error instanceof CCTTxFailedError &&
-        error.message.startsWith('partially applied: 1 transaction(s) confirmed;') &&
-        Array.isArray(error.context.committedHashes) &&
-        error.context.committedHashes[0] === hash,
+      () =>
+        submit(
+          chain,
+          wallet,
+          {
+            family: ChainFamily.Solana,
+            instructions: [
+              new TransactionInstruction({
+                keys: [],
+                programId: PublicKey.default,
+              }),
+            ],
+            mainIndex: 0,
+          },
+          OP,
+        ),
+      (error: unknown) => error instanceof CCTTxFailedError && !error.isTransient,
     )
-    assert.deepEqual(simulationLookupCounts, [1, 1])
   })
 })

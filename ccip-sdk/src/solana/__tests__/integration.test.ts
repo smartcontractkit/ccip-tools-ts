@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
@@ -24,8 +24,6 @@ import { SolanaChain } from '../index.ts'
 // useResourceForDescribe.
 
 const FUJI_RPC = rpcEndpoint('RPC_FUJI')
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
-const SOLANA_DEVNET_RPC = rpcEndpoint('RPC_SOLANA_DEVNET')
 const SOLANA_OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 const SOLANA_V2_SEND_TX =
   '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5'
@@ -39,6 +37,49 @@ const SOLANA_V2_SEND_MESSAGE_ID =
   '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722'
 const EVM_TO_SOLANA_V2_MESSAGE_ID =
   '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f'
+
+/**
+ * Retention-aware health probe for the public devnet endpoints (passed to
+ * {@link raceRpcEndpoint}): an endpoint only wins the race when it answers the
+ * fixture execution tx — the very data the scans here need — inside the race
+ * timeout, so a fast-but-pruned or hard-429ing public endpoint never binds the
+ * suite (CI's shared egress IP trips keyless quotas run to run).
+ */
+const solanaDevnetHealthy = (url: string) =>
+  fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTransaction',
+      params: [SOLANA_V2_EXEC_TX, { maxSupportedTransactionVersion: 1, commitment: 'confirmed' }],
+    }),
+    signal: AbortSignal.timeout(20_000),
+  })
+    .then((res) => res.json() as Promise<{ result?: unknown }>)
+    .then((json) => json.result != null)
+
+/**
+ * Sepolia counterpart: prove the fixture send tx is reachable AND complete (tx +
+ * receipt) — the tests here replay the send tx and consume its logs. A throttled
+ * endpoint aborts each EVM op at EVMChain's 90s per-request bound, which is what
+ * blew this suite's 300s ceiling in CI (two ops ≈ one bound + change).
+ */
+const sepoliaHealthy = async (url: string) => {
+  const body = (method: string) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [EVM_TO_SOLANA_V2_TX] }),
+      signal: AbortSignal.timeout(20_000),
+    }).then((res) => res.json() as Promise<{ result?: unknown }>)
+  const [tx, receipt] = await Promise.all([
+    body('eth_getTransactionByHash'),
+    body('eth_getTransactionReceipt'),
+  ])
+  return tx.result != null && receipt.result != null
+}
 
 // Latest v2 messages on the current (post-redeploy) contracts, for both directions.
 const SOLANA_TO_SEPOLIA_V2_TX =
@@ -289,9 +330,20 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   // Sepolia is the EVM counterpart of several fixtures here (v2 both directions)
   useResourceForDescribe(['solana-devnet', 'sepolia'])
   let solanaChain: SolanaChain
+  let sepoliaRpc: string
 
   before(async () => {
-    solanaChain = await SolanaChain.fromUrl(SOLANA_DEVNET_RPC, {
+    // CI's shared egress IP trips public endpoints' keyless quotas run to run:
+    // race each network's defaults with a fixture-data probe instead of binding
+    // to the first entry — a throttled endpoint stalled this suite past its 300s
+    // ceiling (each slow EVM op aborts at EVMChain's 90s request bound; devnet
+    // signature scans crawl through pacing retries).
+    const [devnetRpc, sepolia] = await Promise.all([
+      raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      raceRpcEndpoint('RPC_SEPOLIA', sepoliaHealthy),
+    ])
+    sepoliaRpc = sepolia
+    solanaChain = await SolanaChain.fromUrl(devnetRpc, {
       apiClient: null,
       logger: testLogger,
     })
@@ -348,7 +400,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should fetch EVM to Solana v2 OffRamp executions without verifications', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
 
@@ -396,7 +448,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should resolve v2 verifications policy via get_ccvs_for_msg (RMN accounts) without a simulation panic', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
     const tx = await source.getTransaction(EVM_TO_SOLANA_V2_TX)
@@ -437,7 +489,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     async function runAssertions() {
       await using disposer = new AsyncDisposableStack()
       const dest = disposer.adopt(
-        await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+        await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
         (dest) => dest.provider.destroy(),
       )
 
@@ -461,7 +513,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   it('should fetch the latest Sepolia -> Solana v2 execution', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
-      await EVMChain.fromUrl(SEPOLIA_RPC, { apiClient: null, logger: testLogger }),
+      await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
       (source) => source.provider.destroy(),
     )
 
@@ -501,10 +553,13 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
   let chain: SolanaChain | undefined
 
   before(async () => {
-    chain = await SolanaChain.fromUrl(SOLANA_DEVNET_RPC, {
-      apiClient: null,
-      logger: testLogger,
-    })
+    chain = await SolanaChain.fromUrl(
+      await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      {
+        apiClient: null,
+        logger: testLogger,
+      },
+    )
   })
 
   after(async () => {})

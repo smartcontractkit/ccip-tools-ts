@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 
+import { CCIPAbortError, CCIPTimeoutError } from './errors/index.ts'
 import {
   createAxiosFetchAdapter,
   createRateLimitedFetch,
   endpointKey,
   fetchProfileForUrl,
+  fetchWithTimeout,
   getEndpointLogRange,
   getEndpointTopicLimit,
   originKey,
@@ -702,14 +707,18 @@ describe('createRateLimitedFetch', () => {
     )
     assert.equal(result.ok, true)
     assert.equal(seenSignals.length, 3)
-    // No per-attempt re-wrap: attempts 1..3 must all see the SAME merged signal.
+    // No per-attempt re-wrap: attempts 1..3 must all see the SAME linked signal.
     assert.ok(seenSignals[0])
     assert.equal(seenSignals[1], seenSignals[0])
     assert.equal(seenSignals[2], seenSignals[0])
-    // It must still reflect BOTH sources (composite semantics preserved).
+    // The (bodiless) responses settled, so the link already detached: a later
+    // source abort must not propagate into a completed request — that permanent
+    // coupling is exactly what pinned composites on long-lived sources.
     assert.equal(seenSignals[0]!.aborted, false)
+    assert.equal(getEventListeners(callerAc.signal, 'abort').length, 0)
+    assert.equal(getEventListeners(ctxAc.signal, 'abort').length, 0)
     callerAc.abort()
-    assert.equal(seenSignals[0]!.aborted, true)
+    assert.equal(seenSignals[0]!.aborted, false)
 
     // Without a per-request signal, the ctx abort itself is passed through
     // verbatim (no composite is created at all).
@@ -731,6 +740,26 @@ describe('createRateLimitedFetch', () => {
     )('https://rl-test-signal-once2.example.com')
     assert.equal(callCount, 1)
     assert.equal(seenSignals[0], ctxAc.signal)
+
+    // In flight, the linked signal still reflects EITHER source aborting.
+    globalThis.fetch = mockedFetch = mock.fn(
+      (_input: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal
+          // like undici: an already-aborted signal rejects immediately
+          if (signal.aborted) return reject(signal.reason)
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    const callerAc2 = new AbortController()
+    const ctxAc2 = new AbortController()
+    const pending = createRateLimitedFetch({}, { abort: ctxAc2.signal })(
+      'https://rl-test-signal-inflight.example.com',
+      { signal: callerAc2.signal },
+    )
+    // after the limiter/semaphore microtasks, when the fetch is truly in flight
+    setTimeout(() => callerAc2.abort(), 0)
+    await assert.rejects(pending, /aborted/i)
   })
 
   it('should handle network errors with retry logic', async () => {
@@ -1218,5 +1247,173 @@ describe('redactEndpointUrl', () => {
     const flat = JSON.stringify(debugCalls)
     assert.ok(!flat.includes(KEY), 'the endpoint credential must never reach the logger')
     assert.ok(flat.includes('https://ton-gateway.example.com/api/v2'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// abort-signal lifetime: linked signals detach when the response body settles
+// ---------------------------------------------------------------------------
+
+/** Exposes V8's GC for this process (node --test does not pass --expose-gc). */
+function forceGc(): () => void {
+  const direct = globalThis.gc as (() => void) | undefined
+  if (direct) return () => void direct()
+  setFlagsFromString('--expose_gc')
+  return runInNewContext('gc') as () => void
+}
+
+describe('fetchWithTimeout abort lifetime', () => {
+  it('detaches the caller signal once the body is consumed', async () => {
+    const caller = new AbortController()
+    let seen: AbortSignal | undefined
+    const stubFetch = mock.fn(async (_input: unknown, init?: RequestInit) => {
+      seen = init?.signal as AbortSignal
+      return new Response('{"ok":true}')
+    })
+    const res = await fetchWithTimeout('https://example.com/x', 'test', {
+      fetch: stubFetch as unknown as typeof fetch,
+      signal: caller.signal,
+    })
+    // linked while the body is still streaming
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 1)
+    assert.ok(seen && seen !== caller.signal, 'fetch must receive the linked signal')
+    assert.equal(await res.text(), '{"ok":true}')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+
+  it('keeps propagating aborts while the body streams', async () => {
+    const caller = new AbortController()
+    let fail: (reason: unknown) => void = () => {}
+    const stubFetch = mock.fn(async (_input: unknown, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('part1'))
+          fail = (reason) => controller.error(reason)
+        },
+      })
+      // what undici does: error the body when the request signal fires
+      signal.addEventListener('abort', () => fail(signal.reason), { once: true })
+      return new Response(body)
+    })
+    const res = await fetchWithTimeout('https://example.com/stream', 'test', {
+      fetch: stubFetch as unknown as typeof fetch,
+      signal: caller.signal,
+    })
+    const reader = res.body!.getReader()
+    assert.deepEqual((await reader.read()).value, new TextEncoder().encode('part1'))
+    const stop = new Error('stop')
+    caller.abort(stop)
+    await assert.rejects(reader.read(), (err: unknown) => err === stop)
+    // a fired link detaches itself
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+
+  it('maps a stalled request to CCIPTimeoutError and cleans up', async () => {
+    const caller = new AbortController()
+    const stubFetch = mock.fn(
+      (_input: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    await assert.rejects(
+      fetchWithTimeout('https://example.com/slow', 'op', {
+        fetch: stubFetch as unknown as typeof fetch,
+        signal: caller.signal,
+        timeoutMs: 20,
+      }),
+      (err: unknown) => err instanceof CCIPTimeoutError,
+    )
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+
+  it('maps a caller abort to CCIPAbortError', async () => {
+    const caller = new AbortController()
+    const stubFetch = mock.fn(
+      (_input: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    const pending = fetchWithTimeout('https://example.com/never', 'op', {
+      fetch: stubFetch as unknown as typeof fetch,
+      signal: caller.signal,
+      timeoutMs: 60_000,
+    })
+    caller.abort()
+    await assert.rejects(pending, (err: unknown) => err instanceof CCIPAbortError)
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+})
+
+describe('createRateLimitedFetch abort lifetime', () => {
+  let originalFetch: typeof fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('detaches merged caller and ctx signals once the body settles', async () => {
+    const ctx = new AbortController()
+    const caller = new AbortController()
+    globalThis.fetch = mock.fn(async () => new Response('{"ok":true}'))
+    const rateLimitedFetch = createRateLimitedFetch({}, { abort: ctx.signal })
+    const res = await rateLimitedFetch('https://rl-abort-life-1.example.com', {
+      signal: caller.signal,
+    })
+    assert.equal(getEventListeners(ctx.signal, 'abort').length, 1)
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 1)
+    assert.equal(await res.text(), '{"ok":true}')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(getEventListeners(ctx.signal, 'abort').length, 0)
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+
+  it('detaches immediately on a terminal error', async () => {
+    const ctx = new AbortController()
+    const caller = new AbortController()
+    globalThis.fetch = mock.fn(async () => {
+      throw new Error('permanent failure')
+    })
+    const rateLimitedFetch = createRateLimitedFetch({}, { abort: ctx.signal })
+    await assert.rejects(
+      rateLimitedFetch('https://rl-abort-life-2.example.com', { signal: caller.signal }),
+      /permanent failure/,
+    )
+    assert.equal(getEventListeners(ctx.signal, 'abort').length, 0)
+    assert.equal(getEventListeners(caller.signal, 'abort').length, 0)
+  })
+
+  it('releases caller-created nested composites once the body settles (GC)', async () => {
+    // The pre-fix deployed evm getUrlFunc shape: a bare AbortSignal.any
+    // composite over a kTimeout source, never listened to directly — pinned in
+    // gcPersistentSignals for the process's lifetime (.repro-abort S1). The
+    // downstream link's attach/detach must release even that (S7).
+    const gc = forceGc()
+    const ctx = new AbortController()
+    globalThis.fetch = mock.fn(async () => new Response('{"ok":true}'))
+    const rateLimitedFetch = createRateLimitedFetch({}, { abort: ctx.signal })
+    const N = 20
+    const callers: WeakRef<AbortSignal>[] = []
+    for (let i = 0; i < N; i++) {
+      const caller = AbortSignal.any([new AbortController().signal, AbortSignal.timeout(60_000)])
+      callers.push(new WeakRef(caller))
+      const res = await rateLimitedFetch('https://rl-abort-life-3.example.com', { signal: caller })
+      await res.text()
+    }
+    for (let i = 0; i < 8; i++) gc()
+    await new Promise((resolve) => setImmediate(resolve))
+    for (let i = 0; i < 8; i++) gc()
+    // The final iteration's bindings can stay reachable from the frame.
+    const alive = callers.filter((r) => r.deref()).length
+    assert.ok(alive <= 1, `caller composites still reachable: ${alive}/${N}`)
   })
 })

@@ -35,6 +35,55 @@ The `manual-exec` command allows you to manually trigger the execution of a CCIP
 
 ## Options
 
+### Verification Sources
+
+| Option                      | Type  | Default | Description                                                                                                              |
+| --------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--verifier`, `--verifiers` | array | -       | Verifier endpoint URLs to read CCV attestations from directly, when the CCIP API and indexers don't cover the CCV policy |
+| `--ccv-data`                | array | -       | Supply an attestation obtained out of band, as `<dest-ccv-address>=<0x-hex>`                                             |
+
+A CCV that no indexer has onboarded cannot be executed from the managed sources alone: the indexer
+has no result for its messages and the CCIP API reports no verification, even though the
+attestation is available from the verifier itself. `--verifier` reads it from there.
+
+The CCIP API and indexers are always asked first, and their partial answers are kept. The verifier
+endpoints are then tried in the order given, one at a time, until the destination's CCV policy (every
+required CCV, plus the optional threshold) is covered. Each attestation a verifier returns counts for
+the destination CCV it names, so one list can serve several CCVs, and a later endpoint acts as a
+failover for an earlier one:
+
+```bash
+ccip-cli manual-exec <src-tx> \
+  --verifier grpc://aggregator-a-primary:443 \
+  --verifier grpc://aggregator-a-backup:443 \
+  --verifier https://verifier-b.example
+```
+
+**Endpoint URLs:** the scheme selects the protocol.
+
+| Scheme                | Protocol                                                      |
+| --------------------- | ------------------------------------------------------------- |
+| `https://`, `http://` | grpc-web, e.g. an aggregator behind an Envoy `grpc_web` proxy |
+| `grpc://`, `grpcs://` | native gRPC over TLS                                          |
+| `grpc+plaintext://`   | native gRPC without TLS (e.g. a local devenv)                 |
+
+Coverage is checked before anything is signed. If the policy is still not covered, the command
+fails with a "not verified yet" error that names the missing CCVs and why each verifier failed,
+instead of an onchain `RequiredCCVMissing` revert.
+
+When no source is reachable, supply the bytes yourself:
+
+```bash
+ccip-cli manual-exec <src-tx> --ccv-data 0xAAA...=0x0001000100407602...
+```
+
+`--ccv-data` wins over fetched attestations for the same CCV. Validity is decided onchain by the
+CCV's `verifyMessage`, so wrong bytes can only waste the sender's gas; they cannot make a bad
+message execute.
+
+Both options apply to CCIP v2.0 messages, with a message ID or a transaction hash. They also work
+without a source-chain RPC: the encoded message and OffRamp then come from the CCIP API.
+
 ### Message Selection
 
 | Option        | Type   | Default | Description                                                                            |

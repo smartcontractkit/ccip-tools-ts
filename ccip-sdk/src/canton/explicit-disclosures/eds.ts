@@ -1,3 +1,11 @@
+import {
+  type CantonAddress,
+  type PartyId,
+  InstanceAddress,
+  RawInstanceAddress,
+  parseInstanceAddress,
+} from '../addressCodec.ts'
+import { CCIPError } from '../../errors/index.ts'
 import { get, post } from '../client/client.ts'
 import type { DisclosedContract } from './types.ts'
 
@@ -35,10 +43,11 @@ export interface EdsTokenTransfer {
   holdingContractIds: string[]
 }
 
-/** CCIP message shape accepted by the global and external EDS endpoints. */
+/** Outgoing CCIP message shape to be sent from Canton
+ * accepted by the global and external EDS endpoints. */
 export interface EdsMessage {
   destinationChainSelector: string
-  sender: string
+  sender: PartyId
   receiver: string
   payload: string
   tokenTransfer: EdsTokenTransfer | null
@@ -60,8 +69,8 @@ export interface EdsTokenInput {
 export interface EdsSendResult {
   contextData: Record<string, unknown>
   disclosedContracts: DisclosedContract[]
-  ccvs: string[]
-  executor?: string
+  ccvs: CantonAddress[]
+  executor?: CantonAddress
   feeTokenConfigCid: string
 }
 
@@ -69,21 +78,21 @@ export interface EdsSendResult {
 export interface EdsExecuteResult {
   contextData: Record<string, unknown>
   disclosedContracts: DisclosedContract[]
-  tokenPool?: string
+  tokenPool?: RawInstanceAddress
 }
 
 /** Result of external CCV and Executor disclosure endpoints. */
 export interface EdsExternalDisclosureResult {
   contractId: string
-  instanceAddress: string
-  rawInstanceAddress: string
+  instanceAddress: InstanceAddress
+  rawInstanceAddress: RawInstanceAddress
   contextData: Record<string, unknown>
   disclosedContracts: DisclosedContract[]
 }
 
 /** Result of external Token Pool send/execute disclosure endpoints. */
 export interface EdsTokenPoolDisclosureResult extends EdsExternalDisclosureResult {
-  requiredCCVs: string[]
+  requiredCCVs: CantonAddress[]
   tokenInput?: EdsTokenInput
 }
 
@@ -133,16 +142,12 @@ interface EdsExternalDisclosureResponse {
 }
 
 interface EdsTokenPoolDisclosureResponse extends EdsExternalDisclosureResponse {
-  requiredCCVs?: string[]
+  requiredCCVs: string[]
   tokenInput?: EdsTokenInput
 }
 
 interface EdsTokenAdminRegistryResponse {
-  tokenPool?: string
-  pool?: string
-  instanceAddress?: string
   rawInstanceAddress?: string
-  address?: string
 }
 
 interface EdsPerPartyRouterFactoryResponse {
@@ -175,13 +180,6 @@ function stripTrailingSlash(url: string): string {
   return url.replace(/\/$/, '')
 }
 
-function ownerFromRawAddress(address: string): string | undefined {
-  const rawSeparator = address.indexOf('@')
-  if (rawSeparator < 0) return undefined
-  const owner = address.slice(rawSeparator + 1)
-  return owner.length > 0 ? owner : undefined
-}
-
 /**
  * Disclosure provider that speaks the split CCIP EDS API:
  * global CCIP endpoints plus owner-hosted Token Pool, CCV, and Executor endpoints.
@@ -208,38 +206,73 @@ export class EdsDisclosureProvider {
   /**
    * Resolve the EDS base URL for an external endpoint owner.
    *
-   * Raw addresses (`instanceId@owner`) select `externalEdsUrlsByOwner[owner]`
-   * when configured; hashed addresses and unmapped owners fall back to the
+   * RawInstanceAddresses select `externalEdsUrlsByOwner[owner]`
+   * when configured; InstanceAddresses and unmapped owners fall back to the
    * global EDS base URL.
    */
-  externalBaseUrlFor(address: string): string {
-    const owner = ownerFromRawAddress(address)
-    return (owner ? this.externalEdsUrlsByOwner[owner] : undefined) ?? this.edsBaseUrl
+  externalBaseUrlFor(address: CantonAddress): string {
+    if (address instanceof RawInstanceAddress) {
+      return this.externalEdsUrlsByOwner[address.owner] ?? this.edsBaseUrl
+    }
+    return this.edsBaseUrl
   }
 
   /** Fetch the token pool registered for a hashed Canton instrument ID. */
-  async lookupTokenPool(instrumentIdHash: string): Promise<string> {
+  async lookupTokenPool(instrumentIdHash: string): Promise<RawInstanceAddress | undefined> {
     const resp = await get<EdsTokenAdminRegistryResponse>(
       this.edsBaseUrl,
       `/ccip/v1/global/TokenAdminRegistry/token/${encodeURIComponent(instrumentIdHash)}`,
       EDS_HEADERS,
       this.timeoutMs,
     )
-    return (
-      resp.tokenPool ??
-      resp.pool ??
-      resp.rawInstanceAddress ??
-      resp.instanceAddress ??
-      resp.address ??
-      ''
-    )
+    return resp.rawInstanceAddress
+      ? RawInstanceAddress.fromString(resp.rawInstanceAddress)
+      : undefined
+  }
+
+  /**
+   * Fetch a single contract's disclosure by instance address (raw or hashed).
+   *
+   * `POST /ccip/v1/global/disclosure/batch` with a one-element `addresses`
+   * array — the batch endpoint is the EDS's generic disclosure lookup,
+   * intended for shared CCIP singletons (e.g. the TokenAdminRegistry) whose
+   * only stakeholder is ccipOwner: callers whose participant does not host
+   * ccipOwner cannot ACS-read these contracts, so the disclosure comes from
+   * the service instead. Unknown address (404) or empty response → `null`
+   * (caller falls back to ACS resolution); other failures (network, 5xx)
+   * throw rather than being swallowed.
+   *
+   * The response carries no signatories — callers derive the owner from the
+   * raw address form (`instanceId@owner`) when needed.
+   */
+  async fetchContractDisclosure(
+    _templateId: string,
+    instanceAddress: string,
+  ): Promise<(DisclosedContract & { signatories?: string[] }) | null> {
+    try {
+      const resp = await post<{ disclosures?: EdsApiDisclosedContract[] }>(
+        this.edsBaseUrl,
+        '/ccip/v1/global/disclosure/batch',
+        EDS_HEADERS,
+        this.timeoutMs,
+        { addresses: [instanceAddress] },
+      )
+      const contract = resp.disclosures?.[0]
+      if (!contract?.contractId || !contract.createdEventBlob) return null
+      return edsContractToSdk(contract)
+    } catch (err) {
+      // Unknown address (404) → null so the caller falls back to ACS
+      // resolution; anything else (network, 5xx, parse) must surface.
+      if (err instanceof CCIPError && err.context['statusCode'] === 404) return null
+      throw err
+    }
   }
 
   /** Fetch global send disclosures for a CCIP message. */
   async fetchSendDisclosures(
     message: EdsMessage,
-    senderRequiredCCVs: readonly string[] = [],
-    tokenPoolRequiredCCVs: readonly string[] = [],
+    senderRequiredCCVs: readonly CantonAddress[] = [],
+    tokenPoolRequiredCCVs: readonly CantonAddress[] = [],
   ): Promise<EdsSendResult> {
     const resp = await post<EdsGlobalSendResponse>(
       this.edsBaseUrl,
@@ -248,27 +281,27 @@ export class EdsDisclosureProvider {
       this.timeoutMs,
       {
         message,
-        senderRequiredCCVs: [...senderRequiredCCVs],
-        tokenPoolRequiredCCVs: [...tokenPoolRequiredCCVs],
+        senderRequiredCCVs: senderRequiredCCVs.map((addr) => addr.instanceAddress().hex()),
+        tokenPoolRequiredCCVs: tokenPoolRequiredCCVs.map((addr) => addr.instanceAddress().hex()),
       },
     )
     return {
       contextData: contextDataOrEmpty(resp.contextData),
       disclosedContracts: contractsOrEmpty(resp.disclosedContracts),
-      ccvs: resp.ccvs ?? [],
-      executor: resp.executor,
+      ccvs: resp.ccvs?.map(parseInstanceAddress) ?? [],
+      executor: parseInstanceAddress(resp.executor),
       feeTokenConfigCid: resp.feeTokenConfigCid ?? '',
     }
   }
 
   /** Fetch external Token Pool send disclosures. */
   async fetchTokenPoolSendDisclosure(
-    address: string,
+    address: CantonAddress,
     message: EdsMessage,
   ): Promise<EdsTokenPoolDisclosureResult> {
     const resp = await post<EdsTokenPoolDisclosureResponse>(
       this.externalBaseUrlFor(address),
-      `/ccip/v1/external/tokenPool/${encodeURIComponent(address)}/send`,
+      `/ccip/v1/external/tokenPool/${encodeURIComponent(address.instanceAddress().hex())}/send`,
       EDS_HEADERS,
       this.timeoutMs,
       { message },
@@ -278,12 +311,12 @@ export class EdsDisclosureProvider {
 
   /** Fetch external CCV send disclosures. */
   async fetchCcvSendDisclosure(
-    address: string,
+    address: CantonAddress,
     message: EdsMessage,
   ): Promise<EdsExternalDisclosureResult> {
     const resp = await post<EdsExternalDisclosureResponse>(
       this.externalBaseUrlFor(address),
-      `/ccip/v1/external/ccv/${encodeURIComponent(address)}/send`,
+      `/ccip/v1/external/ccv/${encodeURIComponent(address.instanceAddress().hex())}/send`,
       EDS_HEADERS,
       this.timeoutMs,
       { message },
@@ -293,13 +326,13 @@ export class EdsDisclosureProvider {
 
   /** Fetch external Executor send disclosures. */
   async fetchExecutorSendDisclosure(
-    address: string,
+    address: CantonAddress,
     message: EdsMessage,
-    ccvs: readonly string[],
+    ccvs: readonly CantonAddress[],
   ): Promise<EdsExternalDisclosureResult> {
     const resp = await post<EdsExternalDisclosureResponse>(
       this.externalBaseUrlFor(address),
-      `/ccip/v1/external/executor/${encodeURIComponent(address)}/send`,
+      `/ccip/v1/external/executor/${encodeURIComponent(address.instanceAddress().hex())}/send`,
       EDS_HEADERS,
       this.timeoutMs,
       { message, ccvs: [...ccvs] },
@@ -310,7 +343,7 @@ export class EdsDisclosureProvider {
   /** Fetch global execute disclosures for an encoded CCIP message. */
   async fetchExecutionDisclosures(
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsExecuteResult> {
     const resp = await post<EdsGlobalExecuteResponse>(
       this.edsBaseUrl,
@@ -322,19 +355,19 @@ export class EdsDisclosureProvider {
     return {
       contextData: contextDataOrEmpty(resp.contextData),
       disclosedContracts: contractsOrEmpty(resp.disclosedContracts),
-      tokenPool: resp.tokenPool,
+      tokenPool: resp.tokenPool ? RawInstanceAddress.fromString(resp.tokenPool) : undefined,
     }
   }
 
   /** Fetch external Token Pool execute disclosures. */
   async fetchTokenPoolExecuteDisclosure(
-    address: string,
+    address: CantonAddress,
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsTokenPoolDisclosureResult> {
     const resp = await post<EdsTokenPoolDisclosureResponse>(
       this.externalBaseUrlFor(address),
-      `/ccip/v1/external/tokenPool/${encodeURIComponent(address)}/execute`,
+      `/ccip/v1/external/tokenPool/${encodeURIComponent(address.instanceAddress().hex())}/execute`,
       EDS_HEADERS,
       this.timeoutMs,
       { encodedMessage, receiver },
@@ -344,13 +377,13 @@ export class EdsDisclosureProvider {
 
   /** Fetch external CCV execute disclosures. */
   async fetchCcvExecuteDisclosure(
-    address: string,
+    address: CantonAddress,
     encodedMessage: string,
-    receiver: string,
+    receiver: PartyId,
   ): Promise<EdsExternalDisclosureResult> {
     const resp = await post<EdsExternalDisclosureResponse>(
       this.externalBaseUrlFor(address),
-      `/ccip/v1/external/ccv/${encodeURIComponent(address)}/execute`,
+      `/ccip/v1/external/ccv/${encodeURIComponent(address.instanceAddress().hex())}/execute`,
       EDS_HEADERS,
       this.timeoutMs,
       { encodedMessage, receiver },
@@ -363,7 +396,7 @@ export class EdsDisclosureProvider {
    * using the PerPartyRouterFactory.
    */
   async fetchPerPartyRouterFactoryDisclosures(
-    partyID: string,
+    partyID: PartyId,
   ): Promise<EdsPerPartyRouterFactoryResult> {
     const resp = await post<EdsPerPartyRouterFactoryResponse>(
       this.edsBaseUrl,
@@ -385,8 +418,8 @@ export class EdsDisclosureProvider {
   private rawExternalResult(resp: EdsExternalDisclosureResponse): EdsExternalDisclosureResult {
     return {
       contractId: resp.contractId,
-      instanceAddress: resp.instanceAddress,
-      rawInstanceAddress: resp.rawInstanceAddress,
+      instanceAddress: InstanceAddress.fromHex(resp.instanceAddress),
+      rawInstanceAddress: RawInstanceAddress.fromString(resp.rawInstanceAddress),
       contextData: contextDataOrEmpty(resp.contextData),
       disclosedContracts: contractsOrEmpty(resp.disclosedContracts),
     }
@@ -396,7 +429,7 @@ export class EdsDisclosureProvider {
   private rawTokenPoolResult(resp: EdsTokenPoolDisclosureResponse): EdsTokenPoolDisclosureResult {
     return {
       ...this.rawExternalResult(resp),
-      requiredCCVs: resp.requiredCCVs ?? [],
+      requiredCCVs: resp.requiredCCVs.map(parseInstanceAddress),
       tokenInput: resp.tokenInput,
     }
   }

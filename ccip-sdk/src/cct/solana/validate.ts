@@ -11,7 +11,11 @@ import {
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import {
+  CCTParamsInvalidError,
+  CCTTokenAccountMintMismatchError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import {
   type PoolProgramRef,
   type TokenPoolType,
@@ -83,6 +87,76 @@ export function validateOptionalPublicKey(
 export function validatePublicKeys(operation: string, param: string, values: unknown): void {
   if (!Array.isArray(values)) throw new CCTParamsInvalidError(operation, param, 'must be an array')
   for (const [i, value] of values.entries()) validatePublicKey(operation, `${param}[${i}]`, value)
+}
+
+/**
+ * Asserts public keys do not contain duplicates.
+ * @throws CCTParamsInvalidError if a public key is duplicated.
+ */
+export function validateUniquePublicKeys(
+  operation: string,
+  param: string,
+  publicKeys: PublicKey[],
+): void {
+  const seen = new Set<string>()
+  for (const [i, publicKey] of publicKeys.entries()) {
+    const address = publicKey.toBase58()
+    if (seen.has(address)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate addresses',
+      )
+    }
+    seen.add(address)
+  }
+}
+
+/**
+ * Asserts bigint chain selectors do not contain duplicates.
+ * @remarks Silently ignores non-bigint entries; relies on downstream `validateBigInt` for type safety.
+ * @throws CCTParamsInvalidError if a chain selector is duplicated.
+ */
+export function validateUniqueChainSelectors(
+  operation: string,
+  param: string,
+  selectors: unknown[],
+): void {
+  const seen = new Set<bigint>()
+  for (const [i, selector] of selectors.entries()) {
+    if (typeof selector === 'bigint' && seen.has(selector)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        'must not contain duplicate chain selectors',
+      )
+    }
+    if (typeof selector === 'bigint') seen.add(selector)
+  }
+}
+
+/**
+ * Asserts hex byte values do not contain duplicates.
+ * @throws CCTParamsInvalidError if a hex byte value is duplicated.
+ */
+export function validateUniqueHexBytes(
+  operation: string,
+  param: string,
+  values: Buffer[],
+  label = 'hex values',
+): void {
+  const seen = new Set<string>()
+  for (const [i, value] of values.entries()) {
+    const hex = value.toString('hex')
+    if (seen.has(hex)) {
+      throw new CCTParamsInvalidError(
+        operation,
+        `${param}[${i}]`,
+        `must not contain duplicate ${label}`,
+      )
+    }
+    seen.add(hex)
+  }
 }
 
 /**
@@ -341,13 +415,18 @@ export async function validatePoolLiquidityConfig(
 /**
  * Resolves an existing token account, defaulting to the holder's associated token account.
  * @throws {@link CCIPTokenAccountNotFoundError} If the token account does not exist.
+ * @throws {@link CCTTokenAccountMintMismatchError} If an explicitly supplied token account belongs to a different mint.
  */
 export async function resolveExistingTokenAccount(
   connection: Connection,
   tokenAddress: PublicKey,
   holder: PublicKey,
   tokenAccount?: PublicKey,
-): Promise<{ tokenAccount: PublicKey; tokenProgram: PublicKey; account: Account }> {
+): Promise<{
+  tokenAccount: PublicKey
+  tokenProgram: PublicKey
+  account: Account
+}> {
   const { ata, tokenProgram } = await resolveATA(connection, tokenAddress, holder)
   const account = tokenAccount ?? ata
   let tokenAccountInfo: Account
@@ -359,6 +438,14 @@ export async function resolveExistingTokenAccount(
       throw new CCIPTokenAccountNotFoundError(tokenAddress.toBase58(), holder.toBase58())
     }
     throw error
+  }
+
+  if (tokenAccount && !tokenAccountInfo.mint.equals(tokenAddress)) {
+    throw new CCTTokenAccountMintMismatchError(
+      account.toBase58(),
+      tokenAddress.toBase58(),
+      tokenAccountInfo.mint.toBase58(),
+    )
   }
 
   return { tokenAccount: account, tokenProgram, account: tokenAccountInfo }

@@ -92,7 +92,6 @@ const chain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
     edsUrl: 'https://eds.example.com',
     transferInstructionUrl: 'https://transfer-instruction.example.com',
     indexerUrl: 'https://indexer.example.com',
-    senderInstanceId: 'ccipsender',
     chainId: 'canton:TestNet',
   },
 })
@@ -112,6 +111,8 @@ const chain = await EVMChain.fromUrl('https://rpc.sepolia.org', {
   apiClient: null,         // Disable CCIP API (RPC-only mode)
 })
 ```
+
+Some chains consult secondary "public-indexer-like" endpoints internally (TON's TonCenter v3 index, Aptos' GraphQL indexer, the CCIP verifier indexers, …) — each has a ctx override with a documented default. See [Chain Endpoints & Indexers](/sdk/guides/chain-endpoints).
 
 ## Unified Interface
 

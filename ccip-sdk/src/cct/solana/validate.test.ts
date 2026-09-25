@@ -5,7 +5,11 @@ import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import {
+  CCTParamsInvalidError,
+  CCTTokenAccountMintMismatchError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
   parseHexBytes,
@@ -23,6 +27,9 @@ import {
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
+  validateUniqueChainSelectors,
+  validateUniqueHexBytes,
+  validateUniquePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
 
@@ -228,6 +235,51 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
+  it('rejects duplicate public keys', () => {
+    const address = PublicKey.default
+    assert.throws(
+      () => validateUniquePublicKeys('op', 'addresses', [address, address]),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'addresses[1]',
+    )
+  })
+
+  it('rejects duplicate chain selectors', () => {
+    assert.doesNotThrow(() => validateUniqueChainSelectors('op', 'selectors', [1n, 2n]))
+    assert.throws(
+      () => validateUniqueChainSelectors('op', 'selectors', [1n, 1n]),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === 'selectors[1]',
+    )
+  })
+
+  it('rejects duplicate hex byte values', () => {
+    assert.doesNotThrow(() => validateUniqueHexBytes('op', 'addresses', [Buffer.from('01', 'hex')]))
+    assert.throws(
+      () =>
+        validateUniqueHexBytes('op', 'addresses', [
+          Buffer.from('01', 'hex'),
+          Buffer.from('01', 'hex'),
+        ]),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.param === 'addresses[1]' &&
+        err.context.reason === 'must not contain duplicate hex values',
+    )
+    assert.throws(
+      () =>
+        validateUniqueHexBytes(
+          'op',
+          'remotePoolAddresses',
+          [Buffer.from('01', 'hex'), Buffer.from('01', 'hex')],
+          'remote pool addresses',
+        ),
+      (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.reason === 'must not contain duplicate remote pool addresses',
+    )
+  })
+
   it('validates token delegation', () => {
     const tokenAccount = PublicKey.default
     const delegate = new PublicKey(Uint8Array.from({ length: 32 }, () => 1))
@@ -276,6 +328,29 @@ describe('Validate (cct/solana)', () => {
     }
     await assert.rejects(() =>
       resolveExistingTokenAccount(invalidConnection as never, mint, holder, tokenAccount),
+    )
+  })
+
+  it('rejects an explicit token account whose decoded mint differs', async () => {
+    const mint = new PublicKey(Uint8Array.from({ length: 32 }, () => 1))
+    const holder = new PublicKey(Uint8Array.from({ length: 32 }, () => 2))
+    const tokenAccount = new PublicKey(Uint8Array.from({ length: 32 }, () => 3))
+    const resolvedMint = new PublicKey(Uint8Array.from({ length: 32 }, () => 4))
+    const data = Buffer.alloc(165)
+    resolvedMint.toBuffer().copy(data)
+    const connection = {
+      getAccountInfo: async (address: PublicKey) =>
+        address.equals(mint)
+          ? { owner: TOKEN_PROGRAM_ID, data: mintData() }
+          : { owner: TOKEN_PROGRAM_ID, data },
+    }
+
+    await assert.rejects(
+      () => resolveExistingTokenAccount(connection as never, mint, holder, tokenAccount),
+      (err: unknown) =>
+        err instanceof CCTTokenAccountMintMismatchError &&
+        err.context.requestedMint === mint.toBase58() &&
+        err.context.resolvedMint === resolvedMint.toBase58(),
     )
   })
 

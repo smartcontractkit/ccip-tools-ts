@@ -7,10 +7,15 @@ import { Contract, JsonRpcProvider, Wallet, ZeroAddress } from 'ethers'
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
+// Register non-EVM chain families for cross-family message building — the v1.6
+// lane cases below send/quote towards Aptos and Solana devnet, whose receivers
+// and extraArgs are family-specific (same pattern as fork.test.ts).
+import '../aptos/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { discoverOffRamp } from '../execution.ts'
 import { NetworkType } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import '../solana/index.ts'
 import { ExecutionState } from '../types.ts'
 import { interfaces } from './const.ts'
 import { EVMChain } from './index.ts'
@@ -21,9 +26,9 @@ import { EVMChain } from './index.ts'
 // testnets every other live suite in the repo already locks (fork, dest-liquidity,
 // solana, sui, the CLI e2e suites…), so anything pinned to them serializes behind
 // 7-8 other files AND piles onto the same keyless public endpoints, which CI's
-// shared egress gets rate-limited on. Base Sepolia and OP Sepolia carry the same
-// three OnRamp generations (see the lane table below), are locked by no other
-// suite, and therefore run fully in parallel with the rest of the matrix.
+// shared egress gets rate-limited on. Base Sepolia and OP Sepolia still carry all
+// three OnRamp generations between them (see the lane table below), are locked by
+// no other suite, and therefore run fully in parallel with the rest of the matrix.
 await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 
 // ── Chain constants ──
@@ -55,25 +60,38 @@ const BASE_SEP_V2_0_ROUTER = '0x0Ec6D443B425982f1F2862Dd0ffBFD431FCb6b8b'
 
 // ── Destination selectors (no RPC needed: every test below is a source-side eth_call) ──
 //
-// Live OnRamp generations, as reported by `typeAndVersion` on the resolved OnRamp:
-//   Base Sepolia → Chiado         EVM2EVMOnRamp 1.5.0
-//   Base Sepolia → Unichain Sep.  OnRamp 1.6.0
-//   Base Sepolia → OP Sepolia     OnRamp 2.0.0
-//   OP Sepolia   → Chiado         EVM2EVMOnRamp 1.5.0
-//   OP Sepolia   → WEMIX testnet  OnRamp 1.6.0
-//   OP Sepolia   → Base Sepolia   OnRamp 2.0.0
-const CHIADO_SELECTOR = 8871595565390010547n
+// Live OnRamp generations, as reported by `typeAndVersion` on the resolved OnRamp
+// (verified on-chain 2026-09-23, after the Sep-2026 migration wave that took every
+// hub lane on these routers to OnRamp 2.0.0). NOTE: lanes migrate to newer OnRamp
+// deployments over time, so tests that exercise a generation-specific surface must
+// resolve a live lane of that generation at runtime (findLegacyV1_5Lane) instead of
+// pinning a destination:
+//   Base Sepolia → Holesky         EVM2EVMOnRamp 1.5.0  (last 1.5.x lane on the base/op routers)
+//   Base Sepolia → Fuji/BSC/Chiado OnRamp 2.0.0         (migrated from 1.5.0 in Sep 2026)
+//   Base Sepolia → Aptos/Solana/Sui OnRamp 1.6.0        (multi-lane OnRamp 0x28A0…2A20)
+//   Base Sepolia → OP Sepolia      OnRamp 2.0.0
+//   OP Sepolia   → Aptos/Solana/Sui OnRamp 1.6.0        (multi-lane OnRamp 0x8F5b…3986)
+//   OP Sepolia   → Wemix/Base      OnRamp 2.0.0         (wemix migrated from 1.6.0)
+const HOLESKY_SELECTOR = 7717148896336251131n
 const UNICHAIN_SEP_SELECTOR = 14135854469784514356n
-const WEMIX_SELECTOR = 9284632837123596123n
+const APTOS_TESTNET_SELECTOR = 743186221051783445n
+const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
 // Destinations of the CCIP 2.0 deployment reachable from BASE_SEP_V2_0_ROUTER.
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const AMOY_SELECTOR = 16281711391670634445n
 
 // ── Token / pool constants ──
 
-// CCIP-BnM on Base Sepolia — transferable on the v1.5 Base Sepolia→Chiado lane, served
-// by a legacy (BurnMintTokenPool 1.5.1) pool.
-const CCIP_BNM_TOKEN_BASE_SEP = '0x88A2d74F47a237a62e7A51cdDa67270CE381555e'
+// CCIP-BnM on OP Sepolia — its pool on the OP Sepolia → Solana devnet lane is still
+// a legacy BurnMintTokenPool 1.5.1 (pre-v2, FTF-less) while the lane's OnRamp is
+// 1.6.0, which is exactly the pre-v2 pool surface the getLaneFeatures/ccipFee tests
+// below exercise. (The old base-sepolia CCIP-BnM fixture pool was upgraded to a v2
+// pool in Sep 2026, and no base/op-sepolia token retains an outbound-enabled pool on
+// any 1.5 lane — base→holesky has no pools left at all.)
+const CCIP_BNM_TOKEN_OP_SEP = '0x8af4204e30565df93352fe8e1de78925f6664da7'
+// A valid SVM account (USDC on solana-devnet) — receivers for solana-devnet dests
+// must be base58 SVM addresses; EVM-style 20-byte hex is rejected by the SDK.
+const SVM_RECEIVER = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'
 
 // v2.0 pool (BurnMintTokenPool 2.0.0, supportsInterface(IPoolV2) == true) with FTF
 // enabled AND custom fast rate limits configured — i.e. FAST_RATE_LIMITS differs from
@@ -97,6 +115,55 @@ if (!process.env.VERBOSE) testLogger.debug = () => {}
 describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   let baseSepChain: EVMChain | undefined
   let opSepChain: EVMChain | undefined
+
+  // ── Legacy v1.5 lane discovery ──
+  //
+  // The v1.5-specific surfaces below (getFeeTokens addressed by OnRamp, pre-v2.0 fee
+  // short-circuit) need a lane whose OnRamp is still EVM2EVMOnRamp 1.5.x. The Sep-2026
+  // 2.0 migration wave took every hub lane on these routers (fuji, bsc-testnet,
+  // chiado), leaving base-sepolia → holesky as the last 1.5.x lane — holesky itself is
+  // a deprecated network, so it should stay 1.5 for good, but keep resolving it at
+  // runtime from a candidate list so a future migration fails loudly here instead of
+  // in the tests that consume it. Destination selectors are source-side eth_call
+  // constants, so this adds no destination-RPC traffic and no cross-suite contention.
+  const LEGACY_V1_5_CANDIDATES = [
+    {
+      chain: () => baseSepChain,
+      router: BASE_SEP_ROUTER,
+      dest: HOLESKY_SELECTOR,
+      label: 'base-sepolia → holesky',
+    },
+  ] as const
+
+  let legacyV1_5Lane:
+    | {
+        chain: EVMChain
+        router: string
+        dest: bigint
+        label: string
+        onRamp: string
+      }
+    | undefined
+
+  async function findLegacyV1_5Lane() {
+    if (legacyV1_5Lane) return legacyV1_5Lane
+    for (const candidate of LEGACY_V1_5_CANDIDATES) {
+      const chain = candidate.chain()
+      if (!chain) continue
+      const onRamp = await chain.getOnRampForRouter(candidate.router, candidate.dest)
+      const [type, version] = await chain.typeAndVersion(onRamp)
+      if (type === 'EVM2EVMOnRamp' && version.startsWith('1.5')) {
+        const found = { ...candidate, chain, onRamp }
+        legacyV1_5Lane = found
+        return found
+      }
+      testLogger.debug(`  legacy-lane candidate ${candidate.label} migrated: ${type} ${version}`)
+    }
+    assert.fail(
+      'no EVM2EVMOnRamp 1.5.x lane remains on the base/op-sepolia routers; ' +
+        'update LEGACY_V1_5_CANDIDATES (query each router getOnRamp + typeAndVersion)',
+    )
+  }
   let wallet: Wallet
 
   before(async () => {
@@ -360,27 +427,29 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
     // v1.5 resolves the PriceRegistry from the OnRamp's dynamic config and calls
     // getFeeTokens() directly — a single state read, no block-range event scan.
     // Addressed by OnRamp (not Router) so the v1.5 path is exercised regardless of
-    // which lane the Router's resolver happens to pick.
-    it('should return fee tokens for a v1.5 OnRamp on base-sepolia', async () => {
-      assert.ok(baseSepChain, 'base-sepolia chain should be initialized')
+    // which lane the Router's resolver happens to pick. The lane is discovered at
+    // runtime because v1.5 lanes keep migrating (see LEGACY_V1_5_CANDIDATES).
+    it('should return fee tokens for a v1.5 OnRamp', async () => {
+      const lane = await findLegacyV1_5Lane()
 
-      // EVM2EVMOnRamp 1.5.0 of the Base Sepolia → Chiado lane
-      const v1_5OnRamp = await baseSepChain.getOnRampForRouter(BASE_SEP_ROUTER, CHIADO_SELECTOR)
-      const [type, version] = await baseSepChain.typeAndVersion(v1_5OnRamp)
-      assert.equal(type, 'EVM2EVMOnRamp', 'base-sepolia → chiado should be a legacy OnRamp')
-      assert.ok(version.startsWith('1.5'), `expected a v1.5 OnRamp, got ${version}`)
-
-      const feeTokens = await baseSepChain.getFeeTokens(v1_5OnRamp)
+      const feeTokens = await lane.chain.getFeeTokens(lane.onRamp)
       const entries = Object.entries(feeTokens)
-      assert.ok(entries.length > 0, 'base-sepolia v1.5: should have at least one fee token')
+      assert.ok(entries.length > 0, `${lane.label} v1.5: should have at least one fee token`)
 
       console.log(
-        `  base-sepolia v1.5: ${entries.map(([a, i]) => `${i.symbol}(${a.slice(0, 8)}…)`).join(', ')}`,
+        `  ${lane.label} v1.5: ${entries.map(([a, i]) => `${i.symbol}(${a.slice(0, 8)}…)`).join(', ')}`,
       )
       for (const [address, info] of entries) {
-        assert.match(address, /^0x[0-9a-fA-F]{40}$/, `v1.5: token address should be valid`)
-        assert.ok(info.symbol.length > 0, `v1.5: ${address} should have a symbol`)
-        assert.ok(info.decimals >= 0, `v1.5: ${address} should have non-negative decimals`)
+        assert.match(
+          address,
+          /^0x[0-9a-fA-F]{40}$/,
+          `${lane.label} v1.5: token address should be valid`,
+        )
+        assert.ok(info.symbol.length > 0, `${lane.label} v1.5: ${address} should have a symbol`)
+        assert.ok(
+          info.decimals >= 0,
+          `${lane.label} v1.5: ${address} should have non-negative decimals`,
+        )
       }
     })
   })
@@ -479,20 +548,23 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
         extraArgs: { gasLimit: 200_000n, allowOutOfOrderExecution: true },
       }
 
+      // v1.5 lane discovered at runtime — every pinned hub lane has migrated to 2.0.0
+      const legacy = await findLegacyV1_5Lane()
+
       const cases = [
         {
-          chain: baseSepChain,
-          router: BASE_SEP_ROUTER,
-          dest: CHIADO_SELECTOR,
+          chain: legacy.chain,
+          router: legacy.router,
+          dest: legacy.dest,
           message: manualMessage,
-          label: 'base-sepolia v1.5',
+          label: `${legacy.label} v1.5`,
         },
         {
           chain: baseSepChain,
           router: BASE_SEP_ROUTER,
           dest: UNICHAIN_SEP_SELECTOR,
           message: builtMessage,
-          label: 'base-sepolia v1.6',
+          label: 'base-sepolia → unichain (v2.0)',
         },
         {
           chain: baseSepChain,
@@ -511,16 +583,9 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
         {
           chain: opSepChain,
           router: OP_SEP_ROUTER,
-          dest: CHIADO_SELECTOR,
-          message: manualMessage,
-          label: 'op-sepolia v1.5',
-        },
-        {
-          chain: opSepChain,
-          router: OP_SEP_ROUTER,
-          dest: WEMIX_SELECTOR,
+          dest: APTOS_TESTNET_SELECTOR,
           message: builtMessage,
-          label: 'op-sepolia v1.6',
+          label: 'op-sepolia → aptos (v1.6)',
         },
       ]
 
@@ -635,9 +700,11 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
     it('should return FINALITY_FAST=undefined and no rate limits for v1.6 lane', async () => {
       assert.ok(opSepChain, 'op-sepolia chain should be initialized')
 
+      // op-sepolia → solana-devnet is served by the multi-lane OnRamp 1.6.0
+      // (0x8F5b…3986); the wemix lane this used to pin migrated to 2.0.0 (Sep 2026).
       const features = await opSepChain.getLaneFeatures({
         router: OP_SEP_ROUTER,
-        destChainSelector: WEMIX_SELECTOR,
+        destChainSelector: SOLANA_DEVNET_SELECTOR,
       })
 
       assert.equal(
@@ -707,23 +774,31 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
       )
     })
 
-    it('should return RATE_LIMITS for v1.5 lane with token (legacy pool)', async () => {
-      assert.ok(baseSepChain, 'base-sepolia chain should be initialized')
+    // The op-sepolia → solana-devnet lane's OnRamp is 1.6.0 but its CCIP-BnM pool is
+    // still a legacy (pre-v2, FTF-less) BurnMintTokenPool 1.5.1 — which is what this
+    // exercises: a lane whose POOL predates FTF must surface RATE_LIMITS and neither
+    // FTF feature. (The old base-sepolia CCIP-BnM pool was upgraded to a v2 pool in
+    // Sep 2026, surfacing FINALITY_FAST=0 instead of undefined.)
+    it('should return RATE_LIMITS and no FTF features for a legacy (pre-v2) token pool', async () => {
+      assert.ok(opSepChain, 'op-sepolia chain should be initialized')
 
-      const features = await baseSepChain.getLaneFeatures({
-        router: BASE_SEP_ROUTER,
-        destChainSelector: CHIADO_SELECTOR,
-        token: CCIP_BNM_TOKEN_BASE_SEP,
+      const features = await opSepChain.getLaneFeatures({
+        router: OP_SEP_ROUTER,
+        destChainSelector: SOLANA_DEVNET_SELECTOR,
+        token: CCIP_BNM_TOKEN_OP_SEP,
       })
 
       assert.equal(
         features[LaneFeature.FINALITY_FAST],
         undefined,
-        'v1.5 lane should not include FINALITY_FAST (FTF does not exist pre-v2.0)',
+        'legacy pool should not include FINALITY_FAST (FTF does not exist pre-v2 pools)',
       )
 
       // Legacy pool should expose RATE_LIMITS via getCurrentOutboundRateLimiterState
-      assert.ok(LaneFeature.RATE_LIMITS in features, 'v1.5 lane with token should have RATE_LIMITS')
+      assert.ok(
+        LaneFeature.RATE_LIMITS in features,
+        'lane with legacy pool should have RATE_LIMITS',
+      )
       const rateLimits = features[LaneFeature.RATE_LIMITS]
       if (rateLimits != null) {
         assert.equal(typeof rateLimits.tokens, 'bigint', 'tokens should be bigint')
@@ -731,11 +806,11 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
         assert.equal(typeof rateLimits.rate, 'bigint', 'rate should be bigint')
       }
 
-      // FTF doesn't exist on legacy lanes → no FAST_RATE_LIMITS
+      // FTF doesn't exist on legacy pools → no FAST_RATE_LIMITS
       assert.equal(
         LaneFeature.FAST_RATE_LIMITS in features,
         false,
-        'legacy lane should not have FAST_RATE_LIMITS',
+        'legacy pool should not have FAST_RATE_LIMITS',
       )
     })
 
@@ -946,16 +1021,20 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
       console.log(`    value = ${tf.feeDeducted} (${tf.bps} bps)`)
     })
 
-    it('should return ccipFee only for pre-v2.0 lane with token transfer', async () => {
-      assert.ok(baseSepChain, 'base-sepolia chain should be initialized')
+    it('should return ccipFee only for pre-v2.0 lanes with token transfer', async () => {
+      assert.ok(opSepChain, 'op-sepolia chain should be initialized')
 
+      // The op-sepolia → solana-devnet lane is OnRamp 1.6.0 (pre-v2.0) and its CCIP-BnM
+      // pool still carries the remote, so the SDK's version short-circuit itself is
+      // exercised. (No base/op-sepolia 1.5 lane retains an outbound-enabled pool anymore,
+      // and the receiver must be a valid SVM address for this dest — see SVM_RECEIVER.)
       const amount = 1_000_000n
-      const estimate = await baseSepChain.getTotalFeesEstimate({
-        router: BASE_SEP_ROUTER,
-        destChainSelector: CHIADO_SELECTOR,
+      const estimate = await opSepChain.getTotalFeesEstimate({
+        router: OP_SEP_ROUTER,
+        destChainSelector: SOLANA_DEVNET_SELECTOR,
         message: {
-          receiver: '0x0000000000000000000000000000000000000001',
-          tokenAmounts: [{ token: CCIP_BNM_TOKEN_BASE_SEP, amount }],
+          receiver: SVM_RECEIVER,
+          tokenAmounts: [{ token: CCIP_BNM_TOKEN_OP_SEP, amount }],
         },
       })
 

@@ -39,6 +39,38 @@ export class CCTParamsInvalidError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a supplied SPL token account belongs to a different mint than requested.
+ *
+ * `context.requestedMint` is the requested mint; `context.resolvedMint` is decoded from the supplied
+ * token account. This is permanent: supply an account for the requested mint.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await cct.generateUnsignedApproveToken({ payer, tokenAddress, tokenAccount, delegate, amount })
+ * } catch (error) {
+ *   if (error instanceof CCTTokenAccountMintMismatchError) {
+ *     console.log(error.context.requestedMint, error.context.resolvedMint)
+ *   }
+ * }
+ * ```
+ */
+export class CCTTokenAccountMintMismatchError extends CCIPError {
+  override readonly name = 'CCTTokenAccountMintMismatchError'
+  /** Creates a token-account mint-mismatch error. */
+  constructor(tokenAccount: string, requestedMint: string, resolvedMint: string) {
+    super(
+      CCIPErrorCode.CCT_TOKEN_ACCOUNT_MINT_MISMATCH,
+      `Token account mint mismatch for ${tokenAccount}: expected ${requestedMint}, got ${resolvedMint}`,
+      {
+        isTransient: false,
+        context: { tokenAccount, requestedMint, resolvedMint },
+      },
+    )
+  }
+}
+
 // Transaction submission
 
 /**
@@ -125,7 +157,7 @@ function partialApplicationPrefix(context?: Record<string, unknown>): string {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTContractTypeInvalidError) {
  *     console.log(`Expected ${error.context.expected} at ${error.context.address}, got "${error.context.actual}"`)
@@ -166,7 +198,7 @@ export class CCTContractTypeInvalidError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTContractVersionUnsupportedError) {
  *     console.log(`Unsupported ${error.context.contractType} version: ${error.context.version}`)
@@ -197,7 +229,7 @@ export class CCTContractVersionUnsupportedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.transferOwnership({ poolAddress, newOwner, wallet })
+ *   await cct.transferPoolOwnership({ poolAddress, newOwner, wallet })
  * } catch (error) {
  *   if (error instanceof CCTOperationUnsupportedError) {
  *     console.log(`${error.context.operation} unsupported at version ${error.context.version}`)
