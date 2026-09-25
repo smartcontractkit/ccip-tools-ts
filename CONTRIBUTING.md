@@ -262,14 +262,19 @@ The SDK runs in **Node.js** (CLI, scripts) and **browsers** (frontend apps). All
 
 ### Tree-Shaking
 
-The SDK uses `"sideEffects": false` in `package.json` to enable tree-shaking. Frontend bundlers can exclude unused chain families:
+`package.json`'s `sideEffects` lists only `all-chains`, so frontend bundlers drop every chain family the app never references:
 
 ```typescript
-// Only EVMChain is bundled (Solana, Sui, TON, Aptos excluded)
+// Only EVMChain is bundled and registered (Solana, Sui, TON, Aptos, Canton excluded)
 import { EVMChain } from '@chainlink/ccip-sdk'
+
+// Registers every family, also as a side-effect-only import
+import '@chainlink/ccip-sdk/all'
 ```
 
-For chain implementations that must self-register, use the static block pattern documented in [Chain Registration](#chain-registration).
+Family-generic helpers (`decodeAddress`, `decodeExtraArgs`, `decodeMessage`, `getLeafHasher`, ...) dispatch through `supportedChains`, which only holds the classes that got bundled; they throw `CCIPChainFamilyUnsupportedError`, with a `recovery` hint, for a family that isn't registered. Chain classes register themselves with the static block pattern documented in [Chain Registration](#chain-registration). `src/bundling.test.ts` bundles small apps with esbuild to check this behavior.
+
+The Anchor 0.29 buffer-size workaround lives in per-instance coders (`sizedCoder`/`newProgram` in `solana/coder.ts`); never patch dependency prototypes, since bundlers may resolve another build (e.g. `browser`) of the package than a deep import does.
 
 ## Code Patterns
 
@@ -523,12 +528,14 @@ constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainConte
 New chain classes must self-register using a static initialization block:
 
 ```typescript
-import { Chain, supportedChains, ChainFamily } from '../chain.ts'
+import { Chain } from '../chain.ts'
+import { ChainFamily } from '../networks.ts'
+import { supportedChains } from '../supported-chains.ts'
 
 export class MyChain extends Chain<typeof ChainFamily.MyChain> {
-  // Auto-register when module is imported
+  // Auto-register when the module is evaluated; `??=` keeps a class registered before
   static {
-    supportedChains[ChainFamily.MyChain] = MyChain
+    supportedChains[ChainFamily.MyChain] ??= MyChain
   }
 
   static readonly family = ChainFamily.MyChain
@@ -538,7 +545,7 @@ export class MyChain extends Chain<typeof ChainFamily.MyChain> {
 }
 ```
 
-This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection.
+This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection. `supportedChains` is also the extension point for users: assigning a derived or custom class (`supportedChains[ChainFamily.EVM] = MyEVMChain`) makes every family-generic helper use it, so SDK code must dispatch through it too, never call another family's functions directly. Inside instance methods, call statics as `(this.constructor as typeof MyChain).method()`, so subclass overrides apply.
 
 ## CLI Output Architecture
 

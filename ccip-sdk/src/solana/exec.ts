@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type IdlTypes, Program } from '@coral-xyz/anchor'
+import type { IdlTypes, Program } from '@coral-xyz/anchor'
 import {
   type AccountMeta,
   type Connection,
@@ -19,6 +19,7 @@ import { CCIPSolanaLookupTableNotFoundError } from '../errors/index.ts'
 import { ChainFamily } from '../networks.ts'
 import type { ExecutionInput, WithLogger } from '../types.ts'
 import { bytesToBuffer, getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
+import { newProgram } from './coder.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
@@ -51,7 +52,7 @@ export async function generateUnsignedExecuteReport(
 ): Promise<UnsignedSolanaTx> {
   const { connection, logger = console } = ctx
 
-  const program = new Program(CCIP_OFFRAMP_IDL, offramp, simulationProvider(ctx, payer))
+  const program = newProgram(CCIP_OFFRAMP_IDL, offramp, simulationProvider(ctx, payer))
 
   let bufferId
   if (opts?.forceBuffer) {

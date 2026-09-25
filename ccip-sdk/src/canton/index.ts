@@ -199,7 +199,7 @@ export {
  */
 export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   static {
-    supportedChains[ChainFamily.Canton] = CantonChain
+    supportedChains[ChainFamily.Canton] ??= CantonChain
   }
   static readonly family = ChainFamily.Canton
   /** Canton uses 10 decimals (lf-coin micro-units) */

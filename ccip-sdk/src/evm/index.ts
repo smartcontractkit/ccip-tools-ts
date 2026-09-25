@@ -327,7 +327,7 @@ function destroyOnAbort(abort: AbortSignal, provider: JsonRpcApiProvider): void 
  */
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static {
-    supportedChains[ChainFamily.EVM] = EVMChain
+    supportedChains[ChainFamily.EVM] ??= EVMChain
   }
   static readonly family = ChainFamily.EVM
   static readonly decimals = 18

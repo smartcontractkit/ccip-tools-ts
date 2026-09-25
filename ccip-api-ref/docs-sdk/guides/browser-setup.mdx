@@ -346,8 +346,23 @@ The SDK supports tree-shaking — only the chains you import are bundled:
 // Only EVMChain code is bundled
 import { EVMChain } from '@chainlink/ccip-sdk'
 
-// All chains — largest bundle, use only if needed
-import { allSupportedChains } from '@chainlink/ccip-sdk/all'
+// All chains — largest bundle, use only if needed (a side-effect-only import works too)
+import '@chainlink/ccip-sdk/all'
+```
+
+Family-generic helpers such as `decodeAddress`, `decodeExtraArgs`, `decodeMessage` and `getLeafHasher` dispatch to the chain classes registered in `supportedChains`. A chain class registers itself when it is bundled, so these helpers only handle the families your app references: import the class of every family whose messages or addresses you handle, not only the ones you connect to. A missing family throws `CCIPChainFamilyUnsupportedError`, whose `recovery` says what to import.
+
+To customize a family (e.g. address formatting or a decoder), register a derived class; the SDK's own classes never replace a registration:
+
+```typescript
+import { ChainFamily, EVMChain, supportedChains } from '@chainlink/ccip-sdk'
+
+class MyEVMChain extends EVMChain {
+  static override getAddress(bytes: Parameters<typeof EVMChain.getAddress>[0]) {
+    return super.getAddress(bytes).toLowerCase()
+  }
+}
+supportedChains[ChainFamily.EVM] = MyEVMChain
 ```
 
 | Import | Minified | Gzipped |

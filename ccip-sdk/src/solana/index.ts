@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type IdlTypes, BorshAccountsCoder, BorshCoder, Program } from '@coral-xyz/anchor'
+import { type IdlTypes, BorshAccountsCoder, BorshCoder } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
@@ -115,6 +115,7 @@ import {
   util,
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
+import { newProgram } from './coder.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
   decodeSolanaGenericExtraArgsV3,
@@ -132,7 +133,6 @@ import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
-import { patchBorsh } from './patchBorsh.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
@@ -229,8 +229,7 @@ export type SolanaTransaction = MergeArrayElements<
  */
 export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   static {
-    patchBorsh()
-    supportedChains[ChainFamily.Solana] = SolanaChain
+    supportedChains[ChainFamily.Solana] ??= SolanaChain
   }
   static readonly family = ChainFamily.Solana
   static readonly decimals = 9
@@ -587,7 +586,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /** {@inheritDoc Chain.typeAndVersion} */
   async typeAndVersion(address: string) {
-    const program = new Program(
+    const program = newProgram(
       CCIP_OFFRAMP_IDL, // `typeVersion` schema should be the same
       new PublicKey(address),
       simulationProvider(this),
@@ -621,7 +620,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // (fees are quoted by a committee-verifier CCV at send time). Handle it separately; the rest
     // of the router (Config account) stays byte-compatible with the 1.6 IDL.
     if (version.startsWith('2.')) {
-      const program = new Program(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
+      const program = newProgram(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
         connection: this.connection,
       })
       const [destChainStatePda] = PublicKey.findProgramAddressSync(
@@ -645,7 +644,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       )
     }
 
-    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
+    const program = newProgram(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
       connection: this.connection,
     })
 
@@ -655,7 +654,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     )
     const destChainState = await program.account.destChain.fetch(destChainStatePda)
 
-    const feeQuoter = new Program(FEE_QUOTER_IDL, routerConfig.feeQuoter, {
+    const feeQuoter = newProgram(FEE_QUOTER_IDL, routerConfig.feeQuoter, {
       connection: this.connection,
     })
     const [feeQuoterConfigAddress] = PublicKey.findProgramAddressSync(
@@ -697,7 +696,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   private async _getOffRampReferenceAddresses(offRamp: string) {
     const offRamp_ = new PublicKey(offRamp)
     const [, version] = await this.typeAndVersion(offRamp)
-    const program = new Program(
+    const program = newProgram(
       version.startsWith('2.') ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL,
       offRamp_,
       { connection: this.connection },
@@ -723,7 +722,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // differs: v2 dropped the `state` (minSeqNr) field and reshaped `SourceChainConfig`. Decode
     // with the matching IDL.
     const isV2 = version.startsWith('2.')
-    const program = new Program(isV2 ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL, offRamp_, {
+    const program = newProgram(isV2 ? CCIP_OFFRAMP_V2_IDL : CCIP_OFFRAMP_IDL, offRamp_, {
       connection: this.connection,
     })
 
@@ -1652,7 +1651,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       //
       // Token transfer CCVs are not yet resolved (TODO: needs 5 pool remaining_accounts).
       const offRampPk = new PublicKey(offRamp)
-      const program = new Program(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
+      const program = newProgram(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
       const pda = (seed: string, ...extra: Uint8Array[]) =>
         PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
 
@@ -2200,7 +2199,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         ? NATIVE_MINT
         : new PublicKey(opts.token)
 
-    const feeQuoterProgram = new Program(FEE_QUOTER_IDL, feeQuoter, {
+    const feeQuoterProgram = newProgram(FEE_QUOTER_IDL, feeQuoter, {
       connection: this.connection,
     })
 
@@ -2224,7 +2223,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @returns Router configuration including feeQuoter.
    */
   async _getRouterConfig(router: string) {
-    const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), {
+    const program = newProgram(CCIP_ROUTER_IDL, new PublicKey(router), {
       connection: this.connection,
     })
 

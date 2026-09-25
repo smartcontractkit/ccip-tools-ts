@@ -148,7 +148,7 @@ export type TONChainContext = ChainContext & {
  */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
-    supportedChains[ChainFamily.TON] = TONChain
+    supportedChains[ChainFamily.TON] ??= TONChain
   }
 
   // Minimum estimated floor age for the index-driven bounded walk to engage (see
@@ -2077,7 +2077,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       startTime,
       watch: AbortSignal.timeout(5 * 60e3 /* 5m timeout */),
     })) {
-      const msg = TONChain.decodeMessage(log)
+      const msg = (this.constructor as typeof TONChain).decodeMessage(log)
       if (!msg) continue
 
       // Found our message: construct and return the CCIPRequest

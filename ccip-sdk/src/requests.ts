@@ -18,7 +18,7 @@ import type { EVMChain } from './evm/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
-import { supportedChains } from './supported-chains.ts'
+import { getChainStatic, getChainStatics } from './supported-chains.ts'
 import {
   type AnyMessage,
   type CCIPMessage,
@@ -209,6 +209,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
  * @param data - Data to decode (hex string, Uint8Array, JSON string, or object)
  * @returns Decoded CCIPMessage
  * @throws {@link CCIPMessageDecodeError} if data cannot be decoded as a valid message
+ * @throws {@link CCIPChainFamilyUnsupportedError} if bytes are passed but no chain family is registered
  * @throws {@link CCIPMessageInvalidError} if message structure is invalid or missing required fields
  *
  * @example
@@ -234,7 +235,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   }
 
   // try bytearray decoding on each supported chain
-  for (const chain of Object.values(supportedChains)) {
+  for (const chain of getChainStatics()) {
     try {
       const decoded = chain.decodeMessage({ data })
       if (decoded) return decoded
@@ -253,7 +254,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  */
 export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   if (message.extraArgs && '_tag' in message.extraArgs) delete message.extraArgs._tag
-  return supportedChains[dest]!.buildMessageForDest(message)
+  return getChainStatic(dest).buildMessageForDest(message)
 }
 
 /**

@@ -25,7 +25,6 @@ export {
 } from './shared/codec.ts'
 import type { Chain, ChainStatic } from './chain.ts'
 import {
-  CCIPChainFamilyUnsupportedError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPTypeVersionInvalidError,
@@ -33,7 +32,7 @@ import {
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
 import { util } from './shared/codec.ts'
-import { supportedChains } from './supported-chains.ts'
+import { getChainStatic, supportedChains } from './supported-chains.ts'
 import type { Logger, WithLogger } from './types.ts'
 
 /** How far back the bracketing walk reaches on its first probe. Only a starting
@@ -193,9 +192,7 @@ export function jsonParse<T = unknown>(text: string): T {
  * ```
  */
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
-  const chain = supportedChains[family]
-  if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
-  return chain.getAddress(address)
+  return getChainStatic(family).getAddress(address)
 }
 
 /**
@@ -206,10 +203,7 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
  * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not supported
  */
 export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
-  let chains: ChainStatic[]
-  if (!family) chains = Object.values(supportedChains)
-  else if (family in supportedChains) chains = [supportedChains[family]!]
-  else throw new CCIPChainFamilyUnsupportedError(family)
+  const chains: ChainStatic[] = family ? [getChainStatic(family)] : Object.values(supportedChains)
   for (const C of chains) {
     try {
       if (C.isTxHash(txHash)) return true

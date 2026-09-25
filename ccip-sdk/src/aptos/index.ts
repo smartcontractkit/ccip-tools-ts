@@ -172,7 +172,7 @@ export type AptosChainContext = ChainContext & {
  */
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static {
-    supportedChains[ChainFamily.Aptos] = AptosChain
+    supportedChains[ChainFamily.Aptos] ??= AptosChain
   }
   /** Chain family identifier for Aptos networks. */
   static readonly family = ChainFamily.Aptos

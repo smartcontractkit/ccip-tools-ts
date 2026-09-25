@@ -13,7 +13,10 @@
     "url": "https://github.com/smartcontractkit/ccip-tools-ts/issues"
   },
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/all-chains.ts",
+    "./dist/all-chains.js"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -60,6 +63,7 @@
   "devDependencies": {
     "@types/bn.js": "^5.2.0",
     "@types/node": "26.6.2",
+    "esbuild": "^0.28.2",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.16",
     "protobufjs": "^8.8.0",
