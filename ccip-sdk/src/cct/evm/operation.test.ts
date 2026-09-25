@@ -32,7 +32,7 @@ function stubChain(): EVMChain {
   } as unknown as EVMChain
 }
 
-function fakeSigner(contractAddress: string) {
+function fakeSigner(contractAddress: string | null) {
   return {
     signTransaction: () => Promise.resolve('0x'),
     getAddress: () => Promise.resolve(SENDER),
@@ -60,7 +60,21 @@ describe('EVMDeployOperation', () => {
       (error: unknown) =>
         error instanceof CCTTxFailedError &&
         error.context.expectedAddress === DEPLOYED &&
-        error.context.returnedAddress === returnedAddress,
+        error.context.returnedAddress === returnedAddress &&
+        error.recovery ===
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
+    )
+  })
+
+  it('rejects a missing receipt contract address', async () => {
+    await assert.rejects(
+      () => new TestDeploy().execute(stubChain(), { wallet: fakeSigner(null) }),
+      (error: unknown) =>
+        error instanceof CCTTxFailedError &&
+        error.context.expectedAddress === DEPLOYED &&
+        error.context.returnedAddress === null &&
+        error.recovery ===
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
     )
   })
 
@@ -70,7 +84,9 @@ describe('EVMDeployOperation', () => {
       (error: unknown) =>
         error instanceof CCTTxFailedError &&
         error.context.expectedAddress === DEPLOYED &&
-        error.context.returnedAddress === 'not-an-address',
+        error.context.returnedAddress === 'not-an-address' &&
+        error.recovery ===
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
     )
   })
 })

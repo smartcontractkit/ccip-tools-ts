@@ -175,6 +175,10 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
    * {@link generate}, then sign and submit; resolves to the tx hash and the newly deployed
    * contract address (validated against the submitted CREATE sender and nonce), plus the
    * {@link ExplorerVerificationInput} for verifying its source on a block explorer.
+   *
+   * @remarks Assumes a direct EOA CREATE deployment. Factory/CREATE2 deployments derive their
+   * address differently and must not use this base.
+   *
    * @throws {@link CCTTxFailedError} if the tx mined without the expected contract address
    */
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
@@ -192,10 +196,12 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
       sender: from,
       nonce,
     } = await submit(chain, params.wallet, unsigned, this.name)
-    const expectedAddress = getAddress(getCreateAddress({ from, nonce }))
+    const expectedAddress = getCreateAddress({ from, nonce })
     const returnedAddress = receipt.contractAddress
     if (returnedAddress == null)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
         context: { txHash: response.hash, expectedAddress, returnedAddress },
       })
     let contractAddress: string
@@ -203,11 +209,15 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
       contractAddress = getAddress(returnedAddress)
     } catch {
       throw new CCTTxFailedError(this.name, 'deployment returned an invalid contract address', {
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
         context: { txHash: response.hash, expectedAddress, returnedAddress },
       })
     }
     if (contractAddress !== expectedAddress)
       throw new CCTTxFailedError(this.name, 'deployment returned an unexpected contract address', {
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
         context: { txHash: response.hash, expectedAddress, returnedAddress },
       })
     return {
