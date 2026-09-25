@@ -432,7 +432,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const client = new SuiJsonRpcClient({ transport, network: suiNetwork })
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
-    const chain = new SuiChain(client, network, ctx)
+    const chain = new this(client, network, ctx)
     return Object.assign(chain, { url })
   }
 

@@ -272,7 +272,7 @@ import { EVMChain } from '@chainlink/ccip-sdk'
 import '@chainlink/ccip-sdk/all'
 ```
 
-Family-generic helpers (`decodeAddress`, `decodeExtraArgs`, `decodeMessage`, `getLeafHasher`, ...) dispatch through `supportedChains`, which only holds the classes that got bundled; they throw `CCIPChainFamilyUnsupportedError`, with a `recovery` hint, for a family that isn't registered. Chain classes register themselves with the static block pattern documented in [Chain Registration](#chain-registration). `src/bundling.test.ts` bundles small apps with esbuild to check this behavior.
+Family-generic helpers (`decodeAddress`, `decodeExtraArgs`, `decodeMessage`, `getLeafHasher`, ...) dispatch through `supportedChains`, which only holds the classes that got bundled (an unused import is dropped; `supportedChains.SVM ??= SolanaChain` keeps and registers one); they throw `CCIPChainFamilyUnsupportedError`, with a `recovery` hint, for a family that isn't registered. Chain classes register themselves with the static block pattern documented in [Chain Registration](#chain-registration). `src/bundling.test.ts` bundles small apps with esbuild to check this behavior.
 
 The Anchor 0.29 buffer-size workaround lives in per-instance coders (`sizedCoder`/`newProgram` in `solana/coder.ts`); never patch dependency prototypes, since bundlers may resolve another build (e.g. `browser`) of the package than a deep import does.
 
@@ -545,7 +545,7 @@ export class MyChain extends Chain<typeof ChainFamily.MyChain> {
 }
 ```
 
-This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection. `supportedChains` is also the extension point for users: assigning a derived or custom class (`supportedChains[ChainFamily.EVM] = MyEVMChain`) makes every family-generic helper use it, so SDK code must dispatch through it too, never call another family's functions directly. Inside instance methods, call statics as `(this.constructor as typeof MyChain).method()`, so subclass overrides apply.
+This enables dynamic chain discovery via `supportedChains[family]` and is required for CLI auto-detection. `supportedChains` is also the extension point for users: assigning a derived or custom class (`supportedChains[ChainFamily.EVM] = MyEVMChain`) makes every family-generic helper use it, so SDK code must dispatch through it too, never call another family's functions directly. Inside instance methods, call statics as `(this.constructor as typeof MyChain).method()`, and have static factories (`fromUrl`, `fromProvider`, ...) construct `new this(...)`, so subclass overrides apply. SDK code must also never use Anchor's `new Program`/`new BorshCoder` (the `ccip/restricted-syntax` lint rule enforces `newProgram`/`sizedCoder`).
 
 ## CLI Output Architecture
 

@@ -18,7 +18,12 @@ import type { EVMChain } from './evm/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
-import { getChainStatic, getChainStatics } from './supported-chains.ts'
+import {
+  getChainStatic,
+  getChainStatics,
+  notRegisteredRecovery,
+  unregisteredFamilies,
+} from './supported-chains.ts'
 import {
   type AnyMessage,
   type CCIPMessage,
@@ -235,7 +240,8 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   }
 
   // try bytearray decoding on each supported chain
-  for (const chain of getChainStatics()) {
+  const chains = getChainStatics()
+  for (const chain of chains) {
     try {
       const decoded = chain.decodeMessage({ data })
       if (decoded) return decoded
@@ -243,7 +249,18 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       // continue
     }
   }
-  throw new CCIPMessageDecodeError()
+  const registered = chains.map((C) => C.family)
+  // a family left unregistered (e.g. tree-shaken) may be the one that would decode it
+  const missing = unregisteredFamilies()
+  throw new CCIPMessageDecodeError(
+    `no registered chain family decoded it (tried ${registered.join(', ')})`,
+    {
+      context: { registered },
+      ...(missing.length && {
+        recovery: `Ensure the data is a valid CCIP send-request log. If it comes from an unregistered family (${missing.join(', ')}): ${notRegisteredRecovery(missing[0])}`,
+      }),
+    },
+  )
 }
 
 /**

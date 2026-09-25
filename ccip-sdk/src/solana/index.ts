@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type IdlTypes, BorshAccountsCoder, BorshCoder } from '@coral-xyz/anchor'
+import { type IdlTypes, BorshAccountsCoder } from '@coral-xyz/anchor'
 import { NATIVE_MINT } from '@solana/spl-token'
 import {
   type Commitment,
@@ -115,7 +115,7 @@ import {
   util,
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
-import { newProgram } from './coder.ts'
+import { newProgram, sizedCoder } from './coder.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
   decodeSolanaGenericExtraArgsV3,
@@ -149,10 +149,10 @@ import {
 } from './utils.ts'
 export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
 
-const routerCoder = new BorshCoder(CCIP_ROUTER_IDL)
-const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
-const offrampCoder = new BorshCoder(CCIP_OFFRAMP_IDL)
-const offrampV2Coder = new BorshCoder(CCIP_OFFRAMP_V2_IDL)
+const routerCoder = sizedCoder(CCIP_ROUTER_IDL)
+const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
+const offrampCoder = sizedCoder(CCIP_OFFRAMP_IDL)
+const offrampV2Coder = sizedCoder(CCIP_OFFRAMP_V2_IDL)
 const TOKEN_POOL_IDL = {
   ...BURN_MINT_TOKEN_POOL,
   types: BASE_TOKEN_POOL.types,
@@ -160,15 +160,15 @@ const TOKEN_POOL_IDL = {
   errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
 }
 
-const tokenPoolCoder = new BorshCoder(TOKEN_POOL_IDL)
+const tokenPoolCoder = sizedCoder(TOKEN_POOL_IDL)
 const CCTP_TOKEN_POOL_IDL = {
   ...CCIP_CCTP_TOKEN_POOL,
   types: [...BASE_TOKEN_POOL.types, ...CCIP_CCTP_TOKEN_POOL.types],
   events: [...BASE_TOKEN_POOL.events, ...CCIP_CCTP_TOKEN_POOL.events],
   errors: [...BASE_TOKEN_POOL.errors, ...CCIP_CCTP_TOKEN_POOL.errors],
 }
-const cctpTokenPoolCoder = new BorshCoder(CCTP_TOKEN_POOL_IDL)
-// const commonCoder = new BorshCoder(CCIP_COMMON_IDL)
+const cctpTokenPoolCoder = sizedCoder(CCTP_TOKEN_POOL_IDL)
+// const commonCoder = sizedCoder(CCIP_COMMON_IDL)
 
 interface ParsedTokenInfo {
   name?: string
@@ -349,7 +349,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    */
   static async fromConnection(connection: Connection, ctx?: ChainContext): Promise<SolanaChain> {
     // Get genesis hash to use as chainId
-    return new SolanaChain(connection, networkInfo(await connection.getGenesisHash()), ctx)
+    return new this(connection, networkInfo(await connection.getGenesisHash()), ctx)
   }
 
   /**

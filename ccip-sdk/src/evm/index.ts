@@ -625,7 +625,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    */
   static async fromProvider(provider: JsonRpcApiProvider, ctx?: ChainContext): Promise<EVMChain> {
     try {
-      return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
+      return new this(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
     } catch (err) {
       provider.destroy()
       throw err
@@ -2833,7 +2833,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       if (
         offchainTokenData === '0x' &&
         poolTypeAndVersion &&
-        EVMChain.destPoolRequiresOffchainTokenData(
+        (this.constructor as typeof EVMChain).destPoolRequiresOffchainTokenData(
           offRampVersion,
           poolTypeAndVersion,
           sourcePoolData,

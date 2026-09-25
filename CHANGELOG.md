@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: `SELECTORS` is the documented way to add chains missing from the bundled table (local devnets, forks, chains newer than the installed release): entries written into it at runtime resolve everywhere. `networkInfo` reads the live table (its caches can no longer return a stale entry), resolves names without a hyphen, and no longer resolves `Object.prototype` keys such as `constructor` as chains
 - CLI: `--chain-selectors` / `CCIP_CHAIN_SELECTORS` add chains missing from the bundled table: `<chainId>=<selector>` for a new chain (family inferred from the chain id format), `<chainId>=<chain name>` for a fork served under a different chain id (Tenderly Virtual Environments, `anvil --fork --chain-id`; a known selector works too), which takes over the forked chain's selector and name. Takes comma/space-separated lists, inline JSON, or a JSON/YAML file (including a `chain-selectors` `selectors:` document); rejects duplicate names and replacing a mainnet chain id
 - SDK: fix Solana Borsh encoding of payloads over 1000 bytes in browser bundles, without patching Anchor's prototypes
-- SDK: bundler-friendlier chain registration: a bare `import '@chainlink/ccip-sdk/all'` registers every family, classes assigned to `supportedChains` are never replaced, and an unregistered family's error says what to import
+- SDK: bundler-friendlier chain registration: a bare `import '@chainlink/ccip-sdk/all'` registers every family, classes assigned to `supportedChains` are never replaced (and `fromUrl` & co. build them), and an unregistered family's error says how to register it
 
 ## [1.13.0] - 2026-08-25
 

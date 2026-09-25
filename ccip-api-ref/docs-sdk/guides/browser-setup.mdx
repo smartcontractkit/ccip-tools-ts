@@ -350,7 +350,19 @@ import { EVMChain } from '@chainlink/ccip-sdk'
 import '@chainlink/ccip-sdk/all'
 ```
 
-Family-generic helpers such as `decodeAddress`, `decodeExtraArgs`, `decodeMessage` and `getLeafHasher` dispatch to the chain classes registered in `supportedChains`. A chain class registers itself when it is bundled, so these helpers only handle the families your app references: import the class of every family whose messages or addresses you handle, not only the ones you connect to. A missing family throws `CCIPChainFamilyUnsupportedError`, whose `recovery` says what to import.
+Family-generic helpers such as `decodeAddress`, `decodeExtraArgs`, `decodeMessage` and `getLeafHasher` dispatch to the chain classes registered in `supportedChains`. A chain class registers itself only when the bundler keeps it, and an import your code never uses is dropped. Register every family whose messages, addresses or extra args you handle, not only the ones you connect to:
+
+```typescript
+import { SolanaChain, supportedChains } from '@chainlink/ccip-sdk'
+
+supportedChains.SVM ??= SolanaChain // e.g. decoding messages sent from Solana
+```
+
+A missing family throws `CCIPChainFamilyUnsupportedError`, whose `recovery` names the class to register.
+
+:::warning Development and production builds differ
+Dev servers (e.g. Vite's dependency pre-bundling), Node and test runners evaluate the whole SDK, so every family is registered there. Only production builds tree-shake: code that works in development but throws `CCIPChainFamilyUnsupportedError` in production is missing a registration. Test your production build.
+:::
 
 To customize a family (e.g. address formatting or a decoder), register a derived class; the SDK's own classes never replace a registration:
 
@@ -403,7 +415,7 @@ npx vite-bundle-visualizer
 npx webpack-bundle-analyzer dist/stats.json
 ```
 
-EVM-only bundles should be ~740 KB minified. If you see >1 MB, tree-shaking may not be working — verify you're using ES module imports (not `require()`) and not importing `allSupportedChains`.
+EVM-only bundles should be ~740 KB minified. If you see >1 MB, tree-shaking may not be working — verify you're using ES module imports (not `require()`) and not importing `allSupportedChains` or `@chainlink/ccip-sdk/all`.
 
 ## Troubleshooting
 
@@ -421,7 +433,7 @@ Wallet libraries (MetaMask SDK, WalletConnect) require `process`. Use the "With 
 
 ### Bundle size larger than expected
 
-Verify you're importing specific chains (`EVMChain`), not `allSupportedChains`. Run a bundle analyzer (see [Tree-Shaking](#tree-shaking)). On Webpack/Next.js, the `@noble/hashes` alias fix must be applied before tree-shaking can work.
+Verify you're importing specific chains (`EVMChain`), not `allSupportedChains` or `@chainlink/ccip-sdk/all`. Run a bundle analyzer (see [Tree-Shaking](#tree-shaking)). On Webpack/Next.js, the `@noble/hashes` alias fix must be applied before tree-shaking can work.
 
 ### Vite dev server errors with EVM-only code
 

@@ -268,7 +268,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           Address.parse('EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'), // mainnet USDT
         )
       ).state === 'active'
-    return new TONChain(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
+    return new this(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
   }
 
   /**
@@ -333,7 +333,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       boundTonClientCaches(client)
       const chain =
         isMainnetHint !== undefined
-          ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
+          ? new this(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
               ...ctx,
               fetch: fetchFn,
               v3Fetch,

@@ -168,7 +168,7 @@ import { ChainFamily, type NetworkInfo, type WithLogger } from '../types.ts'
 export class YourChainChain extends Chain<typeof ChainFamily.YourChain> {
   // Auto-register when this module is imported
   static {
-    supportedChains[ChainFamily.YourChain] = YourChainChain
+    supportedChains[ChainFamily.YourChain] ??= YourChainChain
   }
 
   static readonly family = ChainFamily.YourChain
@@ -356,7 +356,7 @@ Chain instances hold network connections that need cleanup. The SDK uses the sta
 
 **`decodeExtraArgs`:** Returns tagged objects with `_tag` discriminator (e.g., `{ ..., _tag: 'EVMExtraArgsV2' }`). Check the 4-byte tag prefix to determine format, return `undefined` if not recognized.
 
-**`fromUrl`:** Async factory that creates client, fetches chain ID, returns chain instance. Clean up client on failure.
+**`fromUrl`:** Async factory that creates client, fetches chain ID, returns chain instance (`new this(...)`, so subclasses get their own class). Clean up client on failure.
 
 **`typeAndVersion`:** Returns 4-tuple `[type, version, typeAndVersion, suffix?]`. Use `parseTypeAndVersion` utility from `utils.ts`.
 
@@ -394,7 +394,7 @@ Before submitting your PR:
 
 - [ ] `ChainFamily` constant added to `types.ts`
 - [ ] Chain class extends `Chain<typeof ChainFamily.YourChain>`
-- [ ] Static registration block added (`static { supportedChains[...] = ... }`)
+- [ ] Static registration block added (`static { supportedChains[...] ??= ... }`)
 - [ ] All abstract methods implemented
 - [ ] AbortSignal cleanup wired in constructor (`ctx?.abort?.addEventListener('abort', () => ..., { once: true })`)
 - [ ] Key methods memoized (see Engineering Patterns)
