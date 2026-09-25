@@ -3,8 +3,8 @@
  * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
  * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
  * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
- * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist read
- * `applyAllowlistUpdates` pre-flights against ({@link readTokenPoolAllowlist}) plus the
+ * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist
+ * resolution and read ({@link resolveAllowlistHolder}, {@link readTokenPoolAllowlist}) plus the
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
  * liquidity layer: the rebalancer and liquidity reads plus the guards the liquidity ops pre-flight
  * with ({@link assertLockReleasePool}, {@link assertPoolRebalancer},
@@ -341,8 +341,31 @@ export async function readTokenPoolAdvancedPoolHooks(
 }
 
 /**
- * `TokenPool`'s allowlist getters, identical across v1.5.0–v1.6.1 and both ABI families. Absent
- * from v2.0.0, which dropped the allowlist — callers must resolve the version first.
+ * Resolves the contract holding a pool's sender allowlist: the pool itself on v1.5.0–v1.6.1. A
+ * v2.0.0 pool has no allowlist of its own and enforces the one on its bound `AdvancedPoolHooks`,
+ * which may back several pools at once.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool to resolve.
+ * @returns The pool's type + version, and `holder` checksummed: the zero address for a v2.0.0 pool
+ * with no hooks bound, which enforces no allowlist.
+ * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
+ * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+ */
+export async function resolveAllowlistHolder(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<{ type: TokenPoolType; version: TokenPoolVersion; holder: string }> {
+  const pool = await resolveTokenPool(chain, poolAddress)
+  const holder =
+    pool.version === TokenPoolVersion.V2_0_0
+      ? await readTokenPoolAdvancedPoolHooks(chain, poolAddress)
+      : getAddress(poolAddress)
+  return { ...pool, holder }
+}
+
+/**
+ * The allowlist getters, identical across v1.5.0–v1.6.1, both ABI families, and v2.0.0's
+ * `AdvancedPoolHooks`. Absent from the v2.0.0 pool itself — resolve the holder first.
  */
 type PoolAllowlistGetter = Pick<
   TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
@@ -350,17 +373,18 @@ type PoolAllowlistGetter = Pick<
 >
 
 /**
- * Reads a token pool's sender allowlist and whether the feature is enabled at all, in two
- * parallel `eth_call`s.
+ * Reads a sender allowlist and whether the feature is enabled at all, in two parallel
+ * `eth_call`s.
  *
  * @remarks Same rationale as {@link readTokenPoolOwner} for not routing through
  * `getTokenPoolState`, which does not expose the allowlist.
- * @remarks `enabled` is fixed for the pool's lifetime: the contract sets `i_allowlistEnabled`
- * *immutable* in its constructor, to `allowlist.length > 0`. A pool deployed without an
+ * @remarks `enabled` is fixed for the holder's lifetime: both set `i_allowlistEnabled`
+ * *immutable* in their constructor, to `allowlist.length > 0`. A holder deployed without an
  * allowlist can therefore never gain one, and every `applyAllowListUpdates` against it reverts
  * `AllowListNotEnabled`.
  * @param chain - Chain to read from.
- * @param poolAddress - Token pool contract to read from; must be v1.5.0–v1.6.1.
+ * @param poolAddress - Allowlist holder to read from, as returned by
+ * {@link resolveAllowlistHolder}: a v1.5.0–v1.6.1 pool or an `AdvancedPoolHooks`.
  * @returns `enabled`, and the current entries checksummed (empty when disabled).
  */
 export async function readTokenPoolAllowlist(

@@ -5,10 +5,12 @@ import { makeError } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../utils.ts'
-import { CCTContractTypeInvalidError } from '../../errors.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
 import {
   ADVANCED_POOL_HOOKS_BYTECODE,
+  ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksContract,
+  assertAdvancedPoolHooksOwner,
   getAdvancedPoolHooksArtifact,
 } from './contracts.ts'
 
@@ -69,6 +71,43 @@ describe('advanced-pool-hooks/contracts', () => {
           err instanceof CCTContractTypeInvalidError &&
           err.context.actual === 'LockReleaseTokenPool' &&
           !err.isTransient,
+      )
+    })
+  })
+
+  describe('assertAdvancedPoolHooksOwner', () => {
+    const OWNER = '0x' + 'ab'.repeat(20) // lower-case: the comparison must checksum it
+
+    /** Answers only the hooks' `owner()`, recording where the call went. */
+    const ownerChain = (seen: string[] = []): EVMChain =>
+      ({
+        provider: {
+          call: ({ to, data }: { to: string; data: string }) => {
+            seen.push(to.toLowerCase())
+            if (data.startsWith(ADVANCED_POOL_HOOKS_INTERFACE.getFunction('owner')!.selector))
+              return Promise.resolve(
+                ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionResult('owner', [OWNER]),
+              )
+            return Promise.reject(makeError('execution reverted', 'CALL_EXCEPTION'))
+          },
+        },
+        logger: { debug() {}, info() {}, warn() {}, error() {} },
+      }) as unknown as EVMChain
+
+    it('accepts the hooks owner, compared checksummed, reading owner() on the hooks', async () => {
+      const seen: string[] = []
+      await assertAdvancedPoolHooksOwner('op', ownerChain(seen), HOOKS, OWNER)
+      assert.deepEqual(seen, [HOOKS])
+    })
+
+    it('rejects any other sender as a sender param error', async () => {
+      await assert.rejects(
+        () => assertAdvancedPoolHooksOwner('op', ownerChain(), HOOKS, '0x' + '99'.repeat(20)),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'op' &&
+          err.context.param === 'sender' &&
+          err.message.includes('AdvancedPoolHooks owner'),
       )
     })
   })

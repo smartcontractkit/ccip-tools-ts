@@ -8,6 +8,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { ADVANCED_POOL_HOOKS_INTERFACE } from '../../advanced-pool-hooks/contracts.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
 import {
   type ApplyAllowlistUpdatesParams,
@@ -16,6 +17,7 @@ import {
 
 const POOL = '0x' + '11'.repeat(20)
 const OWNER = '0x' + '22'.repeat(20)
+const HOOKS = getAddress('0x' + '44'.repeat(20))
 const HASH = '0x' + 'ab'.repeat(32)
 
 // Distinct fixtures per array: a swapped (removes, adds) pair must fail byte parity.
@@ -41,9 +43,11 @@ const LEGACY_VERSIONS = [
 ] as const
 
 /**
- * EVMChain stub: reports `type version` from `typeAndVersion`, and answers the pool's `owner()`,
- * `getAllowListEnabled()` and `getAllowList()` `eth_call`s. Any other call reverts. `onCall`
- * records that RPC happened at all, so the validation tests can assert nothing was issued.
+ * EVMChain stub: reports `type version` from `typeAndVersion`. The allowlist holder answers
+ * `owner()`, `getAllowListEnabled()` and `getAllowList()`: the pool itself before v2.0.0, the
+ * bound hooks at {@link HOOKS} from v2.0.0, where the pool answers only `getAdvancedPoolHooks()`.
+ * Any other call, or a call to the wrong contract, reverts. `onCall` records that RPC happened at
+ * all, so the validation tests can assert nothing was issued.
  *
  * `allowlist` defaults to {@link REMOVES}, the set the default params remove from — leaving
  * {@link ADDS} absent, so the default case is a real state change on both sides.
@@ -52,6 +56,8 @@ function stubChain({
   family = 'BurnMint',
   version = TokenPoolVersion.V1_5_1,
   owner = OWNER,
+  hooks = HOOKS,
+  hooksOwner = OWNER,
   allowlistEnabled = true,
   allowlist = REMOVES,
   onCall,
@@ -59,28 +65,43 @@ function stubChain({
   family?: TokenPoolFamily
   version?: TokenPoolVersion
   owner?: string
+  hooks?: string
+  hooksOwner?: string
   allowlistEnabled?: boolean
   allowlist?: string[]
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
-  const ownerSelector = iface.getFunction('owner')!.selector
-  // v2.0.0 dropped the allowlist getters, so only look them up where they exist
-  const allowlistEnabledSelector = iface.getFunction('getAllowListEnabled')?.selector
-  const allowlistSelector = iface.getFunction('getAllowList')?.selector
+  const pool = TOKEN_POOL_INTERFACES[family][version]
+  const v2 = version === TokenPoolVersion.V2_0_0
+  const holder = v2
+    ? {
+        address: hooks,
+        iface: ADVANCED_POOL_HOOKS_INTERFACE,
+        owner: hooksOwner,
+      }
+    : { address: POOL, iface: pool, owner }
+  const answer = (iface: Interface, data: string, fn: string, result: unknown) =>
+    data.startsWith(iface.getFunction(fn)!.selector)
+      ? iface.encodeFunctionResult(fn, [result])
+      : undefined
   return {
     provider: {
-      call: ({ data }: { data: string }) => {
+      call: ({ to, data }: { to: string; data: string }) => {
         onCall?.()
-        const selector = data.slice(0, 10)
-        if (selector === ownerSelector)
-          return Promise.resolve(iface.encodeFunctionResult('owner', [owner]))
-        if (selector === allowlistEnabledSelector)
-          return Promise.resolve(
-            iface.encodeFunctionResult('getAllowListEnabled', [allowlistEnabled]),
-          )
-        if (selector === allowlistSelector)
-          return Promise.resolve(iface.encodeFunctionResult('getAllowList', [allowlist]))
+        const target = getAddress(to)
+        const result =
+          (target === getAddress(POOL)
+            ? v2
+              ? (answer(pool, data, 'getAdvancedPoolHooks', hooks) ??
+                answer(pool, data, 'owner', owner))
+              : undefined
+            : undefined) ??
+          (target === getAddress(holder.address)
+            ? (answer(holder.iface, data, 'owner', holder.owner) ??
+              answer(holder.iface, data, 'getAllowListEnabled', allowlistEnabled) ??
+              answer(holder.iface, data, 'getAllowList', allowlist))
+            : undefined)
+        if (result !== undefined) return Promise.resolve(result)
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
           data: '0x',
@@ -327,6 +348,73 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
     })
   })
 
+  describe('2.0.0 (routes through AdvancedPoolHooks)', () => {
+    const v2 = (overrides: Parameters<typeof stubChain>[0] = {}) =>
+      stubChain({ version: TokenPoolVersion.V2_0_0, ...overrides })
+
+    for (const family of ['BurnMint', 'LockRelease'] as const) {
+      it(`sends applyAllowListUpdates(removes, adds) to the bound hooks of a ${family} pool`, async () => {
+        const unsigned = await generate(v2({ family }))
+        const tx = unsigned.transactions[0]!
+        assert.equal(unsigned.transactions.length, 1)
+        assert.equal(tx.to, HOOKS)
+        assert.equal(tx.from, OWNER)
+        assert.equal(tx.data, DATA)
+      })
+    }
+
+    it('checks sender against the hooks owner, not the pool owner', async () => {
+      const poolOwner = '0x' + '99'.repeat(20)
+      // the pool owner did not deploy the hooks, so it cannot write through them
+      await assert.rejects(
+        () => generate(v2({ owner: poolOwner }), { sender: poolOwner }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          err.message.includes('AdvancedPoolHooks owner'),
+      )
+      // and the hooks owner can, even though it does not own the pool
+      const unsigned = await generate(v2({ owner: poolOwner }), { sender: OWNER })
+      assert.equal(unsigned.transactions[0]!.to, HOOKS)
+    })
+
+    it('rejects hooks deployed without an allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlistEnabled: false, allowlist: [] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'poolAddress' &&
+          err.message.includes('updateAdvancedPoolHooks'),
+      )
+    })
+
+    it('rejects removing an address the hooks do not allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlist: [ADDS[0]!] }), { adds: [] }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'removes',
+      )
+    })
+
+    it('rejects adding an address the hooks already allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlist: [...REMOVES, ADDS[1]!] })),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'adds',
+      )
+    })
+
+    it('executes as the hooks owner', async () => {
+      assert.deepEqual(
+        await op.execute(v2(), {
+          poolAddress: POOL,
+          removes: REMOVES,
+          adds: ADDS,
+          wallet: fakeSigner(),
+        }),
+        { hash: HASH },
+      )
+    })
+  })
+
   describe('execute', () => {
     const params = { poolAddress: POOL, removes: REMOVES, adds: ADDS }
 
@@ -388,9 +476,9 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
       })
     }
 
-    it('rejects 2.0.0, where the allowlist was removed from the contract', async () => {
+    it('rejects a 2.0.0 pool with no hooks bound, where there is no allowlist to update', async () => {
       await assert.rejects(
-        () => generate(stubChain({ version: TokenPoolVersion.V2_0_0 })),
+        () => generate(stubChain({ version: TokenPoolVersion.V2_0_0, hooks: ZeroAddress })),
         (err: unknown) =>
           err instanceof CCTOperationUnsupportedError &&
           err.context.operation === 'applyAllowlistUpdates' &&

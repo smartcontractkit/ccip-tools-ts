@@ -75,6 +75,16 @@ import {
   GetAllowedFinalityConfig,
 } from './token-pool/operations/get-allowed-finality-config.ts'
 import {
+  type GetAllowlistEnabledParams,
+  type GetAllowlistEnabledResult,
+  GetAllowlistEnabled,
+} from './token-pool/operations/get-allowlist-enabled.ts'
+import {
+  type GetAllowlistParams,
+  type GetAllowlistResult,
+  GetAllowlist,
+} from './token-pool/operations/get-allowlist.ts'
+import {
   type GetRebalancerParams,
   type GetRebalancerResult,
   GetRebalancer,
@@ -201,6 +211,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
+  readonly #getAllowlist = new GetAllowlist()
+  readonly #getAllowlistEnabled = new GetAllowlistEnabled()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
   readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
@@ -2417,34 +2429,37 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned pool `applyAllowlistUpdates` tx (for multisig / offline signing): removes
-   * and adds entries in the pool's sender allowlist in one call. Probes the pool's on-chain
-   * `typeAndVersion` to resolve its interface + encoder.
-   * @remarks **v1.5.0–v1.6.1 only.** The allowlist feature does not exist on a v2.0.0 pool, which
-   * declares neither `applyAllowListUpdates` nor `getAllowList`/`getAllowListEnabled`, so a 2.0.0
-   * pool is reported unsupported rather than emitting calldata for a removed selector.
+   * Builds an unsigned `applyAllowListUpdates` tx (for multisig / offline signing): removes and
+   * adds entries in the pool's sender allowlist in one call. Probes the pool's on-chain
+   * `typeAndVersion` to resolve which contract holds its allowlist.
+   * @remarks **The target moved in v2.0.0.** On v1.5.0–v1.6.1 the tx goes to the pool, gated on
+   * the pool owner. A v2.0.0 pool has no allowlist of its own: the tx goes to its bound
+   * `AdvancedPoolHooks` (see {@link EVMTokenManager.getAdvancedPoolHooks}), gated on the **hooks**
+   * owner, and changes the allowlist of every pool bound to those hooks. A v2.0.0 pool with no
+   * hooks bound is reported unsupported.
    *
    * `removes` are applied *before* `adds` on-chain. Both arrays must be non-empty in total, hold
    * no duplicates and no zero address, and share no address — an address in both would end up
    * allowlisted (removes run first), which no caller can reasonably have meant.
    *
-   * The pool must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
+   * The holder must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
    * the call reverts `AllowListNotEnabled` when false), and the update must actually change
-   * state: the current allowlist is read first, and an entry the pool would silently ignore — a
+   * state: the current allowlist is read first, and an entry the holder would silently ignore — a
    * `removes` that is not allowlisted, an `adds` that already is — is rejected here.
    *
    * Owner-only (`applyAllowListUpdates` is `onlyOwner`). When `sender` is supplied it is checked
-   * against the pool's `owner()` before any calldata is built; omit it and no owner read is made
-   * (nothing to compare against).
-   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no allowlist
+   * against the holder's `owner()` before any calldata is built; omit it and no owner read is
+   * made (nothing to compare against).
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool with no hooks bound
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
    * address, both arrays are empty, an array holds duplicates or the zero address, an address
-   * appears in both arrays, the pool has no allowlist enabled, a `removes` entry is not currently
-   * allowlisted, an `adds` entry already is, or `sender` is given and is not the pool owner
+   * appears in both arrays, the holder has no allowlist enabled, a `removes` entry is not
+   * currently allowlisted, an `adds` entry already is, or `sender` is given and is not the
+   * holder's owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
-   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * // build only — sign later (multisig / offline). `sender` must be the holder's owner.
    * const unsigned = await cct.generateUnsignedApplyAllowlistUpdates({
    *   poolAddress: '0xPool...',
    *   removes: ['0xRevoked...'],
@@ -2460,18 +2475,18 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Removes and adds entries in the pool's sender allowlist, signing + submitting with
    * `opts.wallet`. `sender` defaults to the wallet's address and must equal it — the wallet must
-   * be the pool owner.
+   * own the allowlist holder: the pool on v1.5.0–v1.6.1, its bound `AdvancedPoolHooks` on v2.0.0.
    *
    * `removes` are applied *before* `adds` on-chain, so an address listed in both would end up
-   * allowlisted; that is rejected, as are duplicates and the zero address. The pool must have an
-   * allowlist enabled (`allowlistEnabled` is immutable — a pool deployed without one can never
+   * allowlisted; that is rejected, as are duplicates and the zero address. The holder must have an
+   * allowlist enabled (`allowlistEnabled` is immutable — a holder deployed without one can never
    * gain it), and every entry must change state: the current allowlist is read first, and a
    * `removes` that is not allowlisted or an `adds` that already is fails here rather than mining
    * as a no-op.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no allowlist
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool with no hooks bound
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the pool owner, the pool has no allowlist enabled, or
+   * the wallet's address, the wallet is not the holder's owner, it has no allowlist enabled, or
    * an entry would be a no-op (see {@link EVMTokenManager.generateUnsignedApplyAllowlistUpdates})
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -2490,6 +2505,40 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<ApplyAllowlistUpdatesParams>,
   ): Promise<TransactionResult> {
     return this.#applyAllowlistUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the sender allowlist the pool enforces, checksummed: its own on v1.5.0–v1.6.1, its
+   * bound `AdvancedPoolHooks`' on v2.0.0. A v2.0.0 pool with no hooks bound reads `[]`.
+   * @remarks `[]` does not mean "anyone may send": pair with
+   * {@link EVMTokenManager.getAllowlistEnabled}, since an enabled allowlist with no entries
+   * rejects every sender.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const senders = await cct.getAllowlist({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getAllowlist(opts: GetAllowlistParams): Promise<GetAllowlistResult> {
+    return this.#getAllowlist.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether the pool enforces a sender allowlist: its own immutable flag on v1.5.0–v1.6.1,
+   * its bound `AdvancedPoolHooks`' on v2.0.0. A v2.0.0 pool with no hooks bound reads `false`.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * if (!(await cct.getAllowlistEnabled({ poolAddress: '0xPool...' })))
+   *   console.log('any sender may transfer through this pool')
+   * ```
+   */
+  getAllowlistEnabled(opts: GetAllowlistEnabledParams): Promise<GetAllowlistEnabledResult> {
+    return this.#getAllowlistEnabled.query(this.chain, opts)
   }
 }
 
@@ -2555,6 +2604,14 @@ export type {
   ChainUpdateV1_5_1,
 } from './token-pool/operations/apply-chain-updates.ts'
 export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
+export type {
+  GetAllowlistParams,
+  GetAllowlistResult,
+} from './token-pool/operations/get-allowlist.ts'
+export type {
+  GetAllowlistEnabledParams,
+  GetAllowlistEnabledResult,
+} from './token-pool/operations/get-allowlist-enabled.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core

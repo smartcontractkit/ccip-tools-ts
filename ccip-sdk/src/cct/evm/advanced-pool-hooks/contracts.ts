@@ -1,9 +1,10 @@
 /**
  * EVM `AdvancedPoolHooks` contract layer for CCT: the cached {@link Interface}
  * ({@link ADVANCED_POOL_HOOKS_INTERFACE}), the deploy artifact
- * ({@link getAdvancedPoolHooksArtifact}), and the bind-target guard
- * ({@link assertAdvancedPoolHooksContract}). Only one version is deployable, so there is no
- * version framework here. Mirrors `lockbox/contracts.ts`.
+ * ({@link getAdvancedPoolHooksArtifact}), the bind-target guard
+ * ({@link assertAdvancedPoolHooksContract}), and the owner guard its owner-gated writes pre-flight
+ * `sender` against ({@link assertAdvancedPoolHooksOwner}). Only one version is deployable, so
+ * there is no version framework here. Mirrors `lockbox/contracts.ts`.
  *
  * @remarks A v2.0.0 `TokenPool` has no allowlist or CCV configuration of its own: both live on an
  * optional `AdvancedPoolHooks`, consulted only when bound — an unbound pool enforces neither.
@@ -11,13 +12,15 @@
  * @packageDocumentation
  */
 
-import { Interface } from 'ethers'
+import { Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { CCTContractTypeInvalidError } from '../../errors.ts'
+import { resultToObject } from '../../../evm/types.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
 import type { DeployArtifact } from '../operation.ts'
+import { getTypedContract } from '../query.ts'
 
 /** The `typeAndVersion` contract type an `AdvancedPoolHooks` reports (`"AdvancedPoolHooks 2.0.0"`). */
 export const ADVANCED_POOL_HOOKS_TYPE = 'AdvancedPoolHooks'
@@ -69,4 +72,35 @@ export async function assertAdvancedPoolHooksContract(
   }
   if (contractType !== ADVANCED_POOL_HOOKS_TYPE)
     throw new CCTContractTypeInvalidError(address, ADVANCED_POOL_HOOKS_TYPE, contractType)
+}
+
+/**
+ * Pre-flights `sender` against an `AdvancedPoolHooks`'s own `owner()` for an owner-gated hooks
+ * write, in one `eth_call`, so an unauthorized caller fails here instead of as an
+ * `OnlyCallableByOwner` revert after a multisig has signed.
+ *
+ * @remarks The hooks are a separately owned `Ownable2Step` contract, not part of the pool: the
+ * deployer becomes their owner, and binding them to a pool transfers nothing. A pool owner who did
+ * not deploy the hooks cannot write through them, so checking the *pool* owner instead would pass
+ * a sender the hooks then revert.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param hooksAddress - `AdvancedPoolHooks` being written to.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the hooks owner
+ */
+export async function assertAdvancedPoolHooksOwner(
+  operation: string,
+  chain: EVMChain,
+  hooksAddress: string,
+  sender: string,
+): Promise<void> {
+  const hooks = getTypedContract(chain, hooksAddress, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  const owner = getAddress(resultToObject(await hooks.owner()))
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${hooksAddress} are owned separately from the pools bound to them`,
+  )
 }
