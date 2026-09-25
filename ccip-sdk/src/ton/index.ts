@@ -148,7 +148,7 @@ export type TONChainContext = ChainContext & {
  */
 export class TONChain extends Chain<typeof ChainFamily.TON> {
   static {
-    supportedChains[ChainFamily.TON] = TONChain
+    supportedChains[ChainFamily.TON] ??= TONChain
   }
 
   // Minimum estimated floor age for the index-driven bounded walk to engage (see
@@ -268,7 +268,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
           Address.parse('EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'), // mainnet USDT
         )
       ).state === 'active'
-    return new TONChain(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
+    return new this(client, networkInfo(isMainnet ? 'ton-mainnet' : 'ton-testnet'), ctx)
   }
 
   /**
@@ -333,7 +333,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       boundTonClientCaches(client)
       const chain =
         isMainnetHint !== undefined
-          ? new TONChain(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
+          ? new this(client, networkInfo(isMainnetHint ? 'ton-mainnet' : 'ton-testnet'), {
               ...ctx,
               fetch: fetchFn,
               v3Fetch,
@@ -2077,7 +2077,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       startTime,
       watch: AbortSignal.timeout(5 * 60e3 /* 5m timeout */),
     })) {
-      const msg = TONChain.decodeMessage(log)
+      const msg = (this.constructor as typeof TONChain).decodeMessage(log)
       if (!msg) continue
 
       // Found our message: construct and return the CCIPRequest

@@ -88,11 +88,28 @@ const restrictedSyntax = {
     const report = (node, message) => context.report({ node, message })
 
     return {
+      ImportDeclaration(node) {
+        if (String(node.source.value).startsWith('@coral-xyz/anchor/dist/')) {
+          report(
+            node,
+            'Import @coral-xyz/anchor from its package entry: a deep dist/ path resolves another build than bundlers pick for the entry.',
+          )
+        }
+      },
       NewExpression(node) {
         if (isIdentifier(node.callee, 'Error')) {
           report(
             node,
             'Use CCIPError or specialized error classes instead of generic Error. See src/errors/specialized.ts for available error types.',
+          )
+        }
+        if (
+          (isIdentifier(node.callee, 'Program') || isIdentifier(node.callee, 'BorshCoder')) &&
+          !context.filename.endsWith('/solana/coder.ts')
+        ) {
+          report(
+            node,
+            'Use newProgram() or sizedCoder() from solana/coder.ts: plain Anchor 0.29 coders overrun 1000B encode buffers.',
           )
         }
       },

@@ -128,7 +128,7 @@ const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
  */
 export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static {
-    supportedChains[ChainFamily.Sui] = SuiChain
+    supportedChains[ChainFamily.Sui] ??= SuiChain
   }
   static readonly family = ChainFamily.Sui
   static readonly decimals = 9 // SUI has 9 decimals
@@ -432,7 +432,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     const client = new SuiJsonRpcClient({ transport, network: suiNetwork })
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
-    const chain = new SuiChain(client, network, ctx)
+    const chain = new this(client, network, ctx)
     return Object.assign(chain, { url })
   }
 
@@ -2014,7 +2014,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       Partial<EVMExtraArgsV2 & SVMExtraArgsV1>
     const { gasLimit, allowOutOfOrderExecution, computeUnits } = extraArgs
     const extraArgsBytes = getDataBytes(
-      SuiChain.encodeExtraArgs({
+      (this.constructor as typeof SuiChain).encodeExtraArgs({
         gasLimit: gasLimit ?? 0n,
         ...(allowOutOfOrderExecution != null && { allowOutOfOrderExecution }),
         ...(computeUnits != null && { computeUnits }),

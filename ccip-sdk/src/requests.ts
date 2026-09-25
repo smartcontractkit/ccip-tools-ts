@@ -18,7 +18,12 @@ import type { EVMChain } from './evm/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { decodeExtraArgs, decodeFinalityRequested } from './extra-args.ts'
 import { ChainFamily, networkInfo } from './networks.ts'
-import { supportedChains } from './supported-chains.ts'
+import {
+  getChainStatic,
+  getChainStatics,
+  notRegisteredRecovery,
+  unregisteredFamilies,
+} from './supported-chains.ts'
 import {
   type AnyMessage,
   type CCIPMessage,
@@ -209,6 +214,7 @@ function decodeJsonMessage(data: Record<string, unknown> | undefined) {
  * @param data - Data to decode (hex string, Uint8Array, JSON string, or object)
  * @returns Decoded CCIPMessage
  * @throws {@link CCIPMessageDecodeError} if data cannot be decoded as a valid message
+ * @throws {@link CCIPChainFamilyUnsupportedError} if bytes are passed but no chain family is registered
  * @throws {@link CCIPMessageInvalidError} if message structure is invalid or missing required fields
  *
  * @example
@@ -234,7 +240,8 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
   }
 
   // try bytearray decoding on each supported chain
-  for (const chain of Object.values(supportedChains)) {
+  const chains = getChainStatics()
+  for (const chain of chains) {
     try {
       const decoded = chain.decodeMessage({ data })
       if (decoded) return decoded
@@ -242,7 +249,18 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
       // continue
     }
   }
-  throw new CCIPMessageDecodeError()
+  const registered = chains.map((C) => C.family)
+  // a family left unregistered (e.g. tree-shaken) may be the one that would decode it
+  const missing = unregisteredFamilies()
+  throw new CCIPMessageDecodeError(
+    `no registered chain family decoded it (tried ${registered.join(', ')})`,
+    {
+      context: { registered },
+      ...(missing.length && {
+        recovery: `Ensure the data is a valid CCIP send-request log. If it comes from an unregistered family (${missing.join(', ')}): ${notRegisteredRecovery(missing[0])}`,
+      }),
+    },
+  )
 }
 
 /**
@@ -253,7 +271,7 @@ export function decodeMessage(data: string | Uint8Array | Record<string, unknown
  */
 export function buildMessageForDest(message: MessageInput, dest: ChainFamily): AnyMessage {
   if (message.extraArgs && '_tag' in message.extraArgs) delete message.extraArgs._tag
-  return supportedChains[dest]!.buildMessageForDest(message)
+  return getChainStatic(dest).buildMessageForDest(message)
 }
 
 /**

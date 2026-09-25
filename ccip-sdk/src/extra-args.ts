@@ -1,9 +1,9 @@
 import { type BytesLike, dataSlice, getAddress, id, toNumber, zeroPadBytes } from 'ethers'
 
 import type { CantonExtraArgsV1 } from './canton/types.ts'
-import { CCIPChainFamilyUnsupportedError, CCIPExtraArgsParseError } from './errors/index.ts'
+import { CCIPExtraArgsParseError } from './errors/index.ts'
 import { ChainFamily } from './networks.ts'
-import { supportedChains } from './supported-chains.ts'
+import { getChainStatic, getChainStatics } from './supported-chains.ts'
 
 /** Tag identifier for EVMExtraArgsV1 encoding. */
 export const EVMExtraArgsV1Tag = id('CCIP EVMExtraArgsV1').substring(0, 10) as '0x97a657c9'
@@ -221,9 +221,7 @@ export type ExtraArgs =
  * @see {@link decodeExtraArgs} - Decode extra arguments from bytes
  */
 export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily.EVM): string {
-  const chain = supportedChains[from]
-  if (!chain) throw new CCIPChainFamilyUnsupportedError(from)
-  return chain.encodeExtraArgs(args)
+  return getChainStatic(from).encodeExtraArgs(args)
 }
 
 /**
@@ -231,7 +229,7 @@ export function encodeExtraArgs(args: ExtraArgs, from: ChainFamily = ChainFamily
  * @param data - Extra arguments bytearray data.
  * @param from - Optional chain family to narrow decoding attempts.
  * @returns Extra arguments object if found, undefined otherwise.
- * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family not supported.
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family (or, without `from`, any family) not registered.
  * @throws {@link CCIPExtraArgsParseError} if data cannot be parsed as valid extra args.
  *
  * @example
@@ -258,15 +256,7 @@ export function decodeExtraArgs(
   | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
   | undefined {
   if (!data || data === '') return
-  let chains
-  if (from) {
-    const chain = supportedChains[from]
-    if (!chain) throw new CCIPChainFamilyUnsupportedError(from)
-    chains = [chain]
-  } else {
-    chains = Object.values(supportedChains)
-  }
-  for (const chain of chains) {
+  for (const chain of getChainStatics(from)) {
     const decoded = chain.decodeExtraArgs(data)
     if (decoded) return decoded
   }

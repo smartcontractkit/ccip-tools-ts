@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type Wallet as AnchorWallet, AnchorProvider, Program } from '@coral-xyz/anchor'
+import { type Wallet as AnchorWallet, AnchorProvider } from '@coral-xyz/anchor'
 import {
   type Connection,
   AddressLookupTableProgram,
@@ -12,6 +12,7 @@ import { memoize } from 'micro-memoize'
 
 import type { WithLogger } from '../types.ts'
 import { sleep } from '../utils.ts'
+import { newProgram } from './coder.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { Wallet } from './types.ts'
 import { simulateAndSendTxs } from './utils.ts'
@@ -122,7 +123,7 @@ export async function cleanUpBuffers(
           .map(({ data }) => Buffer.from(data.subarray(8 + 4, 8 + 4 + 32)))
 
         for (const bufferId of bufferIds) {
-          const offrampProgram = new Program(
+          const offrampProgram = newProgram(
             CCIP_OFFRAMP_IDL,
             new PublicKey(log.address),
             new AnchorProvider(connection, wallet as AnchorWallet, { commitment: 'confirmed' }),

@@ -36,6 +36,7 @@
     "typescript/no-unnecessary-condition": "warn",
     "typescript/require-await": "off",
     "import/no-duplicates": ["warn", { "preferInline": true }],
+    "import/no-cycle": ["error", { "ignoreTypes": true }],
     "import/extensions": ["warn", "always", { "ignorePackages": true, "checkTypeImports": true }],
     "jsdoc/check-tag-names": "off",
     "jsdoc/no-blank-blocks": "error",
