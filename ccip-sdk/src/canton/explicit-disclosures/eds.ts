@@ -1,3 +1,4 @@
+import { CCIPError } from '../../errors/index.ts'
 import {
   type CantonAddress,
   type PartyId,
@@ -5,7 +6,6 @@ import {
   RawInstanceAddress,
   parseInstanceAddress,
 } from '../addressCodec.ts'
-import { CCIPError } from '../../errors/index.ts'
 import { get, post } from '../client/client.ts'
 import type { DisclosedContract } from './types.ts'
 
