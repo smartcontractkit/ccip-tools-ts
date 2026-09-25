@@ -8,6 +8,7 @@
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { type UnsignedSolanaTx, isWallet } from '../../solana/types.ts'
+import type { SolanaSplitMode } from '../../solana/utils.ts'
 import { type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 
@@ -31,6 +32,9 @@ export abstract class SolanaOperation<
   Tx extends UnsignedSolanaTx = UnsignedSolanaTx,
   Parsed = SolanaGenerateParams<P>,
 > extends Operation<SolanaChain, SolanaGenerateParams<P>, Tx, TransactionResult, Parsed> {
+  /** Multi-transaction safety policy; resource splitting requires an operation-specific audit. */
+  protected readonly splitMode: SolanaSplitMode = 'atomic'
+
   /** Build instructions from validated, parsed params. */
   protected abstract buildUnsigned(chain: SolanaChain, params: Parsed): Promise<Tx>
 
@@ -56,6 +60,13 @@ export abstract class SolanaOperation<
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
   async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
-    return submit(chain, wallet, await this.buildUnsigned(chain, parsed), this.name, computeUnits)
+    return submit(
+      chain,
+      wallet,
+      await this.buildUnsigned(chain, parsed),
+      this.name,
+      computeUnits,
+      this.splitMode,
+    )
   }
 }

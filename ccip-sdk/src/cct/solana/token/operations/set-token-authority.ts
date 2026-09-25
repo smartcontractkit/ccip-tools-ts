@@ -220,7 +220,7 @@ export class SetTokenAuthority extends SolanaOperation<
       await this.buildUnsigned(chain, parsed),
       this.name,
       computeUnits,
-      /* requireSingleTransaction */ true,
+      this.splitMode,
     )
   }
 }

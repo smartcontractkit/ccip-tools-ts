@@ -11,6 +11,7 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js'
 
+import { CCIPPartialTransactionSubmissionError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { Wallet } from '../../solana/types.ts'
@@ -88,6 +89,35 @@ describe('Submit error mapping (cct/solana)', () => {
     assert.ok(err instanceof CCTTxFailedError)
     assert.equal(err.isTransient, false)
     assert.match(err.message, /InstructionError/)
+  })
+
+  it('preserves committed slices and maps a pending partial submission to not-confirmed', () => {
+    const err = createCCTSubmitError(
+      OP,
+      new CCIPPartialTransactionSubmissionError([{ signature: 'confirmed', start: 0, end: 2 }], {
+        cause: new Error('blockhash expired'),
+        pendingSignature: 'pending',
+      }),
+    )
+
+    assert.ok(err instanceof CCTTxNotConfirmedError)
+    assert.equal(err.context.txHash, 'pending')
+    assert.deepEqual(err.context.committedHashes, ['confirmed'])
+    assert.deepEqual(err.context.committedSlices, [{ signature: 'confirmed', start: 0, end: 2 }])
+  })
+
+  it('uses a partial submission cause to classify a pre-broadcast failure', () => {
+    const err = createCCTSubmitError(
+      OP,
+      new CCIPPartialTransactionSubmissionError([{ signature: 'confirmed', start: 0, end: 2 }], {
+        cause: new Error('blockhash expired'),
+      }),
+    )
+
+    assert.ok(err instanceof CCTTxFailedError)
+    assert.equal(err.isTransient, true)
+    assert.deepEqual(err.context.committedHashes, ['confirmed'])
+    assert.deepEqual(err.context.committedSlices, [{ signature: 'confirmed', start: 0, end: 2 }])
   })
 
   it('maps a confirmed execution failure and does not return a hash', async () => {
