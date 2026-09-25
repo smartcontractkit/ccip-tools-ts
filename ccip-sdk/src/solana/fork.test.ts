@@ -505,7 +505,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     }
     instructions.push(instruction)
 
-    const hash = await simulateAndSendTxs(
+    const { hash } = await simulateAndSendTxs(
       ctx(),
       wallet!,
       {
@@ -513,8 +513,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         mainIndex: instructions.length - 1,
         lookupTables: [...lookupTables, sendLookupTable!],
       },
-      undefined,
-      'atomic',
+      { split: 'atomic' },
     )
     const requests = await solanaChain!.getMessagesInTx(await solanaChain!.getTransaction(hash))
     assert.equal(requests.length, 1, 'should find exactly one CCIP message in tx')
