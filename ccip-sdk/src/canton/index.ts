@@ -62,16 +62,7 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
-import {
-  damlRequiredCcvsList,
-  decodeCantonVerifierDestAddress,
-  hashedRawInstanceAddress,
-  missingTokenPoolRequiredCcvs,
-  normalizeCantonCcvList,
-  receiverRequiredCcvConfigured,
-  resolveExecuteCcvAddress,
-  resolveSenderRequiredCcvs,
-} from './ccv-addresses.ts'
+import { hashedRawInstanceAddress } from './ccv-addresses.ts'
 import {
   type CantonClient,
   type JsCommands,
@@ -2590,9 +2581,7 @@ function assertRequiredCcvsCovered(
   if (missing.length) {
     throw new CCIPError(
       CCIPErrorCode.CANTON_API_ERROR,
-      `CantonChain.generateUnsignedExecute: token pool requires CCV result(s) not provided by verifications: ${missing.join(
-        ', ',
-      )}`,
+      `CantonChain.generateUnsignedExecute: token pool requires CCV result(s) not provided by verifications: ${missing.map((addr) => addr.instanceAddress().hex()).join(', ')}`,
     )
   }
 }
