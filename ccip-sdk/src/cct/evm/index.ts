@@ -15,9 +15,28 @@ import type { ChainFamily } from '../../networks.ts'
 import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
+  type ApplyCCVConfigUpdatesParams,
+  ApplyCCVConfigUpdates,
+} from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
+import {
   type DeployAdvancedPoolHooksParams,
   DeployAdvancedPoolHooks,
 } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
+import {
+  type GetAllCCVConfigsParams,
+  type GetAllCCVConfigsResult,
+  GetAllCCVConfigs,
+} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
+import {
+  type GetCCVConfigParams,
+  type GetCCVConfigResult,
+  GetCCVConfig,
+} from './advanced-pool-hooks/operations/get-ccv-config.ts'
+import {
+  type GetRequiredCCVsParams,
+  type GetRequiredCCVsResult,
+  GetRequiredCCVs,
+} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
 import {
   type AuthorizeLockboxCallersParams,
   AuthorizeLockboxCallers,
@@ -240,6 +259,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
+  readonly #applyCCVConfigUpdates = new ApplyCCVConfigUpdates()
+  readonly #getCCVConfig = new GetCCVConfig()
+  readonly #getAllCCVConfigs = new GetAllCCVConfigs()
+  readonly #getRequiredCCVs = new GetRequiredCCVs()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
@@ -1216,6 +1239,145 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<DeployAdvancedPoolHooksParams>,
   ): Promise<DeployResult> {
     return this.#deployAdvancedPoolHooks.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads one remote chain's complete CCV config from `AdvancedPoolHooks`.
+   *
+   * @remarks An all-empty result is normal: the selector has no configured requirements. Base
+   * lists apply to every transfer; threshold lists add requirements at or above the hooks'
+   * threshold amount. `address(0)` selects the default CCV.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` or `remoteChainSelector` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getCCVConfig({
+   *   advancedPoolHooks: '0xHooks...',
+   *   remoteChainSelector: 5009297550715157269n,
+   * })
+   * ```
+   */
+  getCCVConfig(opts: GetCCVConfigParams): Promise<GetCCVConfigResult> {
+    return this.#getCCVConfig.query(this.chain, opts)
+  }
+
+  /**
+   * Lists every remote chain with a non-empty base CCV config.
+   *
+   * @remarks The result follows the contract's enumerable-set order, which is not a stable sort.
+   * A config with only threshold CCVs cannot exist; threshold CCVs require a base list.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const configs = await cct.getAllCCVConfigs({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getAllCCVConfigs(opts: GetAllCCVConfigsParams): Promise<GetAllCCVConfigsResult> {
+    return this.#getAllCCVConfigs.query(this.chain, opts)
+  }
+
+  /**
+   * Resolves the CCVs required for a proposed inbound or outbound transfer.
+   *
+   * @remarks This is the hooks contract's current decision for the selector, amount, and direction;
+   * it includes threshold CCVs when the amount reaches the configured threshold. The standard
+   * `AdvancedPoolHooks` ignores the interface's token/finality/extra-data arguments, so this query
+   * supplies their neutral values internally.
+   *
+   * @throws {@link CCTParamsInvalidError} if a param is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const ccvs = await cct.getRequiredCCVs({
+   *   advancedPoolHooks: '0xHooks...',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   amount: 1_000_000n,
+   *   direction: 'outbound',
+   * })
+   * ```
+   */
+  getRequiredCCVs(opts: GetRequiredCCVsParams): Promise<GetRequiredCCVsResult> {
+    return this.#getRequiredCCVs.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `applyCCVConfigUpdates` tx (for multisig / offline signing); use
+   * {@link applyCCVConfigUpdates} to sign and submit it directly.
+   *
+   * @remarks Each entry replaces one remote chain's complete base and threshold CCV lists.
+   * Threshold lists require a non-empty matching base list; CCVs cannot repeat within or across
+   * those paired lists. `address(0)` in any list selects the default CCV. The target is probed
+   * to confirm it reports `AdvancedPoolHooks` before calldata is returned.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
+   * list lacks base CCVs, or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApplyCCVConfigUpdates({
+   *   advancedPoolHooks: '0xHooks...',
+   *   ccvConfigArgs: [{
+   *     remoteChainSelector: 5009297550715157269n,
+   *     outboundCCVs: ['0xCCV...'],
+   *     thresholdOutboundCCVs: [],
+   *     inboundCCVs: [],
+   *     thresholdInboundCCVs: []
+   *   }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedApplyCCVConfigUpdates(opts: ApplyCCVConfigUpdatesParams): Promise<UnsignedEVMTx> {
+    return this.#applyCCVConfigUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces per-chain CCV requirements, signing + submitting as the hooks owner. Use
+   * {@link generateUnsignedApplyCCVConfigUpdates} for multisig or offline signing.
+   *
+   * @remarks Base CCVs apply to every transfer; threshold CCVs add requirements only above the
+   * hooks' configured threshold. `sender` defaults to the wallet address and, when supplied,
+   * must equal it. `address(0)` in any list selects the default CCV. The target is probed to
+   * confirm it is an `AdvancedPoolHooks` contract.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
+   * list lacks base CCVs, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.applyCCVConfigUpdates({
+   *   advancedPoolHooks: '0xHooks...',
+   *   ccvConfigArgs: [{
+   *     remoteChainSelector: 5009297550715157269n,
+   *     outboundCCVs: ['0xCCV...'],
+   *     thresholdOutboundCCVs: [],
+   *     inboundCCVs: [],
+   *     thresholdInboundCCVs: []
+   *   }],
+   *   wallet,
+   * })
+   * ```
+   */
+  applyCCVConfigUpdates(
+    opts: EVMExecuteParams<ApplyCCVConfigUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyCCVConfigUpdates.execute(this.chain, opts)
   }
 
   /**
@@ -2833,6 +2995,20 @@ export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export * from './lockbox/contracts.ts'
+export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
+export type {
+  GetAllCCVConfigsParams,
+  GetAllCCVConfigsResult,
+} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
+export type {
+  GetCCVConfigParams,
+  GetCCVConfigResult,
+} from './advanced-pool-hooks/operations/get-ccv-config.ts'
+export type {
+  CCVMessageDirection,
+  GetRequiredCCVsParams,
+  GetRequiredCCVsResult,
+} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
 export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
 export * from './advanced-pool-hooks/contracts.ts'
 export type {
