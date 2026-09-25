@@ -1,3 +1,4 @@
+import { CCIPError } from '../../errors/index.ts'
 import {
   type CantonAddress,
   type PartyId,
@@ -227,6 +228,44 @@ export class EdsDisclosureProvider {
     return resp.rawInstanceAddress
       ? RawInstanceAddress.fromString(resp.rawInstanceAddress)
       : undefined
+  }
+
+  /**
+   * Fetch a single contract's disclosure by instance address (raw or hashed).
+   *
+   * `POST /ccip/v1/global/disclosure/batch` with a one-element `addresses`
+   * array — the batch endpoint is the EDS's generic disclosure lookup,
+   * intended for shared CCIP singletons (e.g. the TokenAdminRegistry) whose
+   * only stakeholder is ccipOwner: callers whose participant does not host
+   * ccipOwner cannot ACS-read these contracts, so the disclosure comes from
+   * the service instead. Unknown address (404) or empty response → `null`
+   * (caller falls back to ACS resolution); other failures (network, 5xx)
+   * throw rather than being swallowed.
+   *
+   * The response carries no signatories — callers derive the owner from the
+   * raw address form (`instanceId@owner`) when needed.
+   */
+  async fetchContractDisclosure(
+    _templateId: string,
+    instanceAddress: string,
+  ): Promise<(DisclosedContract & { signatories?: string[] }) | null> {
+    try {
+      const resp = await post<{ disclosures?: EdsApiDisclosedContract[] }>(
+        this.edsBaseUrl,
+        '/ccip/v1/global/disclosure/batch',
+        EDS_HEADERS,
+        this.timeoutMs,
+        { addresses: [instanceAddress] },
+      )
+      const contract = resp.disclosures?.[0]
+      if (!contract?.contractId || !contract.createdEventBlob) return null
+      return edsContractToSdk(contract)
+    } catch (err) {
+      // Unknown address (404) → null so the caller falls back to ACS
+      // resolution; anything else (network, 5xx, parse) must surface.
+      if (err instanceof CCIPError && err.context['statusCode'] === 404) return null
+      throw err
+    }
   }
 
   /** Fetch global send disclosures for a CCIP message. */
