@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, id, makeError } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/cross-chain-token.ts'
 import { IsBurner } from './is-burner.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
@@ -12,6 +13,8 @@ const ACCOUNT = '0x' + '22'.repeat(20)
 
 /** Read results from a fresh Interface, never the SDK's cached one. */
 const FRESH = new Interface(['function isBurner(address) view returns (bool)'])
+const V2 = new Interface(CROSS_CHAIN_TOKEN_V2_0_0_ABI)
+const BURNER_ROLE = id('BURNER_ROLE')
 
 /** The `eth_call`s the op makes, in order, as decoded function names. */
 type Seen = { calls: string[]; args: string[] }
@@ -30,6 +33,7 @@ function stubChain({
 } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.resolve(['FactoryBurnMintERC20', '1.5.1', '']),
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
@@ -37,6 +41,23 @@ function stubChain({
         seen.calls.push(fn.name)
         seen.args.push(FRESH.decodeFunctionData(fn, data)[0] as string)
         return Promise.resolve(FRESH.encodeFunctionResult(fn, [holds]))
+      },
+    },
+  } as unknown as EVMChain
+}
+
+function stubV2Chain(holds = true, seen = newSeen()): EVMChain {
+  return {
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    provider: {
+      call: ({ data }: { data: string }) => {
+        const fn = V2.getFunction(data.slice(0, 10))!
+        seen.calls.push(fn.name)
+        const [role, account] = V2.decodeFunctionData(fn, data)
+        assert.equal(role, BURNER_ROLE)
+        assert.equal(account, ACCOUNT)
+        return Promise.resolve(V2.encodeFunctionResult(fn, [holds]))
       },
     },
   } as unknown as EVMChain
@@ -57,6 +78,15 @@ describe('IsBurner (cct/evm)', () => {
   it('answers false for an account without the role', async () => {
     const chain = stubChain({ holds: false })
     assert.equal(await op.query(chain, { tokenAddress: TOKEN, account: ACCOUNT }), false)
+  })
+
+  it('answers true for a CrossChainToken role holder', async () => {
+    const seen = newSeen()
+    assert.equal(
+      await op.query(stubV2Chain(true, seen), { tokenAddress: TOKEN, account: ACCOUNT }),
+      true,
+    )
+    assert.deepEqual(seen.calls, ['hasRole'])
   })
 
   for (const param of ['tokenAddress', 'account'] as const) {
