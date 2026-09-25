@@ -32,6 +32,12 @@ jobs:
           node-version: 24
           cache: 'npm'
 
+      # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
+      # binary for node 24 on ubuntu-latest, so npm ci compiles it from source
+      # and fails without libusb ("libusb.h: No such file or directory").
+      - name: Install node-hid build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev libudev-dev
+
       - name: Install dependencies
         run: npm ci
 

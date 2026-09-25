@@ -12,9 +12,6 @@ export const DEFAULT_CANTON_SEND_GAS_LIMIT = 50_000n
 /** Transfer-factory preview amount for fee payments. */
 export const DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT = '1.0'
 
-/** CCIPSender `instanceId` when creating a missing sender contract. */
-export const DEFAULT_CANTON_SENDER_INSTANCE_ID = 'ccipsender'
-
 /** CCIP-owned LINK instrument id on Canton (`ccipParty::link-token`). */
 export const DEFAULT_CANTON_LINK_INSTRUMENT_ID = 'link-token'
 
@@ -32,7 +29,7 @@ export function formatCantonLinkFeeToken(ccipParty: string): string {
 /** Canton operational defaults overridable via {@link CantonConfig}. */
 export type CantonOperationalDefaults = Pick<
   CantonConfig,
-  'defaultSendGasLimit' | 'feeTransferFactoryAmount' | 'senderInstanceId'
+  'defaultSendGasLimit' | 'feeTransferFactoryAmount'
 >
 
 /** Resolve send gas limit: explicit extraArgs → config → SDK default (0 for token-only, no payload). */
@@ -128,12 +125,4 @@ export function sumCantonHoldingAmounts(
     const holding = byCid.get(contractId)
     return total + (holding ? parseCantonDecimalAmountUnits(holding.amount) : 0n)
   }, 0n)
-}
-
-/**
- * Resolve CCIPSender instance id from config or SDK default.
- */
-export function resolveSenderInstanceId(config?: Partial<CantonOperationalDefaults>): string {
-  const fromConfig = config?.senderInstanceId?.trim()
-  return fromConfig || DEFAULT_CANTON_SENDER_INSTANCE_ID
 }

@@ -85,18 +85,32 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
   RPC_SOLANA_DEVNET: [
     // raced via raceRpcEndpoint (the suites probe a fixture tx): first endpoint to
     // answer wins, so a throttled one doesn't stall the suite. Retention varies over
-    // time (as of 2026-08: onfinality prunes signature history around ~1 month,
-    // api.devnet.solana.com/devnet.rpcpool.com retain longer but 429 harder from cold
-    // starts) — keep fixtures fresher than the shortest observed retention horizon.
-    // devnet.rpcpool.com leads: public, holds at least ~1 week of txs and doesn't 429
-    // as aggressively as the others; onfinality trails (429s hard from cold/shared
-    // egress IPs, observed 2026-09).
+    // time (api.devnet.solana.com prunes older txs, devnet.rpcpool.com holds at least
+    // ~1 week; both 429 under bursts) — keep fixtures fresher than the shortest
+    // observed retention horizon.
+    // Only keyless endpoints belong here: onfinality (added as a fallback when it
+    // still answered) now rejects keyless callers outright — "-32029 Too Many
+    // Requests, Please apply an OnFinality API key" — and an endpoint that never
+    // resolves a chain still keeps a CLI race (and the child process running it)
+    // alive through its retries, which is exactly the stall `raceRpcEndpoint`
+    // exists to avoid.
     'https://devnet.rpcpool.com',
     'https://api.devnet.solana.com',
-    'https://solana-devnet.api.onfinality.io/public',
   ].join(','),
   RPC_TON_TESTNET: 'https://testnet.toncenter.com/api/v2',
-  RPC_SUI_TESTNET: 'https://sui-testnet-endpoint.blockvision.org',
+  RPC_SUI_TESTNET: [
+    // Sui's public fullnodes no longer serve JSON-RPC at all ("JSON-RPC on
+    // public fullnodes has been deprecated"), so the defaults are gateways.
+    // BlockVision leads: it is the only one here whose *retention* covers the
+    // suite's fixtures and the MCMS publish/upgrade history the discovery walks
+    // (it throttles bursts, and the SDK's adaptive limiter paces through that);
+    // the other two are faster, serve `sui_getCheckpoint(0)` (BlockVision
+    // doesn't), and exist so one gateway's throttle or quota can't fail every
+    // Sui suite at once — see the raced-probe note in the suite.
+    'https://sui-testnet-endpoint.blockvision.org',
+    'https://rpc-testnet.suiscan.xyz',
+    'https://sui-testnet-rpc.publicnode.com',
+  ].join(','),
   RPC_HEDERA_TESTNET:
     // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official
     // CCIP Router 1.2.0 from the CCIP Directory
@@ -167,22 +181,43 @@ export function rpcEndpoint(envName: RpcEnvName): string {
  * race stalls the suite just the same. Each probe is bounded by `timeoutMs`;
  * when every probe fails or times out, falls back to {@link rpcEndpoint} (the
  * previous first-entry behavior) so the suite still runs as it used to.
+ *
+ * The network's public {@link DEFAULT_RPC_ENDPOINTS} always join the candidate
+ * list behind the configured entries, so an endpoint that has gone dead (rotated
+ * key, exhausted quota — a recurring state for the keyed CI secrets) costs the
+ * race nothing: all candidates are probed at once and the first to answer is
+ * bound, which is normally a healthy configured one. The cost is one probe per
+ * default per race, paid only by the raced (single-chain) suites.
+ *
+ * A candidate is only declared unhealthy once `attempts` probes have failed,
+ * spaced with backoff: public gateways throttle *bursts*, so the first probe of
+ * a session is regularly rejected by a gateway that is otherwise fine
+ * (BlockVision answers its quota error to request #1). Declaring it dead on a
+ * single refusal would bind the suite to whichever endpoint happens to be first
+ * — the behavior this exists to avoid.
  */
 export async function raceRpcEndpoint(
   envName: RpcEnvName,
   probe: (url: string) => Promise<boolean>,
-  { timeoutMs = 20_000 }: { timeoutMs?: number } = {},
+  { timeoutMs = 20_000, attempts = 3 }: { timeoutMs?: number; attempts?: number } = {},
 ): Promise<string> {
-  const attempts = rpcEndpoints(envName).map(async (url) => {
-    const ok = await Promise.race([
-      Promise.resolve(probe(url)).catch(() => false),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-    ])
-    if (!ok) throw new Error(`probe failed for ${url}`)
-    return url
+  const candidates = [
+    ...new Set([...rpcEndpoints(envName), ...parseList(DEFAULT_RPC_ENDPOINTS[envName])]),
+  ]
+  const candidates$ = candidates.map(async (url) => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const ok = await Promise.race([
+        Promise.resolve(probe(url)).catch(() => false),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+      ])
+      if (ok) return url
+      // plain timer: AbortSignal-based sleeps are unref'd and would not hold the run open
+      if (attempt + 1 < attempts) await new Promise((r) => setTimeout(r, 1_000 * 2 ** attempt))
+    }
+    throw new Error(`probe failed for ${url}`)
   })
   try {
-    return await Promise.any(attempts)
+    return await Promise.any(candidates$)
   } catch {
     return rpcEndpoint(envName)
   }

@@ -621,7 +621,9 @@ export function redactEndpointUrl(input: unknown): string {
       .split('/')
       .map((segment) => (segment.length >= 24 ? '***' : segment))
       .join('/')
-    return url.origin + path
+    // non-special schemes (e.g. `grpc://`) have an opaque `origin` of "null"
+    const origin = url.origin !== 'null' ? url.origin : `${url.protocol}//${url.host}`
+    return origin + path
   } catch {
     return '***'
   }
