@@ -1,16 +1,18 @@
 /**
  * EVM lockbox contract layer for CCT: the cached `ERC20LockBox` {@link Interface}
  * ({@link LOCKBOX_INTERFACE}) for calldata encoding, its deploy artifact
- * ({@link getLockboxArtifact}), and the on-chain identity check the lockbox write ops run before
- * building calldata ({@link assertLockbox}). Mirrors `token/contracts.ts`, and
- * `token-pool/contracts.ts` in the shape of the resolver.
+ * ({@link getLockboxArtifact}), and the on-chain checks the lockbox write ops run before building
+ * calldata: identity ({@link assertLockbox}) and ownership ({@link assertLockboxOwner}). Mirrors
+ * `token/contracts.ts`, and `token-pool/contracts.ts` in the shape of the resolver.
  *
  * @packageDocumentation
  */
 
-import { Interface } from 'ethers'
+import { Interface, getAddress } from 'ethers'
+import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
+import { resultToObject } from '../../../evm/types.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
@@ -19,7 +21,7 @@ import {
 import ERC20_LOCKBOX_V2_0_0_ABI from '../artifacts/abi/V2_0_0/erc20-lockbox.ts'
 import ERC20_LOCKBOX_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/erc20-lockbox.ts'
 import type { DeployArtifact } from '../operation.ts'
-import { isMissingFunction } from '../query.ts'
+import { getTypedContract, isMissingFunction } from '../query.ts'
 
 /** Shared, cached `ERC20LockBox` interface for constructor and calldata encoding. */
 export const LOCKBOX_INTERFACE = new Interface(ERC20_LOCKBOX_V2_0_0_ABI)
@@ -66,7 +68,7 @@ const LOCKBOX_VERSIONS: string[] = ['2.0.0']
  * contract at `lockbox`, or it does not answer the call
  * @throws {@link CCTContractTypeInvalidError} if the contract is not an `ERC20LockBox`
  * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
- * @throws `CCIPTypeVersionInvalidError` if the contract answers with a string that is not a
+ * @throws {@link CCIPTypeVersionInvalidError} if the contract answers with a string that is not a
  * `type version` pair at all, as `chain.typeAndVersion` raises it
  */
 export async function assertLockbox(
@@ -92,4 +94,46 @@ export async function assertLockbox(
     throw new CCTContractVersionUnsupportedError(LOCKBOX_TYPE, version, {
       context: { address: lockbox },
     })
+}
+
+/** The one `ERC20LockBox` getter {@link readLockboxOwner} calls. */
+type LockboxOwnerGetter = Pick<TypedContract<typeof ERC20_LOCKBOX_V2_0_0_ABI>, 'owner'>
+
+/**
+ * Reads an `ERC20LockBox`'s `owner()` in one `eth_call`.
+ * @remarks Callers run {@link assertLockbox} first: `owner()` is declared by pools and tokens too,
+ * so it says nothing about whether `lockbox` is a lockbox.
+ * @param chain - Chain to read from.
+ * @param lockbox - Lockbox contract to read `owner()` from.
+ * @returns The current owner, checksummed.
+ */
+export async function readLockboxOwner(chain: EVMChain, lockbox: string): Promise<string> {
+  const contract: LockboxOwnerGetter = getTypedContract(chain, lockbox, ERC20_LOCKBOX_V2_0_0_ABI)
+  return getAddress(resultToObject(await contract.owner()))
+}
+
+/**
+ * Pre-flights `sender` against the lockbox's on-chain `owner()` for an owner-gated write, so an
+ * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an
+ * `OnlyCallableByOwner` revert after a multisig has already reviewed and signed. The lockbox-side
+ * counterpart of `assertPoolOwner` and `assertTokenOwner`.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read the owner from.
+ * @param lockbox - Lockbox being written to.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the lockbox owner
+ */
+export async function assertLockboxOwner(
+  operation: string,
+  chain: EVMChain,
+  lockbox: string,
+  sender: string,
+): Promise<void> {
+  const owner = await readLockboxOwner(chain, lockbox)
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current lockbox owner (${owner})`,
+  )
 }

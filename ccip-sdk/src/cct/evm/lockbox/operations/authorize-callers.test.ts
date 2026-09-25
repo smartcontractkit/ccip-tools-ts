@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, getIcapAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, getAddress, getIcapAddress, makeError } from 'ethers'
 
 import {
   CCIPExecTxRevertedError,
@@ -23,6 +23,10 @@ const LOCKBOX = '0x' + '66'.repeat(20)
 const POOL = '0x' + '77'.repeat(20)
 const OTHER = '0x' + '88'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
+const NOT_THE_OWNER = '0x' + '99'.repeat(20)
+
+/** Fresh `owner()` interface for the stubbed provider — never the SDK's cached one. */
+const OWNER_IFACE = new Interface(['function owner() view returns (address)'])
 
 // applyAuthorizedCallerUpdates selector, per the vendored ABI (spec-pinned).
 const SELECTOR = '0x91a2749a'
@@ -45,23 +49,32 @@ type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
 
 /**
- * Minimal EVMChain stub. The only read the build path makes is `typeAndVersion` on the lockbox,
- * which defaults to a deployed, supported `ERC20LockBox`; `readError` replaces it with a failure,
- * standing in for an address with no contract code (`BAD_DATA`) or a reverting read.
+ * Minimal EVMChain stub. The build path reads `typeAndVersion` on the lockbox, which defaults to
+ * a deployed, supported `ERC20LockBox`, then `owner()` when a `sender` is known, which defaults
+ * to `SENDER`. `readError` replaces the `typeAndVersion` read with a failure, standing in for an
+ * address with no contract code (`BAD_DATA`) or a reverting read.
  */
 function stubChain({
   type = 'ERC20LockBox',
   version = '2.0.0',
+  owner = SENDER,
   readError,
   seen = newSeen(),
 }: {
   type?: string
   version?: string
+  owner?: string
   readError?: Error
   seen?: Seen
 } = {}): EVMChain {
   return {
-    provider: {} as never,
+    provider: {
+      call: ({ to, data }: { to: string; data: string }) => {
+        const fn = OWNER_IFACE.getFunction(data.slice(0, 10))!.name
+        seen.calls.push(`${fn}:${to}`)
+        return Promise.resolve(OWNER_IFACE.encodeFunctionResult(fn, [owner]))
+      },
+    },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
@@ -78,10 +91,10 @@ const noCodeError = () =>
   makeError('could not decode result data', 'BAD_DATA', { value: '0x', info: {} })
 
 /** Fake ethers Signer for a plain (non-deployment) tx; records broadcasts in `seen`. */
-function fakeSigner(opts: { waitError?: Error; seen?: Seen } = {}) {
+function fakeSigner(opts: { waitError?: Error; seen?: Seen; address?: string } = {}) {
   return {
     signTransaction: () => Promise.resolve('0x'),
-    getAddress: () => Promise.resolve(SENDER),
+    getAddress: () => Promise.resolve(opts.address ?? SENDER),
     populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
     sendTransaction: () => {
       opts.seen?.calls.push('sendTransaction')
@@ -370,7 +383,96 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
   })
 
+  describe('owner pre-flight', () => {
+    it('reads owner() after typeAndVersion, only when a sender is given', async () => {
+      const seen = newSeen()
+      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
+        lockbox: LOCKBOX,
+        addedCallers: [POOL],
+        sender: SENDER,
+      })
+      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`, `owner:${LOCKBOX}`])
+    })
+
+    it('accepts the owner as sender regardless of address casing', async () => {
+      const lower = '0x' + 'ab'.repeat(20)
+      const unsigned = await new AuthorizeLockboxCallers().generate(
+        stubChain({ owner: getAddress(lower) }),
+        { lockbox: LOCKBOX, addedCallers: [POOL], sender: lower },
+      )
+      assert.equal(unsigned.transactions[0]!.from, lower)
+    })
+
+    it('rejects a sender that is not the lockbox owner', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().generate(stubChain(), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+            sender: NOT_THE_OWNER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.param === 'sender',
+      )
+    })
+
+    it('does not read owner() when the lockbox check fails', async () => {
+      const seen = newSeen()
+      await assert.rejects(() =>
+        new AuthorizeLockboxCallers().generate(stubChain({ type: 'Router', seen }), {
+          lockbox: LOCKBOX,
+          addedCallers: [POOL],
+          sender: SENDER,
+        }),
+      )
+      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`])
+    })
+  })
+
   describe('execute', () => {
+    it('checks the signing wallet against the lockbox owner', async () => {
+      const seen = newSeen()
+      await new AuthorizeLockboxCallers().execute(stubChain({ seen }), {
+        lockbox: LOCKBOX,
+        addedCallers: [POOL],
+        wallet: fakeSigner({ seen }),
+      })
+      assert.deepEqual(seen.calls, [
+        `typeAndVersion:${LOCKBOX}`,
+        `owner:${LOCKBOX}`,
+        'sendTransaction',
+      ])
+    })
+
+    it('does not sign or broadcast when the wallet is not the lockbox owner', async () => {
+      const seen = newSeen()
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().execute(stubChain(), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+            wallet: fakeSigner({ seen, address: NOT_THE_OWNER }),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+      assert.deepEqual(seen.calls, [])
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().execute(stubChain(), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+            sender: NOT_THE_OWNER,
+            wallet: fakeSigner(),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
+
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
         lockbox: LOCKBOX,
