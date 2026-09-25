@@ -15,12 +15,7 @@
  * it's given (`jwt`) and never orchestrates an OAuth flow.
  */
 
-export {
-  type CantonCliConfig,
-  loadCantonConfig,
-  resolveCliIndexer,
-  resolveCliRouter,
-} from './config.ts'
+export { type CantonCliConfig, loadCantonConfig, resolveCliIndexer } from './config.ts'
 export {
   createCliAuthProvider,
   mergeAuthEnvVars,

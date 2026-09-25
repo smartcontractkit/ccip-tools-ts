@@ -272,7 +272,6 @@ Canton operations require a JSON config file passed via `--canton-config <path>`
     "ccipReceiver": "ccip-receiver-v2",
     "ccipSender": "ccip-sender-v2"
   },
-  "senderInstanceId": "prod-ccipsender",
   "ccvs": ["0x5b92820da106..."]
 }
 ```
@@ -290,7 +289,6 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 | `externalEdsUrlsByOwner`   | No       | Map of owner party → external EDS URL                                            |
 | `indexerUrl`               | No       | CCIP v2 indexer URL for CCV verifications (required for Canton manual execution) |
 | `chainId`                  | No       | CCIP Canton chain ID (e.g. `canton:TestNet`); skips auto-detection               |
-| `senderInstanceId`         | No       | CCIPSender instance id used as router on Canton source (CLI `-r` overrides)      |
 | `defaultSendGasLimit`      | No       | Default gas limit for Canton → destination sends                                 |
 | `feeTransferFactoryAmount` | No       | Transfer-factory preview amount for fee payments (default: `"1.0"`)              |
 | `ccvs`                     | No       | CCV instance addresses for execute disclosures and send defaults                 |
