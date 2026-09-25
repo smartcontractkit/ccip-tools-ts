@@ -3377,6 +3377,41 @@ export class CCIPSolanaRouterConfigNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when the CCIP 2.0 account resolution flow cannot complete: a stage returned no or
+ * foreign return data, or resolution did not terminate within the round limit.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await resolveAccounts(ctx, { programId, caller, ixData })
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaAccountResolutionError) {
+ *     console.log(`Resolution failed at round ${error.context.round}: ${error.message}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPSolanaAccountResolutionError extends CCIPError {
+  override readonly name = 'CCIPSolanaAccountResolutionError'
+  /** Creates a Solana account resolution error. */
+  constructor(
+    reason: string,
+    context: { programId: string; round: number; stage: string },
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.SOLANA_ACCOUNT_RESOLUTION_FAILED,
+      `Account resolution failed for ${context.programId} at round ${context.round} (${context.stage}): ${reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, ...context, reason },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when fee result from router is invalid.
  *
  * @example

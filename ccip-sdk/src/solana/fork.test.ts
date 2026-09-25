@@ -3,14 +3,39 @@ import { type ChildProcess, execSync, spawn } from 'node:child_process'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Wallet as AnchorWallet } from '@coral-xyz/anchor'
-import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js'
+import { BorshCoder, Wallet as AnchorWallet } from '@coral-xyz/anchor'
+import {
+  NATIVE_MINT,
+  createApproveInstruction,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
+import {
+  type AccountMeta,
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+} from '@solana/web3.js'
+import { hexlify } from 'ethers'
 
-import { useResource } from '../../../scripts/useResource.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
+import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
-import { ExecutionState, MessageStatus } from '../types.ts'
-import { ETHEREUM_TO_SOLANA } from './fork.test.data.ts'
+import { type CCIPMessage, CCIPVersion, ExecutionState, MessageStatus } from '../types.ts'
+import { ETHEREUM_TO_SOLANA, SOLANA_DEVNET_V2_STAGING as STAGING } from './fork.test.data.ts'
+import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
+import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
+import {
+  type ExecutionInputsV2,
+  fetchLookupTables,
+  resolveCcipSendV2,
+  resolveExecuteV2,
+  resolveGetFeeV2,
+} from './resolution.ts'
+import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
 // Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
@@ -125,6 +150,33 @@ function createSurfpoolInstance({
   }
 }
 
+/**
+ * Tears down the web3.js websocket BEFORE stopping surfpool. Sends confirm through it
+ * (connection.confirmTransaction), and web3.js hands its client `max_reconnects: Infinity` — once
+ * surfpool is gone the client would retry the dead socket every second forever, keeping the test
+ * process alive long after every test has passed. There is no public accessor for the client, so
+ * this pokes the private field, but only through its public CommonClient API
+ * (setAutoReconnect/close).
+ */
+function closeWebSocket(connection: Connection | undefined) {
+  const wsClient = (
+    connection as unknown as
+      | {
+          _rpcWebSocket?: {
+            setAutoReconnect?: (enable: boolean) => void
+            close?: (code?: number, data?: string) => void
+          }
+        }
+      | undefined
+  )?._rpcWebSocket
+  wsClient?.setAutoReconnect?.(false)
+  try {
+    wsClient?.close?.(1000, 'fork tests done')
+  } catch {
+    // socket already gone
+  }
+}
+
 // ── Tests ──
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
@@ -163,28 +215,7 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   after(async () => {
-    // Tear down the web3.js websocket BEFORE stopping surfpool. Sends confirm
-    // through it (connection.confirmTransaction), and web3.js hands its client
-    // `max_reconnects: Infinity` — once surfpool is gone the client would retry
-    // the dead socket every second forever, keeping this test process alive
-    // long after every test has passed. There is no public accessor for the
-    // client, so this pokes the private field, but only through its public
-    // CommonClient API (setAutoReconnect/close).
-    const wsClient = (
-      connection as unknown as {
-        _rpcWebSocket?: {
-          setAutoReconnect?: (enable: boolean) => void
-          close?: (code?: number, data?: string) => void
-        }
-      }
-    )._rpcWebSocket
-    wsClient?.setAutoReconnect?.(false)
-    try {
-      wsClient?.close?.(1000, 'fork tests done')
-    } catch {
-      // socket already gone
-    }
-
+    closeWebSocket(connection)
     await surfpoolInstance?.stop()
   })
 
@@ -351,6 +382,314 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         .find((r) => r?.messageId === EXEC_MSG.messageId)
       assert.ok(receipt, 'should find ExecutionStateChanged in offRamp logs')
       assert.equal(receipt.state, ExecutionState.Success, 'offRamp log should confirm Success')
+    })
+  })
+})
+
+// Surfpool forks the private CCIP 2.0 staging deployment on Solana devnet
+// (RPC_SOLANA_DEVNET, or the public default endpoint).
+describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_000 }, () => {
+  useResourceForDescribe(['solana-devnet'])
+
+  const router = new PublicKey(STAGING.router)
+  const offRamp = new PublicKey(STAGING.offRamp)
+  const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
+  const offrampV2Coder = new BorshCoder(CCIP_OFFRAMP_V2_IDL)
+  // lane defaults: CCVs, executor and finality all come from the lane's config
+  const extraArgs: GenericExtraArgsV3 = {
+    gasLimit: 0n,
+    finality: 'finalized',
+    ccvs: [],
+    ccvArgs: [],
+    executor: '',
+    executorArgs: '0x',
+    tokenReceiver: '',
+    tokenArgs: '0x',
+  }
+  const receiver = '0x9eC0e4A4c411493773E01e2ABF4D42395788846b'
+
+  let surfpoolInstance: SurfpoolInstance | undefined
+  let connection: Connection | undefined
+  let solanaChain: SolanaChain | undefined
+  let wallet: AnchorWallet | undefined
+
+  before(async () => {
+    surfpoolInstance = createSurfpoolInstance({
+      rpcUrl: rpcEndpoint('RPC_SOLANA_DEVNET'),
+      port: 8657,
+    })
+    await surfpoolInstance.start()
+
+    connection = new Connection(`http://${surfpoolInstance.host}:${surfpoolInstance.port}`, {
+      commitment: 'confirmed',
+      wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
+    })
+    solanaChain = new SolanaChain(connection, networkInfo('solana-devnet'), {
+      apiClient: null,
+      logger: testLogger,
+    })
+
+    wallet = new AnchorWallet(Keypair.generate())
+    const airdropSig = await connection.requestAirdrop(wallet.publicKey, 10 * LAMPORTS_PER_SOL)
+    await connection.confirmTransaction(airdropSig)
+
+    // token transfers need the sender's token account to exist, even just to quote a fee
+    await (
+      connection as unknown as { _rpcRequest(m: string, a: unknown[]): Promise<unknown> }
+    )._rpcRequest('surfnet_setTokenAccount', [
+      wallet.publicKey.toBase58(),
+      STAGING.sepoliaToken,
+      { amount: 1_000_000_000, state: 'initialized' },
+    ])
+  })
+
+  after(async () => {
+    closeWebSocket(connection)
+    await surfpoolInstance?.stop()
+  })
+
+  const ctx = () => ({ connection: connection!, logger: testLogger })
+
+  /** Simulates a resolved get_fee_v2 and decodes its GetFeeResultV2. */
+  async function quote(message: Parameters<typeof resolveGetFeeV2>[1]['message']) {
+    const { instruction, lookupTables, metadata } = await resolveGetFeeV2(ctx(), {
+      router,
+      destChainSelector: STAGING.sepoliaSelector,
+      sender: wallet!.publicKey,
+      message,
+    })
+    // the fixed deployment lookup table isn't part of resolution; token transfers need it to fit v0
+    const [sendLookupTable] = await fetchLookupTables(connection!, [
+      new PublicKey(STAGING.sendLookupTable),
+    ])
+    const simResult = await simulateTransaction(ctx(), {
+      payerKey: wallet!.publicKey,
+      instructions: [ComputeBudgetProgram.requestHeapFrame({ bytes: 256 * 1024 }), instruction],
+      addressLookupTableAccounts: [...lookupTables, sendLookupTable!],
+    })
+    assert.ok(simResult.returnData?.data[0], 'get_fee_v2 should return data')
+    const result = routerV2Coder.types.decode<{ amount: { toString(): string }; token: PublicKey }>(
+      'GetFeeResultV2',
+      Buffer.from(simResult.returnData.data[0], 'base64'),
+    )
+    return {
+      amount: BigInt(result.amount.toString()),
+      token: result.token,
+      instruction,
+      lookupTables,
+      metadata,
+    }
+  }
+
+  /** Resolves and lands a ccip_send_v2, returning the decoded CCIP request. */
+  async function send(message: Parameters<typeof resolveCcipSendV2>[1]['message']) {
+    const { instruction, lookupTables } = await resolveCcipSendV2(ctx(), {
+      router,
+      destChainSelector: STAGING.sepoliaSelector,
+      sender: wallet!.publicKey,
+      message,
+    })
+    const [sendLookupTable] = await fetchLookupTables(connection!, [
+      new PublicKey(STAGING.sendLookupTable),
+    ])
+
+    const instructions = [ComputeBudgetProgram.requestHeapFrame({ bytes: 256 * 1024 })]
+    for (const { token, amount } of message.tokenAmounts ?? []) {
+      // the pool pulls the tokens through the router's fee billing signer
+      const [spender] = PublicKey.findProgramAddressSync(
+        [Buffer.from('fee_billing_signer')],
+        router,
+      )
+      const ata = getAssociatedTokenAddressSync(new PublicKey(token), wallet!.publicKey)
+      instructions.push(createApproveInstruction(ata, spender, wallet!.publicKey, amount))
+    }
+    instructions.push(instruction)
+
+    const { hash } = await simulateAndSendTxs(
+      ctx(),
+      wallet!,
+      {
+        instructions,
+        mainIndex: instructions.length - 1,
+        lookupTables: [...lookupTables, sendLookupTable!],
+      },
+      { split: 'atomic' },
+    )
+    const requests = await solanaChain!.getMessagesInTx(await solanaChain!.getTransaction(hash))
+    assert.equal(requests.length, 1, 'should find exactly one CCIP message in tx')
+    const request = requests[0]!
+    const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+
+    // Checks common to every send: lane, event origin and message envelope
+    assert.equal(request.lane.sourceChainSelector, networkInfo('solana-devnet').chainSelector)
+    assert.equal(request.lane.destChainSelector, STAGING.sepoliaSelector)
+    assert.equal(request.lane.onRamp, STAGING.router)
+    assert.equal(request.lane.version, CCIPVersion.V2_0)
+    assert.equal(request.log.address, STAGING.router, 'event should come from the router')
+    assert.equal(request.log.transactionHash, hash)
+    assert.match(sent.messageId, /^0x[0-9a-f]{64}$/i)
+    assert.ok(sent.sequenceNumber > 0n, 'sequence number should be assigned')
+    assert.equal(sent.sender, wallet!.publicKey.toBase58())
+    assert.equal(String(sent.receiver).toLowerCase(), message.receiver.toLowerCase())
+    assert.equal(hexlify(sent.data), hexlify(message.data ?? '0x'))
+
+    // Fee: native by default, and the total is exactly what the issuers' receipts charged
+    assert.equal(sent.feeToken, NATIVE_MINT.toBase58(), 'native fee should be paid in WSOL')
+    assert.ok(sent.feeTokenAmount > 0n, 'fee should be positive')
+    assert.equal(
+      sent.receipts.reduce((sum, receipt) => sum + receipt.feeTokenAmount, 0n),
+      sent.feeTokenAmount,
+      'receipts should add up to the fee',
+    )
+    // Resolution applied the lane defaults: the committee verifier and executor both charged
+    const issuers = sent.receipts.map((receipt) => receipt.issuer)
+    assert.ok(issuers.includes(STAGING.committeeVerifier), 'default CCV should issue a receipt')
+    assert.ok(issuers.includes(STAGING.executor), 'default executor should issue a receipt')
+    return { request, sent }
+  }
+
+  describe('get_fee_v2', () => {
+    it('quotes a data-only message in native SOL', async () => {
+      const { amount, token, instruction, metadata } = await quote({
+        receiver,
+        data: '0x1337',
+        extraArgs,
+      })
+      assert.ok(amount > 0n, 'fee should be positive')
+      assert.ok(amount < BigInt(LAMPORTS_PER_SOL), `fee should be under 1 SOL, got ${amount}`)
+      assert.ok(
+        token.equals(NATIVE_MINT),
+        `native fee should be quoted in WSOL, got ${token.toBase58()}`,
+      )
+
+      // the resolved instruction: router's config first, 14 named accounts plus the remaining
+      // ones, nothing to sign (it's a quote), and the account-list lengths as metadata
+      const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], router)
+      assert.ok(instruction.programId.equals(router))
+      assert.ok(instruction.keys[0]?.pubkey.equals(config), 'first account should be the config')
+      assert.ok(instruction.keys.length > 14, 'should resolve named and remaining accounts')
+      assert.ok(
+        instruction.keys.every(({ isSigner }) => !isSigner),
+        'a fee quote should have no signers',
+      )
+      assert.ok(metadata.length > 0, 'resolution should return metadata')
+    })
+
+    it('quotes a token transfer, resolving the token pool lookup table', async () => {
+      const dataOnly = await quote({ receiver, data: '0x', extraArgs })
+      const withToken = await quote({
+        receiver,
+        data: '0x',
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount: 1n }],
+        extraArgs,
+      })
+      assert.ok(withToken.lookupTables.length > 0, 'token pool lookup table should be resolved')
+      assert.ok(withToken.token.equals(NATIVE_MINT), 'native fee should be quoted in WSOL')
+      assert.ok(withToken.amount > dataOnly.amount, 'token transfers should cost more')
+      assert.ok(
+        withToken.instruction.keys.length > dataOnly.instruction.keys.length,
+        'token transfers should resolve the pool accounts',
+      )
+    })
+  })
+
+  describe('ccip_send_v2', () => {
+    it('sends a data-only message (Solana -> Sepolia)', async () => {
+      const message = { receiver, data: '0x1337', extraArgs }
+      const quoted = await quote(message)
+      const balanceBefore = await connection!.getBalance(wallet!.publicKey)
+
+      const { sent } = await send(message)
+
+      assert.equal(sent.feeTokenAmount, quoted.amount, 'fee paid should match the quote')
+      assert.equal(sent.tokenAmounts.length, 0)
+      const spent = BigInt(balanceBefore - (await connection!.getBalance(wallet!.publicKey)))
+      assert.ok(spent >= sent.feeTokenAmount, `sender paid ${spent}, less than the fee`)
+    })
+
+    it('sends a token transfer (Solana -> Sepolia)', async () => {
+      const amount = 1_000n
+      const message = {
+        receiver,
+        data: '0x',
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
+        extraArgs,
+      }
+      const ata = getAssociatedTokenAddressSync(
+        new PublicKey(STAGING.sepoliaToken),
+        wallet!.publicKey,
+      )
+      const tokenBalance = async () =>
+        BigInt((await connection!.getTokenAccountBalance(ata)).value.amount)
+      const quoted = await quote(message)
+      const tokensBefore = await tokenBalance()
+
+      const { sent } = await send(message)
+
+      assert.equal(sent.feeTokenAmount, quoted.amount, 'fee paid should match the quote')
+      assert.equal(sent.tokenAmounts.length, 1)
+      const transfer = sent.tokenAmounts[0]!
+      assert.equal(transfer.amount, amount)
+      assert.equal(transfer.sourceTokenAddress, STAGING.sepoliaToken)
+      assert.equal(String(transfer.tokenReceiver).toLowerCase(), receiver.toLowerCase())
+      // the pool program charged its share of the fee too
+      assert.ok(
+        sent.receipts.some(({ issuer }) => issuer === STAGING.sepoliaTokenPool),
+        'token pool should issue a receipt',
+      )
+      assert.equal(tokensBefore - (await tokenBalance()), amount, 'tokens should leave the sender')
+    })
+  })
+
+  describe('execute_v2', () => {
+    // Re-resolves a landed execution from its own inputs. Resolution is read-only, so it works
+    // for an already executed message, and must reproduce the account list the transaction used.
+    // A program upgrade that changes the account list shows up here, and so does one that
+    // changes the metadata layout, which is why only its message_id suffix is compared.
+    it('reproduces the accounts of a landed execution', async () => {
+      const tx = await connection!.getTransaction(STAGING.executeTx, {
+        maxSupportedTransactionVersion: 0,
+      })
+      assert.ok(tx?.meta, 'execution tx should exist')
+      const msg = tx.transaction.message
+      const keys = msg.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses })
+      const landed = msg.compiledInstructions.find((ix) =>
+        keys.get(ix.programIdIndex)?.equals(offRamp),
+      )
+      assert.ok(landed, 'execution tx should call the offramp')
+      const landedAccounts: AccountMeta[] = landed.accountKeyIndexes.map((i) => ({
+        pubkey: keys.get(i)!,
+        isSigner: msg.isAccountSigner(i),
+        isWritable: msg.isAccountWritable(i),
+      }))
+      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 }>(
+        'ExecuteParams',
+        Buffer.from(landed.data).subarray(8),
+      )
+
+      const { instruction, lookupTables, metadata } = await resolveExecuteV2(ctx(), {
+        offramp: offRamp,
+        caller: keys.get(0)!,
+        execInputs,
+      })
+
+      assert.deepEqual(
+        instruction.keys.map(({ pubkey, isSigner, isWritable }) => [
+          pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        ]),
+        landedAccounts.map(({ pubkey, isSigner, isWritable }) => [
+          pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        ]),
+      )
+      assert.deepEqual(
+        lookupTables.map(({ key }) => key.toBase58()),
+        msg.addressTableLookups.map(({ accountKey }) => accountKey.toBase58()),
+      )
+      assert.equal(hexlify(metadata.subarray(-32)), STAGING.executeMessageId)
     })
   })
 })
