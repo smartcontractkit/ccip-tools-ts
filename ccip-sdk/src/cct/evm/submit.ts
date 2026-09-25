@@ -8,19 +8,45 @@
  */
 
 import {
+  type Network,
+  type Signer,
   type TransactionReceipt,
   type TransactionRequest,
   type TransactionResponse,
   isError,
 } from 'ethers'
 
-import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../errors/index.ts'
+import {
+  CCIPExecTxRevertedError,
+  CCIPWalletChainMismatchError,
+  CCIPWalletInvalidError,
+} from '../../errors/index.ts'
 import { type EVMChain, isSigner, submitTransaction } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { CCTTxFailedError, CCTTxNotConfirmedError } from '../errors.ts'
 
 /** Max ms to wait for one confirmation before throwing {@link CCTTxNotConfirmedError}. */
 const CONFIRM_TIMEOUT_MS = 60_000
+
+/** A signer's provider, with the fresh chain read `AbstractProvider` has but `Provider` omits. */
+type ChainReader = { _detectNetwork?: () => Promise<Network>; getNetwork: () => Promise<Network> }
+
+/**
+ * Asserts `wallet` is connected to `chain`, which otherwise signs this chain's calldata as a
+ * transaction on its own. Prefers `_detectNetwork` because `getNetwork` caches: after a chain
+ * switch it returns the stale network on an `"any"` provider, and throws on any other. A signer
+ * with no provider is skipped, having no network to compare.
+ * @throws {@link CCIPWalletChainMismatchError} if the wallet is on a different chain
+ */
+async function assertWalletChain(chain: EVMChain, wallet: Signer): Promise<void> {
+  const provider: ChainReader | null = wallet.provider
+  if (!provider) return
+  const { chainId, name } = chain.network
+  const read = provider._detectNetwork ?? provider.getNetwork
+  const walletChainId = Number((await read.call(provider)).chainId)
+  if (walletChainId !== chainId)
+    throw new CCIPWalletChainMismatchError(name, chainId, walletChainId)
+}
 
 /** True for ethers infra errors worth retrying (not an on-chain revert). */
 function isTransientError(error: unknown): boolean {
@@ -34,6 +60,8 @@ function isTransientError(error: unknown): boolean {
  * Returns the broadcast `response` and mined `receipt`; callers map these to their
  * own result shape (see {@link EVMOperation.execute}).
  * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+ * @throws {@link CCIPWalletChainMismatchError} if `wallet` is on another chain, raised before
+ * signing, broadcast or nonce consumption
  * @throws {@link CCTTxFailedError} if submission fails before broadcast
  * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
  * @throws {@link CCTTxNotConfirmedError} if broadcast but not confirmed in time
@@ -45,6 +73,9 @@ export async function submit(
   operation: string,
 ): Promise<{ response: TransactionResponse; receipt: TransactionReceipt }> {
   if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
+  // Outside the try on purpose: surfaces as itself, not wrapped in CCTTxFailedError, and
+  // reaches neither `nextNonce` nor the signer below.
+  await assertWalletChain(chain, wallet)
   const sender = await wallet.getAddress()
   chain.logger.debug(`${operation}: submitting...`)
 

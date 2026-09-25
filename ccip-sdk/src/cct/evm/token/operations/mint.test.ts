@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import { type MintParams, Mint } from './mint.ts'
 
@@ -28,6 +28,9 @@ const expectedData = (account = RECIPIENT, amount = AMOUNT) =>
 type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
 
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
 /** EVMChain stub answering `isMinter` off a fresh Interface. */
 function stubChain({
   isMinter = true,
@@ -41,6 +44,7 @@ function stubChain({
 } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
@@ -89,6 +93,7 @@ describe('Mint (cct/evm)', () => {
       assert.equal(unsigned.transactions.length, 1)
       assert.equal(tx.to, TOKEN)
       assert.equal(tx.from, MINTER)
+      assert.equal(tx.chainId, CHAIN_ID, 'pinned to the manager chain')
       assert.equal(tx.data, expectedData())
     })
 

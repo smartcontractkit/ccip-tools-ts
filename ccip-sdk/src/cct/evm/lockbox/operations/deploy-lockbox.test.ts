@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import ERC20_LOCKBOX_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/erc20-lockbox.ts'
 import LOCKBOX_V2_0_0 from '../../artifacts/bytecode/V2_0_0/erc20-lockbox.ts'
@@ -22,11 +22,15 @@ const HASH = '0x' + 'ab'.repeat(32)
 const W_TOKEN = '0000000000000000000000002222222222222222222222222222222222222222'
 const CTOR_ARGS = new Interface(ERC20_LOCKBOX_V2_0_0_ABI).encodeDeploy([TOKEN])
 
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
 /** Minimal EVMChain stub — deployLockbox's build path ignores it; execute uses only these. */
 function stubChain(): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
   } as unknown as EVMChain
@@ -66,6 +70,7 @@ describe('DeployLockbox (cct/evm lockbox operation)', () => {
       const tx = unsigned.transactions[0]!
       assert.equal(tx.to, undefined, 'deployment tx has no `to`')
       assert.equal(tx.from, SENDER)
+      assert.equal(tx.chainId, CHAIN_ID, 'pinned to the manager chain')
       assert.ok(tx.data!.startsWith(LOCKBOX_V2_0_0), 'data starts with creation bytecode')
       // Pinned bytes: the constructor arg is exactly the token address, left-padded to 32 bytes.
       assert.equal(CTOR_ARGS, '0x' + W_TOKEN)

@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import {
@@ -64,6 +64,9 @@ function poolReads(version: TokenPoolVersion, type: TokenPoolType, owner: string
 
 type Calls = { typeAndVersion: number; remotes: number; calls: number }
 
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
 /**
  * EVMChain stub: reports `type`/`version` and answers the owner-gate getters off the pool's own
  * Interface. `getTokenPoolRemotes` is wired only to prove this op never calls it — a wholesale
@@ -89,6 +92,7 @@ function stubChain({
   )
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
     provider: {
       call: ({ data }: { data: string }) => {
         seen.calls++
@@ -159,6 +163,7 @@ describe('SetRemotePool (cct/evm)', () => {
         assert.equal(unsigned.transactions.length, 1)
         assert.equal(tx.to, POOL)
         assert.equal(tx.from, OWNER)
+        assert.equal(tx.chainId, CHAIN_ID, 'pinned to the manager chain')
         assert.equal(tx.data, expectedData())
       })
     }

@@ -6,7 +6,7 @@ import { Interface, ZeroAddress, getAddress, id, makeError } from 'ethers'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
@@ -166,6 +166,7 @@ function stubChain(
   return {
     provider,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
     typeAndVersion: (_address: string) =>
       Promise.resolve([moduleType, moduleVersion, `${moduleType} ${moduleVersion}`]),

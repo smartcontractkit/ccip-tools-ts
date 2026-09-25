@@ -6,7 +6,7 @@ import { ZeroAddress, getAddress } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TransferAdminParams, TransferAdmin } from './transfer-admin.ts'
 
@@ -73,6 +73,7 @@ function stubChain(
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     getTokenAdminRegistryFor: (address: string) => {
       opts.onAddress?.(address)
       return Promise.resolve(TAR)

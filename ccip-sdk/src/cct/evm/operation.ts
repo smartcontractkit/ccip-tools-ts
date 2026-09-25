@@ -100,12 +100,19 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     params: Parsed,
   ): Promise<UnsignedEVMTx> | UnsignedEVMTx
 
-  /** Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing. */
+  /**
+   * Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing.
+   *
+   * @remarks Also pins every built transaction to `chain.network.chainId` (no RPC, known at
+   * construction). This is the one point every CCT builder and both `execute` paths pass
+   * through; unpinned, ethers would infer the chain from the eventual signer's provider.
+   */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {
     const parsed = this.prepare(params)
     if (params.sender !== undefined) validateAddress(this.name, 'sender', params.sender)
     const unsigned = await this.buildUnsigned(chain, parsed)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
+    for (const tx of unsigned.transactions) tx.chainId ??= chain.network.chainId
     return unsigned
   }
 

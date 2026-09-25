@@ -95,6 +95,7 @@ All transient — wait and retry.
 |-------|------|-------------|----------|
 | `CCIPWalletInvalidError` | `WALLET_INVALID` | Wallet not a valid signer | Provide ethers Signer or use `viemWallet(client)` |
 | `CCIPWalletNotSignerError` | `WALLET_NOT_SIGNER` | Wallet can't sign transactions | Use wallet with signing capability |
+| `CCIPWalletChainMismatchError` | `WALLET_CHAIN_MISMATCH` | Wallet connected to a different chain than the `Chain` instance | Connect the wallet to the same chain, or build with `generateUnsigned*` and sign on the intended chain |
 | `CCIPInsufficientBalanceError` | `INSUFFICIENT_BALANCE` | Insufficient funds for transaction | Add funds to wallet |
 
 ## Version

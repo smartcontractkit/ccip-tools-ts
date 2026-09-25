@@ -3,10 +3,10 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, id } from 'ethers'
 
-import { CCIPWalletInvalidError } from '../../errors/index.ts'
+import { CCIPWalletChainMismatchError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
-import { ChainFamily } from '../../networks.ts'
+import { ChainFamily, networkInfo } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
 import { EVMTokenManager } from './index.ts'
 
@@ -28,11 +28,15 @@ function encodeTokenConfig(administrator: string, pendingAdministrator = ZeroAdd
   ])
 }
 
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
 /** Minimal EVMChain stub — only the members EVMTokenManager touches. */
 function stubChain(overrides: Partial<EVMChain> = {}, poolVersion = '1.5.1'): EVMChain {
   return {
     provider: { call: async () => encodeTokenConfig(CURRENT_ADMIN) },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
     getTokenAdminRegistryFor: (_address: string) => Promise.resolve(TAR),
     typeAndVersion: (address: string) =>
       Promise.resolve(
@@ -56,6 +60,33 @@ function fakeSigner(address = TOKEN) {
     populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
     sendTransaction: () =>
       Promise.resolve({ hash: HASH, wait: () => Promise.resolve({ status: 1 }) }),
+  }
+}
+
+/** Ethereum Sepolia; the chain the wallet is wrongly connected to. */
+const OTHER_CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia').chainId)
+
+/**
+ * {@link fakeSigner} with a provider on `chainId`, and counters proving a rejected write never
+ * reached the wallet.
+ */
+function walletOnChain(chainId: number, address?: string) {
+  const calls = { signed: 0, sent: 0 }
+  const base = fakeSigner(address)
+  return {
+    calls,
+    wallet: {
+      ...base,
+      provider: { _detectNetwork: () => Promise.resolve({ chainId: BigInt(chainId) }) },
+      signTransaction: () => {
+        calls.signed++
+        return base.signTransaction()
+      },
+      sendTransaction: () => {
+        calls.sent++
+        return base.sendTransaction()
+      },
+    },
   }
 }
 
@@ -948,6 +979,55 @@ describe('EVMTokenManager (cct/evm)', () => {
     it('isBurner answers the single-address burn-role check', async () => {
       const cct = EVMTokenManager.fromChain(tokenChain())
       assert.equal(await cct.isBurner({ tokenAddress: TOKEN, account: POOL }), true)
+    })
+  })
+
+  // TOB-CLCCT-3: a wallet on chain B used to sign chain A's calldata as a B transaction.
+  describe('wallet chain binding', () => {
+    it('rejects setPool when the wallet is on another chain, writing nothing', async () => {
+      const { wallet, calls } = walletOnChain(OTHER_CHAIN_ID)
+      const cct = EVMTokenManager.fromChain(stubChain())
+      await assert.rejects(
+        () => cct.setPool({ tokenAddress: TOKEN, poolAddress: POOL, address: ROUTER, wallet }),
+        (err: unknown) =>
+          err instanceof CCIPWalletChainMismatchError &&
+          err.context.expected === CHAIN_ID &&
+          err.context.actual === OTHER_CHAIN_ID,
+      )
+      assert.deepEqual(calls, { signed: 0, sent: 0 })
+    })
+
+    it('rejects transferPoolOwnership when the wallet is on another chain, writing nothing', async () => {
+      // The pool owner the stub reports, so validation passes and the chain check is what rejects.
+      const { wallet, calls } = walletOnChain(OTHER_CHAIN_ID, CURRENT_ADMIN)
+      const cct = EVMTokenManager.fromChain(stubChain())
+      await assert.rejects(
+        () => cct.transferPoolOwnership({ poolAddress: POOL, newOwner: NEW_ADMIN, wallet }),
+        (err: unknown) => err instanceof CCIPWalletChainMismatchError,
+      )
+      assert.deepEqual(calls, { signed: 0, sent: 0 })
+    })
+
+    it('still submits setPool when the wallet is on the manager chain', async () => {
+      const { wallet } = walletOnChain(CHAIN_ID)
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const result = await cct.setPool({
+        tokenAddress: TOKEN,
+        poolAddress: POOL,
+        address: ROUTER,
+        wallet,
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('pins generateUnsignedSetPool output to the manager chain', async () => {
+      const cct = EVMTokenManager.fromChain(stubChain())
+      const unsigned = await cct.generateUnsignedSetPool({
+        tokenAddress: TOKEN,
+        poolAddress: POOL,
+        address: ROUTER,
+      })
+      assert.equal(unsigned.transactions[0]!.chainId, CHAIN_ID)
     })
   })
 })
