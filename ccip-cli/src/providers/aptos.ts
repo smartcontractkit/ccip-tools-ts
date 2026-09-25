@@ -16,8 +16,8 @@ import {
   CCIPArgumentInvalidError,
   CCIPInteractiveRequiredError,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import AptosLedger from '@ledgerhq/hw-app-aptos'
-import HIDTransport from '@ledgerhq/hw-transport-node-hid'
+import AptosLedger from '@ledgerhq/hw-app-aptos/lib/Aptos'
+import HIDTransport from '@ledgerhq/hw-transport-node-hid/lib/TransportNodeHid'
 import { type BytesLike, getBytes, hexlify } from 'ethers'
 
 /**
