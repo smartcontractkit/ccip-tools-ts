@@ -13,7 +13,8 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
-import { getErc20Token, readTokenRole } from '../contracts.ts'
+import { getErc20Token } from '../contracts.ts'
+import { readV1TokenRole } from '../roles.ts'
 
 /** Parameters for {@link Mint}. */
 export type MintParams = {
@@ -50,7 +51,7 @@ export class Mint extends EVMOperation<MintParams> {
    * Gated on `isMinter(sender)`, not `owner()`: `mint` is `onlyMinter`, and the owner is only the
    * role admin, who need not hold the role. The read runs even with no `sender` to compare
    * (against the zero address, answer discarded) because it is also the family check
-   * ({@link readTokenRole}) — a `mint` built for an address with no code would otherwise mine
+   * ({@link readV1TokenRole}) — a `mint` built for an address with no code would otherwise mine
    * successfully and mint nothing. It runs here rather than in {@link execute} so the offline /
    * multisig path is gated too. A mint past a capped token's `maxSupply` is not pre-flighted.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
@@ -60,7 +61,7 @@ export class Mint extends EVMOperation<MintParams> {
     chain: EVMChain,
     { tokenAddress, account, amount, sender }: MintParams,
   ): Promise<UnsignedEVMTx> {
-    const isMinter = await readTokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
+    const isMinter = await readV1TokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
     if (sender !== undefined && !isMinter)
       throw new CCTParamsInvalidError(
         this.name,
