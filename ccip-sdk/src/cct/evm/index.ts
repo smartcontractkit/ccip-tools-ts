@@ -1307,7 +1307,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `applyCCVConfigUpdates` tx (for multisig / offline signing).
+   * Builds an unsigned `applyCCVConfigUpdates` tx (for multisig / offline signing); use
+   * {@link applyCCVConfigUpdates} to sign and submit it directly.
    *
    * @remarks Each entry replaces one remote chain's complete base and threshold CCV lists.
    * Threshold lists require a non-empty matching base list; CCVs cannot repeat within or across
@@ -1340,7 +1341,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Replaces per-chain CCV requirements, signing + submitting as the hooks owner.
+   * Replaces per-chain CCV requirements, signing + submitting as the hooks owner. Use
+   * {@link generateUnsignedApplyCCVConfigUpdates} for multisig or offline signing.
    *
    * @remarks Base CCVs apply to every transfer; threshold CCVs add requirements only above the
    * hooks' configured threshold. `sender` defaults to the wallet address and, when supplied,

@@ -3,16 +3,15 @@
  *
  * @remarks The deployed hooks ignore the interface's `localToken`, finality-config, and extra-data
  * arguments, so this query supplies their neutral values internally.
+ *
+ * @packageDocumentation
  */
 
-import { ZeroAddress } from 'ethers'
-
 import type { EVMChain } from '../../../../evm/index.ts'
-import { resultToObject } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress, validateUint256, validateUint64 } from '../../validate.ts'
-import { ADVANCED_POOL_HOOKS_INTERFACE, assertAdvancedPoolHooksContract } from '../contracts.ts'
+import { assertAdvancedPoolHooksContract, readRequiredCCVs } from '../contracts.ts'
 
 /** Transfer direction accepted by `IPoolV2.MessageDirection`. */
 export type CCVMessageDirection = 'outbound' | 'inbound'
@@ -58,20 +57,12 @@ export class GetRequiredCCVs extends EVMQuery<GetRequiredCCVsParams, GetRequired
     params: GetRequiredCCVsParams,
   ): Promise<GetRequiredCCVsResult> {
     await assertAdvancedPoolHooksContract(chain, params.advancedPoolHooks)
-    const data = ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('getRequiredCCVs', [
-      ZeroAddress,
+    return readRequiredCCVs(
+      chain,
+      params.advancedPoolHooks,
       params.remoteChainSelector,
       params.amount,
-      '0x00000000',
-      '0x',
-      params.direction === 'outbound' ? 0 : 1,
-    ])
-    const result = await chain.provider.call({
-      to: params.advancedPoolHooks,
-      data,
-    })
-    return resultToObject(
-      ADVANCED_POOL_HOOKS_INTERFACE.decodeFunctionResult('getRequiredCCVs', result)[0],
-    ) as string[]
+      params.direction === 'outbound' ? 0n : 1n,
+    )
   }
 }

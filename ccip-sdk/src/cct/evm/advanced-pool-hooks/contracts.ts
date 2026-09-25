@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { Interface, getAddress } from 'ethers'
+import { Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
@@ -50,7 +50,75 @@ export type CCVConfig = {
 /** A remote CCIP chain selector (`uint64`) plus its complete CCV configuration. */
 export type CCVConfigUpdate = CCVConfig & { remoteChainSelector: bigint }
 
-/** Reads an `AdvancedPoolHooks` owner's address in one `eth_call`. */
+/** Checksums one CCV address list returned by a typed hooks getter. */
+function toCCVAddresses(ccvs: readonly unknown[]): string[] {
+  return ccvs.map((ccv) => getAddress(ccv as string))
+}
+
+/** Checksums the four address lists in a hooks CCV config result. */
+function toCCVConfig(raw: {
+  outboundCCVs: readonly unknown[]
+  thresholdOutboundCCVs: readonly unknown[]
+  inboundCCVs: readonly unknown[]
+  thresholdInboundCCVs: readonly unknown[]
+}): CCVConfig {
+  return {
+    outboundCCVs: toCCVAddresses(raw.outboundCCVs),
+    thresholdOutboundCCVs: toCCVAddresses(raw.thresholdOutboundCCVs),
+    inboundCCVs: toCCVAddresses(raw.inboundCCVs),
+    thresholdInboundCCVs: toCCVAddresses(raw.thresholdInboundCCVs),
+  }
+}
+
+/** Reads one remote chain's CCV config in one `eth_call`. */
+export async function readCCVConfig(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  remoteChainSelector: bigint,
+): Promise<CCVConfig> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return toCCVConfig(await hooks.getCCVConfig(remoteChainSelector))
+}
+
+/** Reads every configured remote-chain CCV config in one `eth_call`. */
+export async function readAllCCVConfigs(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<CCVConfigUpdate[]> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return (await hooks.getAllCCVConfigs()).map((config) => ({
+    remoteChainSelector: config.remoteChainSelector,
+    ...toCCVConfig(config),
+  }))
+}
+
+/** Resolves the CCVs required for a transfer in one `eth_call`. */
+export async function readRequiredCCVs(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  remoteChainSelector: bigint,
+  amount: bigint,
+  direction: bigint,
+): Promise<string[]> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return toCCVAddresses(
+    await hooks.getRequiredCCVs(
+      ZeroAddress,
+      remoteChainSelector,
+      amount,
+      '0x00000000',
+      '0x',
+      direction,
+    ),
+  )
+}
+
+/**
+ * Reads an `AdvancedPoolHooks` owner's address in one `eth_call`.
+ * @param chain - Chain hosting the hooks contract.
+ * @param advancedPoolHooks - Hooks contract to read.
+ * @returns The checksummed current owner address.
+ */
 export async function readAdvancedPoolHooksOwner(
   chain: EVMChain,
   advancedPoolHooks: string,
@@ -59,7 +127,14 @@ export async function readAdvancedPoolHooksOwner(
   return getAddress(resultToObject(await hooks.owner()))
 }
 
-/** Rejects a known sender that is not the `AdvancedPoolHooks` owner. */
+/**
+ * Pre-flights a known sender against the `AdvancedPoolHooks` owner.
+ * @param operation - Operation name for error context.
+ * @param chain - Chain hosting the hooks contract.
+ * @param advancedPoolHooks - Hooks contract to read.
+ * @param sender - Proposed transaction sender.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the current hooks owner.
+ */
 export async function assertAdvancedPoolHooksOwner(
   operation: string,
   chain: EVMChain,

@@ -22,6 +22,7 @@ import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
 import {
+  parseRecord,
   validateAddress,
   validateArray,
   validateNonZeroAddress,
@@ -54,7 +55,7 @@ function validateCCVList(operation: string, param: string, value: unknown): stri
   const seen = new Set<string>()
   return value.map((address, i) => {
     validateAddress(operation, `${param}[${i}]`, address)
-    const normalized = getAddress(address as string)
+    const normalized = getAddress(address)
     if (seen.has(normalized))
       throw new CCTParamsInvalidError(
         operation,
@@ -67,9 +68,7 @@ function validateCCVList(operation: string, param: string, value: unknown): stri
 }
 
 function validateCCVConfig(operation: string, param: string, value: unknown): void {
-  if (typeof value !== 'object' || value === null || Array.isArray(value))
-    throw new CCTParamsInvalidError(operation, param, 'must be a CCV config update')
-  const config = value as Record<string, unknown>
+  const config = parseRecord(operation, param, value, 'CCV config update')
   validateUint64(operation, `${param}.remoteChainSelector`, config.remoteChainSelector)
   const outbound = validateCCVList(operation, `${param}.outboundCCVs`, config.outboundCCVs)
   const thresholdOutbound = validateCCVList(

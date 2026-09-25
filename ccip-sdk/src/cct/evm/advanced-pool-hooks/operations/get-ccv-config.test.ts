@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress } from 'ethers'
+import { Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { GetCCVConfig } from './get-ccv-config.ts'
 
 const HOOKS = '0x' + '11'.repeat(20)
-const CCV = '0x' + '22'.repeat(20)
+const CCV = '0x' + 'ab'.repeat(20)
 const IFACE = new Interface([
   'function getCCVConfig(uint64) view returns ((address[] outboundCCVs, address[] thresholdOutboundCCVs, address[] inboundCCVs, address[] thresholdInboundCCVs))',
 ])
@@ -34,7 +34,7 @@ describe('GetCCVConfig (cct/evm advanced-pool-hooks)', () => {
       assert.deepEqual(
         await op.query(stubChain(), { advancedPoolHooks: HOOKS, remoteChainSelector: 1n }),
         {
-          outboundCCVs: [CCV],
+          outboundCCVs: [getAddress(CCV)],
           thresholdOutboundCCVs: [],
           inboundCCVs: [],
           thresholdInboundCCVs: [],

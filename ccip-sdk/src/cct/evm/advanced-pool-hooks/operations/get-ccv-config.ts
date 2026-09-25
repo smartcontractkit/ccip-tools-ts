@@ -1,14 +1,13 @@
-/** Reads one remote chain's configured CCV requirements from `AdvancedPoolHooks`. */
+/**
+ * getCCVConfig — reads one remote chain's configured CCV requirements from `AdvancedPoolHooks`.
+ *
+ * @packageDocumentation
+ */
 
 import type { EVMChain } from '../../../../evm/index.ts'
-import { resultToObject } from '../../../../evm/types.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress, validateUint64 } from '../../validate.ts'
-import {
-  type CCVConfig,
-  ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
-} from '../contracts.ts'
+import { type CCVConfig, assertAdvancedPoolHooksContract, readCCVConfig } from '../contracts.ts'
 
 /** Parameters for {@link GetCCVConfig}. */
 export type GetCCVConfigParams = {
@@ -36,12 +35,6 @@ export class GetCCVConfig extends EVMQuery<GetCCVConfigParams, GetCCVConfigResul
     { advancedPoolHooks, remoteChainSelector }: GetCCVConfigParams,
   ): Promise<GetCCVConfigResult> {
     await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    const data = ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('getCCVConfig', [
-      remoteChainSelector,
-    ])
-    const result = await chain.provider.call({ to: advancedPoolHooks, data })
-    return resultToObject(
-      ADVANCED_POOL_HOOKS_INTERFACE.decodeFunctionResult('getCCVConfig', result)[0],
-    ) as GetCCVConfigResult
+    return readCCVConfig(chain, advancedPoolHooks, remoteChainSelector)
   }
 }
