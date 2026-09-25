@@ -9,8 +9,7 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
 import { CrossChainTokenRole, resolveTokenRoleHandler } from '../roles.ts'
@@ -85,21 +84,5 @@ export class RevokeBurnRole extends EVMOperation<RevokeBurnRoleParams> {
       version,
       this.name,
     )(getTokenInterface(version), params)
-  }
-
-  /**
-   * Signs and submits as the token's v1 owner or v2 burn-role admin, defaulting `sender` to the
-   * signing wallet. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or if any other param is invalid (see {@link buildUnsigned})
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<RevokeBurnRoleParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
