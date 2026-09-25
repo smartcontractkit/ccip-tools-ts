@@ -14,6 +14,7 @@ import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-to
 import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
+const OTHER = '0x' + '99'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
 const RMN_PROXY = '0x' + '33'.repeat(20)
 const ROUTER = '0x' + '44'.repeat(20)
@@ -276,6 +277,30 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         assert.equal(result.verification.encodedConstructorArgs, '0x' + ctorArgs)
       })
     }
+
+    it('accepts a sender matching the signing wallet', async () => {
+      const result = await new DeployTokenPool().execute(stubChain(), {
+        ...params,
+        sender: SENDER,
+        wallet: fakeSigner({ contractAddress: DEPLOYED }),
+      })
+      assert.equal(result.hash, HASH)
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().execute(stubChain(), {
+            ...params,
+            sender: OTHER,
+            wallet: fakeSigner({ contractAddress: DEPLOYED }),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'sender',
+      )
+    })
 
     it('throws CCTTxFailedError when the receipt carries no contract address', async () => {
       await assert.rejects(

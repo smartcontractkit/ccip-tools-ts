@@ -14,6 +14,7 @@ const POOL = '0x' + '22'.repeat(20)
 const ADDRESS = '0x' + '33'.repeat(20)
 const TAR = '0x' + '44'.repeat(20)
 const SENDER = '0x' + '55'.repeat(20)
+const OTHER = '0x' + '66'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 
 const DATA = new Interface([
@@ -124,6 +125,28 @@ describe('SetPool (cct/evm)', () => {
         }),
         { hash: HASH },
       )
+    })
+
+    it('rejects a mismatched sender before TAR discovery', async () => {
+      let called = false
+      await assert.rejects(
+        () =>
+          op.execute(
+            stubChain(() => (called = true)),
+            {
+              tokenAddress: TOKEN,
+              poolAddress: POOL,
+              address: ADDRESS,
+              sender: OTHER,
+              wallet: fakeSigner(),
+            },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'setPool' &&
+          err.context.param === 'sender',
+      )
+      assert.equal(called, false)
     })
 
     it('maps an on-chain revert to CCIPExecTxRevertedError', async () => {

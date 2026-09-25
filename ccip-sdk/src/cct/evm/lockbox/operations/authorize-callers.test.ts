@@ -236,6 +236,32 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       assert.deepEqual(result, { hash: HASH })
     })
 
+    it('accepts a sender matching the signing wallet', async () => {
+      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
+        lockbox: LOCKBOX,
+        addedCallers: [POOL],
+        sender: SENDER,
+        wallet: fakeSigner(),
+      })
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new AuthorizeLockboxCallers().execute(stubChain(), {
+            lockbox: LOCKBOX,
+            addedCallers: [POOL],
+            sender: OTHER,
+            wallet: fakeSigner(),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.param === 'sender',
+      )
+    })
+
     it('throws CCIPExecTxRevertedError when the tx reverts on-chain', async () => {
       await assert.rejects(
         () =>
