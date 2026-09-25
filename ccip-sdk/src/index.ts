@@ -144,6 +144,12 @@ import SELECTORS from './selectors.ts'
 export { SELECTORS }
 export type { UnsignedEVMTx } from './evm/index.ts'
 export {
+  type BuildSafeBatchOptions,
+  type SafeBatch,
+  type SafeBatchTransaction,
+  buildSafeBatch,
+} from './evm/safe.ts'
+export {
   type MessageV1,
   type MessageV1TokenTransfer,
   encodeMessageV1,

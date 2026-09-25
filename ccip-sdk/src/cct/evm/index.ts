@@ -15,6 +15,12 @@ import type { ChainFamily } from '../../networks.ts'
 import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
+  type CreateXSaltSource,
+  type DeployViaCreateX,
+  type DeployViaCreateXTarget,
+  deployViaCreateX,
+} from './createx/deploy.ts'
+import {
   type AuthorizeLockboxCallersParams,
   AuthorizeLockboxCallers,
 } from './lockbox/operations/authorize-callers.ts'
@@ -43,6 +49,7 @@ import {
   type TransferAdminParams,
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
+import { getTokenPoolArtifact } from './token-pool/contracts.ts'
 import {
   type AcceptPoolOwnershipParams,
   AcceptPoolOwnership,
@@ -1985,6 +1992,47 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned token pool deployment that goes through the CreateX factory (for multisig /
+   * offline signing), so a Safe or timelock can be the deployer and the pool address is known
+   * before anything is signed. Resolves to that address and the transaction that creates it.
+   *
+   * @remarks Ownership is handed over atomically with creation: `init` proposes the new owner in
+   * the same call, so the pool is never left owned by the factory. `Ownable2Step` means it is a
+   * *proposal* — batch {@link encodeAcceptPoolOwnership} against `address` into the same Safe
+   * transaction to complete it. Skipping the accept stalls the hand-off but does not lose the
+   * pool; the proposal cannot be overwritten, so the target can accept at any later date.
+   *
+   * There is no `execute` counterpart. A CreateX deploy exists to be batched with its accept,
+   * which means a multisig submits it, not this SDK.
+   *
+   * Returns the deploy leg only. Ownership is *proposed* atomically by `init`; completing it
+   * takes an `acceptOwnership` from the proposed owner, which is a separate transaction. Batch
+   * the two so they execute as one on-chain, or send the accept whenever — the proposal cannot
+   * be overwritten, so it keeps.
+   *
+   * @throws {@link CCTParamsInvalidError} if CreateX is not the reviewed contract on this chain,
+   * or if the predicted address already holds code
+   * @example Deploy a pool from a Safe and own it outright, in one Safe transaction:
+   * ```typescript
+   * const { address, transaction } = await cct.generateUnsignedDeployTokenPoolViaCreateX({
+   *   ...poolArgs,
+   *   sender: safe,
+   *   init: { transferOwnership: safe },
+   * })
+   * // transaction.transactions === [deployCreate2AndInit, acceptOwnership]
+   * ```
+   */
+  async generateUnsignedDeployTokenPoolViaCreateX(
+    opts: DeployTokenPoolViaCreateXParams,
+  ): Promise<DeployViaCreateX> {
+    const unsigned = await this.#deployTokenPool.generate(this.chain, opts)
+    // The artifact the deployment was built from, so the init call cannot be encoded against a
+    // different ABI than the bytecode being deployed.
+    const { iface } = getTokenPoolArtifact(opts.type)
+    return deployViaCreateX(this.chain, unsigned, { ...opts, iface })
+  }
+
+  /**
    * Deploys a token pool, signing + submitting with `opts.wallet`; resolves to the tx hash, the
    * newly deployed pool address, and a `verification` ({@link ExplorerVerificationInput}) for
    * verifying the source on a block explorer. `type` selects the pool contract (a
@@ -2581,6 +2629,9 @@ export type { AcceptTokenOwnershipParams } from './token/operations/accept-token
 export * from './token/contracts.ts'
 export type { TransferPoolOwnershipParams } from './token-pool/operations/transfer-pool-ownership.ts'
 export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
+// Pure calldata builders, for batching a call with the deployment that creates its target.
+export { encodeAcceptPoolOwnership } from './token-pool/operations/accept-pool-ownership.ts'
+export { encodeTransferPoolOwnership } from './token-pool/operations/transfer-pool-ownership.ts'
 export type {
   DeployTokenPoolParams,
   DeployableTokenPoolType,
@@ -2651,6 +2702,40 @@ export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
 export * from './lockbox/contracts.ts'
+// CreateX: an optional deterministic-deployment route for any `generateUnsignedDeploy*` output.
+// A transform over a built transaction rather than a mode on the ops, so nothing above changes.
+export {
+  type CreateXInit,
+  type CreateXSaltSource,
+  type DeployViaCreateX,
+  type DeployViaCreateXOptions,
+  type DeployViaCreateXTarget,
+  deployViaCreateX,
+  deployViaCreateXUnchecked,
+} from './createx/deploy.ts'
+
+/**
+ * Parameters for {@link EVMTokenManager.generateUnsignedDeployTokenPoolViaCreateX}: everything
+ * {@link DeployTokenPoolParams} takes, plus the factory's salt and init.
+ *
+ * @remarks `iface` is absent by design — the facade resolves it from the pool `type` being
+ * deployed, so the init call can never be encoded against a different ABI than the bytecode.
+ * `sender` becomes required: the permissioned salt derives from it, so it determines the address.
+ */
+export type DeployTokenPoolViaCreateXParams = DeployTokenPoolParams &
+  CreateXSaltSource &
+  Omit<DeployViaCreateXTarget, 'iface'>
+export { type CreateXVerification, verifyCreateXDeployment } from './createx/verify.ts'
+export { CREATEX_ADDRESS } from './createx/contracts.ts'
+
+// Re-exported from the EVM layer: the batch file that lets a deployment and the calls that
+// configure it reach the chain as one Safe transaction.
+export {
+  type BuildSafeBatchOptions,
+  type SafeBatch,
+  type SafeBatchTransaction,
+  buildSafeBatch,
+} from '../../evm/safe.ts'
 export type {
   DeployArtifact,
   DeployResult,
