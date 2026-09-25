@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -26,15 +26,15 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "26.4.1",
+    "@types/node": "26.6.2",
     "@typescript/native": "npm:typescript@7.0.2",
-    "brace-expansion": "5.0.9",
+    "brace-expansion": "5.0.12",
     "c8": "^12.0.0",
-    "oxfmt": "^0.66.0",
-    "oxlint": "^1.81.0",
-    "oxlint-tsgolint": "7.0.2001",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "oxlint-tsgolint": "7.0.2002",
     "typescript": "npm:@typescript/typescript6@6.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "overrides": {
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",

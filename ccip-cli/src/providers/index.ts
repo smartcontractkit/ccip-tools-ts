@@ -7,7 +7,6 @@ import {
   type ChainTransaction,
   type EVMChain,
   type Logger,
-  type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPError,
@@ -30,7 +29,6 @@ import {
   loadCantonWallet,
   resolveCantonTokenGetter,
   resolveCliIndexer,
-  resolveCliRouter,
 } from './canton/index.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
@@ -67,25 +65,8 @@ export function filterEndpointsForFamily(endpoints: Set<string>, family: ChainFa
 
 type CantonCliArgs = Partial<Pick<GlobalOpts, 'cantonConfig'>>
 
-/** CLI argv fields used by {@link resolveRouter}. */
-export type ResolveRouterArgs = CantonCliArgs & { router?: string }
-
 /** CLI argv fields used by {@link resolveIndexer}. */
 export type ResolveIndexerArgs = CantonCliArgs & { indexer?: string[] }
-
-/**
- * Resolve `ccip-cli send -r` for the source chain.
- * Canton source: CCIPSender instance id (CLI or canton-config `senderInstanceId`).
- * EVM source: router contract address (CLI only).
- */
-export function resolveRouter(
-  argv: ResolveRouterArgs,
-  sourceNetwork: NetworkInfo,
-  logger?: Logger,
-): string | undefined {
-  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
-  return resolveCliRouter(argv.router, cantonConfig, sourceNetwork.family === ChainFamily.Canton)
-}
 
 /**
  * Resolve CCIP v2 indexer URLs for verification lookups on manual-exec / show.

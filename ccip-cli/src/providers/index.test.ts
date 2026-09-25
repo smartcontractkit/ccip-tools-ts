@@ -12,13 +12,8 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 
 import type { Ctx } from '../commands/index.ts'
-import { resolveCliIndexer, resolveCliRouter } from './canton/index.ts'
-import {
-  fetchChainsFromRpcs,
-  filterEndpointsForFamily,
-  isCantonLedgerUrl,
-  resolveRouter,
-} from './index.ts'
+import { resolveCliIndexer } from './canton/index.ts'
+import { fetchChainsFromRpcs, filterEndpointsForFamily, isCantonLedgerUrl } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -686,20 +681,6 @@ describe('filterEndpointsForFamily', () => {
   })
 })
 
-describe('resolveRouter', () => {
-  const cantonSource = networkInfo('canton-testnet')
-  const evmSource = networkInfo('ethereum-testnet-sepolia')
-
-  it('returns explicit CLI -r for any source family', () => {
-    assert.equal(resolveRouter({ router: '0xRouterAddress' }, evmSource), '0xRouterAddress')
-    assert.equal(resolveRouter({ router: 'prod-ccipsender' }, cantonSource), 'prod-ccipsender')
-  })
-
-  it('returns undefined for EVM source without -r', () => {
-    assert.equal(resolveRouter({}, evmSource), undefined)
-  })
-})
-
 describe('resolveCliIndexer', () => {
   const configIndexer = 'https://indexer-1.testnet.ccip.chain.link'
 
@@ -722,35 +703,5 @@ describe('resolveCliIndexer', () => {
 
   it('returns undefined when neither CLI nor config provides an indexer', () => {
     assert.equal(resolveCliIndexer(undefined, undefined, true), undefined)
-  })
-})
-
-describe('resolveCliRouter', () => {
-  it('prefers explicit CLI -r on Canton source', () => {
-    assert.equal(
-      resolveCliRouter('cli-sender', { senderInstanceId: 'prod-ccipsender' }, true),
-      'cli-sender',
-    )
-  })
-
-  it('prefers explicit CLI -r on EVM source even when canton-config has senderInstanceId', () => {
-    assert.equal(
-      resolveCliRouter('0xRouterAddress', { senderInstanceId: 'prod-ccipsender' }, false),
-      '0xRouterAddress',
-    )
-  })
-
-  it('falls back to canton-config senderInstanceId for Canton source', () => {
-    assert.equal(
-      resolveCliRouter(undefined, { senderInstanceId: 'prod-ccipsender' }, true),
-      'prod-ccipsender',
-    )
-  })
-
-  it('does not fall back to senderInstanceId for EVM source', () => {
-    assert.equal(
-      resolveCliRouter(undefined, { senderInstanceId: 'prod-ccipsender' }, false),
-      undefined,
-    )
   })
 })
