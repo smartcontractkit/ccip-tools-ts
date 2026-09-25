@@ -24,7 +24,9 @@ import updateNotifier from 'update-notifier'
 import yargs, { type ArgumentsCamelCase, type InferredOptionTypes } from 'yargs'
 import { hideBin } from 'yargs/helpers'
 
+import { coerceChainSelectors, registerChainSelectors } from './chain-selectors.ts'
 import { Format } from './commands/index.ts'
+import { formatCCIPError } from './commands/utils.ts'
 
 util.inspect.defaultOptions.depth = 6 // print down to tokenAmounts in requests
 Error.stackTraceLimit = 50 // show more stack frames for better debugging
@@ -131,6 +133,19 @@ const globalOpts = {
         return url
       }),
   },
+  'chain-selectors': {
+    type: 'array',
+    string: true,
+    describe:
+      'Add chains missing from the bundled selector table: "<chainId>=<selector>" for a new chain ' +
+      '(local devnet; family inferred from the chain id format, networkType TESTNET), or ' +
+      '"<chainId>=<chain name>" for a fork of a known chain served under another chain id ' +
+      '(Tenderly Virtual Environment, anvil --fork --chain-id); a known selector is a fork too. ' +
+      'Takes comma/space-separated lists, inline JSON, or a JSON/YAML file',
+    // parse each value at option-resolution time so a malformed one is an attributed option error;
+    // the side-effecting registration runs later, in middleware (see below)
+    coerce: coerceChainSelectors,
+  },
 } as const
 
 /** Type for global CLI options. */
@@ -152,6 +167,11 @@ async function main() {
     .scriptName(process.env.CLI_NAME || 'ccip-cli')
     .env('CCIP')
     .options(globalOpts)
+    .middleware((argv) => {
+      // side-effecting registration only; parsing already happened in the option's coerce. Must run
+      // before any command resolves a chain (applyBeforeValidation = true)
+      registerChainSelectors(argv.chainSelectors)
+    }, true)
     .check((_argv) => {
       const raw = process.argv
       const hasJson = raw.includes('--json')
@@ -182,7 +202,10 @@ if (import.meta.main || wasCalledAsScript()) {
   const later = setTimeout(() => {}, 2 ** 31 - 1) // keep event-loop alive
   await main()
     .catch((err) => {
-      console.error(err)
+      // errors thrown before a command handler runs (e.g. --chain-selectors parsing, in middleware)
+      // never reach the per-command Ctx logger, so format them here too
+      const verbose = process.argv.includes('-v') || process.argv.includes('--verbose')
+      console.error(formatCCIPError(err, verbose) ?? err)
       throw err
     })
     .finally(() => {

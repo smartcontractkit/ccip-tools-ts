@@ -115,6 +115,53 @@ ChainIDs depend on the chain family and must be passed using this pattern:
 - `Aptos`, `Sui`: numeric chain id, prefixed with chain family and colon: e.g `aptos:1` for `aptos-mainnet`
 - `Canton`: prefixed chain id: e.g. `canton:TestNet`, `canton:DevNet`, `canton:MainNet`
 
+### Local devnets and unbundled chains
+
+The selector table is bundled from the public
+[chain-selectors](https://github.com/smartcontractkit/chain-selectors) registry, so a chain that
+isn't in it — a local devnet with an arbitrary chain id, or a network newer than your installed CLI
+— can't be resolved, and `send` / `show` fail with `CHAIN_NOT_FOUND`. Add such chains at runtime with
+`--chain-selectors` (or `CCIP_CHAIN_SELECTORS`, which takes a comma/space-separated list):
+
+```sh
+# a new chain: <chainId>=<selector>; family inferred from the chain id, networkType=TESTNET
+ccip-cli show <txHash> --rpcs http://localhost:8545 --rpcs http://localhost:8555 --no-api \
+  --chain-selectors 2337=12922642891491394802
+
+# a fork served under another chain id: <chainId>=<forked chain name>
+ccip-cli show <txHash> --rpcs $TENDERLY_VIRTUAL_ENV_RPC --no-api \
+  --chain-selectors 735711155111=ethereum-testnet-sepolia
+
+# or a JSON/YAML file — including a chain-selectors `selectors:` document, as-is
+ccip-cli send -s 1337 -d 2337 -r 0x5FC8... --chain-selectors ./local-selectors.yml
+```
+
+```yaml
+# local-selectors.yml
+selectors:
+  2337:
+    selector: 12922642891491394802
+    name: local-anvil-dst
+    network_type: testnet # family defaults to EVM
+```
+
+From the SDK, write the entry into the exported `SELECTORS` table:
+
+```typescript
+import { SELECTORS, networkInfo } from '@chainlink/ccip-sdk'
+
+SELECTORS['2337'] = {
+  selector: 12922642891491394802n,
+  name: 'local-anvil-dst',
+  family: 'EVM',
+  network_type: 'TESTNET',
+}
+networkInfo(12922642891491394802n).chainId // 2337
+```
+
+Note that the hosted CCIP API never indexes local networks, so `--no-api` is required for any local
+lane.
+
 ## Shell Completion
 
 The CLI supports shell tab-completion for commands and options. To enable it, add the completion script to your shell profile:
@@ -146,6 +193,8 @@ ccip-cli send --<TAB>  # lists all send options
   `@chainlink/ccip-sdk`, or see
   [Reading JSON Output](https://docs.chain.link/ccip/tools/cli/guides/reading-json-output).
 - `--no-api`: Disable CCIP API integration (fully decentralized mode, RPC-only)
+- `--chain-selectors`: Add chains missing from the bundled selector table (see
+  [Local devnets and unbundled chains](#local-devnets-and-unbundled-chains))
 - `--api=<url>`: Use a custom CCIP API URL instead of the default `api.ccip.chain.link`
 
 **Environment variable prefix:** All CLI options can be set via environment variables using the
