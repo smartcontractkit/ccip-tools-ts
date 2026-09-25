@@ -21,6 +21,17 @@ const CONFIG_MASK_COMPUTE_UNIT_LIMIT_BIT = 0b00100
 const CONFIG_MASK_LOADED_ACCOUNTS_DATA_SIZE_LIMIT_BIT = 0b01000
 const CONFIG_MASK_HEAP_SIZE_BIT = 0b10000
 
+// SIMD-0385 transaction constraints; exceeding them fails sanitization
+const V1_MAX_ACCOUNTS = 64
+const V1_MAX_INSTRUCTIONS = 64
+const V1_MAX_SIGNATURES = 12
+
+/**
+ * Runtime maximum for a transaction's loaded accounts data size limit (64 MiB). v1 transactions
+ * must request it explicitly: an unset limit budgets 0 bytes (SIMD-0385).
+ */
+export const MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES = 64 * 1024 * 1024
+
 /**
  * A {@link MessageV1} that can be serialized for signing and sending.
  *
@@ -47,14 +58,19 @@ export class SerializableMessageV1 extends MessageV1 {
  */
 export function serializeMessageV1(message: MessageV1): Uint8Array {
   const { transactionConfig } = message
-  if (message.staticAccountKeys.length > 255) {
+  if (message.staticAccountKeys.length > V1_MAX_ACCOUNTS) {
     throw new CCIPTransactionTooLargeError(
-      'Too many static account keys for a v1 transaction message (max 255)',
+      `Too many static account keys for a v1 transaction message (max ${V1_MAX_ACCOUNTS})`,
     )
   }
-  if (message.compiledInstructions.length > 255) {
+  if (message.compiledInstructions.length > V1_MAX_INSTRUCTIONS) {
     throw new CCIPTransactionTooLargeError(
-      'Too many instructions for a v1 transaction message (max 255)',
+      `Too many instructions for a v1 transaction message (max ${V1_MAX_INSTRUCTIONS})`,
+    )
+  }
+  if (message.header.numRequiredSignatures > V1_MAX_SIGNATURES) {
+    throw new CCIPTransactionTooLargeError(
+      `Too many signatures for a v1 transaction message (max ${V1_MAX_SIGNATURES})`,
     )
   }
 
@@ -152,20 +168,23 @@ export function serializeV1Transaction(
  * Compiles instructions into a v1 transaction message. v1 has no address lookup
  * tables, so every account is static; compilation reuses web3.js' v0 compiler
  * (same dedupe/ordering/header semantics, same u8 account indexes) and only the
- * envelope differs. The compute-unit limit is inlined into the message's
- * transactionConfig instead of a ComputeBudget instruction.
- * @throws if the compiled accounts exceed the 255 static keys the v1 format allows
+ * envelope differs. The compute-unit and loaded-accounts data-size limits are inlined
+ * into the message's transactionConfig instead of ComputeBudget instructions; both are
+ * required, as v1 budgets 0 for an unset limit instead of a default (SIMD-0385).
+ * @throws if the compiled accounts exceed the 64 static keys the v1 format allows
  */
 export function compileV1Message({
   payerKey,
   recentBlockhash,
   instructions,
   computeUnitLimit,
+  loadedAccountsDataSizeLimit,
 }: {
   payerKey: PublicKey
   recentBlockhash: Blockhash
   instructions: TransactionInstruction[]
-  computeUnitLimit?: number
+  computeUnitLimit: number
+  loadedAccountsDataSizeLimit: number
 }): SerializableMessageV1 {
   let messageV0
   try {
@@ -176,15 +195,16 @@ export function compileV1Message({
     }).compileToV0Message()
   } catch (err) {
     // v0 compilation fails before our own limit check when the accounts cannot be
-    // referenced — surface the v1-specific limit instead
+    // referenced by u8 indexes — surface the v1-specific limit instead
+    if (!(err instanceof Error) || !err.message.includes('Max static account keys')) throw err
     throw new CCIPTransactionTooLargeError(
-      'Too many static account keys for a v1 transaction message (max 255)',
-      { cause: err as Error },
+      `Too many static account keys for a v1 transaction message (max ${V1_MAX_ACCOUNTS})`,
+      { cause: err },
     )
   }
-  if (messageV0.staticAccountKeys.length > 255) {
+  if (messageV0.staticAccountKeys.length > V1_MAX_ACCOUNTS) {
     throw new CCIPTransactionTooLargeError(
-      'Too many static account keys for a v1 transaction message (max 255)',
+      `Too many static account keys for a v1 transaction message (max ${V1_MAX_ACCOUNTS})`,
     )
   }
   const args: MessageV1Args = {
@@ -193,9 +213,9 @@ export function compileV1Message({
     recentBlockhash: messageV0.recentBlockhash,
     compiledInstructions: messageV0.compiledInstructions as MessageCompiledInstruction[],
     transactionConfig: {
-      computeUnitLimit: computeUnitLimit ?? null,
+      computeUnitLimit,
       heapSize: null,
-      loadedAccountsDataSizeLimit: null,
+      loadedAccountsDataSizeLimit,
       priorityFee: null,
     },
   }

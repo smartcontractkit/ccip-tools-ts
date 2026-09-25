@@ -23,7 +23,10 @@ import { validateAddress } from './validate.ts'
 
 /** Assembles a contract-deployment tx (no `to`): creation bytecode + ABI-encoded ctor args. */
 export function deployTx(bytecode: `0x${string}`, ctorArgs: string): UnsignedEVMTx {
-  return { family: ChainFamily.EVM, transactions: [{ data: bytecode + ctorArgs.slice(2) }] }
+  return {
+    family: ChainFamily.EVM,
+    transactions: [{ data: bytecode + ctorArgs.slice(2) }],
+  }
 }
 
 /** Assembles an unsigned call to an existing contract: `to` + ABI-encoded calldata. */
@@ -136,17 +139,20 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
-        `must be the executing wallet address (${walletAddress}) — use generateUnsigned${this.name[0]!.toUpperCase()}${this.name.slice(1)} for externally-signed transactions`,
+        `must be the executing wallet address (${walletAddress}) — use generateUnsigned${this.name[0]!.toUpperCase()}${this.name.slice(
+          1,
+        )} for externally-signed transactions`,
       )
     return sender
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
   async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<TransactionResult> {
+    const sender = await this.resolveWalletSender(params.wallet, params.sender)
     const { response } = await submit(
       chain,
       params.wallet,
-      await this.generate(chain, params),
+      await this.generate(chain, { ...params, sender }),
       this.name,
     )
     return { hash: response.hash }
@@ -179,11 +185,14 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
    * @throws {@link CCTTxFailedError} if the tx mined without producing a contract address
    */
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
-    const unsigned = await this.generate(chain, params)
-    const { contract, iface } = this.artifact(params)
+    const sender = await this.resolveWalletSender(params.wallet, params.sender)
+    const executionParams = { ...params, sender }
+
+    const unsigned = await this.generate(chain, executionParams)
+    const { contract, iface } = this.artifact(executionParams)
     // Same value `buildUnsigned` appended to the bytecode. Taken from `encode` rather than
     // sliced back out of the init-code, so it stays correct regardless of the tx layout.
-    const encodedConstructorArgs = this.encode(iface, params)
+    const encodedConstructorArgs = this.encode(iface, executionParams)
     const { response, receipt } = await submit(chain, params.wallet, unsigned, this.name)
     if (!receipt.contractAddress)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {

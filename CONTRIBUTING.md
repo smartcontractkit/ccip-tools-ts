@@ -35,6 +35,47 @@ typechecks. The root `typescript` alias points to the official TypeScript 6
 compatibility package because TypeDoc still requires TypeScript's classic API;
 this bridge can be removed when TypeDoc supports TypeScript 7.
 
+### Dependency overrides and accepted advisories
+
+The root `package.json` `overrides` block pins transitive dependencies. Keep it minimal:
+each entry must still be doing something, and `npm audit` plus `npm ls` are the test for
+that — an entry whose package already resolves to a patched release on its own only keeps
+the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in three kinds:
+
+- **Version pins** — the dependents' ranges allow (or resolve to) a release inside an
+  advisory, and the patched release is outside what they ask for (`axios`, `tar`,
+  `protobufjs`, `postcss`, `uuid`, `yaml@1`, `serialize-javascript`, `toml`,
+  `lodash-es`, and `js-yaml` for `openapi-to-postmanv2`: that one pins `4.3.0` exactly
+  while the 4.x line is patched only from `4.3.2`). Prefer a range over an exact pin so
+  later patches flow in by themselves, and bump them when `npm audit` reports a newer fix.
+- **Fork swaps** — advisories with no version to pin to, where the fix lives in a
+  maintained fork of the same code: `bigint-buffer` → `@trufflesuite/bigint-buffer`
+  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles) and
+  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS).
+- **The faker stub** — `postman-collection` (the docs toolchain's OpenAPI→Postman
+  converter, via `docusaurus-plugin-openapi-docs`) is the last release of its line: it
+  pins `@faker-js/faker@5.5.3` exactly and reads the pre-v8 API off it at import time,
+  while every version that patches GHSA-qxc2-j82w-r537 (`>= 10.5`) dropped that API — the
+  two cannot coexist. Forcing a patched faker to clear the finding therefore means
+  patching postman-collection, which is what the override does: it points that one
+  dependency at [`scripts/vendor/faker-postman-stub`](scripts/vendor/faker-postman-stub),
+  a no-op stand-in. The docs pipeline only runs OpenAPI → Postman → static pages and never
+  evaluates a Postman dynamic variable (`{{$randomCity}}`, the only consumer of those
+  generators), so the stub is inert there.
+
+Two findings cannot be pinned away and are accepted (both were re-checked against the
+advisory ranges, not just `npm audit` output):
+
+- `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no patched
+  version to pin. It reaches the CLI through `ethers` v5
+  (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
+- `@solana/web3.js` → `jayson` → `stream-json` — `stream-json` is fixed in `3.6.0`,
+  a pure-ESM rewrite that CJS `jayson` cannot load (and would need `require(esm)` support
+  from every consumer's Node), and `1.99.0` is the last `web3.js` 1.x — the v1-transaction
+  support the CLI relies on. npm's suggested "fix" downgrades to `1.98.4`, which would drop
+  that support. The vulnerable API (`pick`/`ignore`/`filter`/`replace`) is not used by
+  jayson, which only takes `StreamValues` and `Verifier`.
+
 ## Test Suite Layout
 
 Test files are classified by filename suffix:
@@ -87,7 +128,9 @@ Locks are per-machine, so all networked suites must run inside a single CI job/r
 
 ### RPC endpoint env vars
 
-Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to keyless public defaults hard-coded in the suites, so locally you only set what you want to override:
+Every networked suite resolves its endpoints from one env var per network, named after it. A value may hold several endpoints for the same network, comma-separated — the e2e suites race them per chain, single-chain suites take the first. Unset variables resolve to the keyless public defaults centralised in [`scripts/test-endpoints.ts`](scripts/test-endpoints.ts), so locally you only set what you want to override.
+
+Suites that would otherwise bind a single endpoint race their candidates with a health probe instead (`raceRpcEndpoint`), and that race always keeps the network's public defaults as a fallback tier behind whatever the env var configures: a secret that has gone dead (rotated key, exhausted quota) then costs the race nothing instead of failing the suite outright.
 
 | Variable | Network |
 | --- | --- |

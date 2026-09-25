@@ -127,7 +127,7 @@ export async function submitCantonCommands(
   }
 
   const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
-  const partySignatures = await signer.sign(hashBytes)
+  const partySignatures = await signer.signTxHash(hashBytes)
 
   const hashingSchemeVersion =
     prepareResponse.hashingSchemeVersion &&
@@ -137,7 +137,7 @@ export async function submitCantonCommands(
 
   return chain.provider.executeSubmissionAndWaitForTransaction({
     preparedTransaction: prepareResponse.preparedTransaction,
-    partySignatures,
+    partySignatures: { signatures: [partySignatures] },
     deduplicationPeriod: { Empty: {} },
     hashingSchemeVersion,
     submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
