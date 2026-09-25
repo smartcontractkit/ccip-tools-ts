@@ -20,8 +20,7 @@ import { getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import {
   validateAddress,
   validateArray,
@@ -145,19 +144,5 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
       advancedPoolHooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('applyCCVConfigUpdates', [ccvConfigArgs]),
     )
-  }
-
-  /**
-   * Signs and submits as the hooks owner, defaulting `sender` to the signing wallet.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
-   * @throws {@link CCTParamsInvalidError} if `sender` differs from the wallet or is not the owner
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ApplyCCVConfigUpdatesParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
