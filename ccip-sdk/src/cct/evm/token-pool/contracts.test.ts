@@ -14,6 +14,7 @@ import {
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
   assertLockReleasePool,
+  assertNonSiloedLockReleasePool,
   getTokenPoolFamily,
   getTokenPoolInterface,
   isLockReleaseTokenPoolType,
@@ -300,6 +301,37 @@ describe('assertLockReleasePool', () => {
           err.context.address === ADDR &&
           err.context.actual === type &&
           err.context.operation === 'provideLiquidity',
+      )
+  })
+})
+
+describe('assertNonSiloedLockReleasePool', () => {
+  it('passes the one lock-release type that has a single lockbox', () => {
+    assert.doesNotThrow(() =>
+      assertNonSiloedLockReleasePool('getLockbox', ADDR, 'LockReleaseTokenPool'),
+    )
+  })
+
+  it('rejects the siloed type, whose lockboxes are per lane', () => {
+    assert.throws(
+      () => assertNonSiloedLockReleasePool('getLockbox', ADDR, 'SiloedLockReleaseTokenPool'),
+      (err: unknown) =>
+        err instanceof CCTContractTypeInvalidError &&
+        err.context.address === ADDR &&
+        err.context.expected === 'LockReleaseTokenPool' &&
+        err.context.actual === 'SiloedLockReleaseTokenPool' &&
+        err.context.operation === 'getLockbox',
+    )
+  })
+
+  it('rejects every burn-mint type, deferring to assertLockReleasePool', () => {
+    for (const type of TOKEN_POOL_TYPES.filter((t) => !isLockReleaseTokenPoolType(t)))
+      assert.throws(
+        () => assertNonSiloedLockReleasePool('getLockbox', ADDR, type),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.actual === type &&
+          err.context.expected === 'LockRelease token pool',
       )
   })
 })
