@@ -1,5 +1,5 @@
 /**
- * authorizeLockboxCallers — adds/removes authorized callers on an `ERC20LockBox` (v2.0.0) via
+ * updateLockboxAuthorizedCallers — adds/removes authorized callers on an `ERC20LockBox` (v2.0.0) via
  * `applyAuthorizedCallerUpdates`. A `LockReleaseTokenPool` must be an authorized caller of its
  * lockbox before it can lock/release. Mirrors `token-pool/operations/transfer-ownership.ts`.
  *
@@ -14,12 +14,12 @@ import { validateNonZeroAddress } from '../../validate.ts'
 import { LOCKBOX_INTERFACE } from '../contracts.ts'
 
 /**
- * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
+ * Parameters for {@link UpdateLockboxAuthorizedCallers}. At least one caller across both arrays is required.
  * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
  * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
  * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
  */
-export interface AuthorizeLockboxCallersParams {
+export interface UpdateLockboxAuthorizedCallersParams {
   /** Address of the `ERC20LockBox` to update. */
   lockbox: string
   /** Callers to authorize (e.g. the `LockReleaseTokenPool`); defaults to `[]`. */
@@ -31,15 +31,15 @@ export interface AuthorizeLockboxCallersParams {
 }
 
 /** Applies authorized-caller updates on an `ERC20LockBox` via `applyAuthorizedCallerUpdates`. */
-export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCallersParams> {
-  readonly name = 'authorizeLockboxCallers'
+export class UpdateLockboxAuthorizedCallers extends EVMOperation<UpdateLockboxAuthorizedCallersParams> {
+  readonly name = 'updateLockboxAuthorizedCallers'
 
   /** Validates the lockbox and every caller address; requires at least one caller. */
   protected override validate({
     lockbox,
     addedCallers = [],
     removedCallers = [],
-  }: AuthorizeLockboxCallersParams): void {
+  }: UpdateLockboxAuthorizedCallersParams): void {
     validateNonZeroAddress(this.name, 'lockbox', lockbox)
     if (addedCallers.length + removedCallers.length === 0) {
       throw new CCTParamsInvalidError(
@@ -57,7 +57,7 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
   /** Builds `applyAuthorizedCallerUpdates` calldata targeting the lockbox. */
   protected buildUnsigned(
     _chain: EVMChain,
-    { lockbox, addedCallers = [], removedCallers = [] }: AuthorizeLockboxCallersParams,
+    { lockbox, addedCallers = [], removedCallers = [] }: UpdateLockboxAuthorizedCallersParams,
   ): UnsignedEVMTx {
     const data = LOCKBOX_INTERFACE.encodeFunctionData('applyAuthorizedCallerUpdates', [
       { addedCallers, removedCallers },

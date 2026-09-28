@@ -53,7 +53,7 @@ export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBaseParams
  *
  * @remarks `lockbox` must be a pre-deployed `ERC20LockBox` for the *same* `token` (the constructor
  * calls `lockbox.isTokenSupported(token)`). Sequence: deployToken → deployLockbox → deployTokenPool
- * (this) → authorizeLockboxCallers (`addedCallers: [pool]`) → setPool → configure lanes.
+ * (this) → updateLockboxAuthorizedCallers (`addedCallers: [pool]`) → setPool → configure lanes.
  */
 export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBaseParams {
   type: 'LockReleaseTokenPool'
