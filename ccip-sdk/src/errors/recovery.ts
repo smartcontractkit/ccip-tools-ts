@@ -177,6 +177,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Simulation returned no data. The on-chain program may have reverted silently.',
   SOLANA_ACCOUNT_RESOLUTION_FAILED:
     'Account resolution did not complete. Check that the program is a CCIP 2.0 router/offramp and that the instruction data is valid for it.',
+  SOLANA_V2_LANE_UNAVAILABLE:
+    'GenericExtraArgsV3 (finality, ccvs, executor, tokenReceiver, ...) can only be sent over a CCIP 2.0 lane. Use legacy extraArgs (gasLimit, allowOutOfOrderExecution) to send over the 1.6 lane, or have the lane configured for 2.0 (and the sender allowlisted, if its allowlist is enabled).',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
