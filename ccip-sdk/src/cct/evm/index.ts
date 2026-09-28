@@ -23,6 +23,11 @@ import {
   AuthorizeLockboxCallers,
 } from './lockbox/operations/authorize-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
+import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+import {
+  type WithdrawFromLockboxParams,
+  WithdrawFromLockbox,
+} from './lockbox/operations/withdraw.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import {
   type AcceptAdminParams,
@@ -84,6 +89,11 @@ import {
   GetDynamicConfig,
 } from './token-pool/operations/get-dynamic-config.ts'
 import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
+import {
+  type GetLockboxParams,
+  type GetLockboxResult,
+  GetLockbox,
+} from './token-pool/operations/get-lockbox.ts'
 import {
   type GetRebalancerParams,
   type GetRebalancerResult,
@@ -254,6 +264,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
+  readonly #getLockbox = new GetLockbox()
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
@@ -261,6 +272,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
   readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
+  readonly #depositToLockbox = new DepositToLockbox()
+  readonly #withdrawFromLockbox = new WithdrawFromLockbox()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -1949,6 +1962,29 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the `ERC20LockBox` a v2.0.0 LockRelease pool escrows through — fixed in its constructor
+   * and immutable thereafter.
+   * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need: those ops
+   * target the lockbox, not the pool. Also the way to confirm a pool is wired to the lockbox you
+   * authorized, which is where a `deployLockbox` → `deployTokenPool` sequence goes wrong quietly.
+   * @returns The lockbox, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
+   * `SiloedLockReleaseTokenPool` — a siloed pool escrows per remote chain and declares
+   * `getLockBox(uint64)` instead, so it has no single lockbox
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a LockRelease pool holds
+   * its liquidity itself — see {@link getRebalancer} and {@link provideLiquidity}
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const lockbox = await cct.getLockbox({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getLockbox(opts: GetLockboxParams): Promise<GetLockboxResult> {
+    return this.#getLockbox.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress, verification }`.
@@ -2459,7 +2495,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
    * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
    * → {@link deployTokenPool} (passing the lockbox) → {@link authorizeLockboxCallers}
-   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
+   * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
+   * its lockbox holds liquidity.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -2487,8 +2525,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
    * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
-   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`) → {@link setPool} →
-   * configure lanes.
+   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`, plus whoever funds it) →
+   * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
+   * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -2535,7 +2574,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
    * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
-   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
+   * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
+   * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -2555,7 +2596,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `ERC20LockBox` `applyAuthorizedCallerUpdates` tx (for multisig / offline
    * signing) that adds/removes authorized callers. Authorize a `LockReleaseTokenPool` here so it
    * can lock/release against the lockbox.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @remarks `lockbox` is checked on-chain before any calldata is built: a call to an EOA or an
+   * undeployed address executes nothing yet mines successfully, so an address that is not a
+   * deployed `ERC20LockBox` is rejected here rather than returning an unsigned tx that silently
+   * authorizes nobody. When `sender` is given it is checked against the lockbox's `owner()`, since
+   * `applyAuthorizedCallerUpdates` is owner-only.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
+   * nothing at `lockbox` answers `typeAndVersion()`, or if `sender` is not the lockbox owner
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
    * @example
    * ```typescript
    * // `sender` must be the lockbox owner
@@ -2575,8 +2626,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
+   * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox`, and a wallet
+   * that is not its owner, before the wallet is asked to sign; see
+   * {@link generateUnsignedAuthorizeLockboxCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
+   * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the
+   * wallet is not the lockbox owner
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
    * ```typescript
@@ -2592,6 +2652,118 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
   ): Promise<TransactionResult> {
     return this.#authorizeLockboxCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `deposit` tx (for multisig / offline signing) that funds
+   * the lockbox a v2.0.0 LockRelease pool releases from.
+   * @remarks The step the deploy sequences stop short of: a v2.0.0 pool cannot release anything
+   * until its lockbox holds liquidity. The v2.0.0 replacement for {@link provideLiquidity}.
+   * @remarks `sender` must itself be an authorized caller of the lockbox — authorizing the pool
+   * is not enough, because the lockbox gates the *depositor* too — and must have approved the
+   * **lockbox** (not the pool) for `amount` via {@link generateUnsignedApproveToken} /
+   * {@link approveToken}. Both are checked before any calldata is built.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox`
+   * answers `typeAndVersion()`, if the lockbox escrows a different token, or if `sender` is not
+   * an authorized caller
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the lockbox for, less
+   * than `amount`
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDepositToLockbox({
+   *   lockbox: '0xLockbox...',
+   *   token: '0xToken...',
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xAuthorizedCaller...',
+   * })
+   * ```
+   */
+  generateUnsignedDepositToLockbox(opts: DepositToLockboxParams): Promise<UnsignedEVMTx> {
+    return this.#depositToLockbox.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits tokens into an `ERC20LockBox`, signing + submitting with `opts.wallet` (an
+   * authorized caller of the lockbox, which must have approved it for `amount`).
+   * @remarks Approve first with {@link approveToken}, naming the **lockbox** as `spender`.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
+   * authorized caller of the lockbox
+   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
+   * below `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * await cct.approveToken({ tokenAddress: token, spender: lockbox, amount, wallet })
+   * const { hash } = await cct.depositToLockbox({
+   *   lockbox,
+   *   token,
+   *   amount,
+   *   wallet,
+   * })
+   * ```
+   */
+  depositToLockbox(opts: EVMExecuteParams<DepositToLockboxParams>): Promise<TransactionResult> {
+    return this.#depositToLockbox.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `withdraw` tx (for multisig / offline signing) that pulls
+   * liquidity back out to an explicit `recipient`.
+   * @remarks The v2.0.0 replacement for {@link withdrawLiquidity}, with one difference worth
+   * noting: the payout address is a parameter, not `msg.sender`.
+   * @remarks `amount` of `MaxUint256` withdraws the lockbox's entire balance.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox`
+   * answers `typeAndVersion()`, if the lockbox escrows a different token, or if `sender` is not
+   * an authorized caller
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedWithdrawFromLockbox({
+   *   lockbox: '0xLockbox...',
+   *   token: '0xToken...',
+   *   amount: 1_000000000000000000n,
+   *   recipient: '0xTreasury...',
+   *   sender: '0xAuthorizedCaller...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFromLockbox(opts: WithdrawFromLockboxParams): Promise<UnsignedEVMTx> {
+    return this.#withdrawFromLockbox.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws tokens from an `ERC20LockBox` to `recipient`, signing + submitting with
+   * `opts.wallet` (an authorized caller of the lockbox).
+   * @remarks The tokens go to `recipient`, which need not be the wallet.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
+   * authorized caller of the lockbox
+   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.withdrawFromLockbox({
+   *   lockbox,
+   *   token,
+   *   amount: MaxUint256, // the whole balance
+   *   recipient: '0xTreasury...',
+   *   wallet,
+   * })
+   * ```
+   */
+  withdrawFromLockbox(
+    opts: EVMExecuteParams<WithdrawFromLockboxParams>,
+  ): Promise<TransactionResult> {
+    return this.#withdrawFromLockbox.execute(this.chain, opts)
   }
 
   /**
@@ -3139,6 +3311,7 @@ export type {
   GetRebalancerParams,
   GetRebalancerResult,
 } from './token-pool/operations/get-rebalancer.ts'
+export type { GetLockboxParams, GetLockboxResult } from './token-pool/operations/get-lockbox.ts'
 export type {
   GetAllowedFinalityConfigParams,
   GetAllowedFinalityConfigResult,
@@ -3152,6 +3325,8 @@ export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/upda
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
+export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
 export * from './lockbox/contracts.ts'
 export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
 export * from './advanced-pool-hooks/contracts.ts'
