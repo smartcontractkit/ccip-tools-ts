@@ -7,12 +7,11 @@ import type { EVMChain } from '../../../evm/index.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-token.ts'
-import { getTypedContract } from '../query.ts'
+import { getTypedContract, isMissingFunction } from '../query.ts'
 import {
   type TokenVersion as TokenVersionType,
   TokenVersion,
   assertTokenOwner,
-  isMissingFunction,
   resolveTokenEncoder,
 } from './contracts.ts'
 
