@@ -3761,7 +3761,6 @@ export type {
 } from './advanced-pool-hooks/operations/get-threshold-amount.ts'
 export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
 export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
-export * from './lockbox/contracts.ts'
 export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
 export type {
   GetAllCCVConfigsParams,
