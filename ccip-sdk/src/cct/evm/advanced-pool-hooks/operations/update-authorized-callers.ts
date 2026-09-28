@@ -25,9 +25,9 @@ import {
 export type UpdateAdvancedPoolHooksAuthorizedCallersParams = {
   /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
   advancedPoolHooks: string
-  /** Callers to authorize; defaults to `[]`. */
+  /** Callers to authorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
   addedCallers?: string[]
-  /** Callers to deauthorize; defaults to `[]`. */
+  /** Callers to deauthorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
   removedCallers?: string[]
   /** Hooks owner; sets `tx.from` and is checked when supplied. */
   sender?: string
@@ -64,7 +64,19 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
       )
   }
 
-  /** Confirms the hooks target and supplied owner before encoding the update. */
+  /**
+   * Confirms `advancedPoolHooks` is deployed `AdvancedPoolHooks` and, when `sender` is known, that
+   * it owns the hooks; then builds `applyAuthorizedCallerUpdates` calldata targeting it.
+   *
+   * @remarks The contract-type pre-flight comes first because this call sent to an EOA succeeds
+   * without changing hooks state. It also gates the owner read, since `owner()` is not a type check.
+   * @remarks `applyAuthorizedCallerUpdates` is `onlyOwner`, so a non-owner `sender` is rejected
+   * before an offline or multisig signer submits the transaction.
+   * @remarks Removes run before adds, so an address in both arrays remains authorized. Repeated
+   * callers within either array are rejected, including addresses that differ only by casing.
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if `sender` is not the hooks owner
+   */
   protected async buildUnsigned(
     chain: EVMChain,
     {
