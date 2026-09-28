@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, id, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -27,6 +27,14 @@ const FRESH = new Interface([
 ])
 const expectedData = (burnAndMinter = POOL) =>
   FRESH.encodeFunctionData('grantMintAndBurnRoles', [burnAndMinter])
+const V2 = new Interface([
+  'function grantMintAndBurnRoles(address burnAndMinter)',
+  'function hasRole(bytes32 role, address account) view returns (bool)',
+  'function getRoleAdmin(bytes32 role) view returns (bytes32)',
+])
+const MINTER_ROLE = id('MINTER_ROLE')
+const BURNER_ROLE = id('BURNER_ROLE')
+const BURN_MINT_ADMIN_ROLE = id('BURN_MINT_ADMIN_ROLE')
 
 /** The `eth_call`s the op makes, as decoded function names. The two role reads race, so unordered. */
 type Seen = { calls: string[] }
@@ -55,12 +63,38 @@ function stubChain({
   }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.reject(missingFunction()),
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
         const fn = FRESH.getFunction(data.slice(0, 10))!.name
         seen.calls.push(fn)
         return Promise.resolve(FRESH.encodeFunctionResult(fn, results[fn]))
+      },
+    },
+    nextNonce: () => Promise.resolve(0),
+    rollbackNonce: () => {},
+  } as unknown as EVMChain
+}
+
+function stubV2Chain({
+  roles = {},
+  senderIsRoleAdmin = true,
+}: { roles?: { mint?: boolean; burn?: boolean }; senderIsRoleAdmin?: boolean } = {}): EVMChain {
+  return {
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    provider: {
+      call: ({ data }: { data: string }) => {
+        const fn = V2.getFunction(data.slice(0, 10))!.name
+        const [role, account] = V2.decodeFunctionData(fn, data)
+        if (fn === 'getRoleAdmin') {
+          assert.ok(role === MINTER_ROLE || role === BURNER_ROLE)
+          return Promise.resolve(V2.encodeFunctionResult(fn, [BURN_MINT_ADMIN_ROLE]))
+        }
+        const hasRole =
+          account === POOL ? (role === MINTER_ROLE ? roles.mint : roles.burn) : senderIsRoleAdmin
+        return Promise.resolve(V2.encodeFunctionResult(fn, [hasRole ?? false]))
       },
     },
     nextNonce: () => Promise.resolve(0),
@@ -128,6 +162,14 @@ describe('GrantMintAndBurnRoles (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, expectedData())
       // no sender to compare, so the owner read is skipped — the family check is not
       assert.deepEqual(seen.calls.sort(), ['isBurner', 'isMinter'])
+    })
+
+    it('encodes the native combined grant for a CrossChainToken', async () => {
+      const unsigned = await generate(stubV2Chain())
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        V2.encodeFunctionData('grantMintAndBurnRoles', [POOL]),
+      )
     })
   })
 
@@ -200,7 +242,13 @@ describe('GrantMintAndBurnRoles (cct/evm)', () => {
     }
   })
 
-  describe('owner gate', () => {
+  describe('authorization', () => {
+    it('rejects a CrossChainToken sender without both role-admin permissions', async () => {
+      await assert.rejects(
+        () => generate(stubV2Chain({ senderIsRoleAdmin: false }), { sender: NOT_THE_OWNER }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
     it('rejects a sender that does not own the token', async () => {
       await assert.rejects(
         () => generate(stubChain(), { sender: NOT_THE_OWNER }),
