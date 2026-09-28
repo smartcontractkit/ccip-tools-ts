@@ -8,7 +8,7 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { readTokenRoleHolders } from '../contracts.ts'
+import { readV1TokenRoleHolders } from '../roles.ts'
 
 /** Parameters for {@link GetBurners}. */
 export type GetBurnersParams = {
@@ -35,10 +35,10 @@ export class GetBurners extends EVMQuery<GetBurnersParams, GetBurnersResult> {
   /**
    * Enumerates the role set in a single `eth_call`.
    * @remarks No version resolution: `getBurners()` is identical at v1.5.1 and v1.6.2, and a
-   * contract that does not declare it is reported by {@link readTokenRoleHolders}.
+   * contract that does not declare it is reported by {@link readV1TokenRoleHolders}.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    */
   protected read(chain: EVMChain, { tokenAddress }: GetBurnersParams): Promise<string[]> {
-    return readTokenRoleHolders(chain, tokenAddress, 'getBurners')
+    return readV1TokenRoleHolders(chain, tokenAddress, 'getBurners')
   }
 }

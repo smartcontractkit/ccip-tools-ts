@@ -327,7 +327,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
           wallet: WALLET,
           additionalAddresses: [Keypair.generate().publicKey.toBase58()],
         }),
-        { hash: HASH },
+        { hash: HASH, hashes: [HASH] },
       )
     })
 
