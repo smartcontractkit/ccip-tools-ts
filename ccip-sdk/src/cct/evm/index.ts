@@ -99,6 +99,13 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
 import {
+  type DeployTokenAndTokenPoolViaFactoryParams,
+  type DeployTokenPoolWithExistingTokenViaFactoryParams,
+  type FactoryDeploy,
+  deployTokenAndTokenPoolViaFactory,
+  deployTokenPoolWithExistingTokenViaFactory,
+} from './token-pool-factory/deploy.ts'
+import {
   type AcceptPoolOwnershipParams,
   AcceptPoolOwnership,
 } from './token-pool/operations/accept-pool-ownership.ts'
@@ -3013,6 +3020,68 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned `TokenPoolFactory` (v2.0.0) `deployTokenAndTokenPool` call — deploying a
+   * CrossChainToken and its pool (and, for LockRelease, a lockbox) and configuring the given remote
+   * lanes, all in one transaction — and returns it with the locally-predicted token, pool, and
+   * (auto-deployed) lockbox addresses, known before signing.
+   *
+   * @remarks **Unsigned-only.** The factory salt is `keccak256(abi.encodePacked(salt, msg.sender))`,
+   * so `sender` (whoever sends this) is baked into the addresses; sign with a wallet whose address
+   * equals `sender`. The predicted pool address depends on the factory's `getStaticConfig()`
+   * (`rmnProxy`/`ccipRouter`), read over RPC — pass `expectedStaticConfig` to pin it to trusted
+   * values. Ownership is *proposed* (Ownable2Step) to `futureOwner`; batch the accepts separately.
+   * @throws {@link CCTParamsInvalidError} on invalid params, empty init code, salt, static-config
+   * mismatch, or an already-occupied predicted address
+   * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { token, pool, transaction } = await cct.generateUnsignedDeployTokenAndTokenPoolViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-token-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: { name: 'My Token', symbol: 'MTK', decimals: 18, maxSupply: 0n },
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenAndTokenPoolViaFactory(
+    opts: DeployTokenAndTokenPoolViaFactoryParams,
+  ): Promise<FactoryDeploy> {
+    return deployTokenAndTokenPoolViaFactory(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `TokenPoolFactory` (v2.0.0) `deployTokenPoolWithExistingToken` call for an
+   * already-deployed token (any ERC20 — the factory does not require a CrossChainToken), configuring
+   * the given remote lanes, and returns it with the locally-predicted pool and (auto-deployed)
+   * lockbox addresses, known before signing.
+   *
+   * @remarks Same unsigned-only, sender-bound-salt, and RPC-trust caveats as
+   * {@link generateUnsignedDeployTokenAndTokenPoolViaFactory}.
+   * @throws {@link CCTParamsInvalidError} on invalid params, empty init code, salt, static-config
+   * mismatch, or an already-occupied predicted address
+   * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { pool, transaction } = await cct.generateUnsignedDeployTokenPoolWithExistingTokenViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-pool-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: '0xExistingToken...',
+   *   localTokenDecimals: 18,
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPoolWithExistingTokenViaFactory(
+    opts: DeployTokenPoolWithExistingTokenViaFactoryParams,
+  ): Promise<FactoryDeploy> {
+    return deployTokenPoolWithExistingTokenViaFactory(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned `ERC20LockBox` `applyAuthorizedCallerUpdates` tx (for multisig / offline
    * signing) that adds/removes authorized callers. Authorize a `LockReleaseTokenPool` here so it
    * can lock/release against the lockbox.
@@ -3779,6 +3848,22 @@ export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operat
 export type { SetPolicyEngineParams } from './advanced-pool-hooks/operations/set-policy-engine.ts'
 export type { SetThresholdAmountParams } from './advanced-pool-hooks/operations/set-threshold-amount.ts'
 export * from './advanced-pool-hooks/contracts.ts'
+export type {
+  DeployTokenAndTokenPoolViaFactoryParams,
+  DeployTokenPoolWithExistingTokenViaFactoryParams,
+  FactoryDeploy,
+  FactoryDeployCommon,
+  FactoryRateLimiterConfig,
+  FactoryRemoteChainConfig,
+  FactoryRemoteTokenPool,
+  FactoryTokenPoolType,
+} from './token-pool-factory/deploy.ts'
+export {
+  deployTokenAndTokenPoolViaFactory,
+  deployTokenAndTokenPoolViaFactoryUnchecked,
+  deployTokenPoolWithExistingTokenViaFactory,
+  deployTokenPoolWithExistingTokenViaFactoryUnchecked,
+} from './token-pool-factory/deploy.ts'
 export type {
   DeployArtifact,
   DeployResult,
