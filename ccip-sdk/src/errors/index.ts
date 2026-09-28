@@ -133,6 +133,7 @@ export {
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
+  CCIPSolanaV2LaneUnavailableError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenAmountInvalidError,
