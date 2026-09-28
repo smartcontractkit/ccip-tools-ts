@@ -2014,9 +2014,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Mint/burn are role-gated (`MINTER_ROLE`/`BURNER_ROLE`); the token grants neither
    * to any pool at deploy. `preMint` mints initial supply to `preMintRecipient`, but before a
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployToken({
@@ -2530,7 +2532,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployTokenPool({
@@ -2579,7 +2582,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployLockbox({
