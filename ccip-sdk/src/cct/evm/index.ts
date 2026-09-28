@@ -2614,6 +2614,16 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * mismatch, or an already-occupied predicted address
    * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { token, pool, transaction } = await cct.generateUnsignedDeployTokenAndTokenPoolViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-token-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: { name: 'My Token', symbol: 'MTK', decimals: 18, maxSupply: 0n },
+   * })
+   * ```
    */
   generateUnsignedDeployTokenAndTokenPoolViaFactory(
     opts: DeployTokenAndTokenPoolViaFactoryParams,
@@ -2633,6 +2643,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * mismatch, or an already-occupied predicted address
    * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { pool, transaction } = await cct.generateUnsignedDeployTokenPoolWithExistingTokenViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-pool-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: '0xExistingToken...',
+   *   localTokenDecimals: 18,
+   * })
+   * ```
    */
   generateUnsignedDeployTokenPoolWithExistingTokenViaFactory(
     opts: DeployTokenPoolWithExistingTokenViaFactoryParams,

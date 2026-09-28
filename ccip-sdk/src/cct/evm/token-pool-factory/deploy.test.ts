@@ -411,9 +411,15 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
   const REMOTE_POOL = getAddress('0x2222222222222222222222222222222222222222')
   // the bytes form the pool stores: abi.encode(address) — the caller pre-encodes, we do not
   const encoded = (a: string) => AbiCoder.defaultAbiCoder().encode(['address'], [a])
-  const remote = (pool?: string, token?: string) => ({
+  const remote = (
+    pool?: string,
+    token?: string,
+    poolInitCode?: string,
+    tokenInitCode?: string,
+  ) => ({
     remoteChainSelector: 99n,
     remotePoolAddress: pool,
+    remotePoolInitCode: poolInitCode,
     remoteChainConfig: {
       remotePoolFactory: FACTORY,
       remoteRouter: ROUTER,
@@ -423,8 +429,14 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
     },
     poolType: 'BurnMint' as const,
     remoteTokenAddress: token,
+    remoteTokenInitCode: tokenInitCode,
   })
-  const buildRemote = (pool?: string, token?: string) =>
+  const buildRemote = (
+    pool?: string,
+    token?: string,
+    poolInitCode?: string,
+    tokenInitCode?: string,
+  ) =>
     decode(
       'deployTokenPoolWithExistingToken',
       deployTokenPoolWithExistingTokenViaFactoryUnchecked(
@@ -435,7 +447,7 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
           type: 'BurnMintTokenPool',
           token: EXISTING_TOKEN,
           localTokenDecimals: 18,
-          remoteTokenPools: [remote(pool, token)],
+          remoteTokenPools: [remote(pool, token, poolInitCode, tokenInitCode)],
         },
         { rmnProxy: RMN, router: ROUTER },
       ).transaction.transactions[0]!.data as string,
@@ -456,9 +468,23 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
     assert.notEqual(rt.remotePoolAddress, encoded(REMOTE_POOL))
   })
 
-  it('leaves an omitted (or 0x) remote address as 0x for the factory to predict', () => {
-    assert.equal(buildRemote(undefined, undefined).remotePoolAddress, '0x')
-    assert.equal(buildRemote('0x', '0x').remoteTokenAddress, '0x')
+  it('leaves an omitted (or 0x) remote address as 0x when init code is given, for the factory to predict', () => {
+    // the factory predicts the remote address FROM the init code, so an omitted address needs one
+    const initCode = '0x6001'
+    assert.equal(buildRemote(undefined, undefined, initCode, initCode).remotePoolAddress, '0x')
+    assert.equal(buildRemote('0x', '0x', initCode, initCode).remoteTokenAddress, '0x')
+  })
+
+  it('rejects a remote with neither address nor init code (factory would revert EmptyInitCode)', () => {
+    assert.throws(
+      () => buildRemote(undefined, undefined),
+      (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'remotePoolAddress',
+    )
+    assert.throws(
+      () => buildRemote(encoded(REMOTE_POOL), undefined),
+      (e: unknown) =>
+        e instanceof CCTParamsInvalidError && e.context.param === 'remoteTokenAddress',
+    )
   })
 
   it('rejects a malformed remote address (non-whole-byte hex) with CCTParamsInvalidError', () => {
