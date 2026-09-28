@@ -379,14 +379,14 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'transferOwnership',
+          'transferPoolOwnership',
           () =>
-            cct.generateUnsignedTransferOwnership({
+            cct.generateUnsignedTransferPoolOwnership({
               ...common,
               newOwner: account,
             }),
         ],
-        ['acceptOwnership', () => cct.generateUnsignedAcceptOwnership(common)],
+        ['acceptPoolOwnership', () => cct.generateUnsignedAcceptPoolOwnership(common)],
         [
           'setChainRateLimit',
           () =>
@@ -658,9 +658,9 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'transferOwnership',
+          'transferPoolOwnership',
           () =>
-            cct.transferOwnership({
+            cct.transferPoolOwnership({
               wallet,
               tokenAddress: mint,
               poolType: 'lock-release',
@@ -668,9 +668,9 @@ describe('SolanaTokenManager (cct/solana)', () => {
             }),
         ],
         [
-          'acceptOwnership',
+          'acceptPoolOwnership',
           () =>
-            cct.acceptOwnership({
+            cct.acceptPoolOwnership({
               wallet,
               tokenAddress: mint,
               poolType: 'lock-release',

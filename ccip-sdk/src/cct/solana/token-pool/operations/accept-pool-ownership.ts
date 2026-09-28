@@ -24,14 +24,14 @@ import {
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 /** Parameters shared by Solana token pool ownership-acceptance generation and execution. */
-type AcceptOwnershipParams = PoolProgramRef & {
+type AcceptPoolOwnershipParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
   /** Proposed pool owner accepting ownership. Defaults to `payer` for single-signer transactions. */
   authority?: string
 }
 
-type ParsedAcceptOwnershipParams = {
+type ParsedAcceptPoolOwnershipParams = {
   tokenAddress: PublicKey
   poolProgram: PublicKey
   payer: PublicKey
@@ -39,27 +39,29 @@ type ParsedAcceptOwnershipParams = {
 }
 
 /** Parameters for unsigned Solana token pool ownership acceptance. */
-export type GenerateAcceptOwnershipParams = SolanaGenerateParams<AcceptOwnershipParams>
+export type GenerateAcceptPoolOwnershipParams = SolanaGenerateParams<AcceptPoolOwnershipParams>
 
 /** Unsigned Solana token pool ownership acceptance result. */
-export type GenerateAcceptOwnershipResult = UnsignedSolanaTx
+export type GenerateAcceptPoolOwnershipResult = UnsignedSolanaTx
 
 /** Parameters for executing Solana token pool ownership acceptance. */
-export type ExecuteAcceptOwnershipParams = SolanaExecuteParams<AcceptOwnershipParams>
+export type ExecuteAcceptPoolOwnershipParams = SolanaExecuteParams<AcceptPoolOwnershipParams>
 
 /** Result of executing Solana token pool ownership acceptance. */
-export type ExecuteAcceptOwnershipResult = TransactionResult
+export type ExecuteAcceptPoolOwnershipResult = TransactionResult
 
 /** Accepts pending ownership of a Solana token pool. */
-export class AcceptOwnership extends SolanaOperation<
-  AcceptOwnershipParams,
+export class AcceptPoolOwnership extends SolanaOperation<
+  AcceptPoolOwnershipParams,
   UnsignedSolanaTx,
-  ParsedAcceptOwnershipParams
+  ParsedAcceptPoolOwnershipParams
 > {
-  readonly name = 'acceptOwnership'
+  readonly name = 'acceptPoolOwnership'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateAcceptOwnershipParams): ParsedAcceptOwnershipParams {
+  protected override parse(
+    params: GenerateAcceptPoolOwnershipParams,
+  ): ParsedAcceptPoolOwnershipParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
@@ -75,7 +77,7 @@ export class AcceptOwnership extends SolanaOperation<
   /** Confirms the authority is the proposed owner, then builds the unsigned `acceptOwnership` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedAcceptOwnershipParams,
+    opts: ParsedAcceptPoolOwnershipParams,
   ): Promise<UnsignedSolanaTx> {
     const { config } = await new GetTokenPoolState().query(chain, {
       tokenAddress: opts.tokenAddress.toBase58(),
@@ -107,8 +109,8 @@ export class AcceptOwnership extends SolanaOperation<
   /** Generate, sign, simulate, send, and confirm with the proposed owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteAcceptOwnershipParams,
-  ): Promise<ExecuteAcceptOwnershipResult> {
+    params: ExecuteAcceptPoolOwnershipParams,
+  ): Promise<ExecuteAcceptPoolOwnershipResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
@@ -116,7 +118,7 @@ export class AcceptOwnership extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'acceptOwnership requires authority to be the executing wallet. Use generateUnsignedAcceptOwnership for externally signed transactions.',
+        'acceptPoolOwnership requires authority to be the executing wallet. Use generateUnsignedAcceptPoolOwnership for externally signed transactions.',
       )
     }
 
