@@ -14,7 +14,7 @@
  * @packageDocumentation
  */
 
-import { Contract, Interface, getAddress, isError } from 'ethers'
+import { Contract, Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import {
@@ -23,6 +23,7 @@ import {
   CCTParamsInvalidError,
 } from '../../errors.ts'
 import TOKEN_POOL_FACTORY_V2_0_0_ABI from '../artifacts/abi/V2_0_0/token-pool-factory.ts'
+import { isMissingFunction } from '../query.ts'
 
 /** Contract type a `TokenPoolFactory` reports from `typeAndVersion`, e.g. `TokenPoolFactory 2.0.0`. */
 export const FACTORY_TYPE = 'TokenPoolFactory'
@@ -38,16 +39,6 @@ export const FACTORY_POOL_TYPE = { BurnMint: 0, LockRelease: 1 } as const
 
 /** Cached interface over the vendored `chainlink-ccip` ABI, built once — as `token-pool`/`token`/`lockbox` do. */
 export const TOKEN_POOL_FACTORY_INTERFACE = new Interface(TOKEN_POOL_FACTORY_V2_0_0_ABI)
-
-/**
- * True for the two failure shapes a call to a function a contract does not declare produces:
- * `CALL_EXCEPTION` (revert) and `BAD_DATA` (node answers `0x`, which is also what an EOA and an
- * undeployed address answer). Deliberately narrow — a transport error or rate limit must not be
- * read as "this contract lacks the function". Local copy; `cct-sdk` has no shared util yet.
- */
-function isMissingFunction(err: unknown): boolean {
-  return isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')
-}
 
 /**
  * Asserts `factory` is a deployed, supported `TokenPoolFactory` by reading its `typeAndVersion`.
