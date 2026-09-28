@@ -36,6 +36,7 @@ import {
   parseHexBytes,
   validateAddress,
   validateNonZeroAddress,
+  validateUint64,
   validateUint8,
 } from '../validate.ts'
 import {
@@ -183,12 +184,49 @@ function parseRemoteAddress(operation: string, param: string, value: string | un
   return parseHexBytes(operation, param, value)
 }
 
-/** Maps a remote-pool input to the ABI tuple shape, applying `0x`/disabled defaults. */
+/** Maps a remote-pool input to the ABI tuple shape, validating and applying `0x`/disabled defaults. */
 function toAbiRemote(operation: string, r: FactoryRemoteTokenPool) {
+  validateUint64(operation, 'remoteChainSelector', r.remoteChainSelector)
+  const remotePoolAddress = parseRemoteAddress(operation, 'remotePoolAddress', r.remotePoolAddress)
+  const remotePoolInitCode = r.remotePoolInitCode ?? '0x'
+  // The factory reverts `EmptyInitCode` (TokenPoolFactory.sol) when a remote has neither a
+  // pre-deployed address nor init code to deploy from. Reject here so the builder fails fast
+  // instead of the tx reverting on-chain; an address-only remote (init code `0x`) stays valid.
+  if (remotePoolAddress === '0x' && remotePoolInitCode === '0x')
+    throw new CCTParamsInvalidError(
+      operation,
+      'remotePoolAddress',
+      'set remotePoolAddress or remotePoolInitCode; both empty would revert EmptyInitCode on-chain',
+    )
+  const remoteTokenAddress = parseRemoteAddress(
+    operation,
+    'remoteTokenAddress',
+    r.remoteTokenAddress,
+  )
+  const remoteTokenInitCode = r.remoteTokenInitCode ?? '0x'
+  if (remoteTokenAddress === '0x' && remoteTokenInitCode === '0x')
+    throw new CCTParamsInvalidError(
+      operation,
+      'remoteTokenAddress',
+      'set remoteTokenAddress or remoteTokenInitCode; both empty would revert EmptyInitCode on-chain',
+    )
+  validateAddress(
+    operation,
+    'remoteChainConfig.remotePoolFactory',
+    r.remoteChainConfig.remotePoolFactory,
+  )
+  validateAddress(operation, 'remoteChainConfig.remoteRouter', r.remoteChainConfig.remoteRouter)
+  validateAddress(operation, 'remoteChainConfig.remoteRMNProxy', r.remoteChainConfig.remoteRMNProxy)
+  validateAddress(operation, 'remoteChainConfig.remoteLockBox', r.remoteChainConfig.remoteLockBox)
+  validateUint8(
+    operation,
+    'remoteChainConfig.remoteTokenDecimals',
+    r.remoteChainConfig.remoteTokenDecimals,
+  )
   return {
     remoteChainSelector: r.remoteChainSelector,
-    remotePoolAddress: parseRemoteAddress(operation, 'remotePoolAddress', r.remotePoolAddress),
-    remotePoolInitCode: r.remotePoolInitCode ?? '0x',
+    remotePoolAddress,
+    remotePoolInitCode,
     remoteChainConfig: {
       remotePoolFactory: r.remoteChainConfig.remotePoolFactory,
       remoteRouter: r.remoteChainConfig.remoteRouter,
@@ -197,8 +235,8 @@ function toAbiRemote(operation: string, r: FactoryRemoteTokenPool) {
       remoteTokenDecimals: r.remoteChainConfig.remoteTokenDecimals,
     },
     poolType: FACTORY_POOL_TYPE[r.poolType],
-    remoteTokenAddress: parseRemoteAddress(operation, 'remoteTokenAddress', r.remoteTokenAddress),
-    remoteTokenInitCode: r.remoteTokenInitCode ?? '0x',
+    remoteTokenAddress,
+    remoteTokenInitCode,
     rateLimiterConfig: r.rateLimiterConfig ?? {
       isEnabled: false,
       capacity: 0n,
@@ -255,8 +293,15 @@ export function deployTokenAndTokenPoolViaFactoryUnchecked(
   staticConfig: { rmnProxy: string; router: string },
 ): FactoryDeploy {
   validateNonZeroAddress(NAME_DEPLOY_BOTH, 'factory', params.factory)
-  validateAddress(NAME_DEPLOY_BOTH, 'sender', params.sender)
+  validateNonZeroAddress(NAME_DEPLOY_BOTH, 'sender', params.sender)
   validateUint8(NAME_DEPLOY_BOTH, 'token.decimals', params.token.decimals)
+  if (params.futureOwner !== undefined)
+    validateAddress(NAME_DEPLOY_BOTH, 'futureOwner', params.futureOwner)
+  if (params.lockBox !== undefined) validateAddress(NAME_DEPLOY_BOTH, 'lockBox', params.lockBox)
+  if (params.token.owner !== undefined)
+    validateAddress(NAME_DEPLOY_BOTH, 'token.owner', params.token.owner)
+  if (params.token.preMintRecipient !== undefined)
+    validateAddress(NAME_DEPLOY_BOTH, 'token.preMintRecipient', params.token.preMintRecipient)
 
   const family = getTokenPoolFamily(params.type)
   const owner = params.token.owner ?? params.futureOwner ?? params.sender
@@ -309,9 +354,12 @@ export function deployTokenPoolWithExistingTokenViaFactoryUnchecked(
   staticConfig: { rmnProxy: string; router: string },
 ): FactoryDeploy {
   validateNonZeroAddress(NAME_DEPLOY_POOL, 'factory', params.factory)
-  validateAddress(NAME_DEPLOY_POOL, 'sender', params.sender)
+  validateNonZeroAddress(NAME_DEPLOY_POOL, 'sender', params.sender)
   validateNonZeroAddress(NAME_DEPLOY_POOL, 'token', params.token)
   validateUint8(NAME_DEPLOY_POOL, 'localTokenDecimals', params.localTokenDecimals)
+  if (params.futureOwner !== undefined)
+    validateAddress(NAME_DEPLOY_POOL, 'futureOwner', params.futureOwner)
+  if (params.lockBox !== undefined) validateAddress(NAME_DEPLOY_POOL, 'lockBox', params.lockBox)
 
   const family = getTokenPoolFamily(params.type)
   const tokenPoolInitCode = getTokenPoolArtifact(params.type).bytecode
