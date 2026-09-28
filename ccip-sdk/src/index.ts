@@ -43,6 +43,7 @@ export type {
   TokenTransferFeeConfig,
   TokenTransferFeeOpts,
   TotalFeesEstimate,
+  VerificationSourcesOpts,
 } from './chain.ts'
 export { DEFAULT_API_RETRY_CONFIG, LaneFeature } from './chain.ts'
 export { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -95,6 +96,8 @@ export {
   type Logger,
   type MessageInput,
   type OffchainTokenData,
+  type VerificationPolicy,
+  type VerifierResult,
   type WithLogger,
   CCIPVersion,
   ExecutionState,
@@ -102,6 +105,13 @@ export {
   MessageStatus,
 } from './types.ts'
 export type { WithRetryConfig } from './utils.ts'
+export {
+  type VerifierCall,
+  type VerifierTransport,
+  VERIFIER_METHOD,
+  grpcWebTransport,
+  readVerifier,
+} from './verifiers/index.ts'
 export {
   bytesToBuffer,
   decodeAddress,
@@ -140,7 +150,7 @@ export {
   encodeTokenTransferV1,
 } from './evm/messageCodec.ts'
 import { SolanaChain } from './solana/index.ts'
-export type { UnsignedSolanaTx } from './solana/index.ts'
+export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
@@ -148,7 +158,7 @@ export type { UnsignedTONTx } from './ton/index.ts'
 export type {
   CantonInstrumentId,
   CantonWallet,
-  PartySignatures,
+  SinglePartySignatures,
   TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
@@ -158,12 +168,10 @@ export {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
   DEFAULT_CANTON_LINK_INSTRUMENT_ID,
-  DEFAULT_CANTON_SENDER_INSTANCE_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   formatCantonLinkFeeToken,
   resolveCantonSendGasLimit,
   resolveFeeTransferFactoryAmount,
-  resolveSenderInstanceId,
 } from './canton/defaults.ts'
 // Canton authentication (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {

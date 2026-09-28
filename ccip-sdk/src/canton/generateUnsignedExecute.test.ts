@@ -11,7 +11,7 @@ import type { TokenMetadataClient } from './token-metadata/client.ts'
 import type { TransferInstructionClient } from './transfer-instruction/client.ts'
 import { CantonChain } from './index.ts'
 
-const PARTY = 'party1::aabbcc'
+const PARTY = `party1::1220${'a'.repeat(64)}`
 
 const ROUTER_CONTRACT_ID = 'router-cid-001'
 const ROUTER_BLOB = 'router-blob'

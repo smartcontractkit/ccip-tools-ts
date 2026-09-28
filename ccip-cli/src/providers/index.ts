@@ -7,7 +7,6 @@ import {
   type ChainTransaction,
   type EVMChain,
   type Logger,
-  type NetworkInfo,
   type TONChain,
   CCIPChainFamilyUnsupportedError,
   CCIPError,
@@ -29,7 +28,6 @@ import {
   loadCantonWallet,
   resolveCantonTokenGetter,
   resolveCliIndexer,
-  resolveCliRouter,
 } from './canton/index.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
@@ -66,25 +64,8 @@ export function filterEndpointsForFamily(endpoints: Set<string>, family: ChainFa
 
 type CantonCliArgs = Partial<Pick<GlobalOpts, 'cantonConfig'>>
 
-/** CLI argv fields used by {@link resolveRouter}. */
-export type ResolveRouterArgs = CantonCliArgs & { router?: string }
-
 /** CLI argv fields used by {@link resolveIndexer}. */
 export type ResolveIndexerArgs = CantonCliArgs & { indexer?: string[] }
-
-/**
- * Resolve `ccip-cli send -r` for the source chain.
- * Canton source: CCIPSender instance id (CLI or canton-config `senderInstanceId`).
- * EVM source: router contract address (CLI only).
- */
-export function resolveRouter(
-  argv: ResolveRouterArgs,
-  sourceNetwork: NetworkInfo,
-  logger?: Logger,
-): string | undefined {
-  const cantonConfig = loadCantonConfig(argv.cantonConfig, logger)
-  return resolveCliRouter(argv.router, cantonConfig, sourceNetwork.family === ChainFamily.Canton)
-}
 
 /**
  * Resolve CCIP v2 indexer URLs for verification lookups on manual-exec / show.
@@ -119,7 +100,15 @@ export async function collectEndpoints(
       .map((s) => s.trim()) || [],
   )
   for (const [env, val] of Object.entries(process.env)) {
-    if (env.startsWith('RPC_') && val && RPCS_RE.test(val)) endpoints.add(val)
+    if (!env.startsWith('RPC_') || !val) continue
+    // RPC_* vars hold comma-separated lists (same shape --rpc accepts), so a
+    // multi-endpoint value must fan out instead of being raced as one URL with
+    // commas in it — which no family can resolve, and which stalls every
+    // "not found on any chain" determination until it fails.
+    for (const url of val.split(',')) {
+      const endpoint = url.trim()
+      if (endpoint && RPCS_RE.test(endpoint)) endpoints.add(endpoint)
+    }
   }
   if (rpcsFile && existsSync(rpcsFile)) {
     try {
@@ -382,7 +371,7 @@ export async function loadChainWallet(
       )
       return [wallet.getAddress(), wallet] as const
     case ChainFamily.Canton: {
-      const cantonWallet = loadCantonWallet(argv, logger)
+      const cantonWallet = await loadCantonWallet(argv, logger)
       return [cantonWallet.party, cantonWallet] as const
     }
     default:

@@ -164,6 +164,17 @@ Password resolution order:
 
 The keystore directory defaults to `~/.foundry/keystores/` and can be overridden with `$FOUNDRY_DIR`.
 
+A **passwordless** keystore (imported with `cast wallet import --unsafe-password ""`) is unlocked with the
+empty string, which is a real password rather than a missing one. Set the variable to an empty value to use
+one with `--no-interactive`:
+
+```bash
+FOUNDRY_KEYSTORE_PASSWORD="" ccip-cli send ... --wallet foundry:sender --no-interactive
+```
+
+Leaving the variable **unset** is different: with `--no-interactive` there is nothing to unlock with, so the
+command fails with `INTERACTIVE_REQUIRED` instead of guessing.
+
 ### Hardhat Keystore
 
 If you manage keys with [Hardhat's built-in keystore](https://hardhat.org/hardhat-runner/docs/guides/configuration-variables), use `hardhat:<name>`. The CLI runs `node_modules/.bin/hardhat keystore get` directly, so Hardhat must be installed as a dev dependency in your project:
@@ -181,6 +192,9 @@ Password resolution order:
 1. `$HARDHAT_KEYSTORE_PASSWORD` env var (piped silently to Hardhat)
 2. `$USER_KEY_PASSWORD` env var (piped silently to Hardhat)
 3. Interactive prompt (ccip-cli prompts, answer is piped to Hardhat)
+
+Hardhat decrypts the keystore itself and requires a password of at least 8 characters when one is created,
+so there is no passwordless Hardhat keystore. The CLI forwards whatever you set and lets Hardhat judge it.
 
 ### Ledger Hardware Wallet
 
@@ -209,7 +223,7 @@ These options are available on all commands:
 | `--page`          | -       | number   | -                             | Pagination size for `getLogs` queries                                                                                                |
 | `--api`           | -       | string   | `https://api.ccip.chain.link` | CCIP API endpoint URL. Enabled by default. Pass a URL for a custom endpoint. Use `--no-api` to disable (decentralized RPC-only mode) |
 | `--canton-config` | -       | string   | -                             | Path to Canton config JSON file (required for Canton operations)                                                                     |
-| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer URLs for CCV verifications (used when lane involves Canton)                                                          |
+| `--indexer`       | -       | string[] | -                             | CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution                |
 | `--help`          | `-h`    | boolean  | -                             | Show help                                                                                                                            |
 | `--version`       | `-V`    | boolean  | -                             | Show version                                                                                                                         |
 
@@ -258,7 +272,6 @@ Canton operations require a JSON config file passed via `--canton-config <path>`
     "ccipReceiver": "ccip-receiver-v2",
     "ccipSender": "ccip-sender-v2"
   },
-  "senderInstanceId": "prod-ccipsender",
   "ccvs": ["0x5b92820da106..."]
 }
 ```
@@ -276,7 +289,6 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 | `externalEdsUrlsByOwner`   | No       | Map of owner party → external EDS URL                                            |
 | `indexerUrl`               | No       | CCIP v2 indexer URL for CCV verifications (required for Canton manual execution) |
 | `chainId`                  | No       | CCIP Canton chain ID (e.g. `canton:TestNet`); skips auto-detection               |
-| `senderInstanceId`         | No       | CCIPSender instance id used as router on Canton source (CLI `-r` overrides)      |
 | `defaultSendGasLimit`      | No       | Default gas limit for Canton → destination sends                                 |
 | `feeTransferFactoryAmount` | No       | Transfer-factory preview amount for fee payments (default: `"1.0"`)              |
 | `ccvs`                     | No       | CCV instance addresses for execute disclosures and send defaults                 |

@@ -31,7 +31,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.13.1-247aa263'
+const VERSION = '1.13.1-a0982689'
 // generate:end
 
 const require = createRequire(import.meta.url)
@@ -117,7 +117,19 @@ const globalOpts = {
     type: 'array',
     string: true,
     describe:
-      'Additional CCIP v2 indexer base URLs to query for CCV verifications (e.g. https://indexer-1.ccip.chain.link)',
+      'CCIP v2 indexer base URLs for CCV verifications; replaces the built-in defaults. Required for Canton manual execution (e.g. https://indexer-1.ccip.chain.link)',
+    // yargs applies boolean negation regardless of the declared type, so `--no-indexer` yields
+    // `[false]` and passes `.strict()`. Reject it here with a readable message instead of letting a
+    // non-string reach the SDK.
+    coerce: (urls: unknown[]): string[] =>
+      urls.map((url) => {
+        if (typeof url !== 'string') {
+          throw new Error(
+            `--indexer expects base URL strings, got ${typeof url}. To skip indexers, pass --indexer with no values.`,
+          )
+        }
+        return url
+      }),
   },
 } as const
 

@@ -24,13 +24,13 @@ export type { DeployableTokenPoolType }
 
 /** Fields shared by every deployable token pool. */
 interface DeployTokenPoolBaseParams {
-  /** Address of the token the pool manages. */
+  /** Non-zero address of the token the pool manages. */
   token: string
   /** The token's `decimals` (uint8). */
   localTokenDecimals: number
-  /** RMN proxy address. */
+  /** Non-zero RMN proxy address. */
   rmnProxy: string
-  /** CCIP router address. */
+  /** Non-zero CCIP router address. */
   router: string
   /**
    * `AdvancedPoolHooks` contract to bind at construction, as returned by
@@ -53,7 +53,8 @@ export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBaseParams
  *
  * @remarks `lockbox` must be a pre-deployed `ERC20LockBox` for the *same* `token` (the constructor
  * calls `lockbox.isTokenSupported(token)`). Sequence: deployToken → deployLockbox → deployTokenPool
- * (this) → authorizeLockboxCallers (`addedCallers: [pool]`) → setPool → configure lanes.
+ * (this) → authorizeLockboxCallers (`addedCallers: [pool]`, plus whoever funds it) → setPool →
+ * configure lanes → depositToLockbox, which a v2.0.0 pool cannot release without.
  */
 export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBaseParams {
   type: 'LockReleaseTokenPool'
@@ -116,10 +117,10 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
         'type',
         `unsupported pool type ${String(params.type)}`,
       )
-    validateAddress(this.name, 'token', params.token)
+    validateNonZeroAddress(this.name, 'token', params.token)
     validateUint8(this.name, 'localTokenDecimals', params.localTokenDecimals)
-    validateAddress(this.name, 'rmnProxy', params.rmnProxy)
-    validateAddress(this.name, 'router', params.router)
+    validateNonZeroAddress(this.name, 'rmnProxy', params.rmnProxy)
+    validateNonZeroAddress(this.name, 'router', params.router)
     if (params.advancedPoolHooks !== undefined)
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     if (params.type === 'LockReleaseTokenPool')

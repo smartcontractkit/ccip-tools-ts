@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package chainlink_ccv.verifier.v1;
+
+import "google/rpc/status.proto";
+
+option go_package = "github.com/smartcontractkit/chainlink-protos/chainlink-ccv/verifier/v1";
+
+service Verifier {
+  rpc GetVerifierResultsForMessage(GetVerifierResultsForMessageRequest) returns (GetVerifierResultsForMessageResponse);
+}
+
+message GetVerifierResultsForMessageRequest {
+  repeated bytes message_ids = 1;
+}
+
+message GetVerifierResultsForMessageResponse {
+  repeated VerifierResult results = 1;
+  repeated google.rpc.Status errors = 2;
+}
+
+message Message {
+  bytes sender = 1;
+  bytes data = 2;
+  bytes on_ramp_address = 3;
+  bytes token_transfer = 4;
+  bytes off_ramp_address = 5;
+  bytes dest_blob = 6;
+  bytes receiver = 7;
+  uint64 source_chain_selector = 8;
+  uint64 dest_chain_selector = 9;
+  uint64 sequence_number = 10;
+  uint32 execution_gas_limit = 11;
+  uint32 ccip_receive_gas_limit = 12;
+  uint32 finality = 13;
+  bytes ccv_and_executor_hash = 14;
+  uint32 dest_blob_length = 15;
+  uint32 token_transfer_length = 16;
+  uint32 data_length = 17;
+  uint32 receiver_length = 18;
+  uint32 sender_length = 19;
+  uint32 version = 20;
+  uint32 off_ramp_address_length = 21;
+  uint32 on_ramp_address_length = 22;
+}
+
+message VerifierResult {
+  // Message data 
+  Message message = 1;
+  // Addresses of the CCV specified for this message
+  repeated bytes message_ccv_addresses = 2;
+  // Address of the preferred executor
+  bytes message_executor_address = 3;
+  // Verification data required to execute the message on the destination (e.g. signatures)
+  bytes ccv_data = 4;
+  VerifierResultMetadata metadata = 5;  
+}
+
+message VerifierResultMetadata {
+  // Timestamp when the verifier result was created
+  int64 timestamp = 1; 
+  // Hint to easily identify the source CCV contract address
+  bytes verifier_source_address = 2;
+  // Execution hint so that executors can easily verify before writing on chain 
+  bytes verifier_dest_address = 3; 
+} 
+

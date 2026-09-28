@@ -324,27 +324,81 @@ void describe('SuiChain.getLogs multi-topic', () => {
 })
 
 describe('fromUrl', () => {
-  it('posts JSON-RPC to the endpoint verbatim, keeping keyed path segments intact', async () => {
-    // BlockVision-style: the API key is a PATH segment. The JSON-RPC transport
-    // must POST to the url exactly as given — nothing appended or stripped.
+  /** Answers Sui's cheap tip call; `checkpoint0` also answers `sui_getCheckpoint`. */
+  const suiFetch =
+    (urls: string[], { checkpoint0 = true }: { checkpoint0?: boolean } = {}) =>
+    async (input: Request | URL | string, init?: RequestInit) => {
+      urls.push(input instanceof Request ? input.url : String(input))
+      const req = JSON.parse(init?.body as string) as { id?: unknown; method?: string }
+      // just the tip: a keyed gateway may 4xx `sui_getCheckpoint` (and its
+      // checkpoint-0 derivation) while being a perfectly usable Sui node.
+      if (req.method === 'sui_getCheckpoint' && !checkpoint0) {
+        return new Response('', { status: 404 })
+      }
+      const result =
+        req.method === 'sui_getCheckpoint'
+          ? { digest: '69WiPdYU2k8bCRNrmBGs1nDLfmeEELuxDZYYJc5PFkMV' } // → 4c78adac
+          : '384445196'
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: req.id ?? null, result }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+  it('falls back to the URL keyword when the gateway cannot derive the chain id', async () => {
+    // BlockVision-style: the API key is a PATH segment, and the gateway does
+    // not serve historical checkpoints (`sui_getCheckpoint` 404s). The URL's
+    // network keyword then names the network — but only after a cheap probe
+    // proved the endpoint answers Sui RPCs at all.
     const urls: string[] = []
     const chain = await SuiChain.fromUrl('https://sui-testnet.blockvision.org/v1/s3cr3t', {
-      fetch: async (input, init) => {
-        urls.push(input instanceof Request ? input.url : String(input))
-        const req = JSON.parse(init?.body as string) as { id?: unknown; method?: string }
-        // sui_getCheckpoint must return a checkpoint whose base58 digest
-        // round-trips to the testnet chain id (4c78adac) for the network mapping.
-        const result =
-          req.method === 'sui_getCheckpoint'
-            ? { digest: '69WiPdYU2k8bCRNrmBGs1nDLfmeEELuxDZYYJc5PFkMV' }
-            : '4c78adac'
-        return new Response(JSON.stringify({ jsonrpc: '2.0', id: req.id ?? null, result }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      },
+      fetch: suiFetch(urls, { checkpoint0: false }),
+    })
+    assert.equal(chain.network.name, 'sui-testnet')
+    // Tip probe + the (failed) chain-identifier derivation, both to the URL
+    // verbatim so the keyed path segment is honored.
+    assert.deepEqual(urls, [
+      'https://sui-testnet.blockvision.org/v1/s3cr3t',
+      'https://sui-testnet.blockvision.org/v1/s3cr3t',
+    ])
+  })
+
+  it('does not misdetect a non-Sui URL carrying a network keyword', async () => {
+    // "devnet"/"testnet" also appear in non-Sui URLs (api.devnet.solana.com,
+    // devnet.rpcpool.com, …). A non-Sui node must be REJECTED, not classified as
+    // Sui devnet: the CLI's cross-family RPC race would otherwise "resolve" the
+    // endpoint as Sui and delete it from the shared endpoint set, starving the
+    // real family ("Racing 0 RPC endpoints for SVM" → RPC_NOT_FOUND).
+    let calls = 0
+    await assert.rejects(
+      SuiChain.fromUrl('https://devnet.rpcpool.com', {
+        fetch: async () => {
+          calls++
+          // what a non-Sui JSON-RPC node answers to Sui methods
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              error: { code: -32601, message: 'Method not found' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
+        },
+      }),
+      /Unable to reach a Sui RPC/,
+    )
+    assert.ok(calls > 0, 'expected the RPC probe to run for a non-sui hostname')
+  })
+
+  it('posts JSON-RPC to the endpoint verbatim, keeping keyed path segments intact', async () => {
+    // A URL with NO network keyword falls back to the chain-identifier RPC;
+    // the JSON-RPC transport must POST to the url exactly as given — nothing
+    // appended or stripped — so a keyed path segment reaches the gateway.
+    const urls: string[] = []
+    const chain = await SuiChain.fromUrl('https://gw.example.node/v1/s3cr3t', {
+      fetch: suiFetch(urls),
     })
     assert.equal(chain.network.name, 'sui-testnet')
     assert.ok(urls.length > 0)
-    assert.ok(urls.every((u) => u === 'https://sui-testnet.blockvision.org/v1/s3cr3t'))
+    assert.ok(urls.every((u) => u === 'https://gw.example.node/v1/s3cr3t'))
   })
 })

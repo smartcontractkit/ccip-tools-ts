@@ -23,6 +23,11 @@ import {
   AuthorizeLockboxCallers,
 } from './lockbox/operations/authorize-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
+import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+import {
+  type WithdrawFromLockboxParams,
+  WithdrawFromLockbox,
+} from './lockbox/operations/withdraw.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import {
   type AcceptAdminParams,
@@ -61,6 +66,10 @@ import {
   ApplyChainUpdates,
 } from './token-pool/operations/apply-chain-updates.ts'
 import {
+  type ApplyTokenTransferFeeConfigUpdatesParams,
+  ApplyTokenTransferFeeConfigUpdates,
+} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
+import {
   type DeployTokenPoolParams,
   DeployTokenPool,
 } from './token-pool/operations/deploy-token-pool.ts'
@@ -85,6 +94,17 @@ import {
   GetAllowlist,
 } from './token-pool/operations/get-allowlist.ts'
 import {
+  type GetDynamicConfigParams,
+  type GetDynamicConfigResult,
+  GetDynamicConfig,
+} from './token-pool/operations/get-dynamic-config.ts'
+import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
+import {
+  type GetLockboxParams,
+  type GetLockboxResult,
+  GetLockbox,
+} from './token-pool/operations/get-lockbox.ts'
+import {
   type GetRebalancerParams,
   type GetRebalancerResult,
   GetRebalancer,
@@ -99,6 +119,11 @@ import {
   type GetTokenPoolStateResult,
   GetTokenPoolState,
 } from './token-pool/operations/get-token-pool-state.ts'
+import {
+  type GetTokenTransferFeeConfigParams,
+  type GetTokenTransferFeeConfigResult,
+  GetTokenTransferFeeConfig,
+} from './token-pool/operations/get-token-transfer-fee-config.ts'
 import {
   type ProvideLiquidityParams,
   ProvideLiquidity,
@@ -138,14 +163,30 @@ import {
   UpdateAdvancedPoolHooks,
 } from './token-pool/operations/update-advanced-pool-hooks.ts'
 import {
+  type WithdrawFeeTokensParams,
+  WithdrawFeeTokens,
+} from './token-pool/operations/withdraw-fee-tokens.ts'
+import {
   type WithdrawLiquidityParams,
   WithdrawLiquidity,
 } from './token-pool/operations/withdraw-liquidity.ts'
+import {
+  type AcceptDefaultAdminTransferParams,
+  AcceptDefaultAdminTransfer,
+} from './token/operations/accept-default-admin-transfer.ts'
 import {
   type AcceptTokenOwnershipParams,
   AcceptTokenOwnership,
 } from './token/operations/accept-token-ownership.ts'
 import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
+import {
+  type BeginDefaultAdminTransferParams,
+  BeginDefaultAdminTransfer,
+} from './token/operations/begin-default-admin-transfer.ts'
+import {
+  type CancelDefaultAdminTransferParams,
+  CancelDefaultAdminTransfer,
+} from './token/operations/cancel-default-admin-transfer.ts'
 import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
 import {
   type GetBurnersParams,
@@ -168,6 +209,7 @@ import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/oper
 import { type MintParams, Mint } from './token/operations/mint.ts'
 import { type RevokeBurnRoleParams, RevokeBurnRole } from './token/operations/revoke-burn-role.ts'
 import { type RevokeMintRoleParams, RevokeMintRole } from './token/operations/revoke-mint-role.ts'
+import { type SetCCIPAdminParams, SetCCIPAdmin } from './token/operations/set-ccip-admin.ts'
 import {
   type TransferTokenOwnershipParams,
   TransferTokenOwnership,
@@ -191,6 +233,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #isBurner = new IsBurner()
   readonly #transferTokenOwnership = new TransferTokenOwnership()
   readonly #acceptTokenOwnership = new AcceptTokenOwnership()
+  readonly #beginDefaultAdminTransfer = new BeginDefaultAdminTransfer()
+  readonly #acceptDefaultAdminTransfer = new AcceptDefaultAdminTransfer()
+  readonly #cancelDefaultAdminTransfer = new CancelDefaultAdminTransfer()
+  readonly #setCCIPAdmin = new SetCCIPAdmin()
 
   // Token admin registry operations
   readonly #registerAdmin = new RegisterAdmin()
@@ -213,18 +259,24 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
   readonly #getAllowlist = new GetAllowlist()
   readonly #getAllowlistEnabled = new GetAllowlistEnabled()
+  readonly #applyTokenTransferFeeConfigUpdates = new ApplyTokenTransferFeeConfigUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
+  readonly #getDynamicConfig = new GetDynamicConfig()
+  readonly #getFee = new GetFee()
+  readonly #getTokenTransferFeeConfig = new GetTokenTransferFeeConfig()
   readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
   readonly #getAdvancedPoolHooks = new GetAdvancedPoolHooks()
   readonly #updateAdvancedPoolHooks = new UpdateAdvancedPoolHooks()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
   readonly #provideLiquidity = new ProvideLiquidity()
+  readonly #withdrawFeeTokens = new WithdrawFeeTokens()
   readonly #withdrawLiquidity = new WithdrawLiquidity()
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
+  readonly #getLockbox = new GetLockbox()
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
@@ -232,6 +284,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
   readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
+  readonly #depositToLockbox = new DepositToLockbox()
+  readonly #withdrawFromLockbox = new WithdrawFromLockbox()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -601,11 +655,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * of the pool's owner ({@link generateUnsignedTransferPoolOwnership}) — moving one leaves the
    * other untouched. Same two-step and zero-address semantics, completed by
    * {@link acceptTokenOwnership}, and the same `owner()` pre-flight of `sender`.
-   * @remarks **v1.x only, and not enforced.** A v2.0.0 `CrossChainToken` has no
-   * `transferOwnership`; it uses `AccessControlDefaultAdminRules` (`beginDefaultAdminTransfer`, on
-   * a mandatory delay), which this SDK does not yet wrap. Passing one is not detected — its
-   * `owner()` aliases the default admin, so the pre-flight passes and the tx reverts once
-   * broadcast.
+   * @remarks v1.x only: a v2.0.0 `CrossChainToken` uses
+   * {@link generateUnsignedBeginDefaultAdminTransfer} instead and is rejected before calldata is
+   * built.
+   * @throws {@link CCTOperationUnsupportedError} if `tokenAddress` is a v2.0.0 CrossChainToken
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`,
    * or if `sender` is given and is not the token owner
    * @example
@@ -687,6 +740,242 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<AcceptTokenOwnershipParams>,
   ): Promise<TransactionResult> {
     return this.#acceptTokenOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `beginDefaultAdminTransfer` tx (for multisig / offline signing), scheduling
+   * a CrossChainToken default-admin transfer. The proposed admin accepts only after the token's
+   * mandatory delay; {@link generateUnsignedAcceptDefaultAdminTransfer} builds that second tx.
+   *
+   * @remarks v2.0.0 and later supported CrossChainToken versions. `newAdmin = 0x0` deliberately
+   * schedules default-admin renunciation, completed with `renounceRole`, not
+   * {@link acceptDefaultAdminTransfer}. Replacing a pending transfer is valid and cancels the old
+   * proposal on-chain.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any address is invalid, the token has no current
+   * default admin, or `sender` is not it
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedBeginDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedBeginDefaultAdminTransfer(
+    opts: BeginDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#beginDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Schedules a CrossChainToken default-admin transfer, signing + submitting with `opts.wallet`
+   * (the current default admin).
+   *
+   * @remarks See {@link generateUnsignedBeginDefaultAdminTransfer} for version, delay, and
+   * renunciation rules. `sender` defaults to the wallet address, so the default-admin gate runs
+   * before broadcast.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, the token has no current default admin, or the wallet is not it
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.beginDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xNewAdmin...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  beginDefaultAdminTransfer(
+    opts: EVMExecuteParams<BeginDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#beginDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `acceptDefaultAdminTransfer` tx (for multisig / offline signing), completing
+   * a pending CrossChainToken transfer. The contract enforces its mandatory delay when mined.
+   *
+   * @remarks The pending admin and schedule are public, so this rejects a missing transfer or a
+   * known `sender` other than the pending admin before signing. It cannot safely reject a schedule
+   * that has not passed yet: an offline tx may be executed after it does.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if no transfer is pending, it schedules renunciation, or
+   * `sender` is not its pending default admin
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   sender: '0xPendingAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptDefaultAdminTransfer(
+    opts: AcceptDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#acceptDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a delayed CrossChainToken default-admin transfer, signing + submitting with
+   * `opts.wallet` (the pending default admin).
+   *
+   * @remarks See {@link generateUnsignedAcceptDefaultAdminTransfer} for pending-transfer and
+   * delay rules. The contract is the final authority on whether its schedule has passed.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, no transfer is pending, or the wallet is not its pending default admin
+   * @throws {@link CCIPExecTxRevertedError} if the mandatory delay has not passed or the tx reverts
+   * on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.acceptDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   wallet, // pending default admin
+   * })
+   * ```
+   */
+  acceptDefaultAdminTransfer(
+    opts: EVMExecuteParams<AcceptDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `cancelDefaultAdminTransfer` tx (for multisig / offline signing), canceling
+   * a pending CrossChainToken default-admin transfer.
+   *
+   * @remarks A cancellation with no pending transfer is rejected even though OpenZeppelin would
+   * mine it as a silent no-op.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if no transfer is pending, the token has no current
+   * default admin, or `sender` is not it
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedCancelDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   sender: '0xCurrentAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedCancelDefaultAdminTransfer(
+    opts: CancelDefaultAdminTransferParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#cancelDefaultAdminTransfer.generate(this.chain, opts)
+  }
+
+  /**
+   * Cancels a pending CrossChainToken default-admin transfer, signing + submitting with
+   * `opts.wallet` (the current default admin).
+   *
+   * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for pending-transfer rules.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, no transfer is pending, the token has no current default admin, or the wallet is not it
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.cancelDefaultAdminTransfer({
+   *   tokenAddress: '0xToken...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  cancelDefaultAdminTransfer(
+    opts: EVMExecuteParams<CancelDefaultAdminTransferParams>,
+  ): Promise<TransactionResult> {
+    return this.#cancelDefaultAdminTransfer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned v2.0.0 `setCCIPAdmin` tx (for multisig / offline signing). The current
+   * default admin sets the separate CCIP admin (including zero to clear it), which
+   * TokenAdminRegistry can use through
+   * `registerAdminViaGetCCIPAdmin`.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if an address is invalid or `sender` is not the current
+   * default admin
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetCCIPAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xCCIPAdmin...',
+   *   sender: '0xDefaultAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedSetCCIPAdmin(opts: SetCCIPAdminParams): Promise<UnsignedEVMTx> {
+    return this.#setCCIPAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets a v2.0.0 CrossChainToken CCIP admin, signing + submitting with `opts.wallet` (the current
+   * default admin).
+   *
+   * @remarks `sender` defaults to the wallet address, so the default-admin gate runs before
+   * broadcast.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
+   * wallet, or the wallet is not the current default admin
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setCCIPAdmin({
+   *   tokenAddress: '0xToken...',
+   *   newAdmin: '0xCCIPAdmin...',
+   *   wallet, // current default admin
+   * })
+   * ```
+   */
+  setCCIPAdmin(opts: EVMExecuteParams<SetCCIPAdminParams>): Promise<TransactionResult> {
+    return this.#setCCIPAdmin.execute(this.chain, opts)
   }
 
   /**
@@ -979,6 +1268,148 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned **v2.0.0** pool token-transfer-fee update transaction.
+   *
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The pool owner may submit it, and
+   * `sender`, when supplied, is pre-flighted against that role.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApplyTokenTransferFeeConfigUpdates({
+   *   poolAddress: '0xPool...',
+   *   updates: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     tokenTransferFeeConfig: {
+   *       destGasOverhead: 100_000,
+   *       destBytesOverhead: 32,
+   *       finalityFeeUSDCents: 10,
+   *       fastFinalityFeeUSDCents: 20,
+   *       finalityTransferFeeBps: 25,
+   *       fastFinalityTransferFeeBps: 50,
+   *       isEnabled: true,
+   *     },
+   *   }],
+   *   disables: [],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedApplyTokenTransferFeeConfigUpdates(
+    opts: ApplyTokenTransferFeeConfigUpdatesParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#applyTokenTransferFeeConfigUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Updates or disables token-transfer fees for destination chains on a **v2.0.0** pool.
+   *
+   * @remarks Each remote selector appears once across `updates` and `disables`. Every update must
+   * set `isEnabled` to `true`; `disables` removes its config. The signing wallet must be the pool
+   * owner.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.applyTokenTransferFeeConfigUpdates({
+   *   poolAddress: '0xPool...',
+   *   updates: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     tokenTransferFeeConfig: {
+   *       destGasOverhead: 100_000,
+   *       destBytesOverhead: 32,
+   *       finalityFeeUSDCents: 10,
+   *       fastFinalityFeeUSDCents: 20,
+   *       finalityTransferFeeBps: 25,
+   *       fastFinalityTransferFeeBps: 50,
+   *       isEnabled: true,
+   *     },
+   *   }],
+   *   disables: [5009297550715157269n],
+   *   wallet, // pool owner
+   * })
+   * ```
+   */
+  applyTokenTransferFeeConfigUpdates(
+    opts: EVMExecuteParams<ApplyTokenTransferFeeConfigUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyTokenTransferFeeConfigUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned **v2.0.0** pool fee-token withdrawal transaction.
+   *
+   * @remarks The pool owner or delegated `feeAdmin` may transfer the full balances of the selected
+   * fee tokens to `recipient`. On LockRelease pools, bridge liquidity remains in the external
+   * lockbox and is not withdrawable here.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedWithdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   sender: '0xFeeAdmin...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFeeTokens(opts: WithdrawFeeTokensParams): Promise<UnsignedEVMTx> {
+    return this.#withdrawFeeTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws the selected fee-token balances from a **v2.0.0** pool to `recipient`.
+   *
+   * @remarks The signing wallet must be the pool owner or delegated `feeAdmin`.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet holds neither role
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.withdrawFeeTokens({
+   *   poolAddress: '0xPool...',
+   *   feeTokens: ['0xFeeToken...'],
+   *   recipient: '0xRecipient...',
+   *   wallet, // pool owner or configured feeAdmin
+   * })
+   * ```
+   */
+  withdrawFeeTokens(opts: EVMExecuteParams<WithdrawFeeTokensParams>): Promise<TransactionResult> {
+    return this.#withdrawFeeTokens.execute(this.chain, opts)
+  }
+
+  /**
    * Reads the finality modes a **v2.0.0+** pool accepts.
    *
    * @remarks `finalityDepth` is the FTF minimum block depth (`0` when disabled); `finalitySafe`
@@ -1010,8 +1441,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The deployed address is only known once mined, so it is NOT returned here — use
    * {@link deployAdvancedPoolHooks} to receive it. The same applies to the constructor args
    * needed for explorer verification.
-   * @remarks `allowlist` is a permanent choice: `[]` disables the allowlist for the contract's
-   * whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
+   * @remarks `allowlist` is a permanent choice: omitting it (or passing `[]`) disables the
+   * allowlist for the contract's whole lifetime. See {@link DeployAdvancedPoolHooksParams}.
    *
    * @throws {@link CCTParamsInvalidError} if any address is invalid, zero or duplicated, or
    * `thresholdAmount` is not a `uint256`
@@ -1019,10 +1450,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // allowlist, thresholdAmount and policyEngine default to off
    * const unsigned = await cct.generateUnsignedDeployAdvancedPoolHooks({
-   *   allowlist: [],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   sender: '0xDeployer...',
    * })
@@ -1052,10 +1481,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
+   * // thresholdAmount and policyEngine default to off
    * const { hash, contractAddress, verification } = await cct.deployAdvancedPoolHooks({
    *   allowlist: ['0xSender...'],
-   *   thresholdAmount: 0n,
-   *   policyEngine: ZeroAddress,
    *   authorizedCallers: ['0xPool...'],
    *   wallet,
    * })
@@ -1161,6 +1589,74 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getAdvancedPoolHooks(opts: GetAdvancedPoolHooksParams): Promise<GetAdvancedPoolHooksResult> {
     return this.#getAdvancedPoolHooks.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a **v2.0.0+** pool's router and delegated admin roles.
+   *
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getDynamicConfig({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getDynamicConfig(opts: GetDynamicConfigParams): Promise<GetDynamicConfigResult> {
+    return this.#getDynamicConfig.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the fee parameters a **v2.0.0+** pool applies to a destination chain and finality.
+   *
+   * @remarks `getFee` reports the configured USD-cent and basis-point values, not a fee amount.
+   * `finality` defaults to `'finalized'`.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const fee = await cct.getFee({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getFee(opts: GetFeeParams): Promise<GetFeeResult> {
+    return this.#getFee.query(this.chain, opts)
+  }
+
+  /**
+   * Reads token-transfer fee configuration for a destination chain from a **v2.0.0+** pool.
+   *
+   * @remarks The pool token is read automatically. `finality` and `tokenArgs` default to
+   * `'finalized'` and `'0x'`, respectively, which are correct for standard pools.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getTokenTransferFeeConfig({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getTokenTransferFeeConfig(
+    opts: GetTokenTransferFeeConfigParams,
+  ): Promise<GetTokenTransferFeeConfigResult> {
+    return this.#getTokenTransferFeeConfig.query(this.chain, opts)
   }
 
   /**
@@ -1478,6 +1974,29 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the `ERC20LockBox` a v2.0.0 LockRelease pool escrows through — fixed in its constructor
+   * and immutable thereafter.
+   * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need: those ops
+   * target the lockbox, not the pool. Also the way to confirm a pool is wired to the lockbox you
+   * authorized, which is where a `deployLockbox` → `deployTokenPool` sequence goes wrong quietly.
+   * @returns The lockbox, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
+   * `SiloedLockReleaseTokenPool` — a siloed pool escrows per remote chain and declares
+   * `getLockBox(uint64)` instead, so it has no single lockbox
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a LockRelease pool holds
+   * its liquidity itself — see {@link getRebalancer} and {@link provideLiquidity}
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const lockbox = await cct.getLockbox({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getLockbox(opts: GetLockboxParams): Promise<GetLockboxResult> {
+    return this.#getLockbox.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned `CrossChainToken` (v2.0.0) deployment tx (for multisig / offline
    * signing). The deployed address is only known once mined, so it is NOT returned here —
    * use {@link deployToken} to deploy and receive `{ hash, contractAddress, verification }`.
@@ -1528,23 +2047,26 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `grantMintAndBurnRoles` tx (for multisig / offline signing): grants a
-   * BurnMintERC677 token's mint **and** burn roles to one account, in a single transaction. This
+   * supported CCT token's mint **and** burn roles to one account, in a single transaction. This
    * is the call that lets a freshly deployed burn/mint pool bridge the token.
-   * @remarks v1.5.1 / v1.6.2 tokens only — v2.0.0's `CrossChainToken` gates mint/burn through
-   * AccessControl, which ships separately. Rejected only when `burnAndMinter` already holds
+   *
+   * @remarks Supported by v1.5.1 / v1.6.2 and v2.0.0 `CrossChainToken`; v2 enforces the
+   * mint/burn role admin through AccessControl. Rejected only when `burnAndMinter` already holds
    * *both* roles; holding just one still builds, since this call is what completes the pair.
-   * @remarks {@link deployToken} deploys v2.0.0, so it is not a source of a token these ops
-   * accept: a v1.5.1 / v1.6.2 `FactoryBurnMintERC20` comes from the CCIP token factory or your
-   * own deployment, outside this SDK.
+   *
    * @see {@link deployTokenPool} — the primary use case is granting these roles to a freshly
    * deployed pool
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burnAndMinter` already holds both roles
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burnAndMinter` already holds both roles
+   *
    * @example
    * ```typescript
-   * // build only — sign later (multisig / offline). `sender` must be the token owner.
+   * // build only — sign later (multisig / offline). `sender` must be the v1 owner or v2 role admin.
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantMintAndBurnRoles({
    *   tokenAddress: '0xToken...',
    *   burnAndMinter: '0xPool...', // the token's burn/mint pool
@@ -1557,26 +2079,31 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Grants a BurnMintERC677 token's mint and burn roles to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * Grants a supported CCT token's mint and burn roles to one account, signing + submitting with
+   * `opts.wallet` (the v1 token owner or v2 mint/burn role admin).
+   *
    * @remarks See {@link generateUnsignedGrantMintAndBurnRoles} for the version and redundancy
-   * rules. `sender` defaults to the wallet's address, so the owner gate always runs before this
-   * submits.
+   * rules. `sender` defaults to the wallet's address, so the role-admin gate always runs before
+   * this submits.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burnAndMinter` already holds
-   * both roles
+   * the wallet's address, the wallet lacks the version's role-admin permission, or
+   * `burnAndMinter` already holds both roles
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantMintAndBurnRoles({
    *   tokenAddress: '0xToken...',
    *   burnAndMinter: '0xPool...',
-   *   wallet, // must be the token owner
+   *   wallet, // v1 token owner or v2 mint/burn role admin
    * })
    * ```
    */
@@ -1588,48 +2115,62 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `grantMintRole` tx (for multisig / offline signing): grants a
-   * BurnMintERC677 token's mint role to one account. Pair it with
+   * supported CCT token's mint role to one account. Pair it with
    * {@link generateUnsignedGrantBurnRole}, or use
    * {@link generateUnsignedGrantMintAndBurnRoles} to grant both in one transaction.
-   * @remarks v1.5.1 / v1.6.2 tokens only; a redundant grant is rejected, since the chain would
-   * mine it as a silent no-op rather than revert.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `minter` already holds the mint role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `grantMintRole` and require the token owner; a v2.0.0
+   * `CrossChainToken` encodes `grantRole(MINTER_ROLE, minter)` and requires its mint-role admin.
+   * A redundant grant is rejected, since the chain would mine it as a silent no-op rather than
+   * revert.
+   *
+   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
+   * deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `minter` already holds the mint role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xMinter...',
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
-   * deployed pool
    */
   generateUnsignedGrantMintRole(opts: GrantMintRoleParams): Promise<UnsignedEVMTx> {
     return this.#grantMintRole.generate(this.chain, opts)
   }
 
   /**
-   * Grants a BurnMintERC677 token's mint role to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
-   * @remarks See {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
+   * Grants a supported CCT token's mint role to one account, signing + submitting with
+   * `opts.wallet` (the v1 token owner or v2 mint-role admin).
+   *
+   * @see {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `minter` already holds the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `minter`
+   * already holds the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xMinter...',
-   *   wallet, // must be the token owner
+   *   wallet, // v1 token owner or v2 mint-role admin
    * })
    * ```
    */
@@ -1639,48 +2180,61 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `grantBurnRole` tx (for multisig / offline signing): grants a
-   * BurnMintERC677 token's burn role to one account. Pair it with
+   * supported CCT token's burn role to one account. Pair it with
    * {@link generateUnsignedGrantMintRole}, or use
    * {@link generateUnsignedGrantMintAndBurnRoles} to grant both in one transaction.
-   * @remarks v1.5.1 / v1.6.2 tokens only; a redundant grant is rejected — see
-   * {@link generateUnsignedGrantMintRole}.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burner` already holds the burn role
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `grantBurnRole` and require the token owner; a v2.0.0
+   * `CrossChainToken` encodes `grantRole(BURNER_ROLE, burner)` and requires its burn-role admin.
+   * A redundant grant is rejected — see {@link generateUnsignedGrantMintRole}.
+   *
+   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
+   * deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burner` already holds the burn role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedGrantBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xBurner...',
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the primary use case is granting this role to a freshly
-   * deployed pool
    */
   generateUnsignedGrantBurnRole(opts: GrantBurnRoleParams): Promise<UnsignedEVMTx> {
     return this.#grantBurnRole.generate(this.chain, opts)
   }
 
   /**
-   * Grants a BurnMintERC677 token's burn role to one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * Grants a supported CCT token's burn role to one account, signing + submitting with
+   * `opts.wallet` (the v1 token owner or v2 burn-role admin).
+   *
    * @remarks See {@link generateUnsignedGrantBurnRole} for the version and redundancy rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burner` already holds the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `burner`
+   * already holds the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.grantBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xBurner...',
-   *   wallet, // must be the token owner
+   *   wallet, // v1 token owner or v2 burn-role admin
    * })
    * ```
    */
@@ -1690,45 +2244,58 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `revokeMintRole` tx (for multisig / offline signing): removes a
-   * BurnMintERC677 token's mint role from one account.
-   * @remarks v1.5.1 / v1.6.2 tokens only; revoking a role the account does not hold is rejected,
-   * since the chain would mine it as a silent no-op and tell you nothing.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `minter` does not currently hold the mint role
+   * supported CCT token's mint role from one account.
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `revokeMintRole`; a v2.0.0 `CrossChainToken` encodes
+   * `revokeRole(MINTER_ROLE, minter)`. A missing role is rejected, since the chain would mine a
+   * silent no-op.
+   *
+   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `minter` does not currently hold the mint role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRevokeMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xOldPool...', // must currently hold the role
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
    */
   generateUnsignedRevokeMintRole(opts: RevokeMintRoleParams): Promise<UnsignedEVMTx> {
     return this.#revokeMintRole.generate(this.chain, opts)
   }
 
   /**
-   * Removes a BurnMintERC677 token's mint role from one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * Removes a supported CCT token's mint role from one account, signing + submitting with
+   * `opts.wallet` (the v1 token owner or v2 mint-role admin).
+   *
    * @remarks See {@link generateUnsignedRevokeMintRole} for the version and role-state rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `minter` does not hold the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `minter` does
+   * not hold the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.revokeMintRole({
    *   tokenAddress: '0xToken...',
    *   minter: '0xOldPool...',
-   *   wallet, // must be the token owner
+   *   wallet, // v1 token owner or v2 mint-role admin
    * })
    * ```
    */
@@ -1738,45 +2305,58 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned `revokeBurnRole` tx (for multisig / offline signing): removes a
-   * BurnMintERC677 token's burn role from one account.
-   * @remarks v1.5.1 / v1.6.2 tokens only; revoking a role the account does not hold is rejected —
-   * see {@link generateUnsignedRevokeMintRole}.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the token owner, or `burner` does not currently hold the burn role
+   * supported CCT token's burn role from one account.
+   *
+   * @remarks v1.5.1 / v1.6.2 tokens encode `revokeBurnRole`; a v2.0.0 `CrossChainToken` encodes
+   * `revokeRole(BURNER_ROLE, burner)`. A missing role is rejected — see
+   * {@link generateUnsignedRevokeMintRole}.
+   *
+   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` lacks the version's
+   * role-admin permission, or `burner` does not currently hold the burn role
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRevokeBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xOldPool...', // must currently hold the role
    *   sender: '0xTokenOwner...',
    * })
    * ```
-   * @see {@link deployTokenPool} — the mirror of the grant made to a freshly deployed pool
    */
   generateUnsignedRevokeBurnRole(opts: RevokeBurnRoleParams): Promise<UnsignedEVMTx> {
     return this.#revokeBurnRole.generate(this.chain, opts)
   }
 
   /**
-   * Removes a BurnMintERC677 token's burn role from one account, signing + submitting with
-   * `opts.wallet` (the token owner).
+   * Removes a supported CCT token's burn role from one account, signing + submitting with
+   * `opts.wallet` (the v1 token owner or v2 burn-role admin).
+   *
    * @remarks See {@link generateUnsignedRevokeBurnRole} for the version and role-state rules.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the token owner, or `burner` does not hold the role
+   * the wallet's address, the wallet lacks the version's role-admin permission, or `burner` does
+   * not hold the role
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
    * @example
    * ```typescript
+   * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.revokeBurnRole({
    *   tokenAddress: '0xToken...',
    *   burner: '0xOldPool...',
-   *   wallet, // must be the token owner
+   *   wallet, // v1 token owner or v2 burn-role admin
    * })
    * ```
    */
@@ -1877,14 +2457,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads whether `account` holds a BurnMintERC677 token's mint role, via `isMinter(address)`.
-   * @remarks The pre-flight for a {@link mint}: the token's `mint` is `onlyMinter`, and the owner
-   * is only the role admin, who need not hold the role. Prefer this over scanning
-   * {@link getMinters} — one call, and it stays a single call as the role set grows.
+   * Reads whether `account` holds a supported CCT token's mint role.
+   * @remarks v1 uses `isMinter(address)`; v2 uses AccessControl `hasRole`. Use this individual
+   * membership check rather than {@link getMinters}, which is v1-only.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
    * address
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @example
    * ```typescript
    * if (await cct.isMinter({ tokenAddress: '0xToken...', account: '0xOpsKey...' })) {
@@ -1897,13 +2478,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads whether `account` holds a BurnMintERC677 token's burn role, via `isBurner(address)`.
-   * @remarks Same shape and caveats as {@link isMinter}; the burn-role counterpart of the set
-   * read {@link getBurners}.
+   * Reads whether `account` holds a supported CCT token's burn role.
+   * @remarks v1 uses `isBurner(address)`; v2 uses AccessControl `hasRole`. Use this individual
+   * membership check rather than {@link getBurners}, which is v1-only.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `account` is not a valid, non-zero
    * address
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
+   * token nor a supported CrossChainToken
+   * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
+   * version
    * @example
    * ```typescript
    * const poolCanBurn = await cct.isBurner({ tokenAddress: '0xToken...', account: '0xPool...' })
@@ -1924,7 +2507,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
    * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
    * → {@link deployTokenPool} (passing the lockbox) → {@link authorizeLockboxCallers}
-   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
+   * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
+   * its lockbox holds liquidity.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -1952,8 +2537,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
    * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
-   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`) → {@link setPool} →
-   * configure lanes.
+   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`, plus whoever funds it) →
+   * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
+   * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -2000,7 +2586,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
    * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
-   * (`addedCallers: [pool]`) → {@link setPool} → configure lanes.
+   * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
+   * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
+   * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -2020,7 +2608,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `ERC20LockBox` `applyAuthorizedCallerUpdates` tx (for multisig / offline
    * signing) that adds/removes authorized callers. Authorize a `LockReleaseTokenPool` here so it
    * can lock/release against the lockbox.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @remarks `lockbox` is checked on-chain before any calldata is built: a call to an EOA or an
+   * undeployed address executes nothing yet mines successfully, so an address that is not a
+   * deployed `ERC20LockBox` is rejected here rather than returning an unsigned tx that silently
+   * authorizes nobody. When `sender` is given it is checked against the lockbox's `owner()`, since
+   * `applyAuthorizedCallerUpdates` is owner-only.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
+   * nothing at `lockbox` answers `typeAndVersion()`, or if `sender` is not the lockbox owner
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
    * @example
    * ```typescript
    * // `sender` must be the lockbox owner
@@ -2040,8 +2638,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Adds/removes authorized callers on an `ERC20LockBox`, signing + submitting with `opts.wallet`
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
+   * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox`, and a wallet
+   * that is not its owner, before the wallet is asked to sign; see
+   * {@link generateUnsignedAuthorizeLockboxCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if no caller is supplied
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
+   * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the
+   * wallet is not the lockbox owner
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
    * ```typescript
@@ -2057,6 +2664,118 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
   ): Promise<TransactionResult> {
     return this.#authorizeLockboxCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `deposit` tx (for multisig / offline signing) that funds
+   * the lockbox a v2.0.0 LockRelease pool releases from.
+   * @remarks The step the deploy sequences stop short of: a v2.0.0 pool cannot release anything
+   * until its lockbox holds liquidity. The v2.0.0 replacement for {@link provideLiquidity}.
+   * @remarks `sender` must itself be an authorized caller of the lockbox — authorizing the pool
+   * is not enough, because the lockbox gates the *depositor* too — and must have approved the
+   * **lockbox** (not the pool) for `amount` via {@link generateUnsignedApproveToken} /
+   * {@link approveToken}. Both are checked before any calldata is built.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox`
+   * answers `typeAndVersion()`, if the lockbox escrows a different token, or if `sender` is not
+   * an authorized caller
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the lockbox for, less
+   * than `amount`
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDepositToLockbox({
+   *   lockbox: '0xLockbox...',
+   *   token: '0xToken...',
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xAuthorizedCaller...',
+   * })
+   * ```
+   */
+  generateUnsignedDepositToLockbox(opts: DepositToLockboxParams): Promise<UnsignedEVMTx> {
+    return this.#depositToLockbox.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits tokens into an `ERC20LockBox`, signing + submitting with `opts.wallet` (an
+   * authorized caller of the lockbox, which must have approved it for `amount`).
+   * @remarks Approve first with {@link approveToken}, naming the **lockbox** as `spender`.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
+   * authorized caller of the lockbox
+   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
+   * below `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * await cct.approveToken({ tokenAddress: token, spender: lockbox, amount, wallet })
+   * const { hash } = await cct.depositToLockbox({
+   *   lockbox,
+   *   token,
+   *   amount,
+   *   wallet,
+   * })
+   * ```
+   */
+  depositToLockbox(opts: EVMExecuteParams<DepositToLockboxParams>): Promise<TransactionResult> {
+    return this.#depositToLockbox.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `withdraw` tx (for multisig / offline signing) that pulls
+   * liquidity back out to an explicit `recipient`.
+   * @remarks The v2.0.0 replacement for {@link withdrawLiquidity}, with one difference worth
+   * noting: the payout address is a parameter, not `msg.sender`.
+   * @remarks `amount` of `MaxUint256` withdraws the lockbox's entire balance.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox`
+   * answers `typeAndVersion()`, if the lockbox escrows a different token, or if `sender` is not
+   * an authorized caller
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedWithdrawFromLockbox({
+   *   lockbox: '0xLockbox...',
+   *   token: '0xToken...',
+   *   amount: 1_000000000000000000n,
+   *   recipient: '0xTreasury...',
+   *   sender: '0xAuthorizedCaller...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFromLockbox(opts: WithdrawFromLockboxParams): Promise<UnsignedEVMTx> {
+    return this.#withdrawFromLockbox.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws tokens from an `ERC20LockBox` to `recipient`, signing + submitting with
+   * `opts.wallet` (an authorized caller of the lockbox).
+   * @remarks The tokens go to `recipient`, which need not be the wallet.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
+   * authorized caller of the lockbox
+   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.withdrawFromLockbox({
+   *   lockbox,
+   *   token,
+   *   amount: MaxUint256, // the whole balance
+   *   recipient: '0xTreasury...',
+   *   wallet,
+   * })
+   * ```
+   */
+  withdrawFromLockbox(
+    opts: EVMExecuteParams<WithdrawFromLockboxParams>,
+  ): Promise<TransactionResult> {
+    return this.#withdrawFromLockbox.execute(this.chain, opts)
   }
 
   /**
@@ -2560,6 +3279,10 @@ export type {
 } from './token-admin-registry/operations/get-supported-tokens.ts'
 export * from './token-admin-registry/contracts.ts'
 export type { DeployTokenParams } from './token/operations/deploy-token.ts'
+export type { BeginDefaultAdminTransferParams } from './token/operations/begin-default-admin-transfer.ts'
+export type { AcceptDefaultAdminTransferParams } from './token/operations/accept-default-admin-transfer.ts'
+export type { CancelDefaultAdminTransferParams } from './token/operations/cancel-default-admin-transfer.ts'
+export type { SetCCIPAdminParams } from './token/operations/set-ccip-admin.ts'
 export type { ApproveTokenParams } from './token/operations/approve-token.ts'
 export type { GrantMintAndBurnRolesParams } from './token/operations/grant-mint-and-burn-roles.ts'
 export type { GrantMintRoleParams } from './token/operations/grant-mint-role.ts'
@@ -2612,18 +3335,32 @@ export type {
   GetAllowlistEnabledParams,
   GetAllowlistEnabledResult,
 } from './token-pool/operations/get-allowlist-enabled.ts'
+export type {
+  GetDynamicConfigParams,
+  GetDynamicConfigResult,
+} from './token-pool/operations/get-dynamic-config.ts'
+export type { GetFeeParams, GetFeeResult } from './token-pool/operations/get-fee.ts'
+export type {
+  GetTokenTransferFeeConfigParams,
+  GetTokenTransferFeeConfigResult,
+} from './token-pool/operations/get-token-transfer-fee-config.ts'
+export type {
+  ApplyTokenTransferFeeConfigUpdatesParams,
+  TokenTransferFeeConfigUpdate,
+} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
-export type { RateLimiterState, TokenPoolRemote } from '../../chain.ts'
+export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
 export type {
   ChainRateLimitUpdate,
   SetChainRateLimiterConfigsParams,
 } from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
 export type { ProvideLiquidityParams } from './token-pool/operations/provide-liquidity.ts'
+export type { WithdrawFeeTokensParams } from './token-pool/operations/withdraw-fee-tokens.ts'
 export type { WithdrawLiquidityParams } from './token-pool/operations/withdraw-liquidity.ts'
 export type { TransferLiquidityParams } from './token-pool/operations/transfer-liquidity.ts'
 export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'
@@ -2631,6 +3368,7 @@ export type {
   GetRebalancerParams,
   GetRebalancerResult,
 } from './token-pool/operations/get-rebalancer.ts'
+export type { GetLockboxParams, GetLockboxResult } from './token-pool/operations/get-lockbox.ts'
 export type {
   GetAllowedFinalityConfigParams,
   GetAllowedFinalityConfigResult,
@@ -2644,6 +3382,8 @@ export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/upda
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
+export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
 export * from './lockbox/contracts.ts'
 export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
 export * from './advanced-pool-hooks/contracts.ts'

@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import { type Interface, getAddress } from 'ethers'
+import { type Interface, ZeroAddress, getAddress } from 'ethers'
 
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type DeployArtifact, EVMDeployOperation } from '../../operation.ts'
@@ -23,22 +23,28 @@ import { getAdvancedPoolHooksArtifact } from '../contracts.ts'
 /** Parameters for {@link DeployAdvancedPoolHooks} — deploys `AdvancedPoolHooks` (v2.0.0). */
 export type DeployAdvancedPoolHooksParams = {
   /**
-   * Senders permitted to `lockOrBurn` through pools bound to these hooks.
+   * Senders permitted to `lockOrBurn` through pools bound to these hooks; defaults to `[]`.
    * @remarks **Permanent:** `i_allowlistEnabled` is `immutable`, set to `allowlist.length > 0`.
    * Deploy with `[]` and the contract can never gain an allowlist; deploy with entries and it
    * can be edited but never switched off.
    */
-  allowlist: string[]
-  /** Amount at or above which the threshold CCVs also apply; `0n` disables the threshold. */
-  thresholdAmount: bigint
-  /** Policy engine run on every pre/postflight check; the zero address disables policy checks. */
-  policyEngine: string
+  allowlist?: string[]
   /**
-   * Pools permitted to call `preflightCheck` / `postflightCheck` on these hooks.
+   * Amount at or above which the threshold CCVs also apply; `0n` (the default) disables the
+   * threshold.
+   */
+  thresholdAmount?: bigint
+  /**
+   * Policy engine run on every pre/postflight check; the zero address (the default) disables
+   * policy checks.
+   */
+  policyEngine?: string
+  /**
+   * Pools permitted to call `preflightCheck` / `postflightCheck` on these hooks; defaults to `[]`.
    * @remarks Binding a pool with `updateAdvancedPoolHooks` does *not* authorize it here; a pool
    * missing from this set reverts `UnauthorizedCaller` on every transfer.
    */
-  authorizedCallers: string[]
+  authorizedCallers?: string[]
   /** Deployer address; sets `tx.from` for offline / multisig signing. */
   sender?: string
 }
@@ -75,10 +81,10 @@ export class DeployAdvancedPoolHooks extends EVMDeployOperation<DeployAdvancedPo
    * it but still counts it, permanently enabling an allowlist containing nobody.
    */
   protected override validate(params: DeployAdvancedPoolHooksParams): void {
-    validateAddressList(this.name, 'allowlist', params.allowlist)
-    validateUint256(this.name, 'thresholdAmount', params.thresholdAmount)
-    validateAddress(this.name, 'policyEngine', params.policyEngine)
-    validateAddressList(this.name, 'authorizedCallers', params.authorizedCallers)
+    validateAddressList(this.name, 'allowlist', params.allowlist ?? [])
+    validateUint256(this.name, 'thresholdAmount', params.thresholdAmount ?? 0n)
+    validateAddress(this.name, 'policyEngine', params.policyEngine ?? ZeroAddress)
+    validateAddressList(this.name, 'authorizedCallers', params.authorizedCallers ?? [])
   }
 
   /** Deploy artifact for `AdvancedPoolHooks` (v2.0.0). */
@@ -86,8 +92,13 @@ export class DeployAdvancedPoolHooks extends EVMDeployOperation<DeployAdvancedPo
     return getAdvancedPoolHooksArtifact()
   }
 
-  /** ABI-encodes the `AdvancedPoolHooks` (v2.0.0) constructor args. */
+  /** ABI-encodes the `AdvancedPoolHooks` (v2.0.0) constructor args; omitted params encode as off. */
   protected encode(iface: Interface, p: DeployAdvancedPoolHooksParams): string {
-    return iface.encodeDeploy([p.allowlist, p.thresholdAmount, p.policyEngine, p.authorizedCallers])
+    return iface.encodeDeploy([
+      p.allowlist ?? [],
+      p.thresholdAmount ?? 0n,
+      p.policyEngine ?? ZeroAddress,
+      p.authorizedCallers ?? [],
+    ])
   }
 }

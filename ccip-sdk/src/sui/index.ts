@@ -362,7 +362,8 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * Creates a SuiChain instance from an RPC URL.
    * @param url - HTTP or WebSocket endpoint URL for the Sui network.
    * @returns A new SuiChain instance.
-   * @throws {@link CCIPDataFormatUnsupportedError} if unable to fetch chain identifier
+   * @throws {@link CCIPDataFormatUnsupportedError} if the endpoint doesn't answer Sui RPCs,
+   * or if its chain identifier can't be determined
    * @throws {@link CCIPError} if chain identifier is not supported
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
@@ -372,8 +373,37 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // Create a temporary client to detect the network (network name unknown yet)
     const tempClient = new SuiJsonRpcClient({ transport, network: url })
 
-    // Get chain identifier from the client and map to network info format
-    const rawChainId = await tempClient.getChainIdentifier().catch(() => null)
+    // Before anything the URL says is trusted, prove the endpoint actually
+    // serves Sui: callers hand `fromUrl` endpoints of several families at once
+    // (the CLI races every `--rpc` URL through every family's `fromUrl` to
+    // resolve a tx hash, and a URL wrongly "resolved" as Sui is dropped from
+    // the shared endpoint set, starving the family it really belongs to).
+    // The probe is a core, cheap call: `getChainIdentifier`'s
+    // `sui_getCheckpoint(0)` is NOT usable here — gateways such as BlockVision
+    // don't serve historical checkpoints (they 4xx/throttle it).
+    const tip: string | null = await tempClient
+      .getLatestCheckpointSequenceNumber()
+      .catch(() => null)
+    if (tip === null || !/^\d+$/.test(String(tip))) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Unable to reach a Sui RPC at: ${redactEndpointUrl(url)}`,
+      )
+    }
+
+    // Which Sui network: the chain identifier the endpoint derives from its own
+    // genesis checkpoint is authoritative; a network keyword in the URL is only
+    // consulted when the endpoint cannot answer that derivation (a keyed
+    // gateway that doesn't serve historical checkpoints), and only ever as a
+    // label for an endpoint already proven to speak Sui — never as the reason
+    // to treat a URL as Sui in the first place.
+    const urlNetwork = url.includes('mainnet')
+      ? '35834a8a'
+      : url.includes('testnet')
+        ? '4c78adac'
+        : url.includes('devnet')
+          ? 'b0c08dea'
+          : null
+    const rawChainId = (await tempClient.getChainIdentifier().catch(() => null)) ?? urlNetwork
     if (rawChainId === null) {
       throw new CCIPDataFormatUnsupportedError(
         `Unable to fetch chain identifier from URL: ${redactEndpointUrl(url)}`,

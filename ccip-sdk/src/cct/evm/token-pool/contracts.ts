@@ -17,6 +17,7 @@
 import { Interface, ZeroAddress, getAddress } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
+import type { TokenTransferFeeConfig } from '../../../chain.ts'
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
 import {
@@ -249,6 +250,35 @@ export function assertLockReleasePool(
 }
 
 /**
+ * Guards an op that needs the *one* lockbox a LockRelease pool escrows through: a LockRelease
+ * pool, and not the siloed variant.
+ *
+ * @remarks Stricter than {@link assertLockReleasePool}, which both variants satisfy. A
+ * `SiloedLockReleaseTokenPool` escrows per remote chain and declares `getLockBox(uint64)` with no
+ * no-arg overload, so there is no single lockbox to name; rejecting it on its *type* (rather than
+ * letting the call revert) is what makes {@link readTokenPoolLockbox} safe to call.
+ * @param operation - Operation name, for the error's context.
+ * @param poolAddress - Token pool being read.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if `type` is a BurnMint pool, or is siloed
+ */
+export function assertNonSiloedLockReleasePool(
+  operation: string,
+  poolAddress: string,
+  type: TokenPoolType,
+): void {
+  assertLockReleasePool(operation, poolAddress, type)
+  if (type !== 'SiloedLockReleaseTokenPool') return
+  throw new CCTContractTypeInvalidError(
+    poolAddress,
+    'LockReleaseTokenPool',
+    type,
+    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's escrow against the pool directly",
+    { context: { operation } },
+  )
+}
+
+/**
  * Cached pool {@link Interface}s per {@link TokenPoolFamily} and {@link TokenPoolVersion},
  * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
  * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
@@ -341,6 +371,84 @@ export async function readTokenPoolAdvancedPoolHooks(
 }
 
 /**
+ * Fee parameters a v2.0.0 pool resolves for one destination chain and requested finality mode.
+ *
+ * @remarks This is the selected standard- or fast-finality tier, not the raw stored pair of tiers.
+ * When `isEnabled` is `false`, every numeric field is zero. See {@link TokenTransferFeeConfig} for
+ * the raw configuration returned by `getTokenTransferFeeConfig`.
+ */
+export type TokenPoolFee = {
+  /** USD surcharge, in cents, added to the CCIP fee for the selected finality tier. */
+  feeUSDCents: bigint
+  /** Gas overhead added to the destination-chain execution-cost estimate. */
+  destGasOverhead: number
+  /** Byte overhead added to the destination-chain data-availability-cost estimate. */
+  destBytesOverhead: number
+  /** Transfer amount deducted as a fee, in basis points (`0..9999`; one BPS is 0.01%). */
+  tokenFeeBps: number
+  /** Whether the destination chain has an enabled token-transfer fee configuration. */
+  isEnabled: boolean
+}
+
+/**
+ * Reads a v2.0.0 pool's fee parameters in one `eth_call`.
+ *
+ * @remarks Standard pools use only `destChainSelector` and `requestedFinalityConfig`; the other
+ * `getFee` ABI inputs are reserved for pool-specific implementations, so this supplies their
+ * neutral values.
+ */
+export async function readTokenPoolFee(
+  chain: EVMChain,
+  poolAddress: string,
+  destChainSelector: bigint,
+  requestedFinalityConfig: string,
+): Promise<TokenPoolFee> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const fee = await pool.getFee(
+    ZeroAddress,
+    destChainSelector,
+    0n,
+    ZeroAddress,
+    requestedFinalityConfig,
+    '0x',
+  )
+  return {
+    feeUSDCents: fee[0] as bigint,
+    destGasOverhead: Number(fee[1]),
+    destBytesOverhead: Number(fee[2]),
+    tokenFeeBps: Number(fee[3]),
+    isEnabled: fee[4] as boolean,
+  }
+}
+
+/** Reads a v2.0.0 pool's token and its token-transfer fee config in two `eth_call`s. */
+export async function readTokenPoolTokenTransferFeeConfig(
+  chain: EVMChain,
+  poolAddress: string,
+  destChainSelector: bigint,
+  finality: string,
+  tokenArgs: string,
+): Promise<TokenTransferFeeConfig> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const tokenAddress = await pool.getToken()
+  const config = await pool.getTokenTransferFeeConfig(
+    tokenAddress,
+    destChainSelector,
+    finality,
+    tokenArgs,
+  )
+  return {
+    destGasOverhead: Number(config.destGasOverhead),
+    destBytesOverhead: Number(config.destBytesOverhead),
+    finalityFeeUSDCents: Number(config.finalityFeeUSDCents),
+    fastFinalityFeeUSDCents: Number(config.fastFinalityFeeUSDCents),
+    finalityTransferFeeBps: Number(config.finalityTransferFeeBps),
+    fastFinalityTransferFeeBps: Number(config.fastFinalityTransferFeeBps),
+    isEnabled: config.isEnabled,
+  }
+}
+
+/**
  * Resolves the contract holding a pool's sender allowlist: the pool itself on v1.5.0–v1.6.1. A
  * v2.0.0 pool has no allowlist of its own and enforces the one on its bound `AdvancedPoolHooks`,
  * which may back several pools at once.
@@ -423,16 +531,61 @@ export async function readTokenPoolRateLimitAdmin(
   poolAddress: string,
   version: TokenPoolVersion,
 ): Promise<string> {
-  if (version === TokenPoolVersion.V2_0_0) {
-    const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
-    // getDynamicConfig returns (router, rateLimitAdmin, feeAdmin); index the raw Result rather
-    // than resultToObject it, which would turn the named tuple into an object (see
-    // get-token-pool-state.ts).
-    const dynamicConfig = await pool.getDynamicConfig()
-    return getAddress(dynamicConfig[1] as string)
-  }
+  if (version === TokenPoolVersion.V2_0_0)
+    return (await readTokenPoolDynamicConfig(chain, poolAddress)).rateLimitAdmin
   const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
   return getAddress(resultToObject(await pool.getRateLimitAdmin()))
+}
+
+/** The v2.0.0 pool's mutable router and delegated admin roles. */
+export type TokenPoolDynamicConfig = {
+  router: string
+  rateLimitAdmin: string
+  feeAdmin: string
+}
+
+/** Reads a v2.0.0 pool's dynamic config in one `eth_call`. */
+export async function readTokenPoolDynamicConfig(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<TokenPoolDynamicConfig> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  // Index the raw Result: resultToObject would turn this named tuple into an object.
+  const dynamicConfig = await pool.getDynamicConfig()
+  return {
+    router: getAddress(dynamicConfig[0] as string),
+    rateLimitAdmin: getAddress(dynamicConfig[1] as string),
+    feeAdmin: getAddress(dynamicConfig[2] as string),
+  }
+}
+
+/** Reads the v2.0.0 pool's delegated token-transfer-fee admin in one `eth_call`. */
+export async function readTokenPoolFeeAdmin(chain: EVMChain, poolAddress: string): Promise<string> {
+  return (await readTokenPoolDynamicConfig(chain, poolAddress)).feeAdmin
+}
+
+/** Pre-flights `sender` against the pool owner or its delegated v2.0.0 `feeAdmin`. */
+export async function assertPoolOwnerOrFeeAdmin(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  sender: string,
+): Promise<void> {
+  const [owner, feeAdmin] = await Promise.all([
+    readTokenPoolOwner(chain, poolAddress),
+    readTokenPoolFeeAdmin(chain, poolAddress),
+  ])
+  const signer = getAddress(sender)
+  if (signer === owner || (feeAdmin !== ZeroAddress && signer === feeAdmin)) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the pool owner (${owner})${
+      feeAdmin === ZeroAddress
+        ? ' — this pool has no feeAdmin set'
+        : ` or its feeAdmin (${feeAdmin})`
+    }`,
+  )
 }
 
 /**
@@ -491,6 +644,24 @@ export async function assertPoolRebalancer(
 }
 
 /**
+ * Reads a non-siloed v2.0.0 LockRelease pool's `getLockBox()` — the `ERC20LockBox` it escrows
+ * through — in one `eth_call`.
+ *
+ * @remarks No dispatch, but callers must resolve the pool first and gate on both halves of the
+ * result: `getLockBox()` exists only at v2.0.0 (pre-2.0.0 pools hold liquidity themselves) and
+ * only on the non-siloed LockRelease type — {@link assertNonSiloedLockReleasePool} for the type,
+ * an explicit v2.0.0 check for the version. Otherwise this reads as a bare revert instead of
+ * naming which of the two is wrong. Same reasoning as {@link readTokenPoolRebalancer}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Non-siloed v2.0.0 LockRelease pool to read `getLockBox()` from.
+ * @returns The pool's lockbox, checksummed. Set in the constructor and immutable thereafter.
+ */
+export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getLockBox()))
+}
+
+/**
  * Reads a v1.5.0 / v1.5.1 LockRelease pool's `canAcceptLiquidity()` in one `eth_call`.
  *
  * @remarks Only declared at v1.5.0 and v1.5.1, where the constructor fixes `i_acceptLiquidity`
@@ -520,10 +691,16 @@ export async function readTokenPoolAcceptsLiquidity(
 export async function readTokenPoolToken(
   chain: EVMChain,
   poolAddress: string,
-): Promise<{ token: string; erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI> }> {
+): Promise<{
+  token: string
+  erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>
+}> {
   const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
   const token = getAddress(resultToObject(await pool.getToken()))
-  return { token, erc20: getTypedContract(chain, token, FACTORY_BURN_MINT_ERC20_V1_5_1_ABI) }
+  return {
+    token,
+    erc20: getTypedContract(chain, token, FACTORY_BURN_MINT_ERC20_V1_5_1_ABI),
+  }
 }
 
 /**

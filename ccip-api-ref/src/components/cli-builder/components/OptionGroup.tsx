@@ -51,6 +51,10 @@ export const GROUP_LABELS: Record<string, { label: string; description?: string 
     label: 'Required Arguments',
     description: 'These values are required to build the command',
   },
+  verification: {
+    label: 'Verification Sources',
+    description: 'Choose where the CCV attestations are fetched from',
+  },
   message: {
     label: 'Message Options',
     description: 'Configure the CCIP message payload',

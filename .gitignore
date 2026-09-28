@@ -25,6 +25,8 @@ ccip-api-ref/docs-api/v1/*
 !ccip-api-ref/docs-api/v1/sidebar.d.ts
 
 # Canton CLI config
-canton-config.json
+canton-config*.json
+evm-pool.json
+pool.json
 
 pnpm-lock.yaml

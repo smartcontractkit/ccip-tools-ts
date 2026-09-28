@@ -1,13 +1,14 @@
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
-import type { JsCommands, PartySignatures } from './client/index.ts'
+import { type PartyId, parsePartyId } from './addressCodec.ts'
+import type { JsCommands, SinglePartySignatures } from './client/index.ts'
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.
  *
  * Implementations receive the raw hash bytes (decoded from the base64
  * `preparedTransactionHash` returned by the Preparing Participant Node) and
- * must return a fully-assembled {@link PartySignatures} structure.
+ * must return a fully-assembled {@link SinglePartySignatures} structure.
  *
  * @example
  * ```ts
@@ -16,13 +17,10 @@ import type { JsCommands, PartySignatures } from './client/index.ts'
  *     const sig = ed25519.sign(hash, privateKey)
  *     return {
  *       signatures: [{
- *         party: partyId,
- *         signatures: [{
- *           format: 'CRYPTO_KEY_FORMAT_RAW',
- *           signature: Buffer.from(sig).toString('base64'),
- *           signedBy: keyFingerprint,
- *           signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
- *         }],
+ *         format: 'CRYPTO_KEY_FORMAT_RAW',
+ *         signature: Buffer.from(sig).toString('base64'),
+ *         signedBy: keyFingerprint,
+ *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
  *       }],
  *     }
  *   },
@@ -30,7 +28,7 @@ import type { JsCommands, PartySignatures } from './client/index.ts'
  * ```
  */
 export interface TransactionSigner {
-  sign(hash: Uint8Array): Promise<PartySignatures>
+  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
 }
 
 /**
@@ -79,12 +77,37 @@ export interface UnsignedCantonTx {
  * The ledger stores `admin` as `party::fingerprint` and `id` as the token name.
  */
 export interface CantonInstrumentId {
-  admin: string
+  admin: PartyId
   id: string
 }
 
 /**
- * Input for a single CCV that should verify the outbound send.
+ * An active contract read from the ACS via {@link CantonChain.findActiveContractsByTemplate}.
+ *
+ * Carries the fields needed both to resolve a contract by `instanceId` and to
+ * embed it as a disclosed contract in a later submission (`createdEventBlob` +
+ * `synchronizerId`). `createArgument` is the raw Daml record value (gRPC
+ * `{ Sum: { Record: { fields: [...] } } }` form) — decode with the shared
+ * `extractField` / `extractStringField` helpers.
+ */
+export interface CantonActiveContract {
+  /** Daml contract ID (`#...`). */
+  contractId: string
+  /** Full template ID string (`#<pkg>:<Module>:<Entity>`). */
+  templateId: string
+  /** Opaque blob for disclosed-contract submission (from `createdEventBlob`). */
+  createdEventBlob: string
+  /** Synchronizer the contract was read from. */
+  synchronizerId: string
+  /** Contract signatories (from the created event); used for InstanceAddress derivation. */
+  signatories: string[]
+  /** Raw Daml `createArgument` record (decode lazily with field helpers). */
+  createArgument: unknown
+}
+
+/**
+ * Input for a single CCV that should verify the outbound send
+ * (maps to Go `ccipsender.CCVSendInput`).
  */
 export interface CantonCCVSendInput {
   ccvCid: string
@@ -165,5 +188,9 @@ export function parseCantonInstrumentId(instrument: string): CantonInstrumentId 
       `invalid Canton instrument ID "${instrument}": expected party::fingerprint::tokenId`,
     )
   }
-  return { admin: [parts[0], parts[1]].join('::'), id: parts[2]! }
+  const adminPartyId = parsePartyId([parts[0], parts[1]].join('::'))
+  return {
+    admin: adminPartyId,
+    id: parts[2]!,
+  }
 }

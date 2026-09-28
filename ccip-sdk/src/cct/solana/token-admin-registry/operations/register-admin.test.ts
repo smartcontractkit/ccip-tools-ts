@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { describe, it } from 'node:test'
 
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { Keypair, PublicKey } from '@solana/web3.js'
+import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -49,14 +49,24 @@ function mintAccount(mintAuthority: PublicKey | null = MINT_AUTHORITY) {
   return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
 }
 
+function tokenAdminRegistryAccount(
+  owner = new PublicKey(ROUTER),
+  data = Buffer.alloc(169),
+  executable = false,
+) {
+  createHash('sha256').update('account:TokenAdminRegistry').digest().copy(data, 0, 0, 8)
+  return { data, executable, lamports: 1, owner, rentEpoch: 0 }
+}
+
 function stubChain(
   registered = false,
   mintAuthority: PublicKey | null = MINT_AUTHORITY,
   configAvailable = true,
+  registryAccount = registered ? tokenAdminRegistryAccount() : null,
 ): SolanaChain {
   const getAccountInfo = async (address: PublicKey) => {
     if (address.equals(TOKEN)) return mintAccount(mintAuthority)
-    if (address.equals(TOKEN_ADMIN_REGISTRY)) return registered ? mintAccount() : null
+    if (address.equals(TOKEN_ADMIN_REGISTRY)) return registryAccount
     if (address.equals(CONFIG)) return configAvailable ? configAccount() : null
     return assert.fail('unexpected account lookup')
   }
@@ -81,8 +91,13 @@ function stubChain(
   } as unknown as SolanaChain
 }
 
-function generate(opts = {}, registered = false, mintAuthority: PublicKey | null = MINT_AUTHORITY) {
-  return new RegisterAdmin().generate(stubChain(registered, mintAuthority), {
+function generate(
+  opts = {},
+  registered = false,
+  mintAuthority: PublicKey | null = MINT_AUTHORITY,
+  registryAccount = registered ? tokenAdminRegistryAccount() : null,
+) {
+  return new RegisterAdmin().generate(stubChain(registered, mintAuthority, true, registryAccount), {
     tokenAddress: TOKEN.toBase58(),
     address: ADDRESS,
     payer: PAYER,
@@ -123,6 +138,32 @@ describe('RegisterAdmin (cct/solana)', () => {
       )
       assert.deepEqual(ccipAdmin.instructions[0]!.data.subarray(-32), ADMINISTRATOR.toBuffer())
     })
+
+    it('allows owner registration at a funded, empty System PDA', async () => {
+      const unsigned = await generate(
+        {},
+        false,
+        MINT_AUTHORITY,
+        tokenAdminRegistryAccount(SystemProgram.programId, Buffer.alloc(0)),
+      )
+
+      assert.equal(unsigned.instructions.length, 1)
+    })
+
+    it('allows CCIP-admin registration at a funded, empty System PDA', async () => {
+      const unsigned = await generate(
+        {
+          registrationMethod: 'ccip-admin',
+          authority: CCIP_ADMIN.toBase58(),
+          administrator: ADMINISTRATOR.toBase58(),
+        },
+        false,
+        null,
+        tokenAdminRegistryAccount(SystemProgram.programId, Buffer.alloc(0)),
+      )
+
+      assert.equal(unsigned.instructions.length, 1)
+    })
   })
 
   describe('validation', () => {
@@ -136,6 +177,20 @@ describe('RegisterAdmin (cct/solana)', () => {
     it('rejects a token that is already registered', async () => {
       await assert.rejects(
         () => generate({}, true),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
+    })
+
+    it('rejects an executable PDA account', async () => {
+      await assert.rejects(
+        () =>
+          generate(
+            {},
+            false,
+            MINT_AUTHORITY,
+            tokenAdminRegistryAccount(SystemProgram.programId, Buffer.alloc(0), true),
+          ),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
       )

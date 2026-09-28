@@ -78,6 +78,8 @@ export type ExecuteDeployTokenParams = SolanaExecuteParams<DeployTokenParams>
 
 /** Result of executing Solana token deploy. */
 export type ExecuteDeployTokenResult = TransactionResult & {
+  /** Every confirmed transaction signature. */
+  hashes: string[]
   tokenAddress: string
   metadataAddress?: string
 }
@@ -152,7 +154,9 @@ type DeployTokenConfig = {
   seed: string
 }
 
-type ParsedDeployTokenParams = GenerateDeployTokenParams & { config: DeployTokenConfig }
+type ParsedDeployTokenParams = GenerateDeployTokenParams & {
+  config: DeployTokenConfig
+}
 
 function resolveDeployTokenConfig(params: GenerateDeployTokenParams): DeployTokenConfig {
   const payer = new PublicKey(params.payer)
@@ -294,6 +298,7 @@ export class DeployToken extends SolanaOperation<
   ParsedDeployTokenParams
 > {
   readonly name = 'deployToken'
+  protected override readonly splitMode = 'resource'
 
   /** Parses mint and metadata params before any RPC. */
   protected override parse(params: GenerateDeployTokenParams): ParsedDeployTokenParams {
@@ -362,9 +367,10 @@ export class DeployToken extends SolanaOperation<
     }
 
     const tx = await this.buildUnsigned(chain, parsed)
-    const hash = await submit(chain, wallet, tx, this.name, computeUnits)
+    const result = await submit(chain, wallet, tx, this.name, computeUnits, this.splitMode, true)
     return {
-      ...hash,
+      hash: result.hash,
+      hashes: result.slices!.map(({ signature }) => signature),
       tokenAddress: tx.tokenAddress,
       ...(tx.metadataAddress ? { metadataAddress: tx.metadataAddress } : {}),
     }

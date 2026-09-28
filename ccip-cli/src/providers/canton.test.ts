@@ -141,27 +141,26 @@ describe('canton/signer', () => {
   describe('Ed25519TransactionSigner.sign()', () => {
     it('returns a PartySignatures structure', async () => {
       const signer = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
-      const result = await signer.sign(SAMPLE_HASH)
+      const result = await signer.signTxHash(SAMPLE_HASH)
 
       assert.ok(result.signatures, 'result should have signatures array')
-      assert.equal(result.signatures.length, 1, 'should have one SinglePartySignatures entry')
+      assert.equal(result.signatures.length, 1, 'should have one Signature entry')
     })
 
     it('includes the correct party ID', async () => {
       const signer = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
-      const result = await signer.sign(SAMPLE_HASH)
+      const result = await signer.signTxHash(SAMPLE_HASH)
 
       assert.ok(result.signatures[0], 'should have first party signature')
-      assert.equal(result.signatures[0].party, PARTY_ID, 'party should match constructor argument')
+      assert.equal(result.party, PARTY_ID, 'party should match constructor argument')
     })
 
     it('produces a signature with correct properties', async () => {
       const signer = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
-      const result = await signer.sign(SAMPLE_HASH)
+      const result = await signer.signTxHash(SAMPLE_HASH)
 
       assert.ok(result.signatures[0], 'should have first party signature')
-      assert.ok(result.signatures[0].signatures[0], 'should have first signature')
-      const sig = result.signatures[0].signatures[0]
+      const sig = result.signatures[0]
 
       assert.equal(
         sig.format,
@@ -184,10 +183,10 @@ describe('canton/signer', () => {
 
     it('produces a valid Ed25519 signature (64 bytes)', async () => {
       const signer = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
-      const result = await signer.sign(SAMPLE_HASH)
+      const result = await signer.signTxHash(SAMPLE_HASH)
 
-      assert.ok(result.signatures[0]?.signatures[0], 'should have signature')
-      const sig = result.signatures[0].signatures[0]
+      assert.ok(result.signatures[0], 'should have signature')
+      const sig = result.signatures[0]
       assert.ok(sig.signature, 'signature field should be present')
       const sigBytes = Buffer.from(sig.signature, 'base64')
 
@@ -196,10 +195,10 @@ describe('canton/signer', () => {
 
     it('produces a cryptographically valid signature', async () => {
       const signer = new Ed25519TransactionSigner(TEST_SEED_HEX, PARTY_ID)
-      const result = await signer.sign(SAMPLE_HASH)
+      const result = await signer.signTxHash(SAMPLE_HASH)
 
-      assert.ok(result.signatures[0]?.signatures[0], 'should have signature')
-      const sig = result.signatures[0].signatures[0]
+      assert.ok(result.signatures[0], 'should have signature')
+      const sig = result.signatures[0]
       assert.ok(sig.signature, 'signature field should be present')
       const sigBytes = Buffer.from(sig.signature, 'base64')
 
@@ -217,13 +216,13 @@ describe('canton/signer', () => {
       const hash1 = new Uint8Array(32).fill(0xaa)
       const hash2 = new Uint8Array(32).fill(0xbb)
 
-      const result1 = await signer.sign(hash1)
-      const result2 = await signer.sign(hash2)
+      const result1 = await signer.signTxHash(hash1)
+      const result2 = await signer.signTxHash(hash2)
 
-      assert.ok(result1.signatures[0]?.signatures[0]?.signature, 'result1 should have signature')
-      assert.ok(result2.signatures[0]?.signatures[0]?.signature, 'result2 should have signature')
-      const sig1 = result1.signatures[0].signatures[0].signature
-      const sig2 = result2.signatures[0].signatures[0].signature
+      assert.ok(result1.signatures[0], 'result1 should have signature')
+      assert.ok(result2.signatures[0], 'result2 should have signature')
+      const sig1 = result1.signatures[0]
+      const sig2 = result2.signatures[0]
 
       assert.notEqual(sig1, sig2, 'different hashes should produce different signatures')
     })
@@ -232,13 +231,13 @@ describe('canton/signer', () => {
       const signer1 = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
       const signer2 = new Ed25519TransactionSigner(TEST_SEED_HEX, PARTY_ID)
 
-      const result1 = await signer1.sign(SAMPLE_HASH)
-      const result2 = await signer2.sign(SAMPLE_HASH)
+      const result1 = await signer1.signTxHash(SAMPLE_HASH)
+      const result2 = await signer2.signTxHash(SAMPLE_HASH)
 
-      assert.ok(result1.signatures[0]?.signatures[0]?.signature, 'result1 should have signature')
-      assert.ok(result2.signatures[0]?.signatures[0]?.signature, 'result2 should have signature')
-      const sig1 = result1.signatures[0].signatures[0].signature
-      const sig2 = result2.signatures[0].signatures[0].signature
+      assert.ok(result1.signatures[0]?.signature, 'result1 should have signature')
+      assert.ok(result2.signatures[0]?.signature, 'result2 should have signature')
+      const sig1 = result1.signatures[0].signature
+      const sig2 = result2.signatures[0].signature
 
       assert.notEqual(sig1, sig2, 'different signers should produce different signatures')
     })
@@ -247,9 +246,9 @@ describe('canton/signer', () => {
       const signer = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
       const emptyHash = new Uint8Array(0)
 
-      const result = await signer.sign(emptyHash)
-      assert.ok(result.signatures[0]?.signatures[0], 'should have signature')
-      const sig = result.signatures[0].signatures[0]
+      const result = await signer.signTxHash(emptyHash)
+      assert.ok(result.signatures[0], 'should have signature')
+      const sig = result.signatures[0]
 
       assert.ok(sig.signature, 'should produce a signature even for empty input')
 
@@ -282,30 +281,24 @@ describe('canton/signer', () => {
       const signer1 = new Ed25519TransactionSigner(ZERO_SEED_HEX, PARTY_ID)
       const signer2 = new Ed25519TransactionSigner(TEST_SEED_HEX, PARTY_ID)
 
-      const result1 = await signer1.sign(SAMPLE_HASH)
-      const result2 = await signer2.sign(SAMPLE_HASH)
+      const result1 = await signer1.signTxHash(SAMPLE_HASH)
+      const result2 = await signer2.signTxHash(SAMPLE_HASH)
 
       assert.ok(result1.signatures[0], 'result1 should have party signature')
       assert.ok(result2.signatures[0], 'result2 should have party signature')
 
       // Both should have the same party
-      assert.equal(result1.signatures[0].party, PARTY_ID)
-      assert.equal(result2.signatures[0].party, PARTY_ID)
+      assert.equal(result1.party, PARTY_ID)
+      assert.equal(result2.party, PARTY_ID)
 
-      assert.ok(result1.signatures[0].signatures[0], 'result1 should have signature')
-      assert.ok(result2.signatures[0].signatures[0], 'result2 should have signature')
+      assert.ok(result1.signatures[0], 'result1 should have signature')
+      assert.ok(result2.signatures[0], 'result2 should have signature')
 
       // But different fingerprints
-      assert.notEqual(
-        result1.signatures[0].signatures[0].signedBy,
-        result2.signatures[0].signatures[0].signedBy,
-      )
+      assert.notEqual(result1.signatures[0].signedBy, result2.signatures[0].signedBy)
 
       // And different signatures
-      assert.notEqual(
-        result1.signatures[0].signatures[0].signature,
-        result2.signatures[0].signatures[0].signature,
-      )
+      assert.notEqual(result1.signatures[0].signature, result2.signatures[0].signature)
     })
   })
 })

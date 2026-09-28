@@ -151,6 +151,52 @@ export class CCIPTransactionTooLargeError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a multi-transaction submission fails after prior transactions confirmed.
+ *
+ * `context.committedSlices` lists each confirmed transaction with the `[start, end)` range of
+ * instructions it carried; `context.pendingSignature` is set when the failing transaction was
+ * sent but its confirmation failed, so it may still land.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await submitTransactions()
+ * } catch (error) {
+ *   if (error instanceof CCIPPartialTransactionSubmissionError) {
+ *     console.log(error.context.committedSlices) // [{ signature, start, end }, ...]
+ *     console.log(error.context.committedInstructionCount)
+ *     // sent but unconfirmed: it may still land, so check it before resubmitting
+ *     if (error.context.pendingSignature) console.log(error.context.pendingSignature)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPPartialTransactionSubmissionError extends CCIPError {
+  override readonly name = 'CCIPPartialTransactionSubmissionError'
+  /** Creates a partial transaction submission error. */
+  constructor(
+    committedSlices: readonly { signature: string; start: number; end: number }[],
+    options?: CCIPErrorOptions & { pendingSignature?: string },
+  ) {
+    const { pendingSignature, ...rest } = options ?? {}
+    super(
+      CCIPErrorCode.PARTIAL_TRANSACTION_SUBMISSION,
+      'Transaction submission partially completed',
+      {
+        ...rest,
+        context: {
+          ...rest.context,
+          committedSlices,
+          committedHashes: committedSlices.map(({ signature }) => signature),
+          committedInstructionCount: committedSlices.at(-1)?.end ?? 0,
+          ...(pendingSignature && { pendingSignature }),
+        },
+      },
+    )
+  }
+}
+
 // CCIP Message
 
 /**

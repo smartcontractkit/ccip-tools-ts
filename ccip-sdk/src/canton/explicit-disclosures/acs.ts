@@ -1,6 +1,7 @@
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
+import type { Logger } from '../../types.ts'
 import { hashedUtf8Hex, isCantonPartyId, normalizeHex } from '../../utils.ts'
-import { normalizeCantonCcvList, receiverRequiresConfiguredCcvs } from '../ccv-addresses.ts'
+import { RawInstanceAddress } from '../addressCodec.ts'
 import {
   type CantonClient,
   type EventFormat,
@@ -84,10 +85,11 @@ function extractRawInstanceAddressUnpack(item: unknown): string | null {
  * CCIPReceiver `requiredCCVs`: CCV addresses the receiver expects at execute time.
  * The ledger returns a list of `RawInstanceAddress`; we collect each `unpack` value.
  */
-function extractRequiredCCVs(createArgument: unknown): string[] {
+function extractRequiredCCVs(createArgument: unknown): RawInstanceAddress[] {
   return asLedgerList(readCreateArgumentField(createArgument, 'requiredCCVs'))
     .map(extractRawInstanceAddressUnpack)
     .filter((address): address is string => address != null)
+    .map((addr) => RawInstanceAddress.fromString(addr))
 }
 
 /**
@@ -232,7 +234,7 @@ interface RichContractMatch {
   /** receiverFinalityConfig variant from createArgument (present on CCIPReceiver) */
   receiverFinalityConfig: { tag: string; value: unknown } | null
   /** RawInstanceAddress.unpack values from requiredCCVs (present on CCIPReceiver) */
-  requiredCCVs: string[]
+  requiredCCVs: RawInstanceAddress[]
 }
 
 function matchesReceiverFinality(
@@ -245,19 +247,6 @@ function matchesReceiverFinality(
     : finality === 0x00010000
       ? cfg.tag === 'WaitForSafe'
       : cfg.tag === 'BlockDepth' && Number(cfg.value) === finality
-}
-
-/** Prefer receivers whose requiredCCVs include a CCV from canton-config `ccvs`. */
-function rankReceiverCandidates(
-  candidates: RichContractMatch[],
-  configuredCcvs: readonly string[],
-): RichContractMatch[] {
-  const score = (candidate: RichContractMatch): number => {
-    if (receiverRequiresConfiguredCcvs(candidate.requiredCCVs, configuredCcvs)) return 2
-    if (candidate.requiredCCVs.length > 0) return 1
-    return 0
-  }
-  return [...candidates].sort((a, b) => score(b) - score(a))
 }
 
 function toDisclosedContract(match: RichContractMatch): DisclosedContract {
@@ -287,59 +276,6 @@ function classifyReceiverHint(hint: string): ReceiverHintKind {
     CCIPErrorCode.CANTON_API_ERROR,
     `Invalid Canton receiver hint "${hint}". Hex value is too short to be a contract ID or keccak256(party).`,
   )
-}
-
-/**
- * Query the ACS once with targeted template filters and build a lookup map keyed by
- * `"ModuleName:EntityName"`, preserving all fields needed for instance-address
- * matching.
- */
-async function fetchRichSnapshot(
-  client: CantonClient,
-  party: string,
-  packages: CcipPackageNames,
-): Promise<Map<string, RichContractMatch[]>> {
-  const { offset } = await client.getLedgerEnd()
-
-  const request: GetActiveContractsRequest = {
-    eventFormat: buildTargetedEventFormat(party, packages),
-    verbose: false,
-    activeAtOffset: offset,
-  }
-
-  const responses = await client.getActiveContracts(request)
-  const byModuleEntity = new Map<string, RichContractMatch[]>()
-
-  for (const response of responses) {
-    const entry = response.contractEntry
-    if (!entry || !('JsActiveContract' in entry)) continue
-
-    const active = entry.JsActiveContract
-    const created = active.createdEvent
-    const parts = created.templateId.split(':')
-    if (parts.length < 3) continue
-    const moduleEntity = `${parts[1]}:${parts[2]}`
-
-    const signatories = created.signatories
-    const rich: RichContractMatch = {
-      contractId: created.contractId,
-      templateId: created.templateId,
-      createdEventBlob: created.createdEventBlob ?? '',
-      synchronizerId: active.synchronizerId,
-      instanceId: extractInstanceId(created.createArgument),
-      signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
-      owner: extractStringField(created.createArgument, 'owner'),
-      partyOwner: extractStringField(created.createArgument, 'partyOwner'),
-      receiverFinalityConfig: extractFinalityConfig(created.createArgument),
-      requiredCCVs: extractRequiredCCVs(created.createArgument),
-    }
-
-    const list = byModuleEntity.get(moduleEntity) ?? []
-    list.push(rich)
-    byModuleEntity.set(moduleEntity, list)
-  }
-
-  return byModuleEntity
 }
 
 /**
@@ -455,12 +391,8 @@ export type AcsDisclosureConfig = {
   party: string
   /** Optional DAR package name overrides for ACS template filters */
   packages?: Partial<CcipPackageNames>
-  /**
-   * Optional execute CCV InstanceAddresses from canton-config (`ccvs`).
-   * Hex hashes and/or raw `instanceId@party` forms are accepted.
-   * Used to prefer CCIPReceivers whose `requiredCCVs` include these verifiers.
-   */
-  ccvs?: string[]
+  /** Optional logger (defaults to `console`) */
+  logger?: Logger
 }
 
 /**
@@ -491,20 +423,21 @@ export class AcsDisclosureProvider {
   private readonly client: CantonClient
   private readonly config: AcsDisclosureConfig
   private readonly packages: CcipPackageNames
+  private readonly logger: Logger
 
   /**
    * Create an `AcsDisclosureProvider` from a pre-built Canton Ledger API client.
    *
    * @param client - Authenticated Canton Ledger API client (JWT already embedded).
-   * @param config - ACS provider configuration: party ID
+   * @param config - ACS provider configuration: party ID and optional logger
    */
   constructor(client: CantonClient, config: AcsDisclosureConfig) {
     this.client = client
     this.config = {
       ...config,
-      ccvs: normalizeCantonCcvList(config.ccvs),
     }
     this.packages = resolveCcipPackageNames(config.packages)
+    this.logger = config.logger ?? console
   }
 
   /**
@@ -520,6 +453,79 @@ export class AcsDisclosureProvider {
   }
 
   /**
+   * Query the ACS once with targeted template filters and build a lookup map keyed by
+   * `"ModuleName:EntityName"`, preserving all fields needed for instance-address
+   * matching.
+   *
+   * Contracts whose `requiredCCVs` cannot be parsed (e.g. a receiver configured with
+   * an invalid `RawInstanceAddress`) are skipped with a warning so a single misconfigured
+   * contract doesn't break the whole snapshot.
+   */
+  private async fetchRichSnapshot(): Promise<Map<string, RichContractMatch[]>> {
+    const { offset } = await this.client.getLedgerEnd()
+
+    const request: GetActiveContractsRequest = {
+      eventFormat: buildTargetedEventFormat(this.config.party, this.packages),
+      verbose: false,
+      activeAtOffset: offset,
+    }
+
+    const responses = await this.client.getActiveContracts(request)
+    const byModuleEntity = new Map<string, RichContractMatch[]>()
+
+    for (const response of responses) {
+      const entry = response.contractEntry
+      if (!entry || !('JsActiveContract' in entry)) continue
+
+      const active = entry.JsActiveContract
+      const created = active.createdEvent
+      const parts = created.templateId.split(':')
+      if (parts.length < 3) continue
+      const moduleEntity = `${parts[1]}:${parts[2]}`
+
+      const signatories = created.signatories
+
+      let requiredCCVs: RawInstanceAddress[]
+      try {
+        requiredCCVs = extractRequiredCCVs(created.createArgument)
+      } catch (error) {
+        // A contract with a malformed requiredCCVs entry (e.g. an invalid RawInstanceAddress)
+        // cannot be matched reliably — skip it and keep the snapshot usable.
+        const address =
+          error instanceof CCIPError && typeof error.context['address'] === 'string'
+            ? error.context['address']
+            : ''
+        this.logger.warn(
+          `Canton ACS: skipping ${moduleEntity} contract ${created.contractId}: ` +
+            `failed to parse requiredCCVs` +
+            (address ? ` (address="${address}")` : '') +
+            `: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        continue
+      }
+
+      const rich: RichContractMatch = {
+        contractId: created.contractId,
+        templateId: created.templateId,
+        createdEventBlob: created.createdEventBlob ?? '',
+        synchronizerId: active.synchronizerId,
+        instanceId: extractInstanceId(created.createArgument),
+        signatory: signatories.length === 1 ? (signatories[0] ?? null) : null,
+        owner: extractStringField(created.createArgument, 'owner'),
+        partyOwner: extractStringField(created.createArgument, 'partyOwner'),
+        receiverFinalityConfig: extractFinalityConfig(created.createArgument),
+        requiredCCVs,
+      }
+
+      const list = byModuleEntity.get(moduleEntity) ?? []
+      list.push(rich)
+      byModuleEntity.set(moduleEntity, list)
+    }
+
+    return byModuleEntity
+  }
+
+  /**
    * Fetch all contracts that must be disclosed for a `ccipExecute` command.
    *
    * @param receiverCid - When provided, the `CCIPReceiver` disclosure is resolved
@@ -527,7 +533,7 @@ export class AcsDisclosureProvider {
    *   the contract's template type.
    */
   async fetchExecutionDisclosures(receiverCid?: string): Promise<AcsExecutionDisclosures> {
-    const snapshot = await fetchRichSnapshot(this.client, this.config.party, this.packages)
+    const snapshot = await this.fetchRichSnapshot()
 
     const existingRouter = pickByPartyOwner(snapshot, 'perPartyRouter', this.config.party)
     const ccipReceiver = receiverCid
@@ -545,7 +551,7 @@ export class AcsDisclosureProvider {
     finality: number,
     hint?: string,
   ): Promise<RichContractMatch | null> {
-    const snapshot = await fetchRichSnapshot(this.client, this.config.party, this.packages)
+    const snapshot = await this.fetchRichSnapshot()
     const moduleEntity = CCIP_MODULE_ENTITIES.ccipReceiver
     const candidates = snapshot.get(moduleEntity) ?? []
 
@@ -572,10 +578,7 @@ export class AcsDisclosureProvider {
       }
     }
 
-    const matching = rankReceiverCandidates(
-      pool.filter((c) => matchesReceiverFinality(c.receiverFinalityConfig, finality)),
-      this.config.ccvs ?? [],
-    )
+    const matching = pool.filter((c) => matchesReceiverFinality(c.receiverFinalityConfig, finality))
     return matching[0] ?? null
   }
 
@@ -640,7 +643,7 @@ export class AcsDisclosureProvider {
     perPartyRouter: DisclosedContract | null
     ccipSender: DisclosedContract | null
   }> {
-    const snapshot = await fetchRichSnapshot(this.client, this.config.party, this.packages)
+    const snapshot = await this.fetchRichSnapshot()
     const routerEntity = CCIP_MODULE_ENTITIES.perPartyRouter
     const senderEntity = CCIP_MODULE_ENTITIES.ccipSender
     const routerMatch = (snapshot.get(routerEntity) ?? []).find(
