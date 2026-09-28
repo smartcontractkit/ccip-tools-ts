@@ -3,7 +3,7 @@ import type { CCIPErrorCode } from './codes.ts'
 /** Recovery hints by error code. */
 export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   CHAIN_NOT_FOUND:
-    'Verify the chainId, chain selector, or chain name is correct. Check CCIP documentation for supported chains.',
+    'Verify the chainId, chain selector, or chain name is correct. Check CCIP documentation for supported chains. A chain missing from the bundled table (local devnet, fork, or a network newer than this release) can be added to `SELECTORS`, or with ccip-cli `--chain-selectors`.',
   CHAIN_SELECTOR_NOT_FOUND:
     'Verify the chain selector is valid. Use networkInfo() to look up selectors.',
   CHAIN_FAMILY_UNSUPPORTED:

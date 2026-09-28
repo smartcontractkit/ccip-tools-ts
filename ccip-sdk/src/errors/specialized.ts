@@ -11,7 +11,8 @@ import { CCIPErrorCode } from './codes.ts'
 // Chain/Network
 
 /**
- * Thrown when chain family is not supported.
+ * Thrown when chain family is not supported, or (with `registered`) supported by the SDK but not
+ * registered in `supportedChains`, e.g. because the bundler dropped its unused Chain class.
  *
  * @example
  * ```typescript
@@ -26,13 +27,30 @@ import { CCIPErrorCode } from './codes.ts'
  */
 export class CCIPChainFamilyUnsupportedError extends CCIPError {
   override readonly name = 'CCIPChainFamilyUnsupportedError'
-  /** Creates a chain family unsupported error. */
-  constructor(family: string, options?: CCIPErrorOptions) {
-    super(CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED, `Unsupported chain family: ${family}`, {
-      ...options,
-      isTransient: false,
-      context: { ...options?.context, family },
-    })
+  /**
+   * Creates a chain family unsupported error.
+   * @param family - chain family, or undefined when no family is registered at all
+   * @param options - error options; `registered` lists the registered families, for a family the
+   *   SDK supports but the app didn't register
+   */
+  constructor(
+    family: string | undefined,
+    options?: CCIPErrorOptions & { registered?: readonly string[] },
+  ) {
+    const { registered, ...rest } = options ?? {}
+    super(
+      CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
+      !registered
+        ? `Unsupported chain family: ${family}`
+        : family
+          ? `Chain family ${family} is not registered (registered: ${registered.join(', ') || 'none'})`
+          : 'No chain family is registered',
+      {
+        ...rest,
+        isTransient: false,
+        context: { ...rest.context, ...(family && { family }), ...(registered && { registered }) },
+      },
+    )
   }
 }
 

@@ -1,6 +1,5 @@
 import { Buffer } from 'buffer'
 
-import { BorshCoder } from '@coral-xyz/anchor'
 import {
   type AccountMeta,
   type AddressLookupTableAccount,
@@ -21,10 +20,10 @@ import {
 } from '../errors/index.ts'
 import type { AnyMessage, WithLogger } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
+import { sighash, sizedCoder } from './coder.ts'
 import { IDL as CCIP_COMMON_IDL } from './idl/2.0.0/CCIP_COMMON.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
-import { patchBorsh, sighash } from './patchBorsh.ts'
 import { anyToSvmMessage } from './send.ts'
 import { simulateTransaction } from './utils.ts'
 
@@ -39,9 +38,9 @@ import { simulateTransaction } from './utils.ts'
  * accounts, lookup tables and resolution metadata of the final instruction.
  */
 
-const commonCoder = new BorshCoder(CCIP_COMMON_IDL)
-const routerV2Coder = new BorshCoder(CCIP_ROUTER_V2_IDL)
-const offrampV2Coder = new BorshCoder(CCIP_OFFRAMP_V2_IDL)
+const commonCoder = sizedCoder(CCIP_COMMON_IDL)
+const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
+const offrampV2Coder = sizedCoder(CCIP_OFFRAMP_V2_IDL)
 
 /** Discriminator of `resolve_accounts_start`, shared by every program implementing resolution. */
 export const RESOLVE_ACCOUNTS_START_DISCRIMINATOR = sighash('global', 'resolve_accounts_start')
@@ -140,7 +139,6 @@ export function encodeResolveAccountsIx(
   params: ResolveAccountsParams,
   accounts: readonly PublicKey[],
 ): TransactionInstruction {
-  patchBorsh()
   return new TransactionInstruction({
     programId,
     keys: accounts.map((pubkey) => ({ pubkey, isSigner: false, isWritable: false })),
@@ -351,7 +349,6 @@ async function resolveInstruction(
     encodeArgs: (resolutionMetadata: Buffer) => Buffer
   },
 ): Promise<ResolvedInstruction> {
-  patchBorsh()
   const resolved = await resolveAccounts(ctx, {
     ...opts,
     programId,
