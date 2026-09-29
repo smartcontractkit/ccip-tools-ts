@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, makeError } from 'ethers'
+import { ZeroAddress, getCreateAddress, makeError } from 'ethers'
 
 import {
   CCIPExecTxRevertedError,
@@ -19,7 +19,7 @@ const OWNER = '0x' + '11'.repeat(20)
 const CCIP_ADMIN = '0x' + '22'.repeat(20)
 const ROLE_ADMIN = '0x' + '33'.repeat(20)
 const PREMINT_RECIPIENT = '0x' + '44'.repeat(20)
-const DEPLOYED = '0x' + '77'.repeat(20)
+const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
 const HASH = '0x' + 'ab'.repeat(32)
 /** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
 const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)

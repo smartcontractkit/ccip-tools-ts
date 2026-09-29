@@ -57,8 +57,8 @@ function isTransientError(error: unknown): boolean {
 
 /**
  * Signs and submits the first transaction in `unsigned`, then waits for one confirmation.
- * Returns the broadcast `response` and mined `receipt`; callers map these to their
- * own result shape (see {@link EVMOperation.execute}).
+ * Returns the broadcast `response`, mined `receipt`, and the sender/nonce submitted; callers map
+ * these to their own result shape (see {@link EVMOperation.execute}).
  * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
  * @throws {@link CCIPWalletChainMismatchError} if `wallet` is on another chain, raised before
  * signing, broadcast or nonce consumption
@@ -71,7 +71,12 @@ export async function submit(
   wallet: unknown,
   unsigned: UnsignedEVMTx,
   operation: string,
-): Promise<{ response: TransactionResponse; receipt: TransactionReceipt }> {
+): Promise<{
+  response: TransactionResponse
+  receipt: TransactionReceipt
+  sender: string
+  nonce: number
+}> {
   if (!isSigner(wallet)) throw new CCIPWalletInvalidError(wallet)
   // Outside the try on purpose: surfaces as itself, not wrapped in CCTTxFailedError, and
   // reaches neither `nextNonce` nor the signer below.
@@ -83,6 +88,7 @@ export async function submit(
   if (!first) throw new CCTTxFailedError(operation, 'no transaction to submit')
 
   let response: TransactionResponse
+  let nonce: number
   let nonceConsumed = false
   try {
     let tx: TransactionRequest = { ...first }
@@ -92,10 +98,13 @@ export async function submit(
       nonceConsumed = true
     }
     tx = await wallet.populateTransaction(tx)
+    if (tx.nonce == null) throw new CCTTxFailedError(operation, 'transaction has no nonce')
+    nonce = tx.nonce
     tx.from = undefined // some signers reject a pre-populated `from`
     response = await submitTransaction(wallet, tx, chain.provider)
   } catch (error) {
     if (nonceConsumed) chain.rollbackNonce(sender)
+    if (error instanceof CCTTxFailedError) throw error
     throw new CCTTxFailedError(operation, error instanceof Error ? error.message : String(error), {
       cause: error instanceof Error ? error : undefined,
       isTransient: isTransientError(error),
@@ -122,5 +131,5 @@ export async function submit(
   if (!receipt) throw new CCTTxNotConfirmedError(operation, response.hash)
 
   chain.logger.info(`${operation}: confirmed, tx =`, response.hash)
-  return { response, receipt }
+  return { response, receipt, sender, nonce }
 }

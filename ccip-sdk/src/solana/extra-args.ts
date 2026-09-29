@@ -1,4 +1,3 @@
-import { BorshCoder } from '@coral-xyz/anchor'
 import { concat, getBytes, hexlify } from 'ethers'
 
 import { CCIPExtraArgsEncodingUnsupportedError, CCIPExtraArgsParseError } from '../errors/index.ts'
@@ -13,6 +12,7 @@ import {
 } from '../extra-args.ts'
 import { ChainFamily } from '../networks.ts'
 import { decodeAddress, getAddressBytes, toLeArray } from '../utils.ts'
+import { sizedCoder } from './coder.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 
 /**
@@ -234,4 +234,4 @@ export function decodeSolanaSuiExtraArgsV1(
 // extraArgs struct layouts; its coder decodes them without hand-rolled field
 // offsets. GenericExtraArgsV3 is an SDK-side construct with no IDL definition,
 // so it keeps its manual decoder.
-const FEE_QUOTER_CODER = new BorshCoder(FEE_QUOTER_IDL)
+const FEE_QUOTER_CODER = sizedCoder(FEE_QUOTER_IDL)
