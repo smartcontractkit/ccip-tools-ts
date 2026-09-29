@@ -14,6 +14,7 @@ import type BN from 'bn.js'
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import {
+  type SolanaV2LaneUnavailableReason,
   CCIPArgumentInvalidError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaV2LaneUnavailableError,
@@ -32,7 +33,7 @@ import {
 } from './resolution.ts'
 import { generateApproveIxs } from './send.ts'
 import type { UnsignedSolanaTx } from './types.ts'
-import { simulateTransaction } from './utils.ts'
+import { customInstructionErrorCode, simulateTransaction } from './utils.ts'
 
 /*
  * CCIP 2.0 send path, and the choice between it and the 1.6 one.
@@ -53,7 +54,8 @@ const INSTRUCTION_FALLBACK_NOT_FOUND = 101 // the router doesn't have 2.0 suppor
 const ACCOUNT_NOT_INITIALIZED = 3012 // no `dest_chain_state_v2` account for the lane
 
 // Placeholder fee payer for read-only simulations, and `get_fee_v2` caller for quotes without a
-// sender (only allowed on lanes without an allowlist, see `selectSendLane`)
+// sender (only allowed on lanes without an allowlist, see `selectSendLane`). Not the System Program
+// (`1111…1111`): a program id can't be the (writable) fee payer
 const SIMULATION_PAYER = new PublicKey('11111111111111111111111111111112')
 
 // WIP: account resolution doesn't return the deployment's fixed ccip_send lookup table yet (an
@@ -71,11 +73,6 @@ const MAX_UINT32 = 0xffff_ffffn
 export type DestChainV2Observation = IdlTypes<
   typeof CCIP_ROUTER_V2_IDL
 >['RouterDestChainV2Observation']
-
-/** Why a lane can't take a 2.0 message; see {@link CCIPSolanaV2LaneUnavailableError}. */
-export type V2LaneUnavailableReason = ConstructorParameters<
-  typeof CCIPSolanaV2LaneUnavailableError
->[0]
 
 /** The router entrypoint a message goes through, with the message to send through it. */
 export type SolanaSendLane =
@@ -152,7 +149,7 @@ export function toGenericExtraArgsV3(extraArgs: ExtraArgs): GenericExtraArgsV3 |
 export async function observeDestChainV2(
   ctx: { connection: Connection } & WithLogger,
   { router, destChainSelector }: { router: PublicKey; destChainSelector: bigint },
-): Promise<{ observation: DestChainV2Observation } | { reason: V2LaneUnavailableReason }> {
+): Promise<{ observation: DestChainV2Observation } | { reason: SolanaV2LaneUnavailableReason }> {
   const ix = new TransactionInstruction({
     programId: router,
     keys: [
@@ -172,11 +169,7 @@ export async function observeDestChainV2(
     })
   } catch (error) {
     if (!(error instanceof SendTransactionError)) throw error
-    const custom = (
-      (error as { simulationError?: unknown }).simulationError as
-        | { InstructionError?: [number, { Custom?: number }] }
-        | undefined
-    )?.InstructionError?.[1]?.Custom
+    const custom = customInstructionErrorCode(error)
     if (custom === ACCOUNT_NOT_INITIALIZED) return { reason: 'lane-not-configured' }
     if (custom === INSTRUCTION_FALLBACK_NOT_FOUND) return { reason: 'router-without-v2-support' }
     throw error
@@ -251,7 +244,7 @@ export async function selectSendLane(
   }
 
   const lane = await observeDestChainV2(ctx, { router, destChainSelector })
-  let reason: V2LaneUnavailableReason | undefined
+  let reason: SolanaV2LaneUnavailableReason | undefined
   if ('reason' in lane) reason = lane.reason
   else if (lane.observation.allowListEnabled) {
     // the allowlist decides the entrypoint, so without the sender a quote could miss the send's fee

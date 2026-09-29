@@ -117,6 +117,7 @@ export {
 
 // Specialized errors - Solana-specific
 export {
+  type SolanaV2LaneUnavailableReason,
   CCIPBlockTimeNotFoundError,
   CCIPCctpDecodeError,
   CCIPExecutionReportChainMismatchError,
