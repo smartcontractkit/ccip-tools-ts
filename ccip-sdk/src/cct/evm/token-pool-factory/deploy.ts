@@ -20,12 +20,14 @@
  * @packageDocumentation
  */
 
-import { ZeroAddress, concat, getAddress } from 'ethers'
+import { ZeroAddress, concat, getAddress, hexlify } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../evm/types.ts'
 import { ChainFamily } from '../../../networks.ts'
+import { encodeAddressToAny } from '../../../utils.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
+import { parseRemoteAddress } from '../../remote-address.ts'
 import {
   type DeployableTokenPoolType,
   getTokenPoolArtifact,
@@ -33,7 +35,6 @@ import {
 } from '../token-pool/contracts.ts'
 import { TokenVersion, getTokenArtifact } from '../token/contracts.ts'
 import {
-  parseHexBytes,
   validateAddress,
   validateNonZeroAddress,
   validateUint64,
@@ -83,23 +84,20 @@ export type FactoryRateLimiterConfig = {
 /**
  * One remote token pool to wire into the new pool's `applyChainUpdates`.
  *
- * @remarks `remotePoolAddress`/`remoteTokenAddress` are the *remote* chain's addresses as the
- * `bytes` the pool stores and matches against at `releaseOrMint` — **not** a plain EVM address.
- * For an EVM remote this is `abi.encode(address)` (a 32-byte left-padded word), which the shared
- * {@link encodeAddressToAny} produces from an address; a raw 20-byte address would misconfigure
- * the lane and revert `InvalidSourcePoolAddress` on the destination. This mirrors how
- * `applyChainUpdates`/`addRemotePool` take these fields (validated via `parseHexBytes`, never
- * auto-encoded). Leave empty (`0x`, the default) to have the factory predict the remote address
- * on-chain.
+ * @remarks `remotePoolAddress`/`remoteTokenAddress` are the *remote* chain's addresses in that
+ * chain's own format (`0x…` for EVM, base58 for Solana, …), validated against the family of
+ * `remoteChainSelector` and encoded to the 32-byte padded `bytes` the pool stores, the same as
+ * `applyChainUpdates`/`addRemotePool`. The already encoded form is accepted too. Leave empty
+ * (`0x`, the default) to have the factory predict the remote address on-chain.
  */
 export type FactoryRemoteTokenPool = {
   remoteChainSelector: bigint
-  /** Remote pool address as pre-encoded `bytes` (EVM: `abi.encode(address)`), or `0x` to have the factory predict it. */
+  /** Remote pool address in the remote chain's own format, or `0x` to have the factory predict it. */
   remotePoolAddress?: string
   remotePoolInitCode?: string
   remoteChainConfig: FactoryRemoteChainConfig
   poolType: FactoryPoolFamily
-  /** Remote token address as pre-encoded `bytes` (EVM: `abi.encode(address)`), or `0x` to have the factory predict it. */
+  /** Remote token address in the remote chain's own format, or `0x` to have the factory predict it. */
   remoteTokenAddress?: string
   remoteTokenInitCode?: string
   rateLimiterConfig?: FactoryRateLimiterConfig
@@ -172,22 +170,33 @@ const NAME_DEPLOY_BOTH = 'deployTokenAndTokenPoolViaFactory'
 const NAME_DEPLOY_POOL = 'deployTokenPoolWithExistingTokenViaFactory'
 
 /**
- * Validates a remote pool/token address the caller supplies as `bytes` for the lane, the same way
- * `applyChainUpdates`/`addRemotePool` do (`parseHexBytes`: non-empty whole-byte hex, normalised to
- * lowercase `0x`). It is **not** auto-encoded from an EVM address — an EVM remote must already be
- * `abi.encode(address)`, e.g. via the shared {@link encodeAddressToAny}. `undefined`/`0x` means
- * "let the factory predict it" and passes through as `0x`.
- * @throws {@link CCTParamsInvalidError} if `value` is a non-empty value that is not whole-byte hex
+ * Parses a remote pool/token address with the shared {@link parseRemoteAddress} and encodes it to
+ * the 32-byte padded `bytes` the pool stores, the same as `applyChainUpdates`/`addRemotePool`.
+ * `undefined`/`0x` means "let the factory predict it" and passes through as `0x`.
+ * @throws {@link CCTParamsInvalidError} if `value` is not a valid, non-zero address of the
+ * remote chain's family
  */
-function parseRemoteAddress(operation: string, param: string, value: string | undefined): string {
+function encodeFactoryRemoteAddress(
+  operation: string,
+  param: string,
+  value: string | undefined,
+  remoteChainSelector: bigint,
+): string {
   if (value === undefined || value === '0x') return '0x'
-  return parseHexBytes(operation, param, value)
+  return hexlify(
+    encodeAddressToAny(parseRemoteAddress(operation, param, value, remoteChainSelector)),
+  )
 }
 
 /** Maps a remote-pool input to the ABI tuple shape, validating and applying `0x`/disabled defaults. */
 function toAbiRemote(operation: string, r: FactoryRemoteTokenPool) {
   validateUint64(operation, 'remoteChainSelector', r.remoteChainSelector)
-  const remotePoolAddress = parseRemoteAddress(operation, 'remotePoolAddress', r.remotePoolAddress)
+  const remotePoolAddress = encodeFactoryRemoteAddress(
+    operation,
+    'remotePoolAddress',
+    r.remotePoolAddress,
+    r.remoteChainSelector,
+  )
   const remotePoolInitCode = r.remotePoolInitCode ?? '0x'
   // The factory reverts `EmptyInitCode` (TokenPoolFactory.sol) when a remote has neither a
   // pre-deployed address nor init code to deploy from. Reject here so the builder fails fast
@@ -198,10 +207,11 @@ function toAbiRemote(operation: string, r: FactoryRemoteTokenPool) {
       'remotePoolAddress',
       'set remotePoolAddress or remotePoolInitCode; both empty would revert EmptyInitCode on-chain',
     )
-  const remoteTokenAddress = parseRemoteAddress(
+  const remoteTokenAddress = encodeFactoryRemoteAddress(
     operation,
     'remoteTokenAddress',
     r.remoteTokenAddress,
+    r.remoteChainSelector,
   )
   const remoteTokenInitCode = r.remoteTokenInitCode ?? '0x'
   if (remoteTokenAddress === '0x' && remoteTokenInitCode === '0x')

@@ -1,81 +1,70 @@
 /**
  * Shared internals of the three remote-pool write ops — `setRemotePool` (v1.5.0),
  * `addRemotePool` and `removeRemotePool` (v1.5.1+): the parameter shape they have in common,
- * `remotePoolAddress` parsing, and the per-lane membership read the add/remove preconditions
- * are checked against. The owner gate itself is `assertPoolOwner` in `../contracts.ts`,
+ * `remotePoolAddress` parsing and encoding, and the per-lane membership read the add/remove
+ * preconditions are checked against. The owner gate itself is `assertPoolOwner` in `../contracts.ts`,
  * shared with every other owner-gated pool write.
  *
  * @packageDocumentation
  */
 
-import { isHexString } from 'ethers'
-
 import { CCIPTokenPoolChainConfigNotFoundError } from '../../../errors/index.ts'
 import type { EVMChain } from '../../../evm/index.ts'
-import { networkInfo } from '../../../networks.ts'
-import { decodeAddress } from '../../../utils.ts'
-import { parseHexBytes, validateNonZeroAddress, validateUint64 } from '../validate.ts'
+import { parseRemoteAddress } from '../../remote-address.ts'
+import { validateNonZeroAddress, validateUint64 } from '../validate.ts'
 
 /**
  * Parameters shared by every remote-pool write op: which pool, which lane, and which remote pool.
  *
- * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw bytes, not an EVM
- * address: the lane's other end may be Solana, Aptos or Sui, whose addresses are 32 bytes. The
- * contracts take it as `bytes` for exactly that reason, so it is accepted here as hex of any
- * (even-digit) length rather than validated as an EVM address.
+ * @remarks `remotePoolAddress` is the *remote* chain's pool address, not necessarily an EVM
+ * address: the lane's other end may be Solana, Aptos or Sui. It is written in that chain's own
+ * format, validated against the family of `remoteChainSelector`, and encoded to the 32-byte padded
+ * `bytes` the contracts store — an unpadded EVM remote would configure fine, then revert every
+ * inbound transfer with `InvalidSourcePoolAddress`.
  */
 export type RemotePoolParams = {
   /** Local token pool contract being reconfigured. */
   poolAddress: string
   /** CCIP selector of the lane's remote chain (`uint64`). */
   remoteChainSelector: bigint
-  /**
-   * Remote chain's pool address as hex bytes; the `0x` prefix is optional. Any even number of
-   * hex digits is accepted — a non-EVM remote's address is not 20 bytes.
-   */
+  /** Remote chain's pool address in that chain's own format: `0x…` for EVM, base58 for Solana. */
   remotePoolAddress: string
   /** Current pool owner; sets `tx.from` for offline / multisig signing. */
   sender?: string
 }
 
 /**
- * {@link RemotePoolParams} as {@link parseRemotePoolParams} leaves it: `remotePoolAddress`
- * normalised to 0x-prefixed lowercase hex, so `buildUnsigned` encodes it without re-parsing.
+ * {@link RemotePoolParams} as {@link parseRemotePoolParams} leaves it: `remotePoolAddress` in its
+ * canonical spelling, the one {@link EVMChain.getTokenPoolRemotes} returns, so the add/remove
+ * preconditions compare it as a plain string. Each op's encoder pads it once, via
+ * `encodeAddressToAny`.
  */
 export type ParsedRemotePoolParams = RemotePoolParams & { remotePoolAddress: string }
-
-/**
- * Normalises `remotePoolAddress` to 0x-prefixed lowercase hex, the form `bytes` calldata is
- * encoded from.
- * @remarks Deliberately not an address check: see {@link RemotePoolParams.remotePoolAddress}.
- * Only the encoding is constrained — hex digits, `0x` optional, whole bytes, non-empty. A thin
- * alias over the shared {@link parseHexBytes} that fixes the param path these three ops all
- * blame; the parser itself lives in `../validate.ts` alongside its sibling validators, shared
- * with `applyChainUpdates`, which validates the same kind of value.
- * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty, whole-byte hex string
- */
-export function parseRemotePoolAddress(operation: string, value: unknown): string {
-  return parseHexBytes(operation, 'remotePoolAddress', value)
-}
 
 /**
  * Validates the params every remote-pool op takes, before any RPC.
  * @remarks `poolAddress` is required to be **non-zero**, not merely well formed: a call to `0x0`
  * hits no code, so it would mine as a *successful* no-op rather than failing.
- * @returns The parsed `remotePoolAddress` (0x-prefixed lowercase hex).
+ * @returns The canonical `remotePoolAddress`.
  * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid non-zero address,
- * `remoteChainSelector` is not a `uint64`, or `remotePoolAddress` is not hex bytes
+ * `remoteChainSelector` is not a `uint64` or a known chain selector, or `remotePoolAddress` is not
+ * a valid, non-zero address of that chain's family
  */
 export function validateRemotePoolParams(operation: string, params: RemotePoolParams): string {
   validateNonZeroAddress(operation, 'poolAddress', params.poolAddress)
   validateUint64(operation, 'remoteChainSelector', params.remoteChainSelector)
-  return parseRemotePoolAddress(operation, params.remotePoolAddress)
+  return parseRemoteAddress(
+    operation,
+    'remotePoolAddress',
+    params.remotePoolAddress,
+    params.remoteChainSelector,
+  )
 }
 
 /**
  * The three ops' {@link Operation.parse}: validates every field before any RPC and returns the
- * params with `remotePoolAddress` already normalised, so `buildUnsigned` encodes it without
- * re-parsing. Spreads the result of {@link validateRemotePoolParams} back over the params.
+ * params with `remotePoolAddress` already canonical. Spreads the result of
+ * {@link validateRemotePoolParams} back over the params.
  * @throws {@link CCTParamsInvalidError} if any field is invalid (see {@link validateRemotePoolParams})
  */
 export function parseRemotePoolParams(
@@ -109,37 +98,4 @@ export async function readRegisteredRemotePools(
   }
   // one selector in, at most one lane out — keyed by the remote network's name
   return Object.values(remotes).flatMap(({ remotePools }) => remotePools)
-}
-
-/**
- * Whether `remotePoolAddress` (hex bytes) is among the lane's `registered` pools.
- *
- * @remarks The two sides arrive in different spellings: `registered` comes back from
- * {@link EVMChain.getTokenPoolRemotes} already decoded into the *remote* family's address format
- * (checksummed hex for EVM, base58 for Solana, …), while the caller passes raw `bytes`. So the
- * caller's value is decoded through the same codec, with the remote chain's family taken from
- * its selector, and only then compared.
- *
- * Comparison is exact, or case-insensitive when both sides are hex — which covers EVM checksum
- * spellings without risking a false match between two base58 addresses that differ only in case.
- * If the family is unknown or the bytes are not decodable as one of its addresses (e.g. an
- * oddly sized value), the undecoded hex is compared instead, so an unrecognised lane degrades
- * to a plain byte comparison rather than throwing.
- */
-export function isRegisteredRemotePool(
-  registered: readonly string[],
-  remotePoolAddress: string,
-  remoteChainSelector: bigint,
-): boolean {
-  let expected
-  try {
-    expected = decodeAddress(remotePoolAddress, networkInfo(remoteChainSelector).family)
-  } catch {
-    expected = remotePoolAddress
-  }
-  return registered.some(
-    (pool) =>
-      pool === expected ||
-      (isHexString(pool) && isHexString(expected) && pool.toLowerCase() === expected.toLowerCase()),
-  )
 }

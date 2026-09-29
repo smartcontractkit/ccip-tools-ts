@@ -14,6 +14,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import { encodeAddressToAny } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
@@ -27,14 +28,13 @@ import {
 import {
   type ParsedRemotePoolParams,
   type RemotePoolParams,
-  isRegisteredRemotePool,
   parseRemotePoolParams,
   readRegisteredRemotePools,
 } from '../remote-pool.ts'
 
 /**
  * Parameters for {@link AddRemotePool} — see {@link RemotePoolParams}; `remotePoolAddress` is the
- * remote chain's pool address as hex bytes, added to the lane's existing set.
+ * remote chain's pool address in that chain's own format, added to the lane's existing set.
  */
 export type AddRemotePoolParams = RemotePoolParams
 
@@ -50,7 +50,10 @@ const encodeAddRemotePool: Encoder = (
 ) =>
   callTx(
     poolAddress,
-    iface.encodeFunctionData('addRemotePool', [remoteChainSelector, remotePoolAddress]),
+    iface.encodeFunctionData('addRemotePool', [
+      remoteChainSelector,
+      encodeAddressToAny(remotePoolAddress),
+    ]),
   )
 
 /** Authorizes an additional remote pool on one lane of a v1.5.1+ pool via `addRemotePool`. */
@@ -68,7 +71,7 @@ export class AddRemotePool extends EVMOperation<AddRemotePoolParams, ParsedAddRe
   }
 
   /**
-   * Validates the pool address, lane selector and remote pool bytes before any RPC, keeping the
+   * Validates the pool address, lane selector and remote pool address before any RPC, keeping the
    * parsed `remotePoolAddress` so {@link buildUnsigned} checks and encodes it without re-parsing.
    */
   protected override parse(params: AddRemotePoolParams): ParsedAddRemotePoolParams {
@@ -97,7 +100,7 @@ export class AddRemotePool extends EVMOperation<AddRemotePoolParams, ParsedAddRe
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
 
     const registered = await readRegisteredRemotePools(chain, params)
-    if (isRegisteredRemotePool(registered, params.remotePoolAddress, params.remoteChainSelector))
+    if (registered.includes(params.remotePoolAddress))
       throw new CCTParamsInvalidError(
         this.name,
         'remotePoolAddress',

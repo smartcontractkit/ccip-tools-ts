@@ -1,4 +1,4 @@
-import type { Buffer } from 'buffer'
+import { Buffer } from 'buffer'
 
 import { type PublicKey, SystemProgram } from '@solana/web3.js'
 import BN from 'bn.js'
@@ -6,8 +6,10 @@ import BN from 'bn.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { getAddressBytes } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
+import { parseUniqueRemoteAddresses } from '../../../remote-address.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -22,7 +24,6 @@ import {
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
-  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
@@ -36,8 +37,9 @@ type AppendRemotePoolAddressesParams = PoolProgramRef & {
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
   /**
-   * Non-empty array of non-empty hex-encoded remote pool addresses, optionally `0x`-prefixed.
-   * Stored at native byte length; unlike `remoteTokenAddress`, not left-padded to 32 bytes.
+   * Non-empty array of unique remote pool addresses in the remote chain's own format (`0x…` for
+   * EVM, base58 for Solana, …), the family taken from `remoteChainSelector`. Stored at native byte
+   * length; unlike `remoteTokenAddress`, not left-padded to 32 bytes.
    */
   remotePoolAddresses: string[]
   /** Pool owner. Defaults to `payer` for single-signer transactions. */
@@ -50,7 +52,7 @@ type ParsedAppendRemotePoolAddressesParams = {
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
-  remotePoolAddresses: Buffer[]
+  remotePoolAddresses: string[]
 }
 
 /** Parameters for unsigned Solana remote pool address appending. */
@@ -91,22 +93,12 @@ export class AppendRemotePoolAddresses extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be a non-empty array')
     }
 
-    const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
-      parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
+    const remotePoolAddresses = parseUniqueRemoteAddresses(
+      this.name,
+      'remotePoolAddresses',
+      params.remotePoolAddresses,
+      params.remoteChainSelector,
     )
-    const seen = new Set<string>()
-
-    for (const [i, address] of remotePoolAddresses.entries()) {
-      const hex = address.toString('hex')
-      if (seen.has(hex)) {
-        throw new CCTParamsInvalidError(
-          this.name,
-          `remotePoolAddresses[${i}]`,
-          'must not duplicate a remote pool address',
-        )
-      }
-      seen.add(hex)
-    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -132,7 +124,9 @@ export class AppendRemotePoolAddresses extends SolanaOperation<
       .appendRemotePoolAddresses(
         new BN(opts.remoteChainSelector.toString()),
         opts.tokenAddress,
-        opts.remotePoolAddresses.map((address) => ({ address })),
+        opts.remotePoolAddresses.map((address) => ({
+          address: Buffer.from(getAddressBytes(address)),
+        })),
       )
       .accountsStrict({
         state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),

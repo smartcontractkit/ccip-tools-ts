@@ -12,8 +12,6 @@ import {
 } from '../errors.ts'
 import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
 import {
-  parseHexBytes,
-  parseNonEmptyHexBytes,
   parsePublicKey,
   resolveExistingTokenAccount,
   resolveLockReleasePoolProgram,
@@ -28,7 +26,6 @@ import {
   validatePublicKey,
   validatePublicKeys,
   validateUniqueChainSelectors,
-  validateUniqueHexBytes,
   validateUniquePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
@@ -54,27 +51,6 @@ describe('Validate (cct/solana)', () => {
   it('parses valid public keys', () => {
     const key = parsePublicKey('op', 'payer', PublicKey.default.toBase58())
     assert.ok(key.equals(PublicKey.default))
-  })
-
-  it('parses hex bytes with an optional maximum size', () => {
-    assert.deepEqual(parseHexBytes('op', 'address', '0x01ab', 2), Buffer.from('01ab', 'hex'))
-    assert.deepEqual(parseHexBytes('op', 'address', ''), Buffer.alloc(0))
-    assert.throws(
-      () => parseHexBytes('op', 'address', '0x123', 2),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.reason === 'must be a hex string of at most 2 bytes',
-    )
-    assert.throws(() => parseHexBytes('op', 'address', null), CCTParamsInvalidError)
-  })
-
-  it('rejects empty hex bytes when required', () => {
-    assert.deepEqual(parseNonEmptyHexBytes('op', 'address', '0x01'), Buffer.from([1]))
-    assert.throws(
-      () => parseNonEmptyHexBytes('op', 'address', ''),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.reason === 'must not be empty',
-    )
   })
 
   it('accepts valid public keys', () => {
@@ -250,33 +226,6 @@ describe('Validate (cct/solana)', () => {
       () => validateUniqueChainSelectors('op', 'selectors', [1n, 1n]),
       (err: unknown) =>
         err instanceof CCTParamsInvalidError && err.context.param === 'selectors[1]',
-    )
-  })
-
-  it('rejects duplicate hex byte values', () => {
-    assert.doesNotThrow(() => validateUniqueHexBytes('op', 'addresses', [Buffer.from('01', 'hex')]))
-    assert.throws(
-      () =>
-        validateUniqueHexBytes('op', 'addresses', [
-          Buffer.from('01', 'hex'),
-          Buffer.from('01', 'hex'),
-        ]),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.param === 'addresses[1]' &&
-        err.context.reason === 'must not contain duplicate hex values',
-    )
-    assert.throws(
-      () =>
-        validateUniqueHexBytes(
-          'op',
-          'remotePoolAddresses',
-          [Buffer.from('01', 'hex'), Buffer.from('01', 'hex')],
-          'remote pool addresses',
-        ),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError &&
-        err.context.reason === 'must not contain duplicate remote pool addresses',
     )
   })
 

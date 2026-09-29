@@ -5,6 +5,8 @@ import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
 
+// registers the EVM chain family, for the lanes whose remote is EVM
+import '../../evm/index.ts'
 import { SolanaChain } from '../../solana/index.ts'
 import { deriveTokenAdminRegistryPda } from './programs/router.ts'
 import {
