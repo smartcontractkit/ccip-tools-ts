@@ -204,7 +204,7 @@ export {
  */
 export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   static {
-    supportedChains[ChainFamily.Canton] = CantonChain
+    supportedChains[ChainFamily.Canton] ??= CantonChain
   }
   static readonly family = ChainFamily.Canton
   /** Canton uses 10 decimals (lf-coin micro-units) */
@@ -348,7 +348,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         'Canton: using chainId from canton config (skipping synchronizer alias detection):',
         configChainId,
       )
-      return new CantonChain(
+      return new this(
         client,
         acsDisclosureProvider,
         edsDisclosureProvider,
@@ -369,7 +369,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         synchronizerAlias.toLowerCase(),
       )
       if (chainId) {
-        return new CantonChain(
+        return new this(
           client,
           acsDisclosureProvider,
           edsDisclosureProvider,
@@ -393,7 +393,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         '— falling back to',
         CantonChain.DEFAULT_CANTON_CHAIN_ID,
       )
-      return new CantonChain(
+      return new this(
         client,
         acsDisclosureProvider,
         edsDisclosureProvider,
@@ -491,7 +491,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       baseUrl: ctx.cantonConfig.transferInstructionUrl,
       jwt,
     })
-    return CantonChain.fromClient(
+    return this.fromClient(
       client,
       acsDisclosureProvider,
       edsDisclosureProvider,

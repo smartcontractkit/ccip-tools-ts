@@ -9,20 +9,18 @@ import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
-import { TransferOwnership } from './transfer-ownership.ts'
+import { AcceptPoolOwnership } from './accept-pool-ownership.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
-const NEW_OWNER = Keypair.generate().publicKey.toBase58()
-const OWNER = Keypair.generate().publicKey
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T>(tx: T) => tx,
 }
 
-function stateData(owner = OWNER): Buffer {
+function stateData(proposedOwner = AUTHORITY): Buffer {
   const key = PublicKey.default.toBuffer()
   return Buffer.concat([
     BorshAccountsCoder.accountDiscriminator('State'),
@@ -32,7 +30,8 @@ function stateData(owner = OWNER): Buffer {
     Buffer.from([6]),
     key,
     key,
-    owner.toBuffer(),
+    key,
+    new PublicKey(proposedOwner).toBuffer(),
     key,
     key,
     key,
@@ -44,17 +43,17 @@ function stateData(owner = OWNER): Buffer {
   ])
 }
 
-function chain(owner = OWNER): SolanaChain {
+function chain(proposedOwner = AUTHORITY): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
-      getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData(owner) }),
+      getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData(proposedOwner) }),
     },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
-  return Object.assign(chain(), {
+  return Object.assign(chain(WALLET.publicKey.toBase58()), {
     connection: {
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
@@ -63,25 +62,27 @@ function submitChain(): SolanaChain {
       }),
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
-      getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData() }),
+      getAccountInfo: async () => ({
+        owner: PublicKey.default,
+        data: stateData(WALLET.publicKey.toBase58()),
+      }),
     },
   })
 }
 
 function generate(opts = {}) {
-  return new TransferOwnership().generate(chain(), {
+  return new AcceptPoolOwnership().generate(chain(), {
     tokenAddress: TOKEN,
     poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
-    newOwner: NEW_OWNER,
     ...opts,
   })
 }
 
-describe('TransferOwnership (cct/solana)', () => {
+describe('AcceptPoolOwnership (cct/solana)', () => {
   describe('generate', () => {
-    it('builds the ownership-transfer instruction', async () => {
+    it('builds the ownership-acceptance instruction', async () => {
       const unsigned = await generate()
       const [instruction] = unsigned.instructions
       const poolProgram = resolveTokenPoolProgram('burn-mint')
@@ -107,15 +108,15 @@ describe('TransferOwnership (cct/solana)', () => {
         ],
       )
       assert.ok(decoded)
-      assert.equal(decoded.name, 'transferOwnership')
-      assert.equal(
-        (decoded.data as { proposedOwner: PublicKey }).proposedOwner.toBase58(),
-        NEW_OWNER,
-      )
+      assert.equal(decoded.name, 'acceptOwnership')
     })
 
     it('defaults authority to payer', async () => {
-      const unsigned = await generate({ authority: undefined })
+      const unsigned = await new AcceptPoolOwnership().generate(chain(PAYER), {
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        payer: PAYER,
+      })
 
       assert.equal(unsigned.instructions[0]!.keys[2]!.pubkey.toBase58(), PAYER)
     })
@@ -129,11 +130,35 @@ describe('TransferOwnership (cct/solana)', () => {
   })
 
   describe('validation', () => {
+    it('rejects an authority that is not the proposed owner', async () => {
+      await assert.rejects(
+        () => generate({ authority: PAYER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          err.message.includes('must be the proposed owner'),
+      )
+    })
+
+    it('rejects when there is no proposed owner', async () => {
+      await assert.rejects(
+        () =>
+          new AcceptPoolOwnership().generate(chain(PublicKey.default.toBase58()), {
+            tokenAddress: TOKEN,
+            poolType: 'burn-mint',
+            payer: PAYER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          err.message.includes('no proposed owner'),
+      )
+    })
+
     it('rejects invalid public keys', async () => {
       for (const [opts, param] of [
         [{ tokenAddress: 'invalid' }, 'tokenAddress'],
-        [{ newOwner: 'invalid' }, 'newOwner'],
-        [{ newOwner: PublicKey.default.toBase58() }, 'newOwner'],
+        [{ authority: 'invalid' }, 'authority'],
       ]) {
         await assert.rejects(
           () => generate(opts),
@@ -141,44 +166,31 @@ describe('TransferOwnership (cct/solana)', () => {
         )
       }
     })
-
-    it('rejects the current pool owner', async () => {
-      await assert.rejects(
-        () => generate({ newOwner: OWNER.toBase58() }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'transferOwnership' &&
-          err.context.param === 'newOwner' &&
-          err.message.includes('must not be the current pool owner'),
-      )
-    })
   })
 
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await new TransferOwnership().execute(submitChain(), {
+      const result = await new AcceptPoolOwnership().execute(submitChain(), {
         tokenAddress: TOKEN,
         poolType: 'burn-mint',
-        newOwner: NEW_OWNER,
         wallet: WALLET,
       })
 
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('rejects a non-wallet authority for signed transfer', async () => {
+    it('rejects a non-wallet authority for signed acceptance', async () => {
       await assert.rejects(
         () =>
-          new TransferOwnership().execute(chain(), {
+          new AcceptPoolOwnership().execute(chain(), {
             tokenAddress: TOKEN,
             poolType: 'burn-mint',
-            newOwner: NEW_OWNER,
             authority: AUTHORITY,
             wallet: WALLET,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'transferOwnership' &&
+          err.context.operation === 'acceptPoolOwnership' &&
           err.context.param === 'authority',
       )
     })

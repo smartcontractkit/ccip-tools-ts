@@ -32,7 +32,12 @@ interface DeployTokenPoolBaseParams {
   rmnProxy: string
   /** Non-zero CCIP router address. */
   router: string
-  /** Advanced pool hooks; defaults to the zero address. */
+  /**
+   * `AdvancedPoolHooks` contract to bind at construction, as returned by
+   * `deployAdvancedPoolHooks`. Defaults to the zero address, which leaves the pool enforcing no
+   * sender allowlist and no CCV requirements — a v2.0.0 pool holds neither itself.
+   * @remarks Re-pointable after deploy with `updateAdvancedPoolHooks`, unlike `lockbox`.
+   */
   advancedPoolHooks?: string
   /** Deployer address; sets `tx.from` for offline / multisig signing. */
   sender?: string
@@ -48,11 +53,19 @@ export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBaseParams
  *
  * @remarks `lockbox` must be a pre-deployed `ERC20LockBox` for the *same* `token` (the constructor
  * calls `lockbox.isTokenSupported(token)`). Sequence: deployToken → deployLockbox → deployTokenPool
- * (this) → authorizeLockboxCallers (`addedCallers: [pool]`) → setPool → configure lanes.
+ * (this) → authorizeLockboxCallers (`addedCallers: [pool]`, plus whoever funds it) → setPool →
+ * configure lanes → depositToLockbox, which a v2.0.0 pool cannot release without.
  */
 export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBaseParams {
   type: 'LockReleaseTokenPool'
-  /** Lockbox address; required and must be non-zero — the v2.0.0 constructor reverts on the zero address. */
+  /**
+   * Lockbox address; required and must be non-zero — the v2.0.0 constructor reverts on the zero
+   * address.
+   *
+   * @remarks **Permanent.** Stored in `i_lockBox`, `immutable` with no setter: a pool bound to
+   * the wrong lockbox must be redeployed and re-registered with `setPool`. Unlike its
+   * constructor neighbour `advancedPoolHooks`, which is re-pointable.
+   */
   lockbox: string
 }
 

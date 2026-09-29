@@ -71,7 +71,10 @@ export type GenerateAppendToLookupTableResult = UnsignedSolanaTx
 export type ExecuteAppendToLookupTableParams = SolanaExecuteParams<AppendToLookupTableParams>
 
 /** Result of executing Solana TokenAdminRegistry `appendToLookupTable`. */
-export type ExecuteAppendToLookupTableResult = TransactionResult
+export type ExecuteAppendToLookupTableResult = TransactionResult & {
+  /** Every confirmed transaction signature. */
+  hashes: string[]
+}
 
 /** Builds and submits Solana ALT extend instructions for token pool setup. */
 export class AppendToLookupTable extends SolanaOperation<
@@ -80,6 +83,7 @@ export class AppendToLookupTable extends SolanaOperation<
   ParsedAppendToLookupTableParams
 > {
   readonly name = 'appendToLookupTable'
+  protected override readonly splitMode = 'resource'
 
   /** Parses all public keys before any RPC. */
   protected override parse(
@@ -153,7 +157,9 @@ export class AppendToLookupTable extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'authority',
-        `authority mismatch; ALT authority is ${lookupTable.value.state.authority?.toBase58() ?? 'none'}`,
+        `authority mismatch; ALT authority is ${
+          lookupTable.value.state.authority?.toBase58() ?? 'none'
+        }`,
       )
     }
 
@@ -215,7 +221,9 @@ export class AppendToLookupTable extends SolanaOperation<
     }
 
     chain.logger.debug(
-      `${this.name}: lookupTable = ${lookupTableAddress.toBase58()}, appended = ${addresses.length}, total = ${totalAddressesAfterAppend}`,
+      `${this.name}: lookupTable = ${lookupTableAddress.toBase58()}, appended = ${
+        addresses.length
+      }, total = ${totalAddressesAfterAppend}`,
     )
     return {
       family: ChainFamily.Solana,
@@ -241,6 +249,10 @@ export class AppendToLookupTable extends SolanaOperation<
     }
 
     const tx = await this.buildUnsigned(chain, parsed)
-    return submit(chain, wallet, tx, this.name, computeUnits)
+    const result = await submit(chain, wallet, tx, this.name, computeUnits, this.splitMode, true)
+    return {
+      hash: result.hash,
+      hashes: result.slices!.map(({ signature }) => signature),
+    }
   }
 }

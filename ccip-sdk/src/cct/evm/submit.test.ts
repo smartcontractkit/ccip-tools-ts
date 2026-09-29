@@ -35,12 +35,16 @@ function fakeSigner(opts: {
   receipt?: { status: number; contractAddress?: string | null } | null
   waitError?: Error
   submitError?: Error
+  dropNonce?: boolean
 }) {
   const fail = opts.submitError
   return {
     signTransaction: () => (fail ? Promise.reject(fail) : Promise.resolve('0x')),
     getAddress: () => Promise.resolve('0x' + '55'.repeat(20)),
-    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    populateTransaction: (tx: unknown) =>
+      Promise.resolve(
+        opts.dropNonce ? { ...(tx as object), nonce: undefined } : { ...(tx as object) },
+      ),
     sendTransaction: (_tx: unknown) =>
       fail
         ? Promise.reject(fail)
@@ -117,6 +121,16 @@ describe('submit (sign-and-confirm pipeline)', () => {
         ),
       (err: unknown) =>
         err instanceof CCTTxNotConfirmedError && err.context.txHash === HASH && err.isTransient,
+    )
+  })
+
+  it('throws CCTTxFailedError without double-wrapping when populated tx has no nonce', async () => {
+    await assert.rejects(
+      () => submit(stubChain(), fakeSigner({ dropNonce: true }), UNSIGNED, 'setPool'),
+      (err: unknown) =>
+        err instanceof CCTTxFailedError &&
+        err.context.reason === 'transaction has no nonce' &&
+        err.message === 'setPool failed: transaction has no nonce',
     )
   })
 

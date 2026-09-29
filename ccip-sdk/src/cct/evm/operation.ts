@@ -10,7 +10,7 @@
  * @packageDocumentation
  */
 
-import { type Interface, getAddress } from 'ethers'
+import { type Interface, getAddress, getCreateAddress } from 'ethers'
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { type EVMChain, isSigner } from '../../evm/index.ts'
@@ -23,7 +23,10 @@ import { validateAddress } from './validate.ts'
 
 /** Assembles a contract-deployment tx (no `to`): creation bytecode + ABI-encoded ctor args. */
 export function deployTx(bytecode: `0x${string}`, ctorArgs: string): UnsignedEVMTx {
-  return { family: ChainFamily.EVM, transactions: [{ data: bytecode + ctorArgs.slice(2) }] }
+  return {
+    family: ChainFamily.EVM,
+    transactions: [{ data: bytecode + ctorArgs.slice(2) }],
+  }
 }
 
 /** Assembles an unsigned call to an existing contract: `to` + ABI-encoded calldata. */
@@ -129,17 +132,20 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
-        `must be the executing wallet address (${walletAddress}) — use generateUnsigned${this.name[0]!.toUpperCase()}${this.name.slice(1)} for externally-signed transactions`,
+        `must be the executing wallet address (${walletAddress}) — use generateUnsigned${this.name[0]!.toUpperCase()}${this.name.slice(
+          1,
+        )} for externally-signed transactions`,
       )
     return sender
   }
 
   /** {@link generate}, then sign and submit; returns the confirmed tx hash. */
   async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<TransactionResult> {
+    const sender = await this.resolveWalletSender(params.wallet, params.sender)
     const { response } = await submit(
       chain,
       params.wallet,
-      await this.generate(chain, params),
+      await this.generate(chain, { ...params, sender }),
       this.name,
     )
     return { hash: response.hash }
@@ -167,24 +173,56 @@ export abstract class EVMDeployOperation<P extends { sender?: string }> extends 
 
   /**
    * {@link generate}, then sign and submit; resolves to the tx hash and the newly deployed
-   * contract address (read from the mined receipt), plus the
+   * contract address (validated against the submitted CREATE sender and nonce), plus the
    * {@link ExplorerVerificationInput} for verifying its source on a block explorer.
-   * @throws {@link CCTTxFailedError} if the tx mined without producing a contract address
+   *
+   * @remarks Assumes a direct EOA CREATE deployment. Factory/CREATE2 deployments derive their
+   * address differently and must not use this base.
+   *
+   * @throws {@link CCTTxFailedError} if the tx mined without the expected contract address
    */
   override async execute(chain: EVMChain, params: EVMExecuteParams<P>): Promise<DeployResult> {
-    const unsigned = await this.generate(chain, params)
-    const { contract, iface } = this.artifact(params)
+    const sender = await this.resolveWalletSender(params.wallet, params.sender)
+    const executionParams = { ...params, sender }
+
+    const unsigned = await this.generate(chain, executionParams)
+    const { contract, iface } = this.artifact(executionParams)
     // Same value `buildUnsigned` appended to the bytecode. Taken from `encode` rather than
     // sliced back out of the init-code, so it stays correct regardless of the tx layout.
-    const encodedConstructorArgs = this.encode(iface, params)
-    const { response, receipt } = await submit(chain, params.wallet, unsigned, this.name)
-    if (!receipt.contractAddress)
+    const encodedConstructorArgs = this.encode(iface, executionParams)
+    const {
+      response,
+      receipt,
+      sender: from,
+      nonce,
+    } = await submit(chain, params.wallet, unsigned, this.name)
+    const expectedAddress = getCreateAddress({ from, nonce })
+    const returnedAddress = receipt.contractAddress
+    if (returnedAddress == null)
       throw new CCTTxFailedError(this.name, 'deployment produced no contract address', {
-        context: { txHash: response.hash },
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
+      })
+    let contractAddress: string
+    try {
+      contractAddress = getAddress(returnedAddress)
+    } catch {
+      throw new CCTTxFailedError(this.name, 'deployment returned an invalid contract address', {
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
+      })
+    }
+    if (contractAddress !== expectedAddress)
+      throw new CCTTxFailedError(this.name, 'deployment returned an unexpected contract address', {
+        recovery:
+          'Verify the RPC endpoint; the expected deployment address is in context.expectedAddress.',
+        context: { txHash: response.hash, expectedAddress, returnedAddress },
       })
     return {
       hash: response.hash,
-      contractAddress: receipt.contractAddress,
+      contractAddress: expectedAddress,
       verification: { contract, encodedConstructorArgs },
     }
   }

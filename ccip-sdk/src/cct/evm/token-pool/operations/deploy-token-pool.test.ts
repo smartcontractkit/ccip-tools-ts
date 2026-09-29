@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, makeError } from 'ethers'
+import { ZeroAddress, getCreateAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
@@ -14,12 +14,13 @@ import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-to
 import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
+const OTHER = '0x' + '99'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
 const RMN_PROXY = '0x' + '33'.repeat(20)
 const ROUTER = '0x' + '44'.repeat(20)
 const HOOKS = '0x' + '55'.repeat(20)
 const LOCKBOX = '0x' + '66'.repeat(20)
-const DEPLOYED = '0x' + '77'.repeat(20)
+const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
 const HASH = '0x' + 'ab'.repeat(32)
 
 const COMMON = { token: TOKEN, localTokenDecimals: 18, rmnProxy: RMN_PROXY, router: ROUTER }
@@ -276,6 +277,30 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         assert.equal(result.verification.encodedConstructorArgs, '0x' + ctorArgs)
       })
     }
+
+    it('accepts a sender matching the signing wallet', async () => {
+      const result = await new DeployTokenPool().execute(stubChain(), {
+        ...params,
+        sender: SENDER,
+        wallet: fakeSigner({ contractAddress: DEPLOYED }),
+      })
+      assert.equal(result.hash, HASH)
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().execute(stubChain(), {
+            ...params,
+            sender: OTHER,
+            wallet: fakeSigner({ contractAddress: DEPLOYED }),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'sender',
+      )
+    })
 
     it('throws CCTTxFailedError when the receipt carries no contract address', async () => {
       await assert.rejects(
