@@ -3,6 +3,7 @@ import { after, describe, it } from 'node:test'
 
 import {
   type ChainTransaction,
+  CCIPChainNotFoundError,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   ChainFamily,
@@ -88,6 +89,7 @@ function makeChainClass({
   networkName,
   connectDelay = () => 0,
   connectReject = () => false,
+  unregisteredChainId = () => undefined,
   getTx = () => 'notfound',
   txDelay = () => 0,
 }: {
@@ -97,6 +99,8 @@ function makeChainClass({
   connectDelay?: (url: string) => number
   /** If true for a url, fromUrl rejects instead of resolving. */
   connectReject?: (url: string) => boolean
+  /** Chain id a url reports that is missing from the selector table (fromUrl: CHAIN_NOT_FOUND). */
+  unregisteredChainId?: (url: string) => number | undefined
   /** Whether getTransaction succeeds ('found') or throws ('notfound'). */
   getTx?: (url: string) => 'found' | 'notfound'
   /** Extra delay (ms) before getTransaction settles. */
@@ -131,6 +135,8 @@ function makeChainClass({
       const ms = connectDelay(url)
       if (ms > 0) await delay(ms)
       if (connectReject(url)) throw new Error(`connection refused: ${url}`)
+      const unregistered = unregisteredChainId(url)
+      if (unregistered != null) throw new CCIPChainNotFoundError(unregistered)
       const chain = new FakeChain(url)
       opts?.abort?.addEventListener('abort', () => chain.destroy(), { once: true })
       stats.connected.push(url)
@@ -345,6 +351,42 @@ describe('fetchChainsFromRpcs', () => {
     }
   })
 
+  it('chainGetter: an RPC on an unregistered chain id gets a --chain-selectors hint, not its CHAIN_NOT_FOUND', async () => {
+    const FORK_RPC = 'https://virtual.sepolia.rpc.tenderly.co/secret-uuid'
+    const { FakeChain } = makeChainClass({
+      family: ChainFamily.EVM,
+      networkName: 'ethereum-testnet-sepolia',
+      unregisteredChainId: (url) => (url === FORK_RPC ? 735711155111 : undefined),
+      connectReject: (url) => url !== FORK_RPC,
+    })
+    const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeChain })
+    const [ctx, ac] = makeCtx()
+    try {
+      const chainGetter = fetchChainsFromRpcs(ctx, {
+        rpcs: [FORK_RPC, 'http://bad.example'],
+        rpcsFile: '',
+        api: false,
+        cantonConfig: undefined,
+      })
+      await assert.rejects(chainGetter('ethereum-testnet-sepolia'), (err: unknown) => {
+        assert.ok(err instanceof CCIPRpcNotFoundError, String(err))
+        assert.match(err.recovery!, /--chain-selectors 735711155111=ethereum-testnet-sepolia$/)
+        assert.match(err.recovery!, /virtual\.sepolia\.rpc\.tenderly\.co/)
+        assert.doesNotMatch(err.recovery!, /secret-uuid/, 'must not leak the RPC path')
+        return true
+      })
+      // the exhausted-family fast path carries the same hint
+      await assert.rejects(chainGetter('ethereum-testnet-sepolia'), (err: unknown) => {
+        assert.ok(err instanceof CCIPRpcNotFoundError)
+        assert.match(err.recovery!, /735711155111=ethereum-testnet-sepolia/)
+        return true
+      })
+    } finally {
+      restore()
+      ac.abort()
+    }
+  })
+
   // -------------------------------------------------------------------------
   // txHash search
   // -------------------------------------------------------------------------
@@ -369,6 +411,39 @@ describe('fetchChainsFromRpcs', () => {
         TX_HASH,
       )
       await assert.rejects(txResult, CCIPTransactionNotFoundError)
+    } finally {
+      restore()
+      ac.abort()
+    }
+  })
+
+  it('txHash: tx not found names RPCs on unregistered chain ids', async () => {
+    const { FakeChain } = makeChainClass({
+      family: ChainFamily.EVM,
+      networkName: 'ethereum-testnet-sepolia',
+      unregisteredChainId: (url) => (url === 'http://fork.example' ? 735711155111 : undefined),
+    })
+    const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeChain })
+    const [ctx, ac] = makeCtx()
+    try {
+      const [, txResult] = fetchChainsFromRpcs(
+        ctx,
+        {
+          rpcs: ['http://fork.example', 'http://rpc1.example'],
+          rpcsFile: '',
+          api: false,
+          cantonConfig: undefined,
+        },
+        TX_HASH,
+      )
+      await assert.rejects(txResult, (err: unknown) => {
+        assert.ok(err instanceof CCIPTransactionNotFoundError, String(err))
+        assert.match(
+          err.recovery!,
+          /735711155111 \(fork\.example\).*--chain-selectors 735711155111=<selector\|forked chain name>/,
+        )
+        return true
+      })
     } finally {
       restore()
       ac.abort()

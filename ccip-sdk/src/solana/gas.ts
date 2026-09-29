@@ -1,6 +1,5 @@
 import { Buffer } from 'buffer'
 
-import { Program } from '@coral-xyz/anchor'
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   createMintToCheckedInstruction,
@@ -12,6 +11,7 @@ import type { BytesLike } from 'ethers'
 
 import type { WithLogger } from '../types.ts'
 import { bytesToBuffer, getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
+import { newProgram } from './coder.ts'
 import { IDL as RECEIVER_IDL } from './idl/1.6.0/CCIP_RECEIVER.ts'
 import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'
 
@@ -135,7 +135,7 @@ export async function estimateExecComputeUnits({
     ],
     new PublicKey(router),
   )
-  const program = new Program(RECEIVER_IDL, receiver, simulationProvider({ connection, logger }))
+  const program = newProgram(RECEIVER_IDL, receiver, simulationProvider({ connection, logger }))
   const receiverMessage = {
     messageId: Array.from(getDataBytes(message.messageId)),
     sourceChainSelector: new BN(message.sourceChainSelector.toString()),

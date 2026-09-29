@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 
-import { Interface, getAddress } from 'ethers'
+import { Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
@@ -30,6 +30,132 @@ export const ADVANCED_POOL_HOOKS_INTERFACE = new Interface(ADVANCED_POOL_HOOKS_V
 
 /** `AdvancedPoolHooks` creation bytecode for `deployAdvancedPoolHooks`. */
 export const ADVANCED_POOL_HOOKS_BYTECODE = ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE
+
+/**
+ * The four CCV lists for one remote chain. Base lists apply to every transfer; threshold lists add
+ * requirements at or above the hooks contract's configured threshold. `address(0)` selects the
+ * default CCV. A threshold list requires its corresponding base list, and no address may repeat
+ * within or across a direction's base/threshold pair.
+ */
+export type CCVConfig = {
+  /** CCVs required for every outbound transfer. */
+  outboundCCVs: string[]
+  /** Additional outbound CCVs required at or above the threshold. */
+  thresholdOutboundCCVs: string[]
+  /** CCVs required for every inbound transfer. */
+  inboundCCVs: string[]
+  /** Additional inbound CCVs required at or above the threshold. */
+  thresholdInboundCCVs: string[]
+}
+
+/** A remote CCIP chain selector (`uint64`) plus its complete CCV configuration. */
+export type CCVConfigUpdate = CCVConfig & { remoteChainSelector: bigint }
+
+/** Checksums one CCV address list returned by a typed hooks getter. */
+function toCCVAddresses(ccvs: readonly unknown[]): string[] {
+  return ccvs.map((ccv) => getAddress(ccv as string))
+}
+
+/** Checksums the four address lists in a hooks CCV config result. */
+function toCCVConfig(raw: {
+  outboundCCVs: readonly unknown[]
+  thresholdOutboundCCVs: readonly unknown[]
+  inboundCCVs: readonly unknown[]
+  thresholdInboundCCVs: readonly unknown[]
+}): CCVConfig {
+  return {
+    outboundCCVs: toCCVAddresses(raw.outboundCCVs),
+    thresholdOutboundCCVs: toCCVAddresses(raw.thresholdOutboundCCVs),
+    inboundCCVs: toCCVAddresses(raw.inboundCCVs),
+    thresholdInboundCCVs: toCCVAddresses(raw.thresholdInboundCCVs),
+  }
+}
+
+/** Reads one remote chain's CCV config in one `eth_call`. */
+export async function readCCVConfig(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  remoteChainSelector: bigint,
+): Promise<CCVConfig> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return toCCVConfig(await hooks.getCCVConfig(remoteChainSelector))
+}
+
+/** Reads every configured remote-chain CCV config in one `eth_call`. */
+export async function readAllCCVConfigs(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<CCVConfigUpdate[]> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return (await hooks.getAllCCVConfigs()).map((config) => ({
+    remoteChainSelector: config.remoteChainSelector,
+    ...toCCVConfig(config),
+  }))
+}
+
+/** Resolves the CCVs required for a transfer in one `eth_call`. */
+export async function readRequiredCCVs(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  remoteChainSelector: bigint,
+  amount: bigint,
+  direction: bigint,
+): Promise<string[]> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return toCCVAddresses(
+    await hooks.getRequiredCCVs(
+      ZeroAddress,
+      remoteChainSelector,
+      amount,
+      '0x00000000',
+      '0x',
+      direction,
+    ),
+  )
+}
+
+/**
+ * Reads an `AdvancedPoolHooks` owner's address in one `eth_call`.
+ * @param chain - Chain hosting the hooks contract.
+ * @param advancedPoolHooks - Hooks contract to read.
+ * @returns The checksummed current owner address.
+ */
+export async function readAdvancedPoolHooksOwner(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<string> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return getAddress(resultToObject(await hooks.owner()))
+}
+
+/**
+ * Pre-flights a known sender against the `AdvancedPoolHooks` owner, so an unauthorized caller fails
+ * here instead of as an `OnlyCallableByOwner` revert after a multisig has signed.
+ *
+ * @remarks The hooks are a separately owned `Ownable2Step` contract, not part of the pool: the
+ * deployer becomes their owner, and binding them to a pool transfers nothing. A pool owner who did
+ * not deploy the hooks cannot write through them, so checking the *pool* owner instead would pass
+ * a sender the hooks then revert.
+ * @param operation - Operation name for error context.
+ * @param chain - Chain hosting the hooks contract.
+ * @param advancedPoolHooks - Hooks contract to read.
+ * @param sender - Proposed transaction sender.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the current hooks owner.
+ */
+export async function assertAdvancedPoolHooksOwner(
+  operation: string,
+  chain: EVMChain,
+  advancedPoolHooks: string,
+  sender: string,
+): Promise<void> {
+  const owner = await readAdvancedPoolHooksOwner(chain, advancedPoolHooks)
+  if (getAddress(sender) === owner) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${advancedPoolHooks} are owned separately from the pools bound to them`,
+  )
+}
 
 /**
  * `AdvancedPoolHooks` deploy artifact: contract name + ctor {@link Interface} + creation bytecode.
@@ -72,35 +198,4 @@ export async function assertAdvancedPoolHooksContract(
   }
   if (contractType !== ADVANCED_POOL_HOOKS_TYPE)
     throw new CCTContractTypeInvalidError(address, ADVANCED_POOL_HOOKS_TYPE, contractType)
-}
-
-/**
- * Pre-flights `sender` against an `AdvancedPoolHooks`'s own `owner()` for an owner-gated hooks
- * write, in one `eth_call`, so an unauthorized caller fails here instead of as an
- * `OnlyCallableByOwner` revert after a multisig has signed.
- *
- * @remarks The hooks are a separately owned `Ownable2Step` contract, not part of the pool: the
- * deployer becomes their owner, and binding them to a pool transfers nothing. A pool owner who did
- * not deploy the hooks cannot write through them, so checking the *pool* owner instead would pass
- * a sender the hooks then revert.
- * @param operation - Operation name, for the error's `operation` field.
- * @param chain - Chain to read the owner from.
- * @param hooksAddress - `AdvancedPoolHooks` being written to.
- * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the hooks owner
- */
-export async function assertAdvancedPoolHooksOwner(
-  operation: string,
-  chain: EVMChain,
-  hooksAddress: string,
-  sender: string,
-): Promise<void> {
-  const hooks = getTypedContract(chain, hooksAddress, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
-  const owner = getAddress(resultToObject(await hooks.owner()))
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${hooksAddress} are owned separately from the pools bound to them`,
-  )
 }
