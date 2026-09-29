@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type SetPoolParams, SetPool } from './set-pool.ts'
 
@@ -24,6 +24,7 @@ const DATA = new Interface([
 function stubChain(onAddress?: (address: string) => void): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     getTokenAdminRegistryFor: (address: string) => {
       onAddress?.(address)
       return Promise.resolve(TAR)

@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, getAddress, getIcapAddress, makeError } from 'e
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import { UpdateAdvancedPoolHooksAuthorizedCallers } from './update-authorized-callers.ts'
 
@@ -67,6 +67,7 @@ function stubChain({
         return Promise.resolve(OWNER_IFACE.encodeFunctionResult(fn, [owner]))
       },
     },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
     rollbackNonce: () => {},

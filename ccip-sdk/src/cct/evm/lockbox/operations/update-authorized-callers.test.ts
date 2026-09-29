@@ -9,7 +9,7 @@ import {
   CCIPWalletInvalidError,
 } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
@@ -45,6 +45,9 @@ const LEN_1 = '0000000000000000000000000000000000000000000000000000000000000001'
 // 20-byte address left-padded to a 32-byte word.
 const word = (addr: string) => '000000000000000000000000' + addr.slice(2)
 
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
 /** What the stubbed chain was asked to do, in order, so the pre-flight's position is assertable. */
 type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
@@ -77,6 +80,7 @@ function stubChain({
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
     typeAndVersion: (address: string) => {
@@ -124,6 +128,7 @@ describe('UpdateLockboxAuthorizedCallers (cct/evm lockbox operation)', () => {
       const tx = unsigned.transactions[0]!
       assert.equal(tx.to, LOCKBOX)
       assert.equal(tx.from, SENDER)
+      assert.equal(tx.chainId, CHAIN_ID, 'pinned to the manager chain')
       assert.ok(
         tx.data!.startsWith(SELECTOR),
         'data carries the applyAuthorizedCallerUpdates selector',

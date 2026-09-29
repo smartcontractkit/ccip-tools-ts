@@ -5,7 +5,7 @@ import { Interface, MaxUint256, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
@@ -83,6 +83,7 @@ function stubChain({
     getAllAuthorizedCallers: [callers],
   }
   return {
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
       call: ({ to, data }: { to: string; data: string }) => {
         const selector = data.slice(0, 10)
