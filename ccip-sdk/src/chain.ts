@@ -1664,9 +1664,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     opts: Omit<SendMessageOpts, 'approveMax'> & {
       /**
        * Address of the wallet which will send the message. Families whose route or fee depends on
-       * it use it to quote what `sendMessage` will charge; others ignore it. Solana requires it for
-       * CCIP 2.0 lanes with a sender allowlist.
-       */
+       * it use it to quote what `sendMessage` will charge; others ignore it.
+      */
       sender?: string
     },
   ): Promise<bigint>
