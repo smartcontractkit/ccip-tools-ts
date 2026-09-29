@@ -172,7 +172,7 @@ export type AptosChainContext = ChainContext & {
  */
 export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   static {
-    supportedChains[ChainFamily.Aptos] = AptosChain
+    supportedChains[ChainFamily.Aptos] ??= AptosChain
   }
   /** Chain family identifier for Aptos networks. */
   static readonly family = ChainFamily.Aptos
@@ -259,7 +259,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @returns A new AptosChain instance.
    */
   static async fromProvider(provider: Aptos, ctx?: WithLogger): Promise<AptosChain> {
-    return new AptosChain(provider, networkInfo(`aptos:${await provider.getChainId()}`), ctx)
+    return new this(provider, networkInfo(`aptos:${await provider.getChainId()}`), ctx)
   }
 
   /**

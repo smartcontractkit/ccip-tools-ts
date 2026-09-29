@@ -15,15 +15,66 @@ import type { ChainFamily } from '../../networks.ts'
 import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
+  type ApplyCCVConfigUpdatesParams,
+  ApplyCCVConfigUpdates,
+} from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
+import {
   type DeployAdvancedPoolHooksParams,
   DeployAdvancedPoolHooks,
 } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
 import {
-  type AuthorizeLockboxCallersParams,
-  AuthorizeLockboxCallers,
-} from './lockbox/operations/authorize-callers.ts'
+  type GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  type GetAllAdvancedPoolHooksAuthorizedCallersResult,
+  GetAllAdvancedPoolHooksAuthorizedCallers,
+} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
+import {
+  type GetAllCCVConfigsParams,
+  type GetAllCCVConfigsResult,
+  GetAllCCVConfigs,
+} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
+import {
+  type GetCCVConfigParams,
+  type GetCCVConfigResult,
+  GetCCVConfig,
+} from './advanced-pool-hooks/operations/get-ccv-config.ts'
+import {
+  type GetPolicyEngineParams,
+  type GetPolicyEngineResult,
+  GetPolicyEngine,
+} from './advanced-pool-hooks/operations/get-policy-engine.ts'
+import {
+  type GetRequiredCCVsParams,
+  type GetRequiredCCVsResult,
+  GetRequiredCCVs,
+} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
+import {
+  type GetThresholdAmountParams,
+  type GetThresholdAmountResult,
+  GetThresholdAmount,
+} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
+import {
+  type SetPolicyEngineParams,
+  SetPolicyEngine,
+} from './advanced-pool-hooks/operations/set-policy-engine.ts'
+import {
+  type SetThresholdAmountParams,
+  SetThresholdAmount,
+} from './advanced-pool-hooks/operations/set-threshold-amount.ts'
+import {
+  type UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  UpdateAdvancedPoolHooksAuthorizedCallers,
+} from './advanced-pool-hooks/operations/update-authorized-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+import {
+  type GetAllLockboxAuthorizedCallersParams,
+  type GetAllLockboxAuthorizedCallersResult,
+  GetAllLockboxAuthorizedCallers,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+import {
+  type UpdateLockboxAuthorizedCallersParams,
+  UpdateLockboxAuthorizedCallers,
+} from './lockbox/operations/update-authorized-callers.ts'
 import {
   type WithdrawFromLockboxParams,
   WithdrawFromLockbox,
@@ -52,6 +103,13 @@ import {
   type TransferAdminParams,
   TransferAdmin,
 } from './token-admin-registry/operations/transfer-admin.ts'
+import {
+  type DeployTokenAndTokenPoolViaFactoryParams,
+  type DeployTokenPoolWithExistingTokenViaFactoryParams,
+  type FactoryDeploy,
+  deployTokenAndTokenPoolViaFactory,
+  deployTokenPoolWithExistingTokenViaFactory,
+} from './token-pool-factory/deploy.ts'
 import {
   type AcceptPoolOwnershipParams,
   AcceptPoolOwnership,
@@ -268,10 +326,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
+  readonly #applyCCVConfigUpdates = new ApplyCCVConfigUpdates()
+  readonly #updateAdvancedPoolHooksAuthorizedCallers =
+    new UpdateAdvancedPoolHooksAuthorizedCallers()
+  readonly #getCCVConfig = new GetCCVConfig()
+  readonly #getAllCCVConfigs = new GetAllCCVConfigs()
+  readonly #getRequiredCCVs = new GetRequiredCCVs()
+  readonly #getAllAdvancedPoolHooksAuthorizedCallers =
+    new GetAllAdvancedPoolHooksAuthorizedCallers()
+  readonly #getPolicyEngine = new GetPolicyEngine()
+  readonly #getThresholdAmount = new GetThresholdAmount()
+  readonly #setPolicyEngine = new SetPolicyEngine()
+  readonly #setThresholdAmount = new SetThresholdAmount()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
-  readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
+  readonly #updateLockboxAuthorizedCallers = new UpdateLockboxAuthorizedCallers()
+  readonly #getAllLockboxAuthorizedCallers = new GetAllLockboxAuthorizedCallers()
   readonly #depositToLockbox = new DepositToLockbox()
   readonly #withdrawFromLockbox = new WithdrawFromLockbox()
 
@@ -1484,6 +1555,365 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads one remote chain's complete CCV config from `AdvancedPoolHooks`.
+   *
+   * @remarks An all-empty result is normal: the selector has no configured requirements. Base
+   * lists apply to every transfer; threshold lists add requirements at or above the hooks'
+   * threshold amount. `address(0)` selects the default CCV.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` or `remoteChainSelector` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const config = await cct.getCCVConfig({
+   *   advancedPoolHooks: '0xHooks...',
+   *   remoteChainSelector: 5009297550715157269n,
+   * })
+   * ```
+   */
+  getCCVConfig(opts: GetCCVConfigParams): Promise<GetCCVConfigResult> {
+    return this.#getCCVConfig.query(this.chain, opts)
+  }
+
+  /**
+   * Lists every remote chain with a non-empty base CCV config.
+   *
+   * @remarks The result follows the contract's enumerable-set order, which is not a stable sort.
+   * A config with only threshold CCVs cannot exist; threshold CCVs require a base list.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const configs = await cct.getAllCCVConfigs({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getAllCCVConfigs(opts: GetAllCCVConfigsParams): Promise<GetAllCCVConfigsResult> {
+    return this.#getAllCCVConfigs.query(this.chain, opts)
+  }
+
+  /**
+   * Resolves the CCVs required for a proposed inbound or outbound transfer.
+   *
+   * @remarks This is the hooks contract's current decision for the selector, amount, and direction;
+   * it includes threshold CCVs when the amount reaches the configured threshold. The standard
+   * `AdvancedPoolHooks` ignores the interface's token/finality/extra-data arguments, so this query
+   * supplies their neutral values internally.
+   *
+   * @throws {@link CCTParamsInvalidError} if a param is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const ccvs = await cct.getRequiredCCVs({
+   *   advancedPoolHooks: '0xHooks...',
+   *   remoteChainSelector: 5009297550715157269n,
+   *   amount: 1_000_000n,
+   *   direction: 'outbound',
+   * })
+   * ```
+   */
+  getRequiredCCVs(opts: GetRequiredCCVsParams): Promise<GetRequiredCCVsResult> {
+    return this.#getRequiredCCVs.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `applyCCVConfigUpdates` tx (for multisig / offline signing); use
+   * {@link applyCCVConfigUpdates} to sign and submit it directly.
+   *
+   * @remarks Each entry replaces one remote chain's complete base and threshold CCV lists.
+   * Threshold lists require a non-empty matching base list; CCVs cannot repeat within or across
+   * those paired lists. `address(0)` in any list selects the default CCV. The target is probed
+   * to confirm it reports `AdvancedPoolHooks` before calldata is returned.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
+   * list lacks base CCVs, or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedApplyCCVConfigUpdates({
+   *   advancedPoolHooks: '0xHooks...',
+   *   ccvConfigArgs: [{
+   *     remoteChainSelector: 5009297550715157269n,
+   *     outboundCCVs: ['0xCCV...'],
+   *     thresholdOutboundCCVs: [],
+   *     inboundCCVs: [],
+   *     thresholdInboundCCVs: []
+   *   }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedApplyCCVConfigUpdates(opts: ApplyCCVConfigUpdatesParams): Promise<UnsignedEVMTx> {
+    return this.#applyCCVConfigUpdates.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces per-chain CCV requirements, signing + submitting as the hooks owner. Use
+   * {@link generateUnsignedApplyCCVConfigUpdates} for multisig or offline signing.
+   *
+   * @remarks Base CCVs apply to every transfer; threshold CCVs add requirements only above the
+   * hooks' configured threshold. `sender` defaults to the wallet address and, when supplied,
+   * must equal it. `address(0)` in any list selects the default CCV. The target is probed to
+   * confirm it is an `AdvancedPoolHooks` contract.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
+   * list lacks base CCVs, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.applyCCVConfigUpdates({
+   *   advancedPoolHooks: '0xHooks...',
+   *   ccvConfigArgs: [{
+   *     remoteChainSelector: 5009297550715157269n,
+   *     outboundCCVs: ['0xCCV...'],
+   *     thresholdOutboundCCVs: [],
+   *     inboundCCVs: [],
+   *     thresholdInboundCCVs: []
+   *   }],
+   *   wallet,
+   * })
+   * ```
+   */
+  applyCCVConfigUpdates(
+    opts: EVMExecuteParams<ApplyCCVConfigUpdatesParams>,
+  ): Promise<TransactionResult> {
+    return this.#applyCCVConfigUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Lists callers authorized for hooks preflight and postflight checks.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const callers = await cct.getAllAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   * })
+   * ```
+   */
+  getAllAdvancedPoolHooksAuthorizedCallers(
+    opts: GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  ): Promise<GetAllAdvancedPoolHooksAuthorizedCallersResult> {
+    return this.#getAllAdvancedPoolHooksAuthorizedCallers.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the hooks policy engine; the zero address means policy checks are disabled.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const policyEngine = await cct.getPolicyEngine({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getPolicyEngine(opts: GetPolicyEngineParams): Promise<GetPolicyEngineResult> {
+    return this.#getPolicyEngine.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the amount at which additional CCVs apply; zero means they are disabled.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const thresholdAmount = await cct.getThresholdAmount({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getThresholdAmount(opts: GetThresholdAmountParams): Promise<GetThresholdAmountResult> {
+    return this.#getThresholdAmount.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned authorized-caller update for an `AdvancedPoolHooks`; use
+   * {@link updateAdvancedPoolHooksAuthorizedCallers} to sign and submit it directly.
+   *
+   * @remarks Caller arrays reject duplicates (including different address casing). Removes run
+   * before adds, so a caller present in both lists remains authorized. The hooks target and
+   * supplied owner are pre-flighted before calldata is returned.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   *   addedCallers: ['0xPool...'],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers(
+    opts: UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#updateAdvancedPoolHooksAuthorizedCallers.generate(this.chain, opts)
+  }
+
+  /**
+   * Updates callers permitted to invoke hooks checks, signing + submitting as the hooks owner.
+   * Use {@link generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers} for multisig or offline signing.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.updateAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   *   addedCallers: ['0xPool...'],
+   *   wallet,
+   * })
+   * ```
+   */
+  updateAdvancedPoolHooksAuthorizedCallers(
+    opts: EVMExecuteParams<UpdateAdvancedPoolHooksAuthorizedCallersParams>,
+  ): Promise<TransactionResult> {
+    return this.#updateAdvancedPoolHooksAuthorizedCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `setPolicyEngine` tx for an `AdvancedPoolHooks`; use
+   * {@link setPolicyEngine} to sign and submit it directly.
+   *
+   * @remarks The zero address disables policy checks. A non-zero engine must have deployed code
+   * and implement `attach()` / `detach()`; code presence alone cannot verify that interface. The
+   * target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it must
+   * be the current hooks owner.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
+   * code, or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetPolicyEngine({
+   *   advancedPoolHooks: '0xHooks...',
+   *   newPolicyEngine: '0xPolicyEngine...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetPolicyEngine(opts: SetPolicyEngineParams): Promise<UnsignedEVMTx> {
+    return this.#setPolicyEngine.generate(this.chain, opts)
+  }
+
+  /**
+   * Attaches a policy engine to an `AdvancedPoolHooks`, signing + submitting as its owner. Pass
+   * the zero address to disable policy checks. Use {@link generateUnsignedSetPolicyEngine} for
+   * multisig or offline signing.
+   *
+   * @remarks The hooks contract detaches the old engine before attaching the new one. A reverting
+   * old-engine detach reverts this transaction; use the contract's explicit recovery setter if
+   * that is intentional.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
+   * code, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setPolicyEngine({
+   *   advancedPoolHooks: '0xHooks...',
+   *   newPolicyEngine: '0xPolicyEngine...',
+   *   wallet,
+   * })
+   * ```
+   */
+  setPolicyEngine(opts: EVMExecuteParams<SetPolicyEngineParams>): Promise<TransactionResult> {
+    return this.#setPolicyEngine.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `setThresholdAmount` tx for an `AdvancedPoolHooks`; use
+   * {@link setThresholdAmount} to sign and submit it directly.
+   *
+   * @remarks Zero disables threshold CCVs; base CCVs continue to apply. The target is probed to
+   * confirm it reports `AdvancedPoolHooks`; when `sender` is supplied, it must be the current
+   * hooks owner.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetThresholdAmount({
+   *   advancedPoolHooks: '0xHooks...',
+   *   thresholdAmount: 1_000_000n,
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetThresholdAmount(opts: SetThresholdAmountParams): Promise<UnsignedEVMTx> {
+    return this.#setThresholdAmount.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets the amount at which an `AdvancedPoolHooks` requires additional CCVs, signing + submitting
+   * as its owner. Pass zero to disable threshold CCVs. Use
+   * {@link generateUnsignedSetThresholdAmount} for multisig or offline signing.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setThresholdAmount({
+   *   advancedPoolHooks: '0xHooks...',
+   *   thresholdAmount: 1_000_000n,
+   *   wallet,
+   * })
+   * ```
+   */
+  setThresholdAmount(opts: EVMExecuteParams<SetThresholdAmountParams>): Promise<TransactionResult> {
+    return this.#setThresholdAmount.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned pool `updateAdvancedPoolHooks` tx (for multisig / offline signing):
    * points a **v2.0.0** pool at an `AdvancedPoolHooks` contract, or detaches the current one
    * with the zero address.
@@ -1715,7 +2145,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, which has no
    * liquidity to manage
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
-   * external `ERC20LockBox` instead — see {@link deployLockbox} / {@link authorizeLockboxCallers}
+   * external `ERC20LockBox` instead — see {@link deployLockbox} / {@link updateLockboxAuthorizedCallers}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `amount` is zero, the pool
    * cannot accept liquidity, or `sender` is given and is not the pool's rebalancer
    * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
@@ -1897,7 +2327,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * entirely: the pool then accepts those calls from nobody.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
-   * on its `ERC20LockBox` instead — see {@link authorizeLockboxCallers}
+   * on its `ERC20LockBox` instead — see {@link updateLockboxAuthorizedCallers}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
    * address, or `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
@@ -2014,9 +2444,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Mint/burn are role-gated (`MINTER_ROLE`/`BURNER_ROLE`); the token grants neither
    * to any pool at deploy. `preMint` mints initial supply to `preMintRecipient`, but before a
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
+   *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployToken({
@@ -2494,7 +2926,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
    * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
-   * → {@link deployTokenPool} (passing the lockbox) → {@link authorizeLockboxCallers}
+   * → {@link deployTokenPool} (passing the lockbox) → {@link updateLockboxAuthorizedCallers}
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity.
@@ -2525,12 +2957,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
    * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
-   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`, plus whoever funds it) →
+   * lockbox) → {@link updateLockboxAuthorizedCallers} (`addedCallers: [pool]`, plus whoever funds it) →
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployTokenPool({
@@ -2554,7 +2987,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
    * `{ hash, contractAddress, verification }`.
    * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
-   * {@link authorizeLockboxCallers} before the pool can lock/release.
+   * {@link updateLockboxAuthorizedCallers} before the pool can lock/release.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -2573,13 +3006,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * tx hash, the newly deployed lockbox address, and a `verification`
    * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
-   * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
+   * {@link deployTokenPool} (passing this lockbox) → {@link updateLockboxAuthorizedCallers}
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid
-   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
    * @example
    * ```typescript
    * const { hash, contractAddress, verification } = await cct.deployLockbox({
@@ -2590,6 +3024,68 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   deployLockbox(opts: EVMExecuteParams<DeployLockboxParams>): Promise<DeployResult> {
     return this.#deployLockbox.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `TokenPoolFactory` (v2.0.0) `deployTokenAndTokenPool` call — deploying a
+   * CrossChainToken and its pool (and, for LockRelease, a lockbox) and configuring the given remote
+   * lanes, all in one transaction — and returns it with the locally-predicted token, pool, and
+   * (auto-deployed) lockbox addresses, known before signing.
+   *
+   * @remarks **Unsigned-only.** The factory salt is `keccak256(abi.encodePacked(salt, msg.sender))`,
+   * so `sender` (whoever sends this) is baked into the addresses; sign with a wallet whose address
+   * equals `sender`. The predicted pool address depends on the factory's `getStaticConfig()`
+   * (`rmnProxy`/`ccipRouter`), read over RPC — pass `expectedStaticConfig` to pin it to trusted
+   * values. Ownership is *proposed* (Ownable2Step) to `futureOwner`; batch the accepts separately.
+   * @throws {@link CCTParamsInvalidError} on invalid params, empty init code, salt, static-config
+   * mismatch, or an already-occupied predicted address
+   * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { token, pool, transaction } = await cct.generateUnsignedDeployTokenAndTokenPoolViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-token-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: { name: 'My Token', symbol: 'MTK', decimals: 18, maxSupply: 0n },
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenAndTokenPoolViaFactory(
+    opts: DeployTokenAndTokenPoolViaFactoryParams,
+  ): Promise<FactoryDeploy> {
+    return deployTokenAndTokenPoolViaFactory(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `TokenPoolFactory` (v2.0.0) `deployTokenPoolWithExistingToken` call for an
+   * already-deployed token (any ERC20 — the factory does not require a CrossChainToken), configuring
+   * the given remote lanes, and returns it with the locally-predicted pool and (auto-deployed)
+   * lockbox addresses, known before signing.
+   *
+   * @remarks Same unsigned-only, sender-bound-salt, and RPC-trust caveats as
+   * {@link generateUnsignedDeployTokenAndTokenPoolViaFactory}.
+   * @throws {@link CCTParamsInvalidError} on invalid params, empty init code, salt, static-config
+   * mismatch, or an already-occupied predicted address
+   * @throws {@link CCTContractTypeInvalidError} if `factory` is not a `TokenPoolFactory`
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
+   * @example
+   * ```typescript
+   * const { pool, transaction } = await cct.generateUnsignedDeployTokenPoolWithExistingTokenViaFactory({
+   *   factory: '0xFactory...',
+   *   sender: '0xSafe...', // baked into the salt/addresses; must sign the tx
+   *   salt: 'my-pool-v1',
+   *   type: 'BurnMintTokenPool',
+   *   token: '0xExistingToken...',
+   *   localTokenDecimals: 18,
+   * })
+   * ```
+   */
+  generateUnsignedDeployTokenPoolWithExistingTokenViaFactory(
+    opts: DeployTokenPoolWithExistingTokenViaFactoryParams,
+  ): Promise<FactoryDeploy> {
+    return deployTokenPoolWithExistingTokenViaFactory(this.chain, opts)
   }
 
   /**
@@ -2610,17 +3106,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```typescript
    * // `sender` must be the lockbox owner
-   * const unsigned = await cct.generateUnsignedAuthorizeLockboxCallers({
+   * const unsigned = await cct.generateUnsignedUpdateLockboxAuthorizedCallers({
    *   lockbox: '0xLockbox...',
    *   addedCallers: ['0xPool...'], // the LockReleaseTokenPool to authorize
    *   sender: '0xLockboxOwner...',
    * })
    * ```
    */
-  generateUnsignedAuthorizeLockboxCallers(
-    opts: AuthorizeLockboxCallersParams,
+  generateUnsignedUpdateLockboxAuthorizedCallers(
+    opts: UpdateLockboxAuthorizedCallersParams,
   ): Promise<UnsignedEVMTx> {
-    return this.#authorizeLockboxCallers.generate(this.chain, opts)
+    return this.#updateLockboxAuthorizedCallers.generate(this.chain, opts)
   }
 
   /**
@@ -2628,7 +3124,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
    * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox`, and a wallet
    * that is not its owner, before the wallet is asked to sign; see
-   * {@link generateUnsignedAuthorizeLockboxCallers}.
+   * {@link generateUnsignedUpdateLockboxAuthorizedCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
    * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the
@@ -2641,17 +3137,35 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```typescript
    * // `wallet` must sign as the lockbox owner
-   * const { hash } = await cct.authorizeLockboxCallers({
+   * const { hash } = await cct.updateLockboxAuthorizedCallers({
    *   lockbox: '0xLockbox...',
    *   addedCallers: ['0xPool...'],
    *   wallet,
    * })
    * ```
    */
-  authorizeLockboxCallers(
-    opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
+  updateLockboxAuthorizedCallers(
+    opts: EVMExecuteParams<UpdateLockboxAuthorizedCallersParams>,
   ): Promise<TransactionResult> {
-    return this.#authorizeLockboxCallers.execute(this.chain, opts)
+    return this.#updateLockboxAuthorizedCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Lists callers authorized to deposit into or withdraw from an `ERC20LockBox`.
+   *
+   * @throws {@link CCTParamsInvalidError} if `lockbox` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is not `ERC20LockBox`
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const callers = await cct.getAllLockboxAuthorizedCallers({ lockbox: '0xLockbox...' })
+   * ```
+   */
+  getAllLockboxAuthorizedCallers(
+    opts: GetAllLockboxAuthorizedCallersParams,
+  ): Promise<GetAllLockboxAuthorizedCallersResult> {
+    return this.#getAllLockboxAuthorizedCallers.query(this.chain, opts)
   }
 
   /**
@@ -3324,12 +3838,61 @@ export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set
 export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/update-advanced-pool-hooks.ts'
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
-export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export type { UpdateLockboxAuthorizedCallersParams } from './lockbox/operations/update-authorized-callers.ts'
+export type {
+  GetAllLockboxAuthorizedCallersParams,
+  GetAllLockboxAuthorizedCallersResult,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+export * from './lockbox/contracts.ts'
+export type { UpdateAdvancedPoolHooksAuthorizedCallersParams } from './advanced-pool-hooks/operations/update-authorized-callers.ts'
+export type {
+  GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  GetAllAdvancedPoolHooksAuthorizedCallersResult,
+} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
+export type {
+  GetPolicyEngineParams,
+  GetPolicyEngineResult,
+} from './advanced-pool-hooks/operations/get-policy-engine.ts'
+export type {
+  GetThresholdAmountParams,
+  GetThresholdAmountResult,
+} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
 export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
 export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
-export * from './lockbox/contracts.ts'
+export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
+export type {
+  GetAllCCVConfigsParams,
+  GetAllCCVConfigsResult,
+} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
+export type {
+  GetCCVConfigParams,
+  GetCCVConfigResult,
+} from './advanced-pool-hooks/operations/get-ccv-config.ts'
+export type {
+  CCVMessageDirection,
+  GetRequiredCCVsParams,
+  GetRequiredCCVsResult,
+} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
 export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
+export type { SetPolicyEngineParams } from './advanced-pool-hooks/operations/set-policy-engine.ts'
+export type { SetThresholdAmountParams } from './advanced-pool-hooks/operations/set-threshold-amount.ts'
 export * from './advanced-pool-hooks/contracts.ts'
+export type {
+  DeployTokenAndTokenPoolViaFactoryParams,
+  DeployTokenPoolWithExistingTokenViaFactoryParams,
+  FactoryDeploy,
+  FactoryDeployCommon,
+  FactoryRateLimiterConfig,
+  FactoryRemoteChainConfig,
+  FactoryRemoteTokenPool,
+  FactoryTokenPoolType,
+} from './token-pool-factory/deploy.ts'
+export {
+  deployTokenAndTokenPoolViaFactory,
+  deployTokenAndTokenPoolViaFactoryUnchecked,
+  deployTokenPoolWithExistingTokenViaFactory,
+  deployTokenPoolWithExistingTokenViaFactoryUnchecked,
+} from './token-pool-factory/deploy.ts'
 export type {
   DeployArtifact,
   DeployResult,

@@ -23,9 +23,8 @@ export {
   normalizeHex,
   util,
 } from './shared/codec.ts'
-import type { Chain, ChainStatic } from './chain.ts'
+import type { Chain } from './chain.ts'
 import {
-  CCIPChainFamilyUnsupportedError,
   CCIPDataFormatUnsupportedError,
   CCIPError,
   CCIPTypeVersionInvalidError,
@@ -33,7 +32,7 @@ import {
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
 import { util } from './shared/codec.ts'
-import { supportedChains } from './supported-chains.ts'
+import { getChainStatic, getChainStatics } from './supported-chains.ts'
 import type { Logger, WithLogger } from './types.ts'
 
 /** How far back the bracketing walk reaches on its first probe. Only a starting
@@ -193,9 +192,7 @@ export function jsonParse<T = unknown>(text: string): T {
  * ```
  */
 export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFamily.EVM): string {
-  const chain = supportedChains[family]
-  if (!chain) throw new CCIPChainFamilyUnsupportedError(family)
-  return chain.getAddress(address)
+  return getChainStatic(family).getAddress(address)
 }
 
 /**
@@ -203,14 +200,11 @@ export function decodeAddress(address: BytesLike, family: ChainFamily = ChainFam
  * @param txHash - Value to check
  * @param family - Optional chain family to validate against
  * @returns true if value is a valid transaction hash
- * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not supported
+ * @throws {@link CCIPChainFamilyUnsupportedError} if specified chain family is not registered (or,
+ *   without `family`, if no family is registered)
  */
 export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash is string {
-  let chains: ChainStatic[]
-  if (!family) chains = Object.values(supportedChains)
-  else if (family in supportedChains) chains = [supportedChains[family]!]
-  else throw new CCIPChainFamilyUnsupportedError(family)
-  for (const C of chains) {
+  for (const C of getChainStatics(family)) {
     try {
       if (C.isTxHash(txHash)) return true
     } catch (_) {

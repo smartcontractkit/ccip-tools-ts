@@ -5,7 +5,7 @@
  * `withdrawLiquidity` the payout address is explicit: `withdraw` takes a `recipient` rather than
  * paying `msg.sender`, and reverts `RecipientCannotBeZeroAddress` for the zero address. The
  * caller must appear in `getAllAuthorizedCallers()` or it reverts `UnauthorizedCaller(address)`
- * (selector `0xd86ad9cf`); the lockbox owner grants that with `authorizeLockboxCallers`.
+ * (selector `0xd86ad9cf`); the lockbox owner grants that with `updateLockboxAuthorizedCallers`.
  *
  * @remarks `amount` of `type(uint256).max` is a sentinel: the lockbox substitutes its whole
  * balance. Preserved rather than rejected, since draining an escrow without first reading its

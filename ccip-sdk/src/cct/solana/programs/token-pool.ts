@@ -1,6 +1,5 @@
 import { Buffer } from 'buffer'
 
-import { Program } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPError } from '../../../errors/index.ts'
@@ -11,6 +10,7 @@ import {
   tokenPoolCoder,
 } from '../../../solana/idl/token-pool-coder.ts'
 export type { TokenPoolConfig } from '../../../solana/idl/token-pool-coder.ts'
+import { newProgram } from '../../../solana/coder.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
 import { CCTDataDecodeError } from '../../errors.ts'
@@ -73,7 +73,7 @@ export function createTokenPoolProgram(
   poolProgram: PublicKey,
   payer: PublicKey,
 ) {
-  return new Program(TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
+  return newProgram(TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
 }
 
 /** Creates an Anchor Program client for a lock-release token pool program. */
@@ -82,7 +82,7 @@ export function createLockReleaseTokenPoolProgram(
   poolProgram: PublicKey,
   payer: PublicKey,
 ) {
-  return new Program(LOCK_RELEASE_TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
+  return newProgram(LOCK_RELEASE_TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
 }
 
 /** Decodes a canonical token pool state account. */

@@ -24,7 +24,7 @@ import {
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 /** Parameters shared by Solana token pool ownership-transfer generation and execution. */
-type TransferOwnershipParams = PoolProgramRef & {
+type TransferPoolOwnershipParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
   /** Address proposed as the next pool owner. It must accept ownership separately. */
@@ -33,7 +33,7 @@ type TransferOwnershipParams = PoolProgramRef & {
   authority?: string
 }
 
-type ParsedTransferOwnershipParams = {
+type ParsedTransferPoolOwnershipParams = {
   tokenAddress: PublicKey
   newOwner: PublicKey
   poolProgram: PublicKey
@@ -42,27 +42,29 @@ type ParsedTransferOwnershipParams = {
 }
 
 /** Parameters for unsigned Solana token pool ownership transfer. */
-export type GenerateTransferOwnershipParams = SolanaGenerateParams<TransferOwnershipParams>
+export type GenerateTransferPoolOwnershipParams = SolanaGenerateParams<TransferPoolOwnershipParams>
 
 /** Unsigned Solana token pool ownership transfer result. */
-export type GenerateTransferOwnershipResult = UnsignedSolanaTx
+export type GenerateTransferPoolOwnershipResult = UnsignedSolanaTx
 
 /** Parameters for executing Solana token pool ownership transfer. */
-export type ExecuteTransferOwnershipParams = SolanaExecuteParams<TransferOwnershipParams>
+export type ExecuteTransferPoolOwnershipParams = SolanaExecuteParams<TransferPoolOwnershipParams>
 
 /** Result of executing Solana token pool ownership transfer. */
-export type ExecuteTransferOwnershipResult = TransactionResult
+export type ExecuteTransferPoolOwnershipResult = TransactionResult
 
 /** Proposes a new owner for a Solana token pool. The proposed owner must accept separately. */
-export class TransferOwnership extends SolanaOperation<
-  TransferOwnershipParams,
+export class TransferPoolOwnership extends SolanaOperation<
+  TransferPoolOwnershipParams,
   UnsignedSolanaTx,
-  ParsedTransferOwnershipParams
+  ParsedTransferPoolOwnershipParams
 > {
-  readonly name = 'transferOwnership'
+  readonly name = 'transferPoolOwnership'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateTransferOwnershipParams): ParsedTransferOwnershipParams {
+  protected override parse(
+    params: GenerateTransferPoolOwnershipParams,
+  ): ParsedTransferPoolOwnershipParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     const newOwner = parsePublicKey(this.name, 'newOwner', params.newOwner)
     if (newOwner.equals(PublicKey.default)) {
@@ -88,7 +90,7 @@ export class TransferOwnership extends SolanaOperation<
   /** Reads the pool state to reject self-transfer, then builds the unsigned Solana `transferOwnership` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
-    opts: ParsedTransferOwnershipParams,
+    opts: ParsedTransferPoolOwnershipParams,
   ): Promise<UnsignedSolanaTx> {
     const { config } = await new GetTokenPoolState().query(chain, {
       tokenAddress: opts.tokenAddress.toBase58(),
@@ -118,8 +120,8 @@ export class TransferOwnership extends SolanaOperation<
   /** Generate, sign, simulate, send, and confirm with the current pool owner wallet. */
   override async execute(
     chain: SolanaChain,
-    params: ExecuteTransferOwnershipParams,
-  ): Promise<ExecuteTransferOwnershipResult> {
+    params: ExecuteTransferPoolOwnershipParams,
+  ): Promise<ExecuteTransferPoolOwnershipResult> {
     const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
 
     if (params.authority !== undefined) {
@@ -127,7 +129,7 @@ export class TransferOwnership extends SolanaOperation<
         this.name,
         parsed.authority,
         wallet.publicKey,
-        'transferOwnership requires authority to be the executing wallet. Use generateUnsignedTransferOwnership for externally signed transactions.',
+        'transferPoolOwnership requires authority to be the executing wallet. Use generateUnsignedTransferPoolOwnership for externally signed transactions.',
       )
     }
 
