@@ -67,6 +67,11 @@ import {
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
 import {
+  type GetAllLockboxAuthorizedCallersParams,
+  type GetAllLockboxAuthorizedCallersResult,
+  GetAllLockboxAuthorizedCallers,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+import {
   type UpdateLockboxAuthorizedCallersParams,
   UpdateLockboxAuthorizedCallers,
 } from './lockbox/operations/update-authorized-callers.ts'
@@ -330,6 +335,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
   readonly #updateLockboxAuthorizedCallers = new UpdateLockboxAuthorizedCallers()
+  readonly #getAllLockboxAuthorizedCallers = new GetAllLockboxAuthorizedCallers()
   readonly #depositToLockbox = new DepositToLockbox()
   readonly #withdrawFromLockbox = new WithdrawFromLockbox()
 
@@ -3075,6 +3081,24 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Lists callers authorized to deposit into or withdraw from an `ERC20LockBox`.
+   *
+   * @throws {@link CCTParamsInvalidError} if `lockbox` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is not `ERC20LockBox`
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const callers = await cct.getAllLockboxAuthorizedCallers({ lockbox: '0xLockbox...' })
+   * ```
+   */
+  getAllLockboxAuthorizedCallers(
+    opts: GetAllLockboxAuthorizedCallersParams,
+  ): Promise<GetAllLockboxAuthorizedCallersResult> {
+    return this.#getAllLockboxAuthorizedCallers.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned `ERC20LockBox` `deposit` tx (for multisig / offline signing) that funds
    * the lockbox a v2.0.0 LockRelease pool releases from.
    * @remarks The step the deploy sequences stop short of: a v2.0.0 pool cannot release anything
@@ -3745,6 +3769,10 @@ export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/upda
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
 export type { UpdateLockboxAuthorizedCallersParams } from './lockbox/operations/update-authorized-callers.ts'
+export type {
+  GetAllLockboxAuthorizedCallersParams,
+  GetAllLockboxAuthorizedCallersResult,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
 export * from './lockbox/contracts.ts'
 export type { UpdateAdvancedPoolHooksAuthorizedCallersParams } from './advanced-pool-hooks/operations/update-authorized-callers.ts'
 export type {

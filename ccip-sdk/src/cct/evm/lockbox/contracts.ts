@@ -168,6 +168,15 @@ export async function assertLockboxToken(
   )
 }
 
+/** Reads every lockbox authorized caller in one `eth_call`, checksummed. */
+export async function readAllLockboxAuthorizedCallers(
+  chain: EVMChain,
+  lockbox: string,
+): Promise<string[]> {
+  const box: LockboxReader = getTypedContract(chain, lockbox, ERC20_LOCKBOX_V2_0_0_ABI)
+  return resultToObject(await box.getAllAuthorizedCallers()).map((caller) => getAddress(caller))
+}
+
 /**
  * Pre-flights `account` against the lockbox's `getAllAuthorizedCallers()`.
  *
@@ -191,8 +200,7 @@ export async function assertLockboxCaller(
   lockbox: string,
   account: string,
 ): Promise<void> {
-  const box: LockboxReader = getTypedContract(chain, lockbox, ERC20_LOCKBOX_V2_0_0_ABI)
-  const callers = resultToObject(await box.getAllAuthorizedCallers()).map((c) => getAddress(c))
+  const callers = await readAllLockboxAuthorizedCallers(chain, lockbox)
   if (callers.includes(getAddress(account))) return
   throw new CCTParamsInvalidError(
     operation,
