@@ -240,7 +240,7 @@ describe('DepositToLockbox (cct/evm lockbox operation)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'sender' &&
-          err.message.includes('authorizeLockboxCallers'),
+          err.message.includes('updateLockboxAuthorizedCallers'),
       )
     })
 
