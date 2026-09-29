@@ -1,0 +1,234 @@
+---
+id: evm
+title: 'CCT on EVM'
+description: 'Deploy and administer EVM cross-chain token pools with EVMTokenManager.'
+sidebar_label: EVM
+---
+
+# CCT on EVM
+
+Use `EVMTokenManager` for CCT administration on EVM chains. It wraps an `EVMChain` and supports both signed and unsigned transaction workflows.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMTokenManager } from '@chainlink/ccip-sdk/cct/evm'
+
+const chain = await EVMChain.fromUrl(process.env.RPC_URL!)
+const cct = EVMTokenManager.fromChain(chain)
+```
+
+## Required configuration
+
+| Value | Purpose |
+| --- | --- |
+| RPC URL | Connects the manager to the source EVM chain. |
+| Router and RMN proxy | Required to deploy the pool and configure CCIP routing. Use the addresses for the target CCIP deployment. |
+| Registry module | Required by `registerAdmin`. It is deployment-specific and cannot be discovered on-chain. |
+| Lockbox | Required only for a v2.0.0 `LockReleaseTokenPool`. It must escrow the same token. |
+
+## Set up a CCT
+
+Use the addresses for your target CCIP deployment. Do not reuse the placeholders below.
+
+### Deploy or use an existing token
+
+```typescript
+const token = await cct.deployToken({
+  name: 'Example Token',
+  symbol: 'EXAMPLE',
+  decimals: 18,
+  maxSupply: 0n,
+  owner: await wallet.getAddress(),
+  wallet,
+})
+```
+
+For an existing `FactoryBurnMintERC20` or `CrossChainToken`, use its address as `tokenAddress` in the remaining steps.
+
+### Register and accept the token admin
+
+```typescript
+await cct.registerAdmin({
+  tokenAddress: token.contractAddress,
+  registryModule: process.env.REGISTRY_MODULE!,
+  address: process.env.ROUTER!,
+  wallet,
+})
+
+await cct.acceptAdmin({
+  tokenAddress: token.contractAddress,
+  address: process.env.ROUTER!,
+  wallet,
+})
+```
+
+`registerAdmin` and `acceptAdmin` are a two-step handoff. The wallet that accepts must be the proposed TokenAdminRegistry administrator.
+
+### Deploy and register the pool
+
+```typescript
+const pool = await cct.deployTokenPool({
+  type: 'BurnMintTokenPool',
+  token: token.contractAddress,
+  localTokenDecimals: 18,
+  rmnProxy: process.env.RMN_PROXY!,
+  router: process.env.ROUTER!,
+  wallet,
+})
+
+await cct.setPool({
+  tokenAddress: token.contractAddress,
+  poolAddress: pool.contractAddress,
+  address: process.env.ROUTER!,
+  wallet,
+})
+
+await cct.grantMintAndBurnRoles({
+  tokenAddress: token.contractAddress,
+  burnAndMinter: pool.contractAddress,
+  wallet,
+})
+```
+
+## Configure additional networks
+
+Add remote-chain configuration only after both sides have a deployed and registered pool. `applyChainUpdates` can add and remove configurations in one transaction.
+
+```typescript
+await cct.applyChainUpdates({
+  version: '2.0.0',
+  poolAddress: pool.contractAddress,
+  remoteChainSelectorsToRemove: [],
+  chainsToAdd: [
+    {
+      remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
+      remotePoolAddresses: [process.env.REMOTE_POOL!],
+      remoteTokenAddress: process.env.REMOTE_TOKEN!,
+      outboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 100n },
+      inboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 100n },
+    },
+  ],
+  wallet,
+})
+```
+
+Use `getTokenPoolState`, `getTokenPoolRemotes`, and `getTokenAdminRegistry` to read back the deployed configuration before enabling transfers.
+
+## Alternative deployment: TokenPoolFactory
+
+Use the factory only when the target CCIP deployment provides a `TokenPoolFactory` or you need addresses known before signing. Its two methods are unsigned-only and return the predicted token, pool, and optional lockbox address with a transaction for the configured `sender` to submit.
+
+```typescript
+const deployment = await cct.generateUnsignedDeployTokenAndTokenPoolViaFactory({
+  factory: process.env.TOKEN_POOL_FACTORY!,
+  sender: process.env.SAFE_ADDRESS!, // Must be the account that submits `transaction`
+  salt: 'example-token-v1',
+  type: 'BurnMintTokenPool',
+  token: {
+    name: 'Example Token',
+    symbol: 'EXAMPLE',
+    decimals: 18,
+    maxSupply: 0n,
+  },
+  expectedStaticConfig: {
+    rmnProxy: process.env.RMN_PROXY!,
+    router: process.env.ROUTER!,
+  },
+})
+
+console.log('Predicted token:', deployment.token)
+console.log('Predicted pool:', deployment.pool)
+// Submit deployment.transaction from deployment's `sender` (for example, the Safe).
+```
+
+For an existing ERC-20, use `generateUnsignedDeployTokenPoolWithExistingTokenViaFactory` and provide `token` and `localTokenDecimals`. The factory salt is tied to `sender`. Submit the transaction from that account, or the predicted addresses will change. `futureOwner` must accept ownership in a separate transaction. The factory deploys v2 pools without `AdvancedPoolHooks`. Add hooks afterward if you need them.
+
+## Configure a token pool
+
+### Rate limits and transfer fees
+
+After a lane exists, use `setChainRateLimiterConfigs` to adjust its inbound and outbound buckets. It is callable by the pool owner or its delegated rate-limit admin. On v2 pools, `fastFinality: true` targets the separate FTF bucket.
+
+For v2 pools, use `applyTokenTransferFeeConfigUpdates` to configure or disable per-destination transfer fees. Use `setAllowedFinalityConfig` to enable or change FTF/FCR finality. Read the current configuration first. These setters replace the relevant configuration. See [Fee Estimation](../fee-estimation) and [Faster-Than-Finality](../ftf) for transfer behavior.
+
+### Advanced Pool Hooks and CCVs
+
+On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. Deploy hooks with the pool in `authorizedCallers`, then bind them to the pool. A pool omitted from `authorizedCallers` cannot transfer through the hooks.
+
+```typescript
+const hooks = await cct.deployAdvancedPoolHooks({
+  authorizedCallers: [pool.contractAddress],
+  wallet,
+})
+
+await cct.updateAdvancedPoolHooks({
+  poolAddress: pool.contractAddress,
+  advancedPoolHooks: hooks.contractAddress,
+  wallet,
+})
+```
+
+Use `applyCCVConfigUpdates` to set complete per-remote-chain inbound and outbound CCV requirements. Read them with `getCCVConfig` or `getAllCCVConfigs` before enabling a lane.
+
+## Lock/release pools
+
+A v2.0.0 `LockReleaseTokenPool` requires a pre-deployed lockbox for the same token. Its lockbox is immutable: an incorrect address requires a new pool deployment and registry update.
+
+```typescript
+const lockbox = await cct.deployLockbox({
+  token: token.contractAddress,
+  wallet,
+})
+
+const lockReleasePool = await cct.deployTokenPool({
+  type: 'LockReleaseTokenPool',
+  token: token.contractAddress,
+  localTokenDecimals: 18,
+  rmnProxy: process.env.RMN_PROXY!,
+  router: process.env.ROUTER!,
+  lockbox: lockbox.contractAddress,
+  wallet,
+})
+
+await cct.authorizeLockboxCallers({
+  lockbox: lockbox.contractAddress,
+  addedCallers: [lockReleasePool.contractAddress, await wallet.getAddress()],
+  removedCallers: [],
+  wallet,
+})
+
+await cct.approveToken({
+  tokenAddress: token.contractAddress,
+  spender: lockbox.contractAddress,
+  amount: 1_000_000n,
+  wallet,
+})
+await cct.depositToLockbox({
+  lockbox: lockbox.contractAddress,
+  token: token.contractAddress,
+  amount: 1_000_000n,
+  wallet,
+})
+```
+
+## Verify and test a transfer
+
+Verify the TokenAdminRegistry points to the intended pool, the pool reports the expected remote token and remote pool addresses, and rate limits can accommodate the transfer. Then run [Pre-Send Validation](../pre-send-validation) against the source and destination before sending a production transfer.
+
+## Ownership handoffs
+
+| Resource | Propose | Accept |
+| --- | --- | --- |
+| TokenAdminRegistry administrator | `transferAdmin` | `acceptAdmin` |
+| Pool owner | `transferPoolOwnership` | `acceptPoolOwnership` |
+| v1 token owner | `transferTokenOwnership` | `acceptTokenOwnership` |
+| v2 token default admin | `beginDefaultAdminTransfer` | `acceptDefaultAdminTransfer` |
+
+The proposed account must submit the acceptance transaction. Factory `futureOwner` follows the same two-step ownership model. Use `generateUnsigned<Operation>` when an external signer submits a transaction. Set `sender` to enable local authority checks.
+
+## Related
+
+- [EVMTokenManager API reference](/sdk/classes/EVMTokenManager)
+- [Token Pools](../token-pools) — inspect deployed CCIP pool configuration
+- [Pre-Send Validation](../pre-send-validation) — validate the destination pool leg
+- [Sending Messages](../sending-messages) — send transfers after CCT setup

@@ -36,6 +36,17 @@ const sidebars: SidebarsConfig = {
         'guides/manual-execution',
         'guides/querying-data',
         'guides/token-pools',
+        {
+          type: 'category',
+          label: 'Cross-Chain Tokens (CCT)',
+          collapsed: false,
+          items: [
+            'guides/cct/overview',
+            'guides/cct/evm',
+            'guides/cct/solana',
+            'guides/cct/canton',
+          ],
+        },
         'guides/multi-chain',
         'guides/chain-endpoints',
         'guides/viem-integration',

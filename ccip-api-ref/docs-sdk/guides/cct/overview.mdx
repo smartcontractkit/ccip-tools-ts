@@ -1,0 +1,52 @@
+---
+id: overview
+title: 'Cross-Chain Tokens (CCT)'
+description: 'Configure custom cross-chain tokens and pools with the CCIP SDK.'
+sidebar_label: Overview
+---
+
+# Cross-Chain Tokens (CCT)
+
+Cross-Chain Tokens (CCT) let token administrators configure a token pool and its remote-chain lanes for CCIP. The SDK exposes chain-family-specific managers rather than a single cross-family API:
+
+| Chain family | Manager | Import |
+| --- | --- | --- |
+| EVM | `EVMTokenManager` | `@chainlink/ccip-sdk/cct/evm` |
+| Solana | `SolanaTokenManager` | `@chainlink/ccip-sdk/cct/solana` |
+| Canton | `CantonTokenManager` | `@chainlink/ccip-sdk/cct/canton` |
+
+## Choose an execution mode
+
+Each manager provides two forms of write operation:
+
+- `generateUnsigned<Operation>` builds a transaction or instruction set for multisig, offline, or external signing workflows.
+- `<operation>` signs and submits with the supplied chain-family wallet.
+
+Use the unsigned form when the account that owns the token, registry, or pool is a multisig. The signed form validates the wallet and waits for the submitted transaction.
+
+## Typical setup flow
+
+1. Create or identify the local token.
+2. Deploy or initialize its pool.
+3. Register the token administrator and associate the pool in the TokenAdminRegistry where required.
+4. Configure each remote-chain token, pool, rate limit, and any allowlist or verifier requirements.
+5. Fund a lock/release pool before sending transfers.
+6. Read the pool and registry state to verify the final configuration.
+
+The exact sequence and required parameters differ by chain family. Follow the platform guide rather than copying parameters between chains.
+
+## Platform guides
+
+- [EVM](./evm) — ERC-20 token, TokenAdminRegistry, v2 pool, lockbox, and remote-lane operations.
+- [Solana](./solana) — SPL mint, canonical pool programs, PDAs, lookup tables, and remote-lane operations.
+- [Canton](./canton) — registry-pool deployment, atomic lane initialization, and Canton read operations.
+
+:::warning
+Pool administration changes what can be transferred cross-chain. Test with the target pool type, token authority, router, and remote-chain configuration before using a production token.
+:::
+
+## Related
+
+- [EVMTokenManager API reference](/sdk/classes/EVMTokenManager)
+- [SolanaTokenManager API reference](/sdk/classes/SolanaTokenManager)
+- [CantonTokenManager API reference](/sdk/classes/CantonTokenManager)

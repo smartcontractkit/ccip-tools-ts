@@ -1,0 +1,192 @@
+---
+id: solana
+title: 'CCT on Solana'
+description: 'Deploy and administer Solana cross-chain token pools with SolanaTokenManager.'
+sidebar_label: Solana
+---
+
+# CCT on Solana
+
+Use `SolanaTokenManager` to create and administer pools for SPL token mints. It returns unsigned instruction sets for externally signed workflows and can submit transactions using an Anchor-compatible wallet.
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+import { SolanaTokenManager } from '@chainlink/ccip-sdk/cct/solana'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const cct = SolanaTokenManager.fromChain(chain)
+```
+
+## Required configuration
+
+| Value | Purpose |
+| --- | --- |
+| Solana RPC URL | Connects the manager to the target cluster. |
+| Router address | Resolves the TokenAdminRegistry for registration and pool association. |
+| Token mint | The SPL mint managed by the pool. |
+| Pool lookup table | Required by `setPool`. It must contain the pool accounts the router needs. |
+| Remote token and pool addresses | Required for each remote-chain configuration. |
+
+## Set up the SPL token and pool
+
+### Create or use an SPL token
+
+CCT requires an SPL mint. Use an existing mint, or create one with `deployToken`. The mint authority must remain available until the pool and its required mint authority setup are complete.
+
+### Initialize the CCIP token pool
+
+The SDK deploy operation targets the canonical CCIP `burn-mint` and `lock-release` pool programs. It returns the pool state PDA and pool signer PDA.
+
+```typescript
+const result = await cct.deployTokenPool({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  poolType: 'lock-release',
+  createPoolSignerATA: true,
+})
+
+console.log('Pool state:', result.poolAddress)
+console.log('Pool signer:', result.poolSignerAddress)
+```
+
+### Create the pool signer token account
+
+Set `createPoolSignerATA: true` to create the pool signer's associated token account during pool initialization. Otherwise, create it with `createTokenAccount` before registering the pool. Transfers fail without it.
+
+### Use unsigned transactions
+
+For a multisig or external signing flow, generate instructions instead:
+
+```typescript
+const unsigned = await cct.generateUnsignedDeployTokenPool({
+  payer: payer.toBase58(),
+  tokenAddress: mint.toBase58(),
+  poolType: 'lock-release',
+  createPoolSignerATA: true,
+})
+
+// Submit unsigned.instructions with the wallet or multisig that controls `payer`.
+```
+
+Export an unsigned transaction for a wallet, multisig, or offline signer:
+
+```typescript
+const base64 = await cct.serializeUnsignedTx(unsigned, payer.toBase58(), 'base64')
+// Send `base64` to the external signer for deserialization and submission.
+```
+
+`serializeUnsignedTx` always produces a legacy message, regardless of encoding. It cannot serialize transactions that use address lookup tables. Serialize those versioned transactions in the wallet or multisig instead.
+
+## Configure token administration
+
+### Register and accept the token admin
+
+```typescript
+await cct.registerAdmin({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  address: router.toBase58(),
+  poolType: 'lock-release',
+})
+
+await cct.acceptAdmin({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  address: router.toBase58(),
+})
+```
+
+### Configure an SPL token multisig
+
+For governed burn/mint tokens, use `createTokenMultisig` and `setTokenAuthority` to transfer the mint authority after pool setup. The pool signer occupies `threshold` multisig slots, so choose the threshold and additional signers accordingly. This is not required for lock/release pools or single-authority token administration.
+
+## Configure remote chains
+
+Configure the remote token, pool, decimals, and rate limits after both sides have initialized their pools:
+
+```typescript
+await cct.applyChainUpdates({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  poolType: 'lock-release',
+  remoteChainSelectorsToRemove: [],
+  chainsToAdd: [
+    {
+      remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
+      remoteTokenAddress: process.env.REMOTE_TOKEN!,
+      remotePoolAddresses: [process.env.REMOTE_POOL!],
+      remoteTokenDecimals: 18,
+      inboundRateLimiterConfig: { enabled: false },
+      outboundRateLimiterConfig: { enabled: false },
+    },
+  ],
+})
+```
+
+## Register the pool with the Router
+
+### Create the address lookup table
+
+`setPool` requires an address lookup table (ALT) containing the canonical CCIP accounts for the mint and pool program. Create and populate one before registering the pool:
+
+```typescript
+const lookupTable = await cct.createLookupTable({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  poolType: 'lock-release',
+})
+
+console.log('Pool lookup table:', lookupTable.lookupTableAddress)
+```
+
+`createLookupTable` creates and extends the ALT by default. Use `appendToLookupTable` for an existing ALT or extra program accounts. Do not append canonical accounts that are already present.
+
+### Register the pool
+
+```typescript
+await cct.setPool({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  address: router.toBase58(),
+  poolType: 'lock-release',
+  poolLookupTableAddress: lookupTable.lookupTableAddress,
+})
+```
+
+## Prepare lock/release liquidity
+
+### Delegate token authority
+
+For lock/release pools, approve the pool signer PDA as a delegate before providing liquidity. Pool deployment returns this address. Do not use the pool state PDA as the delegate.
+
+```typescript
+await cct.approveToken({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  delegate: result.poolSignerAddress,
+  amount: 1_000_000n,
+})
+
+await cct.provideLiquidity({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  poolType: 'lock-release',
+  amount: 1_000_000n,
+})
+```
+
+## Verify and test a transfer
+
+Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to confirm the accepted administrator, registered lookup table, pool PDA, remote addresses, and rate limits. Then run [Pre-Send Validation](../pre-send-validation) before sending a production transfer.
+
+## Ownership handoffs
+
+`transferAdmin` requires the proposed administrator to call `acceptAdmin`. Pool ownership likewise requires `transferPoolOwnership` followed by `acceptPoolOwnership`. Use the unsigned variants for multisigs. Each accepting account must sign its own acceptance transaction.
+
+## Related
+
+- [SolanaTokenManager API reference](/sdk/classes/SolanaTokenManager)
+- [CCT Overview](./overview)
+- [Token Pools](../token-pools) — inspect deployed pool configuration
+- [Pre-Send Validation](../pre-send-validation) — validate the destination pool leg
+- [Sending Messages](../sending-messages)
