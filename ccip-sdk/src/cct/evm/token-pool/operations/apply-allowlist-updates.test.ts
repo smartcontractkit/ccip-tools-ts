@@ -198,6 +198,22 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
       )
     })
 
+    it('defaults an omitted removes to [] (adds only)', async () => {
+      const unsigned = await generate(stubChain(), { removes: undefined })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
+      )
+    })
+
+    it('defaults an omitted adds to [] (removes only)', async () => {
+      const unsigned = await generate(stubChain(), { adds: undefined })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [REMOVES, []]),
+      )
+    })
+
     it('rejects a sender that is not the pool owner', async () => {
       await assert.rejects(
         () => generate(stubChain(), { sender: '0x' + '99'.repeat(20) }),
@@ -248,13 +264,13 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
         param: 'removes[0]',
         params: { removes: ['not-an-address'] },
       },
-      {
-        name: 'a missing removes',
-        param: 'removes',
-        params: { removes: undefined },
-      },
       { name: 'a non-array adds', param: 'adds', params: { adds: 42 as unknown as string[] } },
       { name: 'both arrays empty', param: 'adds', params: { removes: [], adds: [] } },
+      {
+        name: 'both arrays omitted',
+        param: 'adds',
+        params: { removes: undefined, adds: undefined },
+      },
       {
         name: 'duplicates within adds',
         param: 'adds',

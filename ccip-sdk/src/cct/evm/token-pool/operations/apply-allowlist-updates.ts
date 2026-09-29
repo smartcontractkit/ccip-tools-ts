@@ -36,7 +36,10 @@ import {
   resolveAllowlistHolder,
 } from '../contracts.ts'
 
-/** Parameters for {@link ApplyAllowlistUpdates}. */
+/**
+ * Parameters for {@link ApplyAllowlistUpdates}. Either array may be omitted, but at least one
+ * address across both is required.
+ */
 export type ApplyAllowlistUpdatesParams = {
   /**
    * Token pool whose allowlist is being updated. On v2.0.0 the update lands on the pool's bound
@@ -46,15 +49,15 @@ export type ApplyAllowlistUpdatesParams = {
   /**
    * Addresses to remove from the allowlist. Applied *before* {@link adds} on-chain. Must contain
    * no duplicates, no zero address, and no address that also appears in {@link adds}. Every entry
-   * must currently be allowlisted — the holder silently ignores the rest.
+   * must currently be allowlisted — the holder silently ignores the rest. Defaults to `[]`.
    */
-  removes: string[]
+  removes?: string[]
   /**
    * Addresses to add to the allowlist. Must contain no duplicates, no zero address, and no
    * address that also appears in {@link removes}. No entry may already be allowlisted — the holder
-   * silently ignores the rest.
+   * silently ignores the rest. Defaults to `[]`.
    */
-  adds: string[]
+  adds?: string[]
   /**
    * Allowlist holder's owner: the pool owner on v1.5.0–v1.6.1, the `AdvancedPoolHooks` owner on
    * v2.0.0. Sets `tx.from` for offline / multisig signing. When supplied it is also checked
@@ -110,7 +113,7 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    * check produced (checksummed, duplicate-free arrays) so {@link buildUnsigned} and the encoder
    * never re-derive it.
    *
-   * Three judgement calls, all rejections:
+   * Four judgement calls, all rejections:
    * - **both arrays empty** — rejected: such a call encodes and mines while changing nothing, so
    *   it can only be a caller bug; mirrors `lockbox/operations/authorize-callers.ts`.
    * - **duplicates within an array** — rejected, mirroring the Solana `configureAllowlist` /
@@ -118,7 +121,6 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    *   silent no-op on-chain; catching it locally keeps the two families' contracts identical.
    * - **an address in BOTH `adds` and `removes`** — rejected: removes apply first, so the address
    *   would end up *allowlisted*, and no caller can reasonably have meant both.
-   *
    * - **the zero address in either array** — rejected: the holder `continue`s past it in `adds` and
    *   so can never hold it, making it a silent no-op on either side.
    *
@@ -126,16 +128,21 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    * counts as a duplicate / an overlap. The remaining no-ops — removing an address that is not
    * allowlisted, adding one that already is — need the holder's current allowlist and are caught in
    * {@link buildUnsigned}.
-   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, either array is not an
-   * array or is sparse, both are empty, an entry is not a valid address or is the zero address
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, either array is given but
+   * is not an array or is sparse, both are empty or omitted, an entry is not a valid address or is the zero address
    * (reported as `adds[i]` / `removes[i]`), an array holds duplicates, or an address appears in
    * both arrays
    */
-  protected override parse(params: ApplyAllowlistUpdatesParams): ParsedApplyAllowlistUpdatesParams {
-    validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
-    validateArray(this.name, 'removes', params.removes)
-    validateArray(this.name, 'adds', params.adds)
-    if (params.removes.length + params.adds.length === 0) {
+  protected override parse({
+    poolAddress,
+    removes: rawRemoves = [],
+    adds: rawAdds = [],
+    sender,
+  }: ApplyAllowlistUpdatesParams): ParsedApplyAllowlistUpdatesParams {
+    validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
+    validateArray(this.name, 'removes', rawRemoves)
+    validateArray(this.name, 'adds', rawAdds)
+    if (rawRemoves.length + rawAdds.length === 0) {
       throw new CCTParamsInvalidError(
         this.name,
         'adds',
@@ -143,8 +150,8 @@ export class ApplyAllowlistUpdates extends EVMOperation<
       )
     }
 
-    const removes = normalizeAddresses(this.name, 'removes', params.removes)
-    const adds = normalizeAddresses(this.name, 'adds', params.adds)
+    const removes = normalizeAddresses(this.name, 'removes', rawRemoves)
+    const adds = normalizeAddresses(this.name, 'adds', rawAdds)
     const removed = new Set(removes)
     const overlap = adds.find((address) => removed.has(address))
     if (overlap !== undefined) {
@@ -154,7 +161,7 @@ export class ApplyAllowlistUpdates extends EVMOperation<
         `${overlap} is also in removes; removes are applied first on-chain, so it would end up allowlisted — list it in one array only`,
       )
     }
-    return { poolAddress: params.poolAddress, removes, adds, sender: params.sender }
+    return { poolAddress, removes, adds, sender }
   }
 
   /**

@@ -3392,8 +3392,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * owner, and changes the allowlist of every pool bound to those hooks. A v2.0.0 pool with no
    * hooks bound is reported unsupported.
    *
-   * `removes` are applied *before* `adds` on-chain. Both arrays must be non-empty in total, hold
-   * no duplicates and no zero address, and share no address — an address in both would end up
+   * `removes` are applied *before* `adds` on-chain. Either array may be omitted (defaults to `[]`),
+   * but at least one address is required across both. They must hold no duplicates and no zero
+   * address, and share no address — an address in both would end up
    * allowlisted (removes run first), which no caller can reasonably have meant.
    *
    * The holder must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
@@ -3406,7 +3407,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * made (nothing to compare against).
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool with no hooks bound
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
-   * address, both arrays are empty, an array holds duplicates or the zero address, an address
+   * address, both arrays are empty or omitted, an array holds duplicates or the zero address, an address
    * appears in both arrays, the holder has no allowlist enabled, a `removes` entry is not
    * currently allowlisted, an `adds` entry already is, or `sender` is given and is not the
    * holder's owner
