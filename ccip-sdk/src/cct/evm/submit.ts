@@ -51,7 +51,12 @@ async function assertWalletChain(chain: EVMChain, wallet: Signer): Promise<void>
 /** True for ethers infra errors worth retrying (not an on-chain revert). */
 function isTransientError(error: unknown): boolean {
   return (
-    isError(error, 'TIMEOUT') || isError(error, 'NETWORK_ERROR') || isError(error, 'SERVER_ERROR')
+    isError(error, 'TIMEOUT') ||
+    isError(error, 'NETWORK_ERROR') ||
+    isError(error, 'SERVER_ERROR') ||
+    // nonce taken outside the SDK: a retry reserves a fresh one
+    isError(error, 'NONCE_EXPIRED') ||
+    isError(error, 'REPLACEMENT_UNDERPRICED')
   )
 }
 
@@ -89,13 +94,13 @@ export async function submit(
 
   let response: TransactionResponse
   let nonce: number
-  let nonceConsumed = false
+  let reservedNonce: number | undefined
   try {
     let tx: TransactionRequest = { ...first }
     tx.from = undefined // drop any builder-set sender before populate, else ethers throws on a from/signer mismatch
     if (tx.nonce == null) {
-      tx.nonce = await chain.nextNonce(sender)
-      nonceConsumed = true
+      reservedNonce = await chain.nextNonce(sender)
+      tx.nonce = reservedNonce
     }
     tx = await wallet.populateTransaction(tx)
     if (tx.nonce == null) throw new CCTTxFailedError(operation, 'transaction has no nonce')
@@ -103,7 +108,7 @@ export async function submit(
     tx.from = undefined // some signers reject a pre-populated `from`
     response = await submitTransaction(wallet, tx, chain.provider)
   } catch (error) {
-    if (nonceConsumed) chain.rollbackNonce(sender)
+    if (reservedNonce != null) chain.rollbackNonce(sender, reservedNonce, error)
     if (error instanceof CCTTxFailedError) throw error
     throw new CCTTxFailedError(operation, error instanceof Error ? error.message : String(error), {
       cause: error instanceof Error ? error : undefined,
@@ -123,6 +128,7 @@ export async function submit(
       throw new CCIPExecTxRevertedError(response.hash, { cause: error, context: { operation } })
     }
     // broadcast already succeeded; any non-revert error leaves the tx in an unknown state
+    if (reservedNonce != null) chain.rollbackNonce(sender, reservedNonce, error)
     throw new CCTTxNotConfirmedError(operation, response.hash, {
       cause: error instanceof Error ? error : undefined,
     })

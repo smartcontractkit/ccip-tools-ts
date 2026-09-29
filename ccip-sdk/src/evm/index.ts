@@ -25,6 +25,7 @@ import {
   isBytesLike,
   isError,
   isHexString,
+  keccak256,
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
@@ -248,10 +249,20 @@ export function isSigner(wallet: unknown): wallet is Signer {
   )
 }
 
+/** Whether a tx that failed with `error` may still have reached the network. */
+function mayBeBroadcast(error: unknown): boolean {
+  return (
+    isError(error, 'TIMEOUT') ||
+    isError(error, 'NETWORK_ERROR') ||
+    isError(error, 'SERVER_ERROR') ||
+    /already known/i.test(String((error as Error | undefined)?.message))
+  )
+}
+
 /**
  * Submit transaction using best available method.
  * Try sendTransaction() first (works with browser wallets),
- * fallback to signTransaction() + broadcastTransaction() if unsupported.
+ * fallback to signTransaction() + broadcastTransaction() if unsupported or inconclusive.
  */
 export async function submitTransaction(
   wallet: Signer,
@@ -260,9 +271,22 @@ export async function submitTransaction(
 ): Promise<TransactionResponse> {
   try {
     return await wallet.sendTransaction(tx)
-  } catch {
-    const signed = await wallet.signTransaction(tx)
-    return provider.broadcastTransaction(signed)
+  } catch (err) {
+    if (isError(err, 'ACTION_REJECTED')) throw err // don't prompt the user twice
+    let signed
+    try {
+      signed = await wallet.signTransaction(tx)
+    } catch (signErr) {
+      throw mayBeBroadcast(err) ? err : signErr
+    }
+    // same tx and nonce: at worst a duplicate of the first send, which the node dedups or rejects
+    try {
+      return await provider.broadcastTransaction(signed)
+    } catch (broadcastErr) {
+      const sent = await provider.getTransaction(keccak256(signed)).catch(() => null)
+      if (sent) return sent
+      throw broadcastErr
+    }
   }
 }
 
@@ -333,9 +357,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly decimals = 18
 
   provider: JsonRpcApiProvider
-  private noncesPromises: Record<string, Promise<unknown>>
+  private nonceStates: Record<
+    string,
+    {
+      /** Latest read of the pending tx count, merged into {@link nonces}. */
+      sync?: Promise<void>
+      syncedAt: number
+      /** Never broadcast: reused before new nonces. */
+      released: Set<number>
+      /** May have been broadcast, with the time they were reported failed. */
+      suspects: Map<number, number>
+    }
+  >
   /**
-   * Cache of current nonces per wallet address.
+   * How long {@link nextNonce} trusts {@link nonces} before re-reading the pending tx count, so
+   * transactions sent in quick succession cost no RPC. `0` re-reads on every call.
+   */
+  nonceCacheTtlMs = 10_000
+  /**
+   * Next nonce to hand out per wallet address.
    * Used internally by {@link sendMessage} and {@link execute} to manage transaction ordering.
    * Can be inspected for debugging or manually adjusted if needed.
    */
@@ -349,7 +389,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
-    this.noncesPromises = {}
+    this.nonceStates = {}
     this.nonces = {}
 
     this.provider = provider
@@ -497,31 +537,94 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
-  /**
-   * Get the next nonce for a wallet address and increment the internal counter.
-   * Fetches from the network on first call, then uses cached value.
-   * @param address - Wallet address to get nonce for
-   * @returns The next available nonce
-   */
-  async nextNonce(address: string): Promise<number> {
-    await (this.noncesPromises[address] ??= this.provider
-      .getTransactionCount(address)
-      .then((nonce) => {
-        this.nonces[address] = nonce
-        return nonce
-      }))
-    return this.nonces[address]!++
+  private nonceState(address: string) {
+    return (this.nonceStates[address] ??= { syncedAt: 0, released: new Set(), suspects: new Map() })
   }
 
   /**
-   * Undo the last {@link nextNonce} increment for a wallet address.
-   * {@link nextNonce} hands out a nonce optimistically; if the send then fails
-   * before broadcast, call this so the counter is reused rather than leaving a
-   * permanent gap that stalls every later transaction. No-op if uncached.
-   * @param address - Wallet address whose cached nonce to roll back
+   * Reserve the next nonce for a wallet address.
+   * Reads the pending transaction count at most once per {@link nonceCacheTtlMs}, never moving
+   * the counter back, so neither SDK nor external pending transactions are replaced.
+   * Nonces released by {@link rollbackNonce} are reused first.
+   * @param address - Wallet address to get nonce for
+   * @returns The reserved nonce
    */
-  rollbackNonce(address: string): void {
-    if (this.nonces[address] != null) this.nonces[address]--
+  async nextNonce(address: string): Promise<number> {
+    const state = this.nonceState(address)
+    if (!state.sync || Date.now() - state.syncedAt >= this.nonceCacheTtlMs) {
+      state.syncedAt = Date.now()
+      const sync: Promise<void> = (state.sync = this.provider
+        .getTransactionCount(address, 'pending')
+        .then(
+          (pending) => this.syncNonce(address, pending),
+          (err) => {
+            if (state.sync === sync) state.sync = undefined
+            throw err
+          },
+        ))
+    }
+    await state.sync
+    // synchronous from here on, so concurrent callers can't interleave
+    if (state.released.size) {
+      const n = Math.min(...state.released)
+      state.released.delete(n)
+      return n
+    }
+    return this.nonces[address]!++
+  }
+
+  /** Merges a pending tx count read from the network into the cache. */
+  private syncNonce(address: string, pending: number): void {
+    const { released, suspects } = this.nonceState(address)
+    this.nonces[address] = Math.max(this.nonces[address] ?? 0, pending)
+    for (const n of released) if (n < pending) released.delete(n) // filled outside the SDK
+    for (const [n, since] of suspects) {
+      if (n < pending) {
+        suspects.delete(n) // the network has it
+      } else if (n === pending && Date.now() - since >= this.nonceCacheTtlMs) {
+        // still the network's next nonce: never broadcast, or dropped before being mined
+        suspects.delete(n)
+        this.rollbackNonce(address, n)
+      }
+    }
+  }
+
+  /**
+   * Report that the transaction using a nonce from {@link nextNonce} failed, so the nonce can be
+   * reused to fill the gap it would otherwise leave. Later nonces are never re-issued.
+   * - `error` proves the tx never reached the network (or no `error`): `nonce` is released now.
+   * - `error` is inconclusive (e.g. a timeout while broadcasting or waiting to be mined): `nonce`
+   *   is released only once the network shows it as its next nonce after {@link nonceCacheTtlMs}.
+   * - `nonce` was taken outside the SDK, or the tx was mined or replaced: the cache re-reads the
+   *   pending count on next use.
+   * @param address - Wallet address the nonce was reserved for
+   * @param nonce - The nonce returned by {@link nextNonce}; defaults to the latest one
+   * @param error - Why the transaction failed
+   */
+  rollbackNonce(address: string, nonce = (this.nonces[address] ?? 0) - 1, error?: unknown): void {
+    const next = this.nonces[address]
+    if (next == null || nonce < 0 || nonce >= next) return
+    const state = this.nonceState(address)
+    if (
+      isError(error, 'NONCE_EXPIRED') ||
+      isError(error, 'REPLACEMENT_UNDERPRICED') ||
+      (error as { receipt?: unknown } | undefined)?.receipt
+    ) {
+      state.syncedAt = 0
+      return
+    }
+    if (mayBeBroadcast(error)) {
+      state.suspects.set(nonce, Date.now())
+      return
+    }
+    if (nonce !== next - 1) {
+      state.released.add(nonce)
+      return
+    }
+    // latest reservation: step back, collapsing any released nonces now at the top
+    let top = nonce
+    while (state.released.delete(top - 1)) top--
+    this.nonces[address] = top
   }
 
   /**
@@ -1819,12 +1922,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.logger.debug('approve =>', response.hash)
           return response
         } catch (err) {
-          this.nonces[sender]!--
+          this.rollbackNonce(sender, tx.nonce!, err)
           throw err
         }
       }),
     )
-    if (responses.length) await responses[responses.length - 1]!.wait(1, 60_000) // wait last tx nonce to be mined
+    const lastApprove = responses[responses.length - 1]
+    if (lastApprove)
+      await lastApprove.wait(1, 60_000).catch((err: unknown) => {
+        this.rollbackNonce(sender, lastApprove.nonce, err)
+        throw err
+      }) // wait last tx nonce to be mined
 
     sendTx.nonce = await this.nextNonce(sender)
     let response
@@ -1834,11 +1942,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       sendTx.from = undefined // some signers don't like receiving pre-populated `from`
       response = await submitTransaction(wallet, sendTx, this.provider)
     } catch (err) {
-      this.nonces[sender]!--
+      this.rollbackNonce(sender, sendTx.nonce!, err)
       throw err
     }
     this.logger.debug('ccipSend =>', response.hash)
-    const tx = (await response.wait(1, 60_000))!
+    const tx = (await response.wait(1, 60_000).catch((err: unknown) => {
+      this.rollbackNonce(sender, response.nonce, err)
+      throw err
+    }))!
     return (await this.getMessagesInTx(await this.getTransaction(tx)))[0]!
   }
 
@@ -2038,15 +2149,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
-    unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
-    const populatedTx = await wallet.populateTransaction(unsignedTx)
-    populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
-
-    const response = await submitTransaction(wallet, populatedTx, this.provider)
+    const payer = await wallet.getAddress()
+    unsignedTx.nonce = await this.nextNonce(payer)
+    let populatedTx, response
+    try {
+      populatedTx = await wallet.populateTransaction(unsignedTx)
+      populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+      response = await submitTransaction(wallet, populatedTx, this.provider)
+    } catch (err) {
+      this.rollbackNonce(payer, unsignedTx.nonce, err)
+      throw err
+    }
     this.logger.debug('manuallyExecute =>', response.hash)
 
     let receipt = await response.wait(0)
-    if (!receipt) receipt = await response.wait(1, 240_000)
+    if (!receipt)
+      receipt = await response.wait(1, 240_000).catch((err: unknown) => {
+        this.rollbackNonce(payer, response.nonce, err)
+        throw err
+      })
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
