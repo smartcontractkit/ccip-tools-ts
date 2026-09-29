@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { Interface, getCreateAddress } from 'ethers'
 
 import type { EVMChain } from '../../evm/index.ts'
+import { networkInfo } from '../../networks.ts'
 import { CCTTxFailedError } from '../errors.ts'
 import { type DeployArtifact, EVMDeployOperation } from './operation.ts'
 
@@ -25,6 +26,7 @@ class TestDeploy extends EVMDeployOperation<{}> {
 
 function stubChain(): EVMChain {
   return {
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
