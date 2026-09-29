@@ -15,7 +15,11 @@ import { Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
+import {
+  type PreconditionError,
+  CCTContractTypeInvalidError,
+  CCTParamsInvalidError,
+} from '../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
 import type { DeployArtifact } from '../operation.ts'
@@ -180,25 +184,19 @@ export async function assertPolicyEngineContract(
 
 /**
  * Pre-flights a known sender against the `AdvancedPoolHooks` owner.
- * @param operation - Operation name for error context.
  * @param chain - Chain hosting the hooks contract.
  * @param advancedPoolHooks - Hooks contract to read.
  * @param sender - Proposed transaction sender.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the current hooks owner.
+ * @returns The unmet requirement, or `undefined` if `sender` already owns the hooks contract.
  */
-export async function assertAdvancedPoolHooksOwner(
-  operation: string,
+export async function checkAdvancedPoolHooksOwner(
   chain: EVMChain,
   advancedPoolHooks: string,
   sender: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const owner = await readAdvancedPoolHooksOwner(chain, advancedPoolHooks)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current AdvancedPoolHooks owner (${owner})`,
-  )
+  if (getAddress(sender) === owner) return undefined
+  return { param: 'sender', reason: `must be the current AdvancedPoolHooks owner (${owner})` }
 }
 
 /**

@@ -18,13 +18,13 @@ import { type Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import { assertAdvancedPoolHooksContract } from '../../advanced-pool-hooks/contracts.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolAdvancedPoolHooks,
   resolveEncoder,
@@ -74,21 +74,17 @@ export class UpdateAdvancedPoolHooks extends EVMOperation<UpdateAdvancedPoolHook
   }
 
   /**
-   * Resolves the pool, rejects a no-op re-point, confirms the target is an `AdvancedPoolHooks`,
-   * and — when `sender` is supplied — confirms it is the owner. The encoder resolves first so
-   * pre-v2.0.0 pools fail without further reads.
+   * Resolves the pool, confirms the target is an `AdvancedPoolHooks`, and encodes. The encoder
+   * resolves first so pre-v2.0.0 pools fail without further reads.
    *
-   * @remarks The no-op guard is the SDK's: the contract rewrites the slot and emits
-   * `AdvancedPoolHooksUpdated(hook, hook)`, indistinguishable from a real re-point in an audit
-   * trail.
+   * @remarks The hooks-contract probe stays fatal while the state checks are reported: no earlier
+   * transaction in a plan can turn an address that is not an `AdvancedPoolHooks` into one.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if the pool is already bound to `advancedPoolHooks`
    * @throws {@link CCTContractTypeInvalidError} if a non-zero `advancedPoolHooks` is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the pool owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -97,20 +93,41 @@ export class UpdateAdvancedPoolHooks extends EVMOperation<UpdateAdvancedPoolHook
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params)
-    const current = await readTokenPoolAdvancedPoolHooks(chain, params.poolAddress)
-    if (current === params.advancedPoolHooks)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'advancedPoolHooks',
-        current === ZeroAddress
-          ? `no hooks are bound to ${params.poolAddress}, so detaching would change nothing; it would still emit AdvancedPoolHooksUpdated`
-          : `${current} is already bound to ${params.poolAddress}; the update would emit AdvancedPoolHooksUpdated with no state change`,
-      )
     // Skipped for a detach: the zero address is the documented way to unbind, not a target.
     if (params.advancedPoolHooks !== ZeroAddress)
       await assertAdvancedPoolHooksContract(chain, params.advancedPoolHooks)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return unsigned
+  }
+
+  /**
+   * Reports a no-op re-point and, when `sender` is given, a non-owner sender.
+   *
+   * @remarks The no-op check is the SDK's: the contract rewrites the slot and emits
+   * `AdvancedPoolHooksUpdated(hook, hook)`, indistinguishable from a real re-point in an audit
+   * trail. Reported rather than thrown outright because both requirements are plan-relative — an
+   * earlier step can re-point the pool elsewhere, or hand ownership to this `sender`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: UpdateAdvancedPoolHooksParams,
+  ): Promise<PreconditionError[]> {
+    const [current, owner] = await Promise.all([
+      readTokenPoolAdvancedPoolHooks(chain, params.poolAddress),
+      params.sender === undefined
+        ? undefined
+        : checkPoolOwner(chain, params.poolAddress, params.sender),
+    ])
+    return unmet(
+      current !== params.advancedPoolHooks
+        ? undefined
+        : {
+            param: 'advancedPoolHooks',
+            reason:
+              current === ZeroAddress
+                ? `no hooks are bound to ${params.poolAddress}, so detaching would change nothing; it would still emit AdvancedPoolHooksUpdated`
+                : `${current} is already bound to ${params.poolAddress}; the update would emit AdvancedPoolHooksUpdated with no state change`,
+          },
+      owner,
+    )
   }
 }

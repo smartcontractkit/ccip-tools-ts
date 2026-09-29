@@ -19,8 +19,8 @@ import { getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseRecord,
   validateAddress,
@@ -32,7 +32,7 @@ import {
   type CCVConfigUpdate,
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksContract,
-  assertAdvancedPoolHooksOwner,
+  checkAdvancedPoolHooksOwner,
 } from '../contracts.ts'
 
 /** Parameters for {@link ApplyCCVConfigUpdates}. */
@@ -127,21 +127,30 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
   }
 
   /**
-   * Confirms the target is `AdvancedPoolHooks`, checks `sender` when supplied, then encodes the
-   * update calldata.
+   * Confirms the target is `AdvancedPoolHooks`, then encodes the update calldata.
    * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, ccvConfigArgs, sender }: ApplyCCVConfigUpdatesParams,
+    { advancedPoolHooks, ccvConfigArgs }: ApplyCCVConfigUpdatesParams,
   ): Promise<UnsignedEVMTx> {
     await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
     return callTx(
       advancedPoolHooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('applyCCVConfigUpdates', [ccvConfigArgs]),
     )
+  }
+
+  /**
+   * Confirms `sender` (when given) owns the hooks contract.
+   * @remarks Reported rather than thrown outright, so a plan that deploys these hooks — or hands
+   * them to this owner — in an earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { advancedPoolHooks, sender }: ApplyCCVConfigUpdatesParams,
+  ): Promise<PreconditionError[]> {
+    if (sender === undefined) return []
+    return unmet(await checkAdvancedPoolHooksOwner(chain, advancedPoolHooks, sender))
   }
 }

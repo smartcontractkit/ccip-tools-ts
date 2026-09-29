@@ -7,7 +7,7 @@
  *
  * @remarks The deposit is a `transferFrom` on the rebalancer, so the tokens must be **approved to
  * the pool** first — see `token/operations/approve-token.ts`. That is pre-flighted here
- * ({@link assertLiquidityFunding}) rather than left to revert `ERC20InsufficientAllowance` in the
+ * ({@link checkLiquidityFunding}) rather than left to revert `ERC20InsufficientAllowance` in the
  * wallet, matching Solana's `provideLiquidity`.
  *
  * @remarks **Removed in v2.0.0**, where a LockRelease pool escrows through an external
@@ -20,15 +20,15 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertLiquidityFunding,
   assertLockReleasePool,
-  assertPoolRebalancer,
+  checkLiquidityFunding,
+  checkPoolRebalancer,
   getTokenPoolInterface,
   readTokenPoolAcceptsLiquidity,
   resolveEncoder,
@@ -84,17 +84,14 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
    * so it runs first: `i_acceptLiquidity` is set *immutable* in the constructor, so a pool
    * deployed with it `false` reverts every `provideLiquidity` for its whole lifetime and no
    * choice of sender helps. v1.6.1 dropped the flag and always accepts.
-   * @remarks The checks live here, not in {@link execute}, so the offline / multisig path gets
-   * them too rather than being handed a transaction that reverts once signed. The funding check
-   * needs a depositor, so it runs only with a `sender`.
+   * @remarks The rebalancer and funding requirements are reported by
+   * {@link ProvideLiquidity.preconditions}; only the immutable accept-liquidity flag is fatal
+   * here.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through an
    * `ERC20LockBox` instead
-   * @throws {@link CCTParamsInvalidError} if the pool cannot accept liquidity, or `sender` is
-   * given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the pool for, less than
-   * `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if the pool was deployed with `acceptLiquidity = false`
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -105,6 +102,8 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
     const encode = resolveEncoder(this.encoders, version, this.name)
     const unsigned = encode(getTokenPoolInterface(type, version), params)
 
+    // Stays fatal while the rest is reported: `acceptLiquidity` is a constructor argument with no
+    // setter, so no step of any plan can turn this pool into one that takes deposits.
     const hasAcceptFlag = version === TokenPoolVersion.V1_5_0 || version === TokenPoolVersion.V1_5_1
     if (hasAcceptFlag && !(await readTokenPoolAcceptsLiquidity(chain, params.poolAddress)))
       throw new CCTParamsInvalidError(
@@ -112,22 +111,34 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
         'poolAddress',
         `pool ${params.poolAddress} was deployed with acceptLiquidity = false, which is immutable, so it rejects every deposit with LiquidityNotAccepted`,
       )
-    if (params.sender !== undefined) {
-      await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
-      await assertLiquidityFunding(
-        this.name,
-        chain,
-        params.poolAddress,
-        params.sender,
-        params.amount,
-      )
-    }
     return unsigned
   }
 
   /**
+   * Confirms `sender` is the pool's rebalancer and holds — and has approved the pool for — the
+   * deposit.
+   * @remarks All reported rather than thrown outright, and this is the case the feature exists
+   * for: `setRebalancer → approveToken → provideLiquidity` is one plan, and none of its later
+   * steps can be built if the earlier ones have not landed yet. Reported from here rather than
+   * {@link execute} so the offline / multisig path is covered too. The funding check needs a
+   * depositor, so nothing is reported without a `sender`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ProvideLiquidityParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(
+      ...(await Promise.all([
+        checkPoolRebalancer(chain, params.poolAddress, params.sender),
+        checkLiquidityFunding(chain, params.poolAddress, params.sender, params.amount),
+      ])),
+    )
+  }
+
+  /**
    * Signs and submits as the rebalancer, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' rebalancer check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

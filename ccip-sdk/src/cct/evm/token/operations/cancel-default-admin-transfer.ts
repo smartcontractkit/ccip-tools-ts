@@ -9,12 +9,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenVersion,
-  assertTokenDefaultAdmin,
+  checkTokenDefaultAdmin,
   getTokenInterface,
   readPendingTokenDefaultAdmin,
   resolveCrossChainToken,
@@ -42,27 +42,40 @@ export class CancelDefaultAdminTransfer extends EVMOperation<CancelDefaultAdminT
   }
 
   /**
-   * Confirms a transfer exists and, when known, that `sender` is the current default admin.
+   * Resolves the v2 encoder and encodes.
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
-   * @throws {@link CCTParamsInvalidError} if no transfer is pending or `sender` is not the admin
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, sender }: CancelDefaultAdminTransferParams,
+    { tokenAddress }: CancelDefaultAdminTransferParams,
   ): Promise<UnsignedEVMTx> {
     const version = await resolveCrossChainToken(chain, tokenAddress)
     const iface = resolveTokenEncoder(this.encoders, version, this.name)
-    const { schedule } = await readPendingTokenDefaultAdmin(chain, tokenAddress)
-    if (schedule === 0n)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        'has no pending default-admin transfer to cancel',
-      )
-    if (sender !== undefined) await assertTokenDefaultAdmin(this.name, chain, tokenAddress, sender)
     return callTx(tokenAddress, iface.encodeFunctionData('cancelDefaultAdminTransfer', []))
+  }
+
+  /**
+   * Confirms a transfer exists to cancel and, when known, that `sender` is the current default
+   * admin.
+   * @remarks Both reported rather than thrown outright: `beginDefaultAdminTransfer` in an earlier
+   * step creates the pending transfer this one cancels.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, sender }: CancelDefaultAdminTransferParams,
+  ): Promise<PreconditionError[]> {
+    const [{ schedule }, admin] = await Promise.all([
+      readPendingTokenDefaultAdmin(chain, tokenAddress),
+      sender === undefined ? undefined : checkTokenDefaultAdmin(chain, tokenAddress, sender),
+    ])
+    return unmet(
+      schedule === 0n
+        ? { param: 'tokenAddress', reason: 'has no pending default-admin transfer to cancel' }
+        : undefined,
+      admin,
+    )
   }
 }

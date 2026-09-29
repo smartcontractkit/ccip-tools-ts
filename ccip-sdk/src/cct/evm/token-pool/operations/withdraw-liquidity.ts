@@ -16,14 +16,15 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolLiquidity,
-  assertPoolRebalancer,
+  checkPoolLiquidity,
+  checkPoolRebalancer,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -71,18 +72,11 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
   }
 
   /**
-   * Resolves the pool's type/version, floor-matches the encoder, then confirms `sender` (when
-   * given) is the pool's rebalancer.
-   * @remarks The rebalancer check lives here, not in {@link execute}, so the offline / multisig
-   * path gets it too rather than being handed a transaction that reverts once signed.
-   * @remarks The pool's balance is pre-flighted ({@link assertPoolLiquidity}). Advisory only:
-   * every CCIP transfer moves that balance, so a later shortfall still reverts
-   * `InsufficientLiquidity`.
+   * Resolves the pool's type/version, floor-matches the encoder, and encodes. The rebalancer and
+   * balance requirements are reported by {@link WithdrawLiquidity.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through an
    * `ERC20LockBox` instead
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
@@ -92,16 +86,34 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     assertLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
-    await assertPoolLiquidity(this.name, chain, params.poolAddress, params.amount)
-    return unsigned
+    return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool's rebalancer, and that the pool holds `amount`.
+   * @remarks Both reported rather than thrown outright: `provideLiquidity` in an earlier plan
+   * step is exactly what puts the balance there. Reported from here rather than {@link execute}
+   * so the offline / multisig path is covered too.
+   * @remarks The balance check is advisory: every CCIP transfer moves that balance, so a later
+   * shortfall still reverts `InsufficientLiquidity`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: WithdrawLiquidityParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(
+      ...(await Promise.all([
+        params.sender === undefined
+          ? undefined
+          : checkPoolRebalancer(chain, params.poolAddress, params.sender),
+        checkPoolLiquidity(chain, params.poolAddress, params.amount),
+      ])),
+    )
   }
 
   /**
    * Signs and submits as the rebalancer, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx, and the
+   * address that can satisfy {@link preconditions}' rebalancer check for a broadcast tx, and the
    * address the tokens are sent to. See {@link EVMOperation.resolveWalletSender} for why a
    * divergent `sender` is rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

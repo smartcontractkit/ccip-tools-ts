@@ -10,7 +10,7 @@ import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { DepositToLockbox } from './deposit.ts'
 
@@ -268,7 +268,7 @@ describe('DepositToLockbox (cct/evm lockbox operation)', () => {
             ...params,
             sender: SENDER,
           }),
-        (err: unknown) => err instanceof CCTTxFailedError && err.message.includes('holds'),
+        (err: unknown) => err instanceof CCTPreconditionError && err.message.includes('holds'),
       )
     })
 
@@ -279,7 +279,8 @@ describe('DepositToLockbox (cct/evm lockbox operation)', () => {
             ...params,
             sender: SENDER,
           }),
-        (err: unknown) => err instanceof CCTTxFailedError && err.message.includes('approveToken'),
+        (err: unknown) =>
+          err instanceof CCTPreconditionError && err.message.includes('approveToken'),
       )
     })
 

@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type TransferLiquidityParams, TransferLiquidity } from './transfer-liquidity.ts'
@@ -168,13 +168,14 @@ describe('TransferLiquidity (cct/evm)', () => {
     it('reads the rebalancer from the source pool and the owner from the destination', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
-      assert.deepEqual(seen.calls, [
-        'typeAndVersion@pool',
-        'typeAndVersion@from',
-        'getToken@pool',
-        'getToken@from',
-        'getRebalancer@from',
+      // the source-pool checks and the owner check are issued together, so only the set is
+      // asserted — the two type resolutions still come first, before anything they gate
+      assert.deepEqual(seen.calls.slice(0, 2), ['typeAndVersion@pool', 'typeAndVersion@from'])
+      assert.deepEqual(seen.calls.slice(2).sort(), [
         'balanceOf@from',
+        'getRebalancer@from',
+        'getToken@from',
+        'getToken@pool',
         'owner@pool',
       ])
     })
@@ -326,7 +327,7 @@ describe('TransferLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ sourceLiquidity: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'transferLiquidity' &&
           /holds 999999999999999999 of/.test(err.message),
       )

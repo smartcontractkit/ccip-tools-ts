@@ -17,9 +17,9 @@ import { type Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -268,20 +268,11 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
   }
 
   /**
-   * Reads the pool's type-and-version, floor-matches the encoder and its contract interface, then
-   * — when `sender` is known — pre-flights it against the pool's `owner` **or** its
-   * `rateLimitAdmin`.
+   * Reads the pool's type-and-version, floor-matches the encoder and its contract interface, and
+   * encodes. The role requirement is reported by
+   * {@link SetChainRateLimiterConfigs.preconditions}.
    *
-   * @remarks The role check lives here, not only in {@link execute}, so the offline / multisig
-   * path gets it too: `generateUnsignedSetChainRateLimiterConfigs` with an unauthorized `sender`
-   * would otherwise hand back a fully-formed transaction that reverts `Unauthorized` only after
-   * being reviewed and signed. Every sibling pool write gates in `buildUnsigned` for the same
-   * reason; this one is gated on a *disjunction* rather than the owner alone, so it reads both
-   * roles instead of using `assertPoolOwner`.
-   * @remarks Ordered *after* the encoder so a bad parameter fails on the one `typeAndVersion`
-   * probe rather than after two more role reads.
-   * @throws {@link CCTParamsInvalidError} if `sender` is neither the pool `owner` nor its (set)
-   * `rateLimitAdmin`, or a multi-lane `updates` is sent to a v1.5.0 pool
+   * @throws {@link CCTParamsInvalidError} if a multi-lane `updates` is sent to a v1.5.0 pool
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -289,14 +280,31 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params, version)
-    if (params.sender !== undefined)
-      await this.#assertRateLimitRole(chain, params.poolAddress, params.sender, version)
-    return unsigned
+    return encode(getTokenPoolInterface(type, version), params, version)
   }
 
   /**
-   * Rejects a `sender` that is neither the pool's `owner` nor its `rateLimitAdmin`.
+   * Pre-flights `sender` against the pool's `owner` **or** its `rateLimitAdmin`.
+   *
+   * @remarks Reported rather than thrown outright, so a plan that appoints this `rateLimitAdmin`
+   * with `setRateLimitAdmin` (or `setDynamicConfig` at 2.0.0) in an earlier step can still build
+   * this transaction — and reported from here rather than {@link execute} so the offline /
+   * multisig path is covered too, instead of handing back a fully-formed transaction that reverts
+   * `Unauthorized` only after being reviewed and signed.
+   * @remarks Gated on a *disjunction* rather than the owner alone, so it reads both roles instead
+   * of using `checkPoolOwner`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: SetChainRateLimiterConfigsParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    const { version } = await resolveTokenPool(chain, params.poolAddress)
+    return unmet(await this.#checkRateLimitRole(chain, params.poolAddress, params.sender, version))
+  }
+
+  /**
+   * Reports a `sender` that is neither the pool's `owner` nor its `rateLimitAdmin`.
    *
    * @remarks `rateLimitAdmin` is unset on most pools, where it reads as the zero address, so it is
    * only compared once known to be *set*: an equality-first check would let a zero-address `sender`
@@ -304,14 +312,13 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
    * @remarks `version` selects which getter reports `rateLimitAdmin` (standalone pre-2.0.0, folded
    * into `getDynamicConfig` at 2.0.0). Both roles are read directly, not via the
    * `getTokenPoolState` query op — see {@link readTokenPoolOwner} for why.
-   * @throws {@link CCTParamsInvalidError} if `sender` holds neither role
    */
-  async #assertRateLimitRole(
+  async #checkRateLimitRole(
     chain: EVMChain,
     poolAddress: string,
     sender: string,
     version: TokenPoolVersion,
-  ): Promise<void> {
+  ): Promise<PreconditionError | undefined> {
     const [owner, rateLimitAdmin] = await Promise.all([
       readTokenPoolOwner(chain, poolAddress),
       readTokenPoolRateLimitAdmin(chain, poolAddress, version),
@@ -321,23 +328,21 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
     // an unset rateLimitAdmin is the zero address; exclude it before comparing or a zero-address
     // `sender` would match it
     const isRateLimitAdmin = rateLimitAdmin !== ZeroAddress && rateLimitAdmin === signer
-    if (owner !== signer && !isRateLimitAdmin) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must be the pool owner (${owner})${
-          rateLimitAdmin === ZeroAddress
-            ? ' — this pool has no rateLimitAdmin set'
-            : ` or its rateLimitAdmin (${rateLimitAdmin})`
-        }`,
-      )
+    if (owner === signer || isRateLimitAdmin) return undefined
+    return {
+      param: 'sender',
+      reason: `must be the pool owner (${owner})${
+        rateLimitAdmin === ZeroAddress
+          ? ' — this pool has no rateLimitAdmin set'
+          : ` or its rateLimitAdmin (${rateLimitAdmin})`
+      }`,
     }
   }
 
   /**
    * Signs and submits, binding `sender` to the signing wallet's address — see
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather than
-   * signed. The owner-or-`rateLimitAdmin` gate is {@link buildUnsigned}'s.
+   * signed. The owner-or-`rateLimitAdmin` requirement is reported by {@link preconditions}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is neither the
    * wallet's address, the pool `owner`, nor the pool's (set) `rateLimitAdmin`, or a multi-lane

@@ -14,12 +14,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -85,8 +85,6 @@ export class RemoveRemotePool extends EVMOperation<
    * (`InvalidRemotePoolForChain`). An unconfigured lane reads as having none — see
    * {@link readRegisteredRemotePools} — and is rejected the same way.
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner, or if
-   * `remotePoolAddress` is not currently registered on this lane
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -95,27 +93,42 @@ export class RemoveRemotePool extends EVMOperation<
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-
-    const registered = await readRegisteredRemotePools(chain, params)
-    if (!isRegisteredRemotePool(registered, params.remotePoolAddress, params.remoteChainSelector))
-      throw new CCTParamsInvalidError(
-        this.name,
-        'remotePoolAddress',
-        `is not registered on chain selector ${params.remoteChainSelector} (registered: ${registered.join(', ') || 'none'}); removing it reverts`,
-      )
-
-    chain.logger.debug(
-      `${this.name}: pool = ${params.poolAddress}, lane = ${params.remoteChainSelector}, registered = ${registered.length}`,
-    )
     return encode(getTokenPoolInterface(type, version), params)
   }
 
   /**
+   * Confirms `sender` (when given) is the pool owner — the call is owner-gated on-chain — and
+   * that this lane currently holds `remotePoolAddress`.
+   * @remarks Both reported rather than thrown outright: `addRemotePool` in an earlier plan step
+   * creates the registration this one removes.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedRemoveRemotePoolParams,
+  ): Promise<PreconditionError[]> {
+    const [owner, registered] = await Promise.all([
+      params.sender === undefined
+        ? undefined
+        : checkPoolOwner(chain, params.poolAddress, params.sender),
+      readRegisteredRemotePools(chain, params),
+    ])
+    chain.logger.debug(
+      `${this.name}: pool = ${params.poolAddress}, lane = ${params.remoteChainSelector}, registered = ${registered.length}`,
+    )
+    return unmet(
+      owner,
+      isRegisteredRemotePool(registered, params.remotePoolAddress, params.remoteChainSelector)
+        ? undefined
+        : {
+            param: 'remotePoolAddress',
+            reason: `is not registered on chain selector ${params.remoteChainSelector} (registered: ${registered.join(', ') || 'none'}); removing it reverts`,
+          },
+    )
+  }
+
+  /**
    * Signs and submits as the pool owner, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or

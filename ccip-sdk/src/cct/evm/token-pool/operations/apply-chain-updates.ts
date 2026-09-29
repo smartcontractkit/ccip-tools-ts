@@ -13,9 +13,9 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseHexBytes,
   parseRecord,
@@ -27,7 +27,7 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -467,8 +467,8 @@ export class ApplyChainUpdates extends EVMOperation<
 
   /**
    * Resolves the pool's type and version, applies the checks that needed it, then encodes.
-   * @throws {@link CCTParamsInvalidError} if the declared `version` is not this pool's shape, a
-   * rate limit breaks its enabled-bucket bound, or `sender` is not the pool owner
+   * @throws {@link CCTParamsInvalidError} if the declared `version` is not this pool's shape, or
+   * a rate limit breaks its enabled-bucket bound
    * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
@@ -493,10 +493,20 @@ export class ApplyChainUpdates extends EVMOperation<
 
     this.assertRateBounds(params, version)
 
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-
     return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedApplyChainUpdatesParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 
   /**

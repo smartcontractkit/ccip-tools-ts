@@ -8,8 +8,8 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
 import { CrossChainTokenRole, resolveTokenRoleHandler } from '../roles.ts'
@@ -60,29 +60,43 @@ export class RevokeMintRole extends EVMOperation<RevokeMintRoleParams> {
    * nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
    * version
-   * @throws {@link CCTParamsInvalidError} if `minter` does not hold the mint role, or `sender`
-   * lacks the version's role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: RevokeMintRoleParams,
   ): Promise<UnsignedEVMTx> {
-    const { tokenAddress, minter, sender } = params
-    const version = await resolveToken(chain, tokenAddress)
-    const roleHandler = resolveTokenRoleHandler(version, this.name)
-    if (!(await roleHandler.hasRole(chain, tokenAddress, 'mint', minter)))
-      throw new CCTParamsInvalidError(
-        this.name,
-        'minter',
-        `does not hold the mint role on ${tokenAddress}; revoking it changes nothing`,
-      )
-    if (sender !== undefined)
-      await roleHandler.assertAdmin(this.name, chain, tokenAddress, 'mint', sender)
-
+    const version = await resolveToken(chain, params.tokenAddress)
     return resolveTokenEncoder(
       this.encoders,
       version,
       this.name,
     )(getTokenInterface(version), params)
+  }
+
+  /**
+   * Reports a revoke of a role never held, and checks `sender` against the version's role admin.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * grants the role, or the one that makes `sender` its admin.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, minter, sender }: RevokeMintRoleParams,
+  ): Promise<PreconditionError[]> {
+    const roleHandler = resolveTokenRoleHandler(await resolveToken(chain, tokenAddress), this.name)
+    const [holdsRole, admin] = await Promise.all([
+      roleHandler.hasRole(chain, tokenAddress, 'mint', minter),
+      sender === undefined
+        ? undefined
+        : roleHandler.checkAdmin(chain, tokenAddress, 'mint', sender),
+    ])
+    return unmet(
+      holdsRole
+        ? undefined
+        : {
+            param: 'minter',
+            reason: `does not hold the mint role on ${tokenAddress}; revoking it changes nothing`,
+          },
+      admin,
+    )
   }
 }

@@ -18,13 +18,14 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksContract,
-  assertAdvancedPoolHooksOwner,
   assertPolicyEngineContract,
+  checkAdvancedPoolHooksOwner,
 } from '../contracts.ts'
 
 /** Parameters for {@link SetPolicyEngine}. */
@@ -54,24 +55,35 @@ export class SetPolicyEngine extends EVMOperation<SetPolicyEngineParams> {
   }
 
   /**
-   * Confirms the target, policy engine code, and supplied owner before encoding
-   * `setPolicyEngine(address)`.
+   * Confirms the target and the policy engine's code before encoding `setPolicyEngine(address)`.
+   * @remarks Both stay fatal: neither an address that is not an `AdvancedPoolHooks` nor one with
+   * no deployed code can be made into one by an earlier step of a plan.
    * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
    * @throws {@link CCTParamsInvalidError} if non-zero `newPolicyEngine` has no deployed code
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, newPolicyEngine, sender }: SetPolicyEngineParams,
+    { advancedPoolHooks, newPolicyEngine }: SetPolicyEngineParams,
   ): Promise<UnsignedEVMTx> {
     await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
     if (getAddress(newPolicyEngine) !== ZeroAddress)
       await assertPolicyEngineContract(this.name, 'newPolicyEngine', chain, newPolicyEngine)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
     return callTx(
       advancedPoolHooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('setPolicyEngine', [newPolicyEngine]),
     )
+  }
+
+  /**
+   * Confirms `sender` (when given) owns the hooks contract.
+   * @remarks Reported rather than thrown outright, so a plan that deploys these hooks — or hands
+   * them to this owner — in an earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { advancedPoolHooks, sender }: SetPolicyEngineParams,
+  ): Promise<PreconditionError[]> {
+    if (sender === undefined) return []
+    return unmet(await checkAdvancedPoolHooksOwner(chain, advancedPoolHooks, sender))
   }
 }
