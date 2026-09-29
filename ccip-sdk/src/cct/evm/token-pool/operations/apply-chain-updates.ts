@@ -13,13 +13,13 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import { encodeAddressToAny } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
+import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../../remote-address.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import {
-  parseHexBytes,
   parseRecord,
-  parseUniqueHexBytesArray,
   validateArray,
   validateBoolean,
   validateNonZeroAddress,
@@ -55,7 +55,11 @@ export type ApplyChainUpdatesParamVersion =
 type ChainUpdateCommon = {
   /** CCIP selector of the remote chain (`uint64`). */
   remoteChainSelector: bigint
-  /** Hex-encoded remote token address, `0x` prefix optional; must be non-empty whole bytes. */
+  /**
+   * Remote token address in the remote chain's own format (`0x…` for EVM, base58 for Solana, …),
+   * the family taken from `remoteChainSelector`. Encoded to the 32-byte padded `bytes` the pool
+   * stores; an unpadded EVM remote would configure fine, then revert every inbound transfer.
+   */
   remoteTokenAddress: string
   /** Rate limit for tokens received from the remote chain. */
   inboundRateLimiterConfig: RateLimitConfig
@@ -89,8 +93,9 @@ type WithParsedRateLimits<T> = Omit<T, 'inboundRateLimiterConfig' | 'outboundRat
  * @remarks `requireNonZero` holds only for an addition, which `TokenPool.applyChainUpdates` does
  * not guard: `s_remoteChainSelectors.add(0)` succeeds, so the tx **mines as a success** and leaves
  * `getSupportedChains()` holding a lane nothing can route. A removal is how such a pool is
- * repaired, so `0n` stays legal there. Not a *known*-selector check, though — the registry lags new
- * chains, and rejecting a real-but-unrecognised selector is the worse failure.
+ * repaired, so `0n` stays legal there. Not a *known*-selector check here; an addition gets one
+ * anyway, since its remote addresses are parsed in the remote chain's format, which the selector
+ * names. A removal skips that parse, so an unrecognised selector can still be removed.
  */
 function parseLaneSelector(
   operation: string,
@@ -118,27 +123,34 @@ function parseLaneSelector(
   return selector
 }
 
-/** Parses the lane fields both shapes share. */
+/**
+ * Parses the lane fields both shapes share. `adding` is false only for a v1.5.0 removal, whose
+ * remote addresses the contract ignores: they are left unparsed, as `''`, and encoded empty.
+ */
 function parseLaneCommon(
   operation: string,
   path: string,
   update: { [k: string]: unknown },
   seen: Set<bigint>,
-  requireNonZero: boolean,
+  adding: boolean,
 ): WithParsedRateLimits<ChainUpdateCommon> {
+  const remoteChainSelector = parseLaneSelector(
+    operation,
+    `${path}.remoteChainSelector`,
+    update.remoteChainSelector,
+    seen,
+    adding,
+  )
   return {
-    remoteChainSelector: parseLaneSelector(
-      operation,
-      `${path}.remoteChainSelector`,
-      update.remoteChainSelector,
-      seen,
-      requireNonZero,
-    ),
-    remoteTokenAddress: parseHexBytes(
-      operation,
-      `${path}.remoteTokenAddress`,
-      update.remoteTokenAddress,
-    ),
+    remoteChainSelector,
+    remoteTokenAddress: adding
+      ? parseRemoteAddress(
+          operation,
+          `${path}.remoteTokenAddress`,
+          update.remoteTokenAddress,
+          remoteChainSelector,
+        )
+      : '',
     inboundRateLimiterConfig: parseRateLimitConfig(
       operation,
       `${path}.inboundRateLimiterConfig`,
@@ -168,12 +180,17 @@ export type ChainUpdateV1_5_0 = ChainUpdateCommon & {
   /**
    * Whether the lane is enabled. **v1.5.0 only** — `false` removes the lane, which is how this
    * version spells v1.5.1+'s `remoteChainSelectorsToRemove`. Every other field is still required
-   * and still encoded for a removal, and both rate limits must be `{ enabled: false }`: v1.5.0
+   * for a removal, though the contract ignores both remote addresses, so they are not validated
+   * and are encoded as empty bytes; a lane of `0n` or of a chain the SDK does not know can still be
+   * removed. Both rate limits must be `{ enabled: false }`: v1.5.0
    * validates them with `mustBeDisabled = !update.allowed` and reverts `RateLimitMustBeDisabled()`
    * otherwise, so passing a lane's current (enabled) limits back through is rejected.
    */
   allowed: boolean
-  /** Hex-encoded remote pool address, `0x` prefix optional. Singular at v1.5.0 — one pool per lane. */
+  /**
+   * Remote pool address in the remote chain's own format, like `remoteTokenAddress`. Singular at
+   * v1.5.0 — one pool per lane.
+   */
   remotePoolAddress: string
 }
 
@@ -194,14 +211,18 @@ function parseChainsV1_5_0(operation: string, chains: unknown) {
     const update = parseRecord(operation, path, entry, 'chain update')
     const { allowed } = update
     validateBoolean(operation, `${path}.allowed`, allowed)
+    const common = parseLaneCommon(operation, path, update, seen, allowed)
     const lane = {
-      ...parseLaneCommon(operation, path, update, seen, allowed),
+      ...common,
       allowed,
-      remotePoolAddress: parseHexBytes(
-        operation,
-        `${path}.remotePoolAddress`,
-        update.remotePoolAddress,
-      ),
+      remotePoolAddress: allowed
+        ? parseRemoteAddress(
+            operation,
+            `${path}.remotePoolAddress`,
+            update.remotePoolAddress,
+            common.remoteChainSelector,
+          )
+        : '',
     }
     const stillEnabled =
       !allowed &&
@@ -229,6 +250,9 @@ const encodeV1_5_0 = (
     iface.encodeFunctionData('applyChainUpdates', [
       params.chains.map((lane) => ({
         ...lane,
+        // a removal's addresses are ignored on-chain, so they go out empty
+        remoteTokenAddress: lane.allowed ? encodeAddressToAny(lane.remoteTokenAddress) : '0x',
+        remotePoolAddress: lane.allowed ? encodeAddressToAny(lane.remotePoolAddress) : '0x',
         // re-key the shared `enabled` to the ABI's `isEnabled`
         inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
           isEnabled,
@@ -254,9 +278,9 @@ const encodeV1_5_0 = (
  */
 export type ChainUpdateV1_5_1 = ChainUpdateCommon & {
   /**
-   * Hex-encoded remote pool addresses, `0x` prefix optional — plural, because a lane may accept
-   * several remote pools, e.g. while migrating one. Non-empty, and unique within the lane
-   * (compared as bytes, so `0xAB` and `ab` collide).
+   * Remote pool addresses in the remote chain's own format, like `remoteTokenAddress` — plural,
+   * because a lane may accept several remote pools, e.g. while migrating one. Non-empty, and unique
+   * within the lane (compared by canonical spelling, so two spellings of one address collide).
    */
   remotePoolAddresses: string[]
 }
@@ -297,12 +321,16 @@ function parseChainsV1_5_1(
   const adds = chainsToAdd.map((entry, i) => {
     const path = `chainsToAdd[${i}]`
     const update = parseRecord(operation, path, entry, 'chain update')
+    const common = parseLaneCommon(operation, path, update, seenAdds, true)
+    const { remotePoolAddresses } = update
+    validateArray(operation, `${path}.remotePoolAddresses`, remotePoolAddresses, 1)
     return {
-      ...parseLaneCommon(operation, path, update, seenAdds, true),
-      remotePoolAddresses: parseUniqueHexBytesArray(
+      ...common,
+      remotePoolAddresses: parseUniqueRemoteAddresses(
         operation,
         `${path}.remotePoolAddresses`,
-        update.remotePoolAddresses,
+        remotePoolAddresses,
+        common.remoteChainSelector,
       ),
     }
   })
@@ -320,6 +348,8 @@ const encodeV1_5_1 = (
       params.remoteChainSelectorsToRemove,
       params.chainsToAdd.map((lane) => ({
         ...lane,
+        remoteTokenAddress: encodeAddressToAny(lane.remoteTokenAddress),
+        remotePoolAddresses: lane.remotePoolAddresses.map((pool) => encodeAddressToAny(pool)),
         // re-key the shared `enabled` to the ABI's `isEnabled`
         inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
           isEnabled,

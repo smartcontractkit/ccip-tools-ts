@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
+// registers the EVM chain family, for the lanes whose remote is EVM
+import '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -17,8 +19,8 @@ import { AppendRemotePoolAddresses } from './append-remote-pool-addresses.ts'
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
-const SELECTOR = 5009297550715157269n
-const REMOTE_POOLS = ['0x1234567890abcdef1234567890abcdef12345678', '0xaabbccdd']
+const SELECTOR = 5009297550715157269n // ethereum-mainnet
+const REMOTE_POOLS = ['0x1234567890abcdef1234567890abcdef12345678', '0x' + 'ab'.repeat(20)]
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
@@ -109,6 +111,18 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
       )
     })
 
+    it('stores an EVM remote pool given padded to 32 bytes at its native 20', async () => {
+      const unsigned = await generate({
+        remotePoolAddresses: ['0x' + '00'.repeat(12) + REMOTE_POOLS[0]!.slice(2)],
+      })
+      const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+      const { addresses } = decoded!.data as { addresses: { address: Buffer }[] }
+      assert.deepEqual(
+        addresses.map(({ address }) => address),
+        [Buffer.from(REMOTE_POOLS[0]!.slice(2), 'hex')],
+      )
+    })
+
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
       const unsigned = await generate({ poolType: undefined, poolProgramAddress })
@@ -125,8 +139,18 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
         [{ remotePoolAddresses: [] }, 'remotePoolAddresses'],
         [{ remotePoolAddresses: [''] }, 'remotePoolAddresses[0]'],
-        [{ remotePoolAddresses: ['0x123'] }, 'remotePoolAddresses[0]'],
-        [{ remotePoolAddresses: ['0xaabbccdd', 'aabbccdd'] }, 'remotePoolAddresses[1]'],
+        [{ remotePoolAddresses: ['0xzz'] }, 'remotePoolAddresses[0]'],
+        // decodes to the zero address
+        [{ remotePoolAddresses: ['0x'] }, 'remotePoolAddresses[0]'],
+        // a Solana address on an EVM lane
+        [{ remotePoolAddresses: [TOKEN] }, 'remotePoolAddresses[0]'],
+        // two spellings of one address
+        [
+          { remotePoolAddresses: [REMOTE_POOLS[0], REMOTE_POOLS[0]!.slice(2).toUpperCase()] },
+          'remotePoolAddresses[1]',
+        ],
+        // a selector the SDK does not know, so the address format is unknown
+        [{ remoteChainSelector: 2n ** 63n }, 'remotePoolAddresses[0]'],
         [{ remotePoolAddresses: '0x12' }, 'remotePoolAddresses'],
       ] as const) {
         await assert.rejects(

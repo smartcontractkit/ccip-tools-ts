@@ -160,33 +160,6 @@ export function validateUint64(
 }
 
 /**
- * Parses an optionally `0x`-prefixed hex string of whole, non-empty bytes into the 0x-prefixed
- * lower-case form ethers encodes as `bytes`.
- *
- * @remarks The EVM counterpart of Solana's `parseHexBytes`/`parseNonEmptyHexBytes`, minus their
- * byte cap: the values this guards are *remote* addresses carried as `bytes` (a lane's remote
- * token or remote pool), and a remote may be Solana or Aptos (32 bytes) as easily as EVM (20), so
- * a length ceiling here would only reject valid remotes. Shared by the remote-pool write ops and
- * `applyChainUpdates`, which previously each carried their own copy of this parser.
- * @param operation - Operation name, for the error context.
- * @param param - Param path to blame, e.g. `remotePoolAddress` or `chains[0].remoteTokenAddress`.
- * @param value - The caller-supplied value, unvalidated.
- * @returns The value as `0x`-prefixed lower-case hex.
- * @throws {@link CCTParamsInvalidError} if `value` is not a non-empty whole-byte hex string
- */
-export function parseHexBytes(operation: string, param: string, value: unknown): string {
-  const hex = typeof value === 'string' ? value.replace(/^0x/i, '').toLowerCase() : ''
-  if (typeof value !== 'string' || !/^(?:[\da-f]{2})+$/.test(hex)) {
-    throw new CCTParamsInvalidError(
-      operation,
-      param,
-      `must be a non-empty hex string of whole bytes, got ${String(value)}`,
-    )
-  }
-  return `0x${hex}`
-}
-
-/**
  * Parses `value` as a plain object, returned as an indexable record so a caller can validate
  * fields one by one before the value has a type. `kind` names the shape in the failure message,
  * e.g. `'chain update'` → `must be a chain update`.
@@ -233,33 +206,4 @@ export function validateArray(
         `${param}[${i}]`,
         'must not be a hole — the array is sparse, and a missing element cannot be encoded',
       )
-}
-
-/**
- * Parses a non-empty list of `bytes` values into 0x-prefixed lower-case hex, rejecting duplicates.
- * @remarks Duplicates are compared *after* {@link parseHexBytes} normalisation, so `0xAB` and `ab`
- * collide the way a Solidity `bytes` set would.
- * @returns The values as 0x-prefixed lower-case hex, in input order.
- * @throws {@link CCTParamsInvalidError} if the list is empty, not an array, sparse, or holds an
- * invalid or duplicate value
- */
-export function parseUniqueHexBytesArray(
-  operation: string,
-  param: string,
-  value: unknown,
-): string[] {
-  validateArray(operation, param, value, 1)
-  const seen = new Set<string>()
-  return value.map((entry, i) => {
-    const hex = parseHexBytes(operation, `${param}[${i}]`, entry)
-    if (seen.has(hex)) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${param}[${i}]`,
-        'must not duplicate an earlier entry in the same array',
-      )
-    }
-    seen.add(hex)
-    return hex
-  })
 }

@@ -1,13 +1,12 @@
-import { Buffer } from 'buffer'
-
 import { type PublicKey, SystemProgram } from '@solana/web3.js'
 import BN from 'bn.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { encodeAddressToAny } from '../../../../utils.ts'
 import type { TransactionResult } from '../../../operation.ts'
+import { parseRemoteAddress } from '../../../remote-address.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -22,7 +21,6 @@ import {
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
-  parseHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
@@ -36,7 +34,10 @@ type InitChainRemoteConfigParams = PoolProgramRef & {
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
-  /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. Left-padded in the instruction. */
+  /**
+   * Remote token address in the remote chain's own format (`0x…` for EVM, base58 for Solana, …),
+   * the family taken from `remoteChainSelector`. Left-padded to 32 bytes in the instruction.
+   */
   remoteTokenAddress: string
   /** Decimals of the remote token (`u8`), not the local mint: an integer from 0 to 255; 0 is valid. */
   remoteTokenDecimals: number
@@ -50,7 +51,7 @@ type ParsedInitChainRemoteConfigParams = {
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
-  remoteTokenAddress: Buffer
+  remoteTokenAddress: string
   remoteTokenDecimals: number
 }
 
@@ -85,16 +86,12 @@ export class InitChainRemoteConfig extends SolanaOperation<
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
     validateInteger(this.name, 'remoteTokenDecimals', params.remoteTokenDecimals, 0, 255)
 
-    const remoteTokenAddress = parseHexBytes(
+    const remoteTokenAddress = parseRemoteAddress(
       this.name,
       'remoteTokenAddress',
       params.remoteTokenAddress,
-      32,
+      params.remoteChainSelector,
     )
-
-    if (!remoteTokenAddress.length) {
-      throw new CCTParamsInvalidError(this.name, 'remoteTokenAddress', 'must not be empty')
-    }
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
@@ -123,12 +120,9 @@ export class InitChainRemoteConfig extends SolanaOperation<
       opts.remoteChainSelector,
       opts.tokenAddress,
     )
-    const paddedRemoteToken = Buffer.alloc(32)
-    opts.remoteTokenAddress.copy(paddedRemoteToken, 32 - opts.remoteTokenAddress.length)
-
     const instruction = await program.methods
       .initChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
-        tokenAddress: { address: paddedRemoteToken },
+        tokenAddress: { address: encodeAddressToAny(opts.remoteTokenAddress) },
         poolAddresses: [],
         decimals: opts.remoteTokenDecimals,
       })
