@@ -1,9 +1,10 @@
 /**
  * EVM `AdvancedPoolHooks` contract layer for CCT: the cached {@link Interface}
  * ({@link ADVANCED_POOL_HOOKS_INTERFACE}), the deploy artifact
- * ({@link getAdvancedPoolHooksArtifact}), and the bind-target guard
- * ({@link assertAdvancedPoolHooksContract}). Only one version is deployable, so there is no
- * version framework here. Mirrors `lockbox/contracts.ts`.
+ * ({@link getAdvancedPoolHooksArtifact}), the bind-target guard
+ * ({@link assertAdvancedPoolHooksContract}), and the owner guard its owner-gated writes pre-flight
+ * `sender` against ({@link assertAdvancedPoolHooksOwner}). Only one version is deployable, so
+ * there is no version framework here. Mirrors `lockbox/contracts.ts`.
  *
  * @remarks A v2.0.0 `TokenPool` has no allowlist or CCV configuration of its own: both live on an
  * optional `AdvancedPoolHooks`, consulted only when bound — an unbound pool enforces neither.
@@ -179,7 +180,13 @@ export async function assertPolicyEngineContract(
 }
 
 /**
- * Pre-flights a known sender against the `AdvancedPoolHooks` owner.
+ * Pre-flights a known sender against the `AdvancedPoolHooks` owner, so an unauthorized caller fails
+ * here instead of as an `OnlyCallableByOwner` revert after a multisig has signed.
+ *
+ * @remarks The hooks are a separately owned `Ownable2Step` contract, not part of the pool: the
+ * deployer becomes their owner, and binding them to a pool transfers nothing. A pool owner who did
+ * not deploy the hooks cannot write through them, so checking the *pool* owner instead would pass
+ * a sender the hooks then revert.
  * @param operation - Operation name for error context.
  * @param chain - Chain hosting the hooks contract.
  * @param advancedPoolHooks - Hooks contract to read.
@@ -197,7 +204,7 @@ export async function assertAdvancedPoolHooksOwner(
   throw new CCTParamsInvalidError(
     operation,
     'sender',
-    `must be the current AdvancedPoolHooks owner (${owner})`,
+    `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${advancedPoolHooks} are owned separately from the pools bound to them`,
   )
 }
 
