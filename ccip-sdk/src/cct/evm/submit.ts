@@ -52,19 +52,19 @@ export async function submit(
   if (!first) throw new CCTTxFailedError(operation, 'no transaction to submit')
 
   let response: TransactionResponse
-  let nonceConsumed = false
+  let reservedNonce: number | undefined
   try {
     let tx: TransactionRequest = { ...first }
     tx.from = undefined // drop any builder-set sender before populate, else ethers throws on a from/signer mismatch
     if (tx.nonce == null) {
-      tx.nonce = await chain.nextNonce(sender)
-      nonceConsumed = true
+      reservedNonce = await chain.nextNonce(sender)
+      tx.nonce = reservedNonce
     }
     tx = await wallet.populateTransaction(tx)
     tx.from = undefined // some signers reject a pre-populated `from`
     response = await submitTransaction(wallet, tx, chain.provider)
   } catch (error) {
-    if (nonceConsumed) chain.rollbackNonce(sender)
+    if (reservedNonce != null) chain.rollbackNonce(sender, reservedNonce)
     throw new CCTTxFailedError(operation, error instanceof Error ? error.message : String(error), {
       cause: error instanceof Error ? error : undefined,
       isTransient: isTransientError(error),

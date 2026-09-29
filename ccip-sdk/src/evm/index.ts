@@ -332,9 +332,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly decimals = 18
 
   provider: JsonRpcApiProvider
-  private noncesPromises: Record<string, Promise<unknown>>
+  /** Nonces released by {@link rollbackNonce}, reused before new ones. */
+  private releasedNonces: Record<string, Set<number>>
   /**
-   * Cache of current nonces per wallet address.
+   * Next nonce to hand out per wallet address.
    * Used internally by {@link sendMessage} and {@link execute} to manage transaction ordering.
    * Can be inspected for debugging or manually adjusted if needed.
    */
@@ -348,7 +349,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
-    this.noncesPromises = {}
+    this.releasedNonces = {}
     this.nonces = {}
 
     this.provider = provider
@@ -497,30 +498,48 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Get the next nonce for a wallet address and increment the internal counter.
-   * Fetches from the network on first call, then uses cached value.
+   * Reserve the next nonce for a wallet address.
+   * Uses the higher of the pending transaction count and the local counter, so
+   * pending transactions are never replaced. Released nonces are reused first.
    * @param address - Wallet address to get nonce for
-   * @returns The next available nonce
+   * @returns The reserved nonce
    */
   async nextNonce(address: string): Promise<number> {
-    await (this.noncesPromises[address] ??= this.provider
-      .getTransactionCount(address)
-      .then((nonce) => {
-        this.nonces[address] = nonce
-        return nonce
-      }))
-    return this.nonces[address]!++
+    const pending = await this.provider.getTransactionCount(address, 'pending')
+    // synchronous from here on, so concurrent callers can't interleave
+    const released = this.releasedNonces[address]
+    if (released?.size) {
+      // drop released nonces the network has since consumed (e.g. filled externally)
+      for (const n of released) if (n < pending) released.delete(n)
+      if (released.size) {
+        const n = Math.min(...released)
+        released.delete(n)
+        return n
+      }
+    }
+    const nonce = Math.max(pending, this.nonces[address] ?? 0)
+    this.nonces[address] = nonce + 1
+    return nonce
   }
 
   /**
-   * Undo the last {@link nextNonce} increment for a wallet address.
-   * {@link nextNonce} hands out a nonce optimistically; if the send then fails
-   * before broadcast, call this so the counter is reused rather than leaving a
-   * permanent gap that stalls every later transaction. No-op if uncached.
-   * @param address - Wallet address whose cached nonce to roll back
+   * Release a nonce from {@link nextNonce} whose send failed before broadcast.
+   * Only `nonce` becomes reusable; later nonces are never re-issued.
+   * @param address - Wallet address the nonce was reserved for
+   * @param nonce - The nonce returned by {@link nextNonce}
    */
-  rollbackNonce(address: string): void {
-    if (this.nonces[address] != null) this.nonces[address]--
+  rollbackNonce(address: string, nonce: number): void {
+    const next = this.nonces[address]
+    if (next == null || nonce >= next) return
+    const released = (this.releasedNonces[address] ??= new Set())
+    if (nonce !== next - 1) {
+      released.add(nonce)
+      return
+    }
+    // latest reservation: step back, collapsing any released nonces now at the top
+    let top = nonce
+    while (released.delete(top - 1)) top--
+    this.nonces[address] = top
   }
 
   /**
@@ -1802,7 +1821,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     // approve all tokens (including feeToken, if needed) in parallel
     const responses = await Promise.all(
       approveTxs.map(async (tx: TransactionRequest) => {
-        tx.nonce = await this.nextNonce(sender)
+        const nonce = await this.nextNonce(sender)
+        tx.nonce = nonce
         try {
           tx = await wallet.populateTransaction(tx)
           tx.from = undefined
@@ -1810,14 +1830,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.logger.debug('approve =>', response.hash)
           return response
         } catch (err) {
-          this.nonces[sender]!--
+          this.rollbackNonce(sender, nonce)
           throw err
         }
       }),
     )
     if (responses.length) await responses[responses.length - 1]!.wait(1, 60_000) // wait last tx nonce to be mined
 
-    sendTx.nonce = await this.nextNonce(sender)
+    const sendNonce = await this.nextNonce(sender)
+    sendTx.nonce = sendNonce
     let response
     try {
       // sendTx.gasLimit = await this.provider.estimateGas(sendTx)
@@ -1825,7 +1846,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       sendTx.from = undefined // some signers don't like receiving pre-populated `from`
       response = await submitTransaction(wallet, sendTx, this.provider)
     } catch (err) {
-      this.nonces[sender]!--
+      this.rollbackNonce(sender, sendNonce)
       throw err
     }
     this.logger.debug('ccipSend =>', response.hash)
@@ -2029,11 +2050,18 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
-    unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
-    const populatedTx = await wallet.populateTransaction(unsignedTx)
-    populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
-
-    const response = await submitTransaction(wallet, populatedTx, this.provider)
+    const payer = await wallet.getAddress()
+    const nonce = await this.nextNonce(payer)
+    unsignedTx.nonce = nonce
+    let populatedTx, response
+    try {
+      populatedTx = await wallet.populateTransaction(unsignedTx)
+      populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+      response = await submitTransaction(wallet, populatedTx, this.provider)
+    } catch (err) {
+      this.rollbackNonce(payer, nonce)
+      throw err
+    }
     this.logger.debug('manuallyExecute =>', response.hash)
 
     let receipt = await response.wait(0)

@@ -133,6 +133,19 @@ describe('submit (sign-and-confirm pipeline)', () => {
     )
   })
 
+  it('releases exactly the reserved nonce when submission fails before broadcast', async () => {
+    const released: [string, number][] = []
+    const chain = Object.assign(stubChain(), {
+      nextNonce: async () => 4,
+      rollbackNonce: (address: string, nonce: number) => void released.push([address, nonce]),
+    })
+    await assert.rejects(
+      () => submit(chain, fakeSigner({ submitError: new Error('boom') }), UNSIGNED, 'setPool'),
+      CCTTxFailedError,
+    )
+    assert.deepEqual(released, [['0x' + '55'.repeat(20), 4]])
+  })
+
   it('rejects a non-signer wallet', async () => {
     await assert.rejects(
       () => submit(stubChain(), {}, UNSIGNED, 'setPool'),
