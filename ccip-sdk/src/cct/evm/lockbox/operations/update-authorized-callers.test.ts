@@ -22,6 +22,7 @@ const SENDER = '0x' + '11'.repeat(20)
 const LOCKBOX = '0x' + '66'.repeat(20)
 const POOL = '0x' + '77'.repeat(20)
 const OTHER = '0x' + '88'.repeat(20)
+const DUPLICATE_CALLER = '0x' + 'aa'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const NOT_THE_OWNER = '0x' + '99'.repeat(20)
 
@@ -250,6 +251,19 @@ describe('UpdateLockboxAuthorizedCallers (cct/evm lockbox operation)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'removedCallers[0]',
       )
+    })
+
+    it('rejects duplicate callers, including differently cased addresses', async () => {
+      for (const param of ['addedCallers', 'removedCallers'] as const) {
+        await assert.rejects(
+          () =>
+            new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
+              lockbox: LOCKBOX,
+              [param]: [DUPLICATE_CALLER, `0x${DUPLICATE_CALLER.slice(2).toUpperCase()}`],
+            }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
     })
 
     it('rejects the zero address as a caller', async () => {

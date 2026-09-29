@@ -9,6 +9,8 @@
  * @packageDocumentation
  */
 
+import { getAddress } from 'ethers'
+
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
@@ -19,18 +21,28 @@ import { LOCKBOX_INTERFACE, assertLockbox, assertLockboxOwner } from '../contrac
 /**
  * Parameters for {@link UpdateLockboxAuthorizedCallers}. At least one caller across both arrays is required.
  * @remarks `AuthorizedCallers._applyAuthorizedCallerUpdates` applies `removedCallers` first, so an
- * address in both arrays ends up authorized. The list is a set: re-adding an existing caller is a
- * no-op (though `AuthorizedCallerAdded` still fires), and removing an absent one emits nothing.
+ * address in both arrays ends up authorized. Duplicates within either array are rejected; removing
+ * an absent caller remains a no-op.
  */
 export interface UpdateLockboxAuthorizedCallersParams {
   /** Address of the `ERC20LockBox` to update. */
   lockbox: string
-  /** Callers to authorize (e.g. the `LockReleaseTokenPool`); defaults to `[]`. */
+  /** Callers to authorize (e.g. the `LockReleaseTokenPool`); defaults to `[]`. No duplicates. */
   addedCallers?: string[]
-  /** Callers to deauthorize; defaults to `[]`. */
+  /** Callers to deauthorize; defaults to `[]`. No duplicates. */
   removedCallers?: string[]
   /** Lockbox owner; sets `tx.from` for offline / multisig signing. */
   sender?: string
+}
+
+function validateCallers(operation: string, param: string, callers: unknown): void {
+  validateArray(operation, param, callers)
+  const normalized = callers.map((caller, i) => {
+    validateNonZeroAddress(operation, `${param}[${i}]`, caller)
+    return getAddress(caller as string)
+  })
+  if (new Set(normalized).size !== normalized.length)
+    throw new CCTParamsInvalidError(operation, param, 'must not contain duplicate addresses')
 }
 
 /** Applies authorized-caller updates on an `ERC20LockBox` via `applyAuthorizedCallerUpdates`. */
@@ -44,8 +56,8 @@ export class UpdateLockboxAuthorizedCallers extends EVMOperation<UpdateLockboxAu
     removedCallers = [],
   }: UpdateLockboxAuthorizedCallersParams): void {
     validateNonZeroAddress(this.name, 'lockbox', lockbox)
-    validateArray(this.name, 'addedCallers', addedCallers)
-    validateArray(this.name, 'removedCallers', removedCallers)
+    validateCallers(this.name, 'addedCallers', addedCallers)
+    validateCallers(this.name, 'removedCallers', removedCallers)
     if (addedCallers.length + removedCallers.length === 0) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -53,10 +65,6 @@ export class UpdateLockboxAuthorizedCallers extends EVMOperation<UpdateLockboxAu
         'at least one caller must be added or removed',
       )
     }
-    const validateCaller = (field: string, c: string, i: number): void =>
-      validateNonZeroAddress(this.name, `${field}[${i}]`, c)
-    addedCallers.forEach((c, i) => validateCaller('addedCallers', c, i))
-    removedCallers.forEach((c, i) => validateCaller('removedCallers', c, i))
   }
 
   /**

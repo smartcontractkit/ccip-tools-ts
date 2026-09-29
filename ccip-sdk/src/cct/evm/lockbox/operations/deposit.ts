@@ -6,7 +6,7 @@
  * `ERC20LockBox._validateDepositWithdraw` ends in `AuthorizedCallers._validateCaller`, so the
  * depositing account must itself appear in `getAllAuthorizedCallers()` — authorizing the pool is
  * not enough. Until it does, the deposit reverts `UnauthorizedCaller(address)` (selector
- * `0xd86ad9cf`); the lockbox owner cures that with `authorizeLockboxCallers`.
+ * `0xd86ad9cf`); the lockbox owner cures that with `updateLockboxAuthorizedCallers`.
  *
  * @remarks The deposit is a `safeTransferFrom` on the depositor, so the tokens must be **approved
  * to the lockbox** — not to the pool, which is the v1.5.x habit — see
@@ -15,7 +15,7 @@
  *
  * @remarks The v2.0.0 replacement for `provideLiquidity`, which pre-2.0.0 pools declared
  * themselves. Full sequence: `deployToken` → `deployLockbox` → `deployTokenPool` →
- * `authorizeLockboxCallers` → `setPool` → configure lanes → this.
+ * `updateLockboxAuthorizedCallers` → `setPool` → configure lanes → this.
  *
  * @remarks The `ILockBox` signature carries a `uint64 remoteChainSelector` that this lockbox
  * ignores, so the op takes no parameter for it and encodes zero; see

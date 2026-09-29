@@ -8,7 +8,8 @@
  *
  * Owner-only. The target is verified as `AdvancedPoolHooks`, a non-zero engine must have deployed
  * code, and a supplied sender is checked against the hooks' on-chain `owner()` before calldata is
- * built.
+ * built. Code presence does not prove the engine implements the required `attach()` / `detach()`
+ * hooks; an incompatible deployed contract reverts on-chain.
  *
  * @packageDocumentation
  */
@@ -30,7 +31,8 @@ import {
 export type SetPolicyEngineParams = {
   /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
   advancedPoolHooks: string
-  /** Policy engine to attach; must have deployed code unless zero, which disables policy checks. */
+  /** Policy engine to attach; must have deployed code unless zero, which disables policy checks.
+   * It must also implement the required `attach()` / `detach()` hooks. */
   newPolicyEngine: string
   /**
    * Hooks owner. Sets `tx.from` for offline / multisig signing and, when supplied, is checked

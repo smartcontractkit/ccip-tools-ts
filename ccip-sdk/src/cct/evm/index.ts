@@ -1797,9 +1797,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned `setPolicyEngine` tx for an `AdvancedPoolHooks`; use
    * {@link setPolicyEngine} to sign and submit it directly.
    *
-   * @remarks The zero address disables policy checks. A non-zero engine must have deployed code;
-   * the target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it
-   * must be the current hooks owner.
+   * @remarks The zero address disables policy checks. A non-zero engine must have deployed code
+   * and implement `attach()` / `detach()`; code presence alone cannot verify that interface. The
+   * target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it must
+   * be the current hooks owner.
    *
    * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
    * `AdvancedPoolHooks` contract
@@ -3117,7 +3118,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
    * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox`, and a wallet
    * that is not its owner, before the wallet is asked to sign; see
-   * {@link generateUnsignedAuthorizeLockboxCallers}.
+   * {@link generateUnsignedUpdateLockboxAuthorizedCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
    * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the

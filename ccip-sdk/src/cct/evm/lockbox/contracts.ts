@@ -175,7 +175,7 @@ export async function assertLockboxToken(
  * `_validateDepositWithdraw` ends in `_validateCaller`, so a *depositor* must itself be an
  * authorized caller, not only the pool. Without this the only signal is an
  * `UnauthorizedCaller(address)` revert (selector `0xd86ad9cf`) at wallet-confirmation time, which
- * names neither the lockbox nor the op that cures it. The error names `authorizeLockboxCallers`,
+ * names neither the lockbox nor the op that cures it. The error names `updateLockboxAuthorizedCallers`,
  * which grants exactly this.
  * @remarks Owner-gated ops use `owner()`; this set is separate and wider — being the lockbox
  * owner does not make an account an authorized caller.
@@ -198,8 +198,8 @@ export async function assertLockboxCaller(
     operation,
     'sender',
     callers.length === 0
-      ? `lockbox ${lockbox} has no authorized callers, so it accepts deposits and withdrawals from nobody; its owner must add ${getAddress(account)} with authorizeLockboxCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`
-      : `${getAddress(account)} is not an authorized caller of lockbox ${lockbox} (currently ${callers.join(', ')}), so it would revert UnauthorizedCaller; its owner must add it with authorizeLockboxCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`,
+      ? `lockbox ${lockbox} has no authorized callers, so it accepts deposits and withdrawals from nobody; its owner must add ${getAddress(account)} with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`
+      : `${getAddress(account)} is not an authorized caller of lockbox ${lockbox} (currently ${callers.join(', ')}), so it would revert UnauthorizedCaller; its owner must add it with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`,
   )
 }
 
