@@ -12,6 +12,7 @@ import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
+import { parseUniqueRemoteAddresses } from '../../../remote-address.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -20,10 +21,11 @@ import {
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
-  parseNonEmptyHexBytes,
+  U64_MAX,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
+  validateBigInt,
   validateUniqueChainSelectors,
 } from '../../validate.ts'
 import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
@@ -48,9 +50,12 @@ type PackedInstructionGroup = {
 type ChainUpdate = {
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
-  /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. */
+  /**
+   * Remote token address in the remote chain's own format (`0x…` for EVM, base58 for Solana, …),
+   * the family taken from `remoteChainSelector`.
+   */
   remoteTokenAddress: string
-  /** Hex-encoded remote pool addresses, optionally `0x`-prefixed; supplied addresses are non-empty and unique. */
+  /** Remote pool addresses in the remote chain's own format, like `remoteTokenAddress`; unique. */
   remotePoolAddresses: string[]
   /** Remote token decimals (`u8`), required by the Solana pool account. */
   remoteTokenDecimals: number
@@ -85,30 +90,30 @@ type ParsedApplyChainUpdatesParams = ApplyChainUpdatesParams & {
   authority: string
 }
 
+/**
+ * Validates every addition's remote pool addresses up front, in the remote chain's own format, so a
+ * bad lane fails before any batch is built rather than partway through.
+ * @throws {@link CCTParamsInvalidError} if an entry is not a chain update, its selector is not a
+ * `u64`, or a pool address is invalid or duplicated within its lane
+ */
 function validateRemotePoolAddresses(operation: string, updates: unknown[]): void {
   for (const [i, update] of updates.entries()) {
     if (typeof update !== 'object' || update === null) {
       throw new CCTParamsInvalidError(operation, `chainsToAdd[${i}]`, 'must be a chain update')
     }
-    const remotePoolAddresses = (update as { remotePoolAddresses?: unknown }).remotePoolAddresses
-    if (!Array.isArray(remotePoolAddresses)) continue
-
-    const pools = new Set<string>()
-    for (const [j, address] of remotePoolAddresses.entries()) {
-      const parsed = parseNonEmptyHexBytes(
-        operation,
-        `chainsToAdd[${i}].remotePoolAddresses[${j}]`,
-        address,
-      )
-      if (pools.has(parsed.toString('hex'))) {
-        throw new CCTParamsInvalidError(
-          operation,
-          `chainsToAdd[${i}].remotePoolAddresses[${j}]`,
-          'must not duplicate a remote pool address',
-        )
-      }
-      pools.add(parsed.toString('hex'))
+    const { remoteChainSelector, remotePoolAddresses } = update as {
+      remoteChainSelector?: unknown
+      remotePoolAddresses?: unknown
     }
+    if (!Array.isArray(remotePoolAddresses)) continue
+    const path = `chainsToAdd[${i}]`
+    validateBigInt(operation, `${path}.remoteChainSelector`, remoteChainSelector, 0n, U64_MAX)
+    parseUniqueRemoteAddresses(
+      operation,
+      `${path}.remotePoolAddresses`,
+      remotePoolAddresses,
+      remoteChainSelector,
+    )
   }
 }
 

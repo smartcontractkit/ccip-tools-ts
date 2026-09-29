@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
+// registers the EVM chain family, for the lanes whose remote is EVM
+import '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -19,7 +21,7 @@ const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
 const SELECTOR = 5009297550715157269n
 const REMOTE_TOKEN = '0x1234567890abcdef1234567890abcdef12345678'
-const REMOTE_POOLS = ['0x1234567890abcdef1234567890abcdef12345678', '0xaabbccdd']
+const REMOTE_POOLS = ['0x1234567890abcdef1234567890abcdef12345678', '0x' + 'ab'.repeat(20)]
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
@@ -119,8 +121,14 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
       assert.equal(data.cfg.decimals, 18)
     })
 
-    it('supports a zero remote-chain selector', async () => {
-      await assert.doesNotReject(() => generate({ remoteChainSelector: 0n }))
+    it('rejects a zero remote-chain selector, whose address format is unknown', async () => {
+      // the remote addresses are parsed in the format the selector names; deleting the lane,
+      // which parses none, is how such a config is repaired
+      await assert.rejects(
+        () => generate({ remoteChainSelector: 0n }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'remoteTokenAddress',
+      )
     })
 
     it('uses a compatible custom pool program', async () => {
@@ -137,10 +145,18 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
         [{ remoteChainSelector: 1 }, 'remoteChainSelector'],
         [{ remoteChainSelector: -1n }, 'remoteChainSelector'],
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
-        [{ remoteTokenAddress: '0x123' }, 'remoteTokenAddress'],
+        [{ remoteTokenAddress: '0xzz' }, 'remoteTokenAddress'],
+        // decodes to the zero address
+        [{ remoteTokenAddress: '0x' }, 'remoteTokenAddress'],
+        // a Solana address on an EVM lane
+        [{ remoteTokenAddress: TOKEN }, 'remoteTokenAddress'],
         [{ remotePoolAddresses: [''] }, 'remotePoolAddresses[0]'],
-        [{ remotePoolAddresses: ['0x123'] }, 'remotePoolAddresses[0]'],
-        [{ remotePoolAddresses: ['0x1234', '0x1234'] }, 'remotePoolAddresses[1]'],
+        [{ remotePoolAddresses: ['0xzz'] }, 'remotePoolAddresses[0]'],
+        // two spellings of one address
+        [
+          { remotePoolAddresses: [REMOTE_POOLS[0], REMOTE_POOLS[0]!.slice(2).toUpperCase()] },
+          'remotePoolAddresses[1]',
+        ],
         [{ remotePoolAddresses: '0x12' }, 'remotePoolAddresses'],
         [{ remoteTokenDecimals: 256 }, 'remoteTokenDecimals'],
       ] as const) {

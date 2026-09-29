@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
+import { Interface, ZeroAddress, makeError, toBeHex, zeroPadValue } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
+// registers the Solana chain family, for the lanes whose remote is Solana
+import '../../../../solana/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import {
@@ -28,6 +30,10 @@ const HASH = '0x' + 'ab'.repeat(32)
 
 /** The remote pool this lane is being pointed at. */
 const REMOTE_POOL = '0x' + '99'.repeat(20)
+/** A Solana remote pool, as base58 and as the 32 raw bytes the pool stores. */
+const SOLANA_REMOTE_POOL = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+const SOLANA_REMOTE_POOL_BYTES =
+  '0x6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb'
 
 const SELECTOR = 5009297550715157269n // ethereum-mainnet
 const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
@@ -36,8 +42,9 @@ const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
 const FRESH = new Interface([
   'function setRemotePool(uint64 remoteChainSelector, bytes remotePoolAddress)',
 ])
-const expectedData = (remotePoolAddress = REMOTE_POOL, selector = SELECTOR) =>
-  FRESH.encodeFunctionData('setRemotePool', [selector, remotePoolAddress])
+/** `remotePoolBytes` is what the pool stores: an EVM remote left-padded to 32 bytes. */
+const expectedData = (remotePoolBytes = zeroPadValue(REMOTE_POOL, 32), selector = SELECTOR) =>
+  FRESH.encodeFunctionData('setRemotePool', [selector, remotePoolBytes])
 
 /** The `getTokenPoolState` getters the owner gate reads, per version generation. */
 function poolReads(version: TokenPoolVersion, type: TokenPoolType, owner: string) {
@@ -178,14 +185,28 @@ describe('SetRemotePool (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
 
-    it('encodes a 32-byte non-EVM remote pool address as-is', async () => {
-      const remotePoolAddress = '0x' + 'cd'.repeat(32)
+    it('accepts an EVM remote already left-padded to 32 bytes', async () => {
       const unsigned = await generate(stubChain(), {
-        remoteChainSelector: SOLANA_SELECTOR,
-        remotePoolAddress,
+        remotePoolAddress: zeroPadValue(REMOTE_POOL, 32),
       })
-      assert.equal(unsigned.transactions[0]!.data, expectedData(remotePoolAddress, SOLANA_SELECTOR))
+      assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
+
+    for (const [form, remotePoolAddress] of [
+      ['base58', SOLANA_REMOTE_POOL],
+      ['32-byte hex', SOLANA_REMOTE_POOL_BYTES],
+    ]) {
+      it(`encodes a Solana remote pool given as ${form} to its 32 raw bytes`, async () => {
+        const unsigned = await generate(stubChain(), {
+          remoteChainSelector: SOLANA_SELECTOR,
+          remotePoolAddress,
+        })
+        assert.equal(
+          unsigned.transactions[0]!.data,
+          expectedData(SOLANA_REMOTE_POOL_BYTES, SOLANA_SELECTOR),
+        )
+      })
+    }
 
     it('omits from, and skips the owner read, when sender is not supplied', async () => {
       const seen: Calls = { typeAndVersion: 0, remotes: 0, calls: 0 }
@@ -211,10 +232,12 @@ describe('SetRemotePool (cct/evm)', () => {
       ['remoteChainSelector', -1n],
       ['remoteChainSelector', 2n ** 64n],
       ['remotePoolAddress', ''],
+      // decodes to the zero address
       ['remotePoolAddress', '0x'],
-      ['remotePoolAddress', '0xabc'],
       ['remotePoolAddress', '0xzz'],
       ['remotePoolAddress', 42 as never],
+      // a Solana address on an EVM lane
+      ['remotePoolAddress', SOLANA_REMOTE_POOL],
     ] as const) {
       it(`rejects ${param} = ${String(value)} before any RPC`, async () => {
         const seen: Calls = { typeAndVersion: 0, remotes: 0, calls: 0 }

@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
+// registers the EVM chain family, for the lanes whose remote is EVM
+import '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -110,8 +112,24 @@ describe('InitChainRemoteConfig (cct/solana)', () => {
       assert.equal(data.cfg.decimals, 18)
     })
 
-    it('supports a zero remote-chain selector', async () => {
-      await assert.doesNotReject(() => generate({ remoteChainSelector: 0n }))
+    it('stores an EVM remote token given padded to 32 bytes the same as unpadded', async () => {
+      const unsigned = await generate({
+        remoteTokenAddress: '0x' + '00'.repeat(12) + REMOTE_TOKEN.slice(2),
+      })
+      const decoded = tokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)
+      const { cfg } = decoded!.data as { cfg: { tokenAddress: { address: Buffer } } }
+      assert.deepEqual(
+        cfg.tokenAddress.address,
+        Buffer.from(REMOTE_TOKEN.slice(2).padStart(64, '0'), 'hex'),
+      )
+    })
+
+    it('rejects a zero remote-chain selector, whose address format is unknown', async () => {
+      await assert.rejects(
+        () => generate({ remoteChainSelector: 0n }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'remoteTokenAddress',
+      )
     })
 
     it('uses a compatible custom pool program', async () => {
@@ -130,7 +148,9 @@ describe('InitChainRemoteConfig (cct/solana)', () => {
         [{ remoteChainSelector: 1n << 64n }, 'remoteChainSelector'],
         [{ remoteTokenAddress: '' }, 'remoteTokenAddress'],
         [{ remoteTokenAddress: '0x' }, 'remoteTokenAddress'],
-        [{ remoteTokenAddress: '0x123' }, 'remoteTokenAddress'],
+        [{ remoteTokenAddress: '0xzz' }, 'remoteTokenAddress'],
+        // a Solana address on an EVM lane
+        [{ remoteTokenAddress: TOKEN }, 'remoteTokenAddress'],
         [{ remoteTokenAddress: null }, 'remoteTokenAddress'],
         [{ remoteTokenDecimals: 256 }, 'remoteTokenDecimals'],
       ] as const) {

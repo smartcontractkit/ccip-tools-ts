@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError, toBeHex } from 'ethers'
+import { Interface, ZeroAddress, makeError, toBeHex, zeroPadValue } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
+// registers the Solana chain family, for the lane whose remote is Solana
+import '../../../../solana/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
@@ -26,7 +28,9 @@ const SEL_A = 16015286601757825753n // ethereum-sepolia
 const SEL_B = 3478487238524512106n // arbitrum-sepolia
 const REMOTE_TOKEN = '0x' + 'aa'.repeat(20)
 const REMOTE_POOL_1 = '0x' + 'bb'.repeat(20)
-const REMOTE_POOL_2 = '0x' + 'cc'.repeat(32) // a 32-byte (non-EVM) remote pool
+const REMOTE_POOL_2 = '0x' + 'cc'.repeat(20)
+/** The pool stores every remote address left-padded to 32 bytes. */
+const pad = (address: string) => zeroPadValue(address, 32)
 
 const INBOUND = { enabled: true, capacity: 100_000n, rate: 167n } as const
 const OUTBOUND = { enabled: false } as const
@@ -52,16 +56,17 @@ const DATA_V1_5_0 = FRESH_V1_5_0.encodeFunctionData('applyChainUpdates', [
     {
       remoteChainSelector: SEL_A,
       allowed: true,
-      remotePoolAddress: REMOTE_POOL_1,
-      remoteTokenAddress: REMOTE_TOKEN,
+      remotePoolAddress: pad(REMOTE_POOL_1),
+      remoteTokenAddress: pad(REMOTE_TOKEN),
       outboundRateLimiterConfig: ABI_OUTBOUND,
       inboundRateLimiterConfig: ABI_INBOUND,
     },
     {
       remoteChainSelector: SEL_B,
       allowed: false,
-      remotePoolAddress: REMOTE_POOL_1,
-      remoteTokenAddress: REMOTE_TOKEN,
+      // a removal's addresses are ignored on-chain, so they go out empty
+      remotePoolAddress: '0x',
+      remoteTokenAddress: '0x',
       outboundRateLimiterConfig: ABI_OUTBOUND,
       inboundRateLimiterConfig: ABI_OUTBOUND,
     },
@@ -73,8 +78,8 @@ const DATA_V1_5_1 = FRESH_V1_5_1.encodeFunctionData('applyChainUpdates', [
   [
     {
       remoteChainSelector: SEL_A,
-      remotePoolAddresses: [REMOTE_POOL_1, REMOTE_POOL_2],
-      remoteTokenAddress: REMOTE_TOKEN,
+      remotePoolAddresses: [pad(REMOTE_POOL_1), pad(REMOTE_POOL_2)],
+      remoteTokenAddress: pad(REMOTE_TOKEN),
       outboundRateLimiterConfig: ABI_OUTBOUND,
       inboundRateLimiterConfig: ABI_INBOUND,
     },
@@ -290,7 +295,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, DATA_V1_5_1)
     })
 
-    it('normalises 0x-less and upper-case hex remote addresses', async () => {
+    it('normalises 0x-less, upper-case and padded EVM remote addresses', async () => {
       const { chain } = stubChain()
       const unsigned = await op.generate(
         chain,
@@ -299,7 +304,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
             {
               remoteChainSelector: SEL_A,
               remoteTokenAddress: 'AA'.repeat(20),
-              remotePoolAddresses: ['0X' + 'BB'.repeat(20), REMOTE_POOL_2],
+              remotePoolAddresses: ['0X' + 'BB'.repeat(20), pad(REMOTE_POOL_2)],
               inboundRateLimiterConfig: INBOUND,
               outboundRateLimiterConfig: OUTBOUND,
             },
@@ -307,6 +312,43 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         }),
       )
       assert.equal(unsigned.transactions[0]!.data, DATA_V1_5_1)
+    })
+
+    it('encodes a Solana lane from base58, the 32-byte keys needing no padding', async () => {
+      const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
+      const token = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+      const tokenBytes = '0x6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb'
+      const poolBytes = '0x' + 'cd'.repeat(32)
+      const unsigned = await op.generate(
+        stubChain().chain,
+        paramsV1_5_1({
+          remoteChainSelectorsToRemove: [],
+          chainsToAdd: [
+            {
+              ...paramsV1_5_1AddEntry(),
+              remoteChainSelector: SOLANA_SELECTOR,
+              remoteTokenAddress: token,
+              // the same key may also be given as its 32-byte hex
+              remotePoolAddresses: [poolBytes],
+            },
+          ],
+        }),
+      )
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        FRESH_V1_5_1.encodeFunctionData('applyChainUpdates', [
+          [],
+          [
+            {
+              remoteChainSelector: SOLANA_SELECTOR,
+              remotePoolAddresses: [poolBytes],
+              remoteTokenAddress: tokenBytes,
+              outboundRateLimiterConfig: ABI_OUTBOUND,
+              inboundRateLimiterConfig: ABI_INBOUND,
+            },
+          ],
+        ]),
+      )
     })
 
     it('accepts uint128 max for both rate-limit amounts', async () => {
@@ -335,8 +377,8 @@ describe('ApplyChainUpdates (cct/evm)', () => {
           [
             {
               remoteChainSelector: SEL_A,
-              remotePoolAddresses: [REMOTE_POOL_1],
-              remoteTokenAddress: REMOTE_TOKEN,
+              remotePoolAddresses: [pad(REMOTE_POOL_1)],
+              remoteTokenAddress: pad(REMOTE_TOKEN),
               outboundRateLimiterConfig: ABI_OUTBOUND,
               inboundRateLimiterConfig: {
                 isEnabled: true,
@@ -384,7 +426,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       [
         'chainsToAdd[0].remotePoolAddresses[0]',
         paramsV1_5_1({
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remotePoolAddresses: ['0xabc'] }],
+          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remotePoolAddresses: ['0xzz'] }],
         }),
       ],
       [
@@ -401,6 +443,18 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       [
         'chainsToAdd[0].remoteTokenAddress',
         paramsV1_5_1({ chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remoteTokenAddress: '' }] }),
+      ],
+      [
+        // a Solana address on an EVM lane
+        'chainsToAdd[0].remoteTokenAddress',
+        paramsV1_5_1({
+          chainsToAdd: [
+            {
+              ...paramsV1_5_1AddEntry(),
+              remoteTokenAddress: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
+            },
+          ],
+        }),
       ],
       [
         'chainsToAdd[0].inboundRateLimiterConfig.enabled',
@@ -629,6 +683,25 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       assert.equal(entry.allowed, false)
     })
 
+    it('neither parses nor encodes the addresses of a v1.5.0 removal', async () => {
+      // the contract ignores them, and a lane the SDK cannot name a format for must stay removable
+      const { chain } = stubChain(TokenPoolVersion.V1_5_0)
+      const unsigned = await op.generate(
+        chain,
+        paramsV1_5_0({
+          chains: [
+            { ...lane(2n ** 63n, false), remoteTokenAddress: 'junk', remotePoolAddress: 'junk' },
+          ],
+        }),
+      )
+      const [chains] = FRESH_V1_5_0.decodeFunctionData(
+        'applyChainUpdates',
+        unsigned.transactions[0]!.data!,
+      )
+      const [entry] = chains as [{ remoteTokenAddress: string; remotePoolAddress: string }]
+      assert.deepEqual([entry.remoteTokenAddress, entry.remotePoolAddress], ['0x', '0x'])
+    })
+
     it('keeps the wholesale-replace idiom: one selector in both arrays at once', async () => {
       const { chain } = stubChain()
       const unsigned = await op.generate(
@@ -839,8 +912,8 @@ describe('ApplyChainUpdates (cct/evm)', () => {
               [
                 {
                   remoteChainSelector: SEL_A,
-                  remotePoolAddresses: [REMOTE_POOL_1],
-                  remoteTokenAddress: REMOTE_TOKEN,
+                  remotePoolAddresses: [pad(REMOTE_POOL_1)],
+                  remoteTokenAddress: pad(REMOTE_TOKEN),
                   outboundRateLimiterConfig: ABI_OUTBOUND,
                   inboundRateLimiterConfig: {
                     isEnabled: true,

@@ -3087,8 +3087,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link CCTOperationUnsupportedError} — use {@link generateUnsignedAddRemotePool} /
    * {@link generateUnsignedRemoveRemotePool} there. No emulation is attempted: replacing a set of
    * unknown size is not one transaction.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Owner-gated on-chain. When `sender` is given it is checked against the pool's current
    * `owner` before any calldata is built; omit it to build for a signer that is not known yet.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
@@ -3100,7 +3101,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const unsigned = await cct.generateUnsignedSetRemotePool({
    *   poolAddress: '0xPool...', // a v1.5.0 pool
    *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
-   *   remotePoolAddress: '0xRemotePool...', // hex bytes; 32 bytes for a non-EVM remote
+   *   remotePoolAddress: '0xRemotePool...', // the remote chain's own format, e.g. base58 for Solana
    *   sender: '0xPoolOwner...',
    * })
    * ```
@@ -3145,8 +3146,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool, drain the old one, then {@link removeRemotePool}. A v1.5.0 pool has no additive
    * primitive and throws {@link CCTOperationUnsupportedError} — it only supports the wholesale
    * {@link setRemotePool}.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Pre-checked against the chain: the lane's currently registered remote pools are read
    * (scoped to `remoteChainSelector`, one call) and an address already among them is rejected
    * locally instead of reverting on-chain. A lane with no configuration yet counts as having none.
@@ -3204,8 +3206,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools. The last step of a remote-side pool upgrade started with {@link addRemotePool}. A
    * v1.5.0 pool has no removal primitive and throws {@link CCTOperationUnsupportedError}; its
    * single remote pool can only be overwritten via {@link setRemotePool}.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Pre-checked against the chain: the lane's registered remote pools are read (scoped to
    * `remoteChainSelector`, one call) and an address that is not among them is rejected locally
    * instead of reverting on-chain. Removing the lane's last remote pool is allowed — the contract

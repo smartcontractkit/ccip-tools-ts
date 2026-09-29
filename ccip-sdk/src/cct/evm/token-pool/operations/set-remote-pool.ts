@@ -15,6 +15,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import { encodeAddressToAny } from '../../../../utils.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import {
@@ -32,7 +33,7 @@ import {
 
 /**
  * Parameters for {@link SetRemotePool} — see {@link RemotePoolParams}; `remotePoolAddress` is the
- * remote chain's pool address as hex bytes, which becomes the lane's *only* remote pool.
+ * remote chain's pool address in that chain's own format, which becomes the lane's *only* remote pool.
  */
 export type SetRemotePoolParams = RemotePoolParams
 
@@ -48,7 +49,10 @@ const encodeSetRemotePool: Encoder = (
 ) =>
   callTx(
     poolAddress,
-    iface.encodeFunctionData('setRemotePool', [remoteChainSelector, remotePoolAddress]),
+    iface.encodeFunctionData('setRemotePool', [
+      remoteChainSelector,
+      encodeAddressToAny(remotePoolAddress),
+    ]),
   )
 
 /** Replaces a v1.5.0 pool's remote pool for one lane via `setRemotePool`. */
@@ -67,7 +71,7 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
   }
 
   /**
-   * Validates the pool address, lane selector and remote pool bytes before any RPC, keeping the
+   * Validates the pool address, lane selector and remote pool address before any RPC, keeping the
    * parsed `remotePoolAddress` so {@link buildUnsigned} encodes it without re-parsing.
    */
   protected override parse(params: SetRemotePoolParams): ParsedSetRemotePoolParams {

@@ -1,5 +1,3 @@
-import { Buffer } from 'buffer'
-
 import { type Account, TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
 import { type Connection, PublicKey } from '@solana/web3.js'
 
@@ -132,30 +130,6 @@ export function validateUniqueChainSelectors(
       )
     }
     if (typeof selector === 'bigint') seen.add(selector)
-  }
-}
-
-/**
- * Asserts hex byte values do not contain duplicates.
- * @throws CCTParamsInvalidError if a hex byte value is duplicated.
- */
-export function validateUniqueHexBytes(
-  operation: string,
-  param: string,
-  values: Buffer[],
-  label = 'hex values',
-): void {
-  const seen = new Set<string>()
-  for (const [i, value] of values.entries()) {
-    const hex = value.toString('hex')
-    if (seen.has(hex)) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${param}[${i}]`,
-        `must not contain duplicate ${label}`,
-      )
-    }
-    seen.add(hex)
   }
 }
 
@@ -307,43 +281,6 @@ export function validateWritableIndexes(
   for (const [i, index] of writableIndexes.entries()) {
     validateInteger(operation, `${param}[${i}]`, index, 0, 255)
   }
-}
-
-/**
- * Parses an optionally `0x`-prefixed hex string into bytes, with an optional maximum size.
- * @throws CCTParamsInvalidError if `value` is not valid hex or exceeds the requested size.
- */
-export function parseHexBytes(
-  operation: string,
-  param: string,
-  value: unknown,
-  maxBytes?: number,
-): Buffer {
-  const hex = typeof value === 'string' ? value.replace(/^0x/, '') : ''
-  if (
-    typeof value !== 'string' ||
-    !/^(?:[\da-fA-F]{2})*$/.test(hex) ||
-    (maxBytes !== undefined && hex.length / 2 > maxBytes)
-  ) {
-    const size = maxBytes === undefined ? '' : ` of at most ${maxBytes} bytes`
-    throw new CCTParamsInvalidError(operation, param, `must be a hex string${size}`)
-  }
-  return Buffer.from(hex, 'hex')
-}
-
-/**
- * Parses a non-empty optionally `0x`-prefixed hex string into bytes.
- * @throws CCTParamsInvalidError if `value` is not valid non-empty hex or exceeds the requested size.
- */
-export function parseNonEmptyHexBytes(
-  operation: string,
-  param: string,
-  value: unknown,
-  maxBytes?: number,
-): Buffer {
-  const bytes = parseHexBytes(operation, param, value, maxBytes)
-  if (!bytes.length) throw new CCTParamsInvalidError(operation, param, 'must not be empty')
-  return bytes
 }
 
 /**
