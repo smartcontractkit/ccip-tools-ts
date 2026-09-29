@@ -152,8 +152,8 @@ describe('GrantMintAndBurnRoles (cct/evm)', () => {
       assert.equal(tx.to, TOKEN)
       assert.equal(tx.from, OWNER)
       assert.equal(tx.data, expectedData())
-      assert.deepEqual(seen.calls.slice(0, 2).sort(), ['isBurner', 'isMinter'])
-      assert.equal(seen.calls[2], 'owner')
+      // the two role reads and the owner read; v1 gates both roles on owner, so one owner read
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'isMinter', 'owner'])
     })
 
     it('omits from when sender is not supplied, but still probes the token', async () => {
@@ -231,8 +231,8 @@ describe('GrantMintAndBurnRoles (cct/evm)', () => {
           err.context.param === 'burnAndMinter' &&
           /already holds the mint and burn roles/.test(String(err.context.reason)),
       )
-      // rejected on the role reads alone, before the owner read
-      assert.ok(!seen.calls.includes('owner'))
+      // every check runs: preconditions reports each unmet requirement in one pass
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'isMinter', 'owner'])
     })
 
     for (const roles of [{ isMinter: true }, { isBurner: true }] as const) {

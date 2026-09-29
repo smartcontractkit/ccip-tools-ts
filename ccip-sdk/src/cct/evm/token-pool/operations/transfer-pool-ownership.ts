@@ -16,12 +16,12 @@ import { type Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwnershipTransfer,
+  checkPoolOwnershipTransfer,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -39,7 +39,7 @@ export type TransferPoolOwnershipParams = {
    * *constructor* owner away from `0x0`, so proposing it here parks `s_pendingOwner` on an address
    * nobody can sign as, which is how a mistaken proposal is retracted. The one address the
    * contract rejects is the current owner's own address (`CannotTransferToSelf`), which
-   * {@link assertPoolOwnershipTransfer} catches against the pool's on-chain `owner()`. Note
+   * {@link checkPoolOwnershipTransfer} catches against the pool's on-chain `owner()`. Note
    * zero-to-cancel is EVM-only: the Solana op rejects the zero pubkey outright.
    */
   newOwner: string
@@ -97,15 +97,8 @@ export class TransferPoolOwnership extends EVMOperation<TransferPoolOwnershipPar
   }
 
   /**
-   * Reads the pool's type-and-version, floor-matches the encoder and its interface, then bounds
-   * the transfer against the pool's on-chain `owner()`.
-   * @remarks The owner check lives here, not only in {@link execute}, so the offline / multisig
-   * path gets it too: `generateUnsignedTransferPoolOwnership` with an unauthorized `sender` would
-   * otherwise hand back a fully-formed transaction that reverts only after being reviewed and
-   * signed. Every sibling owner-gated pool write gates in `buildUnsigned` for the same reason.
+   * Reads the pool's type-and-version, floor-matches the encoder and its interface, and encodes.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner, or if
-   * `newOwner` is already the pool owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -113,14 +106,24 @@ export class TransferPoolOwnership extends EVMOperation<TransferPoolOwnershipPar
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    await assertPoolOwnershipTransfer(
-      this.name,
-      chain,
-      params.poolAddress,
-      params.newOwner,
-      params.sender,
+    return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Bounds the transfer against the pool's on-chain `owner()`: `sender` (when given) must be it,
+   * and `newOwner` must not already be.
+   * @remarks Reported rather than thrown outright, and reported here rather than only in
+   * {@link execute}, so the offline / multisig path is covered too:
+   * `generateUnsignedTransferPoolOwnership` with an unauthorized `sender` would otherwise hand
+   * back a fully-formed transaction that reverts only after being reviewed and signed. Every
+   * sibling owner-gated pool write reports from `preconditions` for the same reason.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: TransferPoolOwnershipParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(
+      await checkPoolOwnershipTransfer(chain, params.poolAddress, params.newOwner, params.sender),
     )
-    return unsigned
   }
 }

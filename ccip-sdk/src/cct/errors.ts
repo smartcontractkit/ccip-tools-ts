@@ -6,6 +6,7 @@
  */
 
 import { type CCIPErrorOptions, CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import type { UnsignedEVMTx } from '../evm/types.ts'
 
 // Parameter validation
 
@@ -24,7 +25,9 @@ import { type CCIPErrorOptions, CCIPError, CCIPErrorCode } from '../errors/index
  * ```
  */
 export class CCTParamsInvalidError extends CCIPError {
-  override readonly name = 'CCTParamsInvalidError'
+  // Widened to `string`, as on {@link CCIPError} itself, because {@link CCTPreconditionError}
+  // narrows it further; a literal type here would claim every instance is the base class.
+  override readonly name: string = 'CCTParamsInvalidError'
   /** Creates a params-invalid error. */
   constructor(operation: string, param: string, reason: string, options?: CCIPErrorOptions) {
     super(
@@ -68,6 +71,71 @@ export class CCTTokenAccountMintMismatchError extends CCIPError {
         context: { tokenAccount, requestedMint, resolvedMint },
       },
     )
+  }
+}
+
+/**
+ * One on-chain requirement an operation found unmet, blamed on the parameter a caller would
+ * change (or whose value an earlier transaction would have to produce) to satisfy it.
+ */
+export type PreconditionError = {
+  /** Operation parameter the unmet requirement is blamed on, e.g. `'sender'`. */
+  param: string
+  /** What the chain requires, phrased as a predicate on `param`. */
+  reason: string
+}
+
+/**
+ * Thrown when an operation's params are well-formed but the chain is not in the state the
+ * transaction needs — `sender` is not the pool owner yet, no administrator is pending, the pool
+ * holds no liquidity to withdraw. Permanent for the state read, but not for the plan: unlike its
+ * {@link CCTParamsInvalidError} base, every requirement reported here is one an earlier
+ * transaction can satisfy.
+ *
+ * Carries the calldata it would have returned. The checks run against state as it is *now*, so an
+ * op whose prerequisites are created by an earlier step of the same plan reports them here while
+ * still handing back a usable {@link CCTPreconditionError.unsigned} — which is what lets
+ * `registerAdmin → acceptAdmin`, `setRebalancer → transferLiquidity` or `grantMintRole → mint` be
+ * built as one batch and signed later.
+ *
+ * Extends {@link CCTParamsInvalidError}, so callers that only catch that keep working: `context`
+ * carries the first entry's `param` and the reasons joined, and the full list is on
+ * {@link CCTPreconditionError.errors}.
+ *
+ * @example Building a plan step whose prerequisites an earlier step will create
+ * ```typescript
+ * let unsigned
+ * try {
+ *   unsigned = await cct.generateUnsignedAcceptAdmin({ tokenAddress, address, sender: safe })
+ * } catch (error) {
+ *   if (!(error instanceof CCTPreconditionError)) throw error
+ *   // e.g. [{ param: 'sender', reason: 'must be the pending token administrator (0x00…00)' }]
+ *   console.log(error.errors)
+ *   unsigned = error.unsigned // the same calldata the happy path would have returned
+ * }
+ * ```
+ */
+export class CCTPreconditionError<Tx = UnsignedEVMTx> extends CCTParamsInvalidError {
+  override readonly name: string = 'CCTPreconditionError'
+  /** Every unmet requirement found, in check order. Never empty. */
+  readonly errors: PreconditionError[]
+  /** The transaction the operation built, prerequisites aside — the calldata to plan with. */
+  readonly unsigned: Tx
+
+  /**
+   * Creates a precondition error.
+   * @param errors - every unmet requirement found, in check order; must not be empty
+   * @param unsigned - the transaction the operation built, prerequisites aside
+   */
+  constructor(
+    operation: string,
+    errors: PreconditionError[],
+    unsigned: Tx,
+    options?: CCIPErrorOptions,
+  ) {
+    super(operation, errors[0]!.param, errors.map(({ reason }) => reason).join('; '), options)
+    this.errors = errors
+    this.unsigned = unsigned
   }
 }
 
