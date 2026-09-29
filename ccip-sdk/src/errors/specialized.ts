@@ -3474,6 +3474,12 @@ export class CCIPSolanaAccountResolutionError extends CCIPError {
   }
 }
 
+/** Why a lane can't take a Solana CCIP 2.0 message; see {@link CCIPSolanaV2LaneUnavailableError}. */
+export type SolanaV2LaneUnavailableReason =
+  | 'lane-not-configured'
+  | 'router-without-v2-support'
+  | 'sender-not-allowed'
+
 /**
  * Thrown when a Solana message requires a CCIP 2.0 lane (its extraArgs are GenericExtraArgsV3),
  * but the router can't send it over one: the lane isn't configured for 2.0, the router doesn't
@@ -3494,7 +3500,7 @@ export class CCIPSolanaV2LaneUnavailableError extends CCIPError {
   override readonly name = 'CCIPSolanaV2LaneUnavailableError'
   /** Creates a Solana CCIP 2.0 lane unavailable error. */
   constructor(
-    reason: 'lane-not-configured' | 'router-without-v2-support' | 'sender-not-allowed',
+    reason: SolanaV2LaneUnavailableReason,
     context: { router: string; destChainSelector: bigint; sender?: string },
     options?: CCIPErrorOptions,
   ) {
