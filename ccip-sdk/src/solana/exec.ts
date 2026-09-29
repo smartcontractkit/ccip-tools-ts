@@ -23,7 +23,11 @@ import { newProgram } from './coder.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
-import { simulateTransaction, simulationProvider } from './utils.ts'
+import {
+  getExecutionReportBufferPda,
+  simulateTransaction,
+  simulationProvider,
+} from './utils.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]
@@ -223,10 +227,7 @@ async function bufferedTransactionData(
     clearLeftoverAccounts,
   }: { clearLeftoverAccounts?: boolean } & WithLogger = {},
 ): Promise<TransactionInstruction[]> {
-  const [bufferAddress] = PublicKey.findProgramAddressSync(
-    [Buffer.from('execution_report_buffer'), bufferId, payer.toBuffer()],
-    offramp.programId,
-  )
+  const bufferAddress = getExecutionReportBufferPda(offramp.programId, bufferId, payer)
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
 

@@ -25,7 +25,11 @@ import { IDL as CCIP_COMMON_IDL } from './idl/2.0.0/CCIP_COMMON.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { anyToSvmMessage } from './send.ts'
-import { simulateTransaction } from './utils.ts'
+import {
+  customInstructionErrorCode,
+  getExecutionReportBufferPda,
+  simulateTransaction,
+} from './utils.ts'
 
 /*
  * CCIP 2.0 account resolution (see `ccip_common::resolution`).
@@ -178,17 +182,14 @@ export function decodeResolveAccountsResponse(data: Buffer): ResolveAccountsResp
 // Names the failure from the program's own error when possible: `ccip_common` errors are shared by
 // every program implementing resolution, and Anchor logs the name of any other program error
 function describeSimulationError(error: SendTransactionError): string {
-  const simulationError = (error as { simulationError?: unknown }).simulationError
-  const custom = (
-    simulationError as { InstructionError?: [number, { Custom?: number }] } | undefined
-  )?.InstructionError?.[1]?.Custom
+  const custom = customInstructionErrorCode(error)
   const known = CCIP_COMMON_IDL.errors.find(({ code }) => code === custom)
   if (known) return `${known.name} (${known.code}): ${known.msg}`
   const anchorError = error.logs
     ?.map((log) => log.match(/Error Code: (\w+)\. Error Number: (\d+)\. Error Message: (.*)$/))
     .findLast((match) => match)
   if (anchorError) return `${anchorError[1]} (${anchorError[2]}): ${anchorError[3]}`
-  return `simulation failed: ${JSON.stringify(simulationError ?? error.message)}`
+  return `simulation failed: ${error.transactionError.message}`
 }
 
 /**
@@ -463,22 +464,25 @@ export function resolveExecuteV2(
     | { bufferId: BytesLike }
   ),
 ): Promise<ResolvedInstruction> {
-  let execInputs = null
-  const extraAccounts: PublicKey[] = []
-  if ('execInputs' in inputs) {
-    execInputs = {
-      encodedMessage: bytesToBuffer(inputs.execInputs.encodedMessage),
-      ccvs: inputs.execInputs.ccvs,
-      verifierResults: inputs.execInputs.verifierResults.map((result) => bytesToBuffer(result)),
-    }
-  } else {
-    // buffered execution: the start stage reads the inputs from the buffer
-    const [buffer] = PublicKey.findProgramAddressSync(
-      [Buffer.from('execution_report_buffer'), bytesToBuffer(inputs.bufferId), caller.toBuffer()],
-      offramp,
-    )
-    extraAccounts.push(buffer)
-  }
+  const { execInputs, extraAccounts } =
+    'execInputs' in inputs
+      ? {
+          execInputs: {
+            encodedMessage: bytesToBuffer(inputs.execInputs.encodedMessage),
+            ccvs: inputs.execInputs.ccvs,
+            verifierResults: inputs.execInputs.verifierResults.map((result) =>
+              bytesToBuffer(result),
+            ),
+          },
+          extraAccounts: [],
+        }
+      : // buffered execution: the start stage reads the inputs from the buffer
+        {
+          execInputs: null,
+          extraAccounts: [
+            getExecutionReportBufferPda(offramp, bytesToBuffer(inputs.bufferId), caller),
+          ],
+        }
   return resolveInstruction(ctx, {
     programId: offramp,
     caller,
