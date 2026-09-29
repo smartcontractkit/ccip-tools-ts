@@ -1,5 +1,5 @@
 /**
- * mint — mints new supply of a BurnMintERC677 token to an account. A role-gated manual mint, for
+ * mint — mints new supply of a supported CCT token to an account. A role-gated manual mint, for
  * seeding liquidity or topping up test supply; the bridge path mints through the pool instead.
  *
  * @packageDocumentation
@@ -9,16 +9,20 @@ import { ZeroAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
-import { getErc20Token } from '../contracts.ts'
-import { readV1TokenRole } from '../roles.ts'
+import { getErc20Token, resolveToken } from '../contracts.ts'
+import { resolveTokenRoleHandler } from '../roles.ts'
 
 /** Parameters for {@link Mint}. */
 export type MintParams = {
-  /** BurnMintERC677 token (v1.5.1 / v1.6.2) to mint. */
+  /**
+   * Token to mint. A recognized CCT token (BurnMintERC677 v1.5.1 / v1.6.2, or CrossChainToken
+   * v2.0.0) gets a mint-role pre-flight; any other token exposing `mint(address,uint256)` is
+   * minted best-effort, letting the chain enforce the role at broadcast.
+   */
   tokenAddress: string
   /** Account credited with the newly minted supply. */
   account: string
@@ -28,7 +32,7 @@ export type MintParams = {
   sender?: string
 }
 
-/** Mints new supply of a BurnMintERC677 token to an account. Gated on the token's mint role. */
+/** Mints new supply of a token to an account. Gated on the mint role for recognized CCT tokens. */
 export class Mint extends EVMOperation<MintParams> {
   readonly name = 'mint'
 
@@ -46,23 +50,40 @@ export class Mint extends EVMOperation<MintParams> {
   }
 
   /**
-   * Confirms `sender` holds the token's mint role before encoding.
+   * Confirms `sender` holds the token's mint role before encoding, for a recognized CCT token.
    *
-   * Gated on `isMinter(sender)`, not `owner()`: `mint` is `onlyMinter`, and the owner is only the
-   * role admin, who need not hold the role. The read runs even with no `sender` to compare
-   * (against the zero address, answer discarded) because it is also the family check
-   * ({@link readV1TokenRole}) — a `mint` built for an address with no code would otherwise mine
-   * successfully and mint nothing. It runs here rather than in {@link execute} so the offline /
-   * multisig path is gated too. A mint past a capped token's `maxSupply` is not pre-flighted.
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and does not hold the mint role
+   * Gated on the mint role, not `owner()`: `mint` is role-gated (`onlyMinter` on v1, `MINTER_ROLE`
+   * on v2), and the owner is only the role admin, who need not hold the role. The role is resolved
+   * version-aware — `isMinter(sender)` on a v1 BurnMintERC677, `hasRole(MINTER_ROLE, sender)` on a
+   * v2.0.0 CrossChainToken — via {@link resolveTokenRoleHandler} ({@link resolveToken} picks the
+   * version). It runs here rather than in {@link execute} so the offline / multisig path is gated
+   * too. A mint past a capped token's `maxSupply` is not pre-flighted.
+   *
+   * For a token the SDK does not recognize (one that declares neither `isMinter` nor `hasRole`)
+   * the pre-flight is skipped and the `mint` is built best-effort — the chain enforces the role at
+   * broadcast.
+   * @throws {@link CCTParamsInvalidError} if `sender` is given and does not hold the mint role of a
+   * recognized CCT token
    */
   protected async buildUnsigned(
     chain: EVMChain,
     { tokenAddress, account, amount, sender }: MintParams,
   ): Promise<UnsignedEVMTx> {
-    const isMinter = await readV1TokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
-    if (sender !== undefined && !isMinter)
+    const version = await resolveToken(chain, tokenAddress)
+    let holdsMintRole: boolean | undefined // undefined = unrecognized token, pre-flight skipped
+    try {
+      holdsMintRole = await resolveTokenRoleHandler(version, this.name).hasRole(
+        chain,
+        tokenAddress,
+        'mint',
+        sender ?? ZeroAddress,
+      )
+    } catch (err) {
+      // A token that declares no recognized mint-role reader: fall back to a best-effort mint
+      // rather than refusing. Other errors (RPC, a real v2 read failure) still propagate.
+      if (!(err instanceof CCTContractTypeInvalidError)) throw err
+    }
+    if (sender !== undefined && holdsMintRole === false)
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
@@ -77,7 +98,6 @@ export class Mint extends EVMOperation<MintParams> {
    * that can satisfy {@link buildUnsigned}'s role check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, if
    * the wallet does not hold the mint role, or if any other param is invalid (see
    * {@link buildUnsigned})
