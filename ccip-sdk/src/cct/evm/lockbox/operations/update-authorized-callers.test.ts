@@ -16,12 +16,13 @@ import {
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
-import { AuthorizeLockboxCallers } from './authorize-callers.ts'
+import { UpdateLockboxAuthorizedCallers } from './update-authorized-callers.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const LOCKBOX = '0x' + '66'.repeat(20)
 const POOL = '0x' + '77'.repeat(20)
 const OTHER = '0x' + '88'.repeat(20)
+const DUPLICATE_CALLER = '0x' + 'aa'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const NOT_THE_OWNER = '0x' + '99'.repeat(20)
 
@@ -109,10 +110,10 @@ function fakeSigner(opts: { waitError?: Error; seen?: Seen; address?: string } =
   }
 }
 
-describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
+describe('UpdateLockboxAuthorizedCallers (cct/evm lockbox operation)', () => {
   describe('generate (golden vectors)', () => {
     it('encodes an added caller as a call to the lockbox', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
+      const unsigned = await new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         sender: SENDER,
@@ -132,7 +133,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('encodes both added and removed callers', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
+      const unsigned = await new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         removedCallers: [OTHER],
@@ -145,7 +146,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('defaults omitted caller arrays to empty', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
+      const unsigned = await new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
         lockbox: LOCKBOX,
         removedCallers: [OTHER],
       })
@@ -157,7 +158,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('omits `from` when no sender is given', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
+      const unsigned = await new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
       })
@@ -169,13 +170,13 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid lockbox address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: 'nope',
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.operation === 'updateLockboxAuthorizedCallers' &&
           err.context.param === 'lockbox',
       )
     })
@@ -184,13 +185,13 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       // a call to 0x0 hits no code, so it would mine as a successful no-op
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: ZeroAddress,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.operation === 'updateLockboxAuthorizedCallers' &&
           err.context.param === 'lockbox',
       )
     })
@@ -199,7 +200,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       // isAddress() accepts ICAP, and this never equals ZeroAddress literally
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: getIcapAddress(ZeroAddress),
             addedCallers: [POOL],
           }),
@@ -209,7 +210,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
 
     it('rejects when no callers are supplied', async () => {
       await assert.rejects(
-        () => new AuthorizeLockboxCallers().generate(stubChain(), { lockbox: LOCKBOX }),
+        () => new UpdateLockboxAuthorizedCallers().generate(stubChain(), { lockbox: LOCKBOX }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'addedCallers',
       )
@@ -218,7 +219,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects when both caller arrays are empty', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [],
             removedCallers: [],
@@ -231,7 +232,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid added caller address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL, 'nope'],
           }),
@@ -243,7 +244,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid removed caller address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             removedCallers: ['nope'],
           }),
@@ -252,10 +253,23 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       )
     })
 
+    it('rejects duplicate callers, including differently cased addresses', async () => {
+      for (const param of ['addedCallers', 'removedCallers'] as const) {
+        await assert.rejects(
+          () =>
+            new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
+              lockbox: LOCKBOX,
+              [param]: [DUPLICATE_CALLER, `0x${DUPLICATE_CALLER.slice(2).toUpperCase()}`],
+            }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
     it('rejects the zero address as a caller', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [ZeroAddress],
           }),
@@ -267,7 +281,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid sender', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             sender: 'nope',
@@ -280,7 +294,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
   describe('lockbox pre-flight', () => {
     it('reads the lockbox typeAndVersion before building calldata', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
+      await new UpdateLockboxAuthorizedCallers().generate(stubChain({ seen }), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
       })
@@ -291,13 +305,13 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       const readError = noCodeError()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain({ readError }), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.operation === 'updateLockboxAuthorizedCallers' &&
           err.context.param === 'lockbox' &&
           err.cause === readError,
       )
@@ -314,7 +328,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       })
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain({ readError }), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
           }),
@@ -333,7 +347,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       })
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain({ readError }), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
           }),
@@ -344,10 +358,13 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a contract whose typeAndVersion string is unparseable', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ type: 'garbage', version: 'x' }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-          }),
+          new UpdateLockboxAuthorizedCallers().generate(
+            stubChain({ type: 'garbage', version: 'x' }),
+            {
+              lockbox: LOCKBOX,
+              addedCallers: [POOL],
+            },
+          ),
         (err: unknown) => err instanceof CCIPTypeVersionInvalidError,
       )
     })
@@ -355,10 +372,13 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a deployed contract that is not an ERC20LockBox', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ type: 'LockReleaseTokenPool' }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-          }),
+          new UpdateLockboxAuthorizedCallers().generate(
+            stubChain({ type: 'LockReleaseTokenPool' }),
+            {
+              lockbox: LOCKBOX,
+              addedCallers: [POOL],
+            },
+          ),
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
           err.context.address === LOCKBOX &&
@@ -370,7 +390,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an unsupported ERC20LockBox version', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ version: '3.0.0' }), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain({ version: '3.0.0' }), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
           }),
@@ -386,7 +406,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
   describe('owner pre-flight', () => {
     it('reads owner() after typeAndVersion, only when a sender is given', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
+      await new UpdateLockboxAuthorizedCallers().generate(stubChain({ seen }), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         sender: SENDER,
@@ -396,7 +416,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
 
     it('accepts the owner as sender regardless of address casing', async () => {
       const lower = '0x' + 'ab'.repeat(20)
-      const unsigned = await new AuthorizeLockboxCallers().generate(
+      const unsigned = await new UpdateLockboxAuthorizedCallers().generate(
         stubChain({ owner: getAddress(lower) }),
         { lockbox: LOCKBOX, addedCallers: [POOL], sender: lower },
       )
@@ -406,14 +426,14 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a sender that is not the lockbox owner', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().generate(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             sender: NOT_THE_OWNER,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.operation === 'updateLockboxAuthorizedCallers' &&
           err.context.param === 'sender',
       )
     })
@@ -421,7 +441,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('does not read owner() when the lockbox check fails', async () => {
       const seen = newSeen()
       await assert.rejects(() =>
-        new AuthorizeLockboxCallers().generate(stubChain({ type: 'Router', seen }), {
+        new UpdateLockboxAuthorizedCallers().generate(stubChain({ type: 'Router', seen }), {
           lockbox: LOCKBOX,
           addedCallers: [POOL],
           sender: SENDER,
@@ -434,7 +454,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
   describe('execute', () => {
     it('checks the signing wallet against the lockbox owner', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().execute(stubChain({ seen }), {
+      await new UpdateLockboxAuthorizedCallers().execute(stubChain({ seen }), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         wallet: fakeSigner({ seen }),
@@ -450,7 +470,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             wallet: fakeSigner({ seen, address: NOT_THE_OWNER }),
@@ -463,7 +483,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a sender that differs from the signing wallet', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             sender: NOT_THE_OWNER,
@@ -474,7 +494,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
+      const result = await new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         wallet: fakeSigner(),
@@ -483,7 +503,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('accepts a sender matching the signing wallet', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
+      const result = await new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
         lockbox: LOCKBOX,
         addedCallers: [POOL],
         sender: SENDER,
@@ -492,38 +512,22 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('rejects a sender that differs from the signing wallet', async () => {
-      await assert.rejects(
-        () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-            sender: OTHER,
-            wallet: fakeSigner(),
-          }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
-          err.context.param === 'sender',
-      )
-    })
-
     it('throws CCIPExecTxRevertedError when the tx reverts on-chain', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             wallet: fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
           }),
         (err: unknown) =>
           err instanceof CCIPExecTxRevertedError &&
-          err.context.operation === 'authorizeLockboxCallers',
+          err.context.operation === 'updateLockboxAuthorizedCallers',
       )
     })
 
     it('revokes a caller and returns the tx hash', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
+      const result = await new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
         lockbox: LOCKBOX,
         removedCallers: [POOL],
         wallet: fakeSigner(),
@@ -535,7 +539,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain({ readError: noCodeError() }), {
+          new UpdateLockboxAuthorizedCallers().execute(stubChain({ readError: noCodeError() }), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             wallet: fakeSigner({ seen }),
@@ -548,7 +552,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a non-signer wallet', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
+          new UpdateLockboxAuthorizedCallers().execute(stubChain(), {
             lockbox: LOCKBOX,
             addedCallers: [POOL],
             wallet: {},
