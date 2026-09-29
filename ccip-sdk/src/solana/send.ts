@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 
-import { type IdlTypes, Program } from '@coral-xyz/anchor'
+import type { IdlTypes, Program } from '@coral-xyz/anchor'
 import { NATIVE_MINT, createApproveInstruction, getAccount } from '@solana/spl-token'
 import {
   type AccountMeta,
@@ -22,6 +22,7 @@ import {
 import { ChainFamily } from '../networks.ts'
 import type { AnyMessage, WithLogger } from '../types.ts'
 import { bytesToBuffer, encodeAddressToAny, toLeArray } from '../utils.ts'
+import { newProgram } from './coder.ts'
 import { encodeSolanaExtraArgs } from './extra-args.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
@@ -64,7 +65,7 @@ export async function getFee(
   message: AnyMessage,
 ): Promise<bigint> {
   const { connection, logger = console } = ctx
-  const program = new Program(CCIP_ROUTER_IDL, new PublicKey(router), simulationProvider(ctx))
+  const program = newProgram(CCIP_ROUTER_IDL, new PublicKey(router), simulationProvider(ctx))
 
   // Get router config to find feeQuoter
   const [configPda] = PublicKey.findProgramAddressSync([Buffer.from('config')], program.programId)
@@ -345,7 +346,7 @@ export async function generateUnsignedCcipSend(
   if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
     amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
   }
-  const program = new Program(CCIP_ROUTER_IDL, router, simulationProvider(ctx, sender))
+  const program = newProgram(CCIP_ROUTER_IDL, router, simulationProvider(ctx, sender))
 
   const approveIxs = []
   for (const [token, amount] of Object.entries(amountsToApprove)) {
