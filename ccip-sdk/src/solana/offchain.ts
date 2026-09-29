@@ -1,8 +1,8 @@
-import { BorshCoder } from '@coral-xyz/anchor'
 import { hexlify } from 'ethers'
 
 import type { OffchainTokenData } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
+import { sizedCoder } from './coder.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 
@@ -12,7 +12,7 @@ interface CcipCctpMessageAndAttestation {
   }
   attestation: Uint8Array
 }
-const cctpTokenPoolCoder = new BorshCoder({
+const cctpTokenPoolCoder = sizedCoder({
   ...CCTP_TOKEN_POOL,
   types: [...BASE_TOKEN_POOL.types, ...CCTP_TOKEN_POOL.types],
   events: [...BASE_TOKEN_POOL.events, ...CCTP_TOKEN_POOL.events],
