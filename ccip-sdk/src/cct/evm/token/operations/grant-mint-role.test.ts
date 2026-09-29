@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, id, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
@@ -62,6 +62,7 @@ function stubChain({
   }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     // v1.5.1 does not implement typeAndVersion; role detection falls back to its v1 encoder.
     typeAndVersion: () => Promise.reject(missingFunction()),
     provider: {
@@ -89,6 +90,7 @@ function stubV2Chain({
 } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
     provider: {
       call: ({ data }: { data: string }) => {

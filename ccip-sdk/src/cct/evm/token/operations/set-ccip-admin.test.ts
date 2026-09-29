@@ -5,7 +5,7 @@ import { Interface, ZeroAddress } from 'ethers'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import { type SetCCIPAdminParams, SetCCIPAdmin } from './set-ccip-admin.ts'
 
@@ -22,6 +22,7 @@ const FRESH = new Interface([
 function stubChain({ admin = ADMIN } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
     provider: {
       call: ({ data }: { data: string }) => {
