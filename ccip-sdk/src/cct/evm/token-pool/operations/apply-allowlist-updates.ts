@@ -115,7 +115,7 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    *
    * Four judgement calls, all rejections:
    * - **both arrays empty** — rejected: such a call encodes and mines while changing nothing, so
-   *   it can only be a caller bug; mirrors `lockbox/operations/authorize-callers.ts`.
+   *   it can only be a caller bug; mirrors `lockbox/operations/update-authorized-callers.ts`.
    * - **duplicates within an array** — rejected, mirroring the Solana `configureAllowlist` /
    *   `removeFromAllowlist` ops. The EVM holder treats its allowlist as a set, so a duplicate is a
    *   silent no-op on-chain; catching it locally keeps the two families' contracts identical.

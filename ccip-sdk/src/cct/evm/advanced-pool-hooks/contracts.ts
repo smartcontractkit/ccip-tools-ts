@@ -51,9 +51,9 @@ export type CCVConfig = {
 /** A remote CCIP chain selector (`uint64`) plus its complete CCV configuration. */
 export type CCVConfigUpdate = CCVConfig & { remoteChainSelector: bigint }
 
-/** Checksums one CCV address list returned by a typed hooks getter. */
-function toCCVAddresses(ccvs: readonly unknown[]): string[] {
-  return ccvs.map((ccv) => getAddress(ccv as string))
+/** Checksums one address list returned by a typed hooks getter. */
+function toAddresses(addresses: readonly unknown[]): string[] {
+  return addresses.map((address) => getAddress(address as string))
 }
 
 /** Checksums the four address lists in a hooks CCV config result. */
@@ -64,10 +64,10 @@ function toCCVConfig(raw: {
   thresholdInboundCCVs: readonly unknown[]
 }): CCVConfig {
   return {
-    outboundCCVs: toCCVAddresses(raw.outboundCCVs),
-    thresholdOutboundCCVs: toCCVAddresses(raw.thresholdOutboundCCVs),
-    inboundCCVs: toCCVAddresses(raw.inboundCCVs),
-    thresholdInboundCCVs: toCCVAddresses(raw.thresholdInboundCCVs),
+    outboundCCVs: toAddresses(raw.outboundCCVs),
+    thresholdOutboundCCVs: toAddresses(raw.thresholdOutboundCCVs),
+    inboundCCVs: toAddresses(raw.inboundCCVs),
+    thresholdInboundCCVs: toAddresses(raw.thresholdInboundCCVs),
   }
 }
 
@@ -93,6 +93,33 @@ export async function readAllCCVConfigs(
   }))
 }
 
+/** Reads the hooks' current policy engine address in one `eth_call`. */
+export async function readPolicyEngine(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<string> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return getAddress(resultToObject(await hooks.getPolicyEngine()))
+}
+
+/** Reads the amount at which the hooks require additional CCVs in one `eth_call`. */
+export async function readThresholdAmount(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<bigint> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return resultToObject(await hooks.getThresholdAmount()) as bigint
+}
+
+/** Reads every hooks caller authorized for preflight and postflight checks in one `eth_call`. */
+export async function readAllAuthorizedCallers(
+  chain: EVMChain,
+  advancedPoolHooks: string,
+): Promise<string[]> {
+  const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
+  return toAddresses(await hooks.getAllAuthorizedCallers())
+}
+
 /** Resolves the CCVs required for a transfer in one `eth_call`. */
 export async function readRequiredCCVs(
   chain: EVMChain,
@@ -102,7 +129,7 @@ export async function readRequiredCCVs(
   direction: bigint,
 ): Promise<string[]> {
   const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
-  return toCCVAddresses(
+  return toAddresses(
     await hooks.getRequiredCCVs(
       ZeroAddress,
       remoteChainSelector,
@@ -126,6 +153,30 @@ export async function readAdvancedPoolHooksOwner(
 ): Promise<string> {
   const hooks = getTypedContract(chain, advancedPoolHooks, ADVANCED_POOL_HOOKS_V2_0_0_ABI)
   return getAddress(resultToObject(await hooks.owner()))
+}
+
+/**
+ * Pre-flights a non-zero policy engine address to ensure it has deployed code.
+ *
+ * @remarks Code presence rejects EOAs, whose `attach()` call otherwise succeeds as a no-op. The
+ * update itself verifies only `attach()` (and the old engine's `detach()`); `run()` is first called
+ * during a transfer, so callers remain responsible for supplying a compatible policy engine.
+ * @param operation - Operation name for error context.
+ * @param param - Policy engine parameter name for error context.
+ * @throws {@link CCTParamsInvalidError} if the address has no deployed code.
+ */
+export async function assertPolicyEngineContract(
+  operation: string,
+  param: string,
+  chain: EVMChain,
+  policyEngine: string,
+): Promise<void> {
+  if ((await chain.provider.getCode(policyEngine)) !== '0x') return
+  throw new CCTParamsInvalidError(
+    operation,
+    param,
+    'must be a deployed policy engine contract, not an EOA',
+  )
 }
 
 /**
