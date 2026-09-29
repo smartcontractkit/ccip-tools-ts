@@ -1,5 +1,6 @@
-import { type Idl, type IdlTypes, BorshCoder } from '@coral-xyz/anchor'
+import type { Idl, IdlTypes } from '@coral-xyz/anchor'
 
+import { sizedCoder } from '../coder.ts'
 import { IDL as BASE_TOKEN_POOL } from './1.6.0/BASE_TOKEN_POOL.ts'
 import { IDL as BURN_MINT_TOKEN_POOL } from './1.6.0/BURN_MINT_TOKEN_POOL.ts'
 import { IDL as LOCK_RELEASE_TOKEN_POOL } from './1.6.0/LOCK_RELEASE_TOKEN_POOL.ts'
@@ -24,7 +25,7 @@ export const LOCK_RELEASE_TOKEN_POOL_IDL = composeTokenPoolIdl(LOCK_RELEASE_TOKE
 export type TokenPoolConfig = IdlTypes<typeof TOKEN_POOL_IDL>['BaseConfig']
 
 /** Borsh decoder for burn-mint token pool instructions and canonical token pool accounts. */
-export const tokenPoolCoder = new BorshCoder(TOKEN_POOL_IDL)
+export const tokenPoolCoder = sizedCoder(TOKEN_POOL_IDL)
 
 /** Borsh decoder for lock-release token pool instructions and canonical token pool accounts. */
-export const lockReleaseTokenPoolCoder = new BorshCoder(LOCK_RELEASE_TOKEN_POOL_IDL)
+export const lockReleaseTokenPoolCoder = sizedCoder(LOCK_RELEASE_TOKEN_POOL_IDL)
