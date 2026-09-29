@@ -5,7 +5,7 @@ import { Interface, MaxUint256, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type ApproveTokenParams, ApproveToken } from './approve-token.ts'
 
@@ -31,6 +31,7 @@ function stubChain(seen: { calls: number } = { calls: 0 }): EVMChain {
     throw new Error('approveToken must not touch the chain to build')
   }
   return {
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: { call: fail },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     typeAndVersion: fail,

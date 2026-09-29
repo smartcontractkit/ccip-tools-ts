@@ -5,7 +5,7 @@ import { AbiCoder, Interface, ZeroAddress, getCreateAddress, makeError } from 'e
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0 from '../../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
@@ -44,6 +44,7 @@ function stubChain(): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     nextNonce: async () => 0,
     rollbackNonce: () => {},
   } as unknown as EVMChain
