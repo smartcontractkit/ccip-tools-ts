@@ -376,6 +376,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (unlike the unsigned builder, where it's optional for offline/multisig flows), so the
    * token-authority check always runs before this signs and submits.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `registryModule` is not a
    * registered TAR module, `registrationMethod` needs a v1.6+ module, `sender` doesn't match the
    * token's authority for the chosen method, or the token is already registered (or pending
@@ -420,6 +421,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Registers a pool, signing + submitting with `opts.wallet` (the token admin).
    * A zero/empty `poolAddress` delists the token from the registry.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
@@ -465,6 +467,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
    * (see {@link transferPoolOwnership}); do not confuse the two.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
    * token's current registry administrator (including a not-yet-accepted registration), or if an
    * explicit `opts.sender` does not match the wallet's address
@@ -512,6 +515,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.wallet` (the pending administrator). Completes the `registerAdmin`/`transferAdmin` →
    * `acceptAdmin` handshake, after which {@link setPool} becomes callable.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
    *   pending administrator
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
@@ -601,6 +605,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link generateUnsignedTransferPoolOwnership}: ownership moves only once `newOwner` calls
    * {@link acceptPoolOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
    * signer, if `sender` is given and is not the wallet's address, or if the signer is not the pool
    * owner
@@ -649,6 +654,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * wallet that is not the proposed owner reverts rather than failing validation, per
    * {@link generateUnsignedAcceptPoolOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or `sender` is given and is
    * not the wallet's address
    * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
@@ -699,6 +705,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * token's current owner, and is what `sender` defaults to. Two-step, and v1.x-only without a
    * version check, per {@link generateUnsignedTransferTokenOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
    * signer, if `sender` is given and is not the wallet's address, or if the signer is not the
    * token owner
@@ -742,6 +749,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Completes a pending token ownership transfer, signing + submitting with `opts.wallet` — which
    * must be the address {@link transferTokenOwnership} proposed. Ownership moves in this tx.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is invalid, or `sender` is given and
    * is not the wallet's address
    * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
@@ -800,6 +808,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * before broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -860,6 +869,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * delay rules. The contract is the final authority on whether its schedule has passed.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -918,6 +928,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for pending-transfer rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -974,6 +985,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -1062,6 +1074,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Same version rules as {@link generateUnsignedSetChainRateLimiterConfigs}: **v1.5.0 pools set
    * one lane per transaction**, and `fastFinality` is v2.0.0-only.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is given and is
    * not the wallet's address, or the signer is neither the pool `owner` nor its (set)
    * `rateLimitAdmin`. On a **v1.5.1** pool an enabled rate limiter must additionally satisfy
@@ -1128,6 +1141,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Assigns the pool's rate-limit admin role, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — use {@link setDynamicConfig}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -1195,6 +1209,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
    * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -1260,6 +1275,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `sender` defaults to the wallet address and, when supplied, must equal it.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1333,6 +1349,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * owner.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1403,6 +1420,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The signing wallet must be the pool owner or delegated `feeAdmin`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1492,6 +1510,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * hooks' own `applyAuthorizedCallerUpdates`, otherwise transfers revert `UnauthorizedCaller`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any address is invalid, zero or duplicated, or
    * `thresholdAmount` is not a `uint256`
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -1622,6 +1641,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * confirm it is an `AdvancedPoolHooks` contract.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
    * `AdvancedPoolHooks` contract
    * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
@@ -1701,6 +1721,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link generateUnsignedUpdateAdvancedPoolHooks}.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported,
    * or a non-zero `advancedPoolHooks` is not an `AdvancedPoolHooks` contract
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
@@ -1846,6 +1867,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * wallet's address and must equal it — the allowance comes out of the signing account's balance,
    * so approving on behalf of another address is rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
    * the wallet's address
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -1909,6 +1931,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * defaults to the wallet's address and must equal it — the wallet must be the pool's
    * rebalancer, and must have approved `amount` to the pool with {@link approveToken}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool's rebalancer
@@ -1964,6 +1987,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Withdraws liquidity from a LockRelease pool to the signing wallet, which must be the pool's
    * rebalancer. `sender` defaults to the wallet's address and must equal it.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool's rebalancer
@@ -2031,6 +2055,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * own the destination pool. See {@link generateUnsignedTransferLiquidity} for the two-step
    * rebalancer wiring this depends on.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the source pool is not wired to `poolAddress`, or the wallet does not
@@ -2088,6 +2113,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Appoints the pool's rebalancer, signing + submitting with `opts.wallet`. `sender` defaults to
    * the wallet's address and must equal it — the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -2185,6 +2211,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2246,6 +2273,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * this submits.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2313,6 +2341,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @see {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2377,6 +2406,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedGrantBurnRole} for the version and redundancy rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2438,6 +2468,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedRevokeMintRole} for the version and role-state rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2499,6 +2530,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedRevokeBurnRole} for the version and role-state rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2558,6 +2590,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedMint} for the version and role rules. `sender` defaults
    * to the wallet's address, so the mint-role check always runs before this submits.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
@@ -2700,6 +2733,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2750,6 +2784,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2865,6 +2900,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * that is not its owner, before the wallet is asked to sign; see
    * {@link generateUnsignedAuthorizeLockboxCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
    * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the
    * wallet is not the lockbox owner
@@ -2924,6 +2960,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * authorized caller of the lockbox, which must have approved it for `amount`).
    * @remarks Approve first with {@link approveToken}, naming the **lockbox** as `spender`.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
    * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
@@ -2978,6 +3015,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.wallet` (an authorized caller of the lockbox).
    * @remarks The tokens go to `recipient`, which need not be the wallet.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
    * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
@@ -3117,6 +3155,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedSetRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
    * the wallet's address / the pool owner
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.1 or newer
@@ -3177,6 +3216,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedAddRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
    * wallet's address / the pool owner, or `remotePoolAddress` is already registered on that lane
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
@@ -3237,6 +3277,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedRemoveRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
    * wallet's address / the pool owner, or `remotePoolAddress` is not registered on that lane
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
@@ -3264,6 +3305,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.sender` defaults to the wallet's own address (the only address `onlyOwner` can pass) and
    * is rejected if it differs, so the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `version` does not match the
    * pool's own generation, or `sender` is given and is not the wallet address / pool owner. As
    * with {@link generateUnsignedApplyChainUpdates}, an enabled rate limiter on a **v1.5.0 or
@@ -3423,6 +3465,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `removes` that is not allowlisted or an `adds` that already is fails here rather than mining
    * as a no-op.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no allowlist
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the wallet is not the pool owner, the pool has no allowlist enabled, or

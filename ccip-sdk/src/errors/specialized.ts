@@ -2435,16 +2435,25 @@ export class CCIPWalletInvalidError extends CCIPError {
  */
 export class CCIPWalletChainMismatchError extends CCIPError {
   override readonly name = 'CCIPWalletChainMismatchError'
-  /** Creates a wallet chain mismatch error */
+  /**
+   * Creates a wallet chain mismatch error. The message names the wallet's chain when `actual` is
+   * a known network; `context.actual` stays the raw id.
+   */
   constructor(
     chainName: string,
     expected: number | string,
     actual: number | string,
     options?: CCIPErrorOptions,
   ) {
+    let actualChain = String(actual)
+    try {
+      actualChain = `${networkInfo(actual).name} (${actual})`
+    } catch {
+      // unknown network: the bare id is all there is to show
+    }
     super(
       CCIPErrorCode.WALLET_CHAIN_MISMATCH,
-      `Wallet is connected to the wrong chain for ${chainName}: expected ${expected}, got ${actual}`,
+      `Wallet is connected to the wrong chain for ${chainName}: expected ${expected}, got ${actualChain}`,
       {
         ...options,
         isTransient: false,
