@@ -9,11 +9,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenVersion,
-  assertTokenDefaultAdmin,
+  checkTokenDefaultAdmin,
   getTokenInterface,
   resolveCrossChainToken,
   resolveTokenEncoder,
@@ -43,20 +44,30 @@ export class SetCCIPAdmin extends EVMOperation<SetCCIPAdminParams> {
   }
 
   /**
-   * Resolves the v2 encoder and confirms `sender` (when known) is the current default admin.
+   * Resolves the v2 encoder and encodes.
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
-   * @throws {@link CCTParamsInvalidError} if the token has no default admin or `sender` is not it
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, newAdmin, sender }: SetCCIPAdminParams,
+    { tokenAddress, newAdmin }: SetCCIPAdminParams,
   ): Promise<UnsignedEVMTx> {
     const version = await resolveCrossChainToken(chain, tokenAddress)
     const iface = resolveTokenEncoder(this.encoders, version, this.name)
-    await assertTokenDefaultAdmin(this.name, chain, tokenAddress, sender)
     return callTx(tokenAddress, iface.encodeFunctionData('setCCIPAdmin', [newAdmin]))
+  }
+
+  /**
+   * Confirms the token has a default admin and, when known, that `sender` is it.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * makes `sender` the default admin.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, sender }: SetCCIPAdminParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(await checkTokenDefaultAdmin(chain, tokenAddress, sender))
   }
 }

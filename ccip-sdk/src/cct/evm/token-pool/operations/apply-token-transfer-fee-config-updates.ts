@@ -14,9 +14,9 @@ import type { Interface } from 'ethers'
 import type { TokenTransferFeeConfig } from '../../../../chain.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -27,7 +27,7 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -182,20 +182,29 @@ export class ApplyTokenTransferFeeConfigUpdates extends EVMOperation<
   }
 
   /**
-   * Resolves the v2.0.0 interface and, when known, verifies the owner sender. The encoder is
-   * resolved before the role read, so older pools fail without unnecessary RPCs.
+   * Resolves the v2.0.0 interface and encodes.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the pool owner
    */
   protected async buildUnsigned(chain: EVMChain, params: ParsedParams): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 
   /**

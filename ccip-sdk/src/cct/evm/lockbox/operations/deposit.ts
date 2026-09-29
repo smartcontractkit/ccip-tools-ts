@@ -26,15 +26,16 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   IGNORED_CHAIN_SELECTOR,
   LOCKBOX_INTERFACE,
   assertLockbox,
-  assertLockboxCaller,
-  assertLockboxFunding,
   assertLockboxToken,
+  checkLockboxCaller,
+  checkLockboxFunding,
 } from '../contracts.ts'
 
 /**
@@ -73,38 +74,49 @@ export class DepositToLockbox extends EVMOperation<DepositToLockboxParams> {
   }
 
   /**
-   * Confirms the target is a deployed, supported lockbox and that it escrows `token`, then — with
-   * a known `sender` — that it accepts calls from that account and that the account can actually
-   * fund the transfer.
+   * Confirms the target is a deployed, supported lockbox, then encodes. The escrowed token and
+   * everything about `sender` are handled by {@link DepositToLockbox.preconditions}.
    *
-   * @remarks Ordered cheapest-to-narrowest, and property-of-the-lockbox before
-   * property-of-the-caller: an unusable lockbox or a token mismatch fails for every possible
-   * sender, so no choice of signer helps and there is no point reading the caller set first.
-   * @remarks The checks live here, not in {@link execute}, so the offline / multisig path gets
-   * them too rather than being handed a transaction that reverts once signed. The caller and
-   * funding checks need a depositor, so they run only with a `sender`.
-   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`, if
-   * the lockbox escrows a different token, or if `sender` is not an authorized caller
+   * @remarks This check runs first because an unusable lockbox fails for every possible sender,
+   * so no choice of signer helps and there is no point reading the caller set at all.
+   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`
    * @throws {@link CCTContractTypeInvalidError} if `lockbox` is some other contract, e.g. the pool
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
-   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the lockbox for, less
-   * than `amount`
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { lockbox, token, amount, sender }: DepositToLockboxParams,
+    { lockbox, token, amount }: DepositToLockboxParams,
   ): Promise<UnsignedEVMTx> {
     await assertLockbox(this.name, chain, lockbox)
-    const erc20 = await assertLockboxToken(this.name, chain, lockbox, token)
-    if (sender !== undefined) {
-      await assertLockboxCaller(this.name, chain, lockbox, sender)
-      await assertLockboxFunding(this.name, erc20, lockbox, token, sender, amount)
-    }
     const data = LOCKBOX_INTERFACE.encodeFunctionData('deposit', [
       token,
       IGNORED_CHAIN_SELECTOR,
       amount,
     ])
     return callTx(lockbox, data)
+  }
+
+  /**
+   * Confirms `sender` is an authorized caller and holds — and has approved the lockbox for — the
+   * deposit.
+   * @remarks Reported rather than thrown outright: `authorizeLockboxCallers` and `approveToken`
+   * in earlier plan steps are exactly what make these hold.
+   * @remarks The escrowed-token check stays fatal — the lockbox's token is fixed at deployment —
+   * but runs here because the funding checks need the ERC-20 handle it resolves, and paying for
+   * that read in {@link buildUnsigned} as well would double it.
+   * @throws {@link CCTParamsInvalidError} if the lockbox escrows a token other than `token`
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { lockbox, token, amount, sender }: DepositToLockboxParams,
+  ): Promise<PreconditionError[]> {
+    const erc20 = await assertLockboxToken(this.name, chain, lockbox, token)
+    if (sender === undefined) return []
+    return unmet(
+      ...(await Promise.all([
+        checkLockboxCaller(chain, lockbox, sender),
+        checkLockboxFunding(erc20, lockbox, token, sender, amount),
+      ])),
+    )
   }
 }

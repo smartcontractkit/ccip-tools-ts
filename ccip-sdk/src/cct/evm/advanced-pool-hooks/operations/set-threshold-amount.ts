@@ -11,12 +11,13 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateUint256 } from '../../validate.ts'
 import {
   type AdvancedPoolHooksTarget,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksOwner,
+  checkAdvancedPoolHooksOwner,
   resolveAdvancedPoolHooksTarget,
   validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
@@ -45,21 +46,36 @@ export class SetThresholdAmount extends EVMOperation<SetThresholdAmountParams> {
   }
 
   /**
-   * Confirms the target and supplied owner before encoding `setThresholdAmount(uint256)`.
+   * Confirms the target is an `AdvancedPoolHooks` before encoding `setThresholdAmount(uint256)`.
    * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
    * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: SetThresholdAmountParams,
   ): Promise<UnsignedEVMTx> {
-    const { thresholdAmount, sender } = params
     const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
-    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
       hooks,
-      ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('setThresholdAmount', [thresholdAmount]),
+      ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('setThresholdAmount', [
+        params.thresholdAmount,
+      ]),
     )
+  }
+
+  /**
+   * Confirms `sender` (when given) owns the hooks contract.
+   * @remarks Reported rather than thrown outright, so a plan that deploys these hooks — or hands
+   * them to this owner — in an earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { sender }: SetThresholdAmountParams,
+    tx: UnsignedEVMTx,
+  ): Promise<PreconditionError[]> {
+    if (sender === undefined) return []
+    // The hooks buildUnsigned resolved, directly or through the pool, are the tx target.
+    const hooks = tx.transactions[0]!.to as string
+    return unmet(await checkAdvancedPoolHooksOwner(chain, hooks, sender))
   }
 }

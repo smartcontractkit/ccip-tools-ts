@@ -10,7 +10,7 @@ import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { WithdrawFromLockbox } from './withdraw.ts'
 
@@ -271,7 +271,7 @@ describe('WithdrawFromLockbox (cct/evm lockbox operation)', () => {
             sender: SENDER,
           }),
         (err: unknown) =>
-          err instanceof CCTTxFailedError && err.message.includes('InsufficientBalance'),
+          err instanceof CCTPreconditionError && err.message.includes('InsufficientBalance'),
       )
     })
 
