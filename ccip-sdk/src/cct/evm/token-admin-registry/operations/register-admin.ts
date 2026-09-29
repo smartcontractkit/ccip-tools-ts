@@ -11,9 +11,9 @@ import { Contract, Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import {
   RegistryModuleOwnerCustomVersion,
@@ -44,7 +44,7 @@ export type RegisterAdminMethod = (typeof REGISTRATION_METHODS)[keyof typeof REG
  * pre-flight that same equality. `access-control-default-admin` has no such getter: unlike the
  * other two, `registerAccessControlDefaultAdmin` never derives an address from the token at all —
  * it checks `AccessControl(token).hasRole(DEFAULT_ADMIN_ROLE(), msg.sender)` and then registers
- * `msg.sender` itself, so it's pre-flighted as a role check in {@link RegisterAdmin.buildUnsigned}
+ * `msg.sender` itself, so it's pre-flighted as a role check in {@link RegisterAdmin.preconditions}
  * rather than through a `tokenGetter` here.
  */
 const REGISTRATION: Record<
@@ -143,8 +143,12 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
   }
 
   /**
-   * Resolves the TAR, then runs the on-chain checks that would otherwise surface as an opaque
-   * revert, before encoding the module call.
+   * Resolves the TAR and the module's on-chain version, then encodes the module call.
+   *
+   * @remarks Both checks here stay fatal while the rest are reported. A module the registry does
+   * not know is infrastructure the CCIP operator installs, not something a CCT plan can add; and
+   * the resolved version selects the interface the calldata is built from, so there would be no
+   * transaction to attach a report to.
    */
   protected async buildUnsigned(chain: EVMChain, p: RegisterAdminParams): Promise<UnsignedEVMTx> {
     const method = p.registrationMethod ?? REGISTRATION_METHODS.OWNER
@@ -173,73 +177,92 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
       )
     }
 
-    // Pre-flight the module's own authorization check (see REGISTRATION), so a mismatch fails
-    // here rather than as a `CanOnlySelfRegister`/`RequiredRoleNotFound` revert. Needs `sender`.
-    if (p.sender !== undefined) {
-      if (method === REGISTRATION_METHODS.ACCESS_CONTROL_DEFAULT_ADMIN) {
-        // Not `defaultAdmin()`: that lives on `AccessControlDefaultAdminRules`, not the plain
-        // `AccessControl` the module casts to. Mirror the module: read the role, then `hasRole`.
-        const accessControlInterface = new Interface([
-          'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
-          'function hasRole(bytes32, address) view returns (bool)',
-        ])
-        const token = new Contract(p.tokenAddress, accessControlInterface, chain.provider)
-        const role = (await token.getFunction('DEFAULT_ADMIN_ROLE')()) as string
-        const hasRole = (await token.getFunction('hasRole')(role, p.sender)) as boolean
-        if (!hasRole) {
-          throw new CCTParamsInvalidError(
-            this.name,
-            'sender',
-            `must hold the token's DEFAULT_ADMIN_ROLE (AccessControl.hasRole) for registrationMethod "access-control-default-admin"`,
-          )
-        }
-      } else {
-        const tokenGetter = REGISTRATION[method].tokenGetter!
-        const tokenGetterInterface = new Interface([
-          `function ${tokenGetter}() view returns (address)`,
-        ])
-        const admin = (await new Contract(
-          p.tokenAddress,
-          tokenGetterInterface,
-          chain.provider,
-        ).getFunction(tokenGetter)()) as string
-        if (getAddress(admin) !== getAddress(p.sender)) {
-          throw new CCTParamsInvalidError(
-            this.name,
-            'sender',
-            `must equal token.${tokenGetter}() (${admin}) for registrationMethod "${method}"`,
-          )
-        }
-      }
-    }
-
-    // `proposeAdministrator` reverts `AlreadyRegistered` only once `administrator` is non-zero;
-    // a pending proposal is silently overwritten. Rejecting that too is deliberately stricter.
-    const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
-      chain,
-      registry,
-      p.tokenAddress,
-    )
-    if (administrator !== ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        `token already has registry administrator ${administrator} — use transferAdmin to hand the role over, or setPool if you are already the admin`,
-      )
-    }
-    if (pendingAdministrator !== ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAddress',
-        `a registration proposing ${pendingAdministrator} is already pending — that address must call acceptAdmin (re-registering would silently replace the proposal)`,
-      )
-    }
-
     const data = getRegistryModuleOwnerCustomInterface(onChainVersion).encodeFunctionData(
       moduleFn,
       [p.tokenAddress],
     )
     return callTx(p.registryModule, data)
+  }
+
+  /**
+   * Mirrors the module's own authorization check against `sender`, and confirms the token is not
+   * already registered or proposed.
+   *
+   * @remarks All reported rather than thrown outright: `transferTokenOwnership` or `setCCIPAdmin`
+   * in an earlier plan step is what makes `sender` the address the module will accept, and the
+   * registration state is what the `registerAdmin → acceptAdmin` pair moves through.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    p: RegisterAdminParams,
+  ): Promise<PreconditionError[]> {
+    const method = p.registrationMethod ?? REGISTRATION_METHODS.OWNER
+    const registry = await chain.getTokenAdminRegistryFor(p.address)
+    const [authority, { administrator, pendingAdministrator }] = await Promise.all([
+      this.checkRegistrationAuthority(chain, p, method),
+      readTokenAdminRegistryConfig(chain, registry, p.tokenAddress),
+    ])
+
+    return unmet(
+      authority,
+      // `proposeAdministrator` reverts `AlreadyRegistered` only once `administrator` is non-zero;
+      // a pending proposal is silently overwritten. Reporting that too is deliberately stricter.
+      administrator === ZeroAddress
+        ? undefined
+        : {
+            param: 'tokenAddress',
+            reason: `token already has registry administrator ${administrator} — use transferAdmin to hand the role over, or setPool if you are already the admin`,
+          },
+      pendingAdministrator === ZeroAddress
+        ? undefined
+        : {
+            param: 'tokenAddress',
+            reason: `a registration proposing ${pendingAdministrator} is already pending — that address must call acceptAdmin (re-registering would silently replace the proposal)`,
+          },
+    )
+  }
+
+  /**
+   * Mirrors the check the chosen module performs on its caller (see `REGISTRATION`), so a
+   * mismatch is reported here rather than reverting `CanOnlySelfRegister` /
+   * `RequiredRoleNotFound`. Needs `sender`; reports nothing without one.
+   */
+  private async checkRegistrationAuthority(
+    chain: EVMChain,
+    p: RegisterAdminParams,
+    method: RegisterAdminMethod,
+  ): Promise<PreconditionError | undefined> {
+    if (p.sender === undefined) return undefined
+
+    if (method === REGISTRATION_METHODS.ACCESS_CONTROL_DEFAULT_ADMIN) {
+      // Not `defaultAdmin()`: that lives on `AccessControlDefaultAdminRules`, not the plain
+      // `AccessControl` the module casts to. Mirror the module: read the role, then `hasRole`.
+      const accessControlInterface = new Interface([
+        'function DEFAULT_ADMIN_ROLE() view returns (bytes32)',
+        'function hasRole(bytes32, address) view returns (bool)',
+      ])
+      const token = new Contract(p.tokenAddress, accessControlInterface, chain.provider)
+      const role = (await token.getFunction('DEFAULT_ADMIN_ROLE')()) as string
+      const hasRole = (await token.getFunction('hasRole')(role, p.sender)) as boolean
+      if (hasRole) return undefined
+      return {
+        param: 'sender',
+        reason: `must hold the token's DEFAULT_ADMIN_ROLE (AccessControl.hasRole) for registrationMethod "access-control-default-admin"`,
+      }
+    }
+
+    const tokenGetter = REGISTRATION[method].tokenGetter!
+    const tokenGetterInterface = new Interface([`function ${tokenGetter}() view returns (address)`])
+    const admin = (await new Contract(
+      p.tokenAddress,
+      tokenGetterInterface,
+      chain.provider,
+    ).getFunction(tokenGetter)()) as string
+    if (getAddress(admin) === getAddress(p.sender)) return undefined
+    return {
+      param: 'sender',
+      reason: `must equal token.${tokenGetter}() (${admin}) for registrationMethod "${method}"`,
+    }
   }
 
   /**

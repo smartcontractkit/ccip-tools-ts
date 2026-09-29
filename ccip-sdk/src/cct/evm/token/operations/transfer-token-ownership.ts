@@ -21,13 +21,13 @@ import { getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   assertOwnable2StepToken,
-  assertTokenOwnershipTransfer,
+  checkTokenOwnershipTransfer,
   getErc20Token,
 } from '../contracts.ts'
 
@@ -41,7 +41,7 @@ export type TransferTokenOwnershipParams = {
    *
    * @remarks The zero address is **allowed** and meaningful: it parks the pending owner on an
    * address nobody can sign as, retracting a mistaken proposal. The one address the contract
-   * rejects is the current owner's own, which {@link assertTokenOwnershipTransfer} catches against
+   * rejects is the current owner's own, which {@link checkTokenOwnershipTransfer} catches against
    * the token's on-chain `owner()`.
    */
   newOwner: string
@@ -84,34 +84,38 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
   }
 
   /**
-   * Encodes `transferOwnership`, then confirms `sender` (when given) is the token owner.
+   * Confirms the token is Ownable2Step, then encodes `transferOwnership`.
    * @remarks No version resolution at all: `transferOwnership(address)` is declared identically by
    * v1.5.1 and v1.6.2, so {@link getErc20Token}'s pinned interface encodes for both, exactly as it
    * does for the role and mint writes.
-   * @remarks The owner check lives here, not only in {@link execute}, so the offline / multisig
-   * path gets it too: `generateUnsignedTransferTokenOwnership` with an unauthorized `sender` would
-   * otherwise hand back a fully-formed transaction that reverts only after being reviewed and
-   * signed.
    * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the token owner, or if
-   * `newOwner` is already the token owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
+    { tokenAddress, newOwner }: TransferTokenOwnershipParams,
   ): Promise<UnsignedEVMTx> {
     await assertOwnable2StepToken(this.name, chain, tokenAddress)
-    const unsigned = callTx(
-      tokenAddress,
-      getErc20Token().encodeFunctionData('transferOwnership', [newOwner]),
-    )
-    await assertTokenOwnershipTransfer(this.name, chain, tokenAddress, newOwner, sender)
-    return unsigned
+    return callTx(tokenAddress, getErc20Token().encodeFunctionData('transferOwnership', [newOwner]))
+  }
+
+  /**
+   * Bounds the transfer against the token's on-chain `owner()`: `sender` (when given) must be it,
+   * and `newOwner` must not already be.
+   * @remarks Reported rather than thrown outright, and reported here rather than only in
+   * {@link execute}, so the offline / multisig path is covered too:
+   * `generateUnsignedTransferTokenOwnership` with an unauthorized `sender` would otherwise hand
+   * back a fully-formed transaction that reverts only after being reviewed and signed.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(await checkTokenOwnershipTransfer(chain, tokenAddress, newOwner, sender))
   }
 
   /**
    * Signs and submits as the current token owner, defaulting `sender` to the signing wallet — the
-   * only address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * only address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather than
    * signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

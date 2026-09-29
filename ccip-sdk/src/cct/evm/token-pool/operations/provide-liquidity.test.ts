@@ -11,12 +11,13 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type ProvideLiquidityParams, ProvideLiquidity } from './provide-liquidity.ts'
 
 const POOL = '0x' + '11'.repeat(20)
+const NOT_THE_REBALANCER = '0x' + '77'.repeat(20)
 const REBALANCER = '0x' + '22'.repeat(20)
 const OWNER = '0x' + '33'.repeat(20)
 const TOKEN = '0x' + '55'.repeat(20)
@@ -284,7 +285,7 @@ describe('ProvideLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ balance: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'provideLiquidity' &&
           /holds 999999999999999999 of/.test(err.message) &&
           /mint or transfer tokens first/.test(err.message),
@@ -295,7 +296,7 @@ describe('ProvideLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ allowance: 0n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'provideLiquidity' &&
           /has approved 0 of/.test(err.message) &&
           // names the token, the pool and the fix
@@ -304,6 +305,28 @@ describe('ProvideLiquidity (cct/evm)', () => {
           // names the op that grants it, so the fix is copy-pasteable
           /approveToken\(\{ tokenAddress:/.test(err.message),
       )
+    })
+
+    it('reports every unmet requirement at once, not just the first', async () => {
+      // A freshly-planned `setRebalancer → approveToken → provideLiquidity` batch fails all three
+      // checks against today's chain. Reporting them one per round trip would make the caller
+      // re-plan three times to learn what a single pass already knows.
+      const err = await generate(
+        stubChain({ rebalancer: NOT_THE_REBALANCER, balance: 0n, allowance: 0n }),
+      ).then(
+        () => assert.fail('expected a rejection'),
+        (err: unknown) => err as CCTPreconditionError,
+      )
+
+      assert.deepEqual(
+        err.errors.map(({ param }) => param),
+        ['sender', 'sender', 'sender'],
+      )
+      assert.match(err.errors[0]!.reason, /must be the current pool rebalancer/)
+      assert.match(err.errors[1]!.reason, /mint or transfer tokens first/)
+      assert.match(err.errors[2]!.reason, /grant the allowance first/)
+      // and the calldata still comes back, which is what lets the batch be assembled
+      assert.equal(err.unsigned.transactions[0]!.data, dataFor(AMOUNT))
     })
 
     it('accepts an allowance and balance above the deposit', async () => {

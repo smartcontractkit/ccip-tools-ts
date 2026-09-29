@@ -25,15 +25,16 @@ import { MaxUint256 } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   IGNORED_CHAIN_SELECTOR,
   LOCKBOX_INTERFACE,
   assertLockbox,
-  assertLockboxCaller,
-  assertLockboxLiquidity,
   assertLockboxToken,
+  checkLockboxCaller,
+  checkLockboxLiquidity,
 } from '../contracts.ts'
 
 /**
@@ -82,32 +83,20 @@ export class WithdrawFromLockbox extends EVMOperation<WithdrawFromLockboxParams>
   }
 
   /**
-   * Confirms the target is a deployed, supported lockbox escrowing `token`, that it holds enough
-   * of it, and — with a known `sender` — that it accepts calls from that account.
+   * Confirms the target is a deployed, supported lockbox, then encodes. The escrowed token, the
+   * balance and the caller set are handled by {@link WithdrawFromLockbox.preconditions}.
    *
-   * @remarks The balance check runs without a `sender`, unlike the caller check: what the lockbox
-   * holds is a property of the lockbox, so it is worth catching for an offline builder too. It is
-   * advisory either way — every CCIP transfer through the pool moves that balance, so this
-   * catches "withdraw more than was ever deposited" rather than proving the amount still fits
-   * when the tx mines.
-   * @remarks Skipped entirely for the `MaxUint256` sentinel, which asks for whatever is there and
-   * so cannot be short. A drain of an empty lockbox therefore builds and mines as a zero-value
-   * transfer rather than failing here.
-   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`, if
-   * the lockbox escrows a different token, or if `sender` is not an authorized caller
+   * @remarks This check runs first because an unusable lockbox fails for every possible sender,
+   * so no choice of signer helps.
+   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`
    * @throws {@link CCTContractTypeInvalidError} if `lockbox` is some other contract, e.g. the pool
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
-   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { lockbox, token, amount, recipient, sender }: WithdrawFromLockboxParams,
+    { lockbox, token, amount, recipient }: WithdrawFromLockboxParams,
   ): Promise<UnsignedEVMTx> {
     await assertLockbox(this.name, chain, lockbox)
-    const erc20 = await assertLockboxToken(this.name, chain, lockbox, token)
-    if (sender !== undefined) await assertLockboxCaller(this.name, chain, lockbox, sender)
-    if (amount !== MaxUint256)
-      await assertLockboxLiquidity(this.name, erc20, lockbox, token, amount)
     const data = LOCKBOX_INTERFACE.encodeFunctionData('withdraw', [
       token,
       IGNORED_CHAIN_SELECTOR,
@@ -115,5 +104,36 @@ export class WithdrawFromLockbox extends EVMOperation<WithdrawFromLockboxParams>
       recipient,
     ])
     return callTx(lockbox, data)
+  }
+
+  /**
+   * Confirms `sender` is an authorized caller and the lockbox holds `amount`.
+   * @remarks Reported rather than thrown outright: `authorizeLockboxCallers` and a deposit in
+   * earlier plan steps are exactly what make these hold.
+   * @remarks The balance check runs without a `sender`, unlike the caller check: what the lockbox
+   * holds is a property of the lockbox, so it is worth reporting to an offline builder too. It is
+   * advisory either way — every CCIP transfer through the pool moves that balance, so this
+   * catches "withdraw more than was ever deposited" rather than proving the amount still fits
+   * when the tx mines. It is skipped entirely for the `MaxUint256` sentinel, which asks for
+   * whatever is there and so cannot be short; a drain of an empty lockbox therefore builds
+   * cleanly and mines as a zero-value transfer.
+   * @remarks The escrowed-token check stays fatal — the lockbox's token is fixed at deployment —
+   * but runs here because the liquidity check needs the ERC-20 handle it resolves, and paying for
+   * that read in {@link buildUnsigned} as well would double it.
+   * @throws {@link CCTParamsInvalidError} if the lockbox escrows a token other than `token`
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { lockbox, token, amount, sender }: WithdrawFromLockboxParams,
+  ): Promise<PreconditionError[]> {
+    const erc20 = await assertLockboxToken(this.name, chain, lockbox, token)
+    return unmet(
+      ...(await Promise.all([
+        sender === undefined ? undefined : checkLockboxCaller(chain, lockbox, sender),
+        // MaxUint256 is the withdraw-everything sentinel: the lockbox substitutes its own balance,
+        // so there is no amount to compare it against.
+        amount === MaxUint256 ? undefined : checkLockboxLiquidity(erc20, lockbox, token, amount),
+      ])),
+    )
   }
 }

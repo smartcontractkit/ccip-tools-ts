@@ -4,7 +4,7 @@
  * artifact ({@link getTokenArtifact}), the v1 token role reads ({@link readV1TokenRole}) and
  * role-set enumerations ({@link readV1TokenRoleHolders}), plus the owner read every owner-gated
  * write pre-flights `sender`
- * against ({@link readTokenOwner}) plus the guard built on it ({@link assertTokenOwner}). `2.0.0`
+ * against ({@link readTokenOwner}) plus the guard built on it ({@link checkTokenOwner}). `2.0.0`
  * is `CrossChainToken`; `1.5.1` / `1.6.2` are `FactoryBurnMintERC20`. Mirrors
  * `token-pool/contracts.ts`.
  *
@@ -17,10 +17,10 @@ import type { TypedContract } from 'ethers-abitype'
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
 import {
+  type PreconditionError,
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
-  CCTParamsInvalidError,
 } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import FACTORY_BURN_MINT_ERC20_V1_6_2_ABI from '../artifacts/abi/V1_6_2/factory-burn-mint-erc20.ts'
@@ -193,28 +193,27 @@ export async function readPendingTokenDefaultAdmin(
   return { newAdmin: getAddress(newAdmin as string), schedule }
 }
 
-/** Confirms a CrossChainToken has a default admin and, when supplied, checks `sender` against it. */
-export async function assertTokenDefaultAdmin(
-  operation: string,
+/**
+ * Confirms a CrossChainToken has a default admin and, when supplied, checks `sender` against it.
+ * @returns The unmet requirement, or `undefined` if `sender` already holds the role. The two are
+ * exclusive — with no admin there is nothing to compare `sender` to.
+ */
+export async function checkTokenDefaultAdmin(
   chain: EVMChain,
   tokenAddress: string,
   sender?: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const admin = await readTokenDefaultAdmin(chain, tokenAddress)
   if (admin === ZeroAddress)
-    throw new CCTParamsInvalidError(operation, 'tokenAddress', 'has no current default admin')
-  if (sender === undefined || getAddress(sender) === admin) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current default admin (${admin})`,
-  )
+    return { param: 'tokenAddress', reason: 'has no current default admin' }
+  if (sender === undefined || getAddress(sender) === admin) return undefined
+  return { param: 'sender', reason: `must be the current default admin (${admin})` }
 }
 
 /**
  * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built: it declares
  * neither `transferOwnership` nor `acceptOwnership`, and its `owner()` alias passes the
- * {@link assertTokenOwner} pre-flight, so the tx would mine reverted.
+ * {@link checkTokenOwner} pre-flight, so the tx would mine reverted.
  *
  * @remarks Only v2 reports that type, so *any* read failure (v1.5.1 predating
  * `typeAndVersion()`, a revert, a transient error) proceeds and v1.x is untouched.
@@ -276,52 +275,45 @@ export async function readTokenOwner(chain: EVMChain, tokenAddress: string): Pro
  * Pre-flights `sender` against the token's on-chain `owner()` for an owner-gated write, so an
  * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an opaque
  * `OnlyCallableByOwner` revert after a multisig has already reviewed and signed. The token-side
- * counterpart of `assertPoolOwner`.
- * @param operation - Operation name, for the error's `operation` field.
+ * counterpart of {@link checkPoolOwner}.
  * @param chain - Chain to read the owner from.
  * @param tokenAddress - Token being written to.
  * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the token owner
+ * @returns The unmet requirement, or `undefined` if `sender` already owns the token.
  */
-export async function assertTokenOwner(
-  operation: string,
+export async function checkTokenOwner(
   chain: EVMChain,
   tokenAddress: string,
   sender: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const owner = await readTokenOwner(chain, tokenAddress)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(operation, 'sender', `must be the current token owner (${owner})`)
+  if (getAddress(sender) === owner) return undefined
+  return { param: 'sender', reason: `must be the current token owner (${owner})` }
 }
 
 /**
- * The token-side `assertPoolOwnershipTransfer`: bounds a two-step transfer against the token's
- * `owner()` in one `eth_call`.
- * @param operation - Operation name, for the error's `operation` field.
+ * The token-side {@link checkPoolOwnershipTransfer}: bounds a two-step transfer against the
+ * token's `owner()` in one `eth_call`.
  * @param chain - Chain to read the owner from.
  * @param tokenAddress - Token being written to.
  * @param newOwner - The address being proposed as the next owner.
  * @param sender - The address the tx will be sent from, when known.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the owner, or `newOwner` already is
+ * @returns Every unmet requirement; both can fail at once.
  */
-export async function assertTokenOwnershipTransfer(
-  operation: string,
+export async function checkTokenOwnershipTransfer(
   chain: EVMChain,
   tokenAddress: string,
   newOwner: string,
   sender?: string,
-): Promise<void> {
+): Promise<PreconditionError[]> {
   const owner = await readTokenOwner(chain, tokenAddress)
+  const unmet: PreconditionError[] = []
   if (sender !== undefined && getAddress(sender) !== owner)
-    throw new CCTParamsInvalidError(
-      operation,
-      'sender',
-      `must be the current token owner (${owner})`,
-    )
+    unmet.push({ param: 'sender', reason: `must be the current token owner (${owner})` })
   if (getAddress(newOwner) === owner)
-    throw new CCTParamsInvalidError(
-      operation,
-      'newOwner',
-      `must differ from the current token owner (${owner}) — the token would revert CannotTransferToSelf`,
-    )
+    unmet.push({
+      param: 'newOwner',
+      reason: `must differ from the current token owner (${owner}) — the token would revert CannotTransferToSelf`,
+    })
+  return unmet
 }

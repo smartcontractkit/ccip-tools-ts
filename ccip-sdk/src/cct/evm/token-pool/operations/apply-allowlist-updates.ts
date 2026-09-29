@@ -21,13 +21,13 @@ import { type Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolAllowlist,
   resolveEncoder,
@@ -197,9 +197,6 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    * @throws {@link CCTOperationUnsupportedError} if the pool is v2.0.0
    * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner, if the
-   * pool has no allowlist enabled, if a `removes` entry is not currently allowlisted, or if an
-   * `adds` entry already is
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -208,11 +205,29 @@ export class ApplyAllowlistUpdates extends EVMOperation<
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
+    return encode(getTokenPoolInterface(type, version), params)
+  }
 
-    const { enabled, entries } = await readTokenPoolAllowlist(chain, params.poolAddress)
+  /**
+   * Confirms `sender` (when given) is the pool owner — the call is owner-gated on-chain — and
+   * that every `removes` entry is currently allowlisted while no `adds` entry already is.
+   *
+   * @remarks A pool with no allowlist at all stays fatal: `allowlistEnabled` is immutable and
+   * false, so no step of any plan can give this pool a list to update. The membership checks are
+   * reported, because a sibling `applyAllowlistUpdates` earlier in the same plan is exactly what
+   * would make them hold.
+   * @throws {@link CCTParamsInvalidError} if the pool has no allowlist enabled
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedApplyAllowlistUpdatesParams,
+  ): Promise<PreconditionError[]> {
+    const [owner, { enabled, entries }] = await Promise.all([
+      params.sender === undefined
+        ? undefined
+        : checkPoolOwner(chain, params.poolAddress, params.sender),
+      readTokenPoolAllowlist(chain, params.poolAddress),
+    ])
     if (!enabled)
       throw new CCTParamsInvalidError(
         this.name,
@@ -222,29 +237,31 @@ export class ApplyAllowlistUpdates extends EVMOperation<
 
     const allowlisted = new Set(entries)
     const absent = params.removes.find((address) => !allowlisted.has(address))
-    if (absent !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'removes',
-        `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); the pool would ignore it and the tx would change nothing`,
-      )
     const present = params.adds.find((address) => allowlisted.has(address))
-    if (present !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'adds',
-        `${present} is already allowlisted; the pool would ignore it and the tx would change nothing`,
-      )
 
     chain.logger.debug(
       `${this.name}: pool = ${params.poolAddress}, allowlisted = ${entries.length}, removes = ${params.removes.length}, adds = ${params.adds.length}`,
     )
-    return encode(getTokenPoolInterface(type, version), params)
+    return unmet(
+      owner,
+      absent === undefined
+        ? undefined
+        : {
+            param: 'removes',
+            reason: `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); the pool would ignore it and the tx would change nothing`,
+          },
+      present === undefined
+        ? undefined
+        : {
+            param: 'adds',
+            reason: `${present} is already allowlisted; the pool would ignore it and the tx would change nothing`,
+          },
+    )
   }
 
   /**
    * Signs and submits as the pool owner, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

@@ -1,10 +1,16 @@
 /**
- * EVM {@link Operation} lifecycle: prepare (validate → parse) → encode → submit, plus the shared
- * wallet-sender pre-flight ({@link EVMOperation.resolveWalletSender}). Deployment ops extend
- * {@link EVMDeployOperation}, which also resolves the deployed address.
+ * EVM {@link Operation} lifecycle: prepare (validate → parse) → encode → report
+ * ({@link EVMOperation.preconditions}) → submit, plus the shared wallet-sender pre-flight
+ * ({@link EVMOperation.resolveWalletSender}). Deployment ops extend {@link EVMDeployOperation},
+ * which also resolves the deployed address.
  *
- * @remarks The pool-owner pre-flight lives in the token-pool layer as a free helper
- * (`assertPoolOwner` in `token-pool/contracts.ts`), so this generic base
+ * @remarks Two channels, deliberately: a malformed parameter always throws from `validate`/`parse`
+ * before any RPC, while chain state an earlier transaction could still change is collected by
+ * {@link EVMOperation.preconditions} and raised as a {@link CCTPreconditionError} that carries the
+ * built transaction — so an op can be planned ahead of the state it needs.
+ *
+ * @remarks The per-contract probes those overrides call live in the layer that owns the contract,
+ * as free `check*` helpers (`checkPoolOwner` in `token-pool/contracts.ts`), so this generic base
  * carries no dependency on a specific operation.
  *
  * @packageDocumentation
@@ -16,7 +22,12 @@ import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { type EVMChain, isSigner } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily } from '../../networks.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import {
+  type PreconditionError,
+  CCTParamsInvalidError,
+  CCTPreconditionError,
+  CCTTxFailedError,
+} from '../errors.ts'
 import { type ExecuteParams, type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 import { validateAddress } from './validate.ts'
@@ -32,6 +43,24 @@ export function deployTx(bytecode: `0x${string}`, ctorArgs: string): UnsignedEVM
 /** Assembles an unsigned call to an existing contract: `to` + ABI-encoded calldata. */
 export function callTx(to: string, data: string): UnsignedEVMTx {
   return { family: ChainFamily.EVM, transactions: [{ to, data }] }
+}
+
+/**
+ * Collects what the `check*` probes found into the array
+ * {@link EVMOperation.preconditions} returns, dropping the ones that passed. Flattens, so a probe
+ * that reports several requirements at once passes straight through.
+ * @example
+ * ```typescript
+ * return unmet(...(await Promise.all([
+ *   checkPoolOwner(chain, poolAddress, sender),
+ *   checkPoolLiquidity(chain, poolAddress, amount),
+ * ])))
+ * ```
+ */
+export function unmet(
+  ...found: (PreconditionError | PreconditionError[] | undefined)[]
+): PreconditionError[] {
+  return found.flat().filter((error) => error !== undefined)
 }
 
 /**
@@ -100,12 +129,47 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     params: Parsed,
   ): Promise<UnsignedEVMTx> | UnsignedEVMTx
 
-  /** Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing. */
+  /**
+   * Report on-chain requirements this op needs met that currently are not — `sender` is not the
+   * pool owner, no administrator is pending, the pool holds no liquidity. Runs after
+   * {@link buildUnsigned} and after `sender` has been applied, so the tx handed to
+   * {@link CCTPreconditionError} is the one the happy path would have returned. `tx` is passed for
+   * an override that needs what the builder produced; most instead re-derive from `params`, since
+   * the reads behind that are memoized on {@link EVMChain} and `tx.transactions[0].to` is only
+   * typed as a loose `AddressLike`.
+   *
+   * None by default. Overriding ops return **every** unmet requirement rather than the first, so a
+   * caller planning a transaction sees the whole gap in one pass; batch the reads with
+   * `Promise.all` where they are independent. An empty array means the chain is ready now.
+   *
+   * @remarks Only *report* state an earlier transaction could change. A requirement fixed at
+   * deployment (`allowlistEnabled`, `acceptLiquidity`) or one that decides *which* calldata to
+   * build belongs in {@link buildUnsigned} as a throw — there is no plan in which reporting it
+   * helps. An override may still throw for a fatal finding that shares a read with a reportable
+   * one, rather than paying for the same `eth_call` in both places: `mint`'s single `isMinter`
+   * read is both its contract-family check (fatal) and its role check (reported).
+   */
+  protected preconditions(
+    _chain: EVMChain,
+    _params: Parsed,
+    _tx: UnsignedEVMTx,
+  ): Promise<PreconditionError[]> | PreconditionError[] {
+    return []
+  }
+
+  /**
+   * Run {@link prepare} and {@link buildUnsigned}, applying optional `sender`; no signing.
+   * @throws {@link CCTPreconditionError} if {@link preconditions} reports unmet on-chain state —
+   * carrying the built tx, so a caller batching this behind the step that satisfies it can still
+   * take the calldata
+   */
   async generate(chain: EVMChain, params: P): Promise<UnsignedEVMTx> {
     const parsed = this.prepare(params)
     if (params.sender !== undefined) validateAddress(this.name, 'sender', params.sender)
     const unsigned = await this.buildUnsigned(chain, parsed)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
+    const found = await this.preconditions(chain, parsed, unsigned)
+    if (found.length) throw new CCTPreconditionError(this.name, found, unsigned)
     return unsigned
   }
 

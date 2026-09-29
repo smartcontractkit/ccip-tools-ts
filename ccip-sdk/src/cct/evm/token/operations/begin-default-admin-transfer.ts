@@ -9,11 +9,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenVersion,
-  assertTokenDefaultAdmin,
+  checkTokenDefaultAdmin,
   getTokenInterface,
   resolveCrossChainToken,
   resolveTokenEncoder,
@@ -43,22 +44,32 @@ export class BeginDefaultAdminTransfer extends EVMOperation<BeginDefaultAdminTra
   }
 
   /**
-   * Confirms the `defaultAdmin()` capability and, when known, that `sender` is its default admin.
-   * OpenZeppelin permits replacing an existing pending transfer and permits the zero-address
-   * proposal used for renunciation, so neither is rejected here.
+   * Resolves the v2 encoder and encodes.
    *
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTOperationUnsupportedError} if no encoder supports the resolved version
-   * @throws {@link CCTParamsInvalidError} if the token has no default admin or `sender` is not it
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { tokenAddress, newAdmin, sender }: BeginDefaultAdminTransferParams,
+    { tokenAddress, newAdmin }: BeginDefaultAdminTransferParams,
   ): Promise<UnsignedEVMTx> {
     const version = await resolveCrossChainToken(chain, tokenAddress)
     const iface = resolveTokenEncoder(this.encoders, version, this.name)
-    await assertTokenDefaultAdmin(this.name, chain, tokenAddress, sender)
     return callTx(tokenAddress, iface.encodeFunctionData('beginDefaultAdminTransfer', [newAdmin]))
+  }
+
+  /**
+   * Confirms the token has a default admin and, when known, that `sender` is it. OpenZeppelin
+   * permits replacing an existing pending transfer and permits the zero-address proposal used for
+   * renunciation, so neither is reported.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * makes `sender` the default admin.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, sender }: BeginDefaultAdminTransferParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(await checkTokenDefaultAdmin(chain, tokenAddress, sender))
   }
 }

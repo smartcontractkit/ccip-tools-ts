@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type WithdrawLiquidityParams, WithdrawLiquidity } from './withdraw-liquidity.ts'
@@ -236,7 +236,7 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ poolBalance: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'withdrawLiquidity' &&
           /holds 999999999999999999 of/.test(err.message) &&
           err.message.includes(TOKEN) &&

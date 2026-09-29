@@ -129,7 +129,7 @@ describe('RevokeBurnRole (cct/evm)', () => {
       assert.equal(tx.from, OWNER)
       assert.equal(tx.data, expectedData())
       // the role read comes first: it is also the family check, so it gates the owner read
-      assert.deepEqual(seen.calls, ['isBurner', 'owner'])
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'owner'])
     })
 
     it('encodes revokeRole(BURNER_ROLE, address) for a CrossChainToken', async () => {
@@ -206,8 +206,8 @@ describe('RevokeBurnRole (cct/evm)', () => {
           err.context.param === 'burner' &&
           /does not hold the burn role/.test(String(err.context.reason)),
       )
-      // rejected on the role read alone, before the owner read
-      assert.deepEqual(seen.calls, ['isBurner'])
+      // both checks run: preconditions reports every unmet requirement in one pass
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'owner'])
     })
 
     it('rejects the no-op with no sender supplied too', async () => {

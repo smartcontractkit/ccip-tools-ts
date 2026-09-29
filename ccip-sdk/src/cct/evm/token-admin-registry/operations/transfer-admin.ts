@@ -18,7 +18,7 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
@@ -80,44 +80,12 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     return { ...p, sender: getAddress(p.sender) }
   }
 
-  /**
-   * Reads the registry directly, confirms `sender` is the current administrator, then builds
-   * `transferAdminRole` calldata against the TAR resolved from `address`.
-   */
+  /** Builds `transferAdminRole` calldata against the TAR resolved from `address`. */
   protected async buildUnsigned(
     chain: EVMChain,
     p: ParsedTransferAdminParams,
   ): Promise<UnsignedEVMTx> {
     const to = await chain.getTokenAdminRegistryFor(p.address)
-    const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
-      chain,
-      to,
-      p.tokenAddress,
-    )
-
-    const pending = pendingAdministrator === ZeroAddress ? undefined : pendingAdministrator
-
-    // Registration state is checked BEFORE comparing against `sender`, and deliberately so: an
-    // unregistered token has a zero `administrator`, so an equality-first check would let
-    // `sender: ZeroAddress` (which validateAddress permits) compare equal to it and build a
-    // `transferAdminRole` tx for a token that has no admin to transfer.
-    if (administrator === ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        pending
-          ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
-          : `token ${p.tokenAddress} is not registered in the TokenAdminRegistry at ${to}; call registerAdmin first`,
-      )
-    }
-    if (administrator !== p.sender) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must be the current token administrator (${administrator})`,
-      )
-    }
-
     // TAR.transferAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
     const data = getTokenAdminRegistryInterface().encodeFunctionData('transferAdminRole', [
       p.tokenAddress,
@@ -128,8 +96,48 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
   }
 
   /**
+   * Confirms the token has an accepted administrator and that `sender` is it.
+   * @remarks Reported rather than thrown outright, which is the case this whole mechanism exists
+   * for: `registerAdmin → acceptAdmin → transferAdmin` is one plan, and neither of the later two
+   * could be built at all while the earlier ones were still unsigned.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    p: ParsedTransferAdminParams,
+  ): Promise<PreconditionError[]> {
+    // `chain.getTokenAdminRegistryFor` is memoized, so this re-uses what `buildUnsigned` resolved
+    // rather than reading `tx.transactions[0].to`, which is typed as a loose `AddressLike`.
+    const registry = await chain.getTokenAdminRegistryFor(p.address)
+    const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
+      chain,
+      registry,
+      p.tokenAddress,
+    )
+    const pending = pendingAdministrator === ZeroAddress ? undefined : pendingAdministrator
+
+    // Registration state is checked BEFORE comparing against `sender`, and deliberately so: an
+    // unregistered token has a zero `administrator`, so an equality-first check would let
+    // `sender: ZeroAddress` (which validateAddress permits) compare equal to it and report
+    // nothing for a token that has no admin to transfer.
+    if (administrator === ZeroAddress)
+      return [
+        {
+          param: 'sender',
+          reason: pending
+            ? `registration for this token is still pending acceptance by ${pending}; the pending administrator must accept the admin role first — this operation only transfers an accepted role`
+            : `token ${p.tokenAddress} is not registered in the TokenAdminRegistry at ${registry}; call registerAdmin first`,
+        },
+      ]
+    if (administrator !== p.sender)
+      return [
+        { param: 'sender', reason: `must be the current token administrator (${administrator})` },
+      ]
+    return []
+  }
+
+  /**
    * Signs and submits as the current administrator, defaulting `sender` to the signing wallet —
-   * the only address that can satisfy {@link buildUnsigned}'s current-administrator check for a
+   * the only address that can satisfy {@link preconditions}' current-administrator check for a
    * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
    * rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

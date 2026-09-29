@@ -132,8 +132,8 @@ describe('GrantBurnRole (cct/evm)', () => {
       assert.equal(tx.to, TOKEN)
       assert.equal(tx.from, OWNER)
       assert.equal(tx.data, expectedData())
-      // the role read comes first: it is also the family check, so it gates the owner read
-      assert.deepEqual(seen.calls, ['isBurner', 'owner'])
+      // both checks run in parallel now, so order is not asserted
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'owner'])
     })
 
     it('omits from when sender is not supplied, but still probes the token', async () => {
@@ -210,8 +210,8 @@ describe('GrantBurnRole (cct/evm)', () => {
           err.context.param === 'burner' &&
           /already holds the burn role/.test(String(err.context.reason)),
       )
-      // rejected on the role read alone, before the owner read
-      assert.deepEqual(seen.calls, ['isBurner'])
+      // both checks run: preconditions reports every unmet requirement in one pass
+      assert.deepEqual(seen.calls.sort(), ['isBurner', 'owner'])
     })
 
     it('rejects the no-op with no sender supplied too', async () => {

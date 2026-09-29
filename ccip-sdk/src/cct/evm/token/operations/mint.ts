@@ -9,7 +9,7 @@ import { ZeroAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
@@ -45,36 +45,43 @@ export class Mint extends EVMOperation<MintParams> {
     validateUint256(this.name, 'amount', amount)
   }
 
+  /** Encodes `mint(account, amount)`. No reads: the one this op makes is a precondition check. */
+  protected buildUnsigned(
+    _chain: EVMChain,
+    { tokenAddress, account, amount }: MintParams,
+  ): UnsignedEVMTx {
+    return callTx(tokenAddress, getErc20Token().encodeFunctionData('mint', [account, amount]))
+  }
+
   /**
-   * Confirms `sender` holds the token's mint role before encoding.
+   * Confirms `sender` holds the token's mint role.
    *
    * Gated on `isMinter(sender)`, not `owner()`: `mint` is `onlyMinter`, and the owner is only the
    * role admin, who need not hold the role. The read runs even with no `sender` to compare
    * (against the zero address, answer discarded) because it is also the family check
    * ({@link readV1TokenRole}) — a `mint` built for an address with no code would otherwise mine
-   * successfully and mint nothing. It runs here rather than in {@link execute} so the offline /
-   * multisig path is gated too. A mint past a capped token's `maxSupply` is not pre-flighted.
+   * successfully and mint nothing. That check stays fatal; only the role comparison is reported,
+   * so `grantMintRole → mint` can be planned as one batch. A mint past a capped token's
+   * `maxSupply` is not pre-flighted.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and does not hold the mint role
    */
-  protected async buildUnsigned(
+  protected override async preconditions(
     chain: EVMChain,
-    { tokenAddress, account, amount, sender }: MintParams,
-  ): Promise<UnsignedEVMTx> {
+    { tokenAddress, sender }: MintParams,
+  ): Promise<PreconditionError[]> {
     const isMinter = await readV1TokenRole(chain, tokenAddress, 'isMinter', sender ?? ZeroAddress)
-    if (sender !== undefined && !isMinter)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must hold the mint role on ${tokenAddress} — grant it with grantMintRole (or grantMintAndBurnRoles) as the token owner`,
-      )
-
-    return callTx(tokenAddress, getErc20Token().encodeFunctionData('mint', [account, amount]))
+    if (sender === undefined || isMinter) return []
+    return [
+      {
+        param: 'sender',
+        reason: `must hold the mint role on ${tokenAddress} — grant it with grantMintRole (or grantMintAndBurnRoles) as the token owner`,
+      },
+    ]
   }
 
   /**
    * Signs and submits as a minter, defaulting `sender` to the signing wallet — the only address
-   * that can satisfy {@link buildUnsigned}'s role check for a broadcast tx. See
+   * that can satisfy {@link preconditions}' role check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token

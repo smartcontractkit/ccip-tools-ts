@@ -129,7 +129,7 @@ describe('RevokeMintRole (cct/evm)', () => {
       assert.equal(tx.from, OWNER)
       assert.equal(tx.data, expectedData())
       // the role read comes first: it is also the family check, so it gates the owner read
-      assert.deepEqual(seen.calls, ['isMinter', 'owner'])
+      assert.deepEqual(seen.calls.sort(), ['isMinter', 'owner'])
     })
 
     it('encodes revokeRole(MINTER_ROLE, address) for a CrossChainToken', async () => {
@@ -206,8 +206,8 @@ describe('RevokeMintRole (cct/evm)', () => {
           err.context.param === 'minter' &&
           /does not hold the mint role/.test(String(err.context.reason)),
       )
-      // rejected on the role read alone, before the owner read
-      assert.deepEqual(seen.calls, ['isMinter'])
+      // both checks run: preconditions reports every unmet requirement in one pass
+      assert.deepEqual(seen.calls.sort(), ['isMinter', 'owner'])
     })
 
     it('rejects the no-op with no sender supplied too', async () => {

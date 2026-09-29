@@ -8,8 +8,8 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
 import { CrossChainTokenRole, resolveTokenRoleHandler } from '../roles.ts'
@@ -50,34 +50,47 @@ export class GrantMintRole extends EVMOperation<GrantMintRoleParams> {
   }
 
   /**
-   * Reads the current role state, then checks the supplied sender against the role's actual
-   * on-chain admin. v1.x is owner-gated; CrossChainToken v2 uses AccessControl's
-   * `BURN_MINT_ADMIN_ROLE`. Both paths reject a redundant grant before it becomes a mined no-op.
+   * Resolves the token version and encodes the grant.
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677 token
    * nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
    * version
-   * @throws {@link CCTParamsInvalidError} if `minter` already holds the role or `sender` lacks
-   * the role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: GrantMintRoleParams,
   ): Promise<UnsignedEVMTx> {
-    const { tokenAddress, minter, sender } = params
-    const version = await resolveToken(chain, tokenAddress)
-    const roleHandler = resolveTokenRoleHandler(version, this.name)
-    const isMinter = await roleHandler.hasRole(chain, tokenAddress, 'mint', minter)
-    if (isMinter)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'minter',
-        `already holds the mint role on ${tokenAddress}; granting it again changes nothing`,
-      )
-    if (sender !== undefined)
-      await roleHandler.assertAdmin(this.name, chain, tokenAddress, 'mint', sender)
-
+    const version = await resolveToken(chain, params.tokenAddress)
     const encode = resolveTokenEncoder(this.encoders, version, this.name)
     return encode(getTokenInterface(version), params)
+  }
+
+  /**
+   * Reports a redundant grant, and checks the supplied sender against the role's actual on-chain
+   * admin: v1.x is owner-gated, CrossChainToken v2 uses AccessControl's `BURN_MINT_ADMIN_ROLE`.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * makes `sender` the role admin. `resolveToken` re-reads nothing — `chain.typeAndVersion` is
+   * memoized, so the version {@link buildUnsigned} just resolved is already cached.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, minter, sender }: GrantMintRoleParams,
+  ): Promise<PreconditionError[]> {
+    const roleHandler = resolveTokenRoleHandler(await resolveToken(chain, tokenAddress), this.name)
+    const [isMinter, admin] = await Promise.all([
+      roleHandler.hasRole(chain, tokenAddress, 'mint', minter),
+      sender === undefined
+        ? undefined
+        : roleHandler.checkAdmin(chain, tokenAddress, 'mint', sender),
+    ])
+    return unmet(
+      isMinter
+        ? {
+            param: 'minter',
+            reason: `already holds the mint role on ${tokenAddress}; granting it again changes nothing`,
+          }
+        : undefined,
+      admin,
+    )
   }
 }

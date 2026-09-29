@@ -17,13 +17,13 @@ import { type Interface, toBeHex } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { type FinalityAllowed, encodeFinality } from '../../../../extra-args.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { parseRecord, validateBoolean, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -104,14 +104,12 @@ export class SetAllowedFinalityConfig extends EVMOperation<SetAllowedFinalityCon
   }
 
   /**
-   * Resolves the v2.0.0 pool interface and, when `sender` is supplied, confirms it is the owner.
-   * The encoder is resolved first so pre-v2.0.0 pools report the missing operation without an
-   * unnecessary owner read.
+   * Resolves the v2.0.0 pool interface and encodes. The encoder is resolved first so pre-v2.0.0
+   * pools report the missing operation without an unnecessary owner read.
    *
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the pool owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -119,10 +117,20 @@ export class SetAllowedFinalityConfig extends EVMOperation<SetAllowedFinalityCon
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: SetAllowedFinalityConfigParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 
   /** Signs and submits as the pool owner, defaulting `sender` to the signing wallet. */

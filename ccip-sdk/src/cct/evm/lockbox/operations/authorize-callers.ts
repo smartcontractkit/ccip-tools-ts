@@ -11,10 +11,10 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
-import { LOCKBOX_INTERFACE, assertLockbox, assertLockboxOwner } from '../contracts.ts'
+import { LOCKBOX_INTERFACE, assertLockbox, checkLockboxOwner } from '../contracts.ts'
 
 /**
  * Parameters for {@link AuthorizeLockboxCallers}. At least one caller across both arrays is required.
@@ -66,13 +66,11 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
    * code and mines successfully, so without the read this op returns a confirmed tx hash for an
    * authorization that never happened, and the pool's first `lockOrBurn` is what finally reverts
    * `UnauthorizedCaller`. It also gates the owner read, since `owner()` is not a type check.
-   * @remarks `applyAuthorizedCallerUpdates` is `onlyOwner`, so a non-owner `sender` is rejected
-   * here ({@link assertLockboxOwner}) rather than reverting `OnlyCallableByOwner` after a
-   * multisig has signed. Both checks live here, not in {@link execute}, so the offline / multisig
-   * path gets them too.
-   * @remarks The calldata for a valid lockbox is unchanged by the checks.
-   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`, or
-   * `sender` is given and is not the lockbox owner
+   * @remarks `applyAuthorizedCallerUpdates` is `onlyOwner`; that requirement is reported by
+   * {@link AuthorizeLockboxCallers.preconditions} rather than reverting `OnlyCallableByOwner`
+   * after a multisig has signed.
+   * @remarks The calldata for a valid lockbox is unchanged by either check.
+   * @throws {@link CCTParamsInvalidError} if nothing at `lockbox` answers `typeAndVersion()`
    * @throws {@link CCTContractTypeInvalidError} if `lockbox` is some other contract, e.g. the pool
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
    * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with a
@@ -80,13 +78,26 @@ export class AuthorizeLockboxCallers extends EVMOperation<AuthorizeLockboxCaller
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { lockbox, addedCallers = [], removedCallers = [], sender }: AuthorizeLockboxCallersParams,
+    { lockbox, addedCallers = [], removedCallers = [] }: AuthorizeLockboxCallersParams,
   ): Promise<UnsignedEVMTx> {
     await assertLockbox(this.name, chain, lockbox)
-    if (sender !== undefined) await assertLockboxOwner(this.name, chain, lockbox, sender)
     const data = LOCKBOX_INTERFACE.encodeFunctionData('applyAuthorizedCallerUpdates', [
       { addedCallers, removedCallers },
     ])
     return callTx(lockbox, data)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the lockbox owner.
+   * @remarks Reported rather than thrown outright, so a plan that hands the lockbox to this owner
+   * in an earlier step can still build this transaction — and reported here rather than in
+   * {@link execute} so the offline / multisig path is checked too.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { lockbox, sender }: AuthorizeLockboxCallersParams,
+  ): Promise<PreconditionError[]> {
+    if (sender === undefined) return []
+    return unmet(await checkLockboxOwner(chain, lockbox, sender))
   }
 }
