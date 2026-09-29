@@ -26,6 +26,8 @@ const chain = await CantonChain.fromUrl(process.env.CANTON_LEDGER_URL!, {
 const cct = CantonTokenManager.fromChain(chain)
 ```
 
+The signed operations below take a `wallet`. See [Multi-Chain](../multi-chain) for Canton connection and wallet configuration.
+
 ## Required configuration
 
 | Value | Purpose |
@@ -39,9 +41,11 @@ const cct = CantonTokenManager.fromChain(chain)
 
 ## Set up the Canton pool
 
+On Canton, a single atomic operation stands up the whole token pool, so most of the setup happens in one call.
+
 ### Deploy and initialize the pool
 
-Canton deployment is atomic: `deployTokenPool` creates the burn/mint or lock/release pool, initializes it, registers the token, and creates the specified lane rate limiters in one operation. It requires the token admin and pool owner to authorize the operation.
+Canton deployment is atomic: `deployTokenPool` creates the burn/mint or lock/release token pool, initializes it, registers the token, and creates the specified lane rate limiters in one operation. Both the token administrator and the pool owner must authorize it.
 
 ```typescript
 const deployment = await cct.deployTokenPool({
@@ -62,22 +66,29 @@ console.log('Pool:', deployment.poolInstanceAddress)
 console.log('Token config CID:', deployment.tokenConfigCid)
 ```
 
+`deployment.poolInstanceAddress` is optional on the result, so narrow it before reusing it in `applyChainUpdates` or `getTokenPoolState`, both of which require a `string`:
+
+```typescript
+if (!deployment.poolInstanceAddress) {
+  throw new Error('deployTokenPool did not return a pool instance address')
+}
+const poolInstanceAddress = deployment.poolInstanceAddress
+```
+
 `decimals` is the Canton instrument's decimals, not the remote token's decimals. An incorrect value mis-scales transfers. Add initial lanes through `lanes`, or configure them later with `applyChainUpdates`.
 
 ### Third-party token administrators
 
-Use `existingTokenConfigCid` only when a third-party administrator has already completed the TokenAdminRegistry proposal flow for the instrument. Get the current CID from `getTokenAdminRegistry` immediately before deployment: it rotates after every registry write. For a new self-administered instrument, omit it and let `deployTokenPool` register the token atomically.
+Use `existingTokenConfigCid` only when a third-party administrator has already completed the TokenAdminRegistry proposal flow for the instrument. That CID is not stable. It rotates after every registry write, so read the current value from `getTokenAdminRegistry` immediately before deployment. For a new self-administered instrument, omit it and let `deployTokenPool` register the token atomically.
 
 ## Configure remote chains
 
-### Add or replace a remote lane
-
-`applyChainUpdates` consumes the existing pool contract and returns a new pool contract ID. Read state again after every update rather than retaining the prior CID.
+`applyChainUpdates` consumes the pool contract and returns a new one. The returned contract ID changes on every call, so read state again after each update instead of retaining the prior CID.
 
 ```typescript
 const update = await cct.applyChainUpdates({
   wallet,
-  poolInstanceAddress: deployment.poolInstanceAddress,
+  poolInstanceAddress,
   poolType: 'burnMint',
   chainsToAdd: [
     {
@@ -97,13 +108,19 @@ Inbound and outbound rate limiters are required and must be distinct. For a `Blo
 
 When deploying initial lanes, every `lanes` entry requires all three limiter specs: inbound, outbound, and inbound custom finality. This is true even when the lane uses standard finality, because the pool initializes all three limiter contracts together.
 
+:::note
+`applyChainUpdates` references `inboundRateLimiter` and `outboundRateLimiter` by raw instance address (`"instanceId@party"`). It does not create them and does not accept capacity or rate. Limiter contracts are created only by `deployTokenPool`, whose atomic `Initialize` builds each lane's limiters from a full spec (instance ID, enabled, capacity, rate) and returns their contract IDs on the result as `rateLimiterCids`. The manager exposes no standalone rate-limiter creation operation, so the limiter contracts a post-deploy lane points at must already exist on-ledger.
+:::
+
 ## Verify the configuration
+
+Read the pool, registry, and rate-limiter state back before you transfer through a lane, so you know the deployment landed as intended.
 
 ### Read the pool and registry
 
 ```typescript
 const pool = await cct.getTokenPoolState({
-  poolInstanceAddress: deployment.poolInstanceAddress,
+  poolInstanceAddress,
   poolType: 'burnMint',
   poolOwner: process.env.CANTON_PARTY!,
 })
@@ -120,9 +137,11 @@ Use `getRateLimiterState` to verify each lane limiter is enabled and has the exp
 
 Confirm `getTokenAdminRegistry` returns the expected pool, `getTokenPoolState` contains the intended remote lane, and every referenced limiter is enabled with sufficient capacity before transferring through the configured lane.
 
+Sends from a Canton source follow [Sending Messages](../sending-messages). A Canton-source transfer also needs source-side `extraArgs` (`feeTokenHoldingCids`, `ccvRawAddresses`), so it is not a single copy-paste CLI line the way an EVM send is.
+
 ## Related
 
 - [CantonTokenManager API reference](/sdk/classes/CantonTokenManager)
 - [CCT Overview](./overview)
-- [Multi-Chain](../multi-chain) — Canton connection and wallet configuration
-- [Sending Messages](../sending-messages) — send transfers after CCT setup
+- [Multi-Chain](../multi-chain): Canton connection and wallet configuration
+- [Sending Messages](../sending-messages): send transfers after CCT setup

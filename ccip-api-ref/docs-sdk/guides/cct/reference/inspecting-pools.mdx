@@ -1,18 +1,19 @@
 ---
-id: token-pools
-title: 'Token Pools'
+id: inspecting-pools
+title: 'Inspecting token pools'
 description: 'Query token pool configuration, remote chain settings, and rate limits.'
-sidebar_label: Token Pools
-sidebar_position: 9
+sidebar_label: 'Inspecting pools'
 ---
 
-# Token Pools
+# Inspecting token pools
 
-Token pools are contracts that manage cross-chain token transfers. Each supported token has a pool that handles lock/release or burn/mint mechanics, rate limiting, and cross-chain routing. The SDK provides methods to query pool configuration and rate limit status — all RPC-based.
+Every cross-chain token has a token pool: the contract that handles its lock/release or burn/mint mechanics, rate limiting, and cross-chain routing. This page shows how to read a deployed pool's configuration and rate-limit state with the SDK's RPC-based query methods.
 
-## Find the Token Pool Address
+These are chain-level read methods (`chain.getTokenPoolConfig`, `chain.getTokenPoolRemotes`) for inspecting any deployed pool. During CCT setup, the token managers expose their own read operations (`cct.getTokenPoolState`, `cct.getTokenPoolRemotes`, `cct.getTokenAdminRegistry`). See the [EVM](../evm), [Solana](../solana), and [Canton](../canton) walkthroughs.
 
-Tokens are registered in a **TokenAdminRegistry** contract. To find the pool address for a token, query the registry:
+## Find the token pool address
+
+Tokens are registered in a **TokenAdminRegistry** contract. To find a token's pool address, query the registry in two steps:
 
 ```typescript
 import { EVMChain } from '@chainlink/ccip-sdk'
@@ -33,9 +34,9 @@ if (!tokenConfig.tokenPool) {
 }
 ```
 
-`getTokenAdminRegistryFor` accepts a Router, OnRamp, or OffRamp address — it auto-detects the contract type and resolves the registry.
+`getTokenAdminRegistryFor` accepts a Router, OnRamp, or OffRamp address. It auto-detects the contract type and resolves the registry.
 
-## Pool Configuration
+## Pool configuration
 
 `getTokenPoolConfig` returns the pool's token, router, and version string:
 
@@ -48,30 +49,28 @@ console.log('Type and version:', poolConfig.typeAndVersion)
 // e.g. "BurnMintTokenPool 1.5.0", "LockReleaseTokenPool 2.0.0"
 ```
 
-The `typeAndVersion` string identifies the pool type (BurnMint, LockRelease, USDC, etc.) and version. The SDK does not expose pool types as an enum — parse the string if you need the pool type.
+The `typeAndVersion` string identifies the pool type (BurnMint, LockRelease, USDC, etc.) and version. The SDK does not expose pool types as an enum, so parse the string if you need the pool type. See [Pool types](./pool-types) for the full set of recognized types and versions.
 
-### Faster-Than-Finality (FTF) Configuration
+On v2.0+ pools, `getTokenPoolConfig` also returns `finalityDepth` (`undefined` on pre-v2.0 pools, `0` when Faster-Than-Finality is not enabled, `>0` when enabled) and `finalitySafe` (`true` when FCR/safe finality is supported). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
 
-On v2.0+ pools, `getTokenPoolConfig` also returns `finalityDepth` (`undefined` on pre-v2.0 pools, `0` when FTF is not enabled, `>0` when enabled) and `finalitySafe` (`true` when FCR/safe finality is supported). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
+## Remote chain configuration
 
-## Remote Chain Configuration
+`getTokenPoolRemotes` returns how the pool connects to other chains: remote token addresses, remote pool addresses, and rate limiter state.
 
-`getTokenPoolRemotes` returns how the pool connects to other chains — remote token addresses, remote pool addresses, and rate limiter state.
-
-### Query All Remote Chains
+### Query all remote chains
 
 ```typescript
 const remotes = await chain.getTokenPoolRemotes(poolAddress)
 
-// Record<string, TokenPoolRemote> — keys are chain selectors as strings
-for (const [chainSelector, remote] of Object.entries(remotes)) {
-  console.log(`Chain ${chainSelector}:`)
+// Record<string, TokenPoolRemote> — keys are CCIP network names (e.g. "ethereum-mainnet")
+for (const [chainName, remote] of Object.entries(remotes)) {
+  console.log(`Chain ${chainName}:`)
   console.log('  Remote token:', remote.remoteToken)
   console.log('  Remote pools:', remote.remotePools)
 }
 ```
 
-### Query a Specific Remote Chain
+### Query a specific remote chain
 
 Pass a chain selector to filter to a single destination:
 
@@ -88,59 +87,67 @@ if (remote) {
 }
 ```
 
-## Rate Limits
+## Rate limits
 
 Token pools use token-bucket rate limiters to cap throughput in each direction:
 
-- **Outbound** — limits tokens leaving the chain (checked on source)
-- **Inbound** — limits tokens entering the chain (checked on destination)
+- **Outbound**: limits tokens leaving the chain (checked on source)
+- **Inbound**: limits tokens entering the chain (checked on destination)
 
-Each rate limiter state is `null` when rate limiting is disabled for that direction.
+All bucket values (`tokens`, `capacity`, `rate`) are in the token's smallest unit, the same scale as a transfer `amount`. Divide by `10 ** decimals` for whole tokens, so a `rate` of `167000000000000000000` on an 18-decimal token is 167 tokens per second.
 
-### Check Rate Limit Status
+Each rate limiter state reads `null` when rate limiting is disabled for that direction, so check for `null` before reading its fields.
+
+:::warning Decimals metering on older pools
+On pools reporting `typeAndVersion` **1.5.0**, **1.5.1**, or **1.6.0**, the inbound rate limiter meters a transfer in the source token's decimals instead of the local destination decimals. On a lane between tokens of different decimals, this makes the effective inbound cap wrong by the decimal delta. An 18-to-6 decimal lane debits the inbound bucket 1e12 times too much, so the limit throttles far sooner than configured in that direction and barely at all in reverse. On 1.5.0 the release also mints the raw source amount, so mixed decimals are unsupported outright.
+
+The fix ships in **v1.6.1** and every later version, where the inbound bucket is metered on the rescaled destination amount. To check exposure, read the pool's `typeAndVersion` and whether the lane connects tokens of different decimals. To mitigate, upgrade the pool to v1.6.1 or later, use the same decimals for the token on both chains, or size the inbound `capacity` and `rate` in the source token's decimals to compensate.
+:::
+
+### Check rate limit status
 
 ```typescript
 const remotes = await chain.getTokenPoolRemotes(poolAddress, destSelector)
 const remote = Object.values(remotes)[0]
 
 if (remote) {
-  // Outbound rate limit (null if disabled)
+  // Outbound rate limit (null if disabled). Values are in the token's smallest unit.
   if (remote.outboundRateLimiterState) {
     const { tokens, capacity, rate } = remote.outboundRateLimiterState
     console.log('Outbound rate limit:')
-    console.log(`  Available: ${tokens} / ${capacity} tokens`)
-    console.log(`  Refill rate: ${rate} tokens/second`)
+    console.log(`  Available: ${tokens} / ${capacity} (smallest unit)`)
+    console.log(`  Refill rate: ${rate} per second (smallest unit)`)
   } else {
     console.log('Outbound rate limiting: disabled')
   }
 
-  // Inbound rate limit (null if disabled)
+  // Inbound rate limit (null if disabled). Values are in the token's smallest unit.
   if (remote.inboundRateLimiterState) {
     const { tokens, capacity, rate } = remote.inboundRateLimiterState
     console.log('Inbound rate limit:')
-    console.log(`  Available: ${tokens} / ${capacity} tokens`)
-    console.log(`  Refill rate: ${rate} tokens/second`)
+    console.log(`  Available: ${tokens} / ${capacity} (smallest unit)`)
+    console.log(`  Refill rate: ${rate} per second (smallest unit)`)
   } else {
     console.log('Inbound rate limiting: disabled')
   }
 }
 ```
 
-### RateLimiterState Type
+### RateLimiterState type
 
 ```typescript
 type RateLimiterState = {
-  tokens: bigint   // Current tokens available in the bucket
-  capacity: bigint // Maximum bucket capacity
-  rate: bigint     // Refill rate (tokens per second)
+  tokens: bigint   // Current tokens available in the bucket (smallest unit)
+  capacity: bigint // Maximum bucket capacity (smallest unit)
+  rate: bigint     // Refill per second (smallest unit)
 } | null           // null = rate limiting disabled
 ```
 
-### FTF Rate Limits
+### FTF rate limits
 
-TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers (`fastOutboundRateLimiterState` and `fastInboundRateLimiterState`). See [Faster-Than-Finality — FTF Rate Limits](/sdk/guides/ftf#ftf-rate-limits) for details and examples.
+TokenPool v2.0+ contracts may include separate rate limiters for Faster-Than-Finality transfers (`fastOutboundRateLimiterState` and `fastInboundRateLimiterState`). See [Faster-Than-Finality rate limits](/sdk/guides/ftf#ftf-rate-limits) for details and examples.
 
-## Complete Example
+## Complete example
 
 Query full token pool information for a lane:
 
@@ -225,7 +232,7 @@ await inspectTokenPool(
 )
 ```
 
-## Method Reference
+## Method reference
 
 | Method | Called on | Purpose |
 |--------|----------|---------|
@@ -238,6 +245,7 @@ await inspectTokenPool(
 
 ## Related
 
-- [Querying Data](/sdk/guides/querying-data) — Token queries, lane features, and balances
-- [Sending Messages](/sdk/guides/sending-messages) — Send token transfers
-- [Error Handling](/sdk/guides/error-handling) — Handle errors and retries
+- [Pool types](./pool-types): deployable and recognized pool types by version
+- [Querying Data](/sdk/guides/querying-data): Token queries, lane features, and balances
+- [Sending Messages](/sdk/guides/sending-messages): Send token transfers
+- [Error Handling](/sdk/guides/error-handling): Handle errors and retries
