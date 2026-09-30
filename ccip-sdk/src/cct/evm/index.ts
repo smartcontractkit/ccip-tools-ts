@@ -252,10 +252,25 @@ import {
   GetBurners,
 } from './token/operations/get-burners.ts'
 import {
+  type GetCCIPAdminParams,
+  type GetCCIPAdminResult,
+  GetCCIPAdmin,
+} from './token/operations/get-ccip-admin.ts'
+import {
   type GetMintersParams,
   type GetMintersResult,
   GetMinters,
 } from './token/operations/get-minters.ts'
+import {
+  type GetTokenDefaultAdminParams,
+  type GetTokenDefaultAdminResult,
+  GetTokenDefaultAdmin,
+} from './token/operations/get-token-default-admin.ts'
+import {
+  type GetTokenOwnerParams,
+  type GetTokenOwnerResult,
+  GetTokenOwner,
+} from './token/operations/get-token-owner.ts'
 import { type GrantBurnRoleParams, GrantBurnRole } from './token/operations/grant-burn-role.ts'
 import {
   type GrantMintAndBurnRolesParams,
@@ -289,6 +304,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getBurners = new GetBurners()
   readonly #isMinter = new IsMinter()
   readonly #isBurner = new IsBurner()
+  readonly #getTokenOwner = new GetTokenOwner()
+  readonly #getCCIPAdmin = new GetCCIPAdmin()
+  readonly #getTokenDefaultAdmin = new GetTokenDefaultAdmin()
   readonly #transferTokenOwnership = new TransferTokenOwnership()
   readonly #acceptTokenOwnership = new AcceptTokenOwnership()
   readonly #beginDefaultAdminTransfer = new BeginDefaultAdminTransfer()
@@ -2962,6 +2980,61 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads a token's current `owner()` (Ownable2Step), checksummed — the authority that grants and
+   * revokes mint/burn roles on a BurnMintERC677 token.
+   * @remarks Current owner only. A token's *proposed* owner is a `private` slot with no getter, so
+   * a pending transfer cannot be read on EVM (same limitation as `acceptTokenOwnership` /
+   * `acceptPoolOwnership`). On a v2.0.0 `CrossChainToken`, `owner()` aliases the
+   * `DEFAULT_ADMIN_ROLE` holder — use {@link getTokenDefaultAdmin} for its pending transfer.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
+   * @example
+   * ```typescript
+   * const owner = await cct.getTokenOwner({ tokenAddress: '0xToken...' })
+   * ```
+   */
+  getTokenOwner(opts: GetTokenOwnerParams): Promise<GetTokenOwnerResult> {
+    return this.#getTokenOwner.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a token's current `getCCIPAdmin()`, checksummed — the single-step CCIP admin the
+   * `ccip-admin` registration method authorizes against.
+   * @remarks Single-step: there is no pending CCIP admin slot, so this current value is complete
+   * (contrast {@link getTokenDefaultAdmin}, which is two-step). `getCCIPAdmin()` is declared
+   * identically across every supported token version.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
+   * @example
+   * ```typescript
+   * const ccipAdmin = await cct.getCCIPAdmin({ tokenAddress: '0xToken...' })
+   * ```
+   */
+  getCCIPAdmin(opts: GetCCIPAdminParams): Promise<GetCCIPAdminResult> {
+    return this.#getCCIPAdmin.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a v2.0.0 `CrossChainToken`'s AccessControl default admin: its current `defaultAdmin` and
+   * any scheduled `pendingDefaultAdmin` (`{ newAdmin, schedule }`), together.
+   * @remarks `pendingDefaultAdmin` is omitted when no transfer is scheduled — test with
+   * `'pendingDefaultAdmin' in result`, not a zero-address compare, mirroring
+   * {@link getTokenAdminRegistry}'s `pendingAdministrator`. v2.0.0 CrossChainToken only; a v1.x
+   * `FactoryBurnMintERC20` has no default admin — read its {@link getTokenOwner} instead.
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
+   * @example
+   * ```typescript
+   * const { defaultAdmin, pendingDefaultAdmin } = await cct.getTokenDefaultAdmin({
+   *   tokenAddress: '0xToken...',
+   * })
+   * if (pendingDefaultAdmin) {
+   *   console.log('pending', pendingDefaultAdmin.newAdmin, 'at', pendingDefaultAdmin.schedule)
+   * }
+   * ```
+   */
+  getTokenDefaultAdmin(opts: GetTokenDefaultAdminParams): Promise<GetTokenDefaultAdminResult> {
+    return this.#getTokenDefaultAdmin.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
    * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
@@ -3853,6 +3926,16 @@ export type { RevokeBurnRoleParams } from './token/operations/revoke-burn-role.t
 export type { MintParams } from './token/operations/mint.ts'
 export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
 export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
+export type {
+  GetTokenOwnerParams,
+  GetTokenOwnerResult,
+} from './token/operations/get-token-owner.ts'
+export type { GetCCIPAdminParams, GetCCIPAdminResult } from './token/operations/get-ccip-admin.ts'
+export type {
+  GetTokenDefaultAdminParams,
+  GetTokenDefaultAdminResult,
+  PendingTokenDefaultAdmin,
+} from './token/operations/get-token-default-admin.ts'
 export type { IsMinterParams, IsMinterResult } from './token/operations/is-minter.ts'
 export type { IsBurnerParams, IsBurnerResult } from './token/operations/is-burner.ts'
 export type { TransferTokenOwnershipParams } from './token/operations/transfer-token-ownership.ts'
