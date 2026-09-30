@@ -767,3 +767,19 @@ article > div:last-of-type:not(.theme-doc-markdown):has(p:first-child):has(butto
   margin: 0 var(--space-2x);
   color: var(--gray-400);
 }
+
+/* === FIX: horizontal page overflow below 992px === */
+/* @chainlink/design-system's .container applies fixed side margins
+   (--container-margin: 24px <768px, 32px 768-991px) to a width:100% box.
+   width:100% never subtracts margins, so the box overflows the viewport by
+   the margin amount, giving a 24-32px horizontal scroll on tablet/mobile.
+   The design-system only guards the >=992px breakpoint, where it switches
+   --container-margin to auto AND caps max-width with a `100% - 2*gutter`
+   term. We apply that same guard below 992px so the box leaves room for
+   both margins. Width-only (no overflow/margin change), so position:sticky
+   is unaffected; >=992px is untouched. */
+@media screen and (max-width: 991.98px) {
+  .container {
+    max-width: calc(100% - 2 * var(--container-margin));
+  }
+}
