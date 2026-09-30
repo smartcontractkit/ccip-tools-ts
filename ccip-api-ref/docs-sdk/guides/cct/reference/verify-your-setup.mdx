@@ -38,6 +38,26 @@ const { decimals } = await chain.getTokenInfo(tokenAddress)
 
 Expected: a `CrossChainToken` at `2.0.0`, or a `FactoryBurnMintERC20` / `BurnMintERC677` family type at `1.5.1` or `1.6.2`, and a decimal count that matches the `localTokenDecimals` you deployed the pool with. A read failure on `typeAndVersion` points to a v1.5.1 token that predates the call; treat it as v1.x. A decimal mismatch between the token and the pool means amounts will scale wrong on the lane.
 
+## Check the registration authority
+
+The account that can register the token in the registry is the token's own authority, and which authority applies depends on the token version. Read it so you know who has to sign `registerAdmin`, and confirm no default-admin transfer is mid-flight on a v2 token.
+
+```typescript
+if (type === 'CrossChainToken') {
+  const result = await cct.getTokenDefaultAdmin({ tokenAddress })
+  const ccipAdmin = await cct.getCCIPAdmin({ tokenAddress })
+  if ('pendingDefaultAdmin' in result) {
+    throw new Error(`default-admin transfer pending to ${result.pendingDefaultAdmin.newAdmin}; accept it first`)
+  }
+  console.log('default admin', result.defaultAdmin, 'ccip admin', ccipAdmin)
+} else {
+  const owner = await cct.getTokenOwner({ tokenAddress })
+  console.log('token owner', owner)
+}
+```
+
+Expected: a non-zero authority that matches the key you plan to register with. On a v1 factory token that is the `owner`, which is also the mint/burn role admin. On a `CrossChainToken` it is the `defaultAdmin` (or the `ccipAdmin`, depending on the registration method you use), and no `pendingDefaultAdmin` is present. A pending default-admin transfer means ownership is mid-handoff, so wait for it to be accepted before you register or grant roles. The token's *proposed* v1 owner is not readable, since it lives in a `private` slot with no getter, so confirm a v1 ownership handoff completed by checking that the new owner is now the current `owner`.
+
 ## Check the admin is accepted, not just proposed
 
 Read the registry entry and confirm the administrator is set, not merely pending.

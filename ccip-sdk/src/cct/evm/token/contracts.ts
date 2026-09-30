@@ -193,6 +193,27 @@ export async function readPendingTokenDefaultAdmin(
   return { newAdmin: getAddress(newAdmin as string), schedule }
 }
 
+/** `CrossChainToken.getCCIPAdmin()`, the single-step CCIP-admin slot, declared identically across versions. */
+type CCIPAdminGetter = Pick<TypedContract<typeof CROSS_CHAIN_TOKEN_V2_0_0_ABI>, 'getCCIPAdmin'>
+
+/**
+ * Reads a token's on-chain `getCCIPAdmin()`, checksummed.
+ *
+ * @remarks One `eth_call` against a single ABI, with no version resolution: `getCCIPAdmin()` is
+ * declared identically (`() view returns (address)`) by `FactoryBurnMintERC20` v1.5.1 / v1.6.2 and
+ * by v2.0.0's `CrossChainToken`, so its selector is stable across every supported version — like
+ * {@link readTokenOwner}. Reads through the v2 ABI, which is a superset here.
+ * @remarks The CCIP admin is a *single-step* authority: unlike the default admin there is no pending
+ * slot, so this current value is the whole story.
+ * @param chain - Chain to read from.
+ * @param tokenAddress - Token contract to read `getCCIPAdmin()` from.
+ * @returns The current CCIP admin, checksummed.
+ */
+export async function readCCIPAdmin(chain: EVMChain, tokenAddress: string): Promise<string> {
+  const token: CCIPAdminGetter = getTypedContract(chain, tokenAddress, CROSS_CHAIN_TOKEN_V2_0_0_ABI)
+  return getAddress(resultToObject(await token.getCCIPAdmin()))
+}
+
 /** Confirms a CrossChainToken has a default admin and, when supplied, checks `sender` against it. */
 export async function assertTokenDefaultAdmin(
   operation: string,

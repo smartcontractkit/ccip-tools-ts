@@ -75,9 +75,31 @@ Decimals matter for a cross-chain lane: the pool's `localTokenDecimals` at deplo
 
 ## Ownership reads
 
-The SDK does not expose a dedicated read method for a token's owner, CCIP admin, or default admin. It exposes the writes that change them (`setCCIPAdmin`, `beginDefaultAdminTransfer`, `acceptDefaultAdminTransfer` for v2; `transferTokenOwnership`, `acceptTokenOwnership` for v1), and the ownership-transfer operations pre-flight the current owner internally, but there is no public getter for these fields today.
+`EVMTokenManager` exposes a getter for each token authority, so you no longer need to reach for a raw ethers `Contract`.
 
-To read them, call the token contract directly with an ethers `Contract` on `cct.chain.provider`: `owner()` on a v1 factory token, or `defaultAdmin()` / `getCCIPAdmin()` on a `CrossChainToken`. On the v1 factory family the owner is also the mint/burn role admin, so that one address both administers roles and can grant them.
+`getTokenOwner` reads the token's Ownable2Step `owner()`, checksummed. It works on every supported version: a v1 factory token's owner, or the `DEFAULT_ADMIN_ROLE` holder that `owner()` aliases on a `CrossChainToken`. On the v1 factory family the owner is also the mint/burn role admin, so that one address both administers roles and can grant them.
+
+```typescript
+const owner = await cct.getTokenOwner({ tokenAddress })
+```
+
+`getCCIPAdmin` reads the token's `getCCIPAdmin()`, checksummed. This is a single-step authority: there is no pending CCIP admin, so the returned address is the full state. It is the value the `ccip-admin` registration method authorizes against.
+
+```typescript
+const ccipAdmin = await cct.getCCIPAdmin({ tokenAddress })
+```
+
+`getTokenDefaultAdmin` reads a `CrossChainToken`'s AccessControl default admin, returning the current `defaultAdmin` and any scheduled `pendingDefaultAdmin` in one result. Ownership is two-step on v2, so `pendingDefaultAdmin` reports the address that `beginDefaultAdminTransfer` proposed together with the `schedule`, a Unix timestamp (`bigint`) at which that address may accept. The field is omitted when no transfer is pending, so test `'pendingDefaultAdmin' in result` rather than comparing against the zero address. A v1 factory token has no default admin; read its owner with `getTokenOwner` instead.
+
+```typescript
+const result = await cct.getTokenDefaultAdmin({ tokenAddress })
+if ('pendingDefaultAdmin' in result) {
+  const { newAdmin, schedule } = result.pendingDefaultAdmin
+  console.log('pending admin', newAdmin, 'accepts at', schedule)
+}
+```
+
+A token's *proposed* owner is not readable on EVM. Both a v1 token's Ownable2Step pending owner and a token pool's pending owner live in a `private` slot with no getter, so `getTokenOwner` reports the current owner only. The v2 default admin is the exception, since its pending transfer is public and surfaced by `getTokenDefaultAdmin`.
 
 ## Reading tokens on Solana
 
