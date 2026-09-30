@@ -56,8 +56,8 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
   readonly name = 'withdrawLiquidity'
 
   /**
-   * One 1.5.0 entry covers 1.5.1 and 1.6.1 by floor-match — the signature never changed — and the
-   * explicit `null` at 2.0.0 marks the removal.
+   * One 1.5.0 entry covers 1.5.1, 1.6.0 and 1.6.1 by floor-match — the signature never changed —
+   * and the explicit `null` at 2.0.0 marks the removal.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder | null>> = {
     [TokenPoolVersion.V1_5_0]: encodeWithdrawLiquidity,

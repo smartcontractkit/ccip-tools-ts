@@ -61,8 +61,8 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
 
   /**
    * v1.5.0 only. The explicit `null` at v1.5.1 is load-bearing: it is the removal ceiling
-   * {@link resolveEncoder} stops its floor-match walk at, so v1.5.1/v1.6.1/v2.0.0 report the op
-   * as unsupported. Without it they would inherit the v1.5.0 encoder and emit calldata for a
+   * {@link resolveEncoder} stops its floor-match walk at, so every later version reports the op as
+   * unsupported. Without it they would inherit the v1.5.0 encoder and emit calldata for a
    * function selector those pools do not implement.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder | null>> = {

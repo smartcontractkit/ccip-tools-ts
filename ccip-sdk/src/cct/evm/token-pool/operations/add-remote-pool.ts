@@ -62,7 +62,7 @@ export class AddRemotePool extends EVMOperation<AddRemotePoolParams, ParsedAddRe
 
   /**
    * v1.5.1 and up, where the function was introduced and has not changed since — one entry
-   * covers v1.6.1 and v2.0.0 by {@link resolveEncoder}'s floor-match. No `null` ceiling is
+   * covers v1.6.0, v1.6.1 and v2.0.0 by {@link resolveEncoder}'s floor-match. No `null` ceiling is
    * needed at the bottom: v1.5.0 matches nothing at or below itself and is reported unsupported
    * for free.
    */

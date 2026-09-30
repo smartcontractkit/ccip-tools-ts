@@ -181,6 +181,7 @@ function stubChain(
   version: TokenPoolVersion = TokenPoolVersion.V1_5_1,
   family: TokenPoolFamily = 'BurnMint',
   owner = OWNER,
+  type: string = POOL_TYPE[family],
 ): Stub {
   let probes = 0
   const responses = poolStateReads(version, family)
@@ -211,7 +212,7 @@ function stubChain(
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     typeAndVersion: () => {
       probes++
-      return Promise.resolve(parseTypeAndVersion(`${POOL_TYPE[family]} ${version}`))
+      return Promise.resolve(parseTypeAndVersion(`${type} ${version}`))
     },
     getTokenInfo: () => Promise.resolve({ decimals: 18, symbol: 'TKN', name: 'Token' }),
     nextNonce: () => Promise.resolve(0),
@@ -897,6 +898,23 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         )
       })
 
+      it(`rejects ${label} on a siloed v1.6.0 pool, which kept the strict bound`, async () => {
+        await assert.rejects(
+          () =>
+            op.generate(
+              stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
+                .chain,
+              paramsV1_5_1({
+                chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: limit }],
+              }),
+            ),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'applyChainUpdates' &&
+            err.context.param === 'chainsToAdd[0].inboundRateLimiterConfig.rate',
+        )
+      })
+
       for (const version of [TokenPoolVersion.V1_6_1, TokenPoolVersion.V2_0_0] as const) {
         it(`accepts ${label} on a v${version} pool`, async () => {
           const unsigned = await op.generate(
@@ -928,6 +946,33 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         })
       }
     }
+
+    it('floor-matches a siloed v1.6.0 pool to the v1.5.1 shape', async () => {
+      const valid = { enabled: true, capacity: 10n, rate: 9n } as const
+      const unsigned = await op.generate(
+        stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
+          .chain,
+        paramsV1_5_1({
+          remoteChainSelectorsToRemove: [],
+          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: valid }],
+        }),
+      )
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        FRESH_V1_5_1.encodeFunctionData('applyChainUpdates', [
+          [],
+          [
+            {
+              remoteChainSelector: SEL_A,
+              remotePoolAddresses: [REMOTE_POOL_1],
+              remoteTokenAddress: REMOTE_TOKEN,
+              outboundRateLimiterConfig: ABI_OUTBOUND,
+              inboundRateLimiterConfig: { isEnabled: true, capacity: 10n, rate: 9n },
+            },
+          ],
+        ]),
+      )
+    })
 
     it('still rejects rate > capacity on a v2.0.0 pool', async () => {
       await assert.rejects(

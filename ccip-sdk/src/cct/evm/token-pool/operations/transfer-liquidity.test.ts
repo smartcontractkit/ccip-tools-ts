@@ -248,16 +248,18 @@ describe('TransferLiquidity (cct/evm)', () => {
       )
     })
 
-    it('rejects a siloed destination pool, which does not declare transferLiquidity', async () => {
-      await assert.rejects(
-        () => generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.6.1' })),
-        (err: unknown) =>
-          err instanceof CCTContractTypeInvalidError &&
-          err.context.address === POOL &&
-          err.context.actual === 'SiloedLockReleaseTokenPool' &&
-          err.context.expected === 'LockReleaseTokenPool',
-      )
-    })
+    for (const version of ['1.6.0', '1.6.1'] as const) {
+      it(`rejects a siloed destination pool, which does not declare transferLiquidity, at v${version}`, async () => {
+        await assert.rejects(
+          () => generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version })),
+          (err: unknown) =>
+            err instanceof CCTContractTypeInvalidError &&
+            err.context.address === POOL &&
+            err.context.actual === 'SiloedLockReleaseTokenPool' &&
+            err.context.expected === 'LockReleaseTokenPool',
+        )
+      })
+    }
 
     it('accepts the MaxUint256 transfer-all sentinel at 1.6.1', async () => {
       const unsigned = await generate(stubChain({ version: '1.6.1' }), { amount: MaxUint256 })

@@ -272,6 +272,7 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
     switch (version) {
       case TokenPoolVersion.V1_5_0:
       case TokenPoolVersion.V1_5_1:
+      case TokenPoolVersion.V1_6_0:
       case TokenPoolVersion.V1_6_1:
         return readLegacyTokenPool(chain, poolAddress, type, version)
       case TokenPoolVersion.V2_0_0:

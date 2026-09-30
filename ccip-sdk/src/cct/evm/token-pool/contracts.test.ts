@@ -77,6 +77,7 @@ describe('pool versions', () => {
     assert.deepEqual(Object.values(TokenPoolVersion), [
       TokenPoolVersion.V1_5_0,
       TokenPoolVersion.V1_5_1,
+      TokenPoolVersion.V1_6_0,
       TokenPoolVersion.V1_6_1,
       TokenPoolVersion.V2_0_0,
     ])
@@ -84,9 +85,10 @@ describe('pool versions', () => {
 
   it('isTokenPoolVersion narrows known versions and rejects others', () => {
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_5_1), true)
+    assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_6_0), true)
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V2_0_0), true)
-    // `1.6.0` is a real on-chain string, but no ABI is vendored for it — deferred, not unknown
-    assert.equal(isTokenPoolVersion('1.6.0'), false)
+    // exact match: an unlisted patch is unknown, not floor-matched to its neighbour
+    assert.equal(isTokenPoolVersion('1.6.2'), false)
     assert.equal(isTokenPoolVersion('garbage'), false)
   })
 })
@@ -188,6 +190,27 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
+  it('accepts SiloedLockReleaseTokenPool at 1.6.0, the one pool that release stamped 1.6.0', () => {
+    assert.deepEqual(
+      parseTokenPoolVersion({
+        address: ADDR,
+        contractType: 'SiloedLockReleaseTokenPool',
+        version: '1.6.0',
+      }),
+      { type: 'SiloedLockReleaseTokenPool', version: TokenPoolVersion.V1_6_0 },
+    )
+  })
+
+  it('rejects every other pool type at 1.6.0, which never shipped', () => {
+    for (const contractType of TOKEN_POOL_TYPES.filter((t) => t !== 'SiloedLockReleaseTokenPool'))
+      assert.throws(
+        () => parseTokenPoolVersion({ address: ADDR, contractType, version: '1.6.0' }),
+        (error: unknown) =>
+          error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
+        contractType,
+      )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
@@ -248,6 +271,24 @@ describe('LockRelease liquidity surface', () => {
       )
       for (const sighash of rest) assert.equal(sighash, first, `${fn} diverged across v1.x`)
     }
+  })
+
+  it('declares the unsiloed liquidity functions at v1.6.0 with the v1.5.0 signatures', () => {
+    // Siloed 1.6.0 backs LockRelease@1.6.0; this parity licenses floor-matching to 1.5.x encoders
+    const siloed = TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_6_0]
+    const base = TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_0]
+    for (const fn of ['provideLiquidity', 'withdrawLiquidity', 'setRebalancer', 'getRebalancer'])
+      assert.equal(
+        siloed.getFunction(fn)!.format('sighash'),
+        base.getFunction(fn)!.format('sighash'),
+        fn,
+      )
+  })
+
+  it('declares neither transferLiquidity nor canAcceptLiquidity at v1.6.0', () => {
+    const siloed = TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_6_0]
+    assert.equal(siloed.hasFunction('transferLiquidity'), false)
+    assert.equal(siloed.hasFunction('canAcceptLiquidity'), false)
   })
 
   it('drops every liquidity function at v2.0.0, which escrows through a lockbox', () => {

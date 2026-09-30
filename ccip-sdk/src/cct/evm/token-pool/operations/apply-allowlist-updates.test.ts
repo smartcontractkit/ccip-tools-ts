@@ -39,8 +39,13 @@ const POOL_TYPE: Record<TokenPoolFamily, string> = {
 const LEGACY_VERSIONS = [
   TokenPoolVersion.V1_5_0,
   TokenPoolVersion.V1_5_1,
+  TokenPoolVersion.V1_6_0,
   TokenPoolVersion.V1_6_1,
 ] as const
+
+/** 1.6.0 shipped only the siloed pool, so a 1.6.0 stub reports that (LockRelease-family) type. */
+const typeAt = (version: TokenPoolVersion) =>
+  version === TokenPoolVersion.V1_6_0 ? 'SiloedLockReleaseTokenPool' : undefined
 
 /**
  * EVMChain stub: reports `type version` from `typeAndVersion`. The allowlist holder answers
@@ -54,6 +59,7 @@ const LEGACY_VERSIONS = [
  */
 function stubChain({
   family = 'BurnMint',
+  type,
   version = TokenPoolVersion.V1_5_1,
   owner = OWNER,
   hooks = HOOKS,
@@ -63,6 +69,8 @@ function stubChain({
   onCall,
 }: {
   family?: TokenPoolFamily
+  /** Reported pool type; defaults to the family's base type. */
+  type?: string
   version?: TokenPoolVersion
   owner?: string
   hooks?: string
@@ -116,7 +124,7 @@ function stubChain({
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     typeAndVersion: () => {
       onCall?.()
-      return Promise.resolve(parseTypeAndVersion(`${POOL_TYPE[family]} ${version}`))
+      return Promise.resolve(parseTypeAndVersion(`${type ?? POOL_TYPE[family]} ${version}`))
     },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
@@ -152,8 +160,9 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
   describe('generate', () => {
     for (const version of LEGACY_VERSIONS) {
       for (const family of ['BurnMint', 'LockRelease'] as const) {
+        if (version === TokenPoolVersion.V1_6_0 && family === 'BurnMint') continue
         it(`encodes applyAllowListUpdates(removes, adds) for a ${family} ${version} pool`, async () => {
-          const unsigned = await generate(stubChain({ family, version }))
+          const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
           const tx = unsigned.transactions[0]!
 
           assert.equal(unsigned.family, ChainFamily.EVM)
@@ -164,13 +173,15 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
         })
       }
 
-      it(`produces identical calldata for both ABI families at ${version}`, async () => {
-        const [burnMint, lockRelease] = await Promise.all([
-          generate(stubChain({ family: 'BurnMint', version })),
-          generate(stubChain({ family: 'LockRelease', version })),
-        ])
-        assert.equal(burnMint.transactions[0]!.data, lockRelease.transactions[0]!.data)
-      })
+      // 1.6.0 has no BurnMint pool to compare against
+      if (version !== TokenPoolVersion.V1_6_0)
+        it(`produces identical calldata for both ABI families at ${version}`, async () => {
+          const [burnMint, lockRelease] = await Promise.all([
+            generate(stubChain({ family: 'BurnMint', version })),
+            generate(stubChain({ family: 'LockRelease', version })),
+          ])
+          assert.equal(burnMint.transactions[0]!.data, lockRelease.transactions[0]!.data)
+        })
     }
 
     it('omits from, and skips the owner read, when sender is not supplied', async () => {
@@ -488,7 +499,8 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
   describe('version dispatch', () => {
     for (const version of LEGACY_VERSIONS) {
       it(`supports ${version}`, async () => {
-        const unsigned = await generate(stubChain({ version }))
+        const family = version === TokenPoolVersion.V1_6_0 ? 'LockRelease' : 'BurnMint'
+        const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
         assert.equal(unsigned.transactions[0]!.data, DATA)
       })
     }

@@ -169,13 +169,21 @@ function generate(chain: EVMChain, overrides: Partial<AddRemotePoolParams> = {})
 }
 
 /** Versions that declare `addRemotePool`, each with both ABI families. */
-const SUPPORTED = [TokenPoolVersion.V1_5_1, TokenPoolVersion.V1_6_1, TokenPoolVersion.V2_0_0]
+const SUPPORTED = [
+  TokenPoolVersion.V1_5_1,
+  TokenPoolVersion.V1_6_0,
+  TokenPoolVersion.V1_6_1,
+  TokenPoolVersion.V2_0_0,
+]
 const TYPES: TokenPoolType[] = ['BurnMintTokenPool', 'LockReleaseTokenPool']
+/** The pool types a stub may report at `version`: 1.6.0 shipped only the siloed pool. */
+const typesAt = (version: TokenPoolVersion): TokenPoolType[] =>
+  version === TokenPoolVersion.V1_6_0 ? ['SiloedLockReleaseTokenPool'] : TYPES
 
 describe('AddRemotePool (cct/evm)', () => {
   describe('generate', () => {
     for (const version of SUPPORTED) {
-      for (const type of TYPES) {
+      for (const type of typesAt(version)) {
         it(`encodes addRemotePool(selector, bytes) for a ${type} ${version}`, async () => {
           const unsigned = await generate(stubChain({ type, version }))
           const tx = unsigned.transactions[0]!
@@ -297,7 +305,7 @@ describe('AddRemotePool (cct/evm)', () => {
 
     for (const version of SUPPORTED) {
       it(`encodes on v${version}`, async () => {
-        const unsigned = await generate(stubChain({ version }))
+        const unsigned = await generate(stubChain({ type: typesAt(version)[0], version }))
         assert.equal(unsigned.transactions[0]!.data, expectedData())
       })
     }
