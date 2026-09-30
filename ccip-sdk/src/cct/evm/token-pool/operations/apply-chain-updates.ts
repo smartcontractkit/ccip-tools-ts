@@ -2,9 +2,13 @@
  * applyChainUpdates — configures, enables and disables a token pool's remote lanes: the remote
  * token, the remote pool(s) allowed to bridge into it, and both directional rate limits.
  *
- * The one CCT pool write whose *parameters* changed shape mid-life, so it is discriminated on
- * {@link ApplyChainUpdatesParams.version} rather than version-transparent, and sectioned by version
- * so each shape's type, parser and encoder sit together.
+ * The one CCT pool write whose *parameters* changed shape mid-life. {@link ApplyChainUpdatesParams}
+ * is therefore discriminated on which lane fields are present — the v1.5.0 `chains` array vs the
+ * v1.5.1+ `chainsToAdd` / `remoteChainSelectorsToRemove` pair — rather than on an explicit
+ * `version`, which is now an optional override: like its ~17 sibling pool write-ops, the shape is
+ * auto-resolved from the pool's own `typeAndVersion` (the same on-chain read
+ * {@link ApplyChainUpdates.buildUnsigned} already makes). The file is sectioned by version so each
+ * shape's type, parser and encoder sit together.
  *
  * @packageDocumentation
  */
@@ -194,8 +198,14 @@ export type ChainUpdateV1_5_0 = ChainUpdateCommon & {
   remotePoolAddress: string
 }
 
-/** {@link ApplyChainUpdatesParamsV1_5_0} once parsed — derived, so the two cannot drift. */
-type ParsedApplyChainUpdatesParamsV1_5_0 = Omit<ApplyChainUpdatesParamsV1_5_0, 'chains'> & {
+/**
+ * {@link ApplyChainUpdatesParamsV1_5_0} once parsed. Shares {@link ApplyChainUpdatesBaseParams} so
+ * `poolAddress` / `sender` cannot drift, and pins `version` to a *definite* shape discriminant —
+ * {@link ApplyChainUpdates.parse} always sets it, whether the caller supplied it or it was inferred
+ * — so {@link ApplyChainUpdates.buildUnsigned} can assert it against the resolved pool.
+ */
+type ParsedApplyChainUpdatesParamsV1_5_0 = ApplyChainUpdatesBaseParams & {
+  version: typeof TokenPoolVersion.V1_5_0
   chains: WithParsedRateLimits<ChainUpdateV1_5_0>[]
 }
 
@@ -285,9 +295,15 @@ export type ChainUpdateV1_5_1 = ChainUpdateCommon & {
   remotePoolAddresses: string[]
 }
 
-/** {@link ApplyChainUpdatesParamsV1_5_1} once parsed — derived, so the two cannot drift. */
-type ParsedApplyChainUpdatesParamsV1_5_1 = Omit<ApplyChainUpdatesParamsV1_5_1, 'chainsToAdd'> & {
+/**
+ * {@link ApplyChainUpdatesParamsV1_5_1} once parsed. Shares {@link ApplyChainUpdatesBaseParams} and
+ * pins a definite `version` discriminant, for the same reasons as
+ * {@link ParsedApplyChainUpdatesParamsV1_5_0}.
+ */
+type ParsedApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
+  version: typeof TokenPoolVersion.V1_5_1
   chainsToAdd: WithParsedRateLimits<ChainUpdateV1_5_1>[]
+  remoteChainSelectorsToRemove: bigint[]
 }
 
 /** Parses the v1.5.1+ pair of arrays: removals (applied first on-chain), then additions. */
@@ -366,34 +382,53 @@ const encodeV1_5_1 = (
   )
 
 /**
- * Parameters for {@link ApplyChainUpdates}, discriminated on `version` — the calldata shape you are
- * writing, not a free-form pool version; see {@link ApplyChainUpdatesParamVersion}.
+ * Parameters for {@link ApplyChainUpdates}, a mutually-exclusive union discriminated on which lane
+ * fields are present — the v1.5.0 `chains` array vs the v1.5.1+ `chainsToAdd` /
+ * `remoteChainSelectorsToRemove` pair — not on `version`.
  *
- * The two signatures have different selectors (`0xdb6327dc` vs `0xe8a1da17`), so
- * {@link ApplyChainUpdates.buildUnsigned} checks the declaration against the pool's own
- * `typeAndVersion`: a mismatch is a parameter error rather than a tx that reverts on an unknown
+ * `version` is an **optional** override, not a required discriminant. Omit it and the calldata
+ * shape is inferred from the fields you pass, then reconciled against the pool's own
+ * `typeAndVersion` — the same on-chain read {@link ApplyChainUpdates.buildUnsigned} already makes,
+ * so omitting it costs no extra RPC. Supply it and it is honoured *and* asserted: it must match
+ * both the fields present and the pool's resolved shape, so an explicit `version` acts as a safety
+ * assertion. The two signatures have different selectors (`0xdb6327dc` vs `0xe8a1da17`), so a
+ * mismatch surfaces as a {@link CCTParamsInvalidError} rather than a tx that reverts on an unknown
  * function.
  */
 export type ApplyChainUpdatesParams = ApplyChainUpdatesParamsV1_5_0 | ApplyChainUpdatesParamsV1_5_1
 
 /** The **v1.5.0** parameter shape: a single `chains` array, each lane carrying its `allowed` bit. */
 export type ApplyChainUpdatesParamsV1_5_0 = ApplyChainUpdatesBaseParams & {
-  version: typeof TokenPoolVersion.V1_5_0
+  /**
+   * Optional shape override; auto-resolved when omitted. If supplied it must be `'1.5.0'` — the
+   * shape spelled by the `chains` array — and must match the pool's resolved version.
+   */
+  version?: typeof TokenPoolVersion.V1_5_0
   /**
    * Lanes to configure; `allowed: false` removes one. At least one entry, no holes, and a given
-   * `remoteChainSelector` may appear only once.
+   * `remoteChainSelector` may appear only once. Its presence selects the v1.5.0 shape.
    */
   chains: ChainUpdateV1_5_0[]
+  /** Mutually exclusive with {@link ApplyChainUpdatesParamsV1_5_0.chains}; never both. */
+  chainsToAdd?: never
+  /** Mutually exclusive with {@link ApplyChainUpdatesParamsV1_5_0.chains}; never both. */
+  remoteChainSelectorsToRemove?: never
 }
 
 /** The **v1.5.1+** parameter shape: additions and removals as two arrays. */
 export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
-  version: typeof TokenPoolVersion.V1_5_1
+  /**
+   * Optional shape override; auto-resolved when omitted. If supplied it must be `'1.5.1'` — the
+   * shape for every pool from v1.5.1 up (v1.6.0, v1.6.1, v2.0.0 included) — and must match the
+   * pool's resolved version.
+   */
+  version?: typeof TokenPoolVersion.V1_5_1
   /**
    * Lanes to add or reconfigure. To replace a lane's remote pools wholesale, list its selector
    * here *and* in `remoteChainSelectorsToRemove` — the contract applies removals first, so that
    * cross-array pairing stays legal. Within this array a selector may appear only once, and may
-   * not be `0n`; holes are rejected too.
+   * not be `0n`; holes are rejected too. Presence of this or `remoteChainSelectorsToRemove`
+   * selects the v1.5.1+ shape.
    */
   chainsToAdd: ChainUpdateV1_5_1[]
   /**
@@ -401,6 +436,8 @@ export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
    * here, so a pool already holding a junk lane can be cleaned up.
    */
   remoteChainSelectorsToRemove: bigint[]
+  /** Mutually exclusive with the v1.5.1+ arrays; never combined with a v1.5.0 `chains`. */
+  chains?: never
 }
 
 /**
@@ -446,33 +483,77 @@ export class ApplyChainUpdates extends EVMOperation<
   } as { [V in ApplyChainUpdatesParamVersion]?: Encoder<V> }
 
   /**
+   * Infers the calldata shape from which lane fields are present, rejecting a contradictory
+   * combination, and — when `version` was supplied — asserting it agrees with those fields. The
+   * pool's own version is not read here (that is {@link buildUnsigned}'s reconciliation); this only
+   * fixes which *shape* the params are, so {@link parse} knows which parser to run.
+   * @throws {@link CCTParamsInvalidError} if both shapes' fields are present, neither is, or an
+   * explicit `version` disagrees with the fields
+   */
+  private resolveShape(params: ApplyChainUpdatesParams): ApplyChainUpdatesParamVersion {
+    // Read presence through a loose lens: the public union is mutually exclusive, so TS would
+    // narrow a typed read and treat the second field as provably absent — but contradictory input
+    // (e.g. a hand-rolled or `as`-cast caller passing both shapes) is exactly what this rejects.
+    const fields = params as {
+      chains?: unknown
+      chainsToAdd?: unknown
+      remoteChainSelectorsToRemove?: unknown
+    }
+    const hasV1_5_0 = fields.chains !== undefined
+    const hasV1_5_1 =
+      fields.chainsToAdd !== undefined || fields.remoteChainSelectorsToRemove !== undefined
+
+    if (hasV1_5_0 && hasV1_5_1)
+      throw new CCTParamsInvalidError(
+        this.name,
+        'chains',
+        `must not be combined with chainsToAdd/remoteChainSelectorsToRemove: chains is the v${TokenPoolVersion.V1_5_0} shape and chainsToAdd/remoteChainSelectorsToRemove is the v${TokenPoolVersion.V1_5_1}+ shape — pass one shape's fields, not both`,
+      )
+    if (!hasV1_5_0 && !hasV1_5_1)
+      throw new CCTParamsInvalidError(
+        this.name,
+        'chains',
+        `must supply either chains (the v${TokenPoolVersion.V1_5_0} shape) or chainsToAdd/remoteChainSelectorsToRemove (the v${TokenPoolVersion.V1_5_1}+ shape)`,
+      )
+
+    const shape = hasV1_5_0 ? TokenPoolVersion.V1_5_0 : TokenPoolVersion.V1_5_1
+    const { version } = params
+    if (version !== undefined && version !== shape)
+      throw new CCTParamsInvalidError(
+        this.name,
+        'version',
+        `is '${version}' but the fields present are the v${shape} shape — omit version to infer it, or pass the fields for the declared shape (chains for ${TokenPoolVersion.V1_5_0}, chainsToAdd/remoteChainSelectorsToRemove for ${TokenPoolVersion.V1_5_1})`,
+      )
+    return shape
+  }
+
+  /**
    * Validates the pool address and every lane entry before any RPC, *keeping* what each check
-   * produced so neither {@link buildUnsigned} nor an encoder re-derives it. Only the
+   * produced so neither {@link buildUnsigned} nor an encoder re-derives it. The calldata shape is
+   * inferred from the fields via {@link resolveShape} (an explicit `version` is an optional
+   * override, asserted there), and pinned as a definite discriminant on the parsed result. Only the
    * version-conditional rate bound is left to {@link assertRateBounds}.
-   * @throws {@link CCTParamsInvalidError} if `version` is unknown, or any lane field is invalid
+   * @throws {@link CCTParamsInvalidError} if the shape is ambiguous or contradictory, or any lane
+   * field is invalid
    */
   protected override parse(params: ApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
     validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
-    const version: string = params.version
-    switch (params.version) {
+    const { poolAddress, sender } = params
+    switch (this.resolveShape(params)) {
       case TokenPoolVersion.V1_5_0:
         return {
-          ...params,
+          poolAddress,
+          sender,
+          version: TokenPoolVersion.V1_5_0,
           chains: parseChainsV1_5_0(this.name, params.chains),
         }
       case TokenPoolVersion.V1_5_1:
         return {
-          ...params,
+          poolAddress,
+          sender,
+          version: TokenPoolVersion.V1_5_1,
           ...parseChainsV1_5_1(this.name, params.chainsToAdd, params.remoteChainSelectorsToRemove),
         }
-      default:
-        throw new CCTParamsInvalidError(
-          this.name,
-          'version',
-          `must be one of ${TokenPoolVersion.V1_5_0}, ${
-            TokenPoolVersion.V1_5_1
-          }, got ${String(version)}`,
-        )
     }
   }
 
@@ -496,9 +577,13 @@ export class ApplyChainUpdates extends EVMOperation<
   }
 
   /**
-   * Resolves the pool's type and version, applies the checks that needed it, then encodes.
-   * @throws {@link CCTParamsInvalidError} if the declared `version` is not this pool's shape, a
-   * rate limit breaks its enabled-bucket bound, or `sender` is not the pool owner
+   * Resolves the pool's type and version, applies the checks that needed it, then encodes. The
+   * pool's resolved shape is reconciled against the params' shape — whether that shape was
+   * inferred from the fields or asserted from an explicit `version` — so a v1.5.0 `chains` payload
+   * against a v1.5.1+ pool (or the reverse) fails here rather than reverting on a selector the pool
+   * does not implement.
+   * @throws {@link CCTParamsInvalidError} if the params' shape is not this pool's, a rate limit
+   * breaks its enabled-bucket bound, or `sender` is not the pool owner
    * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
@@ -518,7 +603,11 @@ export class ApplyChainUpdates extends EVMOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'version',
-        `must be '${shape}' for this pool, which reports v${version} — the two signatures have different selectors, so the declared shape would not exist on-chain`,
+        `is the v${shape} shape for this pool, which reports v${version}, but the ${
+          params.version === TokenPoolVersion.V1_5_0
+            ? 'chains'
+            : 'chainsToAdd/remoteChainSelectorsToRemove'
+        } fields are the v${params.version} shape — the two signatures have different selectors, so that shape would not exist on-chain. Pass the v${shape} shape's fields (chains for ${TokenPoolVersion.V1_5_0}, chainsToAdd/remoteChainSelectorsToRemove for ${TokenPoolVersion.V1_5_1})`,
       )
 
     this.assertRateBounds(params, version)

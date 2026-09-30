@@ -13,6 +13,8 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
 import { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 
+const { V1_5_0, V1_5_1, V1_6_0, V1_6_1, V2_0_0 } = TokenPoolVersion
+
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
 const ROUTER = '0x' + '33'.repeat(20)
@@ -1017,6 +1019,169 @@ describe('ApplyChainUpdates (cct/evm)', () => {
             err.context.operation === 'applyChainUpdates' &&
             err.context.param === 'version',
         )
+      })
+    }
+  })
+
+  /**
+   * The DX change under test: `version` is optional. Omitting it must infer the calldata SHAPE from
+   * the fields present and produce byte-identical calldata to the explicit call, across every
+   * recognized (pool type × version) combination `applyChainUpdates` applies to. The shape depends
+   * only on the version — v1.5.0 → the `chains` array, everything from v1.5.1 up → the
+   * `chainsToAdd`/`remoteChainSelectorsToRemove` pair — but the full type matrix is exercised so
+   * the pool-type resolution that drives the omitted path is covered for each.
+   */
+  describe('optional version — inferred == explicit across the type × version matrix', () => {
+    /** Every recognized pool type, with the versions it exists at and its ABI family. */
+    const MATRIX = [
+      { type: 'BurnMintTokenPool', family: 'BurnMint', versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0] },
+      {
+        type: 'BurnFromMintTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'BurnWithFromMintTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'LockReleaseTokenPool',
+        family: 'LockRelease',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      { type: 'BurnToAddressTokenPool', family: 'BurnMint', versions: [V1_5_1, V1_6_1, V2_0_0] },
+      {
+        type: 'BurnMintWithLockReleaseFlagTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'SiloedLockReleaseTokenPool',
+        family: 'LockRelease',
+        versions: [V1_6_0, V1_6_1, V2_0_0],
+      },
+    ] as const satisfies ReadonlyArray<{
+      type: string
+      family: TokenPoolFamily
+      versions: readonly TokenPoolVersion[]
+    }>
+
+    /** The param factory + expected calldata for a version's inferred shape. */
+    const forVersion = (version: TokenPoolVersion) =>
+      version === V1_5_0
+        ? { params: paramsV1_5_0, data: DATA_V1_5_0 }
+        : { params: paramsV1_5_1, data: DATA_V1_5_1 }
+
+    for (const { type, family, versions } of MATRIX) {
+      for (const version of versions) {
+        const { params, data } = forVersion(version)
+
+        it(`v${version} ${type}: omitted version yields identical calldata to explicit`, async () => {
+          // (b) backward-compat: the explicit-version call still produces today's calldata
+          const explicit = await op.generate(
+            stubChain(version, family, OWNER, type).chain,
+            params(),
+          )
+          assert.equal(explicit.transactions[0]!.data, data)
+
+          // (a) calldata parity: omitting version resolves the same shape, byte-for-byte
+          const inferred = await op.generate(
+            stubChain(version, family, OWNER, type).chain,
+            params({ version: undefined }),
+          )
+          assert.equal(inferred.transactions[0]!.data, data)
+          assert.equal(inferred.transactions[0]!.data, explicit.transactions[0]!.data)
+        })
+      }
+    }
+  })
+
+  /**
+   * (c) MISMATCH OVERRIDE and the omitted-path reconciliation: whether the shape was asserted by an
+   * explicit `version` or inferred from the fields, it is reconciled against the pool's resolved
+   * version in `buildUnsigned`, so a shape the pool cannot serve fails locally rather than
+   * reverting on an unknown selector.
+   */
+  describe('shape is reconciled against the resolved pool version', () => {
+    it('rejects an explicit v1.5.0 payload against a v2.0.0 pool (override disagrees with pool)', async () => {
+      await assert.rejects(
+        () => op.generate(stubChain(V2_0_0).chain, paramsV1_5_0()),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'version',
+      )
+    })
+
+    it('rejects an explicit v1.5.1 payload against a v1.5.0 pool (override disagrees with pool)', async () => {
+      await assert.rejects(
+        () => op.generate(stubChain(V1_5_0).chain, paramsV1_5_1()),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'version',
+      )
+    })
+
+    it('rejects an inferred v1.5.0 shape (no version) against a v2.0.0 pool', async () => {
+      await assert.rejects(
+        () => op.generate(stubChain(V2_0_0).chain, paramsV1_5_0({ version: undefined })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'version',
+      )
+    })
+
+    it('rejects an inferred v1.5.1 shape (no version) against a v1.5.0 pool', async () => {
+      await assert.rejects(
+        () => op.generate(stubChain(V1_5_0).chain, paramsV1_5_1({ version: undefined })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'version',
+      )
+    })
+  })
+
+  /**
+   * (d) CONTRADICTORY INPUT: both shapes' fields at once, an explicit `version` that disagrees with
+   * the fields present, or neither shape's fields — each is rejected before any RPC, since the
+   * shape is inferred in `parse()`.
+   */
+  describe('contradictory or ambiguous shape is rejected before any RPC', () => {
+    const cases: [string, string, ApplyChainUpdatesParams][] = [
+      [
+        'both chains and chainsToAdd present',
+        'chains',
+        paramsV1_5_1({ chains: paramsV1_5_0().chains }),
+      ],
+      [
+        'both chains and remoteChainSelectorsToRemove present',
+        'chains',
+        paramsV1_5_0({ remoteChainSelectorsToRemove: [SEL_B] }),
+      ],
+      ['an explicit v1.5.0 version on v1.5.1 fields', 'version', paramsV1_5_1({ version: V1_5_0 })],
+      ['an explicit v1.5.1 version on v1.5.0 fields', 'version', paramsV1_5_0({ version: V1_5_1 })],
+      [
+        'neither shape’s fields',
+        'chains',
+        { poolAddress: POOL, sender: OWNER } as unknown as ApplyChainUpdatesParams,
+      ],
+    ]
+
+    for (const [name, param, params] of cases) {
+      it(`rejects ${name} before any RPC`, async () => {
+        const { chain, probes } = stubChain()
+        await assert.rejects(
+          () => op.generate(chain, params),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'applyChainUpdates' &&
+            err.context.param === param,
+        )
+        assert.equal(probes(), 0, `${name} must fail before the typeAndVersion probe`)
       })
     }
   })
