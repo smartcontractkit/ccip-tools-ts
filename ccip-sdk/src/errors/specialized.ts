@@ -3474,6 +3474,53 @@ export class CCIPSolanaAccountResolutionError extends CCIPError {
   }
 }
 
+/** Why a lane can't take a Solana CCIP 2.0 message; see {@link CCIPSolanaV2LaneUnavailableError}. */
+export type SolanaV2LaneUnavailableReason =
+  | 'lane-not-configured'
+  | 'router-without-v2-support'
+  | 'sender-not-allowed'
+
+/**
+ * Thrown when a Solana message requires a CCIP 2.0 lane (its extraArgs are GenericExtraArgsV3),
+ * but the router can't send it over one: the lane isn't configured for 2.0, the router doesn't
+ * have 2.0 support yet, or the lane's allowlist doesn't include the sender.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.sendMessage({ router, destChainSelector, message, wallet })
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaV2LaneUnavailableError) {
+ *     console.log(`No 2.0 lane (${error.context.reason}); retry with legacy extraArgs`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPSolanaV2LaneUnavailableError extends CCIPError {
+  override readonly name = 'CCIPSolanaV2LaneUnavailableError'
+  /** Creates a Solana CCIP 2.0 lane unavailable error. */
+  constructor(
+    reason: SolanaV2LaneUnavailableReason,
+    context: { router: string; destChainSelector: bigint; sender?: string },
+    options?: CCIPErrorOptions,
+  ) {
+    const why = {
+      'lane-not-configured': 'the lane is not configured for CCIP 2.0',
+      'router-without-v2-support': "the router doesn't have CCIP 2.0 support yet",
+      'sender-not-allowed': `sender ${context.sender} is not in the lane's allowlist`,
+    }[reason]
+    super(
+      CCIPErrorCode.SOLANA_V2_LANE_UNAVAILABLE,
+      `Message requires a CCIP 2.0 lane from router ${context.router} to ${context.destChainSelector}, but ${why}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, ...context, reason },
+      },
+    )
+  }
+}
+
 /**
  * Thrown when fee result from router is invalid.
  *

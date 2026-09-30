@@ -5,7 +5,8 @@
  * v1.6 IDL: the `DestChainCcipV2` account (stored under the `dest_chain_state_v2`
  * PDA seed), the `CCIPMessageSentV2` event, plus the types they reference. It also
  * carries the `ccip_send_v2` / `get_fee_v2` params and result types, whose accounts
- * come from account resolution (see `resolution.ts`).
+ * come from account resolution (see `resolution.ts`), and the `RouterDestChainV2Observation`
+ * returned by `observe_dest_chain_v2`, which tells whether a lane supports CCIP 2.0.
  * Everything else about the v2 router is handled in "compatibility mode" via the
  * existing 1.6.0 IDL — the `Config` account, for instance, is byte-compatible
  * (v2 only appends a trailing field).
@@ -191,6 +192,35 @@ export type CcipRouterV2 = {
       }
     },
     {
+      name: 'RouterDestChainV2Observation'
+      docs: [
+        'Per-destination-chain state and configuration of the CCIP 2.0 onramp path, returned by',
+        '`observe_dest_chain_v2`. The allowed senders are reported as a count only.',
+      ]
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'observationVersion'; type: 'u16' },
+          { name: 'typeVersion'; type: 'string' },
+          { name: 'version'; type: 'u8' },
+          { name: 'chainSelector'; type: 'u64' },
+          { name: 'messageNumber'; type: 'u64' },
+          { name: 'messageNumberToRestore'; type: 'u64' },
+          { name: 'restoreOnAction'; type: { defined: 'RestoreOnAction' } },
+          { name: 'laneCodeVersion'; type: { defined: 'CodeVersion' } },
+          { name: 'allowListEnabled'; type: 'bool' },
+          { name: 'allowedSendersCount'; type: 'u32' },
+          { name: 'defaultCcvs'; type: { vec: 'publicKey' } },
+          { name: 'laneMandatedCcvs'; type: { vec: 'publicKey' } },
+          { name: 'defaultExecutor'; type: 'publicKey' },
+          { name: 'offramp'; type: 'bytes' },
+          { name: 'messageNetworkFee'; type: 'u32' },
+          { name: 'tokenTransferNetworkFee'; type: 'u32' },
+          { name: 'baseExecutionGasCost'; type: 'u32' },
+        ]
+      }
+    },
+    {
       name: 'CodeVersion'
       type: { kind: 'enum'; variants: [{ name: 'Default' }, { name: 'V1' }] }
     },
@@ -373,6 +403,35 @@ export const IDL: CcipRouterV2 = {
         fields: [
           { name: 'amount', type: 'u64' },
           { name: 'token', type: 'publicKey' },
+        ],
+      },
+    },
+    {
+      name: 'RouterDestChainV2Observation',
+      docs: [
+        'Per-destination-chain state and configuration of the CCIP 2.0 onramp path, returned by',
+        '`observe_dest_chain_v2`. The allowed senders are reported as a count only.',
+      ],
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'observationVersion', type: 'u16' },
+          { name: 'typeVersion', type: 'string' },
+          { name: 'version', type: 'u8' },
+          { name: 'chainSelector', type: 'u64' },
+          { name: 'messageNumber', type: 'u64' },
+          { name: 'messageNumberToRestore', type: 'u64' },
+          { name: 'restoreOnAction', type: { defined: 'RestoreOnAction' } },
+          { name: 'laneCodeVersion', type: { defined: 'CodeVersion' } },
+          { name: 'allowListEnabled', type: 'bool' },
+          { name: 'allowedSendersCount', type: 'u32' },
+          { name: 'defaultCcvs', type: { vec: 'publicKey' } },
+          { name: 'laneMandatedCcvs', type: { vec: 'publicKey' } },
+          { name: 'defaultExecutor', type: 'publicKey' },
+          { name: 'offramp', type: 'bytes' },
+          { name: 'messageNetworkFee', type: 'u32' },
+          { name: 'tokenTransferNetworkFee', type: 'u32' },
+          { name: 'baseExecutionGasCost', type: 'u32' },
         ],
       },
     },

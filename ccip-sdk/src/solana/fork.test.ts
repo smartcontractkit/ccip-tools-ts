@@ -22,9 +22,16 @@ import { hexlify } from 'ethers'
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
+import { CCIPArgumentInvalidError, CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
-import { type CCIPMessage, CCIPVersion, ExecutionState, MessageStatus } from '../types.ts'
+import {
+  type CCIPMessage,
+  type MessageInput,
+  CCIPVersion,
+  ExecutionState,
+  MessageStatus,
+} from '../types.ts'
 import { ETHEREUM_TO_SOLANA, SOLANA_DEVNET_V2_STAGING as STAGING } from './fork.test.data.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
@@ -184,6 +191,9 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
 
+// WARNING: these assume the mainnet router has no CCIP 2.0 support yet, so sends go over 1.6.
+// Once mainnet gets 2.0 support (an in-place upgrade), the sends switch to ccip_send_v2 and the
+// 2.0 rejection test below fails: update them then.
 describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let solanaChain: SolanaChain | undefined
   let surfpoolInstance: SurfpoolInstance | undefined
@@ -341,6 +351,27 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(decoded[0]!.message.tokenAmounts.length, 1)
       assert.equal(decoded[0]!.message.tokenAmounts[0]?.amount, 1_000_000n)
+    })
+
+    // WARNING: fails once the mainnet router gets CCIP 2.0 support; see the note on this suite
+    it('should reject GenericExtraArgsV3 on a router without CCIP 2.0', async () => {
+      assert.ok(solanaChain, 'chain should be initialized')
+      assert.ok(wallet, 'wallet should be initialized')
+
+      // the legacy sends above went over 1.6: this router doesn't have 2.0 support yet
+      await assert.rejects(
+        solanaChain.getFee({
+          router: SOLANA_ROUTER,
+          destChainSelector: ETH_MAINNET_SELECTOR,
+          message: {
+            receiver: '0x9eC0e4A4c411493773E01e2ABF4D42395788846b',
+            extraArgs: { finality: 'finalized' },
+          },
+        }),
+        (err: unknown) =>
+          err instanceof CCIPSolanaV2LaneUnavailableError &&
+          err.context.reason === 'router-without-v2-support',
+      )
     })
   })
 
@@ -690,6 +721,174 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         msg.addressTableLookups.map(({ accountKey }) => accountKey.toBase58()),
       )
       assert.equal(hexlify(metadata.subarray(-32)), STAGING.executeMessageId)
+    })
+  })
+
+  // SolanaChain picks the router entrypoint per message: 2.0 whenever the lane supports it
+  describe('SolanaChain send lane routing', () => {
+    const legacyArgs = { gasLimit: 0n, allowOutOfOrderExecution: true }
+    const sendOpts = (message: MessageInput) => ({
+      router: STAGING.router,
+      destChainSelector: STAGING.sepoliaSelector,
+      message,
+      wallet: wallet!,
+    })
+
+    /** The confirmed transaction of a send, as v0 (throws for any later version). */
+    async function landedV0(hash: string) {
+      const tx = await connection!.getTransaction(hash, { maxSupportedTransactionVersion: 0 })
+      assert.ok(tx, 'send tx should exist')
+      return tx
+    }
+
+    it('quotes legacy extraArgs over 2.0, as their GenericExtraArgsV3 conversion', async () => {
+      const fee = await solanaChain!.getFee({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message: { receiver, data: '0x1337', extraArgs: legacyArgs },
+      })
+      const { amount } = await quote({ receiver, data: '0x1337', extraArgs })
+      assert.equal(fee, amount)
+    })
+
+    it('sends legacy extraArgs over 2.0', async () => {
+      const request = await solanaChain!.sendMessage(
+        sendOpts({ receiver, data: '0x1337', extraArgs: legacyArgs }),
+      )
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      assert.equal(request.log.address, STAGING.router)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      const issuers = sent.receipts.map((receipt) => receipt.issuer)
+      assert.ok(issuers.includes(STAGING.committeeVerifier), 'default CCV should issue a receipt')
+      assert.ok(issuers.includes(STAGING.executor), 'default executor should issue a receipt')
+    })
+
+    it('sends a GenericExtraArgsV3 token transfer in a v0 tx, with the fixed lookup table', async () => {
+      const amount = 1_000n
+      const ata = getAssociatedTokenAddressSync(
+        new PublicKey(STAGING.sepoliaToken),
+        wallet!.publicKey,
+      )
+      const tokenBalance = async () =>
+        BigInt((await connection!.getTokenAccountBalance(ata)).value.amount)
+      const tokensBefore = await tokenBalance()
+
+      const request = await solanaChain!.sendMessage(
+        sendOpts({
+          receiver,
+          tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
+          extraArgs: { finality: 'finalized' },
+        }),
+      )
+
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      assert.equal(sent.tokenAmounts[0]?.amount, amount)
+      assert.equal(tokensBefore - (await tokenBalance()), amount, 'tokens should leave the sender')
+      const tx = await landedV0(request.tx.hash)
+      assert.ok(
+        tx.transaction.message.addressTableLookups.some(
+          ({ accountKey }) => accountKey.toBase58() === STAGING.sendLookupTable,
+        ),
+        'the send should use the deployment lookup table',
+      )
+    })
+
+    it('rejects GenericExtraArgsV3 to a lane not configured for 2.0', async () => {
+      await assert.rejects(
+        solanaChain!.getFee({
+          router: STAGING.router,
+          destChainSelector: ETH_MAINNET_SELECTOR,
+          message: { receiver, extraArgs: { finality: 'finalized' } },
+        }),
+        (err: unknown) =>
+          err instanceof CCIPSolanaV2LaneUnavailableError &&
+          err.context.reason === 'lane-not-configured',
+      )
+    })
+
+    // Rewrites the Sepolia lane's `dest_chain_state_v2` on the fork to enable its allowlist
+    describe('with the lane allowlist enabled', () => {
+      const selectorLe = Buffer.alloc(8)
+      selectorLe.writeBigUInt64LE(STAGING.sepoliaSelector)
+      const [laneState] = PublicKey.findProgramAddressSync(
+        [Buffer.from('dest_chain_state_v2'), selectorLe],
+        router,
+      )
+      let original: Buffer | undefined
+
+      async function setLaneState(data: Buffer) {
+        await (
+          connection as unknown as { _rpcRequest(m: string, a: unknown[]): Promise<unknown> }
+        )._rpcRequest('surfnet_setAccount', [
+          laneState.toBase58(),
+          { data: data.toString('hex'), lamports: LAMPORTS_PER_SOL },
+        ])
+      }
+      async function setAllowlist(allowedSenders: PublicKey[]) {
+        const state = routerV2Coder.accounts.decode<{
+          config: { allowListEnabled: boolean; allowedSenders: PublicKey[] }
+        }>('destChainCcipV2', original!)
+        await setLaneState(
+          await routerV2Coder.accounts.encode('destChainCcipV2', {
+            ...state,
+            config: { ...state.config, allowListEnabled: true, allowedSenders },
+          }),
+        )
+      }
+
+      before(async () => {
+        const account = await connection!.getAccountInfoAndContext(laneState)
+        assert.ok(account.value, 'the lane state should exist')
+        original = account.value.data
+      })
+      after(async () => {
+        if (original) await setLaneState(original)
+      })
+
+      const v3 = { receiver, data: '0x1337', extraArgs: { finality: 'finalized' as const } }
+      const feeOpts = (message: MessageInput, sender?: PublicKey) => ({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message,
+        ...(sender && { sender: sender.toBase58() }),
+      })
+
+      it('rejects a sender off the allowlist, and a quote without the sender', async () => {
+        await setAllowlist([])
+
+        await assert.rejects(
+          solanaChain!.sendMessage(sendOpts(v3)),
+          (err: unknown) =>
+            err instanceof CCIPSolanaV2LaneUnavailableError &&
+            err.context.reason === 'sender-not-allowed' &&
+            err.context.sender === wallet!.publicKey.toBase58(),
+        )
+        // legacy args fall back to 1.6 instead, which this 2.0-only deployment doesn't have
+        await assert.rejects(
+          solanaChain!.sendMessage(sendOpts({ ...v3, extraArgs: legacyArgs })),
+          (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
+        )
+        // the allowlist decides the entrypoint, so a quote needs the sender
+        await assert.rejects(
+          solanaChain!.getFee(feeOpts(v3)),
+          (err: unknown) =>
+            err instanceof CCIPArgumentInvalidError && err.context.argument === 'sender',
+        )
+        await assert.rejects(
+          solanaChain!.getFee(feeOpts(v3, wallet!.publicKey)),
+          CCIPSolanaV2LaneUnavailableError,
+        )
+      })
+
+      it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
+        await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
+        const fee = await solanaChain!.getFee(feeOpts(v3, wallet!.publicKey))
+        const request = await solanaChain!.sendMessage(sendOpts({ ...v3, fee }))
+        assert.equal(request.lane.version, CCIPVersion.V2_0)
+        const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+        assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+      })
     })
   })
 })

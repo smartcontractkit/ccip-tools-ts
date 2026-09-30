@@ -314,6 +314,29 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
     assert.throws(() => serializeV1Transaction(message, [null]), /max 64/)
   })
 
+  it('moves a heap frame request into the v1 transactionConfig', () => {
+    const message = compileV1Message({
+      ...LIMITS,
+      payerKey: PAYER.publicKey,
+      recentBlockhash: RECENT_BLOCKHASH,
+      instructions: [
+        sampleInstruction(2),
+        ComputeBudgetProgram.requestHeapFrame({ bytes: 256 * 1024 }),
+        sampleInstruction(3),
+      ],
+    })
+    assert.equal(message.transactionConfig.heapSize, 256 * 1024)
+    // no ComputeBudget instruction is left in the message: v1 carries the limits in its config
+    assert.equal(message.compiledInstructions.length, 2)
+    assert.ok(
+      message.staticAccountKeys.every((key) => !key.equals(ComputeBudgetProgram.programId)),
+      'the ComputeBudget program should not be referenced',
+    )
+    const wire = serializeV1Transaction(message, [null])
+    const tx = VersionedTransaction.deserialize(wire)
+    assert.equal((tx.message as MessageV1).transactionConfig.heapSize, 256 * 1024)
+  })
+
   describe('simulateTransaction / simulateAndSendTxs v1 fallback', () => {
     const OVERSIZED = [sampleInstruction(48, 300)] // v0 wire > 1232B, v1 wire < 4096B
     const SMALL = [sampleInstruction(4)]
@@ -611,6 +634,74 @@ describe('Solana v1 transaction support (SIMD-0385)', () => {
         { signature: 'sig-1', start: 0, end: 3 },
         { signature: 'sig-2', start: 3, end: 5 },
       ])
+    })
+
+    const HEAP_FRAME = ComputeBudgetProgram.requestHeapFrame({ bytes: 256 * 1024 })
+
+    it('simulateAndSendTxs keeps a heap frame request with the instruction after it', async () => {
+      const { connection } = mockConnection()
+      // the main instruction exhausts the budget while sharing its tx with the approval
+      const simulations = mockSimulate(connection, (tx, call) =>
+        call === 1
+          ? {
+              err: {
+                InstructionError: [
+                  tx.message.compiledInstructions.length - 1,
+                  'ComputationalBudgetExceeded',
+                ],
+              },
+              logs: [],
+            }
+          : OK,
+      )
+      const sent = mockSendV0(connection)
+
+      const { hash, slices } = await simulateAndSendTxs(
+        { connection },
+        wallet,
+        { instructions: [...SMALL, HEAP_FRAME, ...SMALL], mainIndex: 2 },
+        { split: 'resource' },
+      )
+      assert.equal(simulations.count, 3)
+      assert.equal(hash, 'sig-2')
+      // cutting right before the failed instruction would strand the heap frame in the first tx
+      assert.deepEqual(slices, [
+        { signature: 'sig-1', start: 0, end: 1 },
+        { signature: 'sig-2', start: 1, end: 3 },
+      ])
+      const heapFrames = sent.map(
+        ({ message }) =>
+          message.compiledInstructions.filter(
+            ({ programIdIndex, data }) =>
+              message.staticAccountKeys[programIdIndex]!.equals(ComputeBudgetProgram.programId) &&
+              data[0] === 1,
+          ).length,
+      )
+      assert.deepEqual(heapFrames, [0, 1])
+    })
+
+    it('simulateAndSendTxs does not split a heap frame request off its instruction', async () => {
+      const { connection, captured } = mockConnection()
+      const simulations = mockSimulate(connection, (tx) => ({
+        err: {
+          InstructionError: [
+            tx.message.compiledInstructions.length - 1,
+            'ComputationalBudgetExceeded',
+          ],
+        },
+        logs: [],
+      }))
+
+      await assert.rejects(
+        simulateAndSendTxs(
+          { connection },
+          wallet,
+          { instructions: [HEAP_FRAME, ...SMALL], mainIndex: 1 },
+          { split: 'resource' },
+        ),
+      )
+      assert.equal(simulations.count, 1)
+      assert.equal(captured.sentV0, undefined, 'nothing was sent')
     })
 
     it('simulateAndSendTxs does not shrink a slice whose first instruction fails', async () => {
