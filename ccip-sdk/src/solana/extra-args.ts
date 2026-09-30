@@ -94,8 +94,9 @@ export function encodeSolanaGenericExtraArgsV3(args: GenericExtraArgsV3): string
   const ccvArgsBytes = args.ccvArgs.map((a) => getBytes(a))
   const ccvArgsCount = toLeArray(ccvArgsBytes.length, 4)
   const ccvArgsEncoded = ccvArgsBytes.map((b) => concat([toLeArray(b.length, 4), b]))
-  // executor: Pubkey [u8; 32] — NO_EXECUTION_TAG → 32-byte zero-padded tag
-  const executorBytes = getAddressBytes(args.executor)
+  // executor: Pubkey [u8; 32] — NO_EXECUTION_TAG → 32-byte zero-padded tag; `''` (lane default)
+  // → zero Pubkey, which the router replaces with the lane's default executor
+  const executorBytes = args.executor ? getAddressBytes(args.executor) : new Uint8Array(32)
   // executor_args: Vec<u8>
   const executorArgsBytes = getBytes(args.executorArgs)
   // token_receiver: Vec<u8>

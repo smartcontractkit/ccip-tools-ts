@@ -3,7 +3,9 @@
  *
  * We deliberately keep this tiny and only describe what the SDK needs beyond the
  * v1.6 IDL: the `DestChainCcipV2` account (stored under the `dest_chain_state_v2`
- * PDA seed), the `CCIPMessageSentV2` event, plus the types they reference.
+ * PDA seed), the `CCIPMessageSentV2` event, plus the types they reference. It also
+ * carries the `ccip_send_v2` / `get_fee_v2` params and result types, whose accounts
+ * come from account resolution (see `resolution.ts`).
  * Everything else about the v2 router is handled in "compatibility mode" via the
  * existing 1.6.0 IDL — the `Config` account, for instance, is byte-compatible
  * (v2 only appends a trailing field).
@@ -139,6 +141,56 @@ export type CcipRouterV2 = {
       }
     },
     {
+      name: 'SVMTokenAmount'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'token'; type: 'publicKey' }, { name: 'amount'; type: 'u64' }]
+      }
+    },
+    {
+      name: 'SVM2AnyMessage'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'receiver'; type: 'bytes' },
+          { name: 'data'; type: 'bytes' },
+          { name: 'tokenAmounts'; type: { vec: { defined: 'SVMTokenAmount' } } },
+          { name: 'feeToken'; type: 'publicKey' },
+          { name: 'extraArgs'; type: 'bytes' },
+        ]
+      }
+    },
+    {
+      name: 'CcipSendV2Params'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'destChainSelector'; type: 'u64' },
+          { name: 'message'; type: { defined: 'SVM2AnyMessage' } },
+          { name: 'resolutionMetadata'; type: 'bytes' },
+        ]
+      }
+    },
+    {
+      name: 'GetFeeParams'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'destChainSelector'; type: 'u64' },
+          { name: 'sender'; type: 'publicKey' },
+          { name: 'message'; type: { defined: 'SVM2AnyMessage' } },
+          { name: 'resolutionMetadata'; type: 'bytes' },
+        ]
+      }
+    },
+    {
+      name: 'GetFeeResultV2'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'amount'; type: 'u64' }, { name: 'token'; type: 'publicKey' }]
+      }
+    },
+    {
       name: 'CodeVersion'
       type: { kind: 'enum'; variants: [{ name: 'Default' }, { name: 'V1' }] }
     },
@@ -265,6 +317,62 @@ export const IDL: CcipRouterV2 = {
           { name: 'tokenTransferNetworkFee', type: 'u32' },
           { name: 'baseExecutionGasCost', type: 'u32' },
           { name: 'maxFeePerMessage', type: 'u32' },
+        ],
+      },
+    },
+    {
+      name: 'SVMTokenAmount',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'token', type: 'publicKey' },
+          { name: 'amount', type: 'u64' },
+        ],
+      },
+    },
+    {
+      name: 'SVM2AnyMessage',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'receiver', type: 'bytes' },
+          { name: 'data', type: 'bytes' },
+          { name: 'tokenAmounts', type: { vec: { defined: 'SVMTokenAmount' } } },
+          { name: 'feeToken', type: 'publicKey' },
+          { name: 'extraArgs', type: 'bytes' },
+        ],
+      },
+    },
+    {
+      name: 'CcipSendV2Params',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'destChainSelector', type: 'u64' },
+          { name: 'message', type: { defined: 'SVM2AnyMessage' } },
+          { name: 'resolutionMetadata', type: 'bytes' },
+        ],
+      },
+    },
+    {
+      name: 'GetFeeParams',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'destChainSelector', type: 'u64' },
+          { name: 'sender', type: 'publicKey' },
+          { name: 'message', type: { defined: 'SVM2AnyMessage' } },
+          { name: 'resolutionMetadata', type: 'bytes' },
+        ],
+      },
+    },
+    {
+      name: 'GetFeeResultV2',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'amount', type: 'u64' },
+          { name: 'token', type: 'publicKey' },
         ],
       },
     },

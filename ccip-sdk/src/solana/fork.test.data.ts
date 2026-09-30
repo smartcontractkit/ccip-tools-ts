@@ -92,3 +92,25 @@ export const SOLANA_ESTIMATE_RECEIVER_MESSAGE: EstimateMessageInput = {
   ],
   accountIsWritableBitmap: 42n,
 }
+
+// CCIP 2.0 private staging deployment on Solana devnet (selector 16423721717087811551), used by
+// the account resolution fork tests. `sendLookupTable` is the deployment's fixed ccip_send lookup
+// table: resolution only returns the lookup tables it discovers (e.g. token pools'), so callers
+// add this one themselves, and token transfers only fit a v0 transaction with it.
+export const SOLANA_DEVNET_V2_STAGING = {
+  router: 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm',
+  offRamp: 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr',
+  sendLookupTable: '61yGrR9h9YU7wq5b3LiYSdePou1iAg5giaVMBig8fK6m',
+  committeeVerifier: 'CVMVgsQYG7NHp7NY2XWCNkXjxAw5E14dnFHNu8e2Gt3M',
+  executor: 'Exet1XoEHNwruTsyjsB2v9JrgBQm8EPVzncJ3gkAP14w',
+  sepoliaSelector: 16015286601757825753n,
+  // SPL token with a BurnMint 2.0 pool on the Sepolia lane
+  sepoliaToken: '3pGvaqUczmzrxA62F1egTf9wpwJ6WNLoPQ823eCXmipc',
+  sepoliaTokenPool: '29VTYP3rprC2vQPUteiR45UTsHWD2L2QXAseJmMeEpWZ',
+  // landed ccip_send_v2 (Solana -> Sepolia) and execute_v2 (Sepolia -> Solana) transactions
+  sendTx:
+    '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5',
+  executeTx:
+    '4qeWX8ELjDt57JLDuDsSW3jYzP915R7wyXLWMshPZJkiDVxt1HAv2DTqmNow64Nxns8PSgrX1vLTYHWTabjFztDM',
+  executeMessageId: '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f',
+} as const
