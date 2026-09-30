@@ -13,7 +13,9 @@
  * has no on-chain guard, and a mismatch moves an asset the destination pool does not manage.
  *
  * @remarks `SiloedLockReleaseTokenPool` does not declare `transferLiquidity` — its liquidity is
- * partitioned per lane — so a siloed destination is rejected by type rather than by version.
+ * partitioned per lane — so a siloed destination is rejected by type rather than by version. A
+ * siloed *source* is accepted, but only its unsiloed bucket moves: `withdrawLiquidity(uint256)`
+ * pays out of nothing else.
  *
  * @remarks **Removed in v2.0.0**, where a LockRelease pool escrows through an external
  * `ERC20LockBox` instead of holding liquidity itself.
@@ -37,6 +39,7 @@ import {
   TokenPoolVersion,
   assertLockReleasePool,
   assertPoolOwner,
+  describeLiquidity,
   getTokenPoolInterface,
   readTokenPoolLiquidity,
   readTokenPoolRebalancer,
@@ -63,7 +66,8 @@ export type TransferLiquidityParams = {
    * Amount of the pool's token to move (`uint256`), in the token's smallest unit.
    * @remarks `MaxUint256` is a v1.6.1 sentinel meaning "the source pool's whole balance". A
    * v1.5.x pool has no such branch and would try to withdraw that literal amount, so it is
-   * rejected there rather than left to revert.
+   * rejected there rather than left to revert. It is also rejected for a siloed `from`, which
+   * pays out of its unsiloed bucket only, never its whole balance.
    */
   amount: bigint
   /**
@@ -81,14 +85,17 @@ type Encoder = (iface: Interface, params: TransferLiquidityParams) => UnsignedEV
 const encodeTransferLiquidity: Encoder = (iface, { poolAddress, from, amount }) =>
   callTx(poolAddress, iface.encodeFunctionData('transferLiquidity', [from, amount]))
 
-/** Migrates liquidity from an older LockRelease pool into this one (v1.5.0–v1.6.1). Owner-only. */
 /**
  * Pre-flights what the *source* pool decides: that it is a LockRelease pool escrowing the same
- * token as the destination, that it pays out to the destination, and that it holds the amount.
+ * token as the destination, that it pays out to the destination, and that it holds the amount —
+ * its unsiloed liquidity, on a siloed pool.
  *
  * @remarks The token check is the one with no on-chain counterpart. A mismatch does not revert:
  * the destination takes whatever `from.withdrawLiquidity` pays out, so it silently receives an
  * asset it does not escrow.
+ * @remarks The sentinel is rejected for a siloed `from`: the destination substitutes
+ * `balanceOf(from)`, which includes the per-lane silos, while `withdrawLiquidity` pays only the
+ * unsiloed bucket, so the call reverts whenever any silo is funded.
  * @param operation - Operation name, for the errors' `operation` field.
  * @param chain - Chain to read from.
  * @param destination - The pool being written to, which must be `from`'s rebalancer.
@@ -96,9 +103,9 @@ const encodeTransferLiquidity: Encoder = (iface, { poolAddress, from, amount }) 
  * @param amount - Transfer amount, or `undefined` for the transfer-all sentinel, where the pool
  * substitutes the source's own balance and there is nothing to compare.
  * @throws {@link CCTContractTypeInvalidError} if `from` is not a LockRelease pool
- * @throws {@link CCTParamsInvalidError} if `from` escrows a different token or does not have
- * `destination` as its rebalancer
- * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+ * @throws {@link CCTParamsInvalidError} if `from` is a v2.0.0 pool, escrows a different token or
+ * does not have `destination` as its rebalancer, or `amount` is the sentinel and `from` is siloed
+ * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
  */
 async function assertSourcePool(
   operation: string,
@@ -107,12 +114,24 @@ async function assertSourcePool(
   from: string,
   amount: bigint | undefined,
 ): Promise<void> {
-  const { type } = await resolveTokenPool(chain, from)
+  const { type, version } = await resolveTokenPool(chain, from)
   assertLockReleasePool(operation, from, type)
+  if (version === TokenPoolVersion.V2_0_0)
+    throw new CCTParamsInvalidError(
+      operation,
+      'from',
+      `${from} is a v2.0.0 pool, which escrows through an ERC20LockBox and has no withdrawLiquidity to transfer from`,
+    )
+  if (amount === undefined && type === 'SiloedLockReleaseTokenPool')
+    throw new CCTParamsInvalidError(
+      operation,
+      'amount',
+      `MaxUint256 would withdraw the whole balance of siloed pool ${from}, but its withdrawLiquidity pays only the unsiloed bucket and would revert InsufficientLiquidity; pass its getUnsiloedLiquidity() amount instead`,
+    )
 
   const [{ token: destinationToken }, source, rebalancer] = await Promise.all([
     readTokenPoolToken(chain, destination),
-    readTokenPoolLiquidity(chain, from),
+    readTokenPoolLiquidity(chain, from, type),
     readTokenPoolRebalancer(chain, from),
   ])
   if (source.token !== destinationToken)
@@ -130,10 +149,11 @@ async function assertSourcePool(
   if (amount !== undefined && source.liquidity < amount)
     throw new CCTTxFailedError(
       operation,
-      `source pool ${from} holds ${source.liquidity} of ${source.token}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
+      `source pool ${from} ${describeLiquidity(type, source.liquidity, source.token)}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
     )
 }
 
+/** Migrates liquidity from an older LockRelease pool into this one (v1.5.0–v1.6.1). Owner-only. */
 export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
   readonly name = 'transferLiquidity'
 
@@ -174,10 +194,11 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
    * destination is siloed
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 destination pool, which escrows
    * through an `ERC20LockBox` instead
-   * @throws {@link CCTParamsInvalidError} if `amount` is `MaxUint256` on a v1.5.x pool, the pools
-   * escrow different tokens, `from` does not have the destination pool as its rebalancer, or
-   * `sender` is given and does not own the destination pool
-   * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+   * @throws {@link CCTParamsInvalidError} if `amount` is `MaxUint256` on a v1.5.x pool or from a
+   * siloed source, `from` is a v2.0.0 pool, the pools escrow different tokens, `from` does not
+   * have the destination pool as its rebalancer, or `sender` is given and does not own the
+   * destination pool
+   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(

@@ -693,8 +693,8 @@ export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string)
  *
  * @remarks Only declared at v1.5.0 and v1.5.1, where the constructor fixes `i_acceptLiquidity`
  * *immutable*: a pool deployed with it `false` rejects every deposit with `LiquidityNotAccepted`
- * for its whole lifetime, which is why that is worth one call to catch before signing. v1.6.1
- * dropped the flag and always accepts, so callers must not reach here for it. Same shape as
+ * for its whole lifetime, which is why that is worth one call to catch before signing. v1.6.x
+ * pools have no flag and always accept, so callers must not reach here for it. Same shape as
  * {@link readTokenPoolAllowlist}'s `enabled`.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool to read from; must be v1.5.0 or v1.5.1.
@@ -776,7 +776,8 @@ export async function assertLiquidityFunding(
 }
 
 /**
- * Pre-flights a withdrawal against the pool's own ERC-20 balance, which is what it pays out of.
+ * Pre-flights a `withdrawLiquidity` against what the pool can pay out of: its own ERC-20 balance,
+ * or on a `SiloedLockReleaseTokenPool` its unsiloed liquidity ({@link readTokenPoolLiquidity}).
  *
  * @remarks Weaker than {@link assertLiquidityFunding}: a pool's balance moves with every CCIP
  * transfer through it, so this catches "withdraw more than was ever provided" rather than proving
@@ -784,38 +785,69 @@ export async function assertLiquidityFunding(
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool being withdrawn from.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
  * @param amount - Withdrawal amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if the pool's balance is below `amount`
+ * @throws {@link CCTTxFailedError} if the pool's withdrawable liquidity is below `amount`
  */
 export async function assertPoolLiquidity(
   operation: string,
   chain: EVMChain,
   poolAddress: string,
+  type: TokenPoolType,
   amount: bigint,
 ): Promise<void> {
-  const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress)
+  const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress, type)
   if (liquidity >= amount) return
   throw new CCTTxFailedError(
     operation,
-    `pool ${poolAddress} holds ${liquidity} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+    `pool ${poolAddress} ${describeLiquidity(type, liquidity, token)}, but ${amount} is required; it would revert InsufficientLiquidity`,
   )
 }
 
 /**
- * A pool's liquidity and the token it is denominated in, from one pair of calls.
+ * A pool's withdrawable liquidity and the token it is denominated in.
  *
  * @remarks Returns the token as well so `transferLiquidity`, which checks both pools escrow the
  * same one, needs no second read.
+ * @remarks On a `SiloedLockReleaseTokenPool` this is `getUnsiloedLiquidity()`, not the pool's
+ * balance: the plain `withdrawLiquidity(uint256)` pays only out of the unsiloed bucket, while the
+ * balance also holds every per-lane silo. Read against the v1.6.0 siloed ABI at v1.6.1 too, where
+ * the type resolves to the LockRelease interface, which does not declare it; the selector is the
+ * same.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool to read.
- * @returns The escrowed token, checksummed, and the pool's balance of it.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @returns The escrowed token, checksummed, and the liquidity `withdrawLiquidity` can pay out.
  */
 export async function readTokenPoolLiquidity(
   chain: EVMChain,
   poolAddress: string,
+  type: TokenPoolType,
 ): Promise<{ token: string; liquidity: bigint }> {
+  if (type === 'SiloedLockReleaseTokenPool') {
+    const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+    const [{ token }, liquidity] = await Promise.all([
+      readTokenPoolToken(chain, poolAddress),
+      pool.getUnsiloedLiquidity(),
+    ])
+    return { token, liquidity }
+  }
   const { token, erc20 } = await readTokenPoolToken(chain, poolAddress)
   return { token, liquidity: await erc20.balanceOf(poolAddress) }
+}
+
+/**
+ * The "holds N of token" clause of an insufficient-liquidity error, naming the unsiloed bucket on
+ * a siloed pool so the figure is not mistaken for its balance.
+ * @param type - Pool type the liquidity was read for.
+ * @param liquidity - As returned by {@link readTokenPoolLiquidity}.
+ * @param token - The escrowed token.
+ * @returns The clause, with no subject.
+ */
+export function describeLiquidity(type: TokenPoolType, liquidity: bigint, token: string): string {
+  return type === 'SiloedLockReleaseTokenPool'
+    ? `has ${liquidity} of ${token} in unsiloed liquidity`
+    : `holds ${liquidity} of ${token}`
 }
 
 /**

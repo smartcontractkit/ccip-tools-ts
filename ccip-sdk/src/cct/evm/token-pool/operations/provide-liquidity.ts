@@ -83,7 +83,7 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
    * @remarks The v1.5.x `canAcceptLiquidity()` read is a property of the pool, not of the caller,
    * so it runs first: `i_acceptLiquidity` is set *immutable* in the constructor, so a pool
    * deployed with it `false` reverts every `provideLiquidity` for its whole lifetime and no
-   * choice of sender helps. v1.6.1 dropped the flag and always accepts.
+   * choice of sender helps. v1.6.x pools have no flag and always accept.
    * @remarks The checks live here, not in {@link execute}, so the offline / multisig path gets
    * them too rather than being handed a transaction that reverts once signed. The funding check
    * needs a depositor, so it runs only with a `sender`.

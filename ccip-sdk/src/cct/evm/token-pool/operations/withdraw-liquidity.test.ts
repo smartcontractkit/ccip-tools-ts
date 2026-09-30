@@ -37,16 +37,21 @@ const newSeen = (): Seen => ({ calls: [] })
 /** ERC-20 side of the pool-balance pre-flight, answered off a fresh Interface. */
 const ERC20 = new Interface(['function balanceOf(address account) view returns (uint256)'])
 
+/** Siloed side of the pre-flight: what the plain `withdrawLiquidity` actually pays out of. */
+const SILOED = new Interface(['function getUnsiloedLiquidity() view returns (uint256)'])
+
 /**
  * EVMChain stub: `typeAndVersion` reports the requested pool type/version, and `provider.call`
  * answers the reads this op makes — `getRebalancer()` and `getToken()` on the pool, then
- * `balanceOf` on that token. Any other selector reverts, which is what pins "no other RPC".
+ * `balanceOf` on that token, or `getUnsiloedLiquidity()` on a siloed pool. Any other selector
+ * reverts, which is what pins "no other RPC".
  */
 function stubChain({
   type = 'LockReleaseTokenPool',
   version = '1.5.0' as TokenPoolVersion,
   rebalancer = REBALANCER,
   poolBalance = AMOUNT,
+  unsiloedLiquidity = AMOUNT,
   seen = newSeen(),
 }: {
   type?: string
@@ -54,6 +59,8 @@ function stubChain({
   rebalancer?: string
   /** The pool's balance of the escrowed token; defaults to exactly the withdrawal. */
   poolBalance?: bigint
+  /** A siloed pool's `getUnsiloedLiquidity()`; defaults to exactly the withdrawal. */
+  unsiloedLiquidity?: bigint
   seen?: Seen
 } = {}): EVMChain {
   const iface = TOKEN_POOL_INTERFACES.LockRelease['1.5.1']
@@ -74,6 +81,12 @@ function stubChain({
         if (ERC20.getFunction(selector)?.name === 'balanceOf') {
           seen.calls.push('balanceOf')
           return Promise.resolve(ERC20.encodeFunctionResult('balanceOf', [poolBalance]))
+        }
+        if (SILOED.getFunction(selector)?.name === 'getUnsiloedLiquidity') {
+          seen.calls.push('getUnsiloedLiquidity')
+          return Promise.resolve(
+            SILOED.encodeFunctionResult('getUnsiloedLiquidity', [unsiloedLiquidity]),
+          )
         }
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
@@ -150,12 +163,12 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, dataFor(amount))
     })
 
-    it('accepts a siloed pool, which takes the same call', async () => {
-      const unsigned = await generate(
-        stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.6.1' }),
-      )
-      assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
-    })
+    for (const version of ['1.6.0', '1.6.1'] as const) {
+      it(`accepts a siloed ${version} pool, which takes the same call`, async () => {
+        const unsigned = await generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version }))
+        assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
+      })
+    }
 
     it('omits from — and skips the rebalancer read — when sender is not supplied', async () => {
       const seen = newSeen()
@@ -244,6 +257,31 @@ describe('WithdrawLiquidity (cct/evm)', () => {
           /InsufficientLiquidity/.test(err.message),
       )
     })
+
+    for (const version of ['1.6.0', '1.6.1'] as const) {
+      const siloed = { type: 'SiloedLockReleaseTokenPool', version, poolBalance: AMOUNT * 5n }
+
+      it(`rejects a siloed ${version} withdrawal above the unsiloed liquidity, though the balance covers it`, async () => {
+        const seen = newSeen()
+        await assert.rejects(
+          () => generate(stubChain({ ...siloed, unsiloedLiquidity: AMOUNT - 1n, seen })),
+          (err: unknown) =>
+            err instanceof CCTTxFailedError &&
+            err.context.operation === 'withdrawLiquidity' &&
+            /has 999999999999999999 of .* in unsiloed liquidity/.test(err.message) &&
+            /InsufficientLiquidity/.test(err.message),
+        )
+        // the siloed buckets sit in the same balance, so it is not what the check reads
+        assert.ok(!seen.calls.includes('balanceOf'))
+      })
+
+      it(`accepts a siloed ${version} withdrawal within the unsiloed liquidity`, async () => {
+        const seen = newSeen()
+        const unsigned = await generate(stubChain({ ...siloed, seen }))
+        assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
+        assert.ok(seen.calls.includes('getUnsiloedLiquidity'))
+      })
+    }
 
     it('accepts a withdrawal below the pool balance', async () => {
       const unsigned = await generate(stubChain({ poolBalance: AMOUNT * 5n }))
