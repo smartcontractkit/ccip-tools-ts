@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-sdk",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "SDK/Library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -80,7 +80,7 @@
     "prool": "^0.2.16",
     "protobufjs": "^8.8.0",
     "typescript": "7.0.2",
-    "viem": "^2.56.5"
+    "viem": "^2.56.8"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^7.3.0",
@@ -90,7 +90,7 @@
     "@metaplex-foundation/umi-bundle-defaults": "1.6.0",
     "@metaplex-foundation/umi-web3js-adapters": "1.6.0",
     "@mysten/bcs": "^2.1.1",
-    "@mysten/sui": "^2.31.0",
+    "@mysten/sui": "^2.31.3",
     "@noble/hashes": "^2.4.0",
     "@solana/spl-token": "0.4.15",
     "@solana/web3.js": "^1.99.0",

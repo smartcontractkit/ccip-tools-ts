@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-09-30
+
 - CCT SDK: new `@chainlink/ccip-sdk/cct/{evm,solana,canton}` entrypoints for deploying and managing Cross-Chain Tokens on EVM, Solana and Canton. Covers the full CCT lifecycle: deploy a token and its pool (burn/mint or lock/release), register it in the Token Admin Registry and transfer admin rights, connect remote chains, and set rate limits and allowlists. Each operation can return unsigned transactions for external signing or be signed and sent directly, and failures come back as typed errors.
 - Solana: `getFee`, `generateUnsignedSendMessage` and `sendMessage` send over CCIP 2.0 (`ccip_send_v2`, accounts from the router's on-chain account resolution) whenever the lane supports it, per `observe_dest_chain_v2`, falling back to the 1.6 `ccip_send` otherwise. Legacy extraArgs (e.g. `{ gasLimit }`) prefer 2.0, converted to `GenericExtraArgsV3` with lane defaults, and fall back to 1.6; `GenericExtraArgsV3` requires 2.0, and throws `CCIPSolanaV2LaneUnavailableError` without it. A 2.0 lane whose allowlist excludes the sender counts as unsupported
 - SDK: `getFee` takes an optional `sender`, for families whose route or fee depends on it. Solana requires it on CCIP 2.0 lanes with a sender allowlist (`CCIPArgumentInvalidError` without it), so quotes follow the entrypoint `sendMessage` will use; the CLI's `send` passes its wallet's address
