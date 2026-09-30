@@ -698,10 +698,13 @@ export type SolanaSentSlice = { signature: string; start: number; end: number }
  * Returns the end of the next slice to try after simulating `instructions[start:end]` failed
  * with `err`, or undefined if `split` doesn't allow splitting on it (or splitting can't help).
  * An instruction error cuts the slice right before the failed instruction, since the ones before
- * it succeeded; other splittable errors (e.g. size) drop the last instruction.
+ * it succeeded; other splittable errors (e.g. size) drop the last instruction. A compute-budget
+ * instruction (e.g. a heap frame request) configures its transaction for the instruction after it,
+ * so a cut never separates the two.
  */
 function nextSliceEnd(
   err: unknown,
+  instructions: readonly TransactionInstruction[],
   start: number,
   end: number,
   split: SolanaSplitMode,
@@ -714,9 +717,14 @@ function nextSliceEnd(
   )
     return
   const failed = getInstructionError(err)?.index
-  if (failed == null || failed < 0 || failed >= end - start) return end - 1
+  let next
+  if (failed == null || failed < 0 || failed >= end - start) next = end - 1
   // the first instruction fails on its own: a shorter slice would fail the same way
-  if (failed > 0) return start + failed
+  else if (failed > 0) next = start + failed
+  else return
+  while (next > start && instructions[next - 1]!.programId.equals(ComputeBudgetProgram.programId))
+    next--
+  if (next > start) return next
 }
 
 /**
@@ -785,7 +793,7 @@ export async function simulateAndSendTxs(
             .loadedAccountsDataSize
           break
         } catch (err) {
-          const next = nextSliceEnd(err, start, end, split)
+          const next = nextSliceEnd(err, instructions, start, end, split)
           if (next == null) throw err
           end = next
         }
