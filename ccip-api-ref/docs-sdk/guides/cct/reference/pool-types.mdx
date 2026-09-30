@@ -1,0 +1,76 @@
+---
+id: pool-types
+title: 'CCT pool types and version support'
+description: 'Which token pool types the SDK deploys, wraps in the factory, and recognizes across pool versions.'
+sidebar_label: 'Pool types'
+---
+
+# CCT pool types and version support
+
+The EVM CCT operations work with several token pool contract types across five pool versions (v1.5.0, v1.5.1, v1.6.0, v1.6.1, and v2.0.0). Version v1.6.0 applies only to `SiloedLockReleaseTokenPool`, the one pool the 1.6.0 release stamped; every other type reports v1.5.x, v1.6.1, or v2.0.0. What the SDK can *deploy* is narrower than what it can *administer and read*: new pools are always v2.0.0, while the read and configuration operations recognize older pools too. Use these matrices to pick a deployable type and to check whether an operation applies to a given pool.
+
+## Deployable and recognized pool types
+
+`deployTokenPool` and the [TokenPoolFactory](../evm#alternative-deploy-via-tokenpoolfactory) deploy v2.0.0 pools only. The read and administration operations recognize all seven pool types across every supported version.
+
+| Pool type | `deployTokenPool` | Factory | Administer / read |
+| --- | --- | --- | --- |
+| `BurnMintTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
+| `BurnFromMintTokenPool` | Yes (v2.0.0) | No | v1.5.0 to v2.0.0 |
+| `BurnWithFromMintTokenPool` | Yes (v2.0.0) | No | v1.5.0 to v2.0.0 |
+| `LockReleaseTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
+| `BurnToAddressTokenPool` | No | No | v1.5.0 to v2.0.0 |
+| `BurnMintWithLockReleaseFlagTokenPool` | No | No | v1.5.0 to v2.0.0 |
+| `SiloedLockReleaseTokenPool` | No | No | v1.5.0 to v2.0.0 |
+
+## Operation applicability by pool version
+
+A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved pool is older, and the sender allowlist exists only through v1.6.1. Read the pool version (`getTokenPoolState`) before calling a version-scoped operation.
+
+| Operation group | Methods | Applies to |
+| --- | --- | --- |
+| Remote lanes | `applyChainUpdates` | All versions (declare the matching `version` shape) |
+| Rate limits | `setChainRateLimiterConfigs` | All versions (`fastFinality` targets the v2.0.0 FTF bucket only) |
+| Admin & pool registration | `registerAdmin`, `acceptAdmin`, `setPool`, ownership transfers | All versions |
+| Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry` | All versions |
+| Sender allowlist | `applyAllowlistUpdates` | v1.5.0 to v1.6.1 only (removed in v2.0.0) |
+| Transfer fees & finality | `applyTokenTransferFeeConfigUpdates`, `setAllowedFinalityConfig`, `getFee`, `getTokenTransferFeeConfig`, `getAllowedFinalityConfig` | v2.0.0 only |
+| CCVs & hooks | `applyCCVConfigUpdates`, `getCCVConfig`, `getAllCCVConfigs`, `getRequiredCCVs`, `deployAdvancedPoolHooks`, `updateAdvancedPoolHooks`, `getAdvancedPoolHooks` | v2.0.0 only |
+| Lockbox | `getLockbox` | v2.0.0 only |
+
+## Siloed liquidity pools
+
+`SiloedLockReleaseTokenPool` escrows liquidity per remote lane. Each siloed lane holds its own balance, isolated from the shared *unsiloed* bucket that serves every non-siloed lane. The SDK works with the unsiloed side only:
+
+- `provideLiquidity`, `withdrawLiquidity`, `transferLiquidity`, and `setRebalancer` act on the **unsiloed** bucket and its rebalancer. On a siloed pool they measure available funds with `getUnsiloedLiquidity()`, not the pool's full token balance (which also holds every siloed lane's escrow), so a pre-flight matches what the plain `withdrawLiquidity(uint256)` can actually pay out.
+- The contract also exposes per-lane operations: `provideSiloedLiquidity`, `withdrawSiloedLiquidity`, `setSiloRebalancer`, and `updateSiloDesignations`. These are **not exposed by the SDK**. To manage a specific lane's silo, call the pool contract directly.
+
+The SDK does not deploy siloed pools (see the deploy matrix above): deploy one from the contract's creation code, then administer and read it with the SDK.
+
+## Source code
+
+### EVM
+
+Each cell links the pool contract at a version-pinned commit. An `n/a` cell means the type does not exist at that version. The v1.5.x contracts live in `smartcontractkit/ccip`, while v1.6.0, v1.6.1, and v2.0.0 all moved to `smartcontractkit/chainlink-ccip`, where only `SiloedLockReleaseTokenPool` was stamped v1.6.0.
+
+| Contract | v1.5.0 | v1.5.1 | v1.6.0 | v1.6.1 | v2.0.0 |
+| --- | --- | --- | --- | --- | --- |
+| `BurnMintTokenPool` | [src](https://github.com/smartcontractkit/ccip/blob/b5529a39311a2fd39cafceb62e4bb8f40eeb2e9e/contracts/src/v0.8/ccip/pools/BurnMintTokenPool.sol) | [src](https://github.com/smartcontractkit/ccip/blob/478f0e5c44d2ba578f36e351cc332c4e6c7a9daa/contracts/src/v0.8/ccip/pools/BurnMintTokenPool.sol) | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/BurnMintTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/BurnMintTokenPool.sol) |
+| `BurnFromMintTokenPool` | [src](https://github.com/smartcontractkit/ccip/blob/b5529a39311a2fd39cafceb62e4bb8f40eeb2e9e/contracts/src/v0.8/ccip/pools/BurnFromMintTokenPool.sol) | [src](https://github.com/smartcontractkit/ccip/blob/478f0e5c44d2ba578f36e351cc332c4e6c7a9daa/contracts/src/v0.8/ccip/pools/BurnFromMintTokenPool.sol) | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/BurnFromMintTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/BurnFromMintTokenPool.sol) |
+| `BurnWithFromMintTokenPool` | [src](https://github.com/smartcontractkit/ccip/blob/b5529a39311a2fd39cafceb62e4bb8f40eeb2e9e/contracts/src/v0.8/ccip/pools/BurnWithFromMintTokenPool.sol) | [src](https://github.com/smartcontractkit/ccip/blob/478f0e5c44d2ba578f36e351cc332c4e6c7a9daa/contracts/src/v0.8/ccip/pools/BurnWithFromMintTokenPool.sol) | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/BurnWithFromMintTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/BurnWithFromMintTokenPool.sol) |
+| `LockReleaseTokenPool` | [src](https://github.com/smartcontractkit/ccip/blob/b5529a39311a2fd39cafceb62e4bb8f40eeb2e9e/contracts/src/v0.8/ccip/pools/LockReleaseTokenPool.sol) | [src](https://github.com/smartcontractkit/ccip/blob/478f0e5c44d2ba578f36e351cc332c4e6c7a9daa/contracts/src/v0.8/ccip/pools/LockReleaseTokenPool.sol) | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/LockReleaseTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/LockReleaseTokenPool.sol) |
+| `BurnToAddressTokenPool` | n/a | n/a | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/BurnToAddressMintTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/BurnToAddressMintTokenPool.sol) |
+| `BurnMintWithLockReleaseFlagTokenPool` | n/a | n/a | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/USDC/BurnMintWithLockReleaseFlagTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/USDC/BurnMintWithLockReleaseFlagTokenPool.sol) |
+| `SiloedLockReleaseTokenPool` | n/a | n/a | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/432f2df19386dc50454aa2f50b25bbc042c49fd6/chains/evm/contracts/pools/SiloedLockReleaseTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/bbab0601244ce58e2ffac0dbc178a80aab1fa4a3/chains/evm/contracts/pools/SiloedLockReleaseTokenPool.sol) | [src](https://github.com/smartcontractkit/chainlink-ccip/blob/c2c125c27f056db2e98d21501922b6eff5750f36/chains/evm/contracts/pools/SiloedLockReleaseTokenPool.sol) |
+
+### Solana
+
+Solana has one burn-mint program and one lock-release program, with no type-and-version matrix. Both are pinned to the `solana-v1.6.4` release tag.
+
+- burn-mint (`poolType: 'burn-mint'`): [burnmint-token-pool](https://github.com/smartcontractkit/chainlink-ccip/tree/c73892d4d33926195eee87b77013883e650a833c/chains/solana/contracts/programs/burnmint-token-pool)
+- lock-release (`poolType: 'lock-release'`): [lockrelease-token-pool](https://github.com/smartcontractkit/chainlink-ccip/tree/c73892d4d33926195eee87b77013883e650a833c/chains/solana/contracts/programs/lockrelease-token-pool)
+
+## Related
+
+- [CCT on EVM](../evm): the end-to-end EVM walkthrough
+- [Inspecting pools](./inspecting-pools): read deployed pool configuration and rate limits

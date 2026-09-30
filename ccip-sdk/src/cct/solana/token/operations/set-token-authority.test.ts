@@ -1,0 +1,340 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { MINT_SIZE, MintLayout, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { Keypair, PublicKey } from '@solana/web3.js'
+
+import {
+  CCIPTokenDataParseError,
+  CCIPTokenMintInvalidError,
+  CCIPTokenMintNotFoundError,
+} from '../../../../errors/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
+import type { SolanaChain } from '../../../../solana/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { SetTokenAuthority } from './set-token-authority.ts'
+
+const TOKEN = Keypair.generate().publicKey.toBase58()
+const PAYER = Keypair.generate().publicKey.toBase58()
+const AUTHORITY = Keypair.generate().publicKey.toBase58()
+const NEW_AUTHORITY = Keypair.generate().publicKey.toBase58()
+const MULTISIG = Keypair.generate().publicKey.toBase58()
+const MULTISIG_SIGNER_1 = Keypair.generate().publicKey.toBase58()
+const MULTISIG_SIGNER_2 = Keypair.generate().publicKey.toBase58()
+const HASH = Keypair.generate().publicKey.toBase58()
+const WALLET = {
+  publicKey: Keypair.generate().publicKey,
+  signTransaction: async <T>(tx: T) => tx,
+}
+
+function mintData(
+  mintAuthority: PublicKey | null = new PublicKey(AUTHORITY),
+  freezeAuthority: PublicKey | null = mintAuthority,
+): Buffer {
+  const data = Buffer.alloc(MINT_SIZE)
+  MintLayout.encode(
+    {
+      mintAuthorityOption: mintAuthority ? 1 : 0,
+      mintAuthority: mintAuthority ?? PublicKey.default,
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthorityOption: freezeAuthority ? 1 : 0,
+      freezeAuthority: freezeAuthority ?? PublicKey.default,
+    },
+    data,
+  )
+  return data
+}
+
+function chain(
+  mintOwner: PublicKey | null = TOKEN_PROGRAM_ID,
+  mintAuthority: PublicKey | null = new PublicKey(AUTHORITY),
+  freezeAuthority: PublicKey | null = mintAuthority,
+): SolanaChain {
+  return {
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    connection: {
+      getAccountInfo: async () =>
+        mintOwner ? { owner: mintOwner, data: mintData(mintAuthority, freezeAuthority) } : null,
+    },
+  } as unknown as SolanaChain
+}
+
+function submitChain(): SolanaChain {
+  return Object.assign(chain(TOKEN_PROGRAM_ID, WALLET.publicKey), {
+    connection: {
+      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID, data: mintData(WALLET.publicKey) }),
+      simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+      getLatestBlockhash: async () => ({
+        blockhash: PublicKey.default.toBase58(),
+        lastValidBlockHeight: 1,
+      }),
+      sendTransaction: async () => HASH,
+      confirmTransaction: async () => ({ value: { err: null } }),
+    },
+  })
+}
+
+function generate(
+  opts: Record<string, unknown> = {},
+  mintOwner?: PublicKey | null,
+  mintAuthority?: PublicKey | null,
+  freezeAuthority?: PublicKey | null,
+) {
+  return new SetTokenAuthority().generate(chain(mintOwner, mintAuthority, freezeAuthority), {
+    tokenAddress: TOKEN,
+    payer: PAYER,
+    authority: AUTHORITY,
+    newAuthority: NEW_AUTHORITY,
+    authorityTypes: ['mint', 'freeze'],
+    ...opts,
+  })
+}
+
+describe('SetTokenAuthority (cct/solana)', () => {
+  describe('generate', () => {
+    it('builds selected mint and freeze authority updates', async () => {
+      const unsigned = await generate()
+
+      assert.equal(unsigned.family, ChainFamily.Solana)
+      assert.equal(unsigned.mainIndex, 0)
+      assert.equal(unsigned.instructions.length, 2)
+      assert.deepEqual(
+        unsigned.instructions.map((instruction) => ({
+          programId: instruction.programId.toBase58(),
+          authorityType: instruction.data[1],
+          mint: instruction.keys[0]!.pubkey.toBase58(),
+          authority: instruction.keys[1]!.pubkey.toBase58(),
+          newAuthority: instruction.data.subarray(3).toString('hex'),
+        })),
+        [
+          {
+            programId: TOKEN_PROGRAM_ID.toBase58(),
+            authorityType: 0, // MintTokens
+            mint: TOKEN,
+            authority: AUTHORITY,
+            newAuthority: new PublicKey(NEW_AUTHORITY).toBuffer().toString('hex'),
+          },
+          {
+            programId: TOKEN_PROGRAM_ID.toBase58(),
+            authorityType: 1, // FreezeAccount
+            mint: TOKEN,
+            authority: AUTHORITY,
+            newAuthority: new PublicKey(NEW_AUTHORITY).toBuffer().toString('hex'),
+          },
+        ],
+      )
+    })
+
+    it('builds only the selected authority update for Token-2022', async () => {
+      const unsigned = await generate({ authorityTypes: ['freeze'] }, TOKEN_2022_PROGRAM_ID)
+
+      assert.equal(unsigned.instructions.length, 1)
+      assert.equal(unsigned.instructions[0]!.programId.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58())
+      assert.equal(unsigned.instructions[0]!.data[1], 1) // FreezeAccount
+    })
+
+    it('includes SPL multisig member signers', async () => {
+      const unsigned = await generate(
+        {
+          authority: MULTISIG,
+          authorityTypes: ['mint'],
+          multisigSigners: [MULTISIG_SIGNER_1, MULTISIG_SIGNER_2],
+        },
+        TOKEN_PROGRAM_ID,
+        new PublicKey(MULTISIG),
+      )
+
+      assert.deepEqual(
+        unsigned.instructions[0]!.keys.map(({ pubkey, isSigner, isWritable }) => ({
+          pubkey: pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        })),
+        [
+          { pubkey: TOKEN, isSigner: false, isWritable: true },
+          { pubkey: MULTISIG, isSigner: false, isWritable: false },
+          { pubkey: MULTISIG_SIGNER_1, isSigner: true, isWritable: false },
+          { pubkey: MULTISIG_SIGNER_2, isSigner: true, isWritable: false },
+        ],
+      )
+    })
+
+    it('builds authority revocation with a null new authority', async () => {
+      const unsigned = await generate({ authorityTypes: ['mint'], newAuthority: null })
+      const [instruction] = unsigned.instructions
+
+      assert.ok(instruction)
+      assert.equal(instruction.data[0], 6) // SetAuthority
+      assert.equal(instruction.data[1], 0) // MintTokens
+      assert.equal(instruction.data[2], 0) // COption<PublicKey>::None
+      assert.equal(instruction.data.length, 3)
+    })
+
+    it('defaults authority to payer', async () => {
+      const unsigned = await generate(
+        { authority: undefined },
+        TOKEN_PROGRAM_ID,
+        new PublicKey(PAYER),
+      )
+
+      assert.equal(unsigned.instructions[0]!.keys[1]!.pubkey.toBase58(), PAYER)
+    })
+  })
+
+  describe('validation', () => {
+    it('rejects invalid public keys', async () => {
+      for (const param of ['tokenAddress', 'newAuthority', 'authority']) {
+        await assert.rejects(
+          () => generate({ [param]: 'invalid' }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
+    it('rejects invalid multisig signers', async () => {
+      for (const [multisigSigners, param] of [
+        ['invalid', 'multisigSigners'],
+        [['invalid'], 'multisigSigners[0]'],
+      ]) {
+        await assert.rejects(
+          () => generate({ multisigSigners }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
+    it('reports invalid authority role selections', async () => {
+      const cases: [unknown, string][] = [
+        [undefined, 'must be an array'],
+        [[], 'must not be empty'],
+        [['mint', 'mint'], 'must not contain duplicates'],
+        [['close'], 'must contain only mint and/or freeze'],
+      ]
+      for (const [authorityTypes, message] of cases) {
+        await assert.rejects(
+          () => generate({ authorityTypes }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === 'authorityTypes' &&
+            err.message.includes(message),
+        )
+      }
+    })
+
+    it('requires the authority for every selected role', async () => {
+      await assert.rejects(
+        () => generate({ authorityTypes: ['mint'] }, TOKEN_PROGRAM_ID, new PublicKey(PAYER)),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          err.context.authorityType === 'mint' &&
+          err.context.currentAuthority === PAYER &&
+          err.message.includes(`mint authority (${PAYER})`),
+      )
+      await assert.rejects(
+        () =>
+          generate(
+            { authorityTypes: ['mint', 'freeze'] },
+            TOKEN_PROGRAM_ID,
+            new PublicKey(AUTHORITY),
+            new PublicKey(PAYER),
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'authority' &&
+          err.context.authorityType === 'freeze' &&
+          err.context.currentAuthority === PAYER &&
+          err.message.includes(`freeze authority (${PAYER})`),
+      )
+    })
+
+    it('identifies a revoked authority', async () => {
+      await assert.rejects(
+        () => generate({ authorityTypes: ['mint'] }, TOKEN_PROGRAM_ID, null),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.currentAuthority === null &&
+          err.message.includes('mint authority (already revoked)'),
+      )
+    })
+
+    it('reports malformed mint data', async () => {
+      const malformedChain = Object.assign(chain(), {
+        connection: {
+          getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(1) }),
+        },
+      })
+
+      await assert.rejects(
+        () =>
+          new SetTokenAuthority().generate(malformedChain, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            authority: AUTHORITY,
+            newAuthority: NEW_AUTHORITY,
+            authorityTypes: ['mint'],
+          }),
+        CCIPTokenDataParseError,
+      )
+    })
+
+    it('rejects missing and non-token mints', async () => {
+      await assert.rejects(
+        () => generate({}, null),
+        (err: unknown) => err instanceof CCIPTokenMintNotFoundError,
+      )
+      await assert.rejects(
+        () => generate({}, Keypair.generate().publicKey),
+        (err: unknown) => err instanceof CCIPTokenMintInvalidError,
+      )
+    })
+  })
+
+  describe('execute', () => {
+    it('signs, submits, and returns the tx hash', async () => {
+      const result = await new SetTokenAuthority().execute(submitChain(), {
+        tokenAddress: TOKEN,
+        newAuthority: NEW_AUTHORITY,
+        authorityTypes: ['mint'],
+        wallet: WALLET,
+      })
+
+      assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('requires unsigned generation for SPL multisig authorities', async () => {
+      await assert.rejects(
+        () =>
+          new SetTokenAuthority().execute(chain(), {
+            tokenAddress: TOKEN,
+            newAuthority: NEW_AUTHORITY,
+            authority: MULTISIG,
+            authorityTypes: ['mint'],
+            multisigSigners: [MULTISIG_SIGNER_1],
+            wallet: WALLET,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'multisigSigners',
+      )
+    })
+
+    it('rejects a non-wallet authority for signed updates', async () => {
+      await assert.rejects(
+        () =>
+          new SetTokenAuthority().execute(chain(), {
+            tokenAddress: TOKEN,
+            newAuthority: NEW_AUTHORITY,
+            authority: AUTHORITY,
+            authorityTypes: ['mint'],
+            wallet: WALLET,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'setTokenAuthority' &&
+          err.context.param === 'authority',
+      )
+    })
+  })
+})

@@ -33,6 +33,7 @@ import {
   CCIPTransactionNotFoundError,
   CCIPUsdcAttestationError,
   CCIPVersionUnsupportedError,
+  CCIPWalletChainMismatchError,
   CCIPWalletNotSignerError,
 } from './specialized.ts'
 import { assert as assertUtil, formatErrorForLogging, getRetryDelay, shouldRetry } from './utils.ts'
@@ -276,6 +277,13 @@ describe('recovery hints', () => {
       assert.ok(DEFAULT_RECOVERY_HINTS.CHAIN_NOT_FOUND?.includes('chainId'))
       assert.ok(DEFAULT_RECOVERY_HINTS.BLOCK_NOT_FOUND?.includes('Wait'))
       assert.ok(DEFAULT_RECOVERY_HINTS.HTTP_ERROR?.includes('rate limiting'))
+    })
+
+    it('should explain how to find a missing token pool state', () => {
+      assert.equal(
+        DEFAULT_RECOVERY_HINTS.TOKEN_POOL_STATE_NOT_FOUND,
+        'Verify poolType matches the deployed pool, pass poolProgramAddress for a custom pool, and confirm the pool is initialized for this mint on this cluster.',
+      )
     })
   })
 
@@ -535,6 +543,24 @@ describe('specialized errors', () => {
       assert.equal(error.code, 'WALLET_NOT_SIGNER')
       assert.equal(error.isTransient, false)
       assert.equal(error.context.walletType, 'object')
+    })
+
+    it('CCIPWalletChainMismatchError should be permanent and carry both chain ids', () => {
+      const error = new CCIPWalletChainMismatchError('base-sepolia', 84532, 11155111)
+
+      assert.equal(error.code, 'WALLET_CHAIN_MISMATCH')
+      assert.equal(error.isTransient, false)
+      assert.equal(error.context.chainName, 'base-sepolia')
+      assert.equal(error.context.expected, 84532)
+      assert.equal(error.context.actual, 11155111)
+      assert.match(error.message, /expected 84532, got ethereum-testnet-sepolia \(11155111\)/)
+    })
+
+    it('CCIPWalletChainMismatchError should fall back to the bare id for an unknown chain', () => {
+      const error = new CCIPWalletChainMismatchError('base-sepolia', 84532, 4242424242)
+
+      assert.equal(error.context.actual, 4242424242)
+      assert.match(error.message, /expected 84532, got 4242424242$/)
     })
   })
 

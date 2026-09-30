@@ -1,0 +1,525 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { Interface, ZeroAddress, getAddress, makeError } from 'ethers'
+
+import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
+import type { EVMChain } from '../../../../evm/index.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
+import { parseTypeAndVersion } from '../../../../utils.ts'
+import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { ADVANCED_POOL_HOOKS_INTERFACE } from '../../advanced-pool-hooks/contracts.ts'
+import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type ApplyAllowlistUpdatesParams,
+  ApplyAllowlistUpdates,
+} from './apply-allowlist-updates.ts'
+
+const POOL = '0x' + '11'.repeat(20)
+const OWNER = '0x' + '22'.repeat(20)
+const HOOKS = getAddress('0x' + '44'.repeat(20))
+const HASH = '0x' + 'ab'.repeat(32)
+
+// Distinct fixtures per array: a swapped (removes, adds) pair must fail byte parity.
+const ADDS = ['0x' + 'a1'.repeat(20), '0x' + 'a2'.repeat(20)]
+const REMOVES = ['0x' + 'e1'.repeat(20)]
+
+/** Independent of the SDK's cached interfaces — the reference the encoding is measured against. */
+const REFERENCE = new Interface([
+  'function applyAllowListUpdates(address[] removes, address[] adds)',
+])
+const DATA = REFERENCE.encodeFunctionData('applyAllowListUpdates', [REMOVES, ADDS])
+
+/** Pool types reporting each ABI family, for the `typeAndVersion` the stub answers with. */
+const POOL_TYPE: Record<TokenPoolFamily, string> = {
+  BurnMint: 'BurnMintTokenPool',
+  LockRelease: 'LockReleaseTokenPool',
+}
+
+const LEGACY_VERSIONS = [
+  TokenPoolVersion.V1_5_0,
+  TokenPoolVersion.V1_5_1,
+  TokenPoolVersion.V1_6_0,
+  TokenPoolVersion.V1_6_1,
+] as const
+
+/** 1.6.0 shipped only the siloed pool, so a 1.6.0 stub reports that (LockRelease-family) type. */
+const typeAt = (version: TokenPoolVersion) =>
+  version === TokenPoolVersion.V1_6_0 ? 'SiloedLockReleaseTokenPool' : undefined
+
+/**
+ * EVMChain stub: reports `type version` from `typeAndVersion`. The allowlist holder answers
+ * `owner()`, `getAllowListEnabled()` and `getAllowList()`: the pool itself before v2.0.0, the
+ * bound hooks at {@link HOOKS} from v2.0.0, where the pool answers only `getAdvancedPoolHooks()`.
+ * Any other call, or a call to the wrong contract, reverts. `onCall` records that RPC happened at
+ * all, so the validation tests can assert nothing was issued.
+ *
+ * `allowlist` defaults to {@link REMOVES}, the set the default params remove from — leaving
+ * {@link ADDS} absent, so the default case is a real state change on both sides.
+ */
+function stubChain({
+  family = 'BurnMint',
+  type,
+  version = TokenPoolVersion.V1_5_1,
+  owner = OWNER,
+  hooks = HOOKS,
+  hooksOwner = OWNER,
+  allowlistEnabled = true,
+  allowlist = REMOVES,
+  onCall,
+}: {
+  family?: TokenPoolFamily
+  /** Reported pool type; defaults to the family's base type. */
+  type?: string
+  version?: TokenPoolVersion
+  owner?: string
+  hooks?: string
+  hooksOwner?: string
+  allowlistEnabled?: boolean
+  allowlist?: string[]
+  onCall?: () => void
+} = {}): EVMChain {
+  const pool = TOKEN_POOL_INTERFACES[family][version]
+  const v2 = version === TokenPoolVersion.V2_0_0
+  const holder = v2
+    ? {
+        address: hooks,
+        iface: ADVANCED_POOL_HOOKS_INTERFACE,
+        owner: hooksOwner,
+      }
+    : { address: POOL, iface: pool, owner }
+  const answer = (iface: Interface, data: string, fn: string, result: unknown) =>
+    data.startsWith(iface.getFunction(fn)!.selector)
+      ? iface.encodeFunctionResult(fn, [result])
+      : undefined
+  return {
+    provider: {
+      call: ({ to, data }: { to: string; data: string }) => {
+        onCall?.()
+        const target = getAddress(to)
+        const result =
+          (target === getAddress(POOL)
+            ? v2
+              ? (answer(pool, data, 'getAdvancedPoolHooks', hooks) ??
+                answer(pool, data, 'owner', owner))
+              : undefined
+            : undefined) ??
+          (target === getAddress(holder.address)
+            ? (answer(holder.iface, data, 'owner', holder.owner) ??
+              answer(holder.iface, data, 'getAllowListEnabled', allowlistEnabled) ??
+              answer(holder.iface, data, 'getAllowList', allowlist))
+            : undefined)
+        if (result !== undefined) return Promise.resolve(result)
+        throw makeError('execution reverted', 'CALL_EXCEPTION', {
+          action: 'call',
+          data: '0x',
+          reason: null,
+          transaction: { to: null, data },
+          invocation: null,
+          revert: null,
+        })
+      },
+    },
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
+    typeAndVersion: () => {
+      onCall?.()
+      return Promise.resolve(parseTypeAndVersion(`${type ?? POOL_TYPE[family]} ${version}`))
+    },
+    nextNonce: async () => 0,
+    rollbackNonce: () => {},
+  } as unknown as EVMChain
+}
+
+function fakeSigner(waitError?: Error, address = OWNER) {
+  return {
+    signTransaction: () => Promise.resolve('0x'),
+    getAddress: () => Promise.resolve(address),
+    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    sendTransaction: () =>
+      Promise.resolve({
+        hash: HASH,
+        wait: () => (waitError ? Promise.reject(waitError) : Promise.resolve({ status: 1 })),
+      }),
+  }
+}
+
+const op = new ApplyAllowlistUpdates()
+
+function generate(chain: EVMChain, overrides: Partial<ApplyAllowlistUpdatesParams> = {}) {
+  return op.generate(chain, {
+    poolAddress: POOL,
+    removes: REMOVES,
+    adds: ADDS,
+    sender: OWNER,
+    ...overrides,
+  })
+}
+
+describe('ApplyAllowlistUpdates (cct/evm)', () => {
+  describe('generate', () => {
+    for (const version of LEGACY_VERSIONS) {
+      for (const family of ['BurnMint', 'LockRelease'] as const) {
+        if (version === TokenPoolVersion.V1_6_0 && family === 'BurnMint') continue
+        it(`encodes applyAllowListUpdates(removes, adds) for a ${family} ${version} pool`, async () => {
+          const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
+          const tx = unsigned.transactions[0]!
+
+          assert.equal(unsigned.family, ChainFamily.EVM)
+          assert.equal(unsigned.transactions.length, 1)
+          assert.equal(tx.to, POOL)
+          assert.equal(tx.from, OWNER)
+          assert.equal(tx.data, DATA)
+        })
+      }
+
+      // 1.6.0 has no BurnMint pool to compare against
+      if (version !== TokenPoolVersion.V1_6_0)
+        it(`produces identical calldata for both ABI families at ${version}`, async () => {
+          const [burnMint, lockRelease] = await Promise.all([
+            generate(stubChain({ family: 'BurnMint', version })),
+            generate(stubChain({ family: 'LockRelease', version })),
+          ])
+          assert.equal(burnMint.transactions[0]!.data, lockRelease.transactions[0]!.data)
+        })
+    }
+
+    it('omits from, and skips the owner read, when sender is not supplied', async () => {
+      let calls = 0
+      const unsigned = await generate(stubChain({ onCall: () => calls++ }), { sender: undefined })
+      assert.equal(unsigned.transactions[0]!.from, undefined)
+      assert.equal(unsigned.transactions[0]!.data, DATA)
+      // typeAndVersion + the two allowlist reads — no owner() read without a sender to compare
+      // it against; the allowlist pre-flight does not depend on the signer and still runs
+      assert.equal(calls, 3)
+    })
+
+    it('encodes an empty removes array (adds only)', async () => {
+      const unsigned = await generate(stubChain(), { removes: [] })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
+      )
+    })
+
+    it('encodes an empty adds array (removes only)', async () => {
+      const unsigned = await generate(stubChain(), { adds: [] })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [REMOVES, []]),
+      )
+    })
+
+    it('defaults an omitted removes to [] (adds only)', async () => {
+      const unsigned = await generate(stubChain(), { removes: undefined })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
+      )
+    })
+
+    it('defaults an omitted adds to [] (removes only)', async () => {
+      const unsigned = await generate(stubChain(), { adds: undefined })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [REMOVES, []]),
+      )
+    })
+
+    it('rejects a sender that is not the pool owner', async () => {
+      await assert.rejects(
+        () => generate(stubChain(), { sender: '0x' + '99'.repeat(20) }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+
+  describe('validation', () => {
+    const cases: { name: string; param: string; params: Partial<ApplyAllowlistUpdatesParams> }[] = [
+      { name: 'an invalid poolAddress', param: 'poolAddress', params: { poolAddress: 'nope' } },
+      // a tx to `0x0` hits no code, so it would mine as a successful no-op rather than reverting
+      { name: 'the zero poolAddress', param: 'poolAddress', params: { poolAddress: ZeroAddress } },
+      // `.map` skips holes, so without the density guard a sparse array validated clean and the
+      // hole reached ethers as `undefined`
+      {
+        name: 'a hole in adds',
+        param: 'adds[1]',
+        params: {
+          adds: (() => {
+            const sparse = [ADDS[0]!]
+            sparse[2] = ADDS[1] ?? ZeroAddress
+            return sparse
+          })(),
+        },
+      },
+      {
+        name: 'a hole in removes',
+        param: 'removes[1]',
+        params: {
+          removes: (() => {
+            const sparse = [REMOVES[0]!]
+            sparse[2] = REMOVES[0]!
+            return sparse
+          })(),
+        },
+      },
+      {
+        name: 'an invalid address inside adds',
+        param: 'adds[1]',
+        params: { adds: [ADDS[0]!, 'not-an-address'] },
+      },
+      {
+        name: 'an invalid address inside removes',
+        param: 'removes[0]',
+        params: { removes: ['not-an-address'] },
+      },
+      { name: 'a non-array adds', param: 'adds', params: { adds: 42 as unknown as string[] } },
+      { name: 'both arrays empty', param: 'adds', params: { removes: [], adds: [] } },
+      {
+        name: 'both arrays omitted',
+        param: 'adds',
+        params: { removes: undefined, adds: undefined },
+      },
+      {
+        name: 'duplicates within adds',
+        param: 'adds',
+        params: { adds: [ADDS[0]!, ADDS[0]!] },
+      },
+      {
+        name: 'duplicates within removes, differing only in case',
+        param: 'removes',
+        params: { removes: [REMOVES[0]!, getAddress(REMOVES[0]!)] },
+      },
+      {
+        name: 'an address present in both adds and removes',
+        param: 'adds',
+        params: { adds: [ADDS[0]!], removes: [ADDS[0]!] },
+      },
+      { name: 'an invalid sender', param: 'sender', params: { sender: 'not-an-address' } },
+      // the pool `continue`s past a zero address in adds, and can therefore never hold one:
+      // a silent no-op on either side, so it is rejected locally rather than encoded
+      {
+        name: 'the zero address inside adds',
+        param: 'adds[0]',
+        params: { adds: [ZeroAddress] },
+      },
+      {
+        name: 'the zero address inside removes',
+        param: 'removes[0]',
+        params: { removes: [ZeroAddress] },
+      },
+    ]
+
+    for (const { name, param, params } of cases) {
+      it(`rejects ${name} before any RPC`, async () => {
+        let calls = 0
+        await assert.rejects(
+          () => generate(stubChain({ onCall: () => calls++ }), params),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'applyAllowlistUpdates' &&
+            err.context.param === param,
+        )
+        assert.equal(calls, 0)
+      })
+    }
+  })
+
+  describe('allowlist pre-flight', () => {
+    it('rejects a pool deployed without an allowlist', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ allowlistEnabled: false, allowlist: [] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'poolAddress',
+      )
+    })
+
+    it('rejects removing an address that is not currently allowlisted', async () => {
+      // the pool's EnumerableSet.remove would return false and the tx would change nothing
+      await assert.rejects(
+        () => generate(stubChain({ allowlist: [ADDS[0]!] }), { adds: [] }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'removes',
+      )
+    })
+
+    it('rejects adding an address that is already allowlisted', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ allowlist: [...REMOVES, ADDS[1]!] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'adds',
+      )
+    })
+
+    it('matches the on-chain allowlist case-insensitively', async () => {
+      const unsigned = await generate(
+        stubChain({ allowlist: REMOVES.map((address) => address.toLowerCase()) }),
+      )
+      assert.equal(unsigned.transactions[0]!.data, DATA)
+    })
+
+    it('accepts an empty allowlist when the feature is enabled (adds only)', async () => {
+      const unsigned = await generate(stubChain({ allowlist: [] }), { removes: [] })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        REFERENCE.encodeFunctionData('applyAllowListUpdates', [[], ADDS]),
+      )
+    })
+  })
+
+  describe('2.0.0 (routes through AdvancedPoolHooks)', () => {
+    const v2 = (overrides: Parameters<typeof stubChain>[0] = {}) =>
+      stubChain({ version: TokenPoolVersion.V2_0_0, ...overrides })
+
+    for (const family of ['BurnMint', 'LockRelease'] as const) {
+      it(`sends applyAllowListUpdates(removes, adds) to the bound hooks of a ${family} pool`, async () => {
+        const unsigned = await generate(v2({ family }))
+        const tx = unsigned.transactions[0]!
+        assert.equal(unsigned.transactions.length, 1)
+        assert.equal(tx.to, HOOKS)
+        assert.equal(tx.from, OWNER)
+        assert.equal(tx.data, DATA)
+      })
+    }
+
+    it('checks sender against the hooks owner, not the pool owner', async () => {
+      const poolOwner = '0x' + '99'.repeat(20)
+      // the pool owner did not deploy the hooks, so it cannot write through them
+      await assert.rejects(
+        () => generate(v2({ owner: poolOwner }), { sender: poolOwner }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          err.message.includes('AdvancedPoolHooks owner'),
+      )
+      // and the hooks owner can, even though it does not own the pool
+      const unsigned = await generate(v2({ owner: poolOwner }), { sender: OWNER })
+      assert.equal(unsigned.transactions[0]!.to, HOOKS)
+    })
+
+    it('rejects hooks deployed without an allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlistEnabled: false, allowlist: [] })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'poolAddress' &&
+          err.message.includes('updateAdvancedPoolHooks'),
+      )
+    })
+
+    it('rejects removing an address the hooks do not allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlist: [ADDS[0]!] }), { adds: [] }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'removes',
+      )
+    })
+
+    it('rejects adding an address the hooks already allowlist', async () => {
+      await assert.rejects(
+        () => generate(v2({ allowlist: [...REMOVES, ADDS[1]!] })),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'adds',
+      )
+    })
+
+    it('executes as the hooks owner', async () => {
+      assert.deepEqual(
+        await op.execute(v2(), {
+          poolAddress: POOL,
+          removes: REMOVES,
+          adds: ADDS,
+          wallet: fakeSigner(),
+        }),
+        { hash: HASH },
+      )
+    })
+  })
+
+  describe('execute', () => {
+    const params = { poolAddress: POOL, removes: REMOVES, adds: ADDS }
+
+    it('signs and submits, resolving to the tx hash', async () => {
+      assert.deepEqual(await op.execute(stubChain(), { ...params, wallet: fakeSigner() }), {
+        hash: HASH,
+      })
+    })
+
+    it('maps an on-chain revert to CCIPExecTxRevertedError', async () => {
+      await assert.rejects(
+        () =>
+          op.execute(stubChain(), {
+            ...params,
+            wallet: fakeSigner(makeError('execution reverted', 'CALL_EXCEPTION')),
+          }),
+        (err: unknown) =>
+          err instanceof CCIPExecTxRevertedError &&
+          err.context.operation === 'applyAllowlistUpdates',
+      )
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      await assert.rejects(
+        () => op.execute(stubChain(), { ...params, wallet: {} }),
+        CCIPWalletInvalidError,
+      )
+    })
+
+    it('rejects a sender that diverges from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          op.execute(stubChain(), {
+            ...params,
+            sender: '0x' + '99'.repeat(20),
+            wallet: fakeSigner(),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
+
+    it('rejects a signing wallet that is not the pool owner', async () => {
+      const notOwner = '0x' + '99'.repeat(20)
+      await assert.rejects(
+        () => op.execute(stubChain(), { ...params, wallet: fakeSigner(undefined, notOwner) }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.param === 'sender',
+      )
+    })
+  })
+
+  describe('version dispatch', () => {
+    for (const version of LEGACY_VERSIONS) {
+      it(`supports ${version}`, async () => {
+        const family = version === TokenPoolVersion.V1_6_0 ? 'LockRelease' : 'BurnMint'
+        const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
+        assert.equal(unsigned.transactions[0]!.data, DATA)
+      })
+    }
+
+    it('rejects a 2.0.0 pool with no hooks bound, where there is no allowlist to update', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ version: TokenPoolVersion.V2_0_0, hooks: ZeroAddress })),
+        (err: unknown) =>
+          err instanceof CCTOperationUnsupportedError &&
+          err.context.operation === 'applyAllowlistUpdates' &&
+          err.context.version === TokenPoolVersion.V2_0_0,
+      )
+    })
+
+    it('covers every known TokenPoolVersion', () => {
+      assert.deepEqual(Object.values(TokenPoolVersion), [
+        ...LEGACY_VERSIONS,
+        TokenPoolVersion.V2_0_0,
+      ])
+    })
+  })
+})

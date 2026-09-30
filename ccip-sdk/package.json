@@ -30,6 +30,18 @@
       "types": "./dist/all-chains.d.ts",
       "default": "./dist/all-chains.js"
     },
+    "./cct/evm": {
+      "types": "./dist/cct/evm/index.d.ts",
+      "default": "./dist/cct/evm/index.js"
+    },
+    "./cct/solana": {
+      "types": "./dist/cct/solana/index.d.ts",
+      "default": "./dist/cct/solana/index.js"
+    },
+    "./cct/canton": {
+      "types": "./dist/cct/canton/index.d.ts",
+      "default": "./dist/cct/canton/index.js"
+    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
@@ -73,6 +85,10 @@
   "dependencies": {
     "@aptos-labs/ts-sdk": "^7.3.0",
     "@coral-xyz/anchor": "^0.29.0",
+    "@metaplex-foundation/mpl-token-metadata": "3.4.0",
+    "@metaplex-foundation/umi": "1.6.0",
+    "@metaplex-foundation/umi-bundle-defaults": "1.6.0",
+    "@metaplex-foundation/umi-web3js-adapters": "1.6.0",
     "@mysten/bcs": "^2.1.1",
     "@mysten/sui": "^2.31.0",
     "@noble/hashes": "^2.4.0",

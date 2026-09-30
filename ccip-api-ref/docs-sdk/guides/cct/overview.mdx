@@ -1,0 +1,60 @@
+---
+id: overview
+title: 'Cross-Chain Tokens (CCT)'
+description: 'Configure custom cross-chain tokens and pools with the CCIP SDK.'
+sidebar_label: Overview
+---
+
+# Cross-Chain Tokens (CCT)
+
+Cross-Chain Tokens (CCT) let a token administrator configure a token pool and its remote chains so the token can move across chains through CCIP. The SDK exposes one manager per chain family rather than a single cross-family API:
+
+| Chain family | Manager | Import |
+| --- | --- | --- |
+| EVM | `EVMTokenManager` | `@chainlink/ccip-sdk/cct/evm` |
+| Solana | `SolanaTokenManager` | `@chainlink/ccip-sdk/cct/solana` |
+| Canton | `CantonTokenManager` | `@chainlink/ccip-sdk/cct/canton` |
+
+Pick your path by what you need to do:
+
+- To set up a new token pool end to end, follow the [platform guide](#platform-guides) for your chain family.
+- To look up pool types and version support, see [Reference › Pool types](./reference/pool-types).
+- To inspect a pool that's already deployed, see [Reference › Inspecting pools](./reference/inspecting-pools).
+
+## Choose an execution mode
+
+Every write operation comes in two forms, so you can sign directly or hand off to an external signer:
+
+- `generateUnsigned<Operation>` builds an unsigned transaction or instruction set for multisig, offline, or external signing workflows.
+- `<operation>` signs and submits with the chain-family wallet you supply.
+
+Choose the unsigned form when the account that owns the token, registry, or token pool is a multisig. The signed form validates the wallet and waits for the submitted transaction to confirm.
+
+## Typical setup flow
+
+Every chain family follows roughly the same arc:
+
+1. Create or identify the local token.
+2. Register the token administrator (`registerAdmin`, then `acceptAdmin`) where required.
+3. Deploy or initialize the token pool, then associate it in the TokenAdminRegistry (`setPool`). On Solana, `setPool` comes last, because it needs a populated address lookup table and so follows the remote-chain configuration.
+4. Configure each remote chain's token, pool, rate limit, and any allowlist or verifier requirements.
+5. Fund a lock/release pool before sending transfers.
+6. Read back the pool and registry state to verify the final configuration.
+
+The exact sequence and required parameters differ by chain family, so follow the platform guide rather than copying parameters between chains.
+
+## Platform guides
+
+- [EVM](./evm): ERC-20 token, TokenAdminRegistry, v2 pool, lockbox, and remote-chain operations.
+- [Solana](./solana): SPL mint, canonical pool programs, PDAs, lookup tables, and remote-chain operations.
+- [Canton](./canton): registry-pool deployment, atomic lane initialization, and Canton read operations.
+
+:::warning
+Pool administration changes what can be transferred cross-chain. Test with the target pool type, token authority, router, and remote-chain configuration before using a production token.
+:::
+
+## Related
+
+- [EVMTokenManager API reference](/sdk/classes/EVMTokenManager)
+- [SolanaTokenManager API reference](/sdk/classes/SolanaTokenManager)
+- [CantonTokenManager API reference](/sdk/classes/CantonTokenManager)
