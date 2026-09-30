@@ -964,8 +964,8 @@ describe('ApplyChainUpdates (cct/evm)', () => {
           [
             {
               remoteChainSelector: SEL_A,
-              remotePoolAddresses: [REMOTE_POOL_1],
-              remoteTokenAddress: REMOTE_TOKEN,
+              remotePoolAddresses: [pad(REMOTE_POOL_1)],
+              remoteTokenAddress: pad(REMOTE_TOKEN),
               outboundRateLimiterConfig: ABI_OUTBOUND,
               inboundRateLimiterConfig: { isEnabled: true, capacity: 10n, rate: 9n },
             },
