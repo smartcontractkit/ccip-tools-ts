@@ -1,0 +1,147 @@
+---
+id: canton
+title: 'CCT on Canton'
+description: 'Deploy and administer Canton cross-chain token pools with CantonTokenManager.'
+sidebar_label: Canton
+---
+
+# CCT on Canton
+
+`CantonTokenManager` configures registry-pool CCT deployments on Canton. It supports pool deployment, remote-lane updates, and reads for pool, registry, and rate-limiter state.
+
+```typescript
+import { CantonChain } from '@chainlink/ccip-sdk'
+import { CantonTokenManager } from '@chainlink/ccip-sdk/cct/canton'
+
+const chain = await CantonChain.fromUrl(process.env.CANTON_LEDGER_URL!, {
+  cantonConfig: {
+    party: process.env.CANTON_PARTY!,
+    ccipParty: process.env.CCIP_PARTY!,
+    jwt: process.env.CANTON_JWT!,
+    edsUrl: process.env.EDS_URL!,
+    transferInstructionUrl: process.env.TRANSFER_INSTRUCTION_URL!,
+    chainId: 'canton:TestNet',
+  },
+})
+const cct = CantonTokenManager.fromChain(chain)
+```
+
+The signed operations below take a `wallet`. See [Multi-Chain](../multi-chain) for Canton connection and wallet configuration.
+
+## Required configuration
+
+| Value | Purpose |
+| --- | --- |
+| Ledger URL and JWT | Connect and authenticate the Canton JSON Ledger API client. |
+| Party and CCIP party | Set the transaction and protocol identities in `cantonConfig`. |
+| TokenAdminRegistry instance address | Required to deploy and initialize the pool. |
+| Instrument ID and Canton decimals | Identify the bridged instrument and its on-ledger scale. |
+| Observer parties | Required for EDS auto-detection. The ledger rejects an empty list. |
+| Remote addresses and rate limiters | Required for each lane added during deployment or later updates. |
+
+## Set up the Canton pool
+
+On Canton, a single atomic operation stands up the whole token pool, so most of the setup happens in one call.
+
+### Deploy and initialize the pool
+
+Canton deployment is atomic: `deployTokenPool` creates the burn/mint or lock/release token pool, initializes it, registers the token, and creates the specified lane rate limiters in one operation. Both the token administrator and the pool owner must authorize it.
+
+```typescript
+const deployment = await cct.deployTokenPool({
+  wallet,
+  poolType: 'burnMint',
+  instanceId: 'example-token-pool-001',
+  poolOwner: process.env.CANTON_PARTY!,
+  ccipOwner: process.env.CCIP_PARTY!,
+  admin: process.env.CANTON_PARTY!,
+  instrumentId: { admin: process.env.CANTON_PARTY!, id: 'EXAMPLE' },
+  decimals: 10,
+  observers: [process.env.CANTON_PARTY!],
+  tokenAdminRegistryInstanceAddress: process.env.TAR_INSTANCE_ADDRESS!,
+  lanes: [],
+})
+
+console.log('Pool:', deployment.poolInstanceAddress)
+console.log('Token config CID:', deployment.tokenConfigCid)
+```
+
+`deployment.poolInstanceAddress` is optional on the result, so narrow it before reusing it in `applyChainUpdates` or `getTokenPoolState`, both of which require a `string`:
+
+```typescript
+if (!deployment.poolInstanceAddress) {
+  throw new Error('deployTokenPool did not return a pool instance address')
+}
+const poolInstanceAddress = deployment.poolInstanceAddress
+```
+
+`decimals` is the Canton instrument's decimals, not the remote token's decimals. An incorrect value mis-scales transfers. Add initial lanes through `lanes`, or configure them later with `applyChainUpdates`.
+
+### Third-party token administrators
+
+Use `existingTokenConfigCid` only when a third-party administrator has already completed the TokenAdminRegistry proposal flow for the instrument. That CID is not stable. It rotates after every registry write, so read the current value from `getTokenAdminRegistry` immediately before deployment. For a new self-administered instrument, omit it and let `deployTokenPool` register the token atomically.
+
+## Configure remote chains
+
+`applyChainUpdates` consumes the pool contract and returns a new one. The returned contract ID changes on every call, so read state again after each update instead of retaining the prior CID.
+
+```typescript
+const update = await cct.applyChainUpdates({
+  wallet,
+  poolInstanceAddress,
+  poolType: 'burnMint',
+  chainsToAdd: [
+    {
+      remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
+      remotePools: [process.env.REMOTE_POOL!],
+      remoteTokenAddress: process.env.REMOTE_TOKEN!,
+      inboundRateLimiter: process.env.INBOUND_RATE_LIMITER!,
+      outboundRateLimiter: process.env.OUTBOUND_RATE_LIMITER!,
+    },
+  ],
+})
+
+console.log('Updated pool CID:', update.poolCid)
+```
+
+Inbound and outbound rate limiters are required and must be distinct. For a `BlockDepth` finality configuration, also provide the inbound custom-block-confirmations limiter.
+
+When deploying initial lanes, every `lanes` entry requires all three limiter specs: inbound, outbound, and inbound custom finality. This is true even when the lane uses standard finality, because the pool initializes all three limiter contracts together.
+
+:::note
+`applyChainUpdates` references `inboundRateLimiter` and `outboundRateLimiter` by raw instance address (`"instanceId@party"`). It does not create them and does not accept capacity or rate. Limiter contracts are created only by `deployTokenPool`, whose atomic `Initialize` builds each lane's limiters from a full spec (instance ID, enabled, capacity, rate) and returns their contract IDs on the result as `rateLimiterCids`. The manager exposes no standalone rate-limiter creation operation, so the limiter contracts a post-deploy lane points at must already exist on-ledger.
+:::
+
+## Verify the configuration
+
+Read the pool, registry, and rate-limiter state back before you transfer through a lane, so you know the deployment landed as intended.
+
+### Read the pool and registry
+
+```typescript
+const pool = await cct.getTokenPoolState({
+  poolInstanceAddress,
+  poolType: 'burnMint',
+  poolOwner: process.env.CANTON_PARTY!,
+})
+
+const registry = await cct.getTokenAdminRegistry({
+  tokenConfigInstanceAddress: process.env.TOKEN_CONFIG_INSTANCE_ADDRESS!,
+  adminParty: process.env.CANTON_PARTY!,
+})
+```
+
+### Check rate limiters
+
+Use `getRateLimiterState` to verify each lane limiter is enabled and has the expected capacity and rate.
+
+Confirm `getTokenAdminRegistry` returns the expected pool, `getTokenPoolState` contains the intended remote lane, and every referenced limiter is enabled with sufficient capacity before transferring through the configured lane.
+
+Sends from a Canton source follow [Sending Messages](../sending-messages). A Canton-source transfer also needs source-side `extraArgs` (`feeTokenHoldingCids`, `ccvRawAddresses`), so it is not a single copy-paste CLI line the way an EVM send is.
+
+## Related
+
+- [CantonTokenManager API reference](/sdk/classes/CantonTokenManager)
+- [CCT Overview](./overview)
+- [Multi-Chain](../multi-chain): Canton connection and wallet configuration
+- [Sending Messages](../sending-messages): send transfers after CCT setup

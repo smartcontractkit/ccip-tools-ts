@@ -1,0 +1,139 @@
+---
+id: verify-your-setup
+title: 'Verify your setup'
+description: 'A read-only checklist that asserts a freshly set-up CCT is consistent across token, registry, and pool.'
+sidebar_label: 'Verify setup'
+---
+
+# Verify your setup
+
+After you set up a cross-chain token, three contracts have to agree before a transfer can move: the token, its token admin registry (TAR) entry, and its pool. A single missing step, a registration that was proposed but never accepted, a pool that was deployed but never registered, or a pool that never received its roles, leaves the token looking done while transfers still revert.
+
+This page is a read-only checklist. Each step is one read, the value that means "healthy," and what a wrong value tells you. Run them in setup order, since a later check assumes the earlier ones passed. The reads come from [Inspecting the registry](./inspecting-registry) and [Inspecting tokens](./inspecting-tokens); this page ties them into a single pass and adds the pool-side reads.
+
+## Before you start
+
+Construct a manager against the source chain. The whole checklist is read-only, so no wallet is needed.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMTokenManager } from '@chainlink/ccip-sdk/cct/evm'
+import { ZeroAddress } from 'ethers'
+
+const chain = await EVMChain.fromUrl(process.env.RPC_URL!)
+const cct = EVMTokenManager.fromChain(chain)
+
+const ROUTER = process.env.ROUTER!
+const tokenAddress = '0xYourToken...'
+```
+
+## Check the token type and decimals
+
+Read what the token actually is, so the later role and decimal checks use the right model.
+
+```typescript
+const [type, version] = await chain.typeAndVersion(tokenAddress)
+const { decimals } = await chain.getTokenInfo(tokenAddress)
+```
+
+Expected: a `CrossChainToken` at `2.0.0`, or a `FactoryBurnMintERC20` / `BurnMintERC677` family type at `1.5.1` or `1.6.2`, and a decimal count that matches the `localTokenDecimals` you deployed the pool with. A read failure on `typeAndVersion` points to a v1.5.1 token that predates the call; treat it as v1.x. A decimal mismatch between the token and the pool means amounts will scale wrong on the lane.
+
+## Check the admin is accepted, not just proposed
+
+Read the registry entry and confirm the administrator is set, not merely pending.
+
+```typescript
+const config = await cct.getTokenAdminRegistry({ address: ROUTER, tokenAddress })
+
+if (config.administrator === ZeroAddress) {
+  throw new Error(
+    config.pendingAdministrator
+      ? `admin proposed but not accepted; run acceptAdmin as ${config.pendingAdministrator}`
+      : 'token is not registered; run registerAdmin',
+  )
+}
+```
+
+Expected: a non-zero `administrator` and no `pendingAdministrator`. A zero `administrator` with a `pendingAdministrator` set is the most common half-finished state: `registerAdmin` ran but `acceptAdmin` did not, so the token is claimed but no one can call `setPool` yet. A zero `administrator` with nothing pending means the token was never registered.
+
+## Check the pool is registered
+
+The same registry entry carries the pool. Confirm it points to the pool you deployed.
+
+```typescript
+if (!config.tokenPool) {
+  throw new Error('no pool registered; run setPool')
+}
+const poolAddress = config.tokenPool
+```
+
+Expected: `tokenPool` equals the address `deployTokenPool` returned. A missing `tokenPool` means `setPool` never ran, so transfers have no pool to route to. An unexpected address means the registry still routes to an older pool, and a new deploy that skipped `setPool` is being ignored.
+
+## Check the roles match the pool type
+
+Whether the pool needs mint and burn roles depends on its type. Read the pool's state first, then branch.
+
+```typescript
+const state = await cct.getTokenPoolState({ poolAddress })
+console.log(state.type, state.version)
+```
+
+### Burn/mint pools
+
+A `BurnMintTokenPool` (and its burn-from and burn-with-from variants) mints and burns the token directly, so the pool must hold both roles.
+
+```typescript
+const canMint = await cct.isMinter({ tokenAddress, account: poolAddress })
+const canBurn = await cct.isBurner({ tokenAddress, account: poolAddress })
+
+if (!canMint || !canBurn) {
+  throw new Error('pool is missing a mint/burn role; run grantMintAndBurnRoles')
+}
+```
+
+Expected: both `true` for the registered pool. A `false` on either side means `grantMintAndBurnRoles` did not run for this pool, and every transfer that would mint or burn reverts.
+
+### Lock/release pools
+
+A `LockReleaseTokenPool` escrows liquidity instead of minting, so it holds no mint or burn role. Checking `isMinter` here would fail for the wrong reason. Read the lockbox and its liquidity instead.
+
+```typescript
+if (state.type === 'LockReleaseTokenPool') {
+  console.log('lockbox:', state.lockBox) // the escrow this pool releases from
+  const lockbox = await cct.getLockbox({ poolAddress })
+}
+```
+
+Expected: a non-zero `lockBox` on a v2.0.0 lock/release pool, funded with enough liquidity to cover releases on the destination side. A zero lockbox means the `deployLockbox` step was skipped, and a lockbox with no liquidity means releases will fail even though every role check would pass.
+
+## Check the remotes are wired
+
+Confirm the pool knows the destination lane before you send. Read the remote configuration for the destination selector.
+
+```typescript
+import { networkInfo } from '@chainlink/ccip-sdk'
+
+const destSelector = networkInfo('avalanche-testnet-fuji').chainSelector
+const remotes = await cct.getTokenPoolRemotes({ poolAddress, remoteChainSelector: destSelector })
+const remote = Object.values(remotes)[0]
+
+if (!remote) {
+  throw new Error('destination not configured; run applyChainUpdates')
+}
+```
+
+Expected: a remote entry whose `remoteToken` and `remotePools` are the token and pool addresses on the destination chain. A missing entry means `applyChainUpdates` never added this lane. A wrong `remoteToken` or `remotePools` means the pool will reject or misroute messages from that chain. Verify the same wiring on the destination pool, since each side stores its own view of the lane.
+
+Once every check passes, run [Pre-Send Validation](../../pre-send-validation) and send a first transfer.
+
+## Solana differences
+
+The registry checks are the same in shape: `SolanaTokenManager.getTokenAdminRegistry` returns `administrator`, `pendingAdministrator`, and `tokenPool` (plus Solana fields), and it throws `CCIPTokenNotConfiguredError` when the token is not registered rather than surfacing a zero administrator. The role check differs: a Solana token is an SPL mint with no `isMinter` read, so a burn/mint pool's authority is the mint's SPL `mintAuthority` pointing at the pool program's PDA. Read the mint account to confirm it, and use `getTokenPoolState` for the pool side. Solana pool reads identify the pool by `tokenAddress` plus `poolType` rather than a pool address, so pass both, for example `getTokenPoolState({ tokenAddress, poolType: 'burn-mint' })`. Omitting `poolType` (or `poolProgramAddress`) throws `CCTParamsInvalidError: provide exactly one of poolType or poolProgramAddress`.
+
+## Related
+
+- [Inspecting the registry](./inspecting-registry): read the token admin registry entry
+- [Inspecting tokens](./inspecting-tokens): read a token's type, roles, and decimals
+- [Inspecting pools](./inspecting-pools): read deployed pool configuration and rate limits
+- [CCT on EVM](../evm): the end-to-end setup walkthrough
+- [Pre-Send Validation](../../pre-send-validation): validate the destination pool leg before sending

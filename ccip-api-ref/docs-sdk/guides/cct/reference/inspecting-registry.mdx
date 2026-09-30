@@ -1,0 +1,103 @@
+---
+id: inspecting-registry
+title: 'Inspecting the registry'
+description: 'Read a token admin registry entry: administrator, pending administrator, and registered pool.'
+sidebar_label: 'Inspecting registry'
+---
+
+# Inspecting the registry
+
+Every cross-chain token is tracked in a **TokenAdminRegistry** (TAR): one on-chain contract per CCIP deployment that records, for each token, who administers it and which pool is authorized to move it. Reading that entry is how you confirm a token is registered, tell a proposed administrator apart from an accepted one, and find the pool a token points to.
+
+These reads run against a deployed registry, so they work at any point in a token's life, not only during setup. The examples use `EVMTokenManager`; the same registry lookups are also available as chain-level methods (`chain.getTokenAdminRegistryFor`, `chain.getRegistryTokenConfig`). See the [EVM walkthrough](../evm) for the full setup flow and [Inspecting tokens](./inspecting-tokens) for the token side.
+
+```typescript
+import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMTokenManager } from '@chainlink/ccip-sdk/cct/evm'
+
+const chain = await EVMChain.fromUrl(process.env.RPC_URL!)
+const cct = EVMTokenManager.fromChain(chain)
+```
+
+## Read a token's registry entry
+
+`getTokenAdminRegistry` returns the token's TAR entry: its `administrator`, an optional `pendingAdministrator`, and an optional `tokenPool`. The `address` argument is the registry itself, or any Router, OnRamp, OffRamp, or pool the manager can resolve the registry from (resolving through a Router or ramp adds hops and needs a configured lane, so pass the registry directly when you have it).
+
+```typescript
+const config = await cct.getTokenAdminRegistry({
+  address: process.env.ROUTER!, // Router, ramp, pool, or the TAR itself
+  tokenAddress: '0xYourToken...',
+})
+```
+
+Unlike `chain.getRegistryTokenConfig`, this method does not throw when the administrator is the zero address. It reports that state faithfully, which is exactly what you need to observe a registration that has been proposed but not yet accepted. The two optional fields are dropped when they are zero, so their absence means "nothing pending" and "no pool registered" rather than a zero-address placeholder.
+
+### Administrator and pending administrator
+
+The pair of fields tells you which stage of the two-step admin handshake the token is in. A registration is proposed by `registerAdmin` (or a hand-off by `transferAdmin`) and completed by `acceptAdmin`.
+
+```typescript
+import { ZeroAddress } from 'ethers'
+
+if (config.administrator === ZeroAddress && config.pendingAdministrator) {
+  // proposed, not yet accepted: acceptAdmin has not run
+  console.log('pending acceptance by', config.pendingAdministrator)
+} else if (config.administrator !== ZeroAddress) {
+  // accepted: this address administers the token
+  console.log('administrator:', config.administrator)
+}
+```
+
+A healthy, fully set-up token has a non-zero `administrator` and no `pendingAdministrator`. Compare `administrator` with `=== ZeroAddress`, not with a truthiness check, because a pending entry still returns the zero string.
+
+### Registered pool
+
+`tokenPool` is present once `setPool` has run, and absent while the token is registered but has no pool yet.
+
+```typescript
+if (config.tokenPool) {
+  console.log('pool:', config.tokenPool)
+} else {
+  console.log('no pool registered for this token')
+}
+```
+
+A correct value is the address of the pool you deployed for this token. If it is missing, the token is registered but has no route: transfers cannot move until you run `setPool`. An address that points at an older pool is worse, because the registry keeps routing there and silently ignores the new deploy.
+
+## List every configured token
+
+`getSupportedTokens` returns the addresses of every token configured in the registry resolved from `address`. It paginates internally, so one call reads the whole registry.
+
+```typescript
+const tokens = await cct.getSupportedTokens({ address: process.env.ROUTER! })
+console.log(`${tokens.length} tokens configured`)
+```
+
+A very large registry can exceed an RPC response-size limit in a single page. Pass a smaller `page` (batch size, default 1000) if a read fails on size.
+
+```typescript
+const tokens = await cct.getSupportedTokens({ address: process.env.ROUTER!, page: 200 })
+```
+
+## Reading the registry on Solana
+
+`SolanaTokenManager` exposes the same two methods with Solana-shaped inputs and outputs. `getTokenAdminRegistry` takes a Router or OffRamp `address` and the SPL mint as `tokenAddress`, and its result adds Solana-specific fields (`mint`, an optional `lookupTable`, `writableIndexes`, and `supportsAutoDerivation`) on top of `administrator`, `pendingAdministrator`, and `tokenPool`.
+
+```typescript
+import { SolanaTokenManager } from '@chainlink/ccip-sdk/cct/solana'
+
+const solCct = SolanaTokenManager.fromChain(solanaChain)
+const config = await solCct.getTokenAdminRegistry({
+  address: router, // Router or OffRamp public key
+  tokenAddress: mint, // SPL mint
+})
+```
+
+Two differences to watch: the Solana read throws `CCIPTokenNotConfiguredError` when the token is not registered (it does not surface a zero administrator the way EVM does), and `getSupportedTokens` scans in one pass with no `page` option.
+
+## Related
+
+- [Inspecting tokens](./inspecting-tokens): read a token's type, roles, and decimals
+- [Verify your setup](./verify-your-setup): assert registry, pool, and roles agree for a new CCT
+- [Inspecting pools](./inspecting-pools): read deployed pool configuration and rate limits
+- [EVMTokenManager API reference](/sdk/classes/EVMTokenManager)
