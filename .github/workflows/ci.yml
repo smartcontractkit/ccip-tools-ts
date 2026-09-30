@@ -94,10 +94,12 @@ jobs:
           set -o pipefail
           # Tee'd for the PR comment: when lint fails, tests never run, and the
           # coverage-comment job reports this output (files/lines included)
-          # instead of a bare "tests did not run" headline.
-          if npm run check 2>&1 | tee lint-output.txt; then
-            rm lint-output.txt # green run: nothing for the report to show
-          fi
+          # instead of a bare "tests did not run" headline. The pipeline must
+          # stay a plain command: as an `if` condition its failure never trips
+          # `bash -e`, and the step went green on lint errors (v1.15.0 shipped
+          # unformatted to main that way, caught only by the publish workflow).
+          npm run check 2>&1 | tee lint-output.txt
+          rm lint-output.txt # green run: nothing for the report to show
 
       - name: Validate package exports
         working-directory: ccip-sdk
@@ -221,7 +223,10 @@ jobs:
 
     # Run on pull_request events even when build-and-test failed: the comment
     # must also reflect failed runs (failed suites/tests, counters, coverage).
-    if: always() && github.event_name == 'pull_request'
+    # `!cancelled()` rather than `always()`: a run superseded by a newer push
+    # (see `concurrency`) holds only partial test output, and its report would
+    # replace the PR comment until the newer run posts its own.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
 
     steps:
       - name: Download test output
@@ -309,7 +314,12 @@ jobs:
             const notPassed = (Number(summary.fail) || 0) + (Number(summary.cancelled) || 0);
 
             let headline;
-            if (hasOutput) {
+            if (hasOutput && summary.tests === undefined) {
+              // Test output without node --test's closing counters: the run was
+              // cut short (timeout, crash) before the reporter finished, so
+              // there is nothing to count — and nothing to report as passing.
+              headline = '⚠️ **Tests did not finish — no results summary was produced.**';
+            } else if (hasOutput) {
               if (notPassed > 0) {
                 headline =
                   `❌ **${notPassed} of ${summary.tests} tests did not pass** ` +
