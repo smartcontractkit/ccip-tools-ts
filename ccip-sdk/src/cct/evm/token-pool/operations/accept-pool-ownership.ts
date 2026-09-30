@@ -5,7 +5,7 @@
  * @remarks Called by the **proposed** owner, not the current one, so unlike every other pool write
  * in this module it is not owner-gated and pre-flights nothing about the caller. The contract
  * compares `msg.sender` against `s_pendingOwner`, which is `private` with no getter in both
- * `ConfirmedOwnerWithProposal` (v1.5.x) and `Ownable2Step` (v1.6.1+) — there is no read that could
+ * `ConfirmedOwnerWithProposal` (v1.5.x) and `Ownable2Step` (v1.6.0+) — there is no read that could
  * confirm the caller is the proposed owner, so a caller who is not simply reverts
  * (`MustBeProposedOwner`, or `Must be proposed owner` on v1.5.x).
  *

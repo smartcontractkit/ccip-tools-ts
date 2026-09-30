@@ -108,15 +108,19 @@ describe('parseRateLimitConfig', () => {
    * The enabled-bucket bound is version-dependent, and getting this wrong in either direction is a
    * bug:
    *
-   * - v1.5.0/v1.5.1 `RateLimiter._validateTokenBucketConfig` reverts `InvalidRateLimitRate` when
-   *   `config.rate >= config.capacity || config.rate == 0`, so an enabled config needs
+   * - v1.5.0/v1.5.1/v1.6.0 `RateLimiter._validateTokenBucketConfig` reverts `InvalidRateLimitRate`
+   *   when `config.rate >= config.capacity || config.rate == 0`, so an enabled config needs
    *   `0 < rate < capacity` — calldata that violates it always reverts, and must fail locally.
    * - v1.6.1/v2.0.0 relaxed that to `config.rate > config.capacity`, so `rate === capacity` and
    *   `rate === 0n` are *legitimate* there. Tightening the rule globally would be a new bug, which
    *   is what the accept-side cases below pin.
    */
   describe('version-specific enabled-bucket bounds', () => {
-    const STRICT = [TokenPoolVersion.V1_5_0, TokenPoolVersion.V1_5_1] as const
+    const STRICT = [
+      TokenPoolVersion.V1_5_0,
+      TokenPoolVersion.V1_5_1,
+      TokenPoolVersion.V1_6_0,
+    ] as const
     const RELAXED = [TokenPoolVersion.V1_6_1, TokenPoolVersion.V2_0_0] as const
 
     for (const version of STRICT) {

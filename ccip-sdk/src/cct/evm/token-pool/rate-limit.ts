@@ -37,7 +37,8 @@ export type RateLimitConfig =
       enabled: true
       /**
        * Maximum token amount in the bucket (`uint128`). Must be at least `rate` on v1.6.1/v2.0.0
-       * pools, and strictly greater than `rate` on v1.5.0/v1.5.1 — see {@link RateLimitConfig.rate}.
+       * pools, and strictly greater than `rate` on v1.5.0/v1.5.1/v1.6.0 — see
+       * {@link RateLimitConfig.rate}.
        */
       capacity: bigint
       /**
@@ -48,8 +49,9 @@ export type RateLimitConfig =
        * - **v1.6.1 / v2.0.0** — `rate <= capacity`. `rate === capacity` and `rate === 0n` are both
        *   legal (`RateLimiter._validateTokenBucketConfig` only reverts `InvalidRateLimitRate` when
        *   `rate > capacity`).
-       * - **v1.5.0 / v1.5.1** — stricter: `0n < rate < capacity`. Those versions revert when
-       *   `rate >= capacity || rate == 0`, so a config that is fine on a newer pool is rejected here.
+       * - **v1.5.0 / v1.5.1 / v1.6.0** — stricter: `0n < rate < capacity`. Those versions revert
+       *   when `rate >= capacity || rate == 0`, so a config that is fine on a newer pool is
+       *   rejected here.
        */
       rate: bigint
     }
@@ -86,6 +88,7 @@ export type ParsedRateLimitConfig = {
 const STRICT_RATE_BOUND_VERSIONS: readonly TokenPoolVersion[] = [
   TokenPoolVersion.V1_5_0,
   TokenPoolVersion.V1_5_1,
+  TokenPoolVersion.V1_6_0,
 ]
 
 /**
@@ -106,8 +109,8 @@ const STRICT_RATE_BOUND_VERSIONS: readonly TokenPoolVersion[] = [
  * @returns The direction with `capacity`/`rate` defaulted to `0n` when disabled and omitted.
  * @throws {@link CCTParamsInvalidError} if `config` is not an object, `enabled` is not a boolean,
  * either amount is not a `uint128`, `rate` exceeds `capacity` while enabled, `rate` is zero or
- * equal to `capacity` while enabled on a v1.5.0/v1.5.1 pool, or either amount is non-zero while
- * disabled
+ * equal to `capacity` while enabled on a v1.5.0/v1.5.1/v1.6.0 pool, or either amount is non-zero
+ * while disabled
  */
 export function parseRateLimitConfig(
   operation: string,
@@ -133,8 +136,9 @@ export function parseRateLimitConfig(
       'must not exceed capacity when enabled',
     )
   }
-  // Version-specific tightening, applied ONLY where the contract itself is stricter: v1.5.0 and
-  // v1.5.1 revert `InvalidRateLimitRate` for an enabled bucket unless `0 < rate < capacity`.
+  // Version-specific tightening, applied ONLY where the contract itself is stricter: v1.5.0,
+  // v1.5.1 and v1.6.0 revert `InvalidRateLimitRate` for an enabled bucket unless
+  // `0 < rate < capacity`.
   if (enabled && version !== null && STRICT_RATE_BOUND_VERSIONS.includes(version)) {
     if (rate === 0n) {
       throw new CCTParamsInvalidError(

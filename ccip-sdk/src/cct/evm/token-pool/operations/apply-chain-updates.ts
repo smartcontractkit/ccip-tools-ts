@@ -45,7 +45,7 @@ import {
 /**
  * The `version` discriminant of {@link ApplyChainUpdatesParams}: the two parameter shapes
  * `applyChainUpdates` has had, each spelled as the version that introduced it — so `1.5.1` is the
- * shape for every pool from v1.5.1 up, v1.6.1 and v2.0.0 included.
+ * shape for every pool from v1.5.1 up, v1.6.0, v1.6.1 and v2.0.0 included.
  */
 export type ApplyChainUpdatesParamVersion =
   | typeof TokenPoolVersion.V1_5_0
@@ -433,7 +433,7 @@ export class ApplyChainUpdates extends EVMOperation<
 > {
   readonly name = 'applyChainUpdates'
 
-  /** Encoder per pool version, floor-matched; v1.6.1 and v2.0.0 inherit v1.5.1's. */
+  /** Encoder per pool version, floor-matched; v1.6.0, v1.6.1 and v2.0.0 inherit v1.5.1's. */
   private readonly encoders = {
     [TokenPoolVersion.V1_5_0]: {
       shape: TokenPoolVersion.V1_5_0,

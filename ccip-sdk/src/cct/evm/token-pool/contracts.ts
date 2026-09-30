@@ -32,6 +32,7 @@ import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-rel
 import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
+import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI from '../artifacts/abi/V1_6_0/siloed-lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
@@ -98,10 +99,22 @@ export function isLockReleaseTokenPoolType(type: TokenPoolType): type is LockRel
   return getTokenPoolFamily(type) === 'LockRelease'
 }
 
-/** Known pool versions, low to high. Value order drives floor-match in {@link resolveEncoder}. */
+/**
+ * Known pool versions, low to high. Value order drives floor-match in {@link resolveEncoder}.
+ *
+ * @remarks **Exact-match allowlist.** A pool resolves only if it reports one of these versions
+ * verbatim; an unlisted version (e.g. `1.6.2`) throws {@link CCTContractVersionUnsupportedError}
+ * rather than being treated as its nearest lower neighbour. Pool ABIs have changed across minor
+ * versions (1.5.0 → 1.5.1 changed `applyChainUpdates`), so accepting an unseen version could
+ * build calldata for a function that does not exist. Floor-match is only how an op picks an
+ * *encoder* among these accepted versions.
+ * @remarks `V1_6_0` exists only for `SiloedLockReleaseTokenPool`, the one pool the 1.6.0 release
+ * stamped `1.6.0`; see {@link parseTokenPoolVersion}.
+ */
 export const TokenPoolVersion = {
   V1_5_0: '1.5.0',
   V1_5_1: '1.5.1',
+  V1_6_0: '1.6.0',
   V1_6_1: '1.6.1',
   V2_0_0: '2.0.0',
 } as const
@@ -118,7 +131,8 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
  * Narrows raw `typeAndVersion` strings to a known {@link TokenPoolType} and
  * {@link TokenPoolVersion}. A v1.5.0 `*AndProxy` type normalizes to its base pool type.
  * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
- * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version
+ * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version, or
+ * is 1.6.0 on a type other than `SiloedLockReleaseTokenPool`
  */
 export function parseTokenPoolVersion({
   address,
@@ -139,6 +153,11 @@ export function parseTokenPoolVersion({
     throw new CCTContractVersionUnsupportedError(contractType, version, {
       context: { address },
     })
+  // 1.6.0 shipped only the siloed pool; any other type claiming it is not a contract we know
+  if (version === TokenPoolVersion.V1_6_0 && type !== 'SiloedLockReleaseTokenPool')
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
 
   return { type, version }
 }
@@ -148,6 +167,7 @@ export function parseTokenPoolVersion({
  * {@link TokenPoolType} and {@link TokenPoolVersion}.
  * @throws {@link CCTContractTypeInvalidError} if the reported type is not a supported pool type
  * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known pool version
+ * @remarks Exact match only; see {@link TokenPoolVersion}.
  */
 export async function resolveTokenPool(
   chain: EVMChain,
@@ -278,21 +298,28 @@ export function assertNonSiloedLockReleasePool(
   )
 }
 
+const BURN_MINT_V1_5_1_INTERFACE = new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+
 /**
  * Cached pool {@link Interface}s per {@link TokenPoolFamily} and {@link TokenPoolVersion},
  * built once from the vendored `artifacts/` ABIs (no per-call `new Interface`). `V1_5_0`
  * uses the `*_and_proxy` variants — the only form `@chainlink/contracts-ccip` ships at 1.5.0.
+ * At `V1_6_0` only `SiloedLockReleaseTokenPool` exists, so LockRelease uses its ABI and the
+ * BurnMint entry (unreachable, since {@link parseTokenPoolVersion} rejects BurnMint at 1.6.0)
+ * reuses the 1.5.1 interface to keep the table total.
  */
 export const TOKEN_POOL_INTERFACES: Record<TokenPoolFamily, Record<TokenPoolVersion, Interface>> = {
   BurnMint: {
     [TokenPoolVersion.V1_5_0]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_0_ABI),
-    [TokenPoolVersion.V1_5_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI),
+    [TokenPoolVersion.V1_5_1]: BURN_MINT_V1_5_1_INTERFACE,
+    [TokenPoolVersion.V1_6_0]: BURN_MINT_V1_5_1_INTERFACE,
     [TokenPoolVersion.V1_6_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_6_1_ABI),
     [TokenPoolVersion.V2_0_0]: new Interface(BURN_MINT_TOKEN_POOL_V2_0_0_ABI),
   },
   LockRelease: {
     [TokenPoolVersion.V1_5_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI),
     [TokenPoolVersion.V1_5_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI),
+    [TokenPoolVersion.V1_6_0]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI),
     [TokenPoolVersion.V1_6_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
     [TokenPoolVersion.V2_0_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
   },
@@ -312,8 +339,8 @@ export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVer
  * owner-gated pool write op pre-flights `sender` against.
  *
  * @remarks No `version` parameter and no family dispatch: `owner()` is declared identically —
- * same selector, same `address` return — by both {@link TOKEN_POOL_FAMILIES} at all four
- * supported versions, so the v1.5.0 `BurnMint` interface types the call for every pool.
+ * same selector, same `address` return — by both {@link TOKEN_POOL_FAMILIES} at every
+ * supported version, so the v1.5.0 `BurnMint` interface types the call for every pool.
  * @remarks **Deliberately not routed through the `getTokenPoolState` query op, and must not be
  * "simplified" back to it.** That query costs 6–8 `eth_call`s (token, router, RMN proxy,
  * rate-limit admin, supported chains, dynamic config, finality config, lockbox) plus a
@@ -666,8 +693,8 @@ export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string)
  *
  * @remarks Only declared at v1.5.0 and v1.5.1, where the constructor fixes `i_acceptLiquidity`
  * *immutable*: a pool deployed with it `false` rejects every deposit with `LiquidityNotAccepted`
- * for its whole lifetime, which is why that is worth one call to catch before signing. v1.6.1
- * dropped the flag and always accepts, so callers must not reach here for it. Same shape as
+ * for its whole lifetime, which is why that is worth one call to catch before signing. v1.6.x
+ * pools have no flag and always accept, so callers must not reach here for it. Same shape as
  * {@link readTokenPoolAllowlist}'s `enabled`.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool to read from; must be v1.5.0 or v1.5.1.
@@ -749,7 +776,8 @@ export async function assertLiquidityFunding(
 }
 
 /**
- * Pre-flights a withdrawal against the pool's own ERC-20 balance, which is what it pays out of.
+ * Pre-flights a `withdrawLiquidity` against what the pool can pay out of: its own ERC-20 balance,
+ * or on a `SiloedLockReleaseTokenPool` its unsiloed liquidity ({@link readTokenPoolLiquidity}).
  *
  * @remarks Weaker than {@link assertLiquidityFunding}: a pool's balance moves with every CCIP
  * transfer through it, so this catches "withdraw more than was ever provided" rather than proving
@@ -757,38 +785,69 @@ export async function assertLiquidityFunding(
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool being withdrawn from.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
  * @param amount - Withdrawal amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if the pool's balance is below `amount`
+ * @throws {@link CCTTxFailedError} if the pool's withdrawable liquidity is below `amount`
  */
 export async function assertPoolLiquidity(
   operation: string,
   chain: EVMChain,
   poolAddress: string,
+  type: TokenPoolType,
   amount: bigint,
 ): Promise<void> {
-  const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress)
+  const { token, liquidity } = await readTokenPoolLiquidity(chain, poolAddress, type)
   if (liquidity >= amount) return
   throw new CCTTxFailedError(
     operation,
-    `pool ${poolAddress} holds ${liquidity} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+    `pool ${poolAddress} ${describeLiquidity(type, liquidity, token)}, but ${amount} is required; it would revert InsufficientLiquidity`,
   )
 }
 
 /**
- * A pool's liquidity and the token it is denominated in, from one pair of calls.
+ * A pool's withdrawable liquidity and the token it is denominated in.
  *
  * @remarks Returns the token as well so `transferLiquidity`, which checks both pools escrow the
  * same one, needs no second read.
+ * @remarks On a `SiloedLockReleaseTokenPool` this is `getUnsiloedLiquidity()`, not the pool's
+ * balance: the plain `withdrawLiquidity(uint256)` pays only out of the unsiloed bucket, while the
+ * balance also holds every per-lane silo. Read against the v1.6.0 siloed ABI at v1.6.1 too, where
+ * the type resolves to the LockRelease interface, which does not declare it; the selector is the
+ * same.
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool to read.
- * @returns The escrowed token, checksummed, and the pool's balance of it.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @returns The escrowed token, checksummed, and the liquidity `withdrawLiquidity` can pay out.
  */
 export async function readTokenPoolLiquidity(
   chain: EVMChain,
   poolAddress: string,
+  type: TokenPoolType,
 ): Promise<{ token: string; liquidity: bigint }> {
+  if (type === 'SiloedLockReleaseTokenPool') {
+    const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+    const [{ token }, liquidity] = await Promise.all([
+      readTokenPoolToken(chain, poolAddress),
+      pool.getUnsiloedLiquidity(),
+    ])
+    return { token, liquidity }
+  }
   const { token, erc20 } = await readTokenPoolToken(chain, poolAddress)
   return { token, liquidity: await erc20.balanceOf(poolAddress) }
+}
+
+/**
+ * The "holds N of token" clause of an insufficient-liquidity error, naming the unsiloed bucket on
+ * a siloed pool so the figure is not mistaken for its balance.
+ * @param type - Pool type the liquidity was read for.
+ * @param liquidity - As returned by {@link readTokenPoolLiquidity}.
+ * @param token - The escrowed token.
+ * @returns The clause, with no subject.
+ */
+export function describeLiquidity(type: TokenPoolType, liquidity: bigint, token: string): string {
+  return type === 'SiloedLockReleaseTokenPool'
+    ? `has ${liquidity} of ${token} in unsiloed liquidity`
+    : `holds ${liquidity} of ${token}`
 }
 
 /**

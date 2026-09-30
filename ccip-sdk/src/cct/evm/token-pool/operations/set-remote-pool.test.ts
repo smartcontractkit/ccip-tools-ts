@@ -156,8 +156,16 @@ function generate(chain: EVMChain, overrides: Partial<SetRemotePoolParams> = {})
 }
 
 /** The versions that dropped `setRemotePool` from the ABI. */
-const UNSUPPORTED = [TokenPoolVersion.V1_5_1, TokenPoolVersion.V1_6_1, TokenPoolVersion.V2_0_0]
+const UNSUPPORTED = [
+  TokenPoolVersion.V1_5_1,
+  TokenPoolVersion.V1_6_0,
+  TokenPoolVersion.V1_6_1,
+  TokenPoolVersion.V2_0_0,
+]
 const TYPES: TokenPoolType[] = ['BurnMintTokenPool', 'LockReleaseTokenPool']
+/** The pool types a stub may report at `version`: 1.6.0 shipped only the siloed pool. */
+const typesAt = (version: TokenPoolVersion): TokenPoolType[] =>
+  version === TokenPoolVersion.V1_6_0 ? ['SiloedLockReleaseTokenPool'] : TYPES
 
 describe('SetRemotePool (cct/evm)', () => {
   describe('generate', () => {
@@ -270,7 +278,7 @@ describe('SetRemotePool (cct/evm)', () => {
         // encoder here and emitting calldata for a selector these pools do not implement
         const seen: Calls = { typeAndVersion: 0, remotes: 0, calls: 0 }
         await assert.rejects(
-          () => generate(stubChain({ version, seen })),
+          () => generate(stubChain({ type: typesAt(version)[0], version, seen })),
           (err: unknown) =>
             err instanceof CCTOperationUnsupportedError &&
             err.context.operation === 'setRemotePool' &&

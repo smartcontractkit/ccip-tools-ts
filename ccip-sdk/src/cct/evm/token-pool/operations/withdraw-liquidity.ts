@@ -9,6 +9,9 @@
  * @remarks **Removed in v2.0.0**, where a LockRelease pool escrows through an external
  * `ERC20LockBox` instead of holding liquidity itself.
  *
+ * @remarks On a `SiloedLockReleaseTokenPool` this withdraws from the *unsiloed* bucket only, and
+ * is gated on the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
+ *
  * @packageDocumentation
  */
 
@@ -56,8 +59,8 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
   readonly name = 'withdrawLiquidity'
 
   /**
-   * One 1.5.0 entry covers 1.5.1 and 1.6.1 by floor-match — the signature never changed — and the
-   * explicit `null` at 2.0.0 marks the removal.
+   * One 1.5.0 entry covers 1.5.1, 1.6.0 and 1.6.1 by floor-match — the signature never changed —
+   * and the explicit `null` at 2.0.0 marks the removal.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder | null>> = {
     [TokenPoolVersion.V1_5_0]: encodeWithdrawLiquidity,
@@ -75,14 +78,14 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
    * given) is the pool's rebalancer.
    * @remarks The rebalancer check lives here, not in {@link execute}, so the offline / multisig
    * path gets it too rather than being handed a transaction that reverts once signed.
-   * @remarks The pool's balance is pre-flighted ({@link assertPoolLiquidity}). Advisory only:
-   * every CCIP transfer moves that balance, so a later shortfall still reverts
-   * `InsufficientLiquidity`.
+   * @remarks The pool's withdrawable liquidity is pre-flighted ({@link assertPoolLiquidity}):
+   * its balance, or its unsiloed liquidity on a siloed pool. Advisory only: every CCIP transfer
+   * moves it, so a later shortfall still reverts `InsufficientLiquidity`.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through an
    * `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the pool holds less than `amount`
+   * @throws {@link CCTTxFailedError} if the pool's withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
@@ -95,7 +98,7 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
     const unsigned = encode(getTokenPoolInterface(type, version), params)
     if (params.sender !== undefined)
       await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
-    await assertPoolLiquidity(this.name, chain, params.poolAddress, params.amount)
+    await assertPoolLiquidity(this.name, chain, params.poolAddress, type, params.amount)
     return unsigned
   }
 

@@ -50,10 +50,14 @@ const REVERT = (to: string | null, data: string) =>
 /** ERC-20 side of the source-liquidity check, answered off a fresh Interface. */
 const ERC20 = new Interface(['function balanceOf(address account) view returns (uint256)'])
 
+/** Siloed side of the source-liquidity check: what its `withdrawLiquidity` actually pays. */
+const SILOED = new Interface(['function getUnsiloedLiquidity() view returns (uint256)'])
+
 /**
  * EVMChain stub covering both pools: `typeAndVersion` answers per address, and `provider.call`
  * answers `owner()` / `getToken()` on the destination and `getToken()` / `getRebalancer()` on the
- * source, plus `balanceOf` on their token. Any other pair reverts, which pins both which read
+ * source, plus `balanceOf` on their token or `getUnsiloedLiquidity()` on a siloed source. Any
+ * other pair reverts, which pins both which read
  * goes where and "no other RPC".
  */
 function stubChain({
@@ -62,12 +66,16 @@ function stubChain({
   owner = OWNER,
   /** The source pool's own type; a BurnMint pool holds no liquidity to transfer. */
   sourceType = 'LockReleaseTokenPool' as string | null,
+  /** The source pool's version; a siloed source exists from 1.6.0. */
+  sourceVersion = '1.6.1' as TokenPoolVersion,
   /** The source pool's rebalancer; defaults to the destination, the wiring this op needs. */
   sourceRebalancer = POOL as string,
   /** The source pool's escrowed token; defaults to the destination's. */
   sourceToken = TOKEN as string,
   /** Liquidity the source pool holds; defaults to exactly the transfer. */
   sourceLiquidity = AMOUNT,
+  /** A siloed source's `getUnsiloedLiquidity()`; defaults to exactly the transfer. */
+  sourceUnsiloedLiquidity = AMOUNT,
   seen = newSeen(),
 }: {
   type?: string
@@ -75,9 +83,11 @@ function stubChain({
   owner?: string
   /** `null` stands in for a `from` that does not report `typeAndVersion` at all. */
   sourceType?: string | null
+  sourceVersion?: TokenPoolVersion
   sourceRebalancer?: string
   sourceToken?: string
   sourceLiquidity?: bigint
+  sourceUnsiloedLiquidity?: bigint
   seen?: Seen
 } = {}): EVMChain {
   const iface = TOKEN_POOL_INTERFACES.LockRelease['1.5.1']
@@ -99,6 +109,12 @@ function stubChain({
           seen.calls.push('balanceOf@from')
           return Promise.resolve(ERC20.encodeFunctionResult('balanceOf', [sourceLiquidity]))
         }
+        if (to === OLD_POOL && SILOED.getFunction(data.slice(0, 10))?.name) {
+          seen.calls.push('getUnsiloedLiquidity@from')
+          return Promise.resolve(
+            SILOED.encodeFunctionResult('getUnsiloedLiquidity', [sourceUnsiloedLiquidity]),
+          )
+        }
         throw REVERT(to, data)
       },
     },
@@ -107,7 +123,7 @@ function stubChain({
       if (address === OLD_POOL) {
         if (sourceType === null) return Promise.reject(REVERT(address, '0x181f5a77'))
         seen.calls.push('typeAndVersion@from')
-        return Promise.resolve(parseTypeAndVersion(`${sourceType} 1.6.1`))
+        return Promise.resolve(parseTypeAndVersion(`${sourceType} ${sourceVersion}`))
       }
       seen.calls.push('typeAndVersion@pool')
       return Promise.resolve(parseTypeAndVersion(`${type} ${version}`))
@@ -248,16 +264,18 @@ describe('TransferLiquidity (cct/evm)', () => {
       )
     })
 
-    it('rejects a siloed destination pool, which does not declare transferLiquidity', async () => {
-      await assert.rejects(
-        () => generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.6.1' })),
-        (err: unknown) =>
-          err instanceof CCTContractTypeInvalidError &&
-          err.context.address === POOL &&
-          err.context.actual === 'SiloedLockReleaseTokenPool' &&
-          err.context.expected === 'LockReleaseTokenPool',
-      )
-    })
+    for (const version of ['1.6.0', '1.6.1'] as const) {
+      it(`rejects a siloed destination pool, which does not declare transferLiquidity, at v${version}`, async () => {
+        await assert.rejects(
+          () => generate(stubChain({ type: 'SiloedLockReleaseTokenPool', version })),
+          (err: unknown) =>
+            err instanceof CCTContractTypeInvalidError &&
+            err.context.address === POOL &&
+            err.context.actual === 'SiloedLockReleaseTokenPool' &&
+            err.context.expected === 'LockReleaseTokenPool',
+        )
+      })
+    }
 
     it('accepts the MaxUint256 transfer-all sentinel at 1.6.1', async () => {
       const unsigned = await generate(stubChain({ version: '1.6.1' }), { amount: MaxUint256 })
@@ -312,6 +330,21 @@ describe('TransferLiquidity (cct/evm)', () => {
       )
     })
 
+    for (const sourceType of ['LockReleaseTokenPool', 'SiloedLockReleaseTokenPool'] as const) {
+      it(`rejects a v2.0.0 ${sourceType} source, which has no withdrawLiquidity`, async () => {
+        const seen = newSeen()
+        await assert.rejects(
+          () => generate(stubChain({ sourceType, sourceVersion: '2.0.0', seen })),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === 'from' &&
+            /v2\.0\.0.*ERC20LockBox/.test(err.message),
+        )
+        // rejected on the source's version alone, before any liquidity or rebalancer read
+        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from'])
+      })
+    }
+
     it('rejects a source pool escrowing a different token, which the chain would not catch', async () => {
       await assert.rejects(
         () => generate(stubChain({ sourceToken: OTHER_TOKEN })),
@@ -340,6 +373,46 @@ describe('TransferLiquidity (cct/evm)', () => {
       })
       assert.equal(unsigned.transactions[0]!.data, dataFor(OLD_POOL, MaxUint256))
     })
+
+    for (const sourceVersion of ['1.6.0', '1.6.1'] as const) {
+      const siloed = {
+        version: '1.6.1',
+        sourceType: 'SiloedLockReleaseTokenPool',
+        sourceVersion,
+        sourceLiquidity: AMOUNT * 5n,
+      } as const
+
+      it(`rejects a transfer above a siloed ${sourceVersion} source's unsiloed liquidity, though its balance covers it`, async () => {
+        await assert.rejects(
+          () => generate(stubChain({ ...siloed, sourceUnsiloedLiquidity: AMOUNT - 1n })),
+          (err: unknown) =>
+            err instanceof CCTTxFailedError &&
+            err.context.operation === 'transferLiquidity' &&
+            /has 999999999999999999 of .* in unsiloed liquidity/.test(err.message),
+        )
+      })
+
+      it(`checks a siloed ${sourceVersion} source's unsiloed liquidity, not its balance`, async () => {
+        const seen = newSeen()
+        const unsigned = await generate(stubChain({ ...siloed, seen }))
+        assert.equal(unsigned.transactions[0]!.data, dataFor(OLD_POOL, AMOUNT))
+        assert.ok(seen.calls.includes('getUnsiloedLiquidity@from'))
+        assert.ok(!seen.calls.includes('balanceOf@from'))
+      })
+
+      it(`rejects the MaxUint256 sentinel from a siloed ${sourceVersion} source, whose balance includes its silos`, async () => {
+        const seen = newSeen()
+        await assert.rejects(
+          () => generate(stubChain({ ...siloed, seen }), { amount: MaxUint256 }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === 'amount' &&
+            /getUnsiloedLiquidity/.test(err.message),
+        )
+        // rejected on the source's type alone, before any liquidity read
+        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from'])
+      })
+    }
 
     it('rejects a sender that does not own the destination pool', async () => {
       await assert.rejects(

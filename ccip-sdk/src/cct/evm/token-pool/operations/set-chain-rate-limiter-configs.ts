@@ -3,7 +3,7 @@
  * lanes on a token pool, in a single transaction.
  *
  * @remarks Every supported version is served by its own entry point, keeping the
- * one-op-one-transaction invariant every CCT write holds: v1.5.1/v1.6.1 encode the batch
+ * one-op-one-transaction invariant every CCT write holds: v1.5.1–v1.6.1 encode the batch
  * `setChainRateLimiterConfigs(uint64[], Config[], Config[])`, v2.0.0 the reshaped
  * `setRateLimitConfig(RateLimitConfigArgs[])`, and v1.5.0 — which ships only the singular
  * `setChainRateLimiterConfig(uint64, Config, Config)` — that call. Because v1.5.0 sets one lane
@@ -56,7 +56,7 @@ export type ChainRateLimitUpdate = {
   /**
    * Whether this entry configures the lane's *fast-finality* (FTF) buckets rather than its
    * finalized ones. **v2.0.0 only** — the field does not exist in the pre-2.0.0 ABIs, so setting it
-   * (to either value) on a v1.5.1/v1.6.1 pool is rejected instead of silently dropped. Defaults to
+   * (to either value) on a v1.5.1–v1.6.1 pool is rejected instead of silently dropped. Defaults to
    * `false` on v2.0.0.
    */
   fastFinality?: boolean
@@ -92,7 +92,7 @@ type ParsedChainRateLimitUpdate = {
  * @param allowFastFinality - Whether the resolved pool version has the per-entry `fastFinality`
  * flag (v2.0.0 and up). When `false`, an entry that sets it at all is rejected.
  * @param version - Resolved pool version, or `null` pre-RPC, which skips the stricter
- * v1.5.0/v1.5.1 rate bound.
+ * v1.5.0/v1.5.1/v1.6.0 rate bound.
  * @throws {@link CCTParamsInvalidError} if `updates` is not a non-empty array, an entry is not an
  * object, a selector repeats or is not a `uint64`, `fastFinality` is not a boolean (or is set on a
  * version without it), or either direction's config is invalid for `version`
@@ -160,8 +160,8 @@ function parseUpdates(
 /**
  * Encodes the batch rate-limit call against the resolved pool {@link Interface}.
  * @remarks `version` is the pool's *actual* resolved version, not the encoder's floor: the v1.5.1
- * encoder serves both v1.5.1 and v1.6.1, whose enabled-bucket rate bounds differ, so it has to be
- * told which one it is encoding for.
+ * encoder serves v1.5.1, v1.6.0 and v1.6.1, whose enabled-bucket rate bounds differ, so it has to
+ * be told which one it is encoding for.
  */
 type Encoder = (
   iface: Interface,
@@ -204,7 +204,7 @@ const encodeSingleConfigV1_5_0: Encoder = (iface, { poolAddress, updates }, vers
 }
 
 /**
- * v1.5.1/v1.6.1: `setChainRateLimiterConfigs(uint64[], Config[] outbound, Config[] inbound)` —
+ * v1.5.1–v1.6.1: `setChainRateLimiterConfigs(uint64[], Config[] outbound, Config[] inbound)` —
  * three parallel arrays, outbound before inbound. No `fastFinality` at these versions.
  */
 const encodeBatchConfigs: Encoder = (iface, { poolAddress, updates }, version) => {

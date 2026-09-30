@@ -280,6 +280,20 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       assert.equal(state.version, '1.6.1')
     })
 
+    it('reads a v1.6.0 siloed pool through the legacy reader', async () => {
+      const chain = stubChain({
+        typeAndVersion: 'SiloedLockReleaseTokenPool 1.6.0',
+        family: 'LockRelease',
+        version: TokenPoolVersion.V1_6_0,
+        reads: LEGACY_READS,
+      })
+
+      const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+      assert.equal(state.type, 'SiloedLockReleaseTokenPool')
+      assert.equal(state.version, '1.6.0')
+    })
+
     it('takes decimals from the token at v1.5.0, which has no getTokenDecimals', async () => {
       const chain = stubChain({
         typeAndVersion: 'BurnMintTokenPool 1.5.0',

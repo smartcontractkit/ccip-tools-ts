@@ -1083,7 +1083,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Builds an unsigned pool rate-limit tx (for multisig / offline signing): sets the inbound and
    * outbound limits of one or more already-configured lanes, in a single transaction. Probes the
    * pool's on-chain `typeAndVersion` to resolve its interface + encoder.
-   * @remarks **v1.5.0 pools set one lane per transaction.** v1.5.1/v1.6.1 encode the batch
+   * @remarks **v1.5.0 pools set one lane per transaction.** v1.5.1–v1.6.1 encode the batch
    * `setChainRateLimiterConfigs(uint64[], Config[], Config[])` and v2.0.0 the reshaped
    * `setRateLimitConfig(RateLimitConfigArgs[])`, but v1.5.0 ships only the singular
    * `setChainRateLimiterConfig(uint64, Config, Config)`. To keep the one-op-one-transaction
@@ -1107,8 +1107,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid: `updates` empty, a repeated
    * `remoteChainSelector`, a non-`uint64` selector, a rate above its capacity while enabled, a
    * non-zero amount while disabled, `fastFinality` set on a pre-2.0.0 pool, or `sender` given and
-   * being neither the pool `owner` nor its (set) `rateLimitAdmin`. On a **v1.5.1** pool the
-   * enabled-bucket bound is stricter still (`0 < rate < capacity`), so a `rate` of `0n` or a
+   * being neither the pool `owner` nor its (set) `rateLimitAdmin`. On a **v1.5.1 or v1.6.0** pool
+   * the enabled-bucket bound is stricter still (`0 < rate < capacity`), so a `rate` of `0n` or a
    * `rate` equal to `capacity` is also rejected there — v1.6.1 and v2.0.0 allow both. A
    * **v1.5.0** pool accepts only a single-element `updates`.
    * @example
@@ -1148,9 +1148,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is given and is
    * not the wallet's address, or the signer is neither the pool `owner` nor its (set)
-   * `rateLimitAdmin`. On a **v1.5.1** pool an enabled rate limiter must additionally satisfy
-   * `0 < rate < capacity`, so a `rate` of `0n` or a `rate` equal to `capacity` is rejected there —
-   * v1.6.1 and v2.0.0 allow both. A **v1.5.0** pool accepts only a single-element `updates`.
+   * `rateLimitAdmin`. On a **v1.5.1 or v1.6.0** pool an enabled rate limiter must additionally
+   * satisfy `0 < rate < capacity`, so a `rate` of `0n` or a `rate` equal to `capacity` is rejected
+   * there — v1.6.1 and v2.0.0 allow both. A **v1.5.0** pool accepts only a single-element
+   * `updates`.
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -2193,7 +2194,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * which likewise refuses to build without the delegation behind it.
    * @remarks On a v1.5.0 / v1.5.1 pool the immutable `acceptLiquidity` flag is read too: a pool
    * deployed with it `false` can never take deposits, so that is reported before signing rather
-   * than as a `LiquidityNotAccepted` revert. v1.6.1 dropped the flag.
+   * than as a `LiquidityNotAccepted` revert. v1.6.x pools have no flag.
+   * @remarks On a `SiloedLockReleaseTokenPool` this funds the *unsiloed* bucket, gated on the
+   * unsiloed rebalancer; the per-lane `provideSiloedLiquidity` is not exposed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, which has no
    * liquidity to manage
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
@@ -2221,6 +2224,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Deposits liquidity into a LockRelease pool, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool's
    * rebalancer, and must have approved `amount` to the pool with {@link approveToken}.
+   * @remarks On a `SiloedLockReleaseTokenPool` this funds the *unsiloed* bucket only.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
@@ -2250,9 +2254,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Gated on the pool's `rebalancer`, **not** its owner, and the tokens are sent to
    * `msg.sender` — so they land with the rebalancer, whoever signs. A given `sender` is checked
    * against `getRebalancer()` before any calldata is built.
-   * @remarks The pool's balance is read first, so withdrawing more than it can pay is reported
-   * before signing. Advisory only: every CCIP transfer moves that balance, so a later shortfall
-   * still reverts `InsufficientLiquidity`.
+   * @remarks The pool's withdrawable liquidity is read first (its balance, or
+   * `getUnsiloedLiquidity()` on a siloed pool), so withdrawing more than it can pay is reported
+   * before signing. Advisory only: every CCIP transfer moves it, so a later shortfall still
+   * reverts `InsufficientLiquidity`.
+   * @remarks On a `SiloedLockReleaseTokenPool` this draws on the *unsiloed* bucket only, gated on
+   * the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
@@ -2277,6 +2284,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Withdraws liquidity from a LockRelease pool to the signing wallet, which must be the pool's
    * rebalancer. `sender` defaults to the wallet's address and must equal it.
+   * @remarks On a `SiloedLockReleaseTokenPool` this draws on the *unsiloed* bucket only.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
@@ -2312,14 +2320,18 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * silently receive an asset it does not manage.
    * @remarks From v1.6.1, `amount: MaxUint256` means "the source pool's whole balance"; on a
    * v1.5.x pool that sentinel does not exist and is rejected rather than left to revert.
+   * @remarks A `SiloedLockReleaseTokenPool` source gives up only its *unsiloed* bucket, so "hold the
+   * amount" means `getUnsiloedLiquidity()`, and `MaxUint256` is rejected: its whole balance
+   * includes the per-lane silos, which its `withdrawLiquidity` cannot pay out.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
    * `SiloedLockReleaseTokenPool` — siloed liquidity is per-lane and has no `transferLiquidity`
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `from` equals `poolAddress`,
-   * `amount` is zero, `from` escrows a different token or does not have `poolAddress` as its
-   * rebalancer, or `sender` is given and does not own `poolAddress`
-   * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+   * `amount` is zero or is `MaxUint256` from a siloed `from`, `from` is a v2.0.0 pool, `from`
+   * escrows a different token or does not have `poolAddress` as its rebalancer, or `sender` is
+   * given and does not own `poolAddress`
+   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -2345,13 +2357,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.wallet`. `sender` defaults to the wallet's address and must equal it — the wallet must
    * own the destination pool. See {@link generateUnsignedTransferLiquidity} for the two-step
    * rebalancer wiring this depends on.
+   * @remarks A `SiloedLockReleaseTokenPool` source gives up only its *unsiloed* bucket, and
+   * `MaxUint256` from one is rejected.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the source pool is not wired to `poolAddress`, or the wallet does not
-   * own `poolAddress`
-   * @throws {@link CCTTxFailedError} if `from` holds less than `amount`
+   * the wallet's address, the source pool is not wired to `poolAddress`, `amount` is `MaxUint256`
+   * from a siloed `from`, or the wallet does not own `poolAddress`
+   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
    * `InsufficientLiquidity` when the source pool holds less than `amount`
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -2380,6 +2394,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * A zero `rebalancer` is accepted and revokes the role, which stops liquidity movement
    * entirely: the pool then accepts those calls from nobody.
+   * @remarks On a `SiloedLockReleaseTokenPool` this sets the *unsiloed* rebalancer, which is what
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; the per-lane
+   * `setSiloRebalancer` is not exposed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
    * on its `ERC20LockBox` instead — see {@link updateLockboxAuthorizedCallers}
@@ -2403,6 +2420,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Appoints the pool's rebalancer, signing + submitting with `opts.wallet`. `sender` defaults to
    * the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks On a `SiloedLockReleaseTokenPool` this sets the *unsiloed* rebalancer only.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
@@ -3544,7 +3562,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool `addRemotePool` tx (for multisig / offline signing), authorizing one
    * more remote pool on a lane.
-   * @remarks **v1.5.1, v1.6.1 and v2.0.0 pools.** From v1.5.1 a lane holds a *set* of remote
+   * @remarks **v1.5.1 and later pools.** From v1.5.1 a lane holds a *set* of remote
    * pools, which is what makes a zero-downtime remote-side pool upgrade possible: add the new
    * pool, drain the old one, then {@link removeRemotePool}. A v1.5.0 pool has no additive
    * primitive and throws {@link CCTOperationUnsupportedError} — it only supports the wholesale
@@ -3606,7 +3624,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool `removeRemotePool` tx (for multisig / offline signing),
    * de-authorizing one remote pool on a lane.
-   * @remarks **v1.5.1, v1.6.1 and v2.0.0 pools** — the versions where a lane holds a set of remote
+   * @remarks **v1.5.1 and later pools** — the versions where a lane holds a set of remote
    * pools. The last step of a remote-side pool upgrade started with {@link addRemotePool}. A
    * v1.5.0 pool has no removal primitive and throws {@link CCTOperationUnsupportedError}; its
    * single remote pool can only be overwritten via {@link setRemotePool}.
@@ -3717,7 +3735,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *   inline (`allowed: false` removes the lane) and a **singular** `remotePoolAddress`.
    * - `version: '1.5.1'` — removals in `remoteChainSelectorsToRemove`, additions in `chainsToAdd`,
    *   and each addition carries **plural** `remotePoolAddresses`. This is also the shape for
-   *   v1.6.1 and v2.0.0 pools, whose calldata is byte-identical to v1.5.1's.
+   *   v1.6.0, v1.6.1 and v2.0.0 pools, whose calldata is byte-identical to v1.5.1's.
    *
    * The declaration is checked against the pool's on-chain `typeAndVersion`, so writing the wrong
    * shape is a parameter error here rather than a tx that reverts on an unknown selector (the two
@@ -3728,9 +3746,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * against the pool's `owner()` — `applyChainUpdates` is `onlyOwner`.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `version` does not match the
    * pool's own generation, or `sender` is not the pool owner. An enabled rate limiter must have
-   * `rate <= capacity` on every version; on a **v1.5.0 or v1.5.1** pool the bound is stricter
-   * (`0 < rate < capacity`), so a `rate` of `0n` or a `rate` equal to `capacity` is also rejected
-   * there — v1.6.1 and v2.0.0 allow both.
+   * `rate <= capacity` on every version; on a **v1.5.0, v1.5.1 or v1.6.0** pool the bound is
+   * stricter (`0 < rate < capacity`), so a `rate` of `0n` or a `rate` equal to `capacity` is also
+   * rejected there — v1.6.1 and v2.0.0 allow both.
    *
    * Each lane array must also be dense (no holes) and free of repeated selectors, and a lane
    * being *added* may not use the `0n` selector — the contract would accept it as a permanently

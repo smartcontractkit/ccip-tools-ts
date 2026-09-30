@@ -92,12 +92,17 @@ function generate(chain: EVMChain, overrides: Partial<AcceptPoolOwnershipParams>
 /** Every pool version: `acceptOwnership()` survived unchanged into 2.0.0. */
 const VERSIONS = Object.values(TokenPoolVersion)
 
+/** 1.6.0 shipped only the siloed pool, so a 1.6.0 stub reports that (LockRelease-family) type. */
+const typeAt = (version: TokenPoolVersion) =>
+  version === TokenPoolVersion.V1_6_0 ? 'SiloedLockReleaseTokenPool' : undefined
+
 describe('AcceptPoolOwnership (cct/evm)', () => {
   describe('generate', () => {
     for (const version of VERSIONS) {
       for (const family of ['BurnMint', 'LockRelease'] as const) {
+        if (version === TokenPoolVersion.V1_6_0 && family === 'BurnMint') continue
         it(`encodes acceptOwnership() for a ${family} ${version} pool`, async () => {
-          const unsigned = await generate(stubChain({ family, version }))
+          const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
           const tx = unsigned.transactions[0]!
 
           assert.equal(unsigned.family, ChainFamily.EVM)

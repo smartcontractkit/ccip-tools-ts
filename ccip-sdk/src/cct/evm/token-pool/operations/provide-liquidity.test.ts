@@ -329,6 +329,21 @@ describe('ProvideLiquidity (cct/evm)', () => {
         'allowance',
       ])
     })
+
+    it('encodes for a siloed 1.6.0 pool without reading canAcceptLiquidity, which it lacks', async () => {
+      const seen = newSeen()
+      const unsigned = await generate(
+        stubChain({ type: 'SiloedLockReleaseTokenPool', version: '1.6.0', seen }),
+      )
+      assert.equal(unsigned.transactions[0]!.data, dataFor(AMOUNT))
+      assert.deepEqual(seen.calls, [
+        'typeAndVersion',
+        'getRebalancer',
+        'getToken',
+        'balanceOf',
+        'allowance',
+      ])
+    })
   })
 
   describe('execute', () => {
