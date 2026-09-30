@@ -4,6 +4,8 @@ import { describe, it } from 'node:test'
 import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { CCIPError } from '../../../../errors/index.ts'
+// registers the EVM chain family, for the lanes whose remote is EVM
+import '../../../../evm/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -14,7 +16,12 @@ import { ApplyChainUpdates } from './apply-chain-updates.ts'
 const TOKEN = Keypair.generate().publicKey.toBase58()
 const PAYER = Keypair.generate().publicKey.toBase58()
 const AUTHORITY = Keypair.generate().publicKey.toBase58()
-const SELECTOR = 5009297550715157269n
+const SELECTOR = 5009297550715157269n // ethereum-mainnet
+/** Real EVM selectors: each lane's remote addresses are parsed in the format its selector names. */
+const SEPOLIA = 16015286601757825753n
+const ARBITRUM_SEPOLIA = 3478487238524512106n
+const BASE_SEPOLIA = 10344971235874465080n
+const hex = (selector: bigint) => `0x${selector.toString(16)}`
 const HASH = Keypair.generate().publicKey.toBase58()
 const WALLET = {
   publicKey: Keypair.generate().publicKey,
@@ -43,7 +50,7 @@ function submitChain(): SolanaChain {
 }
 
 function batchChains() {
-  return [3n, 4n, 5n].map((remoteChainSelector, i) => ({
+  return [SEPOLIA, ARBITRUM_SEPOLIA, BASE_SEPOLIA].map((remoteChainSelector, i) => ({
     remoteChainSelector,
     remoteTokenAddress: `0x${(i + 1).toString(16).padStart(40, '0')}`,
     remotePoolAddresses: [`0x${(i + 11).toString(16).padStart(40, '0')}`],
@@ -135,7 +142,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         remoteChainSelectorsToRemove: [1n, 2n],
         chainsToAdd: [
           {
-            remoteChainSelector: 3n,
+            remoteChainSelector: SEPOLIA,
             remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
             remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
             remoteTokenDecimals: 18,
@@ -143,7 +150,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
             outboundRateLimiterConfig: { enabled: true, capacity: 100n, rate: 10n },
           },
           {
-            remoteChainSelector: 4n,
+            remoteChainSelector: ARBITRUM_SEPOLIA,
             remoteTokenAddress: '0xaabbccddeeff00112233445566778899aabbccdd',
             remotePoolAddresses: [],
             remoteTokenDecimals: 6,
@@ -151,9 +158,9 @@ describe('ApplyChainUpdates (cct/solana)', () => {
             outboundRateLimiterConfig: { enabled: false },
           },
           {
-            remoteChainSelector: 5n,
+            remoteChainSelector: BASE_SEPOLIA,
             remoteTokenAddress: '0x11223344556677889900aabbccddeeff00112233',
-            remotePoolAddresses: ['0x1234', '0xabcd'],
+            remotePoolAddresses: ['0x' + '12'.repeat(20), '0x' + 'ab'.repeat(20)],
             remoteTokenDecimals: 8,
             inboundRateLimiterConfig: { enabled: true, capacity: 5_000n, rate: 50n },
             outboundRateLimiterConfig: { enabled: false },
@@ -237,7 +244,7 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'chainsToAdd' &&
-          err.message.includes('chain selector 0x3 (30 remote pool addresses)'),
+          err.message.includes(`chain selector ${hex(SEPOLIA)} (30 remote pool addresses)`),
       )
     })
 
@@ -420,7 +427,10 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         wallet: WALLET,
       })
 
-      assert.deepEqual(result, { hashes: [HASH, HASH], chainSelectors: [['0x3', '0x4'], ['0x5']] })
+      assert.deepEqual(result, {
+        hashes: [HASH, HASH],
+        chainSelectors: [[hex(SEPOLIA), hex(ARBITRUM_SEPOLIA)], [hex(BASE_SEPOLIA)]],
+      })
     })
 
     it('attaches committed hashes when a later batch fails', async () => {
@@ -447,7 +457,8 @@ describe('ApplyChainUpdates (cct/solana)', () => {
           error.context.committedBatchHashes instanceof Array &&
           error.context.committedBatchHashes[0] === HASH &&
           error.context.committedChainSelectors instanceof Array &&
-          error.context.committedChainSelectors[0]?.join() === '0x3,0x4' &&
+          error.context.committedChainSelectors[0]?.join() ===
+            `${hex(SEPOLIA)},${hex(ARBITRUM_SEPOLIA)}` &&
           error.context.failedBatchIndex === 1 &&
           error.context.totalBatches === 2,
       )

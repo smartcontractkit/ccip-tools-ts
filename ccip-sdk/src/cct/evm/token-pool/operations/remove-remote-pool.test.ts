@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress, makeError, toBeHex, zeroPadValue } from 'ethers'
+import { Interface, ZeroAddress, getAddress, makeError, toBeHex, zeroPadValue } from 'ethers'
 
 import type { TokenPoolRemote } from '../../../../chain.ts'
 import {
@@ -10,7 +10,9 @@ import {
   CCIPWalletInvalidError,
 } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
+// registers the Solana chain family, for the lanes whose remote is Solana
+import '../../../../solana/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import {
@@ -33,8 +35,12 @@ const HASH = '0x' + 'ab'.repeat(32)
 
 /** The remote pool being removed — registered on the lane in the default stub. */
 const REMOTE_POOL = '0x' + '99'.repeat(20)
-/** A remote pool that stays registered. */
-const OTHER_REMOTE_POOL = '0x' + 'aa'.repeat(20)
+/** A remote pool that stays registered; checksummed, as the chain reader returns it. */
+const OTHER_REMOTE_POOL = getAddress('0x' + 'aa'.repeat(20))
+/** A Solana remote pool, as base58 and as the 32 raw bytes the pool stores. */
+const SOLANA_REMOTE_POOL = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+const SOLANA_REMOTE_POOL_BYTES =
+  '0x6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb'
 
 const SELECTOR = 5009297550715157269n // ethereum-mainnet
 const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
@@ -43,8 +49,9 @@ const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
 const FRESH = new Interface([
   'function removeRemotePool(uint64 remoteChainSelector, bytes remotePoolAddress)',
 ])
-const expectedData = (remotePoolAddress = REMOTE_POOL, selector = SELECTOR) =>
-  FRESH.encodeFunctionData('removeRemotePool', [selector, remotePoolAddress])
+/** `remotePoolBytes` is what the pool stores: an EVM remote left-padded to 32 bytes. */
+const expectedData = (remotePoolBytes = zeroPadValue(REMOTE_POOL, 32), selector = SELECTOR) =>
+  FRESH.encodeFunctionData('removeRemotePool', [selector, remotePoolBytes])
 
 /** The `getTokenPoolState` getters the owner gate reads, per version generation. */
 function poolReads(version: TokenPoolVersion, type: TokenPoolType, owner: string) {
@@ -105,6 +112,7 @@ function stubChain({
   }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
       call: ({ data }: { data: string }) => {
         seen.calls++
@@ -196,14 +204,21 @@ describe('RemoveRemotePool (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
 
-    it('encodes a 32-byte non-EVM remote pool address as-is', async () => {
-      const remotePoolAddress = '0x' + 'cd'.repeat(32)
-      const unsigned = await generate(stubChain({ remotePools: [remotePoolAddress] }), {
-        remoteChainSelector: SOLANA_SELECTOR,
-        remotePoolAddress,
+    for (const [form, remotePoolAddress] of [
+      ['base58', SOLANA_REMOTE_POOL],
+      ['32-byte hex', SOLANA_REMOTE_POOL_BYTES],
+    ]) {
+      it(`encodes a Solana remote pool given as ${form} to its 32 raw bytes`, async () => {
+        const unsigned = await generate(stubChain({ remotePools: [SOLANA_REMOTE_POOL] }), {
+          remoteChainSelector: SOLANA_SELECTOR,
+          remotePoolAddress,
+        })
+        assert.equal(
+          unsigned.transactions[0]!.data,
+          expectedData(SOLANA_REMOTE_POOL_BYTES, SOLANA_SELECTOR),
+        )
       })
-      assert.equal(unsigned.transactions[0]!.data, expectedData(remotePoolAddress, SOLANA_SELECTOR))
-    })
+    }
 
     it('omits from, and skips the owner read, when sender is not supplied', async () => {
       const seen: Calls = { typeAndVersion: 0, remotes: [], calls: 0 }
@@ -229,10 +244,12 @@ describe('RemoveRemotePool (cct/evm)', () => {
       ['remoteChainSelector', -1n],
       ['remoteChainSelector', 2n ** 64n],
       ['remotePoolAddress', ''],
+      // decodes to the zero address
       ['remotePoolAddress', '0x'],
-      ['remotePoolAddress', '0xabc'],
       ['remotePoolAddress', '0xzz'],
       ['remotePoolAddress', 42 as never],
+      // a Solana address on an EVM lane
+      ['remotePoolAddress', SOLANA_REMOTE_POOL],
     ] as const) {
       it(`rejects ${param} = ${String(value)} before any RPC`, async () => {
         const seen: Calls = { typeAndVersion: 0, remotes: [], calls: 0 }
@@ -290,28 +307,17 @@ describe('RemoveRemotePool (cct/evm)', () => {
       const unsigned = await generate(stubChain({ remotePools: [REMOTE_POOL] }), {
         remotePoolAddress: zeroPadValue(REMOTE_POOL, 32),
       })
-      assert.equal(
-        unsigned.transactions[0]!.data,
-        expectedData(zeroPadValue(REMOTE_POOL, 32).toLowerCase()),
-      )
-    })
-
-    it('matches a registered pool whose spelling differs only in case', async () => {
-      const unsigned = await generate(
-        stubChain({ remotePools: [REMOTE_POOL.toUpperCase().replace('0X', '0x')] }),
-      )
       assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
 
-    it('falls back to raw byte comparison when the remote family has no registered codec', async () => {
-      // `decodeAddress` only knows the families whose chain module is loaded (EVM always is);
-      // for anything else the undecoded hex is compared
-      const bytes = '0x' + 'cd'.repeat(32)
-      const unsigned = await generate(stubChain({ remotePools: [bytes] }), {
-        remoteChainSelector: SOLANA_SELECTOR,
-        remotePoolAddress: bytes.toUpperCase().replace('0X', '0x'),
+    it('matches a pool given in lower case against its checksummed registered spelling', async () => {
+      const unsigned = await generate(stubChain({ remotePools: [OTHER_REMOTE_POOL] }), {
+        remotePoolAddress: OTHER_REMOTE_POOL.toLowerCase(),
       })
-      assert.equal(unsigned.transactions[0]!.data, expectedData(bytes, SOLANA_SELECTOR))
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        expectedData(zeroPadValue(OTHER_REMOTE_POOL, 32)),
+      )
     })
 
     it('removes one of several registered pools', async () => {

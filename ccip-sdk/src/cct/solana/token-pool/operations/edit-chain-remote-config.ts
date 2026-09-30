@@ -6,8 +6,10 @@ import BN from 'bn.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { encodeAddressToAny, getAddressBytes } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
+import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../../remote-address.ts'
 import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
@@ -22,14 +24,11 @@ import {
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
-  parseHexBytes,
-  parseNonEmptyHexBytes,
   parsePublicKey,
   resolvePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateInteger,
-  validateUniqueHexBytes,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool remote-config editing generation and execution. */
@@ -38,11 +37,14 @@ type EditChainRemoteConfigParams = PoolProgramRef & {
   tokenAddress: string
   /** CCIP selector of the remote chain (`u64`). */
   remoteChainSelector: bigint
-  /** Hex-encoded remote token address, optionally `0x`-prefixed, up to 32 bytes. Left-padded in the instruction. */
+  /**
+   * Remote token address in the remote chain's own format (`0x…` for EVM, base58 for Solana, …),
+   * the family taken from `remoteChainSelector`. Left-padded to 32 bytes in the instruction.
+   */
   remoteTokenAddress: string
   /**
-   * Hex-encoded remote pool addresses, optionally `0x`-prefixed. Stored at native byte length;
-   * unlike `remoteTokenAddress`, they are not left-padded.
+   * Remote pool addresses in the remote chain's own format, like `remoteTokenAddress`; unique.
+   * Stored at native byte length; unlike `remoteTokenAddress`, they are not left-padded.
    */
   remotePoolAddresses: string[]
   /** Remote token decimals (`u8`): an integer from 0 to 255; 0 is valid. */
@@ -57,8 +59,8 @@ type ParsedEditChainRemoteConfigParams = {
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
-  remoteTokenAddress: Buffer
-  remotePoolAddresses: Buffer[]
+  remoteTokenAddress: string
+  remotePoolAddresses: string[]
   remoteTokenDecimals: number
 }
 
@@ -95,24 +97,21 @@ export class EditChainRemoteConfig extends SolanaOperation<
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
     validateInteger(this.name, 'remoteTokenDecimals', params.remoteTokenDecimals, 0, 255)
 
-    const remoteTokenAddress = parseHexBytes(
+    const remoteTokenAddress = parseRemoteAddress(
       this.name,
       'remoteTokenAddress',
       params.remoteTokenAddress,
-      32,
+      params.remoteChainSelector,
     )
 
     if (!Array.isArray(params.remotePoolAddresses)) {
       throw new CCTParamsInvalidError(this.name, 'remotePoolAddresses', 'must be an array')
     }
-    const remotePoolAddresses = params.remotePoolAddresses.map((address, i) =>
-      parseNonEmptyHexBytes(this.name, `remotePoolAddresses[${i}]`, address),
-    )
-    validateUniqueHexBytes(
+    const remotePoolAddresses = parseUniqueRemoteAddresses(
       this.name,
       'remotePoolAddresses',
-      remotePoolAddresses,
-      'remote pool addresses',
+      params.remotePoolAddresses,
+      params.remoteChainSelector,
     )
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)
@@ -143,13 +142,12 @@ export class EditChainRemoteConfig extends SolanaOperation<
       opts.remoteChainSelector,
       opts.tokenAddress,
     )
-    const paddedRemoteToken = Buffer.alloc(32)
-    opts.remoteTokenAddress.copy(paddedRemoteToken, 32 - opts.remoteTokenAddress.length)
-
     const instruction = await program.methods
       .editChainRemoteConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress, {
-        tokenAddress: { address: paddedRemoteToken },
-        poolAddresses: opts.remotePoolAddresses.map((address) => ({ address })),
+        tokenAddress: { address: encodeAddressToAny(opts.remoteTokenAddress) },
+        poolAddresses: opts.remotePoolAddresses.map((address) => ({
+          address: Buffer.from(getAddressBytes(address)),
+        })),
         decimals: opts.remoteTokenDecimals,
       })
       .accountsStrict({

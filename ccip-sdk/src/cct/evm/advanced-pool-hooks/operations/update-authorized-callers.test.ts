@@ -3,25 +3,17 @@ import { describe, it } from 'node:test'
 
 import { Interface, ZeroAddress, getAddress, getIcapAddress, makeError } from 'ethers'
 
-import {
-  CCIPExecTxRevertedError,
-  CCIPTypeVersionInvalidError,
-  CCIPWalletInvalidError,
-} from '../../../../errors/index.ts'
+import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
-import { parseTypeAndVersion } from '../../../../utils.ts'
-import {
-  CCTContractTypeInvalidError,
-  CCTContractVersionUnsupportedError,
-  CCTParamsInvalidError,
-} from '../../../errors.ts'
-import { AuthorizeLockboxCallers } from './authorize-callers.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
+import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { UpdateAdvancedPoolHooksAuthorizedCallers } from './update-authorized-callers.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
-const LOCKBOX = '0x' + '66'.repeat(20)
+const HOOKS = '0x' + '66'.repeat(20)
 const POOL = '0x' + '77'.repeat(20)
 const OTHER = '0x' + '88'.repeat(20)
+const DUPLICATE_CALLER = '0x' + 'aa'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const NOT_THE_OWNER = '0x' + '99'.repeat(20)
 
@@ -49,13 +41,13 @@ type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
 
 /**
- * Minimal EVMChain stub. The build path reads `typeAndVersion` on the lockbox, which defaults to
- * a deployed, supported `ERC20LockBox`, then `owner()` when a `sender` is known, which defaults
+ * Minimal EVMChain stub. The build path reads `typeAndVersion` on the advancedPoolHooks, which defaults to
+ * a deployed, supported `AdvancedPoolHooks`, then `owner()` when a `sender` is known, which defaults
  * to `SENDER`. `readError` replaces the `typeAndVersion` read with a failure, standing in for an
  * address with no contract code (`BAD_DATA`) or a reverting read.
  */
 function stubChain({
-  type = 'ERC20LockBox',
+  type = 'AdvancedPoolHooks',
   version = '2.0.0',
   owner = SENDER,
   readError,
@@ -75,13 +67,14 @@ function stubChain({
         return Promise.resolve(OWNER_IFACE.encodeFunctionResult(fn, [owner]))
       },
     },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nextNonce: async () => 0,
     rollbackNonce: () => {},
     typeAndVersion: (address: string) => {
       seen.calls.push(`typeAndVersion:${address}`)
       if (readError) return Promise.reject(readError)
-      return Promise.resolve(parseTypeAndVersion(`${type} ${version}`))
+      return Promise.resolve([type, version])
     },
   } as unknown as EVMChain
 }
@@ -109,11 +102,11 @@ function fakeSigner(opts: { waitError?: Error; seen?: Seen; address?: string } =
   }
 }
 
-describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
+describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks operation)', () => {
   describe('generate (golden vectors)', () => {
-    it('encodes an added caller as a call to the lockbox', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
-        lockbox: LOCKBOX,
+    it('encodes an added caller as a call to the advancedPoolHooks', async () => {
+      const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         sender: SENDER,
       })
@@ -121,7 +114,7 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       assert.equal(unsigned.family, ChainFamily.EVM)
       assert.equal(unsigned.transactions.length, 1)
       const tx = unsigned.transactions[0]!
-      assert.equal(tx.to, LOCKBOX)
+      assert.equal(tx.to, HOOKS)
       assert.equal(tx.from, SENDER)
       assert.ok(
         tx.data!.startsWith(SELECTOR),
@@ -132,8 +125,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('encodes both added and removed callers', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
-        lockbox: LOCKBOX,
+      const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         removedCallers: [OTHER],
       })
@@ -145,8 +138,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('defaults omitted caller arrays to empty', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
-        lockbox: LOCKBOX,
+      const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+        advancedPoolHooks: HOOKS,
         removedCallers: [OTHER],
       })
       // addedCallers omitted -> empty; OTHER lands in the removed array (removed offset is 0x60).
@@ -157,8 +150,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('omits `from` when no sender is given', async () => {
-      const unsigned = await new AuthorizeLockboxCallers().generate(stubChain(), {
-        lockbox: LOCKBOX,
+      const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
       })
       assert.equal(unsigned.transactions[0]!.from, undefined)
@@ -166,32 +159,32 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
   })
 
   describe('validation', () => {
-    it('rejects an invalid lockbox address', async () => {
+    it('rejects an invalid advancedPoolHooks address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: 'nope',
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: 'nope',
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
-          err.context.param === 'lockbox',
+          err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers' &&
+          err.context.param === 'advancedPoolHooks',
       )
     })
 
-    it('rejects a zero-address lockbox', async () => {
+    it('rejects a zero-address advancedPoolHooks', async () => {
       // a call to 0x0 hits no code, so it would mine as a successful no-op
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: ZeroAddress,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: ZeroAddress,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
-          err.context.param === 'lockbox',
+          err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers' &&
+          err.context.param === 'advancedPoolHooks',
       )
     })
 
@@ -199,17 +192,21 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       // isAddress() accepts ICAP, and this never equals ZeroAddress literally
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: getIcapAddress(ZeroAddress),
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: getIcapAddress(ZeroAddress),
             addedCallers: [POOL],
           }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'advancedPoolHooks',
       )
     })
 
     it('rejects when no callers are supplied', async () => {
       await assert.rejects(
-        () => new AuthorizeLockboxCallers().generate(stubChain(), { lockbox: LOCKBOX }),
+        () =>
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
+          }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'addedCallers',
       )
@@ -218,8 +215,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects when both caller arrays are empty', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [],
             removedCallers: [],
           }),
@@ -231,8 +228,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid added caller address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL, 'nope'],
           }),
         (err: unknown) =>
@@ -243,8 +240,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid removed caller address', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             removedCallers: ['nope'],
           }),
         (err: unknown) =>
@@ -252,11 +249,24 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       )
     })
 
+    it('rejects duplicate callers, including differently cased addresses', async () => {
+      for (const param of ['addedCallers', 'removedCallers'] as const) {
+        await assert.rejects(
+          () =>
+            new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+              advancedPoolHooks: HOOKS,
+              [param]: [DUPLICATE_CALLER, `0x${DUPLICATE_CALLER.slice(2).toUpperCase()}`],
+            }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
     it('rejects the zero address as a caller', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [ZeroAddress],
           }),
         (err: unknown) =>
@@ -267,8 +277,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects an invalid sender', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             sender: 'nope',
           }),
@@ -277,28 +287,28 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
   })
 
-  describe('lockbox pre-flight', () => {
-    it('reads the lockbox typeAndVersion before building calldata', async () => {
+  describe('advancedPoolHooks pre-flight', () => {
+    it('reads the advancedPoolHooks typeAndVersion before building calldata', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
-        lockbox: LOCKBOX,
+      await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ seen }), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
       })
-      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`])
+      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`])
     })
 
     it('rejects an address with no contract code', async () => {
       const readError = noCodeError()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
-          err.context.param === 'lockbox' &&
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === HOOKS &&
+          err.context.actual === 'unknown' &&
           err.cause === readError,
       )
     })
@@ -308,77 +318,58 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
         action: 'call',
         data: '0x',
         reason: null,
-        transaction: { to: LOCKBOX, data: '0x' },
+        transaction: { to: HOOKS, data: '0x' },
         invocation: null,
         revert: null,
       })
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.param === 'lockbox' &&
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === HOOKS &&
+          err.context.actual === 'unknown' &&
           err.cause === readError,
       )
     })
 
-    it('propagates a transport failure unwrapped, rather than blaming the address', async () => {
-      // a rate limit or a dead RPC says nothing about the lockbox; only CALL_EXCEPTION/BAD_DATA do
+    it('wraps a transport failure as an unknown hooks contract', async () => {
       const readError = makeError('request timeout', 'TIMEOUT', {
         operation: 'call',
         reason: 'timeout',
       })
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ readError }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-          }),
-        (err: unknown) => err === readError,
-      )
-    })
-
-    it('rejects a contract whose typeAndVersion string is unparseable', async () => {
-      await assert.rejects(
-        () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ type: 'garbage', version: 'x' }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-          }),
-        (err: unknown) => err instanceof CCIPTypeVersionInvalidError,
-      )
-    })
-
-    it('rejects a deployed contract that is not an ERC20LockBox', async () => {
-      await assert.rejects(
-        () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ type: 'LockReleaseTokenPool' }), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
           }),
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
-          err.context.address === LOCKBOX &&
-          err.context.expected === 'ERC20LockBox' &&
-          err.context.actual === 'LockReleaseTokenPool',
+          err.context.address === HOOKS &&
+          err.context.actual === 'unknown' &&
+          err.cause === readError,
       )
     })
 
-    it('rejects an unsupported ERC20LockBox version', async () => {
+    it('rejects a deployed contract that is not an AdvancedPoolHooks', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain({ version: '3.0.0' }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-          }),
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
+            stubChain({ type: 'LockReleaseTokenPool' }),
+            {
+              advancedPoolHooks: HOOKS,
+              addedCallers: [POOL],
+            },
+          ),
         (err: unknown) =>
-          err instanceof CCTContractVersionUnsupportedError &&
-          err.context.contractType === 'ERC20LockBox' &&
-          err.context.version === '3.0.0' &&
-          err.context.address === LOCKBOX,
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === HOOKS &&
+          err.context.expected === 'AdvancedPoolHooks' &&
+          err.context.actual === 'LockReleaseTokenPool',
       )
     })
   })
@@ -386,72 +377,71 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
   describe('owner pre-flight', () => {
     it('reads owner() after typeAndVersion, only when a sender is given', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().generate(stubChain({ seen }), {
-        lockbox: LOCKBOX,
+      await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ seen }), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         sender: SENDER,
       })
-      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`, `owner:${LOCKBOX}`])
+      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`, `owner:${HOOKS}`])
     })
 
     it('accepts the owner as sender regardless of address casing', async () => {
       const lower = '0x' + 'ab'.repeat(20)
-      const unsigned = await new AuthorizeLockboxCallers().generate(
+      const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
         stubChain({ owner: getAddress(lower) }),
-        { lockbox: LOCKBOX, addedCallers: [POOL], sender: lower },
+        { advancedPoolHooks: HOOKS, addedCallers: [POOL], sender: lower },
       )
       assert.equal(unsigned.transactions[0]!.from, lower)
     })
 
-    it('rejects a sender that is not the lockbox owner', async () => {
+    it('rejects a sender that is not the advancedPoolHooks owner', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().generate(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             sender: NOT_THE_OWNER,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
+          err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers' &&
           err.context.param === 'sender',
       )
     })
 
-    it('does not read owner() when the lockbox check fails', async () => {
+    it('does not read owner() when the advancedPoolHooks check fails', async () => {
       const seen = newSeen()
       await assert.rejects(() =>
-        new AuthorizeLockboxCallers().generate(stubChain({ type: 'Router', seen }), {
-          lockbox: LOCKBOX,
-          addedCallers: [POOL],
-          sender: SENDER,
-        }),
+        new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
+          stubChain({ type: 'Router', seen }),
+          {
+            advancedPoolHooks: HOOKS,
+            addedCallers: [POOL],
+            sender: SENDER,
+          },
+        ),
       )
-      assert.deepEqual(seen.calls, [`typeAndVersion:${LOCKBOX}`])
+      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`])
     })
   })
 
   describe('execute', () => {
-    it('checks the signing wallet against the lockbox owner', async () => {
+    it('checks the signing wallet against the advancedPoolHooks owner', async () => {
       const seen = newSeen()
-      await new AuthorizeLockboxCallers().execute(stubChain({ seen }), {
-        lockbox: LOCKBOX,
+      await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain({ seen }), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         wallet: fakeSigner({ seen }),
       })
-      assert.deepEqual(seen.calls, [
-        `typeAndVersion:${LOCKBOX}`,
-        `owner:${LOCKBOX}`,
-        'sendTransaction',
-      ])
+      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`, `owner:${HOOKS}`, 'sendTransaction'])
     })
 
-    it('does not sign or broadcast when the wallet is not the lockbox owner', async () => {
+    it('does not sign or broadcast when the wallet is not the advancedPoolHooks owner', async () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             wallet: fakeSigner({ seen, address: NOT_THE_OWNER }),
           }),
@@ -463,8 +453,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a sender that differs from the signing wallet', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             sender: NOT_THE_OWNER,
             wallet: fakeSigner(),
@@ -474,8 +464,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('signs, submits, and returns the tx hash', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
-        lockbox: LOCKBOX,
+      const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         wallet: fakeSigner(),
       })
@@ -483,8 +473,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     })
 
     it('accepts a sender matching the signing wallet', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
-        lockbox: LOCKBOX,
+      const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+        advancedPoolHooks: HOOKS,
         addedCallers: [POOL],
         sender: SENDER,
         wallet: fakeSigner(),
@@ -492,55 +482,45 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('rejects a sender that differs from the signing wallet', async () => {
-      await assert.rejects(
-        () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-            sender: OTHER,
-            wallet: fakeSigner(),
-          }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'authorizeLockboxCallers' &&
-          err.context.param === 'sender',
-      )
-    })
-
     it('throws CCIPExecTxRevertedError when the tx reverts on-chain', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             wallet: fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
           }),
         (err: unknown) =>
           err instanceof CCIPExecTxRevertedError &&
-          err.context.operation === 'authorizeLockboxCallers',
+          err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers',
       )
     })
 
     it('revokes a caller and returns the tx hash', async () => {
-      const result = await new AuthorizeLockboxCallers().execute(stubChain(), {
-        lockbox: LOCKBOX,
+      const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+        advancedPoolHooks: HOOKS,
         removedCallers: [POOL],
         wallet: fakeSigner(),
       })
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('does not sign or broadcast when the lockbox is not deployed', async () => {
+    it('does not sign or broadcast when the advancedPoolHooks is not deployed', async () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain({ readError: noCodeError() }), {
-            lockbox: LOCKBOX,
-            addedCallers: [POOL],
-            wallet: fakeSigner({ seen }),
-          }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
+          new UpdateAdvancedPoolHooksAuthorizedCallers().execute(
+            stubChain({ readError: noCodeError() }),
+            {
+              advancedPoolHooks: HOOKS,
+              addedCallers: [POOL],
+              wallet: fakeSigner({ seen }),
+            },
+          ),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === HOOKS &&
+          err.context.actual === 'unknown',
       )
       assert.deepEqual(seen.calls, [])
     })
@@ -548,8 +528,8 @@ describe('AuthorizeLockboxCallers (cct/evm lockbox operation)', () => {
     it('rejects a non-signer wallet', async () => {
       await assert.rejects(
         () =>
-          new AuthorizeLockboxCallers().execute(stubChain(), {
-            lockbox: LOCKBOX,
+          new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
+            advancedPoolHooks: HOOKS,
             addedCallers: [POOL],
             wallet: {},
           }),

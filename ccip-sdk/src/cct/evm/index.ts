@@ -23,6 +23,11 @@ import {
   DeployAdvancedPoolHooks,
 } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
 import {
+  type GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  type GetAllAdvancedPoolHooksAuthorizedCallersResult,
+  GetAllAdvancedPoolHooksAuthorizedCallers,
+} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
+import {
   type GetAllCCVConfigsParams,
   type GetAllCCVConfigsResult,
   GetAllCCVConfigs,
@@ -33,16 +38,43 @@ import {
   GetCCVConfig,
 } from './advanced-pool-hooks/operations/get-ccv-config.ts'
 import {
+  type GetPolicyEngineParams,
+  type GetPolicyEngineResult,
+  GetPolicyEngine,
+} from './advanced-pool-hooks/operations/get-policy-engine.ts'
+import {
   type GetRequiredCCVsParams,
   type GetRequiredCCVsResult,
   GetRequiredCCVs,
 } from './advanced-pool-hooks/operations/get-required-ccvs.ts'
 import {
-  type AuthorizeLockboxCallersParams,
-  AuthorizeLockboxCallers,
-} from './lockbox/operations/authorize-callers.ts'
+  type GetThresholdAmountParams,
+  type GetThresholdAmountResult,
+  GetThresholdAmount,
+} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
+import {
+  type SetPolicyEngineParams,
+  SetPolicyEngine,
+} from './advanced-pool-hooks/operations/set-policy-engine.ts'
+import {
+  type SetThresholdAmountParams,
+  SetThresholdAmount,
+} from './advanced-pool-hooks/operations/set-threshold-amount.ts'
+import {
+  type UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  UpdateAdvancedPoolHooksAuthorizedCallers,
+} from './advanced-pool-hooks/operations/update-authorized-callers.ts'
 import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
 import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+import {
+  type GetAllLockboxAuthorizedCallersParams,
+  type GetAllLockboxAuthorizedCallersResult,
+  GetAllLockboxAuthorizedCallers,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+import {
+  type UpdateLockboxAuthorizedCallersParams,
+  UpdateLockboxAuthorizedCallers,
+} from './lockbox/operations/update-authorized-callers.ts'
 import {
   type WithdrawFromLockboxParams,
   WithdrawFromLockbox,
@@ -109,6 +141,16 @@ import {
   type GetAllowedFinalityConfigResult,
   GetAllowedFinalityConfig,
 } from './token-pool/operations/get-allowed-finality-config.ts'
+import {
+  type GetAllowlistEnabledParams,
+  type GetAllowlistEnabledResult,
+  GetAllowlistEnabled,
+} from './token-pool/operations/get-allowlist-enabled.ts'
+import {
+  type GetAllowlistParams,
+  type GetAllowlistResult,
+  GetAllowlist,
+} from './token-pool/operations/get-allowlist.ts'
 import {
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
@@ -273,6 +315,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #removeRemotePool = new RemoveRemotePool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #applyAllowlistUpdates = new ApplyAllowlistUpdates()
+  readonly #getAllowlist = new GetAllowlist()
+  readonly #getAllowlistEnabled = new GetAllowlistEnabled()
   readonly #applyTokenTransferFeeConfigUpdates = new ApplyTokenTransferFeeConfigUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
@@ -295,13 +339,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
   readonly #applyCCVConfigUpdates = new ApplyCCVConfigUpdates()
+  readonly #updateAdvancedPoolHooksAuthorizedCallers =
+    new UpdateAdvancedPoolHooksAuthorizedCallers()
   readonly #getCCVConfig = new GetCCVConfig()
   readonly #getAllCCVConfigs = new GetAllCCVConfigs()
   readonly #getRequiredCCVs = new GetRequiredCCVs()
+  readonly #getAllAdvancedPoolHooksAuthorizedCallers =
+    new GetAllAdvancedPoolHooksAuthorizedCallers()
+  readonly #getPolicyEngine = new GetPolicyEngine()
+  readonly #getThresholdAmount = new GetThresholdAmount()
+  readonly #setPolicyEngine = new SetPolicyEngine()
+  readonly #setThresholdAmount = new SetThresholdAmount()
 
   // Lockbox operations
   readonly #deployLockbox = new DeployLockbox()
-  readonly #authorizeLockboxCallers = new AuthorizeLockboxCallers()
+  readonly #updateLockboxAuthorizedCallers = new UpdateLockboxAuthorizedCallers()
+  readonly #getAllLockboxAuthorizedCallers = new GetAllLockboxAuthorizedCallers()
   readonly #depositToLockbox = new DepositToLockbox()
   readonly #withdrawFromLockbox = new WithdrawFromLockbox()
 
@@ -376,6 +429,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (unlike the unsigned builder, where it's optional for offline/multisig flows), so the
    * token-authority check always runs before this signs and submits.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `registryModule` is not a
    * registered TAR module, `registrationMethod` needs a v1.6+ module, `sender` doesn't match the
    * token's authority for the chosen method, or the token is already registered (or pending
@@ -420,6 +474,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Registers a pool, signing + submitting with `opts.wallet` (the token admin).
    * A zero/empty `poolAddress` delists the token from the registry.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
@@ -465,6 +520,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
    * (see {@link transferPoolOwnership}); do not confuse the two.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if the signing wallet is not the
    * token's current registry administrator (including a not-yet-accepted registration), or if an
    * explicit `opts.sender` does not match the wallet's address
@@ -512,6 +568,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.wallet` (the pending administrator). Completes the `registerAdmin`/`transferAdmin` →
    * `acceptAdmin` handshake, after which {@link setPool} becomes callable.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
    *   pending administrator
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
@@ -601,6 +658,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link generateUnsignedTransferPoolOwnership}: ownership moves only once `newOwner` calls
    * {@link acceptPoolOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
    * signer, if `sender` is given and is not the wallet's address, or if the signer is not the pool
    * owner
@@ -649,6 +707,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * wallet that is not the proposed owner reverts rather than failing validation, per
    * {@link generateUnsignedAcceptPoolOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or `sender` is given and is
    * not the wallet's address
    * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
@@ -699,6 +758,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * token's current owner, and is what `sender` defaults to. Two-step, and v1.x-only without a
    * version check, per {@link generateUnsignedTransferTokenOwnership}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
    * signer, if `sender` is given and is not the wallet's address, or if the signer is not the
    * token owner
@@ -742,6 +802,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Completes a pending token ownership transfer, signing + submitting with `opts.wallet` — which
    * must be the address {@link transferTokenOwnership} proposed. Ownership moves in this tx.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is invalid, or `sender` is given and
    * is not the wallet's address
    * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
@@ -800,6 +861,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * before broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -860,6 +922,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * delay rules. The contract is the final authority on whether its schedule has passed.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -918,6 +981,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for pending-transfer rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -974,6 +1038,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
@@ -1062,6 +1127,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Same version rules as {@link generateUnsignedSetChainRateLimiterConfigs}: **v1.5.0 pools set
    * one lane per transaction**, and `fastFinality` is v2.0.0-only.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is given and is
    * not the wallet's address, or the signer is neither the pool `owner` nor its (set)
    * `rateLimitAdmin`. On a **v1.5.1** pool an enabled rate limiter must additionally satisfy
@@ -1128,6 +1194,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Assigns the pool's rate-limit admin role, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — use {@link setDynamicConfig}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -1195,6 +1262,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
    * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -1260,6 +1328,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `sender` defaults to the wallet address and, when supplied, must equal it.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1333,6 +1402,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * owner.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1403,6 +1473,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The signing wallet must be the pool owner or delegated `feeAdmin`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
@@ -1492,6 +1563,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * hooks' own `applyAuthorizedCallerUpdates`, otherwise transfers revert `UnauthorizedCaller`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any address is invalid, zero or duplicated, or
    * `thresholdAmount` is not a `uint256`
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines without an address
@@ -1622,6 +1694,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * confirm it is an `AdvancedPoolHooks` contract.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
    * `AdvancedPoolHooks` contract
    * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
@@ -1650,6 +1723,226 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<ApplyCCVConfigUpdatesParams>,
   ): Promise<TransactionResult> {
     return this.#applyCCVConfigUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Lists callers authorized for hooks preflight and postflight checks.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const callers = await cct.getAllAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   * })
+   * ```
+   */
+  getAllAdvancedPoolHooksAuthorizedCallers(
+    opts: GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  ): Promise<GetAllAdvancedPoolHooksAuthorizedCallersResult> {
+    return this.#getAllAdvancedPoolHooksAuthorizedCallers.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the hooks policy engine; the zero address means policy checks are disabled.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const policyEngine = await cct.getPolicyEngine({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getPolicyEngine(opts: GetPolicyEngineParams): Promise<GetPolicyEngineResult> {
+    return this.#getPolicyEngine.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the amount at which additional CCVs apply; zero means they are disabled.
+   *
+   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   *
+   * @example
+   * ```ts
+   * const thresholdAmount = await cct.getThresholdAmount({ advancedPoolHooks: '0xHooks...' })
+   * ```
+   */
+  getThresholdAmount(opts: GetThresholdAmountParams): Promise<GetThresholdAmountResult> {
+    return this.#getThresholdAmount.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned authorized-caller update for an `AdvancedPoolHooks`; use
+   * {@link updateAdvancedPoolHooksAuthorizedCallers} to sign and submit it directly.
+   *
+   * @remarks Caller arrays reject duplicates (including different address casing). Removes run
+   * before adds, so a caller present in both lists remains authorized. The hooks target and
+   * supplied owner are pre-flighted before calldata is returned.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   *   addedCallers: ['0xPool...'],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers(
+    opts: UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#updateAdvancedPoolHooksAuthorizedCallers.generate(this.chain, opts)
+  }
+
+  /**
+   * Updates callers permitted to invoke hooks checks, signing + submitting as the hooks owner.
+   * Use {@link generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers} for multisig or offline signing.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.updateAdvancedPoolHooksAuthorizedCallers({
+   *   advancedPoolHooks: '0xHooks...',
+   *   addedCallers: ['0xPool...'],
+   *   wallet,
+   * })
+   * ```
+   */
+  updateAdvancedPoolHooksAuthorizedCallers(
+    opts: EVMExecuteParams<UpdateAdvancedPoolHooksAuthorizedCallersParams>,
+  ): Promise<TransactionResult> {
+    return this.#updateAdvancedPoolHooksAuthorizedCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `setPolicyEngine` tx for an `AdvancedPoolHooks`; use
+   * {@link setPolicyEngine} to sign and submit it directly.
+   *
+   * @remarks The zero address disables policy checks. A non-zero engine must have deployed code
+   * and implement `attach()` / `detach()`; code presence alone cannot verify that interface. The
+   * target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it must
+   * be the current hooks owner.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
+   * code, or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetPolicyEngine({
+   *   advancedPoolHooks: '0xHooks...',
+   *   newPolicyEngine: '0xPolicyEngine...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetPolicyEngine(opts: SetPolicyEngineParams): Promise<UnsignedEVMTx> {
+    return this.#setPolicyEngine.generate(this.chain, opts)
+  }
+
+  /**
+   * Attaches a policy engine to an `AdvancedPoolHooks`, signing + submitting as its owner. Pass
+   * the zero address to disable policy checks. Use {@link generateUnsignedSetPolicyEngine} for
+   * multisig or offline signing.
+   *
+   * @remarks The hooks contract detaches the old engine before attaching the new one. A reverting
+   * old-engine detach reverts this transaction; use the contract's explicit recovery setter if
+   * that is intentional.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
+   * code, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setPolicyEngine({
+   *   advancedPoolHooks: '0xHooks...',
+   *   newPolicyEngine: '0xPolicyEngine...',
+   *   wallet,
+   * })
+   * ```
+   */
+  setPolicyEngine(opts: EVMExecuteParams<SetPolicyEngineParams>): Promise<TransactionResult> {
+    return this.#setPolicyEngine.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `setThresholdAmount` tx for an `AdvancedPoolHooks`; use
+   * {@link setThresholdAmount} to sign and submit it directly.
+   *
+   * @remarks Zero disables threshold CCVs; base CCVs continue to apply. The target is probed to
+   * confirm it reports `AdvancedPoolHooks`; when `sender` is supplied, it must be the current
+   * hooks owner.
+   *
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetThresholdAmount({
+   *   advancedPoolHooks: '0xHooks...',
+   *   thresholdAmount: 1_000_000n,
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetThresholdAmount(opts: SetThresholdAmountParams): Promise<UnsignedEVMTx> {
+    return this.#setThresholdAmount.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets the amount at which an `AdvancedPoolHooks` requires additional CCVs, signing + submitting
+   * as its owner. Pass zero to disable threshold CCVs. Use
+   * {@link generateUnsignedSetThresholdAmount} for multisig or offline signing.
+   *
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * `AdvancedPoolHooks` contract
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
+   * or the wallet is not the hooks owner
+   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { hash } = await cct.setThresholdAmount({
+   *   advancedPoolHooks: '0xHooks...',
+   *   thresholdAmount: 1_000_000n,
+   *   wallet,
+   * })
+   * ```
+   */
+  setThresholdAmount(opts: EVMExecuteParams<SetThresholdAmountParams>): Promise<TransactionResult> {
+    return this.#setThresholdAmount.execute(this.chain, opts)
   }
 
   /**
@@ -1701,6 +1994,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link generateUnsignedUpdateAdvancedPoolHooks}.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported,
    * or a non-zero `advancedPoolHooks` is not an `AdvancedPoolHooks` contract
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
@@ -1846,6 +2140,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * wallet's address and must equal it — the allowance comes out of the signing account's balance,
    * so approving on behalf of another address is rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
    * the wallet's address
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -1884,7 +2179,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, which has no
    * liquidity to manage
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
-   * external `ERC20LockBox` instead — see {@link deployLockbox} / {@link authorizeLockboxCallers}
+   * external `ERC20LockBox` instead — see {@link deployLockbox} / {@link updateLockboxAuthorizedCallers}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `amount` is zero, the pool
    * cannot accept liquidity, or `sender` is given and is not the pool's rebalancer
    * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
@@ -1909,6 +2204,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * defaults to the wallet's address and must equal it — the wallet must be the pool's
    * rebalancer, and must have approved `amount` to the pool with {@link approveToken}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool's rebalancer
@@ -1964,6 +2260,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Withdraws liquidity from a LockRelease pool to the signing wallet, which must be the pool's
    * rebalancer. `sender` defaults to the wallet's address and must equal it.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool's rebalancer
@@ -2031,6 +2328,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * own the destination pool. See {@link generateUnsignedTransferLiquidity} for the two-step
    * rebalancer wiring this depends on.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the source pool is not wired to `poolAddress`, or the wallet does not
@@ -2066,7 +2364,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * entirely: the pool then accepts those calls from nobody.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
-   * on its `ERC20LockBox` instead — see {@link authorizeLockboxCallers}
+   * on its `ERC20LockBox` instead — see {@link updateLockboxAuthorizedCallers}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
    * address, or `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
@@ -2088,6 +2386,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Appoints the pool's rebalancer, signing + submitting with `opts.wallet`. `sender` defaults to
    * the wallet's address and must equal it — the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
@@ -2185,6 +2484,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool can bridge, `burnMintRoleAdmin` must `grantMintAndBurnRoles(pool)`.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2246,6 +2546,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * this submits.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2313,6 +2614,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @see {@link generateUnsignedGrantMintRole} for the version and redundancy rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2377,6 +2679,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedGrantBurnRole} for the version and redundancy rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2438,6 +2741,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedRevokeMintRole} for the version and role-state rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2499,6 +2803,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedRevokeBurnRole} for the version and role-state rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is neither a BurnMintERC677
    * token nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported version
@@ -2558,6 +2863,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks See {@link generateUnsignedMint} for the version and role rules. `sender` defaults
    * to the wallet's address, so the mint-role check always runs before this submits.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a BurnMintERC677 token
    * (a v2.0.0 `CrossChainToken` included, since it gates mint/burn through AccessControl)
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
@@ -2665,7 +2971,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
    * with the pool authorized on it. The full sequence: {@link deployToken} → {@link deployLockbox}
-   * → {@link deployTokenPool} (passing the lockbox) → {@link authorizeLockboxCallers}
+   * → {@link deployTokenPool} (passing the lockbox) → {@link updateLockboxAuthorizedCallers}
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity.
@@ -2696,10 +3002,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools + rate limits before it can bridge. `LockReleaseTokenPool` also needs a pre-deployed
    * `lockbox` and the pool authorized on it ({@link DeployLockReleaseTokenPoolParams}). The full
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
-   * lockbox) → {@link authorizeLockboxCallers} (`addedCallers: [pool]`, plus whoever funds it) →
+   * lockbox) → {@link updateLockboxAuthorizedCallers} (`addedCallers: [pool]`, plus whoever funds it) →
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2726,7 +3033,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * only known once mined, so it is NOT returned here — use {@link deployLockbox} to receive
    * `{ hash, contractAddress, verification }`.
    * @remarks Deploy the lockbox before its pool, then authorize the pool on it with
-   * {@link authorizeLockboxCallers} before the pool can lock/release.
+   * {@link updateLockboxAuthorizedCallers} before the pool can lock/release.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -2745,11 +3052,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * tx hash, the newly deployed lockbox address, and a `verification`
    * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
    * @remarks Step two of the lock/release flow: {@link deployToken} → {@link deployLockbox} →
-   * {@link deployTokenPool} (passing this lockbox) → {@link authorizeLockboxCallers}
+   * {@link deployTokenPool} (passing this lockbox) → {@link updateLockboxAuthorizedCallers}
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
    *
@@ -2845,17 +3153,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```typescript
    * // `sender` must be the lockbox owner
-   * const unsigned = await cct.generateUnsignedAuthorizeLockboxCallers({
+   * const unsigned = await cct.generateUnsignedUpdateLockboxAuthorizedCallers({
    *   lockbox: '0xLockbox...',
    *   addedCallers: ['0xPool...'], // the LockReleaseTokenPool to authorize
    *   sender: '0xLockboxOwner...',
    * })
    * ```
    */
-  generateUnsignedAuthorizeLockboxCallers(
-    opts: AuthorizeLockboxCallersParams,
+  generateUnsignedUpdateLockboxAuthorizedCallers(
+    opts: UpdateLockboxAuthorizedCallersParams,
   ): Promise<UnsignedEVMTx> {
-    return this.#authorizeLockboxCallers.generate(this.chain, opts)
+    return this.#updateLockboxAuthorizedCallers.generate(this.chain, opts)
   }
 
   /**
@@ -2863,8 +3171,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (the lockbox owner). Authorize the `LockReleaseTokenPool` before it can lock/release.
    * @remarks Rejects a `lockbox` that is not a deployed, supported `ERC20LockBox`, and a wallet
    * that is not its owner, before the wallet is asked to sign; see
-   * {@link generateUnsignedAuthorizeLockboxCallers}.
+   * {@link generateUnsignedUpdateLockboxAuthorizedCallers}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, if no caller is supplied, if
    * nothing at `lockbox` answers `typeAndVersion()`, if `sender` differs from the wallet, or if the
    * wallet is not the lockbox owner
@@ -2876,17 +3185,35 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @example
    * ```typescript
    * // `wallet` must sign as the lockbox owner
-   * const { hash } = await cct.authorizeLockboxCallers({
+   * const { hash } = await cct.updateLockboxAuthorizedCallers({
    *   lockbox: '0xLockbox...',
    *   addedCallers: ['0xPool...'],
    *   wallet,
    * })
    * ```
    */
-  authorizeLockboxCallers(
-    opts: EVMExecuteParams<AuthorizeLockboxCallersParams>,
+  updateLockboxAuthorizedCallers(
+    opts: EVMExecuteParams<UpdateLockboxAuthorizedCallersParams>,
   ): Promise<TransactionResult> {
-    return this.#authorizeLockboxCallers.execute(this.chain, opts)
+    return this.#updateLockboxAuthorizedCallers.execute(this.chain, opts)
+  }
+
+  /**
+   * Lists callers authorized to deposit into or withdraw from an `ERC20LockBox`.
+   *
+   * @throws {@link CCTParamsInvalidError} if `lockbox` is invalid
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is not `ERC20LockBox`
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const callers = await cct.getAllLockboxAuthorizedCallers({ lockbox: '0xLockbox...' })
+   * ```
+   */
+  getAllLockboxAuthorizedCallers(
+    opts: GetAllLockboxAuthorizedCallersParams,
+  ): Promise<GetAllLockboxAuthorizedCallersResult> {
+    return this.#getAllLockboxAuthorizedCallers.query(this.chain, opts)
   }
 
   /**
@@ -2924,6 +3251,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * authorized caller of the lockbox, which must have approved it for `amount`).
    * @remarks Approve first with {@link approveToken}, naming the **lockbox** as `spender`.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
    * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
@@ -2978,6 +3306,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.wallet` (an authorized caller of the lockbox).
    * @remarks The tokens go to `recipient`, which need not be the wallet.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
    * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
@@ -3087,8 +3416,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link CCTOperationUnsupportedError} — use {@link generateUnsignedAddRemotePool} /
    * {@link generateUnsignedRemoveRemotePool} there. No emulation is attempted: replacing a set of
    * unknown size is not one transaction.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Owner-gated on-chain. When `sender` is given it is checked against the pool's current
    * `owner` before any calldata is built; omit it to build for a signer that is not known yet.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
@@ -3100,7 +3430,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const unsigned = await cct.generateUnsignedSetRemotePool({
    *   poolAddress: '0xPool...', // a v1.5.0 pool
    *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
-   *   remotePoolAddress: '0xRemotePool...', // hex bytes; 32 bytes for a non-EVM remote
+   *   remotePoolAddress: '0xRemotePool...', // the remote chain's own format, e.g. base58 for Solana
    *   sender: '0xPoolOwner...',
    * })
    * ```
@@ -3117,6 +3447,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedSetRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is given and is not
    * the wallet's address / the pool owner
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.1 or newer
@@ -3145,8 +3476,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pool, drain the old one, then {@link removeRemotePool}. A v1.5.0 pool has no additive
    * primitive and throws {@link CCTOperationUnsupportedError} — it only supports the wholesale
    * {@link setRemotePool}.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Pre-checked against the chain: the lane's currently registered remote pools are read
    * (scoped to `remoteChainSelector`, one call) and an address already among them is rejected
    * locally instead of reverting on-chain. A lane with no configuration yet counts as having none.
@@ -3177,6 +3509,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedAddRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
    * wallet's address / the pool owner, or `remotePoolAddress` is already registered on that lane
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
@@ -3204,8 +3537,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * pools. The last step of a remote-side pool upgrade started with {@link addRemotePool}. A
    * v1.5.0 pool has no removal primitive and throws {@link CCTOperationUnsupportedError}; its
    * single remote pool can only be overwritten via {@link setRemotePool}.
-   * @remarks `remotePoolAddress` is the *remote* chain's pool address as raw `bytes` (`0x` prefix
-   * optional), not an EVM address — a Solana, Aptos or Sui pool address is 32 bytes.
+   * @remarks `remotePoolAddress` is the *remote* chain's pool address in that chain's own format
+   * (`0x…` for EVM, base58 for Solana), validated against `remoteChainSelector`'s family and
+   * encoded to the 32-byte padded `bytes` the pool stores.
    * @remarks Pre-checked against the chain: the lane's registered remote pools are read (scoped to
    * `remoteChainSelector`, one call) and an address that is not among them is rejected locally
    * instead of reverting on-chain. Removing the lane's last remote pool is allowed — the contract
@@ -3237,6 +3571,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * different `sender` is rejected rather than signed — build with
    * {@link generateUnsignedRemoveRemotePool} for externally-signed flows.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not the
    * wallet's address / the pool owner, or `remotePoolAddress` is not registered on that lane
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.0
@@ -3264,6 +3599,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `opts.sender` defaults to the wallet's own address (the only address `onlyOwner` can pass) and
    * is rejected if it differs, so the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `version` does not match the
    * pool's own generation, or `sender` is given and is not the wallet address / pool owner. As
    * with {@link generateUnsignedApplyChainUpdates}, an enabled rate limiter on a **v1.5.0 or
@@ -3371,34 +3707,38 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned pool `applyAllowlistUpdates` tx (for multisig / offline signing): removes
-   * and adds entries in the pool's sender allowlist in one call. Probes the pool's on-chain
-   * `typeAndVersion` to resolve its interface + encoder.
-   * @remarks **v1.5.0–v1.6.1 only.** The allowlist feature does not exist on a v2.0.0 pool, which
-   * declares neither `applyAllowListUpdates` nor `getAllowList`/`getAllowListEnabled`, so a 2.0.0
-   * pool is reported unsupported rather than emitting calldata for a removed selector.
+   * Builds an unsigned `applyAllowListUpdates` tx (for multisig / offline signing): removes and
+   * adds entries in the pool's sender allowlist in one call. Probes the pool's on-chain
+   * `typeAndVersion` to resolve which contract holds its allowlist.
+   * @remarks **The target moved in v2.0.0.** On v1.5.0–v1.6.1 the tx goes to the pool, gated on
+   * the pool owner. A v2.0.0 pool has no allowlist of its own: the tx goes to its bound
+   * `AdvancedPoolHooks` (see {@link EVMTokenManager.getAdvancedPoolHooks}), gated on the **hooks**
+   * owner, and changes the allowlist of every pool bound to those hooks. A v2.0.0 pool with no
+   * hooks bound is reported unsupported.
    *
-   * `removes` are applied *before* `adds` on-chain. Both arrays must be non-empty in total, hold
-   * no duplicates and no zero address, and share no address — an address in both would end up
+   * `removes` are applied *before* `adds` on-chain. Either array may be omitted (defaults to `[]`),
+   * but at least one address is required across both. They must hold no duplicates and no zero
+   * address, and share no address — an address in both would end up
    * allowlisted (removes run first), which no caller can reasonably have meant.
    *
-   * The pool must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
+   * The holder must have been deployed **with** an allowlist (`allowlistEnabled` is immutable, and
    * the call reverts `AllowListNotEnabled` when false), and the update must actually change
-   * state: the current allowlist is read first, and an entry the pool would silently ignore — a
+   * state: the current allowlist is read first, and an entry the holder would silently ignore — a
    * `removes` that is not allowlisted, an `adds` that already is — is rejected here.
    *
    * Owner-only (`applyAllowListUpdates` is `onlyOwner`). When `sender` is supplied it is checked
-   * against the pool's `owner()` before any calldata is built; omit it and no owner read is made
-   * (nothing to compare against).
-   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no allowlist
+   * against the holder's `owner()` before any calldata is built; omit it and no owner read is
+   * made (nothing to compare against).
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool with no hooks bound
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
-   * address, both arrays are empty, an array holds duplicates or the zero address, an address
-   * appears in both arrays, the pool has no allowlist enabled, a `removes` entry is not currently
-   * allowlisted, an `adds` entry already is, or `sender` is given and is not the pool owner
+   * address, both arrays are empty or omitted, an array holds duplicates or the zero address, an address
+   * appears in both arrays, the holder has no allowlist enabled, a `removes` entry is not
+   * currently allowlisted, an `adds` entry already is, or `sender` is given and is not the
+   * holder's owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
-   * // build only — sign later (multisig / offline). `sender` must be the pool owner.
+   * // build only — sign later (multisig / offline). `sender` must be the holder's owner.
    * const unsigned = await cct.generateUnsignedApplyAllowlistUpdates({
    *   poolAddress: '0xPool...',
    *   removes: ['0xRevoked...'],
@@ -3414,18 +3754,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Removes and adds entries in the pool's sender allowlist, signing + submitting with
    * `opts.wallet`. `sender` defaults to the wallet's address and must equal it — the wallet must
-   * be the pool owner.
+   * own the allowlist holder: the pool on v1.5.0–v1.6.1, its bound `AdvancedPoolHooks` on v2.0.0.
    *
    * `removes` are applied *before* `adds` on-chain, so an address listed in both would end up
-   * allowlisted; that is rejected, as are duplicates and the zero address. The pool must have an
-   * allowlist enabled (`allowlistEnabled` is immutable — a pool deployed without one can never
+   * allowlisted; that is rejected, as are duplicates and the zero address. The holder must have an
+   * allowlist enabled (`allowlistEnabled` is immutable — a holder deployed without one can never
    * gain it), and every entry must change state: the current allowlist is read first, and a
    * `removes` that is not allowlisted or an `adds` that already is fails here rather than mining
    * as a no-op.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which has no allowlist
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool with no hooks bound
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
-   * the wallet's address, the wallet is not the pool owner, the pool has no allowlist enabled, or
+   * the wallet's address, the wallet is not the holder's owner, it has no allowlist enabled, or
    * an entry would be a no-op (see {@link EVMTokenManager.generateUnsignedApplyAllowlistUpdates})
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -3444,6 +3785,40 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<ApplyAllowlistUpdatesParams>,
   ): Promise<TransactionResult> {
     return this.#applyAllowlistUpdates.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the sender allowlist the pool enforces, checksummed: its own on v1.5.0–v1.6.1, its
+   * bound `AdvancedPoolHooks`' on v2.0.0. A v2.0.0 pool with no hooks bound reads `[]`.
+   * @remarks `[]` does not mean "anyone may send": pair with
+   * {@link EVMTokenManager.getAllowlistEnabled}, since an enabled allowlist with no entries
+   * rejects every sender.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const senders = await cct.getAllowlist({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getAllowlist(opts: GetAllowlistParams): Promise<GetAllowlistResult> {
+    return this.#getAllowlist.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether the pool enforces a sender allowlist: its own immutable flag on v1.5.0–v1.6.1,
+   * its bound `AdvancedPoolHooks`' on v2.0.0. A v2.0.0 pool with no hooks bound reads `false`.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * if (!(await cct.getAllowlistEnabled({ poolAddress: '0xPool...' })))
+   *   console.log('any sender may transfer through this pool')
+   * ```
+   */
+  getAllowlistEnabled(opts: GetAllowlistEnabledParams): Promise<GetAllowlistEnabledResult> {
+    return this.#getAllowlistEnabled.query(this.chain, opts)
   }
 }
 
@@ -3514,6 +3889,14 @@ export type {
 } from './token-pool/operations/apply-chain-updates.ts'
 export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
 export type {
+  GetAllowlistParams,
+  GetAllowlistResult,
+} from './token-pool/operations/get-allowlist.ts'
+export type {
+  GetAllowlistEnabledParams,
+  GetAllowlistEnabledResult,
+} from './token-pool/operations/get-allowlist-enabled.ts'
+export type {
   GetDynamicConfigParams,
   GetDynamicConfigResult,
 } from './token-pool/operations/get-dynamic-config.ts'
@@ -3559,10 +3942,27 @@ export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set
 export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/update-advanced-pool-hooks.ts'
 export * from './token-pool/contracts.ts'
 export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
-export type { AuthorizeLockboxCallersParams } from './lockbox/operations/authorize-callers.ts'
+export type { UpdateLockboxAuthorizedCallersParams } from './lockbox/operations/update-authorized-callers.ts'
+export type {
+  GetAllLockboxAuthorizedCallersParams,
+  GetAllLockboxAuthorizedCallersResult,
+} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+export * from './lockbox/contracts.ts'
+export type { UpdateAdvancedPoolHooksAuthorizedCallersParams } from './advanced-pool-hooks/operations/update-authorized-callers.ts'
+export type {
+  GetAllAdvancedPoolHooksAuthorizedCallersParams,
+  GetAllAdvancedPoolHooksAuthorizedCallersResult,
+} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
+export type {
+  GetPolicyEngineParams,
+  GetPolicyEngineResult,
+} from './advanced-pool-hooks/operations/get-policy-engine.ts'
+export type {
+  GetThresholdAmountParams,
+  GetThresholdAmountResult,
+} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
 export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
 export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
-export * from './lockbox/contracts.ts'
 export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
 export type {
   GetAllCCVConfigsParams,
@@ -3578,6 +3978,8 @@ export type {
   GetRequiredCCVsResult,
 } from './advanced-pool-hooks/operations/get-required-ccvs.ts'
 export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
+export type { SetPolicyEngineParams } from './advanced-pool-hooks/operations/set-policy-engine.ts'
+export type { SetThresholdAmountParams } from './advanced-pool-hooks/operations/set-threshold-amount.ts'
 export * from './advanced-pool-hooks/contracts.ts'
 export type {
   DeployTokenAndTokenPoolViaFactoryParams,

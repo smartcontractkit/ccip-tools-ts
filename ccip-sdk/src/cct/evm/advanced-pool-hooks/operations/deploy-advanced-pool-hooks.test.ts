@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { AbiCoder, Interface, ZeroAddress, makeError } from 'ethers'
+import { AbiCoder, Interface, ZeroAddress, getCreateAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0 from '../../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
@@ -15,7 +15,7 @@ const SENDER = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
 const ALLOWED = '0x' + '33'.repeat(20)
 const POLICY_ENGINE = '0x' + '44'.repeat(20)
-const DEPLOYED = '0x' + '77'.repeat(20)
+const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
 const HASH = '0x' + 'ab'.repeat(32)
 
 /**
@@ -44,6 +44,7 @@ function stubChain(): EVMChain {
   return {
     provider: {} as never,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     nextNonce: async () => 0,
     rollbackNonce: () => {},
   } as unknown as EVMChain

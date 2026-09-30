@@ -5,7 +5,7 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import {
@@ -37,6 +37,7 @@ function stubChain(owner = OWNER, onCall?: () => void, hooksType = 'AdvancedPool
         return IFACE.encodeFunctionResult('owner', [owner])
       },
     },
+    network: networkInfo('ethereum-testnet-sepolia-base-1'),
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     typeAndVersion: () => Promise.resolve([hooksType, '2.0.0']),
     nextNonce: async () => 0,

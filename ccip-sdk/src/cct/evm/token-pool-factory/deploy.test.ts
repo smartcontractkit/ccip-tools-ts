@@ -3,7 +3,10 @@ import { describe, it } from 'node:test'
 
 import { AbiCoder, getAddress, makeError } from 'ethers'
 
+// registers the EVM and Solana chain families, for the remotes' own formats
 import type { EVMChain } from '../../../evm/index.ts'
+import '../../../evm/index.ts'
+import '../../../solana/index.ts'
 import { parseTypeAndVersion } from '../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
@@ -407,17 +410,19 @@ describe('token-pool-factory deploy — security hardening', () => {
   })
 })
 
-describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', () => {
+describe("remote address handling (the remote chain's own format, like applyChainUpdates)", () => {
   const REMOTE_POOL = getAddress('0x2222222222222222222222222222222222222222')
-  // the bytes form the pool stores: abi.encode(address) — the caller pre-encodes, we do not
+  const EVM_SELECTOR = 16015286601757825753n // ethereum-sepolia
+  // the bytes form the pool stores: abi.encode(address), which the SDK produces
   const encoded = (a: string) => AbiCoder.defaultAbiCoder().encode(['address'], [a])
   const remote = (
     pool?: string,
     token?: string,
     poolInitCode?: string,
     tokenInitCode?: string,
+    remoteChainSelector = EVM_SELECTOR,
   ) => ({
-    remoteChainSelector: 99n,
+    remoteChainSelector,
     remotePoolAddress: pool,
     remotePoolInitCode: poolInitCode,
     remoteChainConfig: {
@@ -436,6 +441,7 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
     token?: string,
     poolInitCode?: string,
     tokenInitCode?: string,
+    remoteChainSelector?: bigint,
   ) =>
     decode(
       'deployTokenPoolWithExistingToken',
@@ -447,7 +453,7 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
           type: 'BurnMintTokenPool',
           token: EXISTING_TOKEN,
           localTokenDecimals: 18,
-          remoteTokenPools: [remote(pool, token, poolInitCode, tokenInitCode)],
+          remoteTokenPools: [remote(pool, token, poolInitCode, tokenInitCode, remoteChainSelector)],
         },
         { rmnProxy: RMN, router: ROUTER },
       ).transaction.transactions[0]!.data as string,
@@ -460,12 +466,32 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
     assert.equal(rt.remoteTokenAddress, pre)
   })
 
-  it('does NOT auto-encode: a caller-supplied value is validated and passed through verbatim', () => {
-    // a raw 20-byte address is valid hex bytes, so it passes through as-is — NOT abi-encoded.
-    // Callers must pre-encode an EVM remote via encodeAddressToAny; the SDK never encodes for them.
-    const rt = buildRemote(REMOTE_POOL.toLowerCase(), REMOTE_POOL.toLowerCase())
-    assert.equal(rt.remotePoolAddress, REMOTE_POOL.toLowerCase())
-    assert.notEqual(rt.remotePoolAddress, encoded(REMOTE_POOL))
+  it('encodes a plain 20-byte EVM remote to the 32-byte form the pool matches on', () => {
+    // a raw 20-byte value would configure fine, then revert InvalidSourcePoolAddress on transfer
+    const rt = buildRemote(REMOTE_POOL.toLowerCase(), REMOTE_POOL)
+    assert.equal(rt.remotePoolAddress, encoded(REMOTE_POOL))
+    assert.equal(rt.remoteTokenAddress, encoded(REMOTE_POOL))
+  })
+
+  it('encodes a base58 Solana remote to its 32 raw bytes', () => {
+    const rt = buildRemote(
+      '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
+      '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
+      undefined,
+      undefined,
+      16423721717087811551n, // solana-devnet
+    )
+    assert.equal(
+      rt.remotePoolAddress,
+      '0x6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb',
+    )
+  })
+
+  it("rejects an address that is not of the remote chain's family", () => {
+    assert.throws(
+      () => buildRemote('7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', encoded(REMOTE_POOL)),
+      (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'remotePoolAddress',
+    )
   })
 
   it('leaves an omitted (or 0x) remote address as 0x when init code is given, for the factory to predict', () => {
@@ -487,9 +513,9 @@ describe('remote address handling (pre-encoded bytes, like applyChainUpdates)', 
     )
   })
 
-  it('rejects a malformed remote address (non-whole-byte hex) with CCTParamsInvalidError', () => {
+  it('rejects a malformed remote address with CCTParamsInvalidError', () => {
     assert.throws(
-      () => buildRemote('0xabc', encoded(REMOTE_POOL)),
+      () => buildRemote('0xzz', encoded(REMOTE_POOL)),
       (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'remotePoolAddress',
     )
   })
