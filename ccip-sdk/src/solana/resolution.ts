@@ -57,8 +57,11 @@ export const EXECUTE_V2_DISCRIMINATOR = sighash('global', 'execute_v2')
 
 /** Matches the Go reference client; real flows take well under 20 rounds. */
 const DEFAULT_MAX_ROUNDS = 64
-/** The router and offramp run on a custom heap, so resolution needs the largest heap frame. */
-const MAX_HEAP_FRAME_BYTES = 256 * 1024
+/**
+ * The router and offramp run on a custom heap, so resolution needs the largest heap frame, and so
+ * do the final instructions, which run the same code paths.
+ */
+export const MAX_HEAP_FRAME_BYTES = 256 * 1024
 
 // Known stage names, only used to make logs and errors readable
 const STAGE_NAMES = [

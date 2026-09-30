@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Solana: `getFee`, `generateUnsignedSendMessage` and `sendMessage` send over CCIP 2.0 (`ccip_send_v2`, accounts from the router's on-chain account resolution) whenever the lane supports it, per `observe_dest_chain_v2`, falling back to the 1.6 `ccip_send` otherwise. Legacy extraArgs (e.g. `{ gasLimit }`) prefer 2.0, converted to `GenericExtraArgsV3` with lane defaults, and fall back to 1.6; `GenericExtraArgsV3` requires 2.0, and throws `CCIPSolanaV2LaneUnavailableError` without it. A 2.0 lane whose allowlist excludes the sender counts as unsupported
+- SDK: `getFee` takes an optional `sender`, for families whose route or fee depends on it. Solana requires it on CCIP 2.0 lanes with a sender allowlist (`CCIPArgumentInvalidError` without it), so quotes follow the entrypoint `sendMessage` will use; the CLI's `send` passes its wallet's address
+
 ## [1.14.0] - 2026-09-25
 
 - Solana: support reading and sending Version-1 transactions (Agave 4.x devnet and later), up to 4096 bytes per message
