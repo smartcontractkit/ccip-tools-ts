@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { getBytes } from 'ethers'
+
 import { SuiExtraArgsV1Tag } from '../extra-args.ts'
 import { decodeMoveExtraArgs } from '../shared/bcs-codecs.ts'
 import { encodeSuiExtraArgsV1 } from '../sui/types.ts'
-import { decodeSolanaSuiExtraArgsV1, encodeSolanaSuiExtraArgsV1 } from './extra-args.ts'
+import {
+  decodeSolanaSuiExtraArgsV1,
+  encodeSolanaGenericExtraArgsV3,
+  encodeSolanaSuiExtraArgsV1,
+} from './extra-args.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 
 /**
@@ -298,5 +304,25 @@ describe('SuiExtraArgsV1 BCS codec (Sui source)', () => {
     assert.equal(decoded.gasLimit, 0n)
     assert.equal(decoded.allowOutOfOrderExecution, false)
     assert.equal(decoded.receiverObjectIds.length, 0)
+  })
+})
+
+describe('GenericExtraArgsV3 Borsh codec (Solana source)', () => {
+  it('encodes the lane-default executor as a zero Pubkey', () => {
+    const encoded = getBytes(
+      encodeSolanaGenericExtraArgsV3({
+        gasLimit: 200_000n,
+        finality: 'finalized',
+        ccvs: [],
+        ccvArgs: [],
+        executor: '',
+        executorArgs: '0x',
+        tokenReceiver: '',
+        tokenArgs: '0x',
+      }),
+    )
+    // tag(4) + gas(4) + finality(4) + ccvs(4) + ccv_args(4) + executor(32) + 3 empty vecs(12)
+    assert.equal(encoded.length, 64)
+    assert.deepEqual(encoded.subarray(20, 52), new Uint8Array(32))
   })
 })

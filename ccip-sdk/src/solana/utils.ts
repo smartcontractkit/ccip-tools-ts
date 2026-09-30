@@ -157,6 +157,24 @@ export function camelToSnakeCase(str: string): string {
     .replace(/^_/, '')
 }
 
+/**
+ * Derives the offramp PDA holding a buffered execution report.
+ * @param offramp - Offramp program ID.
+ * @param bufferId - ID the report was buffered under.
+ * @param caller - Account that buffered the report.
+ * @returns Address of the execution report buffer.
+ */
+export function getExecutionReportBufferPda(
+  offramp: PublicKey,
+  bufferId: Buffer,
+  caller: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('execution_report_buffer'), bufferId, caller.toBuffer()],
+    offramp,
+  )[0]
+}
+
 type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'level' | 'type'>
 type OrderedParsedLog = ParsedLog & { order: number }
 
@@ -649,6 +667,13 @@ function getInstructionError(err: unknown): { index: number; error: unknown } | 
   const detail = simulationError.InstructionError
   if (!Array.isArray(detail) || typeof detail[0] !== 'number') return
   return { index: detail[0] - instructionOffset, error: detail[1] as unknown }
+}
+
+/** Returns the program-defined (`Custom`) error code of a failed simulation, if any. */
+export function customInstructionErrorCode(err: unknown): number | undefined {
+  const failed = getInstructionError(err)?.error
+  if (typeof failed !== 'object' || failed === null || !('Custom' in failed)) return
+  return typeof failed.Custom === 'number' ? failed.Custom : undefined
 }
 
 /** Returns whether a simulation error was caused by Solana compute-budget exhaustion. */

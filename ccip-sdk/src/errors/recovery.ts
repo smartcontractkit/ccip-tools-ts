@@ -175,6 +175,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   SOLANA_FEE_RESULT_INVALID: 'Invalid fee result from router. Check the router configuration.',
   SOLANA_SIMULATION_NO_RETURN_DATA:
     'Simulation returned no data. The on-chain program may have reverted silently.',
+  SOLANA_ACCOUNT_RESOLUTION_FAILED:
+    'Account resolution did not complete. Check that the program is a CCIP 2.0 router/offramp and that the instruction data is valid for it.',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',

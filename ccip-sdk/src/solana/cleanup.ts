@@ -15,7 +15,7 @@ import { sleep } from '../utils.ts'
 import { newProgram } from './coder.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { Wallet } from './types.ts'
-import { simulateAndSendTxs } from './utils.ts'
+import { getExecutionReportBufferPda, simulateAndSendTxs } from './utils.ts'
 import type { SolanaChain } from './index.ts'
 
 /**
@@ -129,9 +129,10 @@ export async function cleanUpBuffers(
             new AnchorProvider(connection, wallet as AnchorWallet, { commitment: 'confirmed' }),
           )
 
-          const [executionReportBuffer] = PublicKey.findProgramAddressSync(
-            [Buffer.from('execution_report_buffer'), bufferId, wallet.publicKey.toBuffer()],
+          const executionReportBuffer = getExecutionReportBufferPda(
             offrampProgram.programId,
+            bufferId,
+            wallet.publicKey,
           )
           if (seenAccs.has(executionReportBuffer.toBase58())) continue
           seenAccs.add(executionReportBuffer.toBase58())

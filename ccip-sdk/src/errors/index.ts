@@ -123,6 +123,7 @@ export {
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
+  CCIPSolanaAccountResolutionError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,
