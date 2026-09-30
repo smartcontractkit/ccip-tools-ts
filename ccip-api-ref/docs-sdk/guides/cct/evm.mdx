@@ -10,25 +10,55 @@ sidebar_label: EVM
 Use `EVMTokenManager` for CCT administration on EVM chains. It wraps an `EVMChain` and supports both signed and unsigned transaction workflows.
 
 ```typescript
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 import { EVMTokenManager } from '@chainlink/ccip-sdk/cct/evm'
 
 const chain = await EVMChain.fromUrl(process.env.RPC_URL!)
 const cct = EVMTokenManager.fromChain(chain)
+
+// The signed operations below take a `wallet`, an ethers `Signer` (or a viem wallet). It must be
+// the token, pool, or registry owner for owner-gated writes. See Multi-Chain to construct it:
+// const wallet = new Wallet(process.env.PRIVATE_KEY!, chain.provider)
 ```
+
+See [Multi-Chain](../multi-chain) to construct `chain` and a `wallet` for your signing setup (ethers `Signer`, `viemWallet(client)`, and other options).
 
 ## Required configuration
 
-| Value | Purpose |
-| --- | --- |
-| RPC URL | Connects the manager to the source EVM chain. |
-| Router and RMN proxy | Required to deploy the pool and configure CCIP routing. Use the addresses for the target CCIP deployment. |
-| Registry module | Required by `registerAdmin`. It is deployment-specific and cannot be discovered on-chain. |
-| Lockbox | Required only for a v2.0.0 `LockReleaseTokenPool`. It must escrow the same token. |
+| Value | Purpose | Where it comes from |
+| --- | --- | --- |
+| RPC URL | Connects the manager to the source EVM chain. | Your node provider. |
+| Router and RMN proxy | Required to deploy the pool and configure CCIP routing. | The [CCIP Directory](https://docs.chain.link/ccip/directory), per chain. Not bundled in the SDK for EVM. |
+| Registry module | Required by `registerAdmin` (`RegistryModuleOwnerCustom`). Deployment-specific; cannot be discovered on-chain. | The [CCIP Directory](https://docs.chain.link/ccip/directory), per chain. |
+| Chain selectors | Identify remote chains in `applyChainUpdates`. A CCIP selector, not the chain ID. | `networkInfo('<network>').chainSelector`. |
+| Lockbox | Required only for a v2.0.0 `LockReleaseTokenPool`. It must escrow the same token. | Deployed with `deployLockbox`. See [Lock/release pools](#lockrelease-pools). |
+
+The CCT-specific deployment addresses come from the CCIP Directory, and chain selectors from the SDK's network registry:
+
+```typescript
+const ROUTER = process.env.ROUTER! // Router for the target CCIP deployment (CCIP Directory)
+const RMN_PROXY = process.env.RMN_PROXY! // RMN (Risk Management Network) proxy (CCIP Directory)
+const REGISTRY_MODULE = process.env.REGISTRY_MODULE! // RegistryModuleOwnerCustom; only registerAdmin needs it
+
+// Chain selectors are not chain IDs. Resolve them from the SDK's network registry:
+const DEST_CHAIN_SELECTOR = networkInfo('avalanche-testnet-fuji').chainSelector
+```
+
+:::note Pick a router that serves your lane
+A testnet can host more than one CCIP deployment, each with its own Router, RMN proxy, and RegistryModuleOwnerCustom, and a router only reaches the lanes it was set up for. This matters most for an EVM-to-Solana lane: use a router that serves Solana, and confirm the lane exists before you wire it. Look up the per-chain Router, RMN, and RegistryModule addresses in the [CCIP Directory](https://docs.chain.link/ccip/directory) on docs.chain.link, and verify the source-to-destination lane is listed there.
+:::
 
 ## Set up a CCT
 
-Use the addresses for your target CCIP deployment. Do not reuse the placeholders below.
+This walkthrough takes you from a token to a registered, remote-connected token pool. Use the addresses for your target CCIP deployment throughout. Do not reuse the placeholders below.
+
+### Which token, which path
+
+| Goal | Method | Result |
+| --- | --- | --- |
+| Deploy a new managed token and sign directly | `deployToken` | A `CrossChainToken` (v2.0.0). This is the only token contract the SDK deploys; there is no v1.x deploy path. |
+| Deploy token + pool with addresses known before signing (multisig or Safe) | `generateUnsignedDeployTokenAndTokenPoolViaFactory` | Predicted token, pool, and optional lockbox addresses plus one unsigned transaction. Unsigned-only. |
+| Reuse a token you already deployed | n/a | Pass its address as `tokenAddress` (or `token` for the factory) in the remaining steps. |
 
 ### Deploy or use an existing token
 
@@ -47,6 +77,8 @@ For an existing `FactoryBurnMintERC20` or `CrossChainToken`, use its address as 
 
 ### Register and accept the token admin
 
+Claim administration of the token in the TokenAdminRegistry. This is a two-step handoff: propose the administrator, then accept from the proposed account.
+
 ```typescript
 await cct.registerAdmin({
   tokenAddress: token.contractAddress,
@@ -62,9 +94,15 @@ await cct.acceptAdmin({
 })
 ```
 
-`registerAdmin` and `acceptAdmin` are a two-step handoff. The wallet that accepts must be the proposed TokenAdminRegistry administrator.
+The wallet that calls `acceptAdmin` must be the proposed TokenAdminRegistry administrator.
 
 ### Deploy and register the pool
+
+:::note
+Building a lock/release pool? See [Lock/release pools](#lockrelease-pools). The deploy and liquidity steps differ, and you skip `grantMintAndBurnRoles`.
+:::
+
+Deploy the token pool, register it in the TokenAdminRegistry with `setPool`, then grant it the mint and burn roles it needs to move tokens.
 
 ```typescript
 const pool = await cct.deployTokenPool({
@@ -90,31 +128,9 @@ await cct.grantMintAndBurnRoles({
 })
 ```
 
-## Configure additional networks
+This example deploys a `BurnMintTokenPool`. `deployTokenPool` and the factory deploy v2.0.0 pools; the read and administration operations recognize more types across older versions. See [Pool types](./reference/pool-types) for all supported types and versions.
 
-Add remote-chain configuration only after both sides have a deployed and registered pool. `applyChainUpdates` can add and remove configurations in one transaction.
-
-```typescript
-await cct.applyChainUpdates({
-  version: '2.0.0',
-  poolAddress: pool.contractAddress,
-  remoteChainSelectorsToRemove: [],
-  chainsToAdd: [
-    {
-      remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
-      remotePoolAddresses: [process.env.REMOTE_POOL!],
-      remoteTokenAddress: process.env.REMOTE_TOKEN!,
-      outboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 100n },
-      inboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 100n },
-    },
-  ],
-  wallet,
-})
-```
-
-Use `getTokenPoolState`, `getTokenPoolRemotes`, and `getTokenAdminRegistry` to read back the deployed configuration before enabling transfers.
-
-## Alternative deployment: TokenPoolFactory
+## Alternative: deploy via TokenPoolFactory
 
 Use the factory only when the target CCIP deployment provides a `TokenPoolFactory` or you need addresses known before signing. Its two methods are unsigned-only and return the predicted token, pool, and optional lockbox address with a transaction for the configured `sender` to submit.
 
@@ -143,15 +159,68 @@ console.log('Predicted pool:', deployment.pool)
 
 For an existing ERC-20, use `generateUnsignedDeployTokenPoolWithExistingTokenViaFactory` and provide `token` and `localTokenDecimals`. The factory salt is tied to `sender`. Submit the transaction from that account, or the predicted addresses will change. `futureOwner` must accept ownership in a separate transaction. The factory deploys v2 pools without `AdvancedPoolHooks`. Add hooks afterward if you need them.
 
+## Configure additional networks
+
+Add remote-chain configuration only after both sides have a deployed and registered pool. `applyChainUpdates` can add and remove configurations in one transaction.
+
+`version` is the calldata shape, not the pool's own version. v1.6.1 and v2.0.0 pools all use the `'1.5.1'` shape (additions and removals as two arrays); only a legacy v1.5.0 pool uses `'1.5.0'` (a single `chains` array with a per-lane `allowed` flag). Declaring the wrong shape is rejected before the transaction is built.
+
+```typescript
+await cct.applyChainUpdates({
+  version: '1.5.1',
+  poolAddress: pool.contractAddress,
+  remoteChainSelectorsToRemove: [],
+  chainsToAdd: [
+    {
+      remoteChainSelector: DEST_CHAIN_SELECTOR,
+      remotePoolAddresses: [process.env.REMOTE_POOL!],
+      remoteTokenAddress: process.env.REMOTE_TOKEN!,
+      outboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 100_000n * 10n ** 18n, // bucket max: 100,000 tokens (18 decimals) in flight
+        rate: 167n * 10n ** 18n, // refill ~167 tokens/sec (~100,000 tokens per 10 min)
+      },
+      inboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 100_000n * 10n ** 18n,
+        rate: 167n * 10n ** 18n,
+      },
+    },
+  ],
+  wallet,
+})
+```
+
+Set rate limits deliberately. `capacity` (bucket max) and `rate` (refill per second) are in the token's smallest unit, so the `10n ** 18n` multiplier expresses whole tokens for an 18-decimal token. To run a lane with no cap instead, pass `{ enabled: false }` for that direction, which means unlimited.
+
+Use `getTokenPoolState`, `getTokenPoolRemotes`, and `getTokenAdminRegistry` to read back the deployed configuration before enabling transfers.
+
+## Unsigned operations (multisig or offline)
+
+Every signed operation above has a `generateUnsigned<Operation>` twin that takes `sender` (the address that will submit the transaction) instead of `wallet`, and returns an unsigned transaction for a multisig or offline signer to sign and broadcast. Use it whenever the token, pool, or registry owner is a Safe or other external signer.
+
+```typescript
+const unsigned = await cct.generateUnsignedRegisterAdmin({
+  tokenAddress: token.contractAddress,
+  registryModule: REGISTRY_MODULE,
+  address: ROUTER,
+  sender: process.env.SAFE_ADDRESS!, // the account that will submit `unsigned`
+})
+
+// Hand `unsigned` to the Safe or offline signer to sign and broadcast.
+```
+
 ## Configure a token pool
+
+Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool, and the sender allowlist exists only through v1.6.1. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
 
 ### Rate limits and transfer fees
 
-After a lane exists, use `setChainRateLimiterConfigs` to adjust its inbound and outbound buckets. It is callable by the pool owner or its delegated rate-limit admin. On v2 pools, `fastFinality: true` targets the separate FTF bucket.
+After a lane exists, use `setChainRateLimiterConfigs` to adjust its inbound and outbound buckets. It is callable by the pool owner or its delegated rate-limit admin. On v2 pools, `fastFinality: true` targets the separate FTF bucket. If you administer an existing pool at version 1.5.0, 1.5.1, or 1.6.0, read the [decimals metering warning](./reference/inspecting-pools#rate-limits) before setting limits on a lane between tokens of different decimals.
 
 For v2 pools, use `applyTokenTransferFeeConfigUpdates` to configure or disable per-destination transfer fees. Use `setAllowedFinalityConfig` to enable or change FTF/FCR finality. Read the current configuration first. These setters replace the relevant configuration. See [Fee Estimation](../fee-estimation) and [Faster-Than-Finality](../ftf) for transfer behavior.
 
-### Advanced Pool Hooks and CCVs
+### Advanced pool hooks and CCVs
 
 On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. Deploy hooks with the pool in `authorizedCallers`, then bind them to the pool. A pool omitted from `authorizedCallers` cannot transfer through the hooks.
 
@@ -168,11 +237,13 @@ await cct.updateAdvancedPoolHooks({
 })
 ```
 
-Use `applyCCVConfigUpdates` to set complete per-remote-chain inbound and outbound CCV requirements. Read them with `getCCVConfig` or `getAllCCVConfigs` before enabling a lane.
+Binding is only the start. The hooks also carry the sender allowlist, per-remote-chain CCV requirements, an optional policy engine (ACE), a threshold amount, and their own authorized-caller set. See [Advanced pool hooks](./reference/advanced-pool-hooks) for the full feature set and every read/write method.
 
 ## Lock/release pools
 
 A v2.0.0 `LockReleaseTokenPool` requires a pre-deployed lockbox for the same token. Its lockbox is immutable: an incorrect address requires a new pool deployment and registry update.
+
+A lock/release pool still needs the same admin sequence as a burn/mint pool: `registerAdmin`, `acceptAdmin`, and `setPool` all apply. Skip `grantMintAndBurnRoles`: a lock/release pool escrows tokens rather than minting them, so granting it mint/burn roles is a mis-setup.
 
 ```typescript
 const lockbox = await cct.deployLockbox({
@@ -190,7 +261,7 @@ const lockReleasePool = await cct.deployTokenPool({
   wallet,
 })
 
-await cct.authorizeLockboxCallers({
+await cct.updateLockboxAuthorizedCallers({
   lockbox: lockbox.contractAddress,
   addedCallers: [lockReleasePool.contractAddress, await wallet.getAddress()],
   removedCallers: [],
@@ -215,6 +286,55 @@ await cct.depositToLockbox({
 
 Verify the TokenAdminRegistry points to the intended pool, the pool reports the expected remote token and remote pool addresses, and rate limits can accommodate the transfer. Then run [Pre-Send Validation](../pre-send-validation) against the source and destination before sending a production transfer.
 
+### Seed the sender
+
+A burn/mint transfer burns the source balance, so the sender needs tokens first. A freshly deployed `CrossChainToken` starts with no supply. Mint some to the sending account with `cct.mint`:
+
+```typescript
+await cct.mint({
+  tokenAddress: token.contractAddress,
+  account: await wallet.getAddress(),
+  amount: 1_000_000_000_000_000_000n, // one token at 18 decimals
+  wallet,
+})
+```
+
+`amount` is in the token's smallest unit. The wallet must hold the token's mint role, which the pool setup above already grants to the pool; grant it to the seeding account too, or mint from an account that holds it.
+
+### Send a first transfer
+
+Send with the CLI. Use the CCIP network identifier (`ethereum-testnet-sepolia`) or its numeric selector for `-s`/`-d`; a plain alias such as `sepolia` is rejected:
+
+```bash
+ccip-cli send \
+  -s ethereum-testnet-sepolia \
+  -d avalanche-testnet-fuji \
+  -r 0xYourSourceRouter \
+  --to 0xReceiverOnDestination \
+  -t 0xYourToken=1.0 \
+  -w $PRIVATE_KEY \
+  --no-interactive
+```
+
+Sending into Solana uses the same command shape. Set `-d` to the Solana network and pass a source and destination RPC with repeated `--rpc` flags:
+
+```bash
+ccip-cli send \
+  -s avalanche-testnet-fuji \
+  -d solana-devnet \
+  -r <FujiRouter> \
+  --rpc <fujiRpc> \
+  --rpc <solanaDevnetRpc> \
+  --to <ownerPubkey> \
+  -t <token>=1.0 \
+  -w $PRIVATE_KEY \
+  --no-interactive
+```
+
+For a token-only transfer, `--to` is the recipient's owner wallet pubkey (base58), not an associated token account (ATA): the SDK derives and credits the ATA for that owner, so no `--token-receiver` flag is needed.
+
+See [Sending Messages](../sending-messages) for the full flag set.
+
 ## Ownership handoffs
 
 | Resource | Propose | Accept |
@@ -229,6 +349,6 @@ The proposed account must submit the acceptance transaction. Factory `futureOwne
 ## Related
 
 - [EVMTokenManager API reference](/sdk/classes/EVMTokenManager)
-- [Token Pools](../token-pools) — inspect deployed CCIP pool configuration
-- [Pre-Send Validation](../pre-send-validation) — validate the destination pool leg
-- [Sending Messages](../sending-messages) — send transfers after CCT setup
+- [Token Pools](./reference/inspecting-pools): inspect deployed CCIP pool configuration
+- [Pre-Send Validation](../pre-send-validation): validate the destination pool leg
+- [Sending Messages](../sending-messages): send transfers after CCT setup

@@ -17,21 +17,41 @@ const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 const cct = SolanaTokenManager.fromChain(chain)
 ```
 
+The signed operations below take a `wallet`, an Anchor-compatible `Wallet` whose `publicKey` is the fee payer. See [Multi-Chain](../multi-chain) to construct `chain` and `wallet`.
+
 ## Required configuration
 
-| Value | Purpose |
-| --- | --- |
-| Solana RPC URL | Connects the manager to the target cluster. |
-| Router address | Resolves the TokenAdminRegistry for registration and pool association. |
-| Token mint | The SPL mint managed by the pool. |
-| Pool lookup table | Required by `setPool`. It must contain the pool accounts the router needs. |
-| Remote token and pool addresses | Required for each remote-chain configuration. |
+| Value | Purpose | Where it comes from |
+| --- | --- | --- |
+| Solana RPC URL | Connects the manager to the target cluster. | Your cluster or RPC provider. |
+| Router address | Resolves the TokenAdminRegistry for registration and pool association. | The [CCIP Directory](https://docs.chain.link/ccip/directory), per cluster. |
+| Token mint | The SPL mint managed by the pool. | An existing mint, or one created with `deployToken`. |
+| Pool lookup table | Required by `setPool`. It must contain the pool accounts the router needs. | Created with `createLookupTable`. |
+| Remote chain selectors, token, and pool addresses | Required for each remote-chain configuration. | Selectors from `networkInfo('<network>').chainSelector`; addresses from the remote chain's deployment. |
 
 ## Set up the SPL token and pool
+
+Start from an SPL mint and initialize a CCIP token pool for it. On Solana you register the pool with the router later, once its lookup table is populated.
 
 ### Create or use an SPL token
 
 CCT requires an SPL mint. Use an existing mint, or create one with `deployToken`. The mint authority must remain available until the pool and its required mint authority setup are complete.
+
+`deployToken` returns the mint as a base58 `tokenAddress`. The steps below use `PublicKey` values, so wrap the addresses you reference (mint, router, payer) once:
+
+```typescript
+import { PublicKey } from '@solana/web3.js'
+
+const { tokenAddress } = await cct.deployToken({
+  wallet,
+  decimals: 9,
+  withMetaplex: false,
+})
+const mint = new PublicKey(tokenAddress) // or new PublicKey('<existing mint>')
+
+const router = new PublicKey(process.env.ROUTER!) // CCIP router for your cluster (CCIP Directory)
+const payer = wallet.publicKey // fee payer for unsigned flows
+```
 
 ### Initialize the CCIP token pool
 
@@ -79,6 +99,8 @@ const base64 = await cct.serializeUnsignedTx(unsigned, payer.toBase58(), 'base64
 
 ## Configure token administration
 
+Claim administration of the mint in the TokenAdminRegistry, then hand mint authority to the pool where a governed token calls for it.
+
 ### Register and accept the token admin
 
 ```typescript
@@ -86,7 +108,6 @@ await cct.registerAdmin({
   wallet,
   tokenAddress: mint.toBase58(),
   address: router.toBase58(),
-  poolType: 'lock-release',
 })
 
 await cct.acceptAdmin({
@@ -96,9 +117,45 @@ await cct.acceptAdmin({
 })
 ```
 
-### Configure an SPL token multisig
+Both operations wait for `confirmed` before returning. On public devnet, a read issued right after a confirmed transaction can still see stale state for a moment, but the SDK operations already wait for confirmation, so the sequence above is safe to run straight through.
 
-For governed burn/mint tokens, use `createTokenMultisig` and `setTokenAuthority` to transfer the mint authority after pool setup. The pool signer occupies `threshold` multisig slots, so choose the threshold and additional signers accordingly. This is not required for lock/release pools or single-authority token administration.
+### Hand the mint authority to a multisig
+
+A governed burn/mint token has one more step: give the pool a way to mint while keeping an independent minting path for yourself. Read this section in full before you run it.
+
+:::warning The SPL mint authority is a single, destructive slot
+A burn/mint pool mints through its **pool signer PDA**, a keyless, off-curve address that no one holds a private key for. On Solana the SPL mint authority is a **single slot**, not an additive role list like EVM's `MINTER_ROLE`, so writing a new authority overwrites the old one. **Never set the mint authority to the pool signer PDA alone.** If you do, you permanently and irrecoverably lose every other way to control the mint, and no one can ever recover it.
+:::
+
+The safe pattern is to make the mint authority an SPL **multisig** that contains both the pool signer PDA and your own signer, so the pool can mint autonomously (CCIP delivery never blocks on a human) while you keep an independent path to mint or to move the authority later.
+
+Use `createTokenMultisig` to build that multisig, then `setTokenAuthority` to point the mint at it. The canonical setup is a 1-of-2 (`threshold: 1`): the pool signer PDA fills one slot and can mint alone, and your current mint authority is the independent second signer.
+
+```typescript
+import { TOKEN_AUTHORITY_TYPES } from '@chainlink/ccip-sdk/cct/solana'
+
+const { multisigAddress } = await cct.createTokenMultisig({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  poolType: 'burn-mint',
+  threshold: 1, // pool signer PDA (1 slot) can mint alone; your mint authority is the independent signer
+})
+
+await cct.setTokenAuthority({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  newAuthority: multisigAddress,
+  authorityTypes: [TOKEN_AUTHORITY_TYPES.MINT], // 'mint'
+})
+```
+
+`createTokenMultisig` auto-includes the pool signer PDA and the token's current mint authority, so the 1-of-2 above needs no `additionalSigners`; pass `additionalSigners` only to add more independent signers. Do **not** raise the threshold to 2 with only the pool signer and one other member: the pool signer must satisfy the threshold by itself, so the SDK rejects it before submit ("pool signer must occupy at least threshold signer slots"), matching the pool program's `PoolSignerNotInMultisig` guard. `setTokenAuthority` with `newAuthority: null` permanently **revokes** the authority, which is irreversible; use it only when you intend that.
+
+Order matters. Run this handoff **after** `registerAdmin` and `acceptAdmin`, and **before** any mint or transfer. Proposing the administrator requires the caller to still be the mint authority, so if you move the authority to the multisig first, admin registration can no longer complete and fails with `Unauthorized`.
+
+This whole step applies only to a governed burn/mint mint-authority. A lock/release pool has no mint authority to hand off (its liquidity is managed with `provideLiquidity` and `withdrawLiquidity`), and a single-authority or test token can keep its own authority when irrecoverable single control is acceptable.
+
+If you get this wrong, the failure modes are: sole PDA authority means irrecoverable loss of the mint; a threshold too high or a missing pool signer fails with `PoolSignerNotInMultisig`; and the wrong order fails admin registration with `Unauthorized`.
 
 ## Configure remote chains
 
@@ -125,6 +182,8 @@ await cct.applyChainUpdates({
 
 ## Register the pool with the Router
 
+`setPool` comes last on Solana: it needs a fully populated address lookup table (ALT), so create and extend the ALT first, then register. This is the reverse of EVM, where the pool is associated right after deployment.
+
 ### Create the address lookup table
 
 `setPool` requires an address lookup table (ALT) containing the canonical CCIP accounts for the mint and pool program. Create and populate one before registering the pool:
@@ -148,14 +207,11 @@ await cct.setPool({
   wallet,
   tokenAddress: mint.toBase58(),
   address: router.toBase58(),
-  poolType: 'lock-release',
   poolLookupTableAddress: lookupTable.lookupTableAddress,
 })
 ```
 
 ## Prepare lock/release liquidity
-
-### Delegate token authority
 
 For lock/release pools, approve the pool signer PDA as a delegate before providing liquidity. Pool deployment returns this address. Do not use the pool state PDA as the delegate.
 
@@ -175,9 +231,57 @@ await cct.provideLiquidity({
 })
 ```
 
+## Seed a burn/mint sender
+
+To send a burn/mint token from Solana, the sender needs an initial SPL balance to burn. Mint one with `mintTokens`. This applies to burn/mint pools only, since a lock/release pool instead sends from the liquidity you provided above.
+
+```typescript
+await cct.mintTokens({
+  wallet,
+  tokenAddress: mint.toBase58(),
+  recipient: payer.toBase58(), // the sender's owner wallet
+  amount: 1_000_000n, // base units: one token for a mint with six decimals
+  createRecipientATA: true, // create the recipient ATA if it does not exist yet
+})
+```
+
+`amount` is in the mint's base units, and the executing `wallet` must hold the SPL mint authority. If you moved the mint authority to a multisig above, mint through that multisig instead.
+
 ## Verify and test a transfer
 
-Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to confirm the accepted administrator, registered lookup table, pool PDA, remote addresses, and rate limits. Then run [Pre-Send Validation](../pre-send-validation) before sending a production transfer.
+Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to confirm the accepted administrator, registered lookup table, pool PDA, remote addresses, and rate limits. Solana pool reads identify the pool by `tokenAddress` plus `poolType`, so pass both:
+
+```typescript
+const state = await cct.getTokenPoolState({
+  tokenAddress: mint.toBase58(),
+  poolType: 'burn-mint',
+})
+
+const remotes = await cct.getTokenPoolRemotes({
+  tokenAddress: mint.toBase58(),
+  poolType: 'burn-mint',
+  remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
+})
+```
+
+Omitting `poolType` (or `poolProgramAddress`) throws `CCTParamsInvalidError: provide exactly one of poolType or poolProgramAddress`. Then run [Pre-Send Validation](../pre-send-validation) before sending a production transfer.
+
+Send a first transfer with the CLI. Use the CCIP network identifier or its numeric selector for `-s`/`-d`, and pass a Solana keypair file to `-w` (defaults to `~/.config/solana/id.json`):
+
+```bash
+ccip-cli send \
+  -s solana-devnet \
+  -d ethereum-testnet-sepolia \
+  -r YourSolanaRouter \
+  --to 0xReceiverOnDestination \
+  -t YourMint=1.0 \
+  -w ~/.config/solana/id.json \
+  --no-interactive
+```
+
+The sender needs a source balance of the token first. See [Sending Messages](../sending-messages) for the full flag set.
+
+Sending the other way, from EVM into this Solana pool, uses the same command shape with the Solana network as `-d` and the destination receiver in `--to`. See [CCT on EVM](./evm#verify-and-test-a-transfer) for that command.
 
 ## Ownership handoffs
 
@@ -187,6 +291,6 @@ Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to 
 
 - [SolanaTokenManager API reference](/sdk/classes/SolanaTokenManager)
 - [CCT Overview](./overview)
-- [Token Pools](../token-pools) — inspect deployed pool configuration
-- [Pre-Send Validation](../pre-send-validation) — validate the destination pool leg
+- [Token Pools](./reference/inspecting-pools): inspect deployed pool configuration
+- [Pre-Send Validation](../pre-send-validation): validate the destination pool leg
 - [Sending Messages](../sending-messages)
