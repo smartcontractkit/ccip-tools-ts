@@ -72,8 +72,7 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
 
   /**
    * One 1.5.0 entry covers 1.5.1, 1.6.0 and 1.6.1 by floor-match (the encoding never changed), and
-   * the
-   * explicit `null` at 2.0.0 is load-bearing, not decoration: without it a 2.0.0 pool would
+   * the explicit `null` at 2.0.0 is load-bearing, not decoration: without it a 2.0.0 pool would
    * floor-match the 1.5.0 encoder and produce calldata for a selector that version removed.
    */
   private readonly encoders: Partial<Record<TokenPoolVersion, Encoder | null>> = {
