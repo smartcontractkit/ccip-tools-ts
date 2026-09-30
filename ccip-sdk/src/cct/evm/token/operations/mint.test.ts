@@ -6,7 +6,8 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/cross-chain-token.ts'
 import { type MintParams, Mint } from './mint.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
@@ -21,6 +22,8 @@ const FRESH = new Interface([
   'function mint(address account, uint256 amount)',
   'function isMinter(address minter) view returns (bool)',
 ])
+/** v2.0.0 CrossChainToken interface, for the AccessControl `hasRole` role read. */
+const V2 = new Interface(CROSS_CHAIN_TOKEN_V2_0_0_ABI)
 const expectedData = (account = RECIPIENT, amount = AMOUNT) =>
   FRESH.encodeFunctionData('mint', [account, amount])
 
@@ -31,26 +34,42 @@ const newSeen = (): Seen => ({ calls: [] })
 /** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
 const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
 
-/** EVMChain stub answering `isMinter` off a fresh Interface. */
+/**
+ * EVMChain stub. `resolveToken` reads `typeAndVersion` to pick the role reader: a
+ * `FactoryBurnMintERC20` routes to v1 `isMinter(address)`, a `CrossChainToken` to v2
+ * `hasRole(MINTER_ROLE, address)`. The `mint(address,uint256)` calldata is identical either way.
+ * `callError` fails both reads, standing in for a contract that is not a supported CCT token
+ * (an EOA or pool): `resolveToken` falls back to v1 and the `isMinter` read then rejects.
+ */
 function stubChain({
   isMinter = true,
   callError,
   seen = newSeen(),
+  tokenType = 'v1',
 }: {
   isMinter?: boolean
-  /** Fails every `eth_call`, standing in for a contract that is not a BurnMintERC677 token. */
   callError?: Error
   seen?: Seen
+  tokenType?: 'v1' | 'v2'
 } = {}): EVMChain {
+  const iface = tokenType === 'v2' ? V2 : FRESH
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     network: { chainId: CHAIN_ID },
+    typeAndVersion: () =>
+      callError
+        ? Promise.reject(callError)
+        : Promise.resolve(
+            tokenType === 'v2'
+              ? ['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']
+              : ['FactoryBurnMintERC20', '1.5.1', ''],
+          ),
     provider: {
       call: ({ data }: { data: string }) => {
         if (callError) return Promise.reject(callError)
-        const fn = FRESH.getFunction(data.slice(0, 10))!.name
+        const fn = iface.getFunction(data.slice(0, 10))!.name
         seen.calls.push(fn)
-        return Promise.resolve(FRESH.encodeFunctionResult(fn, [isMinter]))
+        return Promise.resolve(iface.encodeFunctionResult(fn, [isMinter]))
       },
     },
     nextNonce: () => Promise.resolve(0),
@@ -152,10 +171,12 @@ describe('Mint (cct/evm)', () => {
     }
   })
 
-  describe('family check', () => {
-    it('rejects a contract that is not a BurnMintERC677 token', async () => {
-      // a v2.0.0 CrossChainToken, a token pool, and an EOA all fail the isMinter read
-      const revert = makeError('execution reverted', 'CALL_EXCEPTION', {
+  // A token that declares neither isMinter (v1) nor hasRole (v2): the pre-flight is skipped and
+  // the mint is built best-effort — the chain enforces the role at broadcast. No family-check
+  // rejection.
+  describe('unrecognized token — best-effort fallback', () => {
+    const missingReaders = () =>
+      makeError('execution reverted', 'CALL_EXCEPTION', {
         action: 'call',
         data: '0x',
         reason: null,
@@ -163,27 +184,18 @@ describe('Mint (cct/evm)', () => {
         invocation: null,
         revert: null,
       })
-      await assert.rejects(
-        () => generate(stubChain({ callError: revert })),
-        (err: unknown) =>
-          err instanceof CCTContractTypeInvalidError && err.context.address === TOKEN,
-      )
+
+    it('builds the mint without a role pre-flight, even with a sender', async () => {
+      const unsigned = await generate(stubChain({ callError: missingReaders() }))
+      assert.equal(unsigned.transactions[0]!.to, TOKEN)
+      assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
 
-    it('rejects an unrelated address even with no sender to check', async () => {
-      // the case a role gate alone would miss: a mint tx to codeless address mines as a no-op
-      const revert = makeError('execution reverted', 'CALL_EXCEPTION', {
-        action: 'call',
-        data: '0x',
-        reason: null,
-        transaction: { to: TOKEN, data: '0x' },
-        invocation: null,
-        revert: null,
+    it('builds with no sender to check', async () => {
+      const unsigned = await generate(stubChain({ callError: missingReaders() }), {
+        sender: undefined,
       })
-      await assert.rejects(
-        () => generate(stubChain({ callError: revert }), { sender: undefined }),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
-      )
+      assert.equal(unsigned.transactions[0]!.data, expectedData())
     })
   })
 
@@ -204,6 +216,42 @@ describe('Mint (cct/evm)', () => {
       const unsigned = await generate(stubChain({ seen }))
       assert.equal(unsigned.transactions[0]!.data, expectedData())
       assert.ok(!seen.calls.includes('owner'), 'mint is onlyMinter, not onlyOwner')
+    })
+  })
+
+  // A CrossChainToken (v2.0.0) — the token `deployToken` creates — gates mint on the AccessControl
+  // MINTER_ROLE via hasRole, not v1 isMinter. The mint(address,uint256) calldata is identical.
+  describe('v2 CrossChainToken', () => {
+    it('mints a v2 token, reading the role via hasRole(MINTER_ROLE)', async () => {
+      const seen = newSeen()
+      const unsigned = await generate(stubChain({ seen, tokenType: 'v2' }))
+      const tx = unsigned.transactions[0]!
+
+      assert.equal(tx.to, TOKEN)
+      assert.equal(tx.from, MINTER)
+      assert.equal(tx.data, expectedData(), 'same mint(address,uint256) calldata as v1')
+      // the role pre-flight uses v2 AccessControl, not v1 isMinter
+      assert.deepEqual(seen.calls, ['hasRole'])
+    })
+
+    it('rejects a v2 sender that does not hold MINTER_ROLE', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ isMinter: false, tokenType: 'v2' }), { sender: NOT_A_MINTER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          /must hold the mint role/.test(String(err.context.reason)),
+      )
+    })
+
+    it('submits a v2 mint as the minting wallet', async () => {
+      const { hash } = await op.execute(stubChain({ tokenType: 'v2' }), {
+        tokenAddress: TOKEN,
+        account: RECIPIENT,
+        amount: AMOUNT,
+        wallet: fakeSigner(),
+      })
+      assert.equal(hash, HASH)
     })
   })
 
