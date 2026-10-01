@@ -128,6 +128,10 @@ export type CcipOfframpV2 = {
         fields: [
           { name: 'tokenTransfer'; type: { option: { defined: 'TokenTransferV1' } } },
           { name: 'messageReceiver'; type: 'publicKey' },
+          // Length of the message's `data` field, and the callback gas it requests. Together with
+          // `message_receiver` these decide whether the receiver is consulted at all.
+          { name: 'dataLen'; type: 'u32' },
+          { name: 'ccipReceiveGasLimit'; type: 'u32' },
           { name: 'sender'; type: 'bytes' },
           { name: 'resolutionMetadata'; type: 'bytes' },
           { name: 'remoteChainSelector'; type: 'u64' },
@@ -317,6 +321,10 @@ export const IDL: CcipOfframpV2 = {
         fields: [
           { name: 'tokenTransfer', type: { option: { defined: 'TokenTransferV1' } } },
           { name: 'messageReceiver', type: 'publicKey' },
+          // Length of the message's `data` field, and the callback gas it requests. Together with
+          // `message_receiver` these decide whether the receiver is consulted at all.
+          { name: 'dataLen', type: 'u32' },
+          { name: 'ccipReceiveGasLimit', type: 'u32' },
           { name: 'sender', type: 'bytes' },
           { name: 'resolutionMetadata', type: 'bytes' },
           { name: 'remoteChainSelector', type: 'u64' },
