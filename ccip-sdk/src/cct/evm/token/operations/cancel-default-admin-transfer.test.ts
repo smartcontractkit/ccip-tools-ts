@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface, ZeroAddress } from 'ethers'
+import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { parseTypeAndVersion } from '../../../../utils.ts'
+import { CCTContractVersionUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type CancelDefaultAdminTransferParams,
   CancelDefaultAdminTransfer,
@@ -16,22 +17,58 @@ const TOKEN = '0x' + '11'.repeat(20)
 const ADMIN = '0x' + '22'.repeat(20)
 const OTHER = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
+/** Byte-parity oracle, independent of the SDK's cached, ABI-derived interfaces. */
 const FRESH = new Interface([
   'function cancelDefaultAdminTransfer()',
+  'function transferOwnership(address to)',
   'function defaultAdmin() view returns (address)',
+  'function owner() view returns (address)',
   'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
 ])
 
-function stubChain({ schedule = 1n, admin = ADMIN } = {}): EVMChain {
+const V2 = 'CrossChainToken 2.0.0'
+const V1 = 'FactoryBurnMintERC20 1.6.2'
+
+const revert = () =>
+  makeError('execution reverted', 'CALL_EXCEPTION', {
+    action: 'call',
+    data: '0x',
+    reason: null,
+    transaction: { to: TOKEN, data: '0x' },
+    invocation: null,
+    revert: null,
+  })
+
+/**
+ * EVMChain stub answering `defaultAdmin()` / `owner()` with `admin` and `pendingDefaultAdmin()`
+ * with `schedule`, recording each `eth_call` by function name. `typeAndVersion: null` reproduces
+ * a v1.5.1 token, which predates the function.
+ */
+function stubChain({
+  typeAndVersion = V2,
+  schedule = 1n,
+  admin = ADMIN,
+  calls = [],
+}: {
+  typeAndVersion?: string | null
+  schedule?: bigint
+  admin?: string
+  calls?: string[]
+} = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    typeAndVersion: () =>
+      typeAndVersion
+        ? Promise.resolve(parseTypeAndVersion(typeAndVersion))
+        : Promise.reject(revert()),
     provider: {
       call: ({ data }: { data: string }) => {
         const fn = FRESH.getFunction(data.slice(0, 10))!.name
-        if (fn === 'defaultAdmin') return Promise.resolve(FRESH.encodeFunctionResult(fn, [admin]))
-        return Promise.resolve(FRESH.encodeFunctionResult(fn, [OTHER, schedule]))
+        calls.push(fn)
+        if (fn === 'pendingDefaultAdmin')
+          return Promise.resolve(FRESH.encodeFunctionResult(fn, [OTHER, schedule]))
+        return Promise.resolve(FRESH.encodeFunctionResult(fn, [admin]))
       },
     },
     nextNonce: () => Promise.resolve(0),
@@ -55,8 +92,8 @@ function generate(chain: EVMChain, overrides: Partial<CancelDefaultAdminTransfer
 }
 
 describe('CancelDefaultAdminTransfer (cct/evm)', () => {
-  describe('generate', () => {
-    it('encodes cancelDefaultAdminTransfer() to a CrossChainToken', async () => {
+  describe('v2 CrossChainToken', () => {
+    it('encodes cancelDefaultAdminTransfer()', async () => {
       const unsigned = await generate(stubChain())
       assert.equal(unsigned.family, ChainFamily.EVM)
       assert.equal(unsigned.transactions[0]!.to, TOKEN)
@@ -64,31 +101,6 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
       assert.equal(
         unsigned.transactions[0]!.data,
         FRESH.encodeFunctionData('cancelDefaultAdminTransfer'),
-      )
-    })
-  })
-
-  describe('validation', () => {
-    it('rejects invalid addresses before RPC', async () => {
-      for (const [param, value] of [
-        ['tokenAddress', ZeroAddress],
-        ['sender', 'not-an-address'],
-      ] as const) {
-        await assert.rejects(
-          () => generate(stubChain(), { [param]: value }),
-          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
-        )
-      }
-    })
-  })
-
-  describe('version and default-admin checks', () => {
-    it('rejects a contract that is not a CrossChainToken', async () => {
-      const chain = stubChain()
-      chain.typeAndVersion = () => Promise.resolve(['FactoryBurnMintERC20', '1.6.2', ''])
-      await assert.rejects(
-        () => generate(chain),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
       )
     })
 
@@ -115,11 +127,85 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
     })
   })
 
+  describe('v1 FactoryBurnMintERC20', () => {
+    for (const [label, typeAndVersion] of [
+      ['v1.6.2', V1],
+      ['v1.5.1 (typeAndVersion() reverts)', null],
+    ] as const) {
+      it(`encodes Ownable2Step transferOwnership(0x0) on ${label}, gated on owner()`, async () => {
+        const calls: string[] = []
+        const unsigned = await generate(stubChain({ typeAndVersion, calls }))
+        assert.equal(unsigned.transactions[0]!.to, TOKEN)
+        assert.equal(unsigned.transactions[0]!.from, ADMIN)
+        assert.equal(
+          unsigned.transactions[0]!.data,
+          FRESH.encodeFunctionData('transferOwnership', [ZeroAddress]),
+        )
+        assert.deepEqual(calls, ['owner'])
+      })
+    }
+
+    it('reads nothing without a sender: the pending owner has no getter', async () => {
+      const calls: string[] = []
+      const unsigned = await generate(stubChain({ typeAndVersion: V1, calls }), {
+        sender: undefined,
+      })
+      assert.equal(unsigned.transactions[0]!.from, undefined)
+      assert.deepEqual(calls, [])
+    })
+
+    it('rejects a sender that is not the token owner', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ typeAndVersion: V1 }), { sender: OTHER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'cancelDefaultAdminTransfer' &&
+          err.context.param === 'sender' &&
+          err.message.includes(ADMIN),
+      )
+    })
+  })
+
+  describe('validation and version resolution', () => {
+    it('rejects invalid addresses before RPC', async () => {
+      for (const [param, value] of [
+        ['tokenAddress', ZeroAddress],
+        ['sender', 'not-an-address'],
+      ] as const) {
+        await assert.rejects(
+          () => generate(stubChain(), { [param]: value }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+
+    it('rejects an unsupported CrossChainToken version', async () => {
+      await assert.rejects(
+        () => generate(stubChain({ typeAndVersion: 'CrossChainToken 3.0.0' })),
+        (err: unknown) => err instanceof CCTContractVersionUnsupportedError,
+      )
+    })
+  })
+
   describe('execute', () => {
-    it('submits as the current default admin', async () => {
-      assert.equal(
-        (await op.execute(stubChain(), { tokenAddress: TOKEN, wallet: fakeSigner() })).hash,
-        HASH,
+    for (const typeAndVersion of [V2, V1]) {
+      it(`submits as the current admin (${typeAndVersion})`, async () => {
+        const { hash } = await op.execute(stubChain({ typeAndVersion }), {
+          tokenAddress: TOKEN,
+          wallet: fakeSigner(),
+        })
+        assert.equal(hash, HASH)
+      })
+    }
+
+    it('rejects a wallet that is not the v1 owner', async () => {
+      await assert.rejects(
+        () =>
+          op.execute(stubChain({ typeAndVersion: V1 }), {
+            tokenAddress: TOKEN,
+            wallet: fakeSigner(OTHER),
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
       )
     })
 

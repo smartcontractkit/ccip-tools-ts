@@ -341,10 +341,16 @@ See [Sending Messages](../sending-messages) for the full flag set.
 | --- | --- | --- |
 | TokenAdminRegistry administrator | `transferAdmin` | `acceptAdmin` |
 | Pool owner | `transferPoolOwnership` | `acceptPoolOwnership` |
-| v1 token owner | `transferTokenOwnership` | `acceptTokenOwnership` |
-| v2 token default admin | `beginDefaultAdminTransfer` | `acceptDefaultAdminTransfer` |
+| Token admin (v1 owner, v2 default admin) | `beginDefaultAdminTransfer` | `acceptDefaultAdminTransfer` |
 
 The proposed account must submit the acceptance transaction. Factory `futureOwner` follows the same two-step ownership model. Use `generateUnsigned<Operation>` when an external signer submits a transaction. Set `sender` to enable local authority checks.
+
+The token admin methods read the token's version and pick the matching contract call:
+
+- On a v2 `CrossChainToken`, `beginDefaultAdminTransfer` schedules the transfer, and the new admin can accept it only after the token's configured delay. A zero `newAdmin` schedules renunciation, which completes with `renounceRole`.
+- On a v1 factory token, `beginDefaultAdminTransfer` calls Ownable2Step `transferOwnership`, and the new owner can accept immediately. A zero `newAdmin` is rejected, because on v1 a zero proposal withdraws the pending transfer instead of renouncing.
+
+To withdraw a pending proposal on either version, the current admin calls `cancelDefaultAdminTransfer`. `transferTokenOwnership` and `acceptTokenOwnership` still work but are deprecated: they pass through to these methods, and a zero `newOwner` cancels.
 
 ## Related
 

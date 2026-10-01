@@ -5,9 +5,11 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
-import { ChainFamily, networkInfo } from '../../../../networks.ts'
+import { networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { BeginDefaultAdminTransfer } from './begin-default-admin-transfer.ts'
+import { CancelDefaultAdminTransfer } from './cancel-default-admin-transfer.ts'
 import {
   type TransferTokenOwnershipParams,
   TransferTokenOwnership,
@@ -18,62 +20,39 @@ const OWNER = '0x' + '22'.repeat(20)
 const NEW_OWNER = '0x' + '44'.repeat(20)
 const NOT_THE_OWNER = '0x' + '88'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
-
-/**
- * Byte-parity oracle: a fresh Interface built from the signature literals, so the assertions are
- * independent of the SDK's cached, ABI-derived interfaces. `owner()` doubles as the stub's
- * response encoder.
- */
-const IFACE = new Interface([
+/** Byte-parity oracle, independent of the SDK's cached, ABI-derived interfaces. */
+const FRESH = new Interface([
   'function transferOwnership(address to)',
+  'function cancelDefaultAdminTransfer()',
   'function owner() view returns (address)',
+  'function defaultAdmin() view returns (address)',
+  'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
 ])
-const dataFor = (to: string) => IFACE.encodeFunctionData('transferOwnership', [to])
+
+const V2 = 'CrossChainToken 2.0.0'
+const V1 = 'FactoryBurnMintERC20 1.6.2'
 
 /**
- * EVMChain stub: `provider.call` answers `owner()` and nothing else. `typeAndVersion` feeds the v2
- * guard; `typeAndVersion: undefined` reproduces a v1.5.1 token, which predates the function.
+ * EVMChain stub for either token version: `owner()` / `defaultAdmin()` answer `owner`, and v2's
+ * `pendingDefaultAdmin()` answers `schedule`.
  */
 function stubChain({
+  typeAndVersion = V1,
   owner = OWNER,
-  typeAndVersion = 'FactoryBurnMintERC20 1.6.2',
-  onCall,
-}: {
-  owner?: string
-  typeAndVersion?: string
-  onCall?: () => void
-} = {}): EVMChain {
+  schedule = 1n,
+}: { typeAndVersion?: string; owner?: string; schedule?: bigint } = {}): EVMChain {
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
       call: ({ data }: { data: string }) => {
-        onCall?.()
-        if (data.slice(0, 10) !== IFACE.getFunction('owner')!.selector)
-          throw makeError('execution reverted', 'CALL_EXCEPTION', {
-            action: 'call',
-            data: '0x',
-            reason: null,
-            transaction: { to: TOKEN, data },
-            invocation: null,
-            revert: null,
-          })
-        return Promise.resolve(IFACE.encodeFunctionResult('owner', [owner]))
+        const fn = FRESH.getFunction(data.slice(0, 10))!.name
+        if (fn === 'pendingDefaultAdmin')
+          return Promise.resolve(FRESH.encodeFunctionResult(fn, [NEW_OWNER, schedule]))
+        return Promise.resolve(FRESH.encodeFunctionResult(fn, [owner]))
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    typeAndVersion: () =>
-      typeAndVersion
-        ? Promise.resolve(parseTypeAndVersion(typeAndVersion))
-        : Promise.reject(
-            makeError('execution reverted', 'CALL_EXCEPTION', {
-              action: 'call',
-              data: '0x',
-              reason: null,
-              transaction: { to: TOKEN },
-              invocation: null,
-              revert: null,
-            }),
-          ),
+    typeAndVersion: () => Promise.resolve(parseTypeAndVersion(typeAndVersion)),
     nextNonce: () => Promise.resolve(0),
     rollbackNonce: () => {},
   } as unknown as EVMChain
@@ -103,54 +82,85 @@ function generate(chain: EVMChain, overrides: Partial<TransferTokenOwnershipPara
   })
 }
 
-describe('TransferTokenOwnership (cct/evm)', () => {
-  describe('generate', () => {
-    it('encodes transferOwnership(newOwner), identically for v1.5.1 and v1.6.2', async () => {
-      const unsigned = await generate(stubChain())
-      const tx = unsigned.transactions[0]!
-
-      assert.equal(unsigned.family, ChainFamily.EVM)
-      assert.equal(unsigned.transactions.length, 1)
-      assert.equal(tx.to, TOKEN)
-      assert.equal(tx.from, OWNER)
-      assert.equal(tx.data, dataFor(NEW_OWNER))
-    })
-
-    it('allows the zero address, which retracts a pending transfer', async () => {
-      const unsigned = await generate(stubChain(), { newOwner: ZeroAddress })
-      assert.equal(unsigned.transactions[0]!.data, dataFor(ZeroAddress))
-    })
-
-    it('reads the owner and nothing else', async () => {
-      let calls = 0
-      await generate(stubChain({ onCall: () => (calls += 1) }))
-      assert.equal(calls, 1)
-    })
-
-    it('omits from — but still reads owner() — when sender is not supplied', async () => {
-      let calls = 0
-      const unsigned = await generate(stubChain({ onCall: () => (calls += 1) }), {
-        sender: undefined,
+describe('TransferTokenOwnership (cct/evm, deprecated alias)', () => {
+  describe('pass-through', () => {
+    for (const typeAndVersion of [V1, V2]) {
+      it(`builds exactly beginDefaultAdminTransfer for a non-zero newOwner (${typeAndVersion})`, async () => {
+        const chain = stubChain({ typeAndVersion })
+        assert.deepEqual(
+          await generate(chain),
+          await new BeginDefaultAdminTransfer().generate(chain, {
+            tokenAddress: TOKEN,
+            newAdmin: NEW_OWNER,
+            sender: OWNER,
+          }),
+        )
       })
-      assert.equal(unsigned.transactions[0]!.from, undefined)
-      // the owner read is what bounds newOwner away from the current owner, sender or not
-      assert.equal(calls, 1)
+
+      it(`builds exactly cancelDefaultAdminTransfer for a zero newOwner (${typeAndVersion})`, async () => {
+        const chain = stubChain({ typeAndVersion })
+        assert.deepEqual(
+          await generate(chain, { newOwner: ZeroAddress }),
+          await new CancelDefaultAdminTransfer().generate(chain, {
+            tokenAddress: TOKEN,
+            sender: OWNER,
+          }),
+        )
+      })
+    }
+
+    it('keeps the v1 calldata: transferOwnership(newOwner), and transferOwnership(0x0) to retract', async () => {
+      const chain = stubChain()
+      assert.equal(
+        (await generate(chain)).transactions[0]!.data,
+        FRESH.encodeFunctionData('transferOwnership', [NEW_OWNER]),
+      )
+      assert.equal(
+        (await generate(chain, { newOwner: ZeroAddress })).transactions[0]!.data,
+        FRESH.encodeFunctionData('transferOwnership', [ZeroAddress]),
+      )
     })
 
-    it('rejects a self-transfer with no sender, against the on-chain owner', async () => {
+    it('cancels on v2 for a zero newOwner, rather than scheduling renunciation', async () => {
+      const unsigned = await generate(stubChain({ typeAndVersion: V2 }), { newOwner: ZeroAddress })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        FRESH.encodeFunctionData('cancelDefaultAdminTransfer'),
+      )
+      await assert.rejects(
+        () => generate(stubChain({ typeAndVersion: V2, schedule: 0n }), { newOwner: ZeroAddress }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'transferTokenOwnership' &&
+          /no pending default-admin transfer to cancel/.test(err.message),
+      )
+    })
+  })
+
+  describe('error attribution', () => {
+    it('reports a v1 self-transfer under transferTokenOwnership / newOwner', async () => {
       await assert.rejects(
         () => generate(stubChain(), { newOwner: OWNER, sender: undefined }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'transferTokenOwnership' &&
           err.context.param === 'newOwner' &&
-          err.message.includes(OWNER) &&
           /CannotTransferToSelf/.test(err.message),
       )
     })
-  })
 
-  describe('validation', () => {
+    it('reports a sender that is not the current admin, on either version', async () => {
+      for (const typeAndVersion of [V1, V2])
+        await assert.rejects(
+          () => generate(stubChain({ typeAndVersion, owner: NOT_THE_OWNER })),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'transferTokenOwnership' &&
+            err.context.param === 'sender' &&
+            err.message.includes(NOT_THE_OWNER),
+        )
+    })
+
     for (const [param, value] of [
       ['tokenAddress', 'not-an-address'],
       ['tokenAddress', ZeroAddress],
@@ -159,8 +169,13 @@ describe('TransferTokenOwnership (cct/evm)', () => {
     ] as const) {
       it(`rejects ${param} = ${value} before any RPC`, async () => {
         let called = false
+        const chain = stubChain()
+        chain.typeAndVersion = () => {
+          called = true
+          return Promise.reject(new Error('unexpected RPC'))
+        }
         await assert.rejects(
-          () => generate(stubChain({ onCall: () => (called = true) }), { [param]: value }),
+          () => generate(chain, { [param]: value }),
           (err: unknown) =>
             err instanceof CCTParamsInvalidError &&
             err.context.operation === 'transferTokenOwnership' &&
@@ -169,65 +184,6 @@ describe('TransferTokenOwnership (cct/evm)', () => {
         assert.equal(called, false)
       })
     }
-
-    it('rejects a self-transfer before any RPC — the token would revert CannotTransferToSelf', async () => {
-      let called = false
-      await assert.rejects(
-        () =>
-          generate(stubChain({ onCall: () => (called = true) }), {
-            newOwner: OWNER,
-            sender: OWNER,
-          }),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'transferTokenOwnership' &&
-          err.context.param === 'newOwner',
-      )
-      assert.equal(called, false)
-    })
-  })
-
-  describe('v2 CrossChainToken guard', () => {
-    it('rejects a v2.0.0 CrossChainToken before building calldata or reading owner()', async () => {
-      let calls = 0
-      await assert.rejects(
-        () =>
-          generate(
-            stubChain({ typeAndVersion: 'CrossChainToken 2.0.0', onCall: () => (calls += 1) }),
-          ),
-        (err: unknown) =>
-          err instanceof CCTOperationUnsupportedError &&
-          err.context.operation === 'transferTokenOwnership' &&
-          err.context.version === '2.0.0' &&
-          /beginDefaultAdminTransfer/.test(err.recovery ?? ''),
-      )
-      // owner() is never read: the guard precedes both the encoding and the owner pre-flight
-      assert.equal(calls, 0)
-    })
-
-    it('proceeds for a v1.6.2 FactoryBurnMintERC20', async () => {
-      const unsigned = await generate(stubChain({ typeAndVersion: 'FactoryBurnMintERC20 1.6.2' }))
-      assert.equal(unsigned.transactions[0]!.data, dataFor(NEW_OWNER))
-    })
-
-    it('proceeds for a v1.5.1 token, whose typeAndVersion() reverts', async () => {
-      const unsigned = await generate(stubChain({ typeAndVersion: undefined }))
-      assert.equal(unsigned.transactions[0]!.data, dataFor(NEW_OWNER))
-    })
-  })
-
-  describe('pre-transaction validation', () => {
-    it('rejects a sender that is not the token owner', async () => {
-      await assert.rejects(
-        () => generate(stubChain({ owner: NOT_THE_OWNER })),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'transferTokenOwnership' &&
-          err.context.param === 'sender' &&
-          // names the owner it read, so the caller can see which address it needed
-          err.message.includes(NOT_THE_OWNER),
-      )
-    })
   })
 
   describe('execute', () => {
@@ -239,7 +195,7 @@ describe('TransferTokenOwnership (cct/evm)', () => {
       })
     })
 
-    it('maps an on-chain revert to CCIPExecTxRevertedError', async () => {
+    it('maps an on-chain revert to CCIPExecTxRevertedError under its own name', async () => {
       await assert.rejects(
         () =>
           op.execute(stubChain(), {
@@ -256,13 +212,6 @@ describe('TransferTokenOwnership (cct/evm)', () => {
       await assert.rejects(
         () => op.execute(stubChain(), { ...params, wallet: {} }),
         CCIPWalletInvalidError,
-      )
-    })
-
-    it('rejects a sender that is not the executing wallet', async () => {
-      await assert.rejects(
-        () => op.execute(stubChain(), { ...params, sender: NEW_OWNER, wallet: fakeSigner() }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
       )
     })
 
