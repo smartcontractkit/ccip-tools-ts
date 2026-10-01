@@ -15,9 +15,8 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { encodeAddressToAny } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
 import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../../remote-address.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -527,20 +526,5 @@ export class ApplyChainUpdates extends EVMOperation<
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
 
     return encode(getTokenPoolInterface(type, version), params)
-  }
-
-  /**
-   * Signs and submits as the pool owner, defaulting `sender` to the signing wallet — the only
-   * address the contract's `onlyOwner` check can pass. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ApplyChainUpdatesParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

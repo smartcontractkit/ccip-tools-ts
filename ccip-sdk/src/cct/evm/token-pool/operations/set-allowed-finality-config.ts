@@ -18,8 +18,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { type FinalityAllowed, encodeFinality } from '../../../../extra-args.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { parseRecord, validateBoolean, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -123,14 +122,5 @@ export class SetAllowedFinalityConfig extends EVMOperation<SetAllowedFinalityCon
     if (params.sender !== undefined)
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return unsigned
-  }
-
-  /** Signs and submits as the pool owner, defaulting `sender` to the signing wallet. */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<SetAllowedFinalityConfigParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

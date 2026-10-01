@@ -16,8 +16,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -74,22 +73,5 @@ export class AcceptPoolOwnership extends EVMOperation<AcceptPoolOwnershipParams>
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
     return encode(getTokenPoolInterface(type, version), params)
-  }
-
-  /**
-   * Signs and submits as the proposed owner, defaulting `sender` to the signing wallet.
-   * @remarks The contract authorizes on `msg.sender`, so the wallet *is* the address that must be
-   * the proposed owner; see {@link EVMOperation.resolveWalletSender}.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — notably when the wallet is
-   * not the pool's proposed owner, which cannot be checked before signing
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<AcceptPoolOwnershipParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
