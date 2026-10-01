@@ -20,6 +20,7 @@ import {
 } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { CantonQuery } from '../../query.ts'
+import { decodeOptionalParty } from '../../token-admin-registry/shared.ts'
 import { instanceAddressOwner, parsePartyId } from '../../validate.ts'
 import { type PoolType, resolvePool } from '../shared.ts'
 
@@ -165,17 +166,6 @@ function decodeInt(value: unknown): number {
   if (typeof v === 'number') return v
   if (typeof v === 'string' && v.length > 0) return Number(v)
   return 0
-}
-
-/** Decode a Daml `Optional Party` into a string (or `undefined`). */
-function decodeOptionalParty(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const v = value as Record<string, unknown>
-  if ('Some' in v && v.Some != null) {
-    const inner = extractFieldValue(v.Some)
-    return typeof inner === 'string' ? inner : undefined
-  }
-  return undefined
 }
 
 /** Decode the pool `instrumentId` (`{ admin, id }`) record from a decoded `createArgument`. */

@@ -77,6 +77,8 @@ function poolContract(
     templateId?: string
     contractId?: string
     rateLimitAdmin?: string
+    /** Raw `rateLimitAdmin` field value, overriding the gRPC `Some`/`None` form. */
+    rateLimitAdminValue?: unknown
     remoteChainConfigs?: Record<string, unknown>
     observers?: string[]
   } = {},
@@ -97,7 +99,14 @@ function poolContract(
           fields: [field('admin', party(INSTRUMENT_ADMIN)), field('id', text('usdc'))],
         }),
         field('decimals', int(6)),
-        field('rateLimitAdmin', opts.rateLimitAdmin ? some(party(opts.rateLimitAdmin)) : none()),
+        field(
+          'rateLimitAdmin',
+          'rateLimitAdminValue' in opts
+            ? opts.rateLimitAdminValue
+            : opts.rateLimitAdmin
+              ? some(party(opts.rateLimitAdmin))
+              : none(),
+        ),
         field('remoteChainConfigs', opts.remoteChainConfigs ?? remoteChainConfigsMap([])),
         field(
           'observers',
@@ -146,6 +155,20 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     assert.equal(result.rateLimitAdmin, RATE_LIMIT_ADMIN)
   })
+
+  // The JSON Ledger API spells `Some party` as the bare party string and `None` as `null`.
+  for (const [label, value, expected] of [
+    ['a bare-string Some', RATE_LIMIT_ADMIN, RATE_LIMIT_ADMIN],
+    ['a null None', null, undefined],
+  ] as const) {
+    it(`decodes the rate-limit admin from the JSON Ledger API form (${label})`, async () => {
+      const { manager } = managerWith(poolContract({ rateLimitAdminValue: value }))
+
+      const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
+
+      assert.equal(result.rateLimitAdmin, expected)
+    })
+  }
 
   it('decodes remoteChainConfigs Daml Map entries', async () => {
     const { manager } = managerWith(
