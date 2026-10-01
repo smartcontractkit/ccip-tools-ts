@@ -6,12 +6,17 @@ import { Interface, ZeroAddress, getAddress, getIcapAddress, makeError } from 'e
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
+import { type PoolStub, POOL, withPool } from '../pool.test.helpers.ts'
 import { UpdateAdvancedPoolHooksAuthorizedCallers } from './update-authorized-callers.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const HOOKS = '0x' + '66'.repeat(20)
-const POOL = '0x' + '77'.repeat(20)
+const CALLER = '0x' + '77'.repeat(20) // the pool being authorized
 const OTHER = '0x' + '88'.repeat(20)
 const DUPLICATE_CALLER = '0x' + 'aa'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
@@ -41,10 +46,12 @@ type Seen = { calls: string[] }
 const newSeen = (): Seen => ({ calls: [] })
 
 /**
- * Minimal EVMChain stub. The build path reads `typeAndVersion` on the advancedPoolHooks, which defaults to
- * a deployed, supported `AdvancedPoolHooks`, then `owner()` when a `sender` is known, which defaults
- * to `SENDER`. `readError` replaces the `typeAndVersion` read with a failure, standing in for an
- * address with no contract code (`BAD_DATA`) or a reverting read.
+ * Minimal EVMChain stub. The build path first resolves the hooks from {@link POOL} (its
+ * `typeAndVersion`, then `getAdvancedPoolHooks()`, answered per `pool` and bound to {@link HOOKS}
+ * by default), then reads `typeAndVersion` on the hooks, which defaults to a deployed, supported
+ * `AdvancedPoolHooks`, then `owner()` when a `sender` is known, which defaults to `SENDER`.
+ * `readError` replaces the hooks' `typeAndVersion` read with a failure, standing in for an address
+ * with no contract code (`BAD_DATA`) or a reverting read. Every read lands in `seen`, in order.
  */
 function stubChain({
   type = 'AdvancedPoolHooks',
@@ -52,32 +59,40 @@ function stubChain({
   owner = SENDER,
   readError,
   seen = newSeen(),
+  pool = {},
 }: {
   type?: string
   version?: string
   owner?: string
   readError?: Error
   seen?: Seen
+  pool?: Partial<PoolStub>
 } = {}): EVMChain {
-  return {
-    provider: {
-      call: ({ to, data }: { to: string; data: string }) => {
-        const fn = OWNER_IFACE.getFunction(data.slice(0, 10))!.name
-        seen.calls.push(`${fn}:${to}`)
-        return Promise.resolve(OWNER_IFACE.encodeFunctionResult(fn, [owner]))
+  return withPool(
+    {
+      provider: {
+        call: ({ to, data }: { to: string; data: string }) => {
+          const fn = OWNER_IFACE.getFunction(data.slice(0, 10))!.name
+          seen.calls.push(`${fn}:${to}`)
+          return Promise.resolve(OWNER_IFACE.encodeFunctionResult(fn, [owner]))
+        },
       },
-    },
-    network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
-    nextNonce: async () => 0,
-    rollbackNonce: () => {},
-    typeAndVersion: (address: string) => {
-      seen.calls.push(`typeAndVersion:${address}`)
-      if (readError) return Promise.reject(readError)
-      return Promise.resolve([type, version])
-    },
-  } as unknown as EVMChain
+      network: networkInfo('ethereum-testnet-sepolia-base-1'),
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      nextNonce: async () => 0,
+      rollbackNonce: () => {},
+      typeAndVersion: (address: string) => {
+        seen.calls.push(`typeAndVersion:${address}`)
+        if (readError) return Promise.reject(readError)
+        return Promise.resolve([type, version])
+      },
+    } as unknown as EVMChain,
+    { hooks: HOOKS, onCall: (call) => seen.calls.push(call), ...pool },
+  )
 }
+
+/** The reads that resolve {@link HOOKS} from {@link POOL}, ahead of any hooks read. */
+const RESOLVE = [`typeAndVersion:${POOL}`, `getAdvancedPoolHooks:${POOL}`]
 
 /** ethers' shape for a call whose target has no code: an empty return that cannot be decoded. */
 const noCodeError = () =>
@@ -102,12 +117,12 @@ function fakeSigner(opts: { waitError?: Error; seen?: Seen; address?: string } =
   }
 }
 
-describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks operation)', () => {
+describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advanced-pool-hooks operation)', () => {
   describe('generate (golden vectors)', () => {
-    it('encodes an added caller as a call to the advancedPoolHooks', async () => {
+    it("encodes an added caller as a call to the pool's bound hooks", async () => {
       const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         sender: SENDER,
       })
 
@@ -120,26 +135,26 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
         tx.data!.startsWith(SELECTOR),
         'data carries the applyAuthorizedCallerUpdates selector',
       )
-      // addedCallers:[POOL], removedCallers:[] — added array holds POOL, removed is empty.
-      assert.equal(tx.data, SELECTOR + W_TUPLE + OFF_40 + OFF_80 + LEN_1 + word(POOL) + LEN_0)
+      // addedCallers:[CALLER], removedCallers:[] — added array holds CALLER, removed is empty.
+      assert.equal(tx.data, SELECTOR + W_TUPLE + OFF_40 + OFF_80 + LEN_1 + word(CALLER) + LEN_0)
     })
 
     it('encodes both added and removed callers', async () => {
       const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         removedCallers: [OTHER],
       })
-      // POOL sits in the added array, OTHER in the removed array — swapping them changes these bytes.
+      // CALLER sits in the added array, OTHER in the removed array — swapping them changes these bytes.
       assert.equal(
         unsigned.transactions[0]!.data,
-        SELECTOR + W_TUPLE + OFF_40 + OFF_80 + LEN_1 + word(POOL) + LEN_1 + word(OTHER),
+        SELECTOR + W_TUPLE + OFF_40 + OFF_80 + LEN_1 + word(CALLER) + LEN_1 + word(OTHER),
       )
     })
 
     it('defaults omitted caller arrays to empty', async () => {
       const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-        advancedPoolHooks: HOOKS,
+        poolAddress: POOL,
         removedCallers: [OTHER],
       })
       // addedCallers omitted -> empty; OTHER lands in the removed array (removed offset is 0x60).
@@ -151,40 +166,39 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
 
     it('omits `from` when no sender is given', async () => {
       const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
       })
       assert.equal(unsigned.transactions[0]!.from, undefined)
     })
   })
 
   describe('validation', () => {
-    it('rejects an invalid advancedPoolHooks address', async () => {
+    it('rejects an invalid pool address', async () => {
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: 'nope',
-            addedCallers: [POOL],
+            poolAddress: 'nope',
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers' &&
-          err.context.param === 'advancedPoolHooks',
+          err.context.param === 'poolAddress',
       )
     })
 
-    it('rejects a zero-address advancedPoolHooks', async () => {
-      // a call to 0x0 hits no code, so it would mine as a successful no-op
+    it('rejects a zero pool address', async () => {
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: ZeroAddress,
-            addedCallers: [POOL],
+            poolAddress: ZeroAddress,
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers' &&
-          err.context.param === 'advancedPoolHooks',
+          err.context.param === 'poolAddress',
       )
     })
 
@@ -193,11 +207,11 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: getIcapAddress(ZeroAddress),
-            addedCallers: [POOL],
+            poolAddress: getIcapAddress(ZeroAddress),
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
-          err instanceof CCTParamsInvalidError && err.context.param === 'advancedPoolHooks',
+          err instanceof CCTParamsInvalidError && err.context.param === 'poolAddress',
       )
     })
 
@@ -205,7 +219,7 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
+            poolAddress: POOL,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'addedCallers',
@@ -216,7 +230,7 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
+            poolAddress: POOL,
             addedCallers: [],
             removedCallers: [],
           }),
@@ -229,8 +243,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL, 'nope'],
+            poolAddress: POOL,
+            addedCallers: [CALLER, 'nope'],
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError && err.context.param === 'addedCallers[1]',
@@ -241,7 +255,7 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
+            poolAddress: POOL,
             removedCallers: ['nope'],
           }),
         (err: unknown) =>
@@ -254,7 +268,7 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
         await assert.rejects(
           () =>
             new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-              advancedPoolHooks: HOOKS,
+              poolAddress: POOL,
               [param]: [DUPLICATE_CALLER, `0x${DUPLICATE_CALLER.slice(2).toUpperCase()}`],
             }),
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
@@ -266,7 +280,7 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
+            poolAddress: POOL,
             addedCallers: [ZeroAddress],
           }),
         (err: unknown) =>
@@ -278,8 +292,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             sender: 'nope',
           }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
@@ -287,14 +301,47 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
     })
   })
 
-  describe('advancedPoolHooks pre-flight', () => {
-    it('reads the advancedPoolHooks typeAndVersion before building calldata', async () => {
+  describe('pool resolution', () => {
+    it('rejects a pre-v2.0.0 pool as unsupported, reading no binding and no hooks', async () => {
+      const seen = newSeen()
+      await assert.rejects(
+        () =>
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
+            stubChain({ seen, pool: { typeAndVersion: 'BurnMintTokenPool 1.6.1' } }),
+            { poolAddress: POOL, addedCallers: [CALLER], sender: SENDER },
+          ),
+        (err: unknown) =>
+          err instanceof CCTOperationUnsupportedError &&
+          err.context.operation === 'updateAdvancedPoolHooksAuthorizedCallers',
+      )
+      assert.deepEqual(seen.calls, [`typeAndVersion:${POOL}`])
+    })
+
+    it('rejects a pool with no hooks bound, reading nothing from the hooks', async () => {
+      const seen = newSeen()
+      await assert.rejects(
+        () =>
+          new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
+            stubChain({ seen, pool: { hooks: ZeroAddress } }),
+            { poolAddress: POOL, addedCallers: [CALLER], sender: SENDER },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'poolAddress' &&
+          err.message.includes('updateAdvancedPoolHooks'),
+      )
+      assert.deepEqual(seen.calls, RESOLVE)
+    })
+  })
+
+  describe('hooks pre-flight', () => {
+    it('resolves the hooks from the pool, then reads their typeAndVersion, before building calldata', async () => {
       const seen = newSeen()
       await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ seen }), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
       })
-      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`])
+      assert.deepEqual(seen.calls, [...RESOLVE, `typeAndVersion:${HOOKS}`])
     })
 
     it('rejects an address with no contract code', async () => {
@@ -302,8 +349,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
@@ -325,8 +372,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
@@ -344,8 +391,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ readError }), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
           }),
         (err: unknown) =>
           err instanceof CCTContractTypeInvalidError &&
@@ -361,8 +408,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
             stubChain({ type: 'LockReleaseTokenPool' }),
             {
-              advancedPoolHooks: HOOKS,
-              addedCallers: [POOL],
+              poolAddress: POOL,
+              addedCallers: [CALLER],
             },
           ),
         (err: unknown) =>
@@ -375,31 +422,31 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
   })
 
   describe('owner pre-flight', () => {
-    it('reads owner() after typeAndVersion, only when a sender is given', async () => {
+    it("reads the hooks' owner() after their typeAndVersion, only when a sender is given", async () => {
       const seen = newSeen()
       await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain({ seen }), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         sender: SENDER,
       })
-      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`, `owner:${HOOKS}`])
+      assert.deepEqual(seen.calls, [...RESOLVE, `typeAndVersion:${HOOKS}`, `owner:${HOOKS}`])
     })
 
     it('accepts the owner as sender regardless of address casing', async () => {
       const lower = '0x' + 'ab'.repeat(20)
       const unsigned = await new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
         stubChain({ owner: getAddress(lower) }),
-        { advancedPoolHooks: HOOKS, addedCallers: [POOL], sender: lower },
+        { poolAddress: POOL, addedCallers: [CALLER], sender: lower },
       )
       assert.equal(unsigned.transactions[0]!.from, lower)
     })
 
-    it('rejects a sender that is not the advancedPoolHooks owner', async () => {
+    it('rejects a sender that is not the hooks owner', async () => {
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().generate(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             sender: NOT_THE_OWNER,
           }),
         (err: unknown) =>
@@ -409,40 +456,45 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       )
     })
 
-    it('does not read owner() when the advancedPoolHooks check fails', async () => {
+    it('does not read owner() when the hooks check fails', async () => {
       const seen = newSeen()
       await assert.rejects(() =>
         new UpdateAdvancedPoolHooksAuthorizedCallers().generate(
           stubChain({ type: 'Router', seen }),
           {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             sender: SENDER,
           },
         ),
       )
-      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`])
+      assert.deepEqual(seen.calls, [...RESOLVE, `typeAndVersion:${HOOKS}`])
     })
   })
 
   describe('execute', () => {
-    it('checks the signing wallet against the advancedPoolHooks owner', async () => {
+    it('checks the signing wallet against the hooks owner', async () => {
       const seen = newSeen()
       await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain({ seen }), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         wallet: fakeSigner({ seen }),
       })
-      assert.deepEqual(seen.calls, [`typeAndVersion:${HOOKS}`, `owner:${HOOKS}`, 'sendTransaction'])
+      assert.deepEqual(seen.calls, [
+        ...RESOLVE,
+        `typeAndVersion:${HOOKS}`,
+        `owner:${HOOKS}`,
+        'sendTransaction',
+      ])
     })
 
-    it('does not sign or broadcast when the wallet is not the advancedPoolHooks owner', async () => {
+    it('does not sign or broadcast when the wallet is not the hooks owner', async () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             wallet: fakeSigner({ seen, address: NOT_THE_OWNER }),
           }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
@@ -454,8 +506,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             sender: NOT_THE_OWNER,
             wallet: fakeSigner(),
           }),
@@ -465,8 +517,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
 
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         wallet: fakeSigner(),
       })
       assert.deepEqual(result, { hash: HASH })
@@ -474,8 +526,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
 
     it('accepts a sender matching the signing wallet', async () => {
       const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        addedCallers: [POOL],
+        poolAddress: POOL,
+        addedCallers: [CALLER],
         sender: SENDER,
         wallet: fakeSigner(),
       })
@@ -486,8 +538,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             wallet: fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
           }),
         (err: unknown) =>
@@ -498,22 +550,22 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
 
     it('revokes a caller and returns the tx hash', async () => {
       const result = await new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-        advancedPoolHooks: HOOKS,
-        removedCallers: [POOL],
+        poolAddress: POOL,
+        removedCallers: [CALLER],
         wallet: fakeSigner(),
       })
       assert.deepEqual(result, { hash: HASH })
     })
 
-    it('does not sign or broadcast when the advancedPoolHooks is not deployed', async () => {
+    it('does not sign or broadcast when the bound hooks are not deployed', async () => {
       const seen = newSeen()
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().execute(
             stubChain({ readError: noCodeError() }),
             {
-              advancedPoolHooks: HOOKS,
-              addedCallers: [POOL],
+              poolAddress: POOL,
+              addedCallers: [CALLER],
               wallet: fakeSigner({ seen }),
             },
           ),
@@ -529,8 +581,8 @@ describe('UpdateAdvancedPoolHooksAuthorizedCallers (cct/evm advancedPoolHooks op
       await assert.rejects(
         () =>
           new UpdateAdvancedPoolHooksAuthorizedCallers().execute(stubChain(), {
-            advancedPoolHooks: HOOKS,
-            addedCallers: [POOL],
+            poolAddress: POOL,
+            addedCallers: [CALLER],
             wallet: {},
           }),
         (err: unknown) => err instanceof CCIPWalletInvalidError,

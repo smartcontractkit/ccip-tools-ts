@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { makeError } from 'ethers'
+import { ZeroAddress, getAddress, makeError } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../utils.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../errors.ts'
 import {
   ADVANCED_POOL_HOOKS_BYTECODE,
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
   getAdvancedPoolHooksArtifact,
+  resolveAdvancedPoolHooks,
 } from './contracts.ts'
+import { type PoolStub, POOL, withPool } from './pool.test.helpers.ts'
 
 const HOOKS = '0x' + '44'.repeat(20)
 
@@ -108,6 +114,98 @@ describe('advanced-pool-hooks/contracts', () => {
           err.context.operation === 'op' &&
           err.context.param === 'sender' &&
           err.message.includes('AdvancedPoolHooks owner'),
+      )
+    })
+  })
+
+  describe('resolveAdvancedPoolHooks', () => {
+    /**
+     * Pool side from {@link withPool}; the hooks answer only `typeAndVersion` (as `hooksType`), and
+     * every read either side makes is recorded in `seen`, in order.
+     */
+    const resolveChain = (
+      seen: string[],
+      pool: Partial<PoolStub> = {},
+      hooksType = 'AdvancedPoolHooks 2.0.0',
+    ): EVMChain =>
+      withPool(
+        {
+          typeAndVersion: (address: string) => {
+            seen.push(`typeAndVersion:${getAddress(address)}`)
+            return Promise.resolve(parseTypeAndVersion(hooksType))
+          },
+          provider: {
+            call: () => Promise.reject(makeError('execution reverted', 'CALL_EXCEPTION')),
+          },
+          logger: { debug() {}, info() {}, warn() {}, error() {} },
+        } as unknown as EVMChain,
+        { hooks: HOOKS, onCall: (call) => seen.push(call), ...pool },
+      )
+
+    it('resolves the bound hooks, reading the binding before probing the hooks', async () => {
+      const seen: string[] = []
+      assert.equal(await resolveAdvancedPoolHooks('op', resolveChain(seen), POOL), HOOKS)
+      assert.deepEqual(seen, [
+        `typeAndVersion:${POOL}`,
+        `getAdvancedPoolHooks:${POOL}`,
+        `typeAndVersion:${HOOKS}`,
+      ])
+    })
+
+    it('resolves through a LockRelease pool too — the getter is on the shared base', async () => {
+      const chain = resolveChain([], { typeAndVersion: 'LockReleaseTokenPool 2.0.0' })
+      assert.equal(await resolveAdvancedPoolHooks('op', chain, POOL), HOOKS)
+    })
+
+    for (const typeAndVersion of [
+      'BurnMintTokenPool 1.5.0',
+      'BurnMintTokenPool 1.5.1',
+      'SiloedLockReleaseTokenPool 1.6.0',
+      'LockReleaseTokenPool 1.6.1',
+    ]) {
+      it(`rejects a ${typeAndVersion} pool as unsupported, reading no binding`, async () => {
+        const seen: string[] = []
+        await assert.rejects(
+          () => resolveAdvancedPoolHooks('op', resolveChain(seen, { typeAndVersion }), POOL),
+          (err: unknown) =>
+            err instanceof CCTOperationUnsupportedError &&
+            err.context.operation === 'op' &&
+            err.context.version === typeAndVersion.split(' ')[1],
+        )
+        assert.deepEqual(seen, [`typeAndVersion:${POOL}`])
+      })
+    }
+
+    it('rejects a pool with no hooks bound as a poolAddress error naming the fix', async () => {
+      const seen: string[] = []
+      await assert.rejects(
+        () => resolveAdvancedPoolHooks('op', resolveChain(seen, { hooks: ZeroAddress }), POOL),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'op' &&
+          err.context.param === 'poolAddress' &&
+          err.message.includes('no AdvancedPoolHooks bound') &&
+          err.message.includes('updateAdvancedPoolHooks'),
+      )
+      assert.deepEqual(seen, [`typeAndVersion:${POOL}`, `getAdvancedPoolHooks:${POOL}`])
+    })
+
+    it('rejects a bound address that is not an AdvancedPoolHooks', async () => {
+      await assert.rejects(
+        () => resolveAdvancedPoolHooks('op', resolveChain([], {}, 'Router 1.2.0'), POOL),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === HOOKS &&
+          err.context.actual === 'Router',
+      )
+    })
+
+    it('rejects a hooks address passed where the pool is expected', async () => {
+      const chain = resolveChain([], { typeAndVersion: 'AdvancedPoolHooks 2.0.0' })
+      await assert.rejects(
+        () => resolveAdvancedPoolHooks('op', chain, POOL),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError && err.context.actual === 'AdvancedPoolHooks',
       )
     })
   })

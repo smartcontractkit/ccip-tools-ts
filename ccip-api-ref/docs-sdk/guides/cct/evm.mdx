@@ -222,7 +222,11 @@ For v2 pools, use `applyTokenTransferFeeConfigUpdates` to configure or disable p
 
 ### Advanced pool hooks and CCVs
 
-On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. Deploy hooks with the pool in `authorizedCallers`, then bind them to the pool. A pool omitted from `authorizedCallers` cannot transfer through the hooks.
+On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. Every hooks configuration method takes the pool's `poolAddress` and resolves the hooks bound to it, so the order is deploy, bind, then configure:
+
+1. Deploy hooks with everything that must hold from the first transfer: the pool in `authorizedCallers`, plus any `allowlist`, `thresholdAmount`, or `policyEngine`. A pool omitted from `authorizedCallers` cannot transfer through the hooks.
+2. Bind them to the pool with `updateAdvancedPoolHooks`.
+3. Apply CCV requirements with `applyCCVConfigUpdates`. The constructor cannot set them, and until they are applied the pool adds no CCV requirements of its own, so finish this step before the pool carries transfers.
 
 ```typescript
 const hooks = await cct.deployAdvancedPoolHooks({
@@ -235,9 +239,25 @@ await cct.updateAdvancedPoolHooks({
   advancedPoolHooks: hooks.contractAddress,
   wallet,
 })
+
+await cct.applyCCVConfigUpdates({
+  poolAddress: pool.contractAddress, // resolves to the bound hooks
+  ccvConfigArgs: [
+    {
+      remoteChainSelector: DEST_CHAIN_SELECTOR,
+      outboundCCVs: ['0xCCV...'],
+      thresholdOutboundCCVs: [],
+      inboundCCVs: ['0xCCV...'],
+      thresholdInboundCCVs: [],
+    },
+  ],
+  wallet,
+})
 ```
 
-Binding is only the start. The hooks also carry the sender allowlist, per-remote-chain CCV requirements, an optional policy engine (ACE), a threshold amount, and their own authorized-caller set. See [Advanced pool hooks](./reference/advanced-pool-hooks) for the full feature set and every read/write method.
+Hooks writes are sent to the hooks contract and gated on the hooks owner, not the pool owner. Several pools can share one `AdvancedPoolHooks`, and a write made through any of them changes every pool bound to those hooks.
+
+The hooks also carry an optional policy engine (ACE), a threshold amount, and their own authorized-caller set. See [Advanced pool hooks](./reference/advanced-pool-hooks) for the full feature set and every read/write method.
 
 ## Lock/release pools
 
