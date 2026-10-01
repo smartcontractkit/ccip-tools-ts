@@ -18,8 +18,7 @@ import { type Interface, ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -332,22 +331,5 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
         }`,
       )
     }
-  }
-
-  /**
-   * Signs and submits, binding `sender` to the signing wallet's address — see
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather than
-   * signed. The owner-or-`rateLimitAdmin` gate is {@link buildUnsigned}'s.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is neither the
-   * wallet's address, the pool `owner`, nor the pool's (set) `rateLimitAdmin`, or a multi-lane
-   * `updates` is sent to a v1.5.0 pool
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<SetChainRateLimiterConfigsParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

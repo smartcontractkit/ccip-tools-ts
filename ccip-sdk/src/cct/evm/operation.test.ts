@@ -4,9 +4,10 @@ import { describe, it } from 'node:test'
 import { Interface, getCreateAddress } from 'ethers'
 
 import type { EVMChain } from '../../evm/index.ts'
+import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { networkInfo } from '../../networks.ts'
-import { CCTTxFailedError } from '../errors.ts'
-import { type DeployArtifact, EVMDeployOperation } from './operation.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../errors.ts'
+import { type DeployArtifact, EVMDeployOperation, EVMOperation, callTx } from './operation.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
 const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
@@ -21,6 +22,19 @@ class TestDeploy extends EVMDeployOperation<{}> {
 
   protected encode(): string {
     return '0x'
+  }
+}
+
+class TestOperation extends EVMOperation<{ sender?: string }> {
+  readonly name = 'testOperation'
+  sender?: string
+  transaction?: UnsignedEVMTx['transactions'][number]
+
+  protected buildUnsigned(_chain: EVMChain, params: { sender?: string }) {
+    this.sender = params.sender
+    const unsigned = callTx(SENDER, '0x')
+    this.transaction = unsigned.transactions[0]
+    return unsigned
   }
 }
 
@@ -47,6 +61,27 @@ function fakeSigner(contractAddress: string | null) {
   }
 }
 
+describe('EVMOperation', () => {
+  it('uses the wallet as sender and pins the chain ID', async () => {
+    const operation = new TestOperation()
+    await operation.execute(stubChain(), { wallet: fakeSigner(null) })
+
+    assert.equal(operation.sender, SENDER)
+    assert.equal(operation.transaction?.chainId, stubChain().network.chainId)
+  })
+
+  it('rejects a sender other than the signing wallet', async () => {
+    await assert.rejects(
+      () =>
+        new TestOperation().execute(stubChain(), {
+          wallet: fakeSigner(null),
+          sender: DEPLOYED,
+        }),
+      (error: unknown) => error instanceof CCTParamsInvalidError,
+    )
+  })
+})
+
 describe('EVMDeployOperation', () => {
   it('accepts a lowercase receipt contract address', async () => {
     const result = await new TestDeploy().execute(stubChain(), {
@@ -58,7 +93,10 @@ describe('EVMDeployOperation', () => {
   it('rejects a substituted receipt contract address', async () => {
     const returnedAddress = '0x' + '77'.repeat(20)
     await assert.rejects(
-      () => new TestDeploy().execute(stubChain(), { wallet: fakeSigner(returnedAddress) }),
+      () =>
+        new TestDeploy().execute(stubChain(), {
+          wallet: fakeSigner(returnedAddress),
+        }),
       (error: unknown) =>
         error instanceof CCTTxFailedError &&
         error.context.expectedAddress === DEPLOYED &&
@@ -82,7 +120,10 @@ describe('EVMDeployOperation', () => {
 
   it('rejects a malformed receipt contract address', async () => {
     await assert.rejects(
-      () => new TestDeploy().execute(stubChain(), { wallet: fakeSigner('not-an-address') }),
+      () =>
+        new TestDeploy().execute(stubChain(), {
+          wallet: fakeSigner('not-an-address'),
+        }),
       (error: unknown) =>
         error instanceof CCTTxFailedError &&
         error.context.expectedAddress === DEPLOYED &&

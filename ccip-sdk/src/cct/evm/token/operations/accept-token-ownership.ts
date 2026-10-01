@@ -17,8 +17,7 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { assertOwnable2StepToken, getErc20Token } from '../contracts.ts'
 
@@ -56,23 +55,5 @@ export class AcceptTokenOwnership extends EVMOperation<AcceptTokenOwnershipParam
   ): Promise<UnsignedEVMTx> {
     await assertOwnable2StepToken(this.name, chain, tokenAddress)
     return callTx(tokenAddress, getErc20Token().encodeFunctionData('acceptOwnership', []))
-  }
-
-  /**
-   * Signs and submits as the proposed owner, defaulting `sender` to the signing wallet.
-   * @remarks The contract authorizes on `msg.sender`, so the wallet *is* the address that must be
-   * the proposed owner; see {@link EVMOperation.resolveWalletSender}.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTOperationUnsupportedError} if the token is a v2.0.0 `CrossChainToken`
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — notably when the wallet is
-   * not the token's proposed owner, which cannot be checked before signing
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<AcceptTokenOwnershipParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
