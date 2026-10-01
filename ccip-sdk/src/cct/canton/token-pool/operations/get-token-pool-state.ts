@@ -1,11 +1,13 @@
 /**
- * getTokenPoolState — read a token pool's config from the ACS: pool owner,
- * remote-chain configs, rate-limit admin, instrument ID, and decimals.
+ * getTokenPoolState — read a token pool's config from the ACS: pool type and
+ * owner, remote-chain configs, rate-limit admin, instrument ID, and decimals.
  *
- * Reads the active pool contract (burn-mint or lock-release) by CID and decodes
- * its `createArgument` into a {@link GetTokenPoolStateResult}. The
- * `remoteChainConfigs` Daml `Map` is decoded defensively (the gRPC JSON
- * `GenMap` shape varies by key type); entries that fail to decode are skipped.
+ * Resolves the active pool contract (burn-mint or lock-release — one ACS query
+ * covers both, and the type is read off the matched template) by its
+ * InstanceAddress and decodes its `createArgument` into a
+ * {@link GetTokenPoolStateResult}. The `remoteChainConfigs` Daml `Map` is
+ * decoded defensively (the gRPC JSON `GenMap` shape varies by key type);
+ * entries that fail to decode are skipped.
  *
  * @packageDocumentation
  */
@@ -18,7 +20,8 @@ import {
 } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { CantonQuery } from '../../query.ts'
-import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
+import { instanceAddressOwner, parsePartyId } from '../../validate.ts'
+import { type PoolType, resolvePool } from '../shared.ts'
 
 /** A remote-chain config entry on the pool. */
 export interface PoolRemoteChainConfig {
@@ -42,6 +45,8 @@ export interface PoolRemoteChainConfig {
 
 /** Result of `getTokenPoolState`: the pool's config. */
 export interface GetTokenPoolStateResult {
+  /** Pool type, read off the resolved contract's template. */
+  poolType: PoolType
   /** Pool owner party ID. */
   poolOwner: string
   /** Pool instance ID. */
@@ -61,18 +66,24 @@ export interface GetTokenPoolStateResult {
 /** Parsed params for {@link GetTokenPoolState.read}. */
 interface ParsedGetTokenPoolState {
   poolInstanceAddress: string
-  templateId: string
-  poolOwner: string
+  /** Party to read as; `undefined` → the chain's ledger party. */
+  poolOwner?: string
 }
 
 /** Parameters for `getTokenPoolState`. */
 export interface GetTokenPoolStateParams {
-  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
+  /**
+   * Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`), of
+   * either pool type — the type is read off the resolved contract and returned.
+   */
   poolInstanceAddress: string
-  /** Pool type (determines the template ID for the ACS query). */
-  poolType: 'burnMint' | 'lockRelease'
-  /** Pool owner party (for ACS visibility — must be a stakeholder/signatory). */
-  poolOwner: string
+  /**
+   * Party to read the pool as (ACS visibility — must be a stakeholder, e.g. the
+   * pool owner or an observer). Defaults to the `poolOwner` suffix of a raw
+   * `"instanceId@poolOwner"` address, else (hashed `0x` form, whose owner cannot
+   * be recovered) to the chain's ledger party (`cantonConfig.party`).
+   */
+  poolOwner?: string
 }
 
 /** Read a token pool's config from the ACS. */
@@ -83,7 +94,7 @@ export class GetTokenPoolState extends CantonQuery<
 > {
   readonly name = 'getTokenPoolState'
 
-  /** Validates the pool target + owner, and normalizes the pool type into a template ID. */
+  /** Validates the pool target, and resolves the reading party where the address carries it. */
   protected prepare(p: GetTokenPoolStateParams): ParsedGetTokenPoolState {
     if (!p.poolInstanceAddress) {
       throw new CCTParamsInvalidError(
@@ -92,34 +103,32 @@ export class GetTokenPoolState extends CantonQuery<
         'pool InstanceAddress is required',
       )
     }
+    const derivedOwner = instanceAddressOwner(
+      this.name,
+      'poolInstanceAddress',
+      p.poolInstanceAddress,
+    )
     return {
       poolInstanceAddress: p.poolInstanceAddress,
-      templateId:
-        p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID,
-      poolOwner: p.poolOwner,
+      poolOwner: p.poolOwner ? parsePartyId(this.name, 'poolOwner', p.poolOwner) : derivedOwner,
     }
   }
 
   /**
-   * Reads the pool contract from the ACS by InstanceAddress and decodes its
-   * `createArgument`. Throws when the pool is not active or not visible.
+   * Resolves the pool contract (either type) from the ACS by InstanceAddress
+   * and decodes its `createArgument`. Throws when the pool is not active or not
+   * visible.
    */
   protected async read(
     chain: CantonChain,
     p: ParsedGetTokenPoolState,
   ): Promise<GetTokenPoolStateResult> {
-    const contract = await chain.findActiveContractByInstanceAddress(
-      p.templateId,
+    const { contract, poolType } = await resolvePool(
+      this.name,
+      chain,
+      p.poolOwner ?? chain.ledgerParty,
       p.poolInstanceAddress,
-      [p.poolOwner],
     )
-    if (!contract) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'poolInstanceAddress',
-        `pool ${p.poolInstanceAddress} is not active or not visible to ${p.poolOwner}`,
-      )
-    }
 
     const fields = decodeDamlRecord(contract.createArgument)
     const instrumentId = decodeInstrumentId(fields)
@@ -132,6 +141,7 @@ export class GetTokenPoolState extends CantonQuery<
     }
 
     return {
+      poolType,
       poolOwner: decodeString(fields['poolOwner']),
       poolInstanceId: decodeString(fields['instanceId']),
       rateLimitAdmin: decodeOptionalParty(fields['rateLimitAdmin']),

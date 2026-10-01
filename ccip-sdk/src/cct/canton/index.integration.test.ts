@@ -12,9 +12,10 @@
 import assert from 'node:assert/strict'
 import { before, describe, it } from 'node:test'
 
+// registers every chain family: remote addresses are parsed in the remote chain's format
+import '../../all-chains.ts'
 import { getCantonNetworkConfig } from '../../canton/networks.ts'
 import { ensureGatewaySession, fetchGatewayPrimaryParty } from './gateway.test.helpers.ts'
-import { deriveTokenConfigInstanceAddress } from './token-admin-registry/shared.ts'
 import { normalizeRemoteAddress } from './token-pool/shared.ts'
 import { CantonTokenManager } from './index.ts'
 
@@ -58,7 +59,6 @@ describe(
     const ledgerUrl = cfg.ledgerUrl ?? network.ledgerUrl
     const edsUrl = cfg.edsUrl ?? network.edsUrl
 
-    const poolType = cfg.poolType ?? 'burnMint'
     const poolInstanceId = cfg.poolInstanceId || `${cfg.instrumentId.toLowerCase()}-pool-001`
     const observers = cfg.observers.split(',').map((s) => s.trim())
     const selector = cfg.remoteChainSelector ?? ''
@@ -75,7 +75,6 @@ describe(
     let owner: string
     let instrumentId: { admin: string; id: string }
     let poolInstanceAddress: string
-    let tokenConfigAddress: string
     let rlIn: string
     let rlOut: string
     let rlInCustom: string
@@ -86,7 +85,6 @@ describe(
       owner = cfg.owner || (await fetchGatewayPrimaryParty({ gatewayUrl, accessToken }))
       instrumentId = { admin: owner, id: cfg.instrumentId }
       poolInstanceAddress = `${poolInstanceId}@${owner}`
-      tokenConfigAddress = deriveTokenConfigInstanceAddress(instrumentId, ccipOwner)
       rlIn = `${poolInstanceId}-rl-in-${selector}@${owner}`
       rlOut = `${poolInstanceId}-rl-out-${selector}@${owner}`
       rlInCustom = `${poolInstanceId}-rl-in-custom-${selector}@${owner}`
@@ -112,17 +110,15 @@ describe(
       manager = CantonTokenManager.fromChain(chain)
     })
 
-    const getPool = () =>
-      manager.getTokenPoolState({ poolInstanceAddress, poolType, poolOwner: owner })
+    // Pool type and reading party (the raw address's owner suffix) are derived.
+    const getPool = () => manager.getTokenPoolState({ poolInstanceAddress })
     const getTar = () =>
-      manager.getTokenAdminRegistry({
-        tokenConfigInstanceAddress: tokenConfigAddress,
-        adminParty: owner,
-      })
+      manager.getTokenAdminRegistry({ instrumentId, adminParty: owner, ccipOwner })
 
     it('pool deployed with expected config', async () => {
       const state = await getPool()
       assert.equal(state.poolOwner, owner)
+      if (cfg.poolType) assert.equal(state.poolType, cfg.poolType)
       if (cfg.decimals) assert.equal(state.decimals, cfg.decimals)
       assert.equal(state.instrumentId.id, instrumentId.id)
       for (const o of observers) assert.ok(state.observers.includes(o), `missing observer ${o}`)
@@ -139,10 +135,15 @@ describe(
       const lane = state.remoteChainConfigs.find((c) => c.remoteChainSelector === selector)
       assert.ok(lane, `no remoteChainConfigs entry for ${selector}`)
       if (cfg.remoteTokenAddress) {
-        assert.equal(lane.remoteTokenAddress, normalizeRemoteAddress(cfg.remoteTokenAddress))
+        assert.equal(
+          lane.remoteTokenAddress,
+          normalizeRemoteAddress(cfg.remoteTokenAddress, BigInt(selector)),
+        )
       }
       if (cfg.remotePools) {
-        const wantPools = cfg.remotePools.split(',').map((s) => normalizeRemoteAddress(s.trim()))
+        const wantPools = cfg.remotePools
+          .split(',')
+          .map((s) => normalizeRemoteAddress(s.trim(), BigInt(selector)))
         assert.deepEqual(lane.remotePools, wantPools)
       }
     })

@@ -34,10 +34,11 @@ The signed operations below take a `wallet`. See [Multi-Chain](../multi-chain) f
 | --- | --- |
 | Ledger URL and JWT | Connect and authenticate the Canton JSON Ledger API client. |
 | Party and CCIP party | Set the transaction and protocol identities in `cantonConfig`. |
-| TokenAdminRegistry instance address | Required to deploy and initialize the pool. |
-| Instrument ID and Canton decimals | Identify the bridged instrument and its on-ledger scale. |
+| Instrument ID and Canton decimals | Identify the bridged instrument and its on-ledger scale. The instrument admin is the pool owner. |
 | Observer parties | Required for EDS auto-detection. The ledger rejects an empty list. |
-| Remote addresses and rate limiters | Required for each lane added during deployment or later updates. |
+| Remote addresses and rate limiters | Required for each lane added during deployment or later updates. Remote addresses use the remote chain's own format. |
+
+On `canton:TestNet` and `canton:MainNet`, the SDK supplies the shared CCIP contracts (TokenAdminRegistry, FeeQuoter, RMNRemote) and the CCIP owner party. On other networks, pass them through `deps` as raw instance addresses (`"instanceId@party"`).
 
 ## Set up the Canton pool
 
@@ -52,13 +53,9 @@ const deployment = await cct.deployTokenPool({
   wallet,
   poolType: 'burnMint',
   instanceId: 'example-token-pool-001',
-  poolOwner: process.env.CANTON_PARTY!,
-  ccipOwner: process.env.CCIP_PARTY!,
-  admin: process.env.CANTON_PARTY!,
   instrumentId: { admin: process.env.CANTON_PARTY!, id: 'EXAMPLE' },
   decimals: 10,
   observers: [process.env.CANTON_PARTY!],
-  tokenAdminRegistryInstanceAddress: process.env.TAR_INSTANCE_ADDRESS!,
   lanes: [],
 })
 
@@ -66,7 +63,13 @@ console.log('Pool:', deployment.poolInstanceAddress)
 console.log('Token config CID:', deployment.tokenConfigCid)
 ```
 
-`deployment.poolInstanceAddress` is optional on the result, so narrow it before reusing it in `applyChainUpdates` or `getTokenPoolState`, both of which require a `string`:
+The SDK derives the remaining `Initialize` inputs:
+
+- The pool owner is `instrumentId.admin`. The ledger requires them to be equal.
+- The TokenAdminRegistry is the pool's `deps.tokenAdminRegistry`, which defaults to the network's registry. The CCIP owner is that registry's owner.
+- The token administrator `admin` defaults to the pool owner. Pass `admin` to have a different party accept the role. That party must also authorize the transaction.
+
+`deployment.poolInstanceAddress` is optional on the result, so narrow it before reusing it in `applyChainUpdates` or `getTokenPoolState`, both of which require a `string`. The raw form `` `${instanceId}@${instrumentId.admin}` `` identifies the same pool:
 
 ```typescript
 if (!deployment.poolInstanceAddress) {
@@ -79,7 +82,7 @@ const poolInstanceAddress = deployment.poolInstanceAddress
 
 ### Third-party token administrators
 
-Use `existingTokenConfigCid` only when a third-party administrator has already completed the TokenAdminRegistry proposal flow for the instrument. That CID is not stable. It rotates after every registry write, so read the current value from `getTokenAdminRegistry` immediately before deployment. For a new self-administered instrument, omit it and let `deployTokenPool` register the token atomically.
+If the instrument's administrator role was already proposed to a third party outside this flow, pass that party as `admin`. `deployTokenPool` looks up the instrument's TokenConfig when it builds the transaction. If the TokenConfig has no administrator yet, `Initialize` receives its current contract ID, so you never handle that ID yourself. It changes after every registry write. For a new self-administered instrument, no TokenConfig exists yet, and `deployTokenPool` registers the token atomically.
 
 ## Configure remote chains
 
@@ -89,7 +92,6 @@ Use `existingTokenConfigCid` only when a third-party administrator has already c
 const update = await cct.applyChainUpdates({
   wallet,
   poolInstanceAddress,
-  poolType: 'burnMint',
   chainsToAdd: [
     {
       remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
@@ -104,7 +106,11 @@ const update = await cct.applyChainUpdates({
 console.log('Updated pool CID:', update.poolCid)
 ```
 
-Inbound and outbound rate limiters are required and must be distinct. For a `BlockDepth` finality configuration, also provide the inbound custom-block-confirmations limiter.
+The SDK resolves the pool from `poolInstanceAddress` alone, whether it is burn/mint or lock/release.
+
+Write `remotePools` and `remoteTokenAddress` in the remote chain's own format: `0x…` hex for EVM, base58 or 32-byte hex for Solana. The SDK selects the format from `remoteChainSelector`, validates each address, and stores it as 32-byte left-padded hex. The remote chain family must be registered with the SDK. For example, `import '@chainlink/ccip-sdk/all'` registers every family. To compare a configured lane against `getTokenPoolState` output, convert your address with `normalizeRemoteAddress(address, remoteChainSelector)`, exported from `@chainlink/ccip-sdk/cct/canton`.
+
+Inbound and outbound rate limiters are required and must be distinct. For a finality configuration faster than finality (`WaitForSafe` or `BlockDepth`), also provide the inbound custom-block-confirmations limiter. The SDK rejects the update without it.
 
 When deploying initial lanes, every `lanes` entry requires all three limiter specs: inbound, outbound, and inbound custom finality. This is true even when the lane uses standard finality, because the pool initializes all three limiter contracts together.
 
@@ -119,17 +125,16 @@ Read the pool, registry, and rate-limiter state back before you transfer through
 ### Read the pool and registry
 
 ```typescript
-const pool = await cct.getTokenPoolState({
-  poolInstanceAddress,
-  poolType: 'burnMint',
-  poolOwner: process.env.CANTON_PARTY!,
-})
+const pool = await cct.getTokenPoolState({ poolInstanceAddress })
+console.log('Pool type:', pool.poolType)
 
 const registry = await cct.getTokenAdminRegistry({
-  tokenConfigInstanceAddress: process.env.TOKEN_CONFIG_INSTANCE_ADDRESS!,
+  instrumentId: { admin: process.env.CANTON_PARTY!, id: 'EXAMPLE' },
   adminParty: process.env.CANTON_PARTY!,
 })
 ```
+
+`getTokenPoolState` and `getRateLimiterState` read as the owner in a raw `"instanceId@owner"` address. For the hashed `0x` form, they read as the chain's `cantonConfig.party`. To read as a different party, such as an observer, pass `poolOwner`. `getTokenAdminRegistry` derives the instrument's TokenConfig address from `instrumentId` and the network's CCIP owner, then returns it as `tokenConfigInstanceAddress`.
 
 ### Check rate limiters
 
