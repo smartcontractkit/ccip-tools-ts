@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): `applyChainUpdates` takes one parameter shape for every pool version, `chainsToAdd` + `remoteChainSelectorsToRemove`, with no `version`. A v1.5.0 pool is detected from its on-chain `typeAndVersion` and the params adapted to its legacy `chains` signature (removals as `allowed: false` lanes, one remote pool per lane). Breaking: the `version` field, the v1.5.0 `chains` shape and the `ApplyChainUpdatesParamVersion`, `ApplyChainUpdatesParamsV1_5_0`, `ApplyChainUpdatesParamsV1_5_1` and `ChainUpdateV1_5_0` types are removed; `ChainUpdateV1_5_1` is renamed `ChainUpdate`
+
 ## [1.15.0] - 2026-09-30
 
 - CCT SDK: new `@chainlink/ccip-sdk/cct/{evm,solana,canton}` entrypoints for deploying and managing Cross-Chain Tokens on EVM, Solana and Canton. Covers the full CCT lifecycle: deploy a token and its pool (burn/mint or lock/release), register it in the Token Admin Registry and transfer admin rights, connect remote chains, and set rate limits and allowlists. Each operation can return unsigned transactions for external signing or be signed and sent directly, and failures come back as typed errors.

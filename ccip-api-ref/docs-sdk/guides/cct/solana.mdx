@@ -173,12 +173,22 @@ await cct.applyChainUpdates({
       remoteTokenAddress: process.env.REMOTE_TOKEN!,
       remotePoolAddresses: [process.env.REMOTE_POOL!],
       remoteTokenDecimals: 18,
-      inboundRateLimiterConfig: { enabled: false },
-      outboundRateLimiterConfig: { enabled: false },
+      outboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 100_000n * 10n ** 9n, // bucket max: 100,000 tokens (9 decimals) in flight
+        rate: 167n * 10n ** 9n, // refill ~167 tokens/sec (~100,000 tokens per 10 min)
+      },
+      inboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 100_000n * 10n ** 9n,
+        rate: 167n * 10n ** 9n,
+      },
     },
   ],
 })
 ```
+
+Set rate limits deliberately, the same as on EVM. `capacity` (bucket max) and `rate` (refill per second) are in the local token's smallest unit, so the `10n ** 9n` multiplier expresses whole tokens for a 9-decimal SPL token. To run a lane with no cap instead, pass `{ enabled: false }` for that direction, which means unlimited.
 
 ## Register the pool with the Router
 
@@ -231,7 +241,7 @@ await cct.provideLiquidity({
 })
 ```
 
-## Seed a burn/mint sender
+## Mint tokens to the sender
 
 To send a burn/mint token from Solana, the sender needs an initial SPL balance to burn. Mint one with `mintTokens`. This applies to burn/mint pools only, since a lock/release pool instead sends from the liquidity you provided above.
 

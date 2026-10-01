@@ -96,13 +96,13 @@ await cct.acceptAdmin({
 
 The wallet that calls `acceptAdmin` must be the proposed TokenAdminRegistry administrator.
 
-### Deploy and register the pool
+### Deploy the pool and grant roles
 
 :::note
 Building a lock/release pool? See [Lock/release pools](#lockrelease-pools). The deploy and liquidity steps differ, and you skip `grantMintAndBurnRoles`.
 :::
 
-Deploy the token pool, register it in the TokenAdminRegistry with `setPool`, then grant it the mint and burn roles it needs to move tokens.
+Deploy the token pool, then grant it the mint and burn roles it needs to move tokens. Registering the pool in the TokenAdminRegistry with `setPool` comes later, after the lanes are configured (see [Register the pool with the Router](#register-the-pool-with-the-router)).
 
 ```typescript
 const pool = await cct.deployTokenPool({
@@ -111,13 +111,6 @@ const pool = await cct.deployTokenPool({
   localTokenDecimals: 18,
   rmnProxy: process.env.RMN_PROXY!,
   router: process.env.ROUTER!,
-  wallet,
-})
-
-await cct.setPool({
-  tokenAddress: token.contractAddress,
-  poolAddress: pool.contractAddress,
-  address: process.env.ROUTER!,
   wallet,
 })
 
@@ -161,13 +154,12 @@ For an existing ERC-20, use `generateUnsignedDeployTokenPoolWithExistingTokenVia
 
 ## Configure additional networks
 
-Add remote-chain configuration only after both sides have a deployed and registered pool. `applyChainUpdates` can add and remove configurations in one transaction.
+Add remote-chain configuration once both sides have a deployed pool. `applyChainUpdates` acts on the pool directly, so it does not need the pool registered in the TokenAdminRegistry yet; that comes next. It can add and remove configurations in one transaction.
 
-`version` is the calldata shape, not the pool's own version. v1.6.1 and v2.0.0 pools all use the `'1.5.1'` shape (additions and removals as two arrays); only a legacy v1.5.0 pool uses `'1.5.0'` (a single `chains` array with a per-lane `allowed` flag). Declaring the wrong shape is rejected before the transaction is built.
+`applyChainUpdates` takes the same parameters for every pool version: removals in `remoteChainSelectorsToRemove`, additions in `chainsToAdd`. It reads the pool's version on-chain and encodes the matching call, adapting to the older signature of a legacy v1.5.0 pool for you. A v1.5.0 pool holds only one remote pool per lane, so give each `remotePoolAddresses` a single entry there.
 
 ```typescript
 await cct.applyChainUpdates({
-  version: '1.5.1',
   poolAddress: pool.contractAddress,
   remoteChainSelectorsToRemove: [],
   chainsToAdd: [
@@ -195,6 +187,19 @@ Set rate limits deliberately. `capacity` (bucket max) and `rate` (refill per sec
 
 Use `getTokenPoolState`, `getTokenPoolRemotes`, and `getTokenAdminRegistry` to read back the deployed configuration before enabling transfers.
 
+## Register the pool with the Router
+
+With the pool deployed and its lanes configured, register it in the TokenAdminRegistry so the Router routes transfers through it. `setPool` comes after `applyChainUpdates`, the same order as Solana, so the pool is fully wired before it goes live. You need to have accepted the admin role first.
+
+```typescript
+await cct.setPool({
+  tokenAddress: token.contractAddress,
+  poolAddress: pool.contractAddress,
+  address: process.env.ROUTER!,
+  wallet,
+})
+```
+
 ## Unsigned operations (multisig or offline)
 
 Every signed operation above has a `generateUnsigned<Operation>` twin that takes `sender` (the address that will submit the transaction) instead of `wallet`, and returns an unsigned transaction for a multisig or offline signer to sign and broadcast. Use it whenever the token, pool, or registry owner is a Safe or other external signer.
@@ -210,7 +215,9 @@ const unsigned = await cct.generateUnsignedRegisterAdmin({
 // Hand `unsigned` to the Safe or offline signer to sign and broadcast.
 ```
 
-## Configure a token pool
+## Configure a v2 pool
+
+`deployTokenPool` and the factory create v2.0.0 pools, which add a configuration surface beyond lanes and rate limits: per-destination transfer fees, faster-than-finality settings, and a pluggable `AdvancedPoolHooks` contract that holds the sender allowlist, Cross-Chain Verifier (CCV) requirements, an optional policy engine (ACE), and a threshold amount. The subsections below cover each, and a lock/release v2 pool also escrows through an [ERC20LockBox](#lockrelease-pools).
 
 Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool, and the sender allowlist exists only through v1.6.1. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
 
@@ -219,6 +226,70 @@ Which configuration and read operations a pool supports depends on its version. 
 After a lane exists, use `setChainRateLimiterConfigs` to adjust its inbound and outbound buckets. It is callable by the pool owner or its delegated rate-limit admin. On v2 pools, `fastFinality: true` targets the separate FTF bucket. If you administer an existing pool at version 1.5.0, 1.5.1, or 1.6.0, read the [decimals metering warning](./reference/inspecting-pools#rate-limits) before setting limits on a lane between tokens of different decimals.
 
 For v2 pools, use `applyTokenTransferFeeConfigUpdates` to configure or disable per-destination transfer fees. Use `setAllowedFinalityConfig` to enable or change FTF/FCR finality. Read the current configuration first. These setters replace the relevant configuration. See [Fee Estimation](../fee-estimation) and [Faster-Than-Finality](../ftf) for transfer behavior.
+
+Every setter below is v2.0.0-only and throws `CCTOperationUnsupportedError` on an older pool. Each also has a `generateUnsigned<Operation>` twin that takes `sender` instead of `wallet` for multisig or offline signing.
+
+`setAllowedFinalityConfig` replaces the whole finality config in one call. `finalityDepth` is the minimum FTF block depth, an integer in `[0, 65535]`, where `0` disables FTF; `finalitySafe` enables the Fast Confirmation Rule (FCR/"safe"), and omitting it (or `false`) disables FCR. Read the current config with `getAllowedFinalityConfig` first so you do not clear the field you are not changing:
+
+```typescript
+await cct.setAllowedFinalityConfig({
+  poolAddress: pool.contractAddress,
+  allowedFinality: {
+    finalityDepth: 10, // accept FTF once a source tx is 10 blocks deep; 0 disables FTF
+    finalitySafe: false, // FCR / "safe" finality off; omit or false to disable
+  },
+  wallet,
+})
+```
+
+FTF transfers draw from a separate rate-limit bucket. Set `fastFinality: true` on a `setChainRateLimiterConfigs` entry to target that FTF bucket for a lane instead of its finalized one. The lane must already be configured. As with the finalized buckets, `capacity` and `rate` are in the token's smallest unit:
+
+```typescript
+await cct.setChainRateLimiterConfigs({
+  poolAddress: pool.contractAddress,
+  updates: [
+    {
+      remoteChainSelector: DEST_CHAIN_SELECTOR,
+      fastFinality: true, // configure the lane's FTF buckets, not its finalized ones
+      outboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 10_000n * 10n ** 18n, // bucket max: 10,000 tokens (18 decimals) in flight
+        rate: 17n * 10n ** 18n, // refill ~17 tokens/sec (~10,000 tokens per 10 min)
+      },
+      inboundRateLimiterConfig: {
+        enabled: true,
+        capacity: 10_000n * 10n ** 18n,
+        rate: 17n * 10n ** 18n,
+      },
+    },
+  ],
+  wallet,
+})
+```
+
+`applyTokenTransferFeeConfigUpdates` sets per-destination transfer fees. Each `tokenTransferFeeConfig` carries a flat USD surcharge (in cents) added to the CCIP fee and a basis-point (BPS) rate deducted from the transferred amount, each in a finalized and a fast-finality variant. It also sets the destination gas and byte overheads. Pass `disables` with a list of remote chain selectors to turn fees off for those lanes instead:
+
+```typescript
+await cct.applyTokenTransferFeeConfigUpdates({
+  poolAddress: pool.contractAddress,
+  updates: [
+    {
+      remoteChainSelector: DEST_CHAIN_SELECTOR,
+      tokenTransferFeeConfig: {
+        destGasOverhead: 90_000, // extra destination gas budgeted for the token transfer
+        destBytesOverhead: 32, // extra data-availability bytes budgeted
+        finalityFeeUSDCents: 50, // +$0.50 flat surcharge under standard finality
+        fastFinalityFeeUSDCents: 150, // +$1.50 flat surcharge under FTF
+        finalityTransferFeeBps: 10, // 0.10% of the amount under standard finality (0..9999)
+        fastFinalityTransferFeeBps: 25, // 0.25% of the amount under FTF (0..9999)
+        isEnabled: true,
+      },
+    },
+  ],
+  disables: [], // e.g. [SOME_OTHER_SELECTOR] to turn that lane's fees off
+  wallet,
+})
+```
 
 ### Advanced pool hooks and CCVs
 
@@ -237,7 +308,19 @@ await cct.updateAdvancedPoolHooks({
 })
 ```
 
-Binding is only the start. The hooks also carry the sender allowlist, per-remote-chain CCV requirements, an optional policy engine (ACE), a threshold amount, and their own authorized-caller set. See [Advanced pool hooks](./reference/advanced-pool-hooks) for the full feature set and every read/write method.
+Binding is only the start. The hooks also carry the sender allowlist, per-remote-chain CCV requirements, an optional policy engine (ACE), a threshold amount, and their own authorized-caller set.
+
+CCV requirements come in two lists per lane: base CCVs apply to every transfer, and threshold CCVs add requirements only once a transfer's amount reaches the hooks' configured threshold. `setThresholdAmount` sets that single amount on the hooks contract (not on the pool). Pass zero to disable threshold CCVs; base CCVs still apply. `thresholdAmount` is in the token's smallest unit, and `getThresholdAmount` reads it back:
+
+```typescript
+await cct.setThresholdAmount({
+  advancedPoolHooks: hooks.contractAddress,
+  thresholdAmount: 1_000n * 10n ** 18n, // threshold CCVs kick in at 1,000 tokens (18 decimals); 0 disables
+  wallet,
+})
+```
+
+`setThresholdAmount` runs against the hooks contract as its owner and has a `generateUnsignedSetThresholdAmount` twin for multisig or offline signing. Configure the base and threshold CCV lists themselves separately. See [Advanced pool hooks](./reference/advanced-pool-hooks) for the full feature set and every read/write method.
 
 ## Lock/release pools
 
@@ -286,7 +369,7 @@ await cct.depositToLockbox({
 
 Verify the TokenAdminRegistry points to the intended pool, the pool reports the expected remote token and remote pool addresses, and rate limits can accommodate the transfer. Then run [Pre-Send Validation](../pre-send-validation) against the source and destination before sending a production transfer.
 
-### Seed the sender
+### Mint tokens to the sender
 
 A burn/mint transfer burns the source balance, so the sender needs tokens first. A freshly deployed `CrossChainToken` starts with no supply. Mint some to the sending account with `cct.mint`:
 
@@ -299,7 +382,7 @@ await cct.mint({
 })
 ```
 
-`amount` is in the token's smallest unit. The wallet must hold the token's mint role, which the pool setup above already grants to the pool; grant it to the seeding account too, or mint from an account that holds it.
+`amount` is in the token's smallest unit. The wallet must hold the token's mint role, which the pool setup above already grants to the pool; grant it to that account too, or mint from an account that holds it.
 
 ### Send a first transfer
 

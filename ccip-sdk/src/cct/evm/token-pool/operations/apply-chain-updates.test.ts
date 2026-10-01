@@ -13,6 +13,8 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
 import { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 
+const { V1_5_0, V1_5_1, V1_6_0, V1_6_1, V2_0_0 } = TokenPoolVersion
+
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
 const ROUTER = '0x' + '33'.repeat(20)
@@ -51,8 +53,20 @@ const FRESH_V1_5_1 = new Interface([
   'function applyChainUpdates(uint64[] remoteChainSelectorsToRemove, (uint64 remoteChainSelector, bytes[] remotePoolAddresses, bytes remoteTokenAddress, (bool isEnabled, uint128 capacity, uint128 rate) outboundRateLimiterConfig, (bool isEnabled, uint128 capacity, uint128 rate) inboundRateLimiterConfig)[] chainsToAdd)',
 ])
 
+/**
+ * {@link validParams} as a v1.5.0 pool takes them: the removal first, as an `allowed: false` lane
+ * whose addresses go out empty and whose rate limits are disabled, then the addition.
+ */
 const DATA_V1_5_0 = FRESH_V1_5_0.encodeFunctionData('applyChainUpdates', [
   [
+    {
+      remoteChainSelector: SEL_B,
+      allowed: false,
+      remotePoolAddress: '0x',
+      remoteTokenAddress: '0x',
+      outboundRateLimiterConfig: ABI_OUTBOUND,
+      inboundRateLimiterConfig: ABI_OUTBOUND,
+    },
     {
       remoteChainSelector: SEL_A,
       allowed: true,
@@ -61,63 +75,28 @@ const DATA_V1_5_0 = FRESH_V1_5_0.encodeFunctionData('applyChainUpdates', [
       outboundRateLimiterConfig: ABI_OUTBOUND,
       inboundRateLimiterConfig: ABI_INBOUND,
     },
-    {
-      remoteChainSelector: SEL_B,
-      allowed: false,
-      // a removal's addresses are ignored on-chain, so they go out empty
-      remotePoolAddress: '0x',
-      remoteTokenAddress: '0x',
-      outboundRateLimiterConfig: ABI_OUTBOUND,
-      inboundRateLimiterConfig: ABI_OUTBOUND,
-    },
   ],
 ])
 
-const DATA_V1_5_1 = FRESH_V1_5_1.encodeFunctionData('applyChainUpdates', [
-  [SEL_B],
-  [
-    {
-      remoteChainSelector: SEL_A,
-      remotePoolAddresses: [pad(REMOTE_POOL_1), pad(REMOTE_POOL_2)],
-      remoteTokenAddress: pad(REMOTE_TOKEN),
-      outboundRateLimiterConfig: ABI_OUTBOUND,
-      inboundRateLimiterConfig: ABI_INBOUND,
-    },
-  ],
-])
-
-/** The v1.5.0 params whose expected calldata is {@link DATA_V1_5_0}. */
-function paramsV1_5_0(overrides: Record<string, unknown> = {}): ApplyChainUpdatesParams {
-  return {
-    version: TokenPoolVersion.V1_5_0,
-    poolAddress: POOL,
-    sender: OWNER,
-    chains: [
+/** {@link validParams} as a v1.5.1+ pool takes them, the lane accepting `remotePools`. */
+const dataV1_5_1 = (remotePools = [REMOTE_POOL_1]) =>
+  FRESH_V1_5_1.encodeFunctionData('applyChainUpdates', [
+    [SEL_B],
+    [
       {
         remoteChainSelector: SEL_A,
-        allowed: true,
-        remoteTokenAddress: REMOTE_TOKEN,
-        remotePoolAddress: REMOTE_POOL_1,
-        inboundRateLimiterConfig: INBOUND,
-        outboundRateLimiterConfig: OUTBOUND,
-      },
-      {
-        remoteChainSelector: SEL_B,
-        allowed: false,
-        remoteTokenAddress: REMOTE_TOKEN,
-        remotePoolAddress: REMOTE_POOL_1,
-        inboundRateLimiterConfig: OUTBOUND,
-        outboundRateLimiterConfig: OUTBOUND,
+        remotePoolAddresses: remotePools.map(pad),
+        remoteTokenAddress: pad(REMOTE_TOKEN),
+        outboundRateLimiterConfig: ABI_OUTBOUND,
+        inboundRateLimiterConfig: ABI_INBOUND,
       },
     ],
-    ...overrides,
-  }
-}
+  ])
+const DATA_V1_5_1 = dataV1_5_1()
 
-/** The v1.5.1+ params whose expected calldata is {@link DATA_V1_5_1}. */
-function paramsV1_5_1(overrides: Record<string, unknown> = {}): ApplyChainUpdatesParams {
+/** The params every version takes; {@link DATA_V1_5_0} / {@link DATA_V1_5_1} is their calldata. */
+function validParams(overrides: Record<string, unknown> = {}): ApplyChainUpdatesParams {
   return {
-    version: TokenPoolVersion.V1_5_1,
     poolAddress: POOL,
     sender: OWNER,
     remoteChainSelectorsToRemove: [SEL_B],
@@ -125,7 +104,7 @@ function paramsV1_5_1(overrides: Record<string, unknown> = {}): ApplyChainUpdate
       {
         remoteChainSelector: SEL_A,
         remoteTokenAddress: REMOTE_TOKEN,
-        remotePoolAddresses: [REMOTE_POOL_1, REMOTE_POOL_2],
+        remotePoolAddresses: [REMOTE_POOL_1],
         inboundRateLimiterConfig: INBOUND,
         outboundRateLimiterConfig: OUTBOUND,
       },
@@ -236,41 +215,21 @@ function fakeSigner(waitError?: Error, address = OWNER) {
 
 const op = new ApplyChainUpdates()
 
-/** Every supported pool version, paired with the parameter shape and calldata it expects. */
+/** Every supported pool version, paired with the calldata it expects for {@link validParams}. */
 const DISPATCH = [
-  {
-    version: TokenPoolVersion.V1_5_0,
-    params: paramsV1_5_0,
-    data: DATA_V1_5_0,
-    otherParams: paramsV1_5_1,
-  },
-  {
-    version: TokenPoolVersion.V1_5_1,
-    params: paramsV1_5_1,
-    data: DATA_V1_5_1,
-    otherParams: paramsV1_5_0,
-  },
-  {
-    version: TokenPoolVersion.V1_6_1,
-    params: paramsV1_5_1,
-    data: DATA_V1_5_1,
-    otherParams: paramsV1_5_0,
-  },
-  {
-    version: TokenPoolVersion.V2_0_0,
-    params: paramsV1_5_1,
-    data: DATA_V1_5_1,
-    otherParams: paramsV1_5_0,
-  },
+  { version: V1_5_0, data: DATA_V1_5_0 },
+  { version: V1_5_1, data: DATA_V1_5_1 },
+  { version: V1_6_1, data: DATA_V1_5_1 },
+  { version: V2_0_0, data: DATA_V1_5_1 },
 ] as const
 
 describe('ApplyChainUpdates (cct/evm)', () => {
   describe('generate', () => {
-    for (const { version, params, data } of DISPATCH) {
+    for (const { version, data } of DISPATCH) {
       for (const family of ['BurnMint', 'LockRelease'] as const) {
         it(`encodes applyChainUpdates for a v${version} ${family} pool`, async () => {
           const { chain } = stubChain(version, family)
-          const unsigned = await op.generate(chain, params())
+          const unsigned = await op.generate(chain, validParams())
           const tx = unsigned.transactions[0]!
 
           assert.equal(unsigned.family, ChainFamily.EVM)
@@ -282,8 +241,11 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       }
 
       it(`encodes identical calldata for both ABI families at v${version}`, async () => {
-        const burnMint = await op.generate(stubChain(version, 'BurnMint').chain, params())
-        const lockRelease = await op.generate(stubChain(version, 'LockRelease').chain, params())
+        const burnMint = await op.generate(stubChain(version, 'BurnMint').chain, validParams())
+        const lockRelease = await op.generate(
+          stubChain(version, 'LockRelease').chain,
+          validParams(),
+        )
         assert.equal(burnMint.transactions[0]!.data, lockRelease.transactions[0]!.data)
         assert.equal(burnMint.transactions[0]!.data, data)
       })
@@ -292,7 +254,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     it('omits from when sender is not supplied, and skips the owner probe', async () => {
       const { chain } = stubChain(TokenPoolVersion.V1_5_1, 'BurnMint', NOT_OWNER)
       // owner() reports NOT_OWNER, so this only builds because no sender was given to check
-      const unsigned = await op.generate(chain, paramsV1_5_1({ sender: undefined }))
+      const unsigned = await op.generate(chain, validParams({ sender: undefined }))
       assert.equal(unsigned.transactions[0]!.from, undefined)
       assert.equal(unsigned.transactions[0]!.data, DATA_V1_5_1)
     })
@@ -301,7 +263,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       const { chain } = stubChain()
       const unsigned = await op.generate(
         chain,
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
               remoteChainSelector: SEL_A,
@@ -313,7 +275,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
           ],
         }),
       )
-      assert.equal(unsigned.transactions[0]!.data, DATA_V1_5_1)
+      assert.equal(unsigned.transactions[0]!.data, dataV1_5_1([REMOTE_POOL_1, REMOTE_POOL_2]))
     })
 
     it('encodes a Solana lane from base58, the 32-byte keys needing no padding', async () => {
@@ -323,11 +285,11 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       const poolBytes = '0x' + 'cd'.repeat(32)
       const unsigned = await op.generate(
         stubChain().chain,
-        paramsV1_5_1({
+        validParams({
           remoteChainSelectorsToRemove: [],
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               remoteChainSelector: SOLANA_SELECTOR,
               remoteTokenAddress: token,
               // the same key may also be given as its 32-byte hex
@@ -358,11 +320,11 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       const UINT128_MAX = 2n ** 128n - 1n
       const unsigned = await op.generate(
         stubChain(TokenPoolVersion.V1_6_1).chain,
-        paramsV1_5_1({
+        validParams({
           remoteChainSelectorsToRemove: [],
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               inboundRateLimiterConfig: {
                 enabled: true,
                 capacity: UINT128_MAX,
@@ -396,7 +358,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     it('rejects a sender that is not the pool owner', async () => {
       const { chain } = stubChain(TokenPoolVersion.V1_5_1, 'BurnMint', NOT_OWNER)
       await assert.rejects(
-        () => op.generate(chain, paramsV1_5_1()),
+        () => op.generate(chain, validParams()),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'applyChainUpdates' &&
@@ -407,36 +369,35 @@ describe('ApplyChainUpdates (cct/evm)', () => {
 
   describe('validation', () => {
     const cases: [string, ApplyChainUpdatesParams][] = [
-      ['poolAddress', paramsV1_5_1({ poolAddress: 'not-an-address' })],
-      ['sender', paramsV1_5_1({ sender: 'not-an-address' })],
-      ['version', paramsV1_5_1({ version: '1.6.1' })],
-      ['chainsToAdd', paramsV1_5_1({ chainsToAdd: 'nope' })],
-      ['remoteChainSelectorsToRemove', paramsV1_5_1({ remoteChainSelectorsToRemove: 'nope' })],
-      ['chainsToAdd', paramsV1_5_1({ chainsToAdd: [], remoteChainSelectorsToRemove: [] })],
-      ['remoteChainSelectorsToRemove[0]', paramsV1_5_1({ remoteChainSelectorsToRemove: [1] })],
-      ['chainsToAdd[0]', paramsV1_5_1({ chainsToAdd: [null] })],
+      ['poolAddress', validParams({ poolAddress: 'not-an-address' })],
+      ['sender', validParams({ sender: 'not-an-address' })],
+      ['chainsToAdd', validParams({ chainsToAdd: 'nope' })],
+      ['remoteChainSelectorsToRemove', validParams({ remoteChainSelectorsToRemove: 'nope' })],
+      ['chainsToAdd', validParams({ chainsToAdd: [], remoteChainSelectorsToRemove: [] })],
+      ['remoteChainSelectorsToRemove[0]', validParams({ remoteChainSelectorsToRemove: [1] })],
+      ['chainsToAdd[0]', validParams({ chainsToAdd: [null] })],
       [
         'chainsToAdd[0].remoteChainSelector',
-        paramsV1_5_1({
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remoteChainSelector: -1n }],
+        validParams({
+          chainsToAdd: [{ ...addEntry(), remoteChainSelector: -1n }],
         }),
       ],
       [
         'chainsToAdd[0].remotePoolAddresses',
-        paramsV1_5_1({ chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remotePoolAddresses: [] }] }),
+        validParams({ chainsToAdd: [{ ...addEntry(), remotePoolAddresses: [] }] }),
       ],
       [
         'chainsToAdd[0].remotePoolAddresses[0]',
-        paramsV1_5_1({
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remotePoolAddresses: ['0xzz'] }],
+        validParams({
+          chainsToAdd: [{ ...addEntry(), remotePoolAddresses: ['0xzz'] }],
         }),
       ],
       [
         'chainsToAdd[0].remotePoolAddresses[1]',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               remotePoolAddresses: [REMOTE_POOL_1, '0X' + 'BB'.repeat(20)],
             },
           ],
@@ -444,15 +405,15 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       ],
       [
         'chainsToAdd[0].remoteTokenAddress',
-        paramsV1_5_1({ chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remoteTokenAddress: '' }] }),
+        validParams({ chainsToAdd: [{ ...addEntry(), remoteTokenAddress: '' }] }),
       ],
       [
         // a Solana address on an EVM lane
         'chainsToAdd[0].remoteTokenAddress',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               remoteTokenAddress: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
             },
           ],
@@ -460,16 +421,16 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       ],
       [
         'chainsToAdd[0].inboundRateLimiterConfig.enabled',
-        paramsV1_5_1({
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: {} }],
+        validParams({
+          chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: {} }],
         }),
       ],
       [
         'chainsToAdd[0].outboundRateLimiterConfig.rate',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               outboundRateLimiterConfig: { enabled: true, capacity: 1n, rate: 2n },
             },
           ],
@@ -480,20 +441,20 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       // ceiling of their own
       [
         'remoteChainSelectorsToRemove[0]',
-        paramsV1_5_1({ remoteChainSelectorsToRemove: [2n ** 64n] }),
+        validParams({ remoteChainSelectorsToRemove: [2n ** 64n] }),
       ],
       [
         'chainsToAdd[0].remoteChainSelector',
-        paramsV1_5_1({
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), remoteChainSelector: 2n ** 64n }],
+        validParams({
+          chainsToAdd: [{ ...addEntry(), remoteChainSelector: 2n ** 64n }],
         }),
       ],
       [
         'chainsToAdd[0].inboundRateLimiterConfig.capacity',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               inboundRateLimiterConfig: { enabled: true, capacity: 2n ** 128n, rate: 1n },
             },
           ],
@@ -502,10 +463,10 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       // an enabled config defaults nothing, so an omitted amount is blamed by the bound check
       [
         'chainsToAdd[0].inboundRateLimiterConfig.rate',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               inboundRateLimiterConfig: { enabled: true, capacity: 1n },
             },
           ],
@@ -514,25 +475,23 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       // a disabled config must be all-zero, and the whole direction is blamed, not one amount
       [
         'chainsToAdd[0].outboundRateLimiterConfig',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               outboundRateLimiterConfig: { enabled: false, capacity: 1n },
             },
           ],
         }),
       ],
-      ['chains', paramsV1_5_0({ chains: [] })],
-      ['chains[0]', paramsV1_5_0({ chains: ['nope'] })],
+      // the retired v1.5.0 `chains` shape is not a way to write a v1.5.0 pool
       [
-        'chains[0].remoteChainSelector',
-        paramsV1_5_0({ chains: [{ ...paramsV1_5_0Entry(), remoteChainSelector: 1 }] }),
-      ],
-      ['chains[0].allowed', paramsV1_5_0({ chains: [{ ...paramsV1_5_0Entry(), allowed: 'yes' }] })],
-      [
-        'chains[0].remotePoolAddress',
-        paramsV1_5_0({ chains: [{ ...paramsV1_5_0Entry(), remotePoolAddress: '0x' }] }),
+        'chainsToAdd',
+        validParams({
+          chainsToAdd: undefined,
+          remoteChainSelectorsToRemove: undefined,
+          chains: [{ ...addEntry(), allowed: true, remotePoolAddress: REMOTE_POOL_1 }],
+        }),
       ],
     ]
 
@@ -575,16 +534,8 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       return array
     }
 
-    /** A v1.5.0 lane whose rate limits are both disabled, so `allowed: false` stays legal. */
-    const lane = (remoteChainSelector: bigint, allowed: boolean) => ({
-      ...paramsV1_5_0Entry(),
-      remoteChainSelector,
-      allowed,
-      inboundRateLimiterConfig: OUTBOUND,
-      outboundRateLimiterConfig: OUTBOUND,
-    })
     const add = (remoteChainSelector: bigint) => ({
-      ...paramsV1_5_1AddEntry(),
+      ...addEntry(),
       remoteChainSelector,
     })
 
@@ -592,54 +543,39 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       [
         'a hole in chainsToAdd',
         'chainsToAdd[1]',
-        paramsV1_5_1({ chainsToAdd: sparse(add(SEL_A), add(SEL_B)) }),
+        validParams({ chainsToAdd: sparse(add(SEL_A), add(SEL_B)) }),
       ],
       [
         'a hole in remoteChainSelectorsToRemove',
         'remoteChainSelectorsToRemove[1]',
-        paramsV1_5_1({ remoteChainSelectorsToRemove: sparse(SEL_A, SEL_B) }),
+        validParams({ remoteChainSelectorsToRemove: sparse(SEL_A, SEL_B) }),
       ],
       [
         "a hole in a lane's remotePoolAddresses",
         'chainsToAdd[0].remotePoolAddresses[1]',
-        paramsV1_5_1({
+        validParams({
           chainsToAdd: [
             {
-              ...paramsV1_5_1AddEntry(),
+              ...addEntry(),
               remotePoolAddresses: sparse(REMOTE_POOL_1, REMOTE_POOL_2),
             },
           ],
         }),
       ],
       [
-        'a hole in the v1.5.0 chains array',
-        'chains[1]',
-        paramsV1_5_0({ chains: sparse(lane(SEL_A, true), lane(SEL_B, true)) }),
-      ],
-      [
         'a 0n selector in chainsToAdd',
         'chainsToAdd[0].remoteChainSelector',
-        paramsV1_5_1({ chainsToAdd: [add(0n)] }),
-      ],
-      [
-        'a 0n selector on a v1.5.0 lane being added',
-        'chains[0].remoteChainSelector',
-        paramsV1_5_0({ chains: [lane(0n, true)] }),
+        validParams({ chainsToAdd: [add(0n)] }),
       ],
       [
         'a repeated selector in chainsToAdd',
         'chainsToAdd[1].remoteChainSelector',
-        paramsV1_5_1({ chainsToAdd: [add(SEL_A), add(SEL_A)] }),
+        validParams({ chainsToAdd: [add(SEL_A), add(SEL_A)] }),
       ],
       [
         'a repeated selector in remoteChainSelectorsToRemove',
         'remoteChainSelectorsToRemove[1]',
-        paramsV1_5_1({ remoteChainSelectorsToRemove: [SEL_A, SEL_A] }),
-      ],
-      [
-        'a repeated selector in the v1.5.0 chains array',
-        'chains[1].remoteChainSelector',
-        paramsV1_5_0({ chains: [lane(SEL_A, true), lane(SEL_A, false)] }),
+        validParams({ remoteChainSelectorsToRemove: [SEL_A, SEL_A] }),
       ],
     ]
 
@@ -663,7 +599,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       const { chain } = stubChain()
       const unsigned = await op.generate(
         chain,
-        paramsV1_5_1({ remoteChainSelectorsToRemove: [0n], chainsToAdd: [] }),
+        validParams({ remoteChainSelectorsToRemove: [0n], chainsToAdd: [] }),
       )
       const [removals, adds] = FRESH_V1_5_1.decodeFunctionData(
         'applyChainUpdates',
@@ -673,42 +609,11 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       assert.equal((adds as unknown[]).length, 0)
     })
 
-    it('accepts a v1.5.0 removal of a 0n lane, where allowed: false is the removal', async () => {
-      const { chain } = stubChain(TokenPoolVersion.V1_5_0)
-      const unsigned = await op.generate(chain, paramsV1_5_0({ chains: [lane(0n, false)] }))
-      const [chains] = FRESH_V1_5_0.decodeFunctionData(
-        'applyChainUpdates',
-        unsigned.transactions[0]!.data!,
-      )
-      const [entry] = chains as [{ remoteChainSelector: bigint; allowed: boolean }]
-      assert.equal(entry.remoteChainSelector, 0n)
-      assert.equal(entry.allowed, false)
-    })
-
-    it('neither parses nor encodes the addresses of a v1.5.0 removal', async () => {
-      // the contract ignores them, and a lane the SDK cannot name a format for must stay removable
-      const { chain } = stubChain(TokenPoolVersion.V1_5_0)
-      const unsigned = await op.generate(
-        chain,
-        paramsV1_5_0({
-          chains: [
-            { ...lane(2n ** 63n, false), remoteTokenAddress: 'junk', remotePoolAddress: 'junk' },
-          ],
-        }),
-      )
-      const [chains] = FRESH_V1_5_0.decodeFunctionData(
-        'applyChainUpdates',
-        unsigned.transactions[0]!.data!,
-      )
-      const [entry] = chains as [{ remoteTokenAddress: string; remotePoolAddress: string }]
-      assert.deepEqual([entry.remoteTokenAddress, entry.remotePoolAddress], ['0x', '0x'])
-    })
-
     it('keeps the wholesale-replace idiom: one selector in both arrays at once', async () => {
       const { chain } = stubChain()
       const unsigned = await op.generate(
         chain,
-        paramsV1_5_1({ remoteChainSelectorsToRemove: [SEL_A], chainsToAdd: [add(SEL_A)] }),
+        validParams({ remoteChainSelectorsToRemove: [SEL_A], chainsToAdd: [add(SEL_A)] }),
       )
       const [removals, adds] = FRESH_V1_5_1.decodeFunctionData(
         'applyChainUpdates',
@@ -722,7 +627,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     it('rejects the zero pool address before any RPC', async () => {
       const { chain, probes } = stubChain()
       await assert.rejects(
-        () => op.generate(chain, paramsV1_5_1({ poolAddress: ZeroAddress })),
+        () => op.generate(chain, validParams({ poolAddress: ZeroAddress })),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'applyChainUpdates' &&
@@ -736,7 +641,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     it('signs and submits, resolving to the tx hash', async () => {
       assert.deepEqual(
         await op.execute(stubChain().chain, {
-          ...paramsV1_5_1({ sender: undefined }),
+          ...validParams({ sender: undefined }),
           wallet: fakeSigner(),
         }),
         { hash: HASH },
@@ -747,7 +652,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       await assert.rejects(
         () =>
           op.execute(stubChain().chain, {
-            ...paramsV1_5_1({ sender: undefined }),
+            ...validParams({ sender: undefined }),
             wallet: fakeSigner(makeError('execution reverted', 'CALL_EXCEPTION')),
           }),
         (err: unknown) =>
@@ -757,7 +662,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
 
     it('rejects a non-signer wallet', async () => {
       await assert.rejects(
-        () => op.execute(stubChain().chain, { ...paramsV1_5_1(), wallet: {} }),
+        () => op.execute(stubChain().chain, { ...validParams(), wallet: {} }),
         CCIPWalletInvalidError,
       )
     })
@@ -766,7 +671,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       await assert.rejects(
         () =>
           op.execute(stubChain().chain, {
-            ...paramsV1_5_1({ sender: NOT_OWNER }),
+            ...validParams({ sender: NOT_OWNER }),
             wallet: fakeSigner(),
           }),
         (err: unknown) =>
@@ -780,7 +685,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       await assert.rejects(
         () =>
           op.execute(stubChain(TokenPoolVersion.V1_5_1, 'BurnMint', NOT_OWNER).chain, {
-            ...paramsV1_5_1({ sender: undefined }),
+            ...validParams({ sender: undefined }),
             wallet: fakeSigner(),
           }),
         (err: unknown) =>
@@ -792,63 +697,93 @@ describe('ApplyChainUpdates (cct/evm)', () => {
   })
 
   /**
-   * v1.5.0's `applyChainUpdates` validates BOTH directions with
-   * `RateLimiter._validateTokenBucketConfig(config, mustBeDisabled: !update.allowed)`, which
-   * reverts `RateLimitMustBeDisabled()` when `isEnabled && mustBeDisabled`. A removal carrying a
-   * lane's current (enabled) limits — the obvious way to write one, by reading the lane back and
-   * flipping `allowed` — therefore always reverts, so it has to fail locally instead.
+   * A v1.5.0 pool takes the same params as every other version, adapted to its `chains` array:
+   * removals first, as `allowed: false` lanes, then additions as `allowed: true` ones.
    *
-   * v1.5.1+ has no such rule: removals there are a separate `remoteChainSelectorsToRemove` array
-   * and the shape has no `allowed` bit at all, so there is nothing to apply it to.
+   * v1.5.0 validates BOTH directions with
+   * `RateLimiter._validateTokenBucketConfig(config, mustBeDisabled: !update.allowed)`, which
+   * reverts `RateLimitMustBeDisabled()` when `isEnabled && mustBeDisabled` — so a removal must go
+   * out with both rate limits disabled. Its remote addresses are ignored on-chain, so they go out
+   * empty, which keeps a lane of `0n` or of a chain the SDK does not know removable.
    */
-  describe('v1.5.0 lane removal requires both rate limits disabled', () => {
-    const removal = (overrides: Record<string, unknown>) =>
-      paramsV1_5_0({
-        chains: [{ ...paramsV1_5_0Entry(), allowed: false, ...overrides }],
-      })
-
-    for (const direction of ['inboundRateLimiterConfig', 'outboundRateLimiterConfig'] as const) {
-      it(`rejects allowed: false with an enabled ${direction}, before any RPC`, async () => {
-        const { chain, probes } = stubChain(TokenPoolVersion.V1_5_0)
-        await assert.rejects(
-          () =>
-            op.generate(
-              chain,
-              removal({
-                inboundRateLimiterConfig: { enabled: false },
-                outboundRateLimiterConfig: { enabled: false },
-                [direction]: { enabled: true, capacity: 100_000n, rate: 167n },
-              }),
-            ),
-          (err: unknown) =>
-            err instanceof CCTParamsInvalidError &&
-            err.context.operation === 'applyChainUpdates' &&
-            err.context.param === `chains[0].${direction}`,
-        )
-        assert.equal(probes(), 0, 'the rule needs no version, so it must fail before any RPC')
-      })
+  describe('v1.5.0 pools: params adapted to the legacy chains array', () => {
+    type LegacyLane = {
+      remoteChainSelector: bigint
+      allowed: boolean
+      remotePoolAddress: string
+      remoteTokenAddress: string
+      inboundRateLimiterConfig: { isEnabled: boolean; capacity: bigint; rate: bigint }
+      outboundRateLimiterConfig: { isEnabled: boolean; capacity: bigint; rate: bigint }
     }
-
-    it('accepts allowed: false when both directions are disabled', async () => {
-      const { chain } = stubChain(TokenPoolVersion.V1_5_0)
-      const unsigned = await op.generate(
-        chain,
-        removal({
-          inboundRateLimiterConfig: { enabled: false },
-          outboundRateLimiterConfig: { enabled: false },
+    const decode = (data: string) =>
+      (FRESH_V1_5_0.decodeFunctionData('applyChainUpdates', data)[0] as LegacyLane[]).map(
+        (lane) => ({
+          remoteChainSelector: lane.remoteChainSelector,
+          allowed: lane.allowed,
+          remotePoolAddress: lane.remotePoolAddress,
+          remoteTokenAddress: lane.remoteTokenAddress,
+          inbound: lane.inboundRateLimiterConfig.isEnabled,
+          outbound: lane.outboundRateLimiterConfig.isEnabled,
         }),
       )
-      assert.equal(unsigned.transactions[0]!.data!.slice(0, 10), '0xdb6327dc')
+
+    it('removes a 0n or unknown-chain lane, with empty addresses and both rate limits disabled', async () => {
+      const unsigned = await op.generate(
+        stubChain(V1_5_0).chain,
+        validParams({ remoteChainSelectorsToRemove: [0n, 2n ** 63n], chainsToAdd: [] }),
+      )
+      const removal = { allowed: false, remotePoolAddress: '0x', remoteTokenAddress: '0x' }
+      assert.deepEqual(decode(unsigned.transactions[0]!.data!), [
+        { remoteChainSelector: 0n, ...removal, inbound: false, outbound: false },
+        { remoteChainSelector: 2n ** 63n, ...removal, inbound: false, outbound: false },
+      ])
     })
 
-    it('does not constrain enabled limits when allowed is true', async () => {
-      const { chain } = stubChain(TokenPoolVersion.V1_5_0)
+    it('keeps the wholesale-replace idiom: the removal precedes the re-add', async () => {
       const unsigned = await op.generate(
-        chain,
-        paramsV1_5_0({ chains: [{ ...paramsV1_5_0Entry(), allowed: true }] }),
+        stubChain(V1_5_0).chain,
+        validParams({ remoteChainSelectorsToRemove: [SEL_A], chainsToAdd: [addEntry()] }),
       )
-      assert.equal(unsigned.transactions[0]!.data!.slice(0, 10), '0xdb6327dc')
+      assert.deepEqual(
+        decode(unsigned.transactions[0]!.data!).map(({ remoteChainSelector, allowed }) => [
+          remoteChainSelector,
+          allowed,
+        ]),
+        [
+          [SEL_A, false],
+          [SEL_A, true],
+        ],
+      )
     })
+
+    it('rejects a lane with several remote pools, before the owner probe', async () => {
+      // owner() reports NOT_OWNER, so a `sender` error would mean the owner probe ran first
+      await assert.rejects(
+        () =>
+          op.generate(
+            stubChain(V1_5_0, 'BurnMint', NOT_OWNER).chain,
+            validParams({
+              chainsToAdd: [{ ...addEntry(), remotePoolAddresses: [REMOTE_POOL_1, REMOTE_POOL_2] }],
+            }),
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'chainsToAdd[0].remotePoolAddresses',
+      )
+    })
+
+    for (const version of [V1_5_1, V1_6_1, V2_0_0] as const) {
+      it(`accepts several remote pools per lane on a v${version} pool`, async () => {
+        const unsigned = await op.generate(
+          stubChain(version).chain,
+          validParams({
+            chainsToAdd: [{ ...addEntry(), remotePoolAddresses: [REMOTE_POOL_1, REMOTE_POOL_2] }],
+          }),
+        )
+        assert.equal(unsigned.transactions[0]!.data, dataV1_5_1([REMOTE_POOL_1, REMOTE_POOL_2]))
+      })
+    }
   })
 
   /**
@@ -866,37 +801,23 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     ] as const
 
     for (const { label, limit } of STRICT_CASES) {
-      it(`rejects ${label} on a v1.5.0 pool`, async () => {
-        await assert.rejects(
-          () =>
-            op.generate(
-              stubChain(TokenPoolVersion.V1_5_0).chain,
-              paramsV1_5_0({
-                chains: [{ ...paramsV1_5_0Entry(), inboundRateLimiterConfig: limit }],
-              }),
-            ),
-          (err: unknown) =>
-            err instanceof CCTParamsInvalidError &&
-            err.context.operation === 'applyChainUpdates' &&
-            err.context.param === 'chains[0].inboundRateLimiterConfig.rate',
-        )
-      })
-
-      it(`rejects ${label} on a v1.5.1 pool`, async () => {
-        await assert.rejects(
-          () =>
-            op.generate(
-              stubChain(TokenPoolVersion.V1_5_1).chain,
-              paramsV1_5_1({
-                chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: limit }],
-              }),
-            ),
-          (err: unknown) =>
-            err instanceof CCTParamsInvalidError &&
-            err.context.operation === 'applyChainUpdates' &&
-            err.context.param === 'chainsToAdd[0].inboundRateLimiterConfig.rate',
-        )
-      })
+      for (const version of [V1_5_0, V1_5_1] as const) {
+        it(`rejects ${label} on a v${version} pool`, async () => {
+          await assert.rejects(
+            () =>
+              op.generate(
+                stubChain(version).chain,
+                validParams({
+                  chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: limit }],
+                }),
+              ),
+            (err: unknown) =>
+              err instanceof CCTParamsInvalidError &&
+              err.context.operation === 'applyChainUpdates' &&
+              err.context.param === 'chainsToAdd[0].inboundRateLimiterConfig.rate',
+          )
+        })
+      }
 
       it(`rejects ${label} on a siloed v1.6.0 pool, which kept the strict bound`, async () => {
         await assert.rejects(
@@ -904,8 +825,8 @@ describe('ApplyChainUpdates (cct/evm)', () => {
             op.generate(
               stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
                 .chain,
-              paramsV1_5_1({
-                chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: limit }],
+              validParams({
+                chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: limit }],
               }),
             ),
           (err: unknown) =>
@@ -919,9 +840,9 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         it(`accepts ${label} on a v${version} pool`, async () => {
           const unsigned = await op.generate(
             stubChain(version).chain,
-            paramsV1_5_1({
+            validParams({
               remoteChainSelectorsToRemove: [],
-              chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: limit }],
+              chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: limit }],
             }),
           )
           assert.equal(
@@ -952,9 +873,9 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       const unsigned = await op.generate(
         stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
           .chain,
-        paramsV1_5_1({
+        validParams({
           remoteChainSelectorsToRemove: [],
-          chainsToAdd: [{ ...paramsV1_5_1AddEntry(), inboundRateLimiterConfig: valid }],
+          chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: valid }],
         }),
       )
       assert.equal(
@@ -979,10 +900,10 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         () =>
           op.generate(
             stubChain(TokenPoolVersion.V2_0_0).chain,
-            paramsV1_5_1({
+            validParams({
               chainsToAdd: [
                 {
-                  ...paramsV1_5_1AddEntry(),
+                  ...addEntry(),
                   inboundRateLimiterConfig: { enabled: true, capacity: 10n, rate: 11n },
                 },
               ],
@@ -996,11 +917,11 @@ describe('ApplyChainUpdates (cct/evm)', () => {
   })
 
   describe('version dispatch', () => {
-    for (const { version, params, data, otherParams } of DISPATCH) {
+    for (const { version, data } of DISPATCH) {
       const shape = version === TokenPoolVersion.V1_5_0 ? 'chains[]' : 'add/remove'
 
       it(`picks the ${shape} encoder for a v${version} pool`, async () => {
-        const unsigned = await op.generate(stubChain(version).chain, params())
+        const unsigned = await op.generate(stubChain(version).chain, validParams())
         assert.equal(unsigned.transactions[0]!.data, data)
         // the two signatures have different selectors, so this pins the encoder, not just the args
         assert.equal(
@@ -1008,38 +929,74 @@ describe('ApplyChainUpdates (cct/evm)', () => {
           version === TokenPoolVersion.V1_5_0 ? '0xdb6327dc' : '0xe8a1da17',
         )
       })
+    }
+  })
 
-      it(`rejects the wrong declared version for a v${version} pool`, async () => {
-        await assert.rejects(
-          () => op.generate(stubChain(version).chain, otherParams()),
-          (err: unknown) =>
-            err instanceof CCTParamsInvalidError &&
-            err.context.operation === 'applyChainUpdates' &&
-            err.context.param === 'version',
-        )
-      })
+  /**
+   * The one param shape must reach the right signature for every recognized (pool type × version)
+   * combination. The signature depends only on the version — v1.5.0 → the `chains` array,
+   * everything from v1.5.1 up → the `chainsToAdd`/`remoteChainSelectorsToRemove` pair — but the
+   * full type matrix is exercised so the pool-type resolution that picks it is covered for each.
+   */
+  describe('type × version matrix', () => {
+    /** Every recognized pool type, with the versions it exists at and its ABI family. */
+    const MATRIX = [
+      { type: 'BurnMintTokenPool', family: 'BurnMint', versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0] },
+      {
+        type: 'BurnFromMintTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'BurnWithFromMintTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'LockReleaseTokenPool',
+        family: 'LockRelease',
+        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+      },
+      { type: 'BurnToAddressTokenPool', family: 'BurnMint', versions: [V1_5_1, V1_6_1, V2_0_0] },
+      {
+        type: 'BurnMintWithLockReleaseFlagTokenPool',
+        family: 'BurnMint',
+        versions: [V1_5_1, V1_6_1, V2_0_0],
+      },
+      {
+        type: 'SiloedLockReleaseTokenPool',
+        family: 'LockRelease',
+        versions: [V1_6_0, V1_6_1, V2_0_0],
+      },
+    ] as const satisfies ReadonlyArray<{
+      type: string
+      family: TokenPoolFamily
+      versions: readonly TokenPoolVersion[]
+    }>
+
+    for (const { type, family, versions } of MATRIX) {
+      for (const version of versions) {
+        it(`v${version} ${type}: encodes the v${version === V1_5_0 ? V1_5_0 : V1_5_1} signature`, async () => {
+          const unsigned = await op.generate(
+            stubChain(version, family, OWNER, type).chain,
+            validParams(),
+          )
+          assert.equal(
+            unsigned.transactions[0]!.data,
+            version === V1_5_0 ? DATA_V1_5_0 : DATA_V1_5_1,
+          )
+        })
+      }
     }
   })
 })
 
-/** One valid v1.5.1 addition, to spread invalid fields over. */
-function paramsV1_5_1AddEntry() {
+/** One valid addition, to spread invalid fields over. */
+function addEntry() {
   return {
     remoteChainSelector: SEL_A,
     remoteTokenAddress: REMOTE_TOKEN,
     remotePoolAddresses: [REMOTE_POOL_1],
-    inboundRateLimiterConfig: INBOUND,
-    outboundRateLimiterConfig: OUTBOUND,
-  }
-}
-
-/** One valid v1.5.0 lane update, to spread invalid fields over. */
-function paramsV1_5_0Entry() {
-  return {
-    remoteChainSelector: SEL_A,
-    allowed: true,
-    remoteTokenAddress: REMOTE_TOKEN,
-    remotePoolAddress: REMOTE_POOL_1,
     inboundRateLimiterConfig: INBOUND,
     outboundRateLimiterConfig: OUTBOUND,
   }

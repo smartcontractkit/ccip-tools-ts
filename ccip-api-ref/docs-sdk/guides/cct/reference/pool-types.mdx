@@ -29,7 +29,7 @@ A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved 
 
 | Operation group | Methods | Applies to |
 | --- | --- | --- |
-| Remote lanes | `applyChainUpdates` | All versions (declare the matching `version` shape) |
+| Remote lanes | `applyChainUpdates` | All versions (one parameter shape; v1.5.0 takes one remote pool per lane) |
 | Rate limits | `setChainRateLimiterConfigs` | All versions (`fastFinality` targets the v2.0.0 FTF bucket only) |
 | Admin & pool registration | `registerAdmin`, `acceptAdmin`, `setPool`, ownership transfers | All versions |
 | Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry` | All versions |
