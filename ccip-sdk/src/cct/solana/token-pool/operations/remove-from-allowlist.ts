@@ -17,8 +17,9 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
   validateUniquePublicKeys,
 } from '../../validate.ts'
@@ -39,7 +40,7 @@ type RemoveFromAllowlistParams = PoolProgramRef & {
 
 type ParsedRemoveFromAllowlistParams = {
   tokenAddress: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   remove: PublicKey[]
   payer: PublicKey
   authority: PublicKey
@@ -84,7 +85,11 @@ export class RemoveFromAllowlist extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       remove,
       payer,
       authority:
@@ -94,13 +99,19 @@ export class RemoveFromAllowlist extends SolanaOperation<
     }
   }
 
-  /** Builds the unsigned Solana `removeFromAllowList` instruction. */
+  /** Resolves the pool program on-chain, then builds the unsigned Solana `removeFromAllowList` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedRemoveFromAllowlistParams,
   ): Promise<UnsignedSolanaTx> {
-    const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
-    const state = deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress)
+    const poolProgram = await resolveExistingPoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const program = createTokenPoolProgram(chain, poolProgram, opts.payer)
+    const state = deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress)
 
     const instruction = await program.methods
       .removeFromAllowList(opts.remove)
@@ -113,7 +124,7 @@ export class RemoveFromAllowlist extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }

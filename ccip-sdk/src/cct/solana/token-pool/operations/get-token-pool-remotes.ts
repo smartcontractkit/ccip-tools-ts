@@ -4,7 +4,13 @@ import type { TokenPoolRemote } from '../../../../chain.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { type PoolProgramRef, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 import { SolanaQuery } from '../../query.ts'
-import { U64_MAX, parsePublicKey, resolvePoolProgram, validateBigInt } from '../../validate.ts'
+import {
+  U64_MAX,
+  parseOptionalPublicKey,
+  parsePublicKey,
+  resolveExistingPoolProgram,
+  validateBigInt,
+} from '../../validate.ts'
 
 /** Parameters for reading Solana token pool remote-chain configurations. */
 export type GetTokenPoolRemotesParams = PoolProgramRef & {
@@ -17,10 +23,11 @@ export type GetTokenPoolRemotesParams = PoolProgramRef & {
 /** Remote-chain configurations keyed by network name. */
 export type GetTokenPoolRemotesResult = Record<string, TokenPoolRemote>
 
-/** {@link GetTokenPoolRemotesParams} with its mint and pool program resolved to public keys. */
-type ParsedGetTokenPoolRemotesParams = GetTokenPoolRemotesParams & {
+/** {@link GetTokenPoolRemotesParams} with its mint and optional pool program parsed to public keys. */
+type ParsedGetTokenPoolRemotesParams = {
   mint: PublicKey
-  programId: PublicKey
+  poolProgramAddress?: PublicKey
+  remoteChainSelector?: bigint
 }
 
 /** Reads all, or one selected, remote-chain configurations of a Solana token pool. */
@@ -32,7 +39,7 @@ export class GetTokenPoolRemotes extends SolanaQuery<
   readonly name = 'getTokenPoolRemotes'
 
   /**
-   * Converts the mint and pool program, and validates the optional remote-chain selector.
+   * Converts the mint and optional pool program, and validates the optional remote-chain selector.
    * @throws {@link CCTParamsInvalidError} if a pool parameter or selector is invalid.
    */
   protected prepare(params: GetTokenPoolRemotesParams): ParsedGetTokenPoolRemotesParams {
@@ -40,18 +47,26 @@ export class GetTokenPoolRemotes extends SolanaQuery<
       validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
     }
     return {
-      ...params,
       mint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      programId: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
+      remoteChainSelector: params.remoteChainSelector,
     }
   }
 
-  /** Derives the pool state PDA and delegates remote config decoding to the shared chain reader. */
-  protected read(
+  /**
+   * Resolves the pool program, derives its state PDA, and delegates remote config decoding to the
+   * shared chain reader.
+   */
+  protected async read(
     chain: SolanaChain,
-    { mint, programId, remoteChainSelector }: ParsedGetTokenPoolRemotesParams,
+    { mint, poolProgramAddress, remoteChainSelector }: ParsedGetTokenPoolRemotesParams,
   ): Promise<GetTokenPoolRemotesResult> {
-    const state = deriveTokenPoolConfigPda(programId, mint).toBase58()
+    const poolProgram = await resolveExistingPoolProgram(this.name, chain, mint, poolProgramAddress)
+    const state = deriveTokenPoolConfigPda(poolProgram, mint).toBase58()
     return chain.getTokenPoolRemotes(state, remoteChainSelector)
   }
 }

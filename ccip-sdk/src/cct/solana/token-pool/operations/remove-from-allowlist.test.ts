@@ -22,16 +22,24 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** Only the canonical burn-mint pool exists for TOKEN; it is probed before lock-release. */
+const POOL_CONNECTION = {
+  getMultipleAccountsInfo: async () => [{}, null],
+  // Holds the pool state of any overriding pool program.
+  getAccountInfo: async () => ({}),
+}
+
 function stubChain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: { ...POOL_CONNECTION },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(stubChain(), {
     connection: {
+      ...POOL_CONNECTION,
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -46,7 +54,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new RemoveFromAllowlist().generate(stubChain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     remove: [ALLOWED],
@@ -117,11 +124,11 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
   describe('validation', () => {
     it('rejects invalid pool program references', async () => {
       await assert.rejects(
-        () => generate({ poolType: 'custom' }),
+        () => generate({ poolProgramAddress: 'invalid' }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'removeFromAllowlist' &&
-          err.context.param === 'poolType',
+          err.context.param === 'poolProgramAddress',
       )
     })
 
@@ -162,7 +169,6 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new RemoveFromAllowlist().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         remove: [ALLOWED],
         wallet: WALLET,
       })
@@ -175,7 +181,6 @@ describe('RemoveFromAllowlist (cct/solana)', () => {
         () =>
           new RemoveFromAllowlist().execute(stubChain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             authority: AUTHORITY,
             remove: [ALLOWED],
             wallet: WALLET,

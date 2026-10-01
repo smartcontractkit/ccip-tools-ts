@@ -49,6 +49,11 @@ function chain(owner = OWNER): SolanaChain {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
       getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData(owner) }),
+      // Only the canonical burn-mint pool exists for TOKEN; it is probed before lock-release.
+      getMultipleAccountsInfo: async () => [
+        { owner: PublicKey.default, data: stateData(owner) },
+        null,
+      ],
     },
   } as unknown as SolanaChain
 }
@@ -64,6 +69,7 @@ function submitChain(): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
       getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData() }),
+      getMultipleAccountsInfo: async () => [{ owner: PublicKey.default, data: stateData() }, null],
     },
   })
 }
@@ -71,7 +77,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new TransferPoolOwnership().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     newOwner: NEW_OWNER,
@@ -122,7 +127,7 @@ describe('TransferPoolOwnership (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -158,7 +163,6 @@ describe('TransferPoolOwnership (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new TransferPoolOwnership().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         newOwner: NEW_OWNER,
         wallet: WALLET,
       })
@@ -171,7 +175,6 @@ describe('TransferPoolOwnership (cct/solana)', () => {
         () =>
           new TransferPoolOwnership().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             newOwner: NEW_OWNER,
             authority: AUTHORITY,
             wallet: WALLET,

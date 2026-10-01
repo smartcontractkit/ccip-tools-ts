@@ -48,6 +48,11 @@ function chain(proposedOwner = AUTHORITY): SolanaChain {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
       getAccountInfo: async () => ({ owner: PublicKey.default, data: stateData(proposedOwner) }),
+      // Only the canonical burn-mint pool exists for TOKEN; it is probed before lock-release.
+      getMultipleAccountsInfo: async () => [
+        { owner: PublicKey.default, data: stateData(proposedOwner) },
+        null,
+      ],
     },
   } as unknown as SolanaChain
 }
@@ -66,6 +71,10 @@ function submitChain(): SolanaChain {
         owner: PublicKey.default,
         data: stateData(WALLET.publicKey.toBase58()),
       }),
+      getMultipleAccountsInfo: async () => [
+        { owner: PublicKey.default, data: stateData(WALLET.publicKey.toBase58()) },
+        null,
+      ],
     },
   })
 }
@@ -73,7 +82,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new AcceptPoolOwnership().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     ...opts,
@@ -114,7 +122,6 @@ describe('AcceptPoolOwnership (cct/solana)', () => {
     it('defaults authority to payer', async () => {
       const unsigned = await new AcceptPoolOwnership().generate(chain(PAYER), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         payer: PAYER,
       })
 
@@ -123,9 +130,31 @@ describe('AcceptPoolOwnership (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
+    })
+
+    it('resolves the pool program in its single pool state read', async () => {
+      const reads: string[] = []
+      const state = { owner: PublicKey.default, data: stateData() }
+      const countingChain = Object.assign(chain(), {
+        connection: {
+          getAccountInfo: async () => (reads.push('getAccountInfo'), state),
+          getMultipleAccountsInfo: async () => (
+            reads.push('getMultipleAccountsInfo'),
+            [state, null]
+          ),
+        },
+      })
+
+      await new AcceptPoolOwnership().generate(countingChain, {
+        tokenAddress: TOKEN,
+        payer: PAYER,
+        authority: AUTHORITY,
+      })
+
+      assert.deepEqual(reads, ['getMultipleAccountsInfo'])
     })
   })
 
@@ -145,7 +174,6 @@ describe('AcceptPoolOwnership (cct/solana)', () => {
         () =>
           new AcceptPoolOwnership().generate(chain(PublicKey.default.toBase58()), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             payer: PAYER,
           }),
         (err: unknown) =>
@@ -172,7 +200,6 @@ describe('AcceptPoolOwnership (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new AcceptPoolOwnership().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         wallet: WALLET,
       })
 
@@ -184,7 +211,6 @@ describe('AcceptPoolOwnership (cct/solana)', () => {
         () =>
           new AcceptPoolOwnership().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             authority: AUTHORITY,
             wallet: WALLET,
           }),

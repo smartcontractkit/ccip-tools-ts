@@ -21,8 +21,9 @@ import {
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolConfig,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
@@ -58,7 +59,7 @@ type ParsedCreateLookupTableParams =
       payer: PublicKey
       authority: PublicKey
       tokenMint: PublicKey
-      poolProgram: PublicKey
+      poolProgramAddress?: PublicKey
       additionalAddresses: PublicKey[]
     }
 
@@ -100,7 +101,11 @@ export class CreateLookupTable extends SolanaOperation<
       payer,
       authority,
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       additionalAddresses: (params.additionalAddresses ?? []).map((address, i) =>
         parsePublicKey(this.name, `additionalAddresses[${i}]`, address),
       ),
@@ -131,7 +136,14 @@ export class CreateLookupTable extends SolanaOperation<
       }
     }
 
-    const { poolProgram, tokenMint, additionalAddresses } = opts
+    const { tokenMint, additionalAddresses } = opts
+    // One pool state read resolves the program and yields the router.
+    const { poolProgram, config } = await resolveExistingPoolConfig(
+      this.name,
+      chain,
+      tokenMint,
+      opts.poolProgramAddress,
+    )
 
     const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
       authority,
@@ -143,6 +155,7 @@ export class CreateLookupTable extends SolanaOperation<
       lookupTableAddress,
       tokenMint,
       poolProgram,
+      router: config.router,
     })
     const addresses = [...ccipAddresses, ...additionalAddresses]
 

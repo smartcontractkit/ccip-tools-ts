@@ -27,16 +27,24 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** Only the canonical burn-mint pool exists for TOKEN; it is probed before lock-release. */
+const POOL_CONNECTION = {
+  getMultipleAccountsInfo: async () => [{}, null],
+  // Holds the pool state of any overriding pool program.
+  getAccountInfo: async () => ({}),
+}
+
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: { ...POOL_CONNECTION },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      ...POOL_CONNECTION,
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -51,7 +59,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new AppendRemotePoolAddresses().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     remoteChainSelector: SELECTOR,
@@ -125,7 +132,7 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
 
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -165,7 +172,6 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new AppendRemotePoolAddresses().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
         remotePoolAddresses: REMOTE_POOLS,
         wallet: WALLET,
@@ -179,7 +185,6 @@ describe('AppendRemotePoolAddresses (cct/solana)', () => {
         () =>
           new AppendRemotePoolAddresses().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             authority: AUTHORITY,
             remoteChainSelector: SELECTOR,
             remotePoolAddresses: REMOTE_POOLS,

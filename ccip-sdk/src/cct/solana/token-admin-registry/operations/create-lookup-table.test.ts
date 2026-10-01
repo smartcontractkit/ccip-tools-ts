@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { AddressLookupTableProgram, Keypair, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { TOKEN_POOL_PROGRAMS } from '../../programs/token-pool.ts'
+import { TOKEN_POOL_PROGRAMS, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 import { CreateLookupTable } from './create-lookup-table.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -22,7 +23,35 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
-function stubChain(onGetSlot?: () => void): SolanaChain {
+/** Pool state for TOKEN whose only meaningful field is its router. */
+function poolState(): Buffer {
+  const key = PublicKey.default.toBuffer()
+  return Buffer.concat([
+    BorshAccountsCoder.accountDiscriminator('State'),
+    Buffer.from([1]),
+    TOKEN_PROGRAM_ID.toBuffer(),
+    new PublicKey(TOKEN).toBuffer(),
+    Buffer.from([6]),
+    ...Array.from({ length: 6 }, () => key),
+    new PublicKey(ROUTER).toBuffer(),
+    key,
+    Buffer.from([0, 0]),
+    Buffer.alloc(4),
+    key,
+  ])
+}
+
+/** Stub chain holding the pool state of TOKEN under `poolPrograms` only. */
+function stubChain(
+  onGetSlot?: () => void,
+  poolPrograms = [new PublicKey(POOL_PROGRAM)],
+): SolanaChain {
+  const states = new Map(
+    poolPrograms.map((poolProgram) => [
+      deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN)).toBase58(),
+      { owner: poolProgram, data: poolState() },
+    ]),
+  )
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
@@ -30,7 +59,11 @@ function stubChain(onGetSlot?: () => void): SolanaChain {
         onGetSlot?.()
         return 123
       },
-      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+      // Every other account, including the mint, is owned by the SPL Token program.
+      getAccountInfo: async (address: PublicKey) =>
+        states.get(address.toBase58()) ?? { owner: TOKEN_PROGRAM_ID },
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => states.get(address.toBase58()) ?? null),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -39,12 +72,10 @@ function stubChain(onGetSlot?: () => void): SolanaChain {
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-    getTokenPoolConfig: async () => ({
-      token: TOKEN,
-      router: ROUTER,
-      tokenPoolProgram: POOL_PROGRAM,
-    }),
-    _getRouterConfig: async () => ({ feeQuoter: FEE_QUOTER }),
+    _getRouterConfig: async (router: string) => {
+      assert.equal(router, ROUTER)
+      return { feeQuoter: FEE_QUOTER }
+    },
   } as unknown as SolanaChain
 }
 
@@ -80,12 +111,11 @@ describe('CreateLookupTable (cct/solana)', () => {
       )
     })
 
-    it('accepts a canonical pool type', async () => {
-      const unsigned = await new CreateLookupTable().generate(stubChain(), {
-        tokenAddress: TOKEN,
-        poolType: 'burn-mint',
-        payer: PAYER,
-      })
+    it('resolves the canonical pool program of the mint', async () => {
+      const unsigned = await new CreateLookupTable().generate(
+        stubChain(undefined, [new PublicKey(TOKEN_POOL_PROGRAMS['burn-mint'])]),
+        { tokenAddress: TOKEN, payer: PAYER },
+      )
 
       assert.equal(unsigned.instructions.length, 2)
       assert.ok(
@@ -156,21 +186,18 @@ describe('CreateLookupTable (cct/solana)', () => {
   })
 
   describe('validation', () => {
-    it('rejects an ambiguous pool reference before the slot RPC', async () => {
+    it('rejects an invalid or unresolvable pool program before the slot RPC', async () => {
       let getSlotCalls = 0
 
-      await assert.rejects(
-        new CreateLookupTable().generate(
-          stubChain(() => getSlotCalls++),
-          {
-            tokenAddress: TOKEN,
-            poolType: 'burn-mint',
-            poolProgramAddress: POOL_PROGRAM,
-            payer: PAYER,
-          } as never,
-        ),
-        CCTParamsInvalidError,
-      )
+      for (const [chain, opts, param] of [
+        [stubChain(() => getSlotCalls++), { poolProgramAddress: 'invalid' }, 'poolProgramAddress'],
+        [stubChain(() => getSlotCalls++, []), {}, 'tokenAddress'],
+      ] as const) {
+        await assert.rejects(
+          new CreateLookupTable().generate(chain, { tokenAddress: TOKEN, payer: PAYER, ...opts }),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
 
       assert.equal(getSlotCalls, 0)
     })

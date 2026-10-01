@@ -14,10 +14,6 @@ import {
   deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
 } from './programs/token-pool.ts'
-import type {
-  GetTokenPoolStateParams,
-  GetTokenPoolStateResult,
-} from './token-pool/operations/index.ts'
 import { METADATA_PROGRAM_ID } from './token/constants.ts'
 import {
   type RegisterAdminMethod,
@@ -70,17 +66,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
     const cct = await SolanaTokenManager.fromUrl('http://localhost:8899')
 
     assert.equal(cct.chain, chain)
-  })
-
-  it('getTokenPoolState accepts params whose pool program is not known statically', () => {
-    const cct = SolanaTokenManager.fromChain(stubChain())
-    // A parameter is not narrowed to one PoolProgramRef arm the way a const literal is, so this
-    // only compiles while a `GetTokenPoolStateParams` overload is declared: TypeScript never
-    // exposes the implementation signature to callers.
-    const read = (opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> =>
-      cct.getTokenPoolState(opts)
-
-    assert.equal(typeof read, 'function')
   })
 
   describe('facade operations', () => {
@@ -171,6 +156,9 @@ describe('SolanaTokenManager (cct/solana)', () => {
             const key = address.toBase58()
             return accounts.has(key) ? accounts.get(key) : defaultAccount
           },
+          // Only the canonical lock-release pool state exists for the mint.
+          getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+            addresses.map((address) => accounts.get(address.toBase58()) ?? null),
           getMinimumBalanceForRentExemption: async () => 1,
           getSlot: async () => 1,
           getAddressLookupTable: async () => ({
@@ -219,7 +207,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
         payer,
         tokenAddress: mint,
         authority: payer,
-        poolType: 'lock-release' as const,
       }
       const cases: Array<
         [string, () => Promise<{ instructions: unknown[] } | { instructions: unknown[] }[]>]
@@ -305,7 +292,10 @@ describe('SolanaTokenManager (cct/solana)', () => {
               enabled: true,
             }),
         ],
-        ['deployTokenPool', () => cct.generateUnsignedDeployTokenPool(common)],
+        [
+          'deployTokenPool',
+          () => cct.generateUnsignedDeployTokenPool({ ...common, poolType: 'lock-release' }),
+        ],
         [
           'applyChainUpdates',
           () =>
@@ -542,7 +532,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.configureAllowlist({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               add: [account],
               enabled: true,
             }),
@@ -562,7 +551,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.applyChainUpdates({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelectorsToRemove: [],
               chainsToAdd: [
                 {
@@ -582,7 +570,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.appendRemotePoolAddresses({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
               remotePoolAddresses: ['0x01'],
             }),
@@ -593,7 +580,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.initChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
               remoteTokenAddress: '0x01',
               remoteTokenDecimals: 6,
@@ -605,7 +591,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.deleteChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
             }),
         ],
@@ -615,7 +600,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.setRateLimitAdmin({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               newRateLimitAdmin: account,
             }),
         ],
@@ -625,7 +609,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.provideLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               amount: 1n,
             }),
         ],
@@ -635,7 +618,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.withdrawLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               amount: 1n,
             }),
         ],
@@ -645,7 +627,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.setCanAcceptLiquidity({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               allow: true,
             }),
         ],
@@ -655,7 +636,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.setRebalancer({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               rebalancer: account,
             }),
         ],
@@ -665,7 +645,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.transferPoolOwnership({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               newOwner: account,
             }),
         ],
@@ -675,7 +654,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.acceptPoolOwnership({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
             }),
         ],
         [
@@ -684,7 +662,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.setChainRateLimit({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
               inbound: { enabled: false },
               outbound: { enabled: false },
@@ -696,7 +673,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.editChainRemoteConfig({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
               remoteTokenAddress: '0x01',
               remotePoolAddresses: ['0x02'],
@@ -733,7 +709,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
             cct.removeFromAllowlist({
               wallet,
               tokenAddress: mint,
-              poolType: 'lock-release',
               remove: [account],
             }),
         ],
@@ -778,7 +753,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
           () =>
             cct.getTokenPoolRemotes({
               tokenAddress: mint,
-              poolType: 'lock-release',
               remoteChainSelector,
             }),
         ],
@@ -788,7 +762,6 @@ describe('SolanaTokenManager (cct/solana)', () => {
           () =>
             cct.getTokenPoolState({
               tokenAddress: mint,
-              poolType: 'lock-release',
             }),
         ],
         [
@@ -802,6 +775,14 @@ describe('SolanaTokenManager (cct/solana)', () => {
         const result = await read()
         assert.ok(typeof result === 'object', `${name} returns a result`)
       }
+    })
+
+    it('reads the lock-release state arm of the resolved pool', async () => {
+      const cct = SolanaTokenManager.fromChain(chain())
+      const state = await cct.getTokenPoolState({ tokenAddress: mint })
+
+      assert.equal(state.programId, TOKEN_POOL_PROGRAMS['lock-release'])
+      assert.ok('rebalancer' in state.config && 'canAcceptLiquidity' in state.config)
     })
   })
 })

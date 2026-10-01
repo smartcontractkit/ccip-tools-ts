@@ -1,5 +1,7 @@
+import type { Buffer } from 'buffer'
+
 import { type Account, TokenAccountNotFoundError, getAccount } from '@solana/spl-token'
-import { type Connection, PublicKey } from '@solana/web3.js'
+import { type AccountInfo, type Connection, PublicKey } from '@solana/web3.js'
 
 import {
   CCIPAddressInvalidError,
@@ -15,7 +17,7 @@ import {
   CCTTxFailedError,
 } from '../errors.ts'
 import {
-  type PoolProgramRef,
+  type TokenPoolConfig,
   type TokenPoolType,
   TOKEN_POOL_PROGRAMS,
   decodeTokenPoolState,
@@ -76,6 +78,19 @@ export function validateOptionalPublicKey(
   value: unknown,
 ): asserts value is string | undefined {
   if (value !== undefined) validatePublicKey(operation, param, value)
+}
+
+/**
+ * Parses `value` as a Solana public key, or returns `undefined` when it is absent.
+ * Only `undefined` counts as absent; `null` and `''` are treated as provided and rejected.
+ * @throws {@link CCTParamsInvalidError} if a non-`undefined` `value` is not a valid public key string.
+ */
+export function parseOptionalPublicKey(
+  operation: string,
+  param: string,
+  value: unknown,
+): PublicKey | undefined {
+  return value === undefined ? undefined : parsePublicKey(operation, param, value)
 }
 
 /**
@@ -171,40 +186,201 @@ export function validatePoolType(
   }
 }
 
-/** Resolves a canonical pool type or custom program address. */
-export function resolvePoolProgram(operation: string, params: PoolProgramRef): PublicKey {
-  // Value semantics: explicit undefined does not count as provided.
-  const hasPoolType = params.poolType !== undefined
-  const hasPoolProgramAddress = params.poolProgramAddress !== undefined
-  if (hasPoolType === hasPoolProgramAddress) {
-    throw new CCTParamsInvalidError(
-      operation,
-      'poolType',
-      'provide exactly one of poolType or poolProgramAddress',
-    )
-  }
-
-  if (hasPoolType) {
-    validatePoolType(operation, 'poolType', params.poolType)
-    return resolveTokenPoolProgram(params.poolType)
-  }
-
-  return parsePublicKey(operation, 'poolProgramAddress', params.poolProgramAddress)
+/** State account of an existing token pool, with the program that owns it. */
+export type ExistingPoolState = {
+  /** Pool program that owns the state account. */
+  poolProgram: PublicKey
+  /** Pool state (config) PDA for the mint under `poolProgram`. */
+  state: PublicKey
+  /** The state account as read. */
+  account: AccountInfo<Buffer>
 }
 
-/** Resolves a lock-release token pool program and rejects the canonical burn-mint program. */
-export function resolveLockReleasePoolProgram(
+/**
+ * Positive pool program resolutions per chain instance. Keys are a mint (canonical resolution)
+ * or `mint:program` (a program confirmed to hold the mint's pool). Misses are never cached.
+ */
+const resolvedPoolPrograms = new WeakMap<SolanaChain, Map<string, PublicKey>>()
+
+function poolProgramCacheKey(mint: PublicKey, poolProgram?: PublicKey): string {
+  return poolProgram ? `${mint.toBase58()}:${poolProgram.toBase58()}` : mint.toBase58()
+}
+
+function poolProgramCache(chain: SolanaChain): Map<string, PublicKey> {
+  let cache = resolvedPoolPrograms.get(chain)
+  if (!cache) resolvedPoolPrograms.set(chain, (cache = new Map()))
+  return cache
+}
+
+/**
+ * Reads the state account of an existing token pool for a mint, resolving its program on-chain.
+ *
+ * @remarks With `poolProgramAddress`, reads that program's state PDA. Otherwise reads the canonical
+ * burn-mint and lock-release state PDAs in one `getMultipleAccountsInfo` and picks the one that
+ * exists. Resolutions are cached per chain instance and mint, so later calls read only the
+ * resolved PDA; a canonical pool deployed for the mint afterwards does not invalidate them.
+ * @throws {@link CCTParamsInvalidError} if `poolProgramAddress` is omitted and the mint has no
+ * canonical pool, or has both.
+ * @throws {@link CCIPTokenPoolStateNotFoundError} if the state PDA under `poolProgramAddress` does
+ * not exist.
+ */
+export async function resolveExistingPoolState(
   operation: string,
-  params: PoolProgramRef,
-): PublicKey {
-  const poolProgram = resolvePoolProgram(operation, params)
-  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) {
+  chain: SolanaChain,
+  mint: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<ExistingPoolState> {
+  const cache = poolProgramCache(chain)
+  const known = poolProgramAddress ?? cache.get(poolProgramCacheKey(mint))
+  if (known) {
+    const state = deriveTokenPoolConfigPda(known, mint)
+    const account = await chain.connection.getAccountInfo(state)
+    if (!account) {
+      // Never serve a stale resolution again.
+      cache.delete(poolProgramCacheKey(mint, known))
+      if (cache.get(poolProgramCacheKey(mint))?.equals(known))
+        cache.delete(poolProgramCacheKey(mint))
+      throw new CCIPTokenPoolStateNotFoundError(state.toBase58(), {
+        context: { mint: mint.toBase58(), poolProgram: known.toBase58() },
+      })
+    }
+    cache.set(poolProgramCacheKey(mint, known), known)
+    return { poolProgram: known, state, account }
+  }
+
+  const candidates = Object.values(TOKEN_POOL_PROGRAMS).map((address) => {
+    const poolProgram = new PublicKey(address)
+    return { poolProgram, state: deriveTokenPoolConfigPda(poolProgram, mint) }
+  })
+  const accounts = await chain.connection.getMultipleAccountsInfo(
+    candidates.map(({ state }) => state),
+  )
+  const found = candidates.flatMap((candidate, i) => {
+    const account = accounts[i]
+    return account ? [{ ...candidate, account }] : []
+  })
+  const [resolved] = found
+  if (!resolved) {
     throw new CCTParamsInvalidError(
       operation,
-      params.poolProgramAddress === undefined ? 'poolType' : 'poolProgramAddress',
-      'must be lock-release',
+      'tokenAddress',
+      `no canonical burn-mint or lock-release token pool exists for mint ${mint.toBase58()}; deploy one first, or pass poolProgramAddress for a custom pool program`,
     )
   }
+  if (found.length > 1) {
+    throw new CCTParamsInvalidError(
+      operation,
+      'poolProgramAddress',
+      `required: mint ${mint.toBase58()} has both canonical burn-mint and lock-release token pools; pass the program of the pool to use`,
+    )
+  }
+
+  cache.set(poolProgramCacheKey(mint), resolved.poolProgram)
+  cache.set(poolProgramCacheKey(mint, resolved.poolProgram), resolved.poolProgram)
+  return resolved
+}
+
+/**
+ * Reads and decodes the state of an existing token pool for a mint.
+ * @see {@link resolveExistingPoolState}
+ * @throws {@link CCTDataDecodeError} if the state account cannot be decoded.
+ */
+export async function resolveExistingPoolConfig(
+  operation: string,
+  chain: SolanaChain,
+  mint: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<ExistingPoolState & { version: number; config: TokenPoolConfig }> {
+  const existing = await resolveExistingPoolState(operation, chain, mint, poolProgramAddress)
+  return {
+    ...existing,
+    ...decodeTokenPoolState(existing.account.data, {
+      tokenPool: existing.state.toBase58(),
+      mint: mint.toBase58(),
+      poolProgram: existing.poolProgram.toBase58(),
+      accountOwner: existing.account.owner.toBase58(),
+    }),
+  }
+}
+
+/**
+ * Resolves the program of an existing token pool for a mint; a cached resolution costs no RPC.
+ * @see {@link resolveExistingPoolState}
+ */
+export async function resolveExistingPoolProgram(
+  operation: string,
+  chain: SolanaChain,
+  mint: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<PublicKey> {
+  return (
+    resolvedPoolPrograms.get(chain)?.get(poolProgramCacheKey(mint, poolProgramAddress)) ??
+    (await resolveExistingPoolState(operation, chain, mint, poolProgramAddress)).poolProgram
+  )
+}
+
+/**
+ * Identifies a token pool program's type: canonical programs by address, custom programs by their
+ * `typeAndVersion`.
+ * @returns `undefined` for a custom program without `typeVersion`, or whose type names neither.
+ */
+export async function resolvePoolProgramType(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+): Promise<TokenPoolType | undefined> {
+  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) return 'burn-mint'
+  if (poolProgram.equals(resolveTokenPoolProgram('lock-release'))) return 'lock-release'
+
+  let type: string
+  try {
+    ;[type] = await chain.typeAndVersion(poolProgram.toBase58())
+  } catch {
+    // Custom pool programs may not implement `typeVersion`.
+    return undefined
+  }
+  if (/LockRelease/i.test(type)) return 'lock-release'
+  if (/BurnMint/i.test(type)) return 'burn-mint'
+  return undefined
+}
+
+/**
+ * Rejects a resolved pool program known to be burn-mint. A custom program of unknown type is
+ * accepted; it must have the canonical lock-release instructions and account layout.
+ * @throws {@link CCTParamsInvalidError} if the pool program is burn-mint.
+ */
+export async function validateLockReleasePoolProgram(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<void> {
+  if ((await resolvePoolProgramType(chain, poolProgram)) !== 'burn-mint') return
+  throw poolProgramAddress
+    ? new CCTParamsInvalidError(
+        operation,
+        'poolProgramAddress',
+        'must be a lock-release token pool program, got burn-mint',
+      )
+    : new CCTParamsInvalidError(
+        operation,
+        'tokenAddress',
+        `token pool is burn-mint; ${operation} requires a lock-release pool`,
+      )
+}
+
+/**
+ * Resolves the program of an existing lock-release token pool for a mint.
+ * @see {@link resolveExistingPoolProgram}
+ * @throws {@link CCTParamsInvalidError} if the resolved pool program is burn-mint.
+ */
+export async function resolveExistingLockReleasePoolProgram(
+  operation: string,
+  chain: SolanaChain,
+  mint: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<PublicKey> {
+  const poolProgram = await resolveExistingPoolProgram(operation, chain, mint, poolProgramAddress)
+  await validateLockReleasePoolProgram(operation, chain, poolProgram, poolProgramAddress)
   return poolProgram
 }
 
@@ -316,27 +492,14 @@ export function validateDelegation(
 }
 
 /**
- * Verifies that a rebalancer may move liquidity for a lock-release pool.
- * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
+ * Verifies, from a decoded lock-release pool config, that a rebalancer may move its liquidity.
  * @throws {@link CCTTxFailedError} If the authority is not the rebalancer or liquidity is disabled.
  */
-export async function validatePoolLiquidityConfig(
+export function validatePoolLiquidityConfig(
   operation: string,
-  chain: SolanaChain,
-  poolProgram: PublicKey,
-  mint: PublicKey,
+  config: TokenPoolConfig,
   authority: PublicKey,
-): Promise<void> {
-  const state = deriveTokenPoolConfigPda(poolProgram, mint)
-  const account = await chain.connection.getAccountInfo(state)
-  if (!account) throw new CCIPTokenPoolStateNotFoundError(state.toBase58())
-
-  const { config } = decodeTokenPoolState(account.data, {
-    tokenPool: state.toBase58(),
-    mint: mint.toBase58(),
-    poolProgram: poolProgram.toBase58(),
-    accountOwner: account.owner.toBase58(),
-  })
+): void {
   if (!config.rebalancer.equals(authority))
     throw new CCTTxFailedError(
       operation,

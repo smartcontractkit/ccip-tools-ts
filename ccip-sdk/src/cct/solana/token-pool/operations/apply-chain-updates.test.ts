@@ -28,16 +28,24 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** Only the canonical burn-mint pool exists for TOKEN; it is probed before lock-release. */
+const POOL_CONNECTION = {
+  getMultipleAccountsInfo: async () => [{}, null],
+  // Holds the pool state of any overriding pool program.
+  getAccountInfo: async () => ({}),
+}
+
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: { ...POOL_CONNECTION },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      ...POOL_CONNECTION,
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -63,7 +71,6 @@ function batchChains() {
 function generateBatches(opts = {}) {
   return new ApplyChainUpdates().generateBatch(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     remoteChainSelectorsToRemove: [SELECTOR],
@@ -103,7 +110,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
       const operation = new ApplyChainUpdates()
       const params = {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint' as const,
         payer: PAYER,
         authority: AUTHORITY,
         remoteChainSelectorsToRemove: [SELECTOR],
@@ -193,7 +199,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
     it('packs large updates without splitting a chain instruction group', async () => {
       const batches = await new ApplyChainUpdates().generateBatch(chain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         payer: PAYER,
         authority: AUTHORITY,
         remoteChainSelectorsToRemove: [],
@@ -227,7 +232,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         () =>
           new ApplyChainUpdates().generateBatch(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             payer: PAYER,
             authority: AUTHORITY,
             remoteChainSelectorsToRemove: [],
@@ -272,10 +276,58 @@ describe('ApplyChainUpdates (cct/solana)', () => {
 
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.ok(
         unsigned.instructions.every(({ programId }) => programId.toBase58() === poolProgramAddress),
+      )
+    })
+
+    it('resolves the pool program once for the whole batch', async () => {
+      const reads: string[] = []
+      const countingChain = Object.assign(chain(), {
+        connection: {
+          getMultipleAccountsInfo: async () => (reads.push('getMultipleAccountsInfo'), [{}, null]),
+          getAccountInfo: async () => (reads.push('getAccountInfo'), {}),
+        },
+      })
+
+      const batches = await new ApplyChainUpdates().generateBatch(countingChain, {
+        tokenAddress: TOKEN,
+        payer: PAYER,
+        authority: AUTHORITY,
+        remoteChainSelectorsToRemove: [SELECTOR],
+        chainsToAdd: batchChains(),
+      })
+
+      assert.equal(batches.length, 2)
+      assert.deepEqual(reads, ['getMultipleAccountsInfo'])
+      assert.ok(
+        batches.every(({ instructions }) =>
+          instructions.every(({ programId }) =>
+            programId.equals(resolveTokenPoolProgram('burn-mint')),
+          ),
+        ),
+      )
+    })
+
+    it('rejects a mint whose pool program cannot be resolved', async () => {
+      const unresolvedChain = Object.assign(chain(), {
+        connection: { getMultipleAccountsInfo: async () => [{}, {}] },
+      })
+
+      await assert.rejects(
+        () =>
+          new ApplyChainUpdates().generateBatch(unresolvedChain, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            remoteChainSelectorsToRemove: [SELECTOR],
+            chainsToAdd: [],
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'applyChainUpdates' &&
+          err.context.param === 'poolProgramAddress',
       )
     })
   })
@@ -400,7 +452,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
     it('signs, submits, and returns all tx hashes', async () => {
       const result = await new ApplyChainUpdates().executeBatch(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         remoteChainSelectorsToRemove: [SELECTOR],
         chainsToAdd: [
           {
@@ -421,7 +472,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
     it('submits every safely packed batch and returns all hashes', async () => {
       const result = await new ApplyChainUpdates().executeBatch(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         remoteChainSelectorsToRemove: [],
         chainsToAdd: batchChains(),
         wallet: WALLET,
@@ -447,7 +497,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         () =>
           new ApplyChainUpdates().executeBatch(failedChain, {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             remoteChainSelectorsToRemove: [],
             chainsToAdd: batchChains(),
             wallet: WALLET,
@@ -469,7 +518,6 @@ describe('ApplyChainUpdates (cct/solana)', () => {
         () =>
           new ApplyChainUpdates().executeBatch(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             authority: AUTHORITY,
             remoteChainSelectorsToRemove: [SELECTOR],
             chainsToAdd: [],

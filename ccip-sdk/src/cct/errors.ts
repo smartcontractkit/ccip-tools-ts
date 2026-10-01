@@ -259,7 +259,7 @@ export class CCTOperationUnsupportedError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   await cct.getTokenPoolState({ tokenAddress: mint, poolType: 'burn-mint' })
+ *   await cct.getTokenPoolState({ tokenAddress: mint })
  * } catch (error) {
  *   if (error instanceof CCTDataDecodeError) {
  *     console.log(error.message)

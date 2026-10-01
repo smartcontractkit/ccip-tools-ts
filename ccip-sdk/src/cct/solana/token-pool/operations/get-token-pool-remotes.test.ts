@@ -6,7 +6,7 @@ import { PublicKey } from '@solana/web3.js'
 import type { TokenPoolRemote } from '../../../../chain.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
+import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
 import { GetTokenPoolRemotes } from './get-token-pool-remotes.ts'
 
 function key(byte: number): PublicKey {
@@ -27,10 +27,17 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
   const program = key(3)
   const selector = 5009297550715157269n
 
-  function chain(): SolanaChain {
+  /** Stub chain whose pool state for `mint` exists only under `poolProgram`. */
+  function chain(poolProgram = program): SolanaChain {
+    const state = deriveTokenPoolConfigPda(poolProgram, mint)
     return {
-      getTokenPoolRemotes: async (state: string, remoteChainSelector?: bigint) => {
-        assert.equal(state, deriveTokenPoolConfigPda(program, mint).toBase58())
+      connection: {
+        getAccountInfo: async (address: PublicKey) => (address.equals(state) ? {} : null),
+        getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+          addresses.map((address) => (address.equals(state) ? {} : null)),
+      },
+      getTokenPoolRemotes: async (stateAddress: string, remoteChainSelector?: bigint) => {
+        assert.equal(stateAddress, state.toBase58())
         assert.equal(remoteChainSelector, selector)
         return REMOTES
       },
@@ -49,17 +56,26 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
     })
 
     it('omits the selector to read all remote configs', async () => {
-      const chainWithAll = {
+      const chainWithAll = Object.assign(chain(), {
         getTokenPoolRemotes: async (_state: string, remoteChainSelector?: bigint) => {
           assert.equal(remoteChainSelector, undefined)
           return REMOTES
         },
-      } as unknown as SolanaChain
+      })
 
       const remotes = await new GetTokenPoolRemotes().query(chainWithAll, {
         tokenAddress: mint.toBase58(),
         poolProgramAddress: program.toBase58(),
       })
+
+      assert.equal(remotes, REMOTES)
+    })
+
+    it('reads the remotes of the resolved canonical pool', async () => {
+      const remotes = await new GetTokenPoolRemotes().query(
+        chain(resolveTokenPoolProgram('burn-mint')),
+        { tokenAddress: mint.toBase58(), remoteChainSelector: selector },
+      )
 
       assert.equal(remotes, REMOTES)
     })
@@ -70,6 +86,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
       const cases: Array<[Partial<{ tokenAddress: string; remoteChainSelector: bigint }>, string]> =
         [
           [{ tokenAddress: 'invalid' }, 'tokenAddress'],
+          [{ poolProgramAddress: 'invalid' } as never, 'poolProgramAddress'],
           [{ remoteChainSelector: -1n }, 'remoteChainSelector'],
           [{ remoteChainSelector: 1 as never }, 'remoteChainSelector'],
         ]

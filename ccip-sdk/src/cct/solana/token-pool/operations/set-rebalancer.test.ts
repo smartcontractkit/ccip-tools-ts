@@ -20,16 +20,28 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** Only the canonical lock-release pool exists for TOKEN; it is probed after burn-mint. */
+const POOL_CONNECTION = {
+  getMultipleAccountsInfo: async () => [null, {}],
+  // Holds the pool state of any overriding pool program.
+  getAccountInfo: async () => ({}),
+}
+
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: { ...POOL_CONNECTION },
+    // Custom pool programs in these tests do not implement `typeVersion`.
+    typeAndVersion: async () => {
+      throw new Error('typeVersion not implemented')
+    },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      ...POOL_CONNECTION,
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -44,7 +56,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new SetRebalancer().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     rebalancer: REBALANCER,
@@ -95,7 +106,7 @@ describe('SetRebalancer (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -106,12 +117,9 @@ describe('SetRebalancer (cct/solana)', () => {
       for (const [opts, param] of [
         [{ tokenAddress: 'invalid' }, 'tokenAddress'],
         [{ rebalancer: 'invalid' }, 'rebalancer'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
+        [{ poolProgramAddress: 'invalid' }, 'poolProgramAddress'],
         [
-          {
-            poolType: undefined,
-            poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
-          },
+          { poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58() },
           'poolProgramAddress',
         ],
       ]) {
@@ -123,11 +131,31 @@ describe('SetRebalancer (cct/solana)', () => {
     })
   })
 
+  describe('pool resolution', () => {
+    it('rejects a mint whose canonical pool is burn-mint', async () => {
+      const burnMintChain = Object.assign(chain(), {
+        connection: { ...POOL_CONNECTION, getMultipleAccountsInfo: async () => [{}, null] },
+      })
+
+      await assert.rejects(
+        () =>
+          new SetRebalancer().generate(burnMintChain, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            rebalancer: REBALANCER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'tokenAddress' &&
+          /requires a lock-release pool/.test(err.message),
+      )
+    })
+  })
+
   describe('execute', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new SetRebalancer().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         rebalancer: REBALANCER,
         wallet: WALLET,
       })
@@ -140,7 +168,6 @@ describe('SetRebalancer (cct/solana)', () => {
         () =>
           new SetRebalancer().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             rebalancer: REBALANCER,
             authority: AUTHORITY,
             wallet: WALLET,

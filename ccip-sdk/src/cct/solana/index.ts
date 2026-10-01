@@ -55,9 +55,6 @@ import {
   TransferAdmin,
 } from './token-admin-registry/operations/index.ts'
 import {
-  type BaseGetTokenPoolStateResult,
-  type BurnMintPoolProgramRef,
-  type CustomPoolProgramRef,
   type ExecuteAcceptPoolOwnershipParams,
   type ExecuteAcceptPoolOwnershipResult,
   type ExecuteAppendRemotePoolAddressesParams,
@@ -130,8 +127,6 @@ import {
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
-  type LockReleaseGetTokenPoolStateResult,
-  type LockReleasePoolProgramRef,
   AcceptPoolOwnership,
   AppendRemotePoolAddresses,
   ApplyChainUpdates,
@@ -705,11 +700,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana pool lookup table instructions.
    *
-   * Defaults to create+extend. Specify a canonical `poolType` or custom `poolProgramAddress`.
+   * Defaults to create+extend, resolving the pool program on-chain from `tokenAddress`; pass
+   * `poolProgramAddress` only for a custom pool program.
    * Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an EOA payer and vault authority,
    * then populate it later through the authority. If `authority` is omitted, it defaults to `payer`.
    *
    * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -736,6 +733,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
@@ -758,21 +756,21 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds an unsigned instruction to append addresses to a token pool allowlist and toggle
    * enforcement. Every call overwrites enforcement; pass `add: []` to toggle it without appending
    * an address. Addresses in `add` must be unique; existing allowlist entries are rejected by the
-   * program. The pool must be initialized first. Pass canonical `poolType` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * program. The pool must be initialized first; its program is resolved on-chain, so pass
+   * `poolProgramAddress` only for a custom pool program. `authority` defaults to `payer`.
    *
    * @see {@link configureAllowlist}
    * @see {@link generateUnsignedDeployTokenPool}
    * @see {@link generateUnsignedRemoveFromAllowlist}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedConfigureAllowlist({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   add: [allowedSender],
    *   enabled: true,
    *   payer,
@@ -799,6 +797,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
@@ -806,7 +805,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.configureAllowlist({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   add: [],
    *   enabled: false,
    *   wallet,
@@ -924,13 +922,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link applyChainUpdates}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or chain update is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsignedTxs = await cct.generateUnsignedApplyChainUpdates({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelectorsToRemove: [oldSelector],
    *   chainsToAdd: [{
    *     remoteChainSelector: newSelector,
@@ -970,6 +968,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter or chain update is invalid, or the
    * authority differs from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If a chain config already exists or is missing, the wallet is
    * not the pool owner, or simulation/submission fails.
    *
@@ -978,7 +977,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.applyChainUpdates({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelectorsToRemove: [],
    *   chainsToAdd: [{
    *     remoteChainSelector: selector,
@@ -998,8 +996,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that appends remote pool addresses to an initialized Solana
-   * token pool remote-chain config. Pass canonical `poolType` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * token pool remote-chain config. The pool program is resolved on-chain; pass
+   * `poolProgramAddress` only for a custom pool program. `authority` defaults to `payer`.
    *
    * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
    * are retained. On-chain execution rejects addresses already present. To clear all pools, use
@@ -1010,13 +1008,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedEditChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter, selector, or remote pool address is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedAppendRemotePoolAddresses({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   payer,
@@ -1045,6 +1043,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote pool address is invalid, or
    * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the chain config does not exist, the wallet is not the pool
    * owner, an address already exists, or simulation/submission fails.
    *
@@ -1053,7 +1052,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.appendRemotePoolAddresses({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
    *   wallet,
@@ -1068,9 +1066,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that initializes a Solana token pool remote-chain config for a
-   * previously unconfigured selector. Pass canonical `poolType` or a compatible
-   * `poolProgramAddress`; `authority` defaults to
-   * `payer`.
+   * previously unconfigured selector. The pool program is resolved on-chain; pass
+   * `poolProgramAddress` only for a custom pool program. `authority` defaults to `payer`.
    *
    * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
    * remote pools and rate limits separately before using the lane.
@@ -1080,13 +1077,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedInitChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
@@ -1115,6 +1112,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
    *
    * @example
@@ -1122,7 +1120,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.initChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remoteTokenDecimals: 18,
@@ -1137,8 +1134,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. Pass
-   * canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   * Builds an unsigned instruction that closes a Solana token pool remote-chain config. The pool
+   * program is resolved on-chain; pass `poolProgramAddress` only for a custom pool program.
+   * `authority` defaults to `payer`.
    *
    * @remarks
    * Destructive: this closes the remote-chain config account and returns its rent to `authority`.
@@ -1151,13 +1149,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedEditChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote chain selector is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedDeleteChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   payer,
    *   authority,
@@ -1185,6 +1183,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the chain config does not exist, the wallet is not the pool
    * owner, or simulation/submission fails.
    *
@@ -1193,7 +1192,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.deleteChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   wallet,
    * })
@@ -1207,8 +1205,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that assigns the rate-limit admin for an initialized Solana
-   * token pool. Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority`
-   * defaults to `payer`.
+   * token pool. The pool program is resolved on-chain; pass `poolProgramAddress` only for a
+   * custom pool program. `authority` defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner. This assignment takes
    * effect immediately; unlike ownership transfer, it has no acceptance step. The new rate-limit
@@ -1218,13 +1216,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedSetChainRateLimit}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetRateLimitAdmin({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   newRateLimitAdmin,
    *   payer,
    *   authority,
@@ -1250,6 +1248,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the pool does not exist, the wallet is not the pool owner,
    * or simulation/submission fails.
    *
@@ -1258,7 +1257,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.setRateLimitAdmin({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   newRateLimitAdmin,
    *   wallet,
    * })
@@ -1270,8 +1268,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction to deposit a rebalancer's tokens into a lock-release pool.
-   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
-   * have the canonical lock-release `provideLiquidity` instruction and account layout. `authority`
+   * The mint's lock-release pool is resolved on-chain; pass `poolProgramAddress` only for a custom
+   * program, which must have the canonical lock-release `provideLiquidity` instruction and account
+   * layout. `authority`
    * defaults to `payer`. `amount` is a positive u64 in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
@@ -1296,7 +1295,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const liquidity = await cct.generateUnsignedProvideLiquidity({
    *   payer: rebalancer,
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   amount: 1_000_000n,
    *   includeApproval: true,
    * })
@@ -1310,8 +1308,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Deposits tokens from the executing rebalancer wallet into a lock-release pool.
-   * Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom program must
-   * have the canonical lock-release `provideLiquidity` instruction and account layout. The wallet's
+   * The mint's lock-release pool is resolved on-chain; pass `poolProgramAddress` only for a custom
+   * program, which must have the canonical lock-release `provideLiquidity` instruction and account
+   * layout. The wallet's
    * associated token account must exist and hold the positive u64 `amount` in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
@@ -1340,7 +1339,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.provideLiquidity({
    *   wallet,
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   amount: 1_000_000n,
    *   includeApproval: true,
    * })
@@ -1352,9 +1350,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction to withdraw tokens from a lock-release pool to a rebalancer's
-   * associated token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`;
-   * a custom program must have the canonical lock-release `withdrawLiquidity` instruction and account
-   * layout. `authority` defaults to `payer`. `amount` is a positive u64 in base units.
+   * associated token account. The mint's lock-release pool is resolved on-chain; pass
+   * `poolProgramAddress` only for a custom program, which must have the canonical lock-release
+   * `withdrawLiquidity` instruction and account layout. `authority` defaults to `payer`. `amount`
+   * is a positive u64 in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
    * transaction authority. The rebalancer's associated token account must already exist.
@@ -1364,6 +1363,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -1373,7 +1373,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const withdrawal = await cct.generateUnsignedWithdrawLiquidity({
    *   payer: rebalancer,
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   amount: 1_000_000n,
    * })
    * ```
@@ -1386,8 +1385,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Withdraws tokens from a lock-release pool into the executing rebalancer wallet's associated
-   * token account. Pass `poolType: 'lock-release'` or a compatible `poolProgramAddress`; a custom
-   * program must have the canonical lock-release `withdrawLiquidity` instruction and account layout.
+   * token account. The mint's lock-release pool is resolved on-chain; pass `poolProgramAddress`
+   * only for a custom program, which must have the canonical lock-release `withdrawLiquidity`
+   * instruction and account layout.
    * The wallet's associated token account must exist. `amount` is a positive u64 in base units.
    *
    * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
@@ -1400,6 +1400,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter, address, or amount is invalid, or
    * the authority differs from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, liquidity is disabled,
@@ -1411,7 +1412,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * await cct.withdrawLiquidity({
    *   wallet,
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   amount: 1_000_000n,
    * })
    * ```
@@ -1422,8 +1422,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets whether an initialized Solana lock-release token pool
-   * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. Pass canonical
-   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   * accepts `provideLiquidity` deposits and `withdrawLiquidity` transfers. The mint's lock-release
+   * pool is resolved on-chain; pass `poolProgramAddress` only for a custom program. `authority`
+   * defaults to `payer`.
    *
    * @remarks
    * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
@@ -1434,13 +1435,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedSetRebalancer}
    *
    * @throws {@link CCTParamsInvalidError} If `allow`, a pool parameter, or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetCanAcceptLiquidity({
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   allow: true,
    *   payer,
    *   authority,
@@ -1468,6 +1469,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If `allow` or a pool parameter is invalid, or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
    *
    * @example
@@ -1475,7 +1477,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.setCanAcceptLiquidity({
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   allow: true,
    *   wallet,
    * })
@@ -1489,10 +1490,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets the address authorized to provide or withdraw
-   * liquidity for an initialized Solana lock-release token pool. Pass canonical
-   * `poolType: 'lock-release'` or a compatible `poolProgramAddress`; `authority` defaults to
-   * `payer`. The default/zero public key (`11111111111111111111111111111111`) disables
-   * rebalancing.
+   * liquidity for an initialized Solana lock-release token pool, resolved on-chain; pass
+   * `poolProgramAddress` only for a custom program. `authority` defaults to `payer`. The
+   * default/zero public key (`11111111111111111111111111111111`) disables rebalancing.
    *
    * @remarks
    * ⚠️ **Consequence:** Rebalancer is the address allowed to provide or withdraw liquidity.
@@ -1505,13 +1505,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedSetCanAcceptLiquidity}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or public key is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetRebalancer({
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   rebalancer,
    *   payer,
    *   authority,
@@ -1526,8 +1526,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Sets the address authorized to provide or withdraw liquidity for an initialized Solana
-   * lock-release token pool using the pool owner wallet. Pass canonical `poolType: 'lock-release'`
-   * or a compatible `poolProgramAddress`; set `rebalancer` to the default/zero public key
+   * lock-release token pool using the pool owner wallet. The pool is resolved on-chain; pass
+   * `poolProgramAddress` only for a custom program. Set `rebalancer` to the default/zero public key
    * (`11111111111111111111111111111111`) to disable rebalancing.
    *
    * @remarks
@@ -1543,6 +1543,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
    *
    * @example
@@ -1550,7 +1551,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.setRebalancer({
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   rebalancer,
    *   wallet,
    * })
@@ -1561,7 +1561,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.setRebalancer({
    *   tokenAddress: mint,
-   *   poolType: 'lock-release',
    *   rebalancer: PublicKey.default.toBase58(), // disable
    *   wallet,
    * })
@@ -1573,9 +1572,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that proposes a new owner for an initialized Solana token pool.
-   * Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to `payer`.
-   * The operation reads pool state and rejects the current owner or default public key. The proposed
-   * owner must accept ownership separately before the transfer takes effect.
+   * The operation reads pool state, resolving the pool program on-chain (pass `poolProgramAddress`
+   * only for a custom pool program), and rejects the current owner or default public key.
+   * `authority` defaults to `payer`. The proposed owner must accept ownership separately before the
+   * transfer takes effect.
    *
    * @see {@link transferPoolOwnership}
    * @see {@link generateUnsignedAcceptPoolOwnership}
@@ -1588,7 +1588,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedTransferPoolOwnership({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   newOwner,
    *   payer,
    *   authority,
@@ -1620,7 +1619,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.transferPoolOwnership({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   newOwner,
    *   wallet,
    * })
@@ -1634,8 +1632,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that accepts pending ownership of an initialized Solana token
-   * pool. Pass canonical `poolType` or a compatible `poolProgramAddress`; `authority` defaults to
-   * `payer`. The operation reads pool state and requires it to be the proposed owner.
+   * pool. The operation reads pool state, resolving the pool program on-chain (pass
+   * `poolProgramAddress` only for a custom pool program), and requires `authority` to be the
+   * proposed owner. `authority` defaults to `payer`.
    *
    * @see {@link acceptPoolOwnership}
    * @see {@link generateUnsignedTransferPoolOwnership}
@@ -1648,7 +1647,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedAcceptPoolOwnership({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   payer,
    *   authority,
    * })
@@ -1679,7 +1677,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.acceptPoolOwnership({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   wallet,
    * })
    * ```
@@ -1692,8 +1689,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets inbound and outbound rate limits for an initialized
-   * Solana token pool remote-chain config. Pass canonical `poolType` or a compatible
-   * `poolProgramAddress`; `authority` defaults to `payer`.
+   * Solana token pool remote-chain config. The pool program is resolved on-chain; pass
+   * `poolProgramAddress` only for a custom pool program. `authority` defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin.
    * The remote-chain config must already exist. Enabled limits require `rate <= capacity`;
@@ -1703,13 +1700,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedInitChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter, rate limit, or selector is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetChainRateLimit({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
    *   outbound: { enabled: false }, // Disabled limits default capacity and rate to zero.
@@ -1737,6 +1734,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter or rate limit is invalid, or the
    * authority differs from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If the chain config does not exist, the wallet is neither the
    * pool owner nor rate-limit admin, or simulation/submission fails.
    *
@@ -1745,7 +1743,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.setChainRateLimit({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
    *   outbound: { enabled: false }, // Disabled limits default capacity and rate to zero.
@@ -1760,21 +1757,22 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
    * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
-   * replaces the remote token address, pool addresses, and decimals. Pass canonical `poolType` or
-   * a compatible `poolProgramAddress`; `authority` defaults to `payer`.
+   * replaces the remote token address, pool addresses, and decimals. The pool program is resolved
+   * on-chain; pass `poolProgramAddress` only for a custom pool program. `authority` defaults to
+   * `payer`.
    *
    * @see {@link editChainRemoteConfig}
    * @see {@link generateUnsignedInitChainRemoteConfig}
    * @see {@link generateUnsignedDeleteChainRemoteConfig}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedEditChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
@@ -1802,6 +1800,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
    *
    * @example
@@ -1809,7 +1808,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.editChainRemoteConfig({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
    *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
@@ -1827,11 +1825,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana lookup table extend instructions.
    *
-   * Pass `tokenAddress` with a canonical `poolType` or custom `poolProgramAddress` to append the
-   * standard CCIP pool addresses; pass `additionalAddresses` to append manual addresses. `authority`
-   * defaults to `payer`.
+   * Pass `tokenAddress` to append the standard CCIP addresses of its pool, whose program is
+   * resolved on-chain (add `poolProgramAddress` only for a custom pool program); pass
+   * `additionalAddresses` to append manual addresses. `authority` defaults to `payer`.
    *
    * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    *
@@ -1857,11 +1856,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Extends a Solana lookup table.
    *
-   * Pass `tokenAddress` with a canonical `poolType` or custom `poolProgramAddress` to append the
-   * standard CCIP pool addresses.
+   * Pass `tokenAddress` to append the standard CCIP addresses of its pool, whose program is
+   * resolved on-chain; add `poolProgramAddress` only for a custom pool program.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
    * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
@@ -2083,9 +2083,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
-   * be initialized first. Pass canonical `poolType` or a compatible `poolProgramAddress`;
-   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
-   * transaction reverts.
+   * be initialized first; its program is resolved on-chain, so pass `poolProgramAddress` only for a
+   * custom pool program. `authority` defaults to `payer`. Every removed address must already be
+   * allowlisted or the transaction reverts.
    *
    * @remarks Removal does not change enforcement; removing the last allowed sender while the
    * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
@@ -2094,13 +2094,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link removeFromAllowlist}
    *
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    *
    * @example
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remove: [sender],
    *   payer,
    *   authority,
@@ -2126,6 +2126,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
    * from the executing wallet.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If no pool state exists under `poolProgramAddress`.
    * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
    *
    * @example
@@ -2133,7 +2134,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * await cct.removeFromAllowlist({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remove: [sender],
    *   wallet,
    * })
@@ -2316,7 +2316,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * const cct = SolanaTokenManager.fromChain(chain)
    * const remotes = await cct.getTokenPoolRemotes({
    *   tokenAddress: mint,
-   *   poolType: 'burn-mint',
    *   remoteChainSelector: 5009297550715157269n,
    * })
    * console.log(remotes)
@@ -2327,16 +2326,21 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Reads a Lock/Release token pool's state account, whose config also reports its liquidity
-   * fields (`rebalancer`, `canAcceptLiquidity`).
+   * Reads a token pool's state account. The pool program is resolved on-chain from `tokenAddress`;
+   * pass `poolProgramAddress` only for a custom pool program.
    *
-   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * @remarks The result shape follows the resolved program: a lock-release pool (the canonical
+   * program, or a custom one whose `typeAndVersion` names lock-release) also reports its liquidity
+   * fields (`rebalancer`, `canAcceptLiquidity`); narrow on their presence.
+   *
+   * The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
    * its fields are flat where these nest under `state.config`, it spells `config.mint` /
    * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
    * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
    * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
    *
-   * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid, or the
+   * mint has no canonical pool, or both.
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
    * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
    *
@@ -2344,35 +2348,16 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * ```ts
    * const cct = SolanaTokenManager.fromChain(chain)
    * const state = await cct.getTokenPoolState({
-   *   poolType: 'lock-release',
    *   tokenAddress: mint,
    * })
    * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
    * console.log(state.config.owner, state.config.mint, state.config.decimals)
    * // lock-release only: who rebalances the pool, and whether it accepts liquidity
-   * console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
+   * if ('rebalancer' in state.config) {
+   *   console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
+   * }
    * ```
    */
-  getTokenPoolState(
-    opts: LockReleasePoolProgramRef & { tokenAddress: string },
-  ): Promise<LockReleaseGetTokenPoolStateResult>
-  /**
-   * Reads a Burn/Mint or custom token pool's state account; its config carries no liquidity
-   * fields. Pass `poolProgramAddress` instead of `poolType` for a custom pool program.
-   */
-  getTokenPoolState(
-    opts: (BurnMintPoolProgramRef | CustomPoolProgramRef) & {
-      tokenAddress: string
-    },
-  ): Promise<BaseGetTokenPoolStateResult>
-  /**
-   * Reads a pool state account whose program is not known statically; narrow the result on the
-   * presence of the lock-release-only config fields.
-   */
-  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult>
-  /**
-   * Implementation for the overloads above; callers always resolve to one of those.
-   * */
   getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }

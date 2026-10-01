@@ -19,8 +19,9 @@ import {
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
 } from '../../validate.ts'
@@ -36,7 +37,7 @@ type DeleteChainRemoteConfigParams = PoolProgramRef & {
 
 type ParsedDeleteChainRemoteConfigParams = {
   tokenAddress: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   payer: PublicKey
   authority: PublicKey
   remoteChainSelector: bigint
@@ -73,7 +74,11 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       payer,
       authority:
         params.authority === undefined
@@ -83,18 +88,24 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
     }
   }
 
-  /** Builds the unsigned Solana `deleteChainConfig` instruction. */
+  /** Resolves the pool program on-chain, then builds the unsigned Solana `deleteChainConfig` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedDeleteChainRemoteConfigParams,
   ): Promise<UnsignedSolanaTx> {
-    const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const poolProgram = await resolveExistingPoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const program = createTokenPoolProgram(chain, poolProgram, opts.payer)
     const instruction = await program.methods
       .deleteChainConfig(new BN(opts.remoteChainSelector.toString()), opts.tokenAddress)
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state: deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress),
         chainConfig: deriveTokenPoolChainConfigPda(
-          opts.poolProgram,
+          poolProgram,
           opts.remoteChainSelector,
           opts.tokenAddress,
         ),
@@ -103,7 +114,7 @@ export class DeleteChainRemoteConfig extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, remoteChainSelector = ${opts.remoteChainSelector}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}, remoteChainSelector = ${opts.remoteChainSelector}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
