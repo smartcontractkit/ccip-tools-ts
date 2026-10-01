@@ -3685,14 +3685,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Applies the pool's remote-lane configuration, signing + submitting with `opts.wallet`.
-   * @remarks Same version-discriminated params as
-   * {@link generateUnsignedApplyChainUpdates} — see there for the v1.5.0 vs v1.5.1 divergence.
-   * `opts.sender` defaults to the wallet's own address (the only address `onlyOwner` can pass) and
-   * is rejected if it differs, so the wallet must be the pool owner.
+   * @remarks Same params as {@link generateUnsignedApplyChainUpdates} — see there for how a
+   * v1.5.0 pool is handled. `opts.sender` defaults to the wallet's own address (the only address
+   * `onlyOwner` can pass) and is rejected if it differs, so the wallet must be the pool owner.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `version` does not match the
-   * pool's own generation, or `sender` is given and is not the wallet address / pool owner. As
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane lists several remote
+   * pools for a v1.5.0 pool, or `sender` is given and is not the wallet address / pool owner. As
    * with {@link generateUnsignedApplyChainUpdates}, an enabled rate limiter on a **v1.5.0 or
    * v1.5.1** pool must satisfy the stricter `0 < rate < capacity`.
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -3702,7 +3701,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```typescript
    * // `wallet` must sign as the pool owner
    * const { hash } = await cct.applyChainUpdates({
-   *   version: '1.5.1',
    *   poolAddress: '0xPool...',
    *   remoteChainSelectorsToRemove: [],
    *   chainsToAdd: [
@@ -3727,25 +3725,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * enabling and disabling the pool's remote lanes: remote token, remote pool(s), and both
    * directional rate limits.
    *
-   * @remarks **The parameter shape is version-discriminated**, because the contract's own
-   * signature changed at v1.5.1 — this is the one CCT pool write where the caller must say which
-   * generation it is writing for, via `opts.version`:
-   *
-   * - `version: '1.5.0'` — a single `chains` array. Each entry carries the enable/disable bit
-   *   inline (`allowed: false` removes the lane) and a **singular** `remotePoolAddress`.
-   * - `version: '1.5.1'` — removals in `remoteChainSelectorsToRemove`, additions in `chainsToAdd`,
-   *   and each addition carries **plural** `remotePoolAddresses`. This is also the shape for
-   *   v1.6.0, v1.6.1 and v2.0.0 pools, whose calldata is byte-identical to v1.5.1's.
-   *
-   * The declaration is checked against the pool's on-chain `typeAndVersion`, so writing the wrong
-   * shape is a parameter error here rather than a tx that reverts on an unknown selector (the two
-   * signatures have different selectors: `0xdb6327dc` vs `0xe8a1da17`).
+   * @remarks One parameter shape for every pool version: removals in
+   * `remoteChainSelectorsToRemove`, additions in `chainsToAdd`, each addition carrying **plural**
+   * `remotePoolAddresses` — the contract's own signature from v1.5.1 up (v1.6.0, v1.6.1 and
+   * v2.0.0 included). A **v1.5.0** pool, detected from its on-chain `typeAndVersion` (a read this
+   * op makes anyway), has an older signature, so the params are adapted to its single `chains`
+   * array: each removal becomes an `allowed: false` lane, each addition an `allowed: true` lane.
+   * A v1.5.0 pool holds a single remote pool per lane, so there each `remotePoolAddresses` must
+   * have exactly one entry.
    *
    * Rate limits use the SDK's `enabled` spelling, not the ABI's `isEnabled`, matching the Solana
    * counterpart; amounts are in the token's smallest unit. Pass `opts.sender` to pre-flight it
    * against the pool's `owner()` — `applyChainUpdates` is `onlyOwner`.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, `version` does not match the
-   * pool's own generation, or `sender` is not the pool owner. An enabled rate limiter must have
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane lists several remote
+   * pools for a v1.5.0 pool, or `sender` is not the pool owner. An enabled rate limiter must have
    * `rate <= capacity` on every version; on a **v1.5.0, v1.5.1 or v1.6.0** pool the bound is
    * stricter (`0 < rate < capacity`), so a `rate` of `0n` or a `rate` equal to `capacity` is also
    * rejected there — v1.6.1 and v2.0.0 allow both.
@@ -3757,10 +3750,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `chainsToAdd` and `remoteChainSelectorsToRemove` remains the wholesale-replace idiom.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
-   * @example Enabling a lane on a v1.6.1 pool (the `1.5.1` shape) while retiring an old one:
+   * @example Enabling a lane while retiring an old one — the same call for any pool version:
    * ```typescript
    * const unsigned = await cct.generateUnsignedApplyChainUpdates({
-   *   version: '1.5.1',
    *   poolAddress: '0xPool...',
    *   sender: '0xPoolOwner...',
    *   remoteChainSelectorsToRemove: [3478487238524512106n], // arbitrum-sepolia
@@ -3770,23 +3762,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *       remoteTokenAddress: '0xRemoteToken...',
    *       remotePoolAddresses: ['0xRemotePool...'],
    *       inboundRateLimiterConfig: { enabled: true, capacity: 100_000_000n, rate: 167_000n },
-   *       outboundRateLimiterConfig: { enabled: false },
-   *     },
-   *   ],
-   * })
-   * ```
-   * @example Disabling a lane on a v1.5.0 pool, where removal is `allowed: false`:
-   * ```typescript
-   * const unsigned = await cct.generateUnsignedApplyChainUpdates({
-   *   version: '1.5.0',
-   *   poolAddress: '0xLegacyPool...',
-   *   chains: [
-   *     {
-   *       remoteChainSelector: 16015286601757825753n,
-   *       allowed: false,
-   *       remoteTokenAddress: '0xRemoteToken...',
-   *       remotePoolAddress: '0xRemotePool...', // still required, ignored by the contract
-   *       inboundRateLimiterConfig: { enabled: false },
    *       outboundRateLimiterConfig: { enabled: false },
    *     },
    *   ],
@@ -3981,12 +3956,8 @@ export type { SetRemotePoolParams } from './token-pool/operations/set-remote-poo
 export type { AddRemotePoolParams } from './token-pool/operations/add-remote-pool.ts'
 export type { RemoveRemotePoolParams } from './token-pool/operations/remove-remote-pool.ts'
 export type {
-  ApplyChainUpdatesParamVersion,
   ApplyChainUpdatesParams,
-  ApplyChainUpdatesParamsV1_5_0,
-  ApplyChainUpdatesParamsV1_5_1,
-  ChainUpdateV1_5_0,
-  ChainUpdateV1_5_1,
+  ChainUpdate,
 } from './token-pool/operations/apply-chain-updates.ts'
 export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
 export type {

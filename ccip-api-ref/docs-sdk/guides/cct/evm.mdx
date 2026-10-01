@@ -156,7 +156,7 @@ For an existing ERC-20, use `generateUnsignedDeployTokenPoolWithExistingTokenVia
 
 Add remote-chain configuration once both sides have a deployed pool. `applyChainUpdates` acts on the pool directly, so it does not need the pool registered in the TokenAdminRegistry yet; that comes next. It can add and remove configurations in one transaction.
 
-`applyChainUpdates` reads the pool's version on-chain and picks the right call shape for you, so you do not pass a version. Supply `chainsToAdd` and `remoteChainSelectorsToRemove` for a v1.5.1 or later pool (v1.6.x and v2.0.0 included), or a single `chains` array with a per-lane `allowed` flag for a legacy v1.5.0 pool. You can still pass `version` to pin the shape explicitly; if it disagrees with what the pool reports on-chain, the call is rejected before the transaction is built.
+`applyChainUpdates` takes the same parameters for every pool version: removals in `remoteChainSelectorsToRemove`, additions in `chainsToAdd`. It reads the pool's version on-chain and encodes the matching call, adapting to the older signature of a legacy v1.5.0 pool for you. A v1.5.0 pool holds only one remote pool per lane, so give each `remotePoolAddresses` a single entry there.
 
 ```typescript
 await cct.applyChainUpdates({

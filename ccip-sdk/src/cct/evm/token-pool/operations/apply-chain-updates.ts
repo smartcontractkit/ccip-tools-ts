@@ -2,13 +2,12 @@
  * applyChainUpdates — configures, enables and disables a token pool's remote lanes: the remote
  * token, the remote pool(s) allowed to bridge into it, and both directional rate limits.
  *
- * The one CCT pool write whose *parameters* changed shape mid-life. {@link ApplyChainUpdatesParams}
- * is therefore discriminated on which lane fields are present — the v1.5.0 `chains` array vs the
- * v1.5.1+ `chainsToAdd` / `remoteChainSelectorsToRemove` pair — rather than on an explicit
- * `version`, which is now an optional override: like its ~17 sibling pool write-ops, the shape is
- * auto-resolved from the pool's own `typeAndVersion` (the same on-chain read
- * {@link ApplyChainUpdates.buildUnsigned} already makes). The file is sectioned by version so each
- * shape's type, parser and encoder sit together.
+ * The one CCT pool write whose *calldata* changed shape mid-life: v1.5.0 takes a single `chains`
+ * array with a per-lane `allowed` bit, v1.5.1+ a `remoteChainSelectorsToRemove` /
+ * `chainsToAdd` pair. Callers only ever see the v1.5.1+ shape, {@link ApplyChainUpdatesParams};
+ * {@link ApplyChainUpdates.buildUnsigned} resolves the pool's version from its own `typeAndVersion`
+ * and, for a v1.5.0 pool, adapts the params to the legacy signature. The file is sectioned by
+ * version so each signature's encoder sits with what it needs.
  *
  * @packageDocumentation
  */
@@ -25,7 +24,6 @@ import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
-  validateBoolean,
   validateNonZeroAddress,
   validateUint64,
 } from '../../validate.ts'
@@ -43,20 +41,16 @@ import {
 } from '../rate-limit.ts'
 
 // ---------------------------------------------------------------------------
-// Shared
+// Params
 // ---------------------------------------------------------------------------
 
 /**
- * The `version` discriminant of {@link ApplyChainUpdatesParams}: the two parameter shapes
- * `applyChainUpdates` has had, each spelled as the version that introduced it — so `1.5.1` is the
- * shape for every pool from v1.5.1 up, v1.6.0, v1.6.1 and v2.0.0 included.
+ * One lane to add or reconfigure.
+ * @remarks Field-for-field the Solana `ChainUpdate` in
+ * `cct/solana/token-pool/operations/apply-chain-updates.ts`, minus its Solana-only
+ * `remoteTokenDecimals`.
  */
-export type ApplyChainUpdatesParamVersion =
-  | typeof TokenPoolVersion.V1_5_0
-  | typeof TokenPoolVersion.V1_5_1
-
-/** The lane fields both parameter shapes share, and which encode identically. */
-type ChainUpdateCommon = {
+export type ChainUpdate = {
   /** CCIP selector of the remote chain (`uint64`). */
   remoteChainSelector: bigint
   /**
@@ -65,14 +59,25 @@ type ChainUpdateCommon = {
    * stores; an unpadded EVM remote would configure fine, then revert every inbound transfer.
    */
   remoteTokenAddress: string
+  /**
+   * Remote pool addresses in the remote chain's own format, like `remoteTokenAddress` — plural,
+   * because a lane may accept several remote pools, e.g. while migrating one. Non-empty, and unique
+   * within the lane (compared by canonical spelling, so two spellings of one address collide). A
+   * **v1.5.0** pool holds a single remote pool per lane, so there it must have exactly one entry.
+   */
+  remotePoolAddresses: string[]
   /** Rate limit for tokens received from the remote chain. */
   inboundRateLimiterConfig: RateLimitConfig
   /** Rate limit for tokens sent to the remote chain. */
   outboundRateLimiterConfig: RateLimitConfig
 }
 
-/** The top-level parameters both shapes share; each version adds its own lane arrays. */
-type ApplyChainUpdatesBaseParams = {
+/**
+ * Parameters for {@link ApplyChainUpdates}: additions and removals as two arrays, the shape of every
+ * pool from v1.5.1 up. A **v1.5.0** pool is written with the same params — its legacy `chains`
+ * signature is derived from them once the pool's version is resolved, at no extra RPC.
+ */
+export type ApplyChainUpdatesParams = {
   /** Token pool whose lanes are being configured. */
   poolAddress: string
   /**
@@ -81,18 +86,45 @@ type ApplyChainUpdatesBaseParams = {
    * rather than as an opaque revert.
    */
   sender?: string
+  /**
+   * Lanes to add or reconfigure. To replace a lane's remote pools wholesale, list its selector
+   * here *and* in `remoteChainSelectorsToRemove` — the contract applies removals first, so that
+   * cross-array pairing stays legal. Within this array a selector may appear only once, and may
+   * not be `0n`; holes are rejected too.
+   */
+  chainsToAdd: ChainUpdate[]
+  /**
+   * Lanes to remove, applied before `chainsToAdd`. No duplicates and no holes; `0n` *is* accepted
+   * here, so a pool already holding a junk lane can be cleaned up.
+   */
+  remoteChainSelectorsToRemove: bigint[]
 }
 
-/** A lane with its rate limits resolved — derived, so the parsed and public shapes cannot drift. */
-type WithParsedRateLimits<T> = Omit<T, 'inboundRateLimiterConfig' | 'outboundRateLimiterConfig'> & {
+/** {@link ChainUpdate} with its rate limits resolved — derived, so the two cannot drift. */
+type ParsedChainUpdate = Omit<
+  ChainUpdate,
+  'inboundRateLimiterConfig' | 'outboundRateLimiterConfig'
+> & {
   inboundRateLimiterConfig: ParsedRateLimitConfig
   outboundRateLimiterConfig: ParsedRateLimitConfig
 }
 
 /**
+ * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.parse} leaves it. The v1.5.1+
+ * encoder adds no validation of its own — a parsed lane is already a `ChainUpdate` struct.
+ */
+type ParsedApplyChainUpdatesParams = Omit<
+  ApplyChainUpdatesParams,
+  'chainsToAdd' | 'remoteChainSelectorsToRemove'
+> & {
+  chainsToAdd: ParsedChainUpdate[]
+  remoteChainSelectorsToRemove: bigint[]
+}
+
+/**
  * Parses a lane's `remoteChainSelector`: a `uint64`, unique within its own array, and — for a lane
  * being *added* — non-zero. `seen` is mutated as each selector is accepted, and is per-array: the
- * same selector in both v1.5.1 arrays is the replace idiom.
+ * same selector in both arrays is the replace idiom.
  *
  * @remarks `requireNonZero` holds only for an addition, which `TokenPool.applyChainUpdates` does
  * not guard: `s_remoteChainSelectors.add(0)` succeeds, so the tx **mines as a success** and leaves
@@ -127,187 +159,8 @@ function parseLaneSelector(
   return selector
 }
 
-/**
- * Parses the lane fields both shapes share. `adding` is false only for a v1.5.0 removal, whose
- * remote addresses the contract ignores: they are left unparsed, as `''`, and encoded empty.
- */
-function parseLaneCommon(
-  operation: string,
-  path: string,
-  update: { [k: string]: unknown },
-  seen: Set<bigint>,
-  adding: boolean,
-): WithParsedRateLimits<ChainUpdateCommon> {
-  const remoteChainSelector = parseLaneSelector(
-    operation,
-    `${path}.remoteChainSelector`,
-    update.remoteChainSelector,
-    seen,
-    adding,
-  )
-  return {
-    remoteChainSelector,
-    remoteTokenAddress: adding
-      ? parseRemoteAddress(
-          operation,
-          `${path}.remoteTokenAddress`,
-          update.remoteTokenAddress,
-          remoteChainSelector,
-        )
-      : '',
-    inboundRateLimiterConfig: parseRateLimitConfig(
-      operation,
-      `${path}.inboundRateLimiterConfig`,
-      update.inboundRateLimiterConfig,
-      null,
-    ),
-    outboundRateLimiterConfig: parseRateLimitConfig(
-      operation,
-      `${path}.outboundRateLimiterConfig`,
-      update.outboundRateLimiterConfig,
-      null,
-    ),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// v1.5.0
-// ---------------------------------------------------------------------------
-
-/**
- * One lane's configuration on a **v1.5.0** pool.
- * @remarks Field-for-field the Solana `ChainUpdate` in
- * `cct/solana/token-pool/operations/apply-chain-updates.ts`, minus its Solana-only
- * `remoteTokenDecimals`.
- */
-export type ChainUpdateV1_5_0 = ChainUpdateCommon & {
-  /**
-   * Whether the lane is enabled. **v1.5.0 only** — `false` removes the lane, which is how this
-   * version spells v1.5.1+'s `remoteChainSelectorsToRemove`. Every other field is still required
-   * for a removal, though the contract ignores both remote addresses, so they are not validated
-   * and are encoded as empty bytes; a lane of `0n` or of a chain the SDK does not know can still be
-   * removed. Both rate limits must be `{ enabled: false }`: v1.5.0
-   * validates them with `mustBeDisabled = !update.allowed` and reverts `RateLimitMustBeDisabled()`
-   * otherwise, so passing a lane's current (enabled) limits back through is rejected.
-   */
-  allowed: boolean
-  /**
-   * Remote pool address in the remote chain's own format, like `remoteTokenAddress`. Singular at
-   * v1.5.0 — one pool per lane.
-   */
-  remotePoolAddress: string
-}
-
-/**
- * {@link ApplyChainUpdatesParamsV1_5_0} once parsed. Shares {@link ApplyChainUpdatesBaseParams} so
- * `poolAddress` / `sender` cannot drift, and pins `version` to a *definite* shape discriminant —
- * {@link ApplyChainUpdates.parse} always sets it, whether the caller supplied it or it was inferred
- * — so {@link ApplyChainUpdates.buildUnsigned} can assert it against the resolved pool.
- */
-type ParsedApplyChainUpdatesParamsV1_5_0 = ApplyChainUpdatesBaseParams & {
-  version: typeof TokenPoolVersion.V1_5_0
-  chains: WithParsedRateLimits<ChainUpdateV1_5_0>[]
-}
-
-/**
- * Parses the v1.5.0 `chains` array. See {@link ChainUpdateV1_5_0.allowed} for why a removal must
- * also carry both rate limits disabled.
- */
-function parseChainsV1_5_0(operation: string, chains: unknown) {
-  validateArray(operation, 'chains', chains, 1)
-  const seen = new Set<bigint>()
-  return chains.map((entry, i) => {
-    const path = `chains[${i}]`
-    const update = parseRecord(operation, path, entry, 'chain update')
-    const { allowed } = update
-    validateBoolean(operation, `${path}.allowed`, allowed)
-    const common = parseLaneCommon(operation, path, update, seen, allowed)
-    const lane = {
-      ...common,
-      allowed,
-      remotePoolAddress: allowed
-        ? parseRemoteAddress(
-            operation,
-            `${path}.remotePoolAddress`,
-            update.remotePoolAddress,
-            common.remoteChainSelector,
-          )
-        : '',
-    }
-    const stillEnabled =
-      !allowed &&
-      (['inboundRateLimiterConfig', 'outboundRateLimiterConfig'] as const).find(
-        (direction) => lane[direction].enabled,
-      )
-    if (stillEnabled) {
-      throw new CCTParamsInvalidError(
-        operation,
-        `${path}.${stillEnabled}`,
-        'must be disabled when allowed is false: v1.5.0 validates both rate limits with mustBeDisabled = !allowed and reverts RateLimitMustBeDisabled — pass { enabled: false } for a removal',
-      )
-    }
-    return lane
-  })
-}
-
-/** Encodes the v1.5.0 signature. */
-const encodeV1_5_0 = (
-  iface: Interface,
-  params: ParsedApplyChainUpdatesParamsV1_5_0,
-): UnsignedEVMTx =>
-  callTx(
-    params.poolAddress,
-    iface.encodeFunctionData('applyChainUpdates', [
-      params.chains.map((lane) => ({
-        ...lane,
-        // a removal's addresses are ignored on-chain, so they go out empty
-        remoteTokenAddress: lane.allowed ? encodeAddressToAny(lane.remoteTokenAddress) : '0x',
-        remotePoolAddress: lane.allowed ? encodeAddressToAny(lane.remotePoolAddress) : '0x',
-        // re-key the shared `enabled` to the ABI's `isEnabled`
-        inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
-          isEnabled,
-          capacity,
-          rate,
-        }))(lane.inboundRateLimiterConfig),
-        outboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
-          isEnabled,
-          capacity,
-          rate,
-        }))(lane.outboundRateLimiterConfig),
-      })),
-    ]),
-  )
-
-// ---------------------------------------------------------------------------
-// v1.5.1+
-// ---------------------------------------------------------------------------
-
-/**
- * One lane's configuration on a **v1.5.1+** pool. No `allowed` bit: removals are a separate array
- * on {@link ApplyChainUpdatesParams}.
- */
-export type ChainUpdateV1_5_1 = ChainUpdateCommon & {
-  /**
-   * Remote pool addresses in the remote chain's own format, like `remoteTokenAddress` — plural,
-   * because a lane may accept several remote pools, e.g. while migrating one. Non-empty, and unique
-   * within the lane (compared by canonical spelling, so two spellings of one address collide).
-   */
-  remotePoolAddresses: string[]
-}
-
-/**
- * {@link ApplyChainUpdatesParamsV1_5_1} once parsed. Shares {@link ApplyChainUpdatesBaseParams} and
- * pins a definite `version` discriminant, for the same reasons as
- * {@link ParsedApplyChainUpdatesParamsV1_5_0}.
- */
-type ParsedApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
-  version: typeof TokenPoolVersion.V1_5_1
-  chainsToAdd: WithParsedRateLimits<ChainUpdateV1_5_1>[]
-  remoteChainSelectorsToRemove: bigint[]
-}
-
-/** Parses the v1.5.1+ pair of arrays: removals (applied first on-chain), then additions. */
-function parseChainsV1_5_1(
+/** Parses the pair of lane arrays: removals (applied first on-chain), then additions. */
+function parseLanes(
   operation: string,
   chainsToAdd: unknown,
   remoteChainSelectorsToRemove: unknown,
@@ -334,30 +187,126 @@ function parseChainsV1_5_1(
   )
 
   const seenAdds = new Set<bigint>()
-  const adds = chainsToAdd.map((entry, i) => {
+  const adds = chainsToAdd.map((entry, i): ParsedChainUpdate => {
     const path = `chainsToAdd[${i}]`
     const update = parseRecord(operation, path, entry, 'chain update')
-    const common = parseLaneCommon(operation, path, update, seenAdds, true)
+    const remoteChainSelector = parseLaneSelector(
+      operation,
+      `${path}.remoteChainSelector`,
+      update.remoteChainSelector,
+      seenAdds,
+      true,
+    )
     const { remotePoolAddresses } = update
     validateArray(operation, `${path}.remotePoolAddresses`, remotePoolAddresses, 1)
     return {
-      ...common,
+      remoteChainSelector,
+      remoteTokenAddress: parseRemoteAddress(
+        operation,
+        `${path}.remoteTokenAddress`,
+        update.remoteTokenAddress,
+        remoteChainSelector,
+      ),
       remotePoolAddresses: parseUniqueRemoteAddresses(
         operation,
         `${path}.remotePoolAddresses`,
         remotePoolAddresses,
-        common.remoteChainSelector,
+        remoteChainSelector,
+      ),
+      inboundRateLimiterConfig: parseRateLimitConfig(
+        operation,
+        `${path}.inboundRateLimiterConfig`,
+        update.inboundRateLimiterConfig,
+        null,
+      ),
+      outboundRateLimiterConfig: parseRateLimitConfig(
+        operation,
+        `${path}.outboundRateLimiterConfig`,
+        update.outboundRateLimiterConfig,
+        null,
       ),
     }
   })
   return { chainsToAdd: adds, remoteChainSelectorsToRemove: removals }
 }
 
-/** Encodes the v1.5.1+ signature. */
-const encodeV1_5_1 = (
+/** Re-keys the SDK's `enabled` to the ABI's `isEnabled`. */
+const toAbiRateLimit = ({ enabled: isEnabled, capacity, rate }: ParsedRateLimitConfig) => ({
+  isEnabled,
+  capacity,
+  rate,
+})
+
+/**
+ * Encodes parsed params into `applyChainUpdates` calldata. `operation` is for the errors of an
+ * encoder that has to adapt the params to its signature, and may fail doing so.
+ */
+type EncodeFn = (
   iface: Interface,
-  params: ParsedApplyChainUpdatesParamsV1_5_1,
-): UnsignedEVMTx =>
+  params: ParsedApplyChainUpdatesParams,
+  operation: string,
+) => UnsignedEVMTx
+
+// ---------------------------------------------------------------------------
+// v1.5.0
+// ---------------------------------------------------------------------------
+
+const DISABLED_RATE_LIMIT = { isEnabled: false, capacity: 0n, rate: 0n }
+
+/**
+ * Encodes the v1.5.0 signature, adapting the params to its single `chains` array:
+ *
+ * - each removal becomes an `allowed: false` lane, with empty addresses (the contract ignores
+ *   them) and both rate limits disabled — v1.5.0 validates them with `mustBeDisabled = !allowed`
+ *   and reverts `RateLimitMustBeDisabled()` otherwise;
+ * - each addition becomes an `allowed: true` lane carrying its one remote pool, v1.5.0's singular
+ *   `remotePoolAddress`.
+ *
+ * Removals go first: v1.5.0 applies `chains` in order, so this keeps v1.5.1+'s removals-first
+ * semantics, and with them the replace idiom (one selector in both arrays).
+ * @throws {@link CCTParamsInvalidError} if a lane lists more than one remote pool, which a v1.5.0
+ * pool cannot hold
+ */
+const encodeV1_5_0: EncodeFn = (iface, params, operation) =>
+  callTx(
+    params.poolAddress,
+    iface.encodeFunctionData('applyChainUpdates', [
+      [
+        ...params.remoteChainSelectorsToRemove.map((remoteChainSelector) => ({
+          remoteChainSelector,
+          allowed: false,
+          remotePoolAddress: '0x',
+          remoteTokenAddress: '0x',
+          outboundRateLimiterConfig: DISABLED_RATE_LIMIT,
+          inboundRateLimiterConfig: DISABLED_RATE_LIMIT,
+        })),
+        ...params.chainsToAdd.map((lane, i) => {
+          const [remotePoolAddress, ...extra] = lane.remotePoolAddresses
+          if (extra.length)
+            throw new CCTParamsInvalidError(
+              operation,
+              `chainsToAdd[${i}].remotePoolAddresses`,
+              `must have exactly one entry for a v${TokenPoolVersion.V1_5_0} pool, which holds a single remote pool per lane; got ${lane.remotePoolAddresses.length}`,
+            )
+          return {
+            remoteChainSelector: lane.remoteChainSelector,
+            allowed: true,
+            remotePoolAddress: encodeAddressToAny(remotePoolAddress!),
+            remoteTokenAddress: encodeAddressToAny(lane.remoteTokenAddress),
+            outboundRateLimiterConfig: toAbiRateLimit(lane.outboundRateLimiterConfig),
+            inboundRateLimiterConfig: toAbiRateLimit(lane.inboundRateLimiterConfig),
+          }
+        }),
+      ],
+    ]),
+  )
+
+// ---------------------------------------------------------------------------
+// v1.5.1+
+// ---------------------------------------------------------------------------
+
+/** Encodes the v1.5.1+ signature, which the params mirror one-to-one. */
+const encodeV1_5_1: EncodeFn = (iface, params) =>
   callTx(
     params.poolAddress,
     iface.encodeFunctionData('applyChainUpdates', [
@@ -366,96 +315,11 @@ const encodeV1_5_1 = (
         ...lane,
         remoteTokenAddress: encodeAddressToAny(lane.remoteTokenAddress),
         remotePoolAddresses: lane.remotePoolAddresses.map((pool) => encodeAddressToAny(pool)),
-        // re-key the shared `enabled` to the ABI's `isEnabled`
-        inboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
-          isEnabled,
-          capacity,
-          rate,
-        }))(lane.inboundRateLimiterConfig),
-        outboundRateLimiterConfig: (({ enabled: isEnabled, capacity, rate }) => ({
-          isEnabled,
-          capacity,
-          rate,
-        }))(lane.outboundRateLimiterConfig),
+        inboundRateLimiterConfig: toAbiRateLimit(lane.inboundRateLimiterConfig),
+        outboundRateLimiterConfig: toAbiRateLimit(lane.outboundRateLimiterConfig),
       })),
     ]),
   )
-
-/**
- * Parameters for {@link ApplyChainUpdates}, a mutually-exclusive union discriminated on which lane
- * fields are present — the v1.5.0 `chains` array vs the v1.5.1+ `chainsToAdd` /
- * `remoteChainSelectorsToRemove` pair — not on `version`.
- *
- * `version` is an **optional** override, not a required discriminant. Omit it and the calldata
- * shape is inferred from the fields you pass, then reconciled against the pool's own
- * `typeAndVersion` — the same on-chain read {@link ApplyChainUpdates.buildUnsigned} already makes,
- * so omitting it costs no extra RPC. Supply it and it is honoured *and* asserted: it must match
- * both the fields present and the pool's resolved shape, so an explicit `version` acts as a safety
- * assertion. The two signatures have different selectors (`0xdb6327dc` vs `0xe8a1da17`), so a
- * mismatch surfaces as a {@link CCTParamsInvalidError} rather than a tx that reverts on an unknown
- * function.
- */
-export type ApplyChainUpdatesParams = ApplyChainUpdatesParamsV1_5_0 | ApplyChainUpdatesParamsV1_5_1
-
-/** The **v1.5.0** parameter shape: a single `chains` array, each lane carrying its `allowed` bit. */
-export type ApplyChainUpdatesParamsV1_5_0 = ApplyChainUpdatesBaseParams & {
-  /**
-   * Optional shape override; auto-resolved when omitted. If supplied it must be `'1.5.0'` — the
-   * shape spelled by the `chains` array — and must match the pool's resolved version.
-   */
-  version?: typeof TokenPoolVersion.V1_5_0
-  /**
-   * Lanes to configure; `allowed: false` removes one. At least one entry, no holes, and a given
-   * `remoteChainSelector` may appear only once. Its presence selects the v1.5.0 shape.
-   */
-  chains: ChainUpdateV1_5_0[]
-  /** Mutually exclusive with {@link ApplyChainUpdatesParamsV1_5_0.chains}; never both. */
-  chainsToAdd?: never
-  /** Mutually exclusive with {@link ApplyChainUpdatesParamsV1_5_0.chains}; never both. */
-  remoteChainSelectorsToRemove?: never
-}
-
-/** The **v1.5.1+** parameter shape: additions and removals as two arrays. */
-export type ApplyChainUpdatesParamsV1_5_1 = ApplyChainUpdatesBaseParams & {
-  /**
-   * Optional shape override; auto-resolved when omitted. If supplied it must be `'1.5.1'` — the
-   * shape for every pool from v1.5.1 up (v1.6.0, v1.6.1, v2.0.0 included) — and must match the
-   * pool's resolved version.
-   */
-  version?: typeof TokenPoolVersion.V1_5_1
-  /**
-   * Lanes to add or reconfigure. To replace a lane's remote pools wholesale, list its selector
-   * here *and* in `remoteChainSelectorsToRemove` — the contract applies removals first, so that
-   * cross-array pairing stays legal. Within this array a selector may appear only once, and may
-   * not be `0n`; holes are rejected too. Presence of this or `remoteChainSelectorsToRemove`
-   * selects the v1.5.1+ shape.
-   */
-  chainsToAdd: ChainUpdateV1_5_1[]
-  /**
-   * Lanes to remove, applied before `chainsToAdd`. No duplicates and no holes; `0n` *is* accepted
-   * here, so a pool already holding a junk lane can be cleaned up.
-   */
-  remoteChainSelectorsToRemove: bigint[]
-  /** Mutually exclusive with the v1.5.1+ arrays; never combined with a v1.5.0 `chains`. */
-  chains?: never
-}
-
-/**
- * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.parse} leaves it. The encoders add
- * no validation of their own — a parsed lane is already a `ChainUpdate` struct.
- */
-type ParsedApplyChainUpdatesParams =
-  | ParsedApplyChainUpdatesParamsV1_5_0
-  | ParsedApplyChainUpdatesParamsV1_5_1
-
-/** Encodes parsed params into `applyChainUpdates` calldata, widened over the parsed union. */
-type EncodeFn = (iface: Interface, params: ParsedApplyChainUpdatesParams) => UnsignedEVMTx
-
-/** One {@link ApplyChainUpdates.encoders} entry: the shape it accepts, and the {@link EncodeFn} for it. */
-type Encoder<V extends ApplyChainUpdatesParamVersion> = {
-  shape: V
-  encode: EncodeFn
-}
 
 /**
  * Configures, enables and disables a token pool's remote lanes via `applyChainUpdates`.
@@ -471,89 +335,23 @@ export class ApplyChainUpdates extends EVMOperation<
   readonly name = 'applyChainUpdates'
 
   /** Encoder per pool version, floor-matched; v1.6.0, v1.6.1 and v2.0.0 inherit v1.5.1's. */
-  private readonly encoders = {
-    [TokenPoolVersion.V1_5_0]: {
-      shape: TokenPoolVersion.V1_5_0,
-      encode: encodeV1_5_0,
-    },
-    [TokenPoolVersion.V1_5_1]: {
-      shape: TokenPoolVersion.V1_5_1,
-      encode: encodeV1_5_1,
-    },
-  } as { [V in ApplyChainUpdatesParamVersion]?: Encoder<V> }
-
-  /**
-   * Infers the calldata shape from which lane fields are present, rejecting a contradictory
-   * combination, and — when `version` was supplied — asserting it agrees with those fields. The
-   * pool's own version is not read here (that is {@link buildUnsigned}'s reconciliation); this only
-   * fixes which *shape* the params are, so {@link parse} knows which parser to run.
-   * @throws {@link CCTParamsInvalidError} if both shapes' fields are present, neither is, or an
-   * explicit `version` disagrees with the fields
-   */
-  private resolveShape(params: ApplyChainUpdatesParams): ApplyChainUpdatesParamVersion {
-    // Read presence through a loose lens: the public union is mutually exclusive, so TS would
-    // narrow a typed read and treat the second field as provably absent — but contradictory input
-    // (e.g. a hand-rolled or `as`-cast caller passing both shapes) is exactly what this rejects.
-    const fields = params as {
-      chains?: unknown
-      chainsToAdd?: unknown
-      remoteChainSelectorsToRemove?: unknown
-    }
-    const hasV1_5_0 = fields.chains !== undefined
-    const hasV1_5_1 =
-      fields.chainsToAdd !== undefined || fields.remoteChainSelectorsToRemove !== undefined
-
-    if (hasV1_5_0 && hasV1_5_1)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'chains',
-        `must not be combined with chainsToAdd/remoteChainSelectorsToRemove: chains is the v${TokenPoolVersion.V1_5_0} shape and chainsToAdd/remoteChainSelectorsToRemove is the v${TokenPoolVersion.V1_5_1}+ shape — pass one shape's fields, not both`,
-      )
-    if (!hasV1_5_0 && !hasV1_5_1)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'chains',
-        `must supply either chains (the v${TokenPoolVersion.V1_5_0} shape) or chainsToAdd/remoteChainSelectorsToRemove (the v${TokenPoolVersion.V1_5_1}+ shape)`,
-      )
-
-    const shape = hasV1_5_0 ? TokenPoolVersion.V1_5_0 : TokenPoolVersion.V1_5_1
-    const { version } = params
-    if (version !== undefined && version !== shape)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'version',
-        `is '${version}' but the fields present are the v${shape} shape — omit version to infer it, or pass the fields for the declared shape (chains for ${TokenPoolVersion.V1_5_0}, chainsToAdd/remoteChainSelectorsToRemove for ${TokenPoolVersion.V1_5_1})`,
-      )
-    return shape
+  private readonly encoders: Partial<Record<TokenPoolVersion, EncodeFn>> = {
+    [TokenPoolVersion.V1_5_0]: encodeV1_5_0,
+    [TokenPoolVersion.V1_5_1]: encodeV1_5_1,
   }
 
   /**
    * Validates the pool address and every lane entry before any RPC, *keeping* what each check
-   * produced so neither {@link buildUnsigned} nor an encoder re-derives it. The calldata shape is
-   * inferred from the fields via {@link resolveShape} (an explicit `version` is an optional
-   * override, asserted there), and pinned as a definite discriminant on the parsed result. Only the
-   * version-conditional rate bound is left to {@link assertRateBounds}.
-   * @throws {@link CCTParamsInvalidError} if the shape is ambiguous or contradictory, or any lane
-   * field is invalid
+   * produced so neither {@link buildUnsigned} nor an encoder re-derives it. Only the
+   * version-conditional checks are left for once the pool's version is known.
+   * @throws {@link CCTParamsInvalidError} if any lane field is invalid
    */
   protected override parse(params: ApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
     validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
-    const { poolAddress, sender } = params
-    switch (this.resolveShape(params)) {
-      case TokenPoolVersion.V1_5_0:
-        return {
-          poolAddress,
-          sender,
-          version: TokenPoolVersion.V1_5_0,
-          chains: parseChainsV1_5_0(this.name, params.chains),
-        }
-      case TokenPoolVersion.V1_5_1:
-        return {
-          poolAddress,
-          sender,
-          version: TokenPoolVersion.V1_5_1,
-          ...parseChainsV1_5_1(this.name, params.chainsToAdd, params.remoteChainSelectorsToRemove),
-        }
+    return {
+      poolAddress: params.poolAddress,
+      sender: params.sender,
+      ...parseLanes(this.name, params.chainsToAdd, params.remoteChainSelectorsToRemove),
     }
   }
 
@@ -562,28 +360,20 @@ export class ApplyChainUpdates extends EVMOperation<
    * just reported, via the shared {@link parseRateLimitConfig}.
    */
   private assertRateBounds(params: ParsedApplyChainUpdatesParams, version: TokenPoolVersion): void {
-    const lanes =
-      params.version === TokenPoolVersion.V1_5_0
-        ? params.chains.map((lane, i) => [`chains[${i}]`, lane] as const)
-        : params.chainsToAdd.map((lane, i) => [`chainsToAdd[${i}]`, lane] as const)
-
-    for (const [path, lane] of lanes) {
+    params.chainsToAdd.forEach((lane, i) => {
       for (const direction of ['inboundRateLimiterConfig', 'outboundRateLimiterConfig'] as const) {
         // already parsed to the shared `enabled` shape; re-running with the resolved version
         // applies the version-conditional bound
-        parseRateLimitConfig(this.name, `${path}.${direction}`, lane[direction], version)
+        parseRateLimitConfig(this.name, `chainsToAdd[${i}].${direction}`, lane[direction], version)
       }
-    }
+    })
   }
 
   /**
-   * Resolves the pool's type and version, applies the checks that needed it, then encodes. The
-   * pool's resolved shape is reconciled against the params' shape — whether that shape was
-   * inferred from the fields or asserted from an explicit `version` — so a v1.5.0 `chains` payload
-   * against a v1.5.1+ pool (or the reverse) fails here rather than reverting on a selector the pool
-   * does not implement.
-   * @throws {@link CCTParamsInvalidError} if the params' shape is not this pool's, a rate limit
-   * breaks its enabled-bucket bound, or `sender` is not the pool owner
+   * Resolves the pool's type and version, applies the checks that needed it, then encodes for that
+   * version's signature — adapting the params to v1.5.0's `chains` array on a legacy pool.
+   * @throws {@link CCTParamsInvalidError} if a rate limit breaks its enabled-bucket bound, a lane
+   * lists several remote pools for a v1.5.0 pool, or `sender` is not the pool owner
    * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
@@ -592,30 +382,16 @@ export class ApplyChainUpdates extends EVMOperation<
     params: ParsedApplyChainUpdatesParams,
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
-
-    // explicit type argument: inference would otherwise fix `F` to the first entry's `shape`
-    const { shape, encode } = resolveEncoder<Encoder<ApplyChainUpdatesParamVersion>>(
-      this.encoders,
-      version,
-      this.name,
-    )
-    if (params.version !== shape)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'version',
-        `is the v${shape} shape for this pool, which reports v${version}, but the ${
-          params.version === TokenPoolVersion.V1_5_0
-            ? 'chains'
-            : 'chainsToAdd/remoteChainSelectorsToRemove'
-        } fields are the v${params.version} shape — the two signatures have different selectors, so that shape would not exist on-chain. Pass the v${shape} shape's fields (chains for ${TokenPoolVersion.V1_5_0}, chainsToAdd/remoteChainSelectorsToRemove for ${TokenPoolVersion.V1_5_1})`,
-      )
+    const encode = resolveEncoder(this.encoders, version, this.name)
 
     this.assertRateBounds(params, version)
+    // encoded before the owner probe, so a lane the v1.5.0 adapter cannot express fails first
+    const tx = encode(getTokenPoolInterface(type, version), params, this.name)
 
     if (params.sender !== undefined)
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
 
-    return encode(getTokenPoolInterface(type, version), params)
+    return tx
   }
 
   /**
