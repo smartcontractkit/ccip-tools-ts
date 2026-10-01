@@ -1716,8 +1716,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
       const router = refAddresses.router
 
-      // Resolve the receiver and its remaining_accounts
+      // Resolve the receiver and its remaining_accounts. The view consults the receiver only for
+      // an arbitrary (data) message: a message with no data AND no receive-gas is token-only —
+      // driven by the pool — so it must get NO receiver accounts (`is_offramp_token_only_transfer`;
+      // passing them anyway fails with InvalidAccountListLengths).
       const message = request.message as CCIPMessage
+      const dataLen = getDataBytes(message.data).length
+      const receiveGasLimit = Number(
+        (message as { ccipReceiveGasLimit?: number | bigint }).ccipReceiveGasLimit ??
+          (message as { gasLimit?: number | bigint }).gasLimit ??
+          0,
+      )
       let messageReceiver = PublicKey.default
       const remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = []
       if (message.receiver && message.receiver !== '0x') {
@@ -1727,7 +1736,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           // non-svm or zero receiver — leave default, skip receiver consultation
         }
       }
-      if (!messageReceiver.equals(PublicKey.default)) {
+      const isArbitrary =
+        !messageReceiver.equals(PublicKey.default) && (dataLen > 0 || receiveGasLimit > 0)
+      if (isArbitrary) {
         // receiver_registry PDA: [RECEIVER_REGISTRY, receiver] under router
         const [registryPda] = PublicKey.findProgramAddressSync(
           [Buffer.from('receiver_registry'), messageReceiver.toBuffer()],
@@ -1777,6 +1788,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
           tokenTransfer: null,
           messageReceiver,
+          dataLen,
+          ccipReceiveGasLimit: receiveGasLimit,
           sender: Buffer.from(getAddressBytes(message.sender)),
           resolutionMetadata: Buffer.alloc(0),
           remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
