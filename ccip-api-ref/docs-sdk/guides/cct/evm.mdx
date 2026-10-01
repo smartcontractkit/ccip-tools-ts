@@ -212,7 +212,7 @@ const unsigned = await cct.generateUnsignedRegisterAdmin({
 
 ## Configure a token pool
 
-Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool, and the sender allowlist exists only through v1.6.1. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
+Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool. The sender allowlist lives in the pool through v1.6.1 and in its bound `AdvancedPoolHooks` on v2.0.0; `applyAllowlistUpdates` targets whichever applies. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
 
 ### Rate limits and transfer fees
 

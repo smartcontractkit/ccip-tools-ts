@@ -25,7 +25,7 @@ The EVM CCT operations work with several token pool contract types across five p
 
 ## Operation applicability by pool version
 
-A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved pool is older, and the sender allowlist exists only through v1.6.1. Read the pool version (`getTokenPoolState`) before calling a version-scoped operation.
+A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved pool is older. The sender allowlist moved in v2.0.0 from the pool to its bound `AdvancedPoolHooks`; `applyAllowlistUpdates` and `getAllowlist` follow it for you. Read the pool version (`getTokenPoolState`) before calling a version-scoped operation.
 
 | Operation group | Methods | Applies to |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved 
 | Rate limits | `setChainRateLimiterConfigs` | All versions (`fastFinality` targets the v2.0.0 FTF bucket only) |
 | Admin & pool registration | `registerAdmin`, `acceptAdmin`, `setPool`, ownership transfers | All versions |
 | Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry` | All versions |
-| Sender allowlist | `applyAllowlistUpdates` | v1.5.0 to v1.6.1 only (removed in v2.0.0) |
+| Sender allowlist | `applyAllowlistUpdates`, `getAllowlist`, `getAllowlistEnabled` | All versions (the pool through v1.6.1; its bound `AdvancedPoolHooks` on v2.0.0) |
 | Transfer fees & finality | `applyTokenTransferFeeConfigUpdates`, `setAllowedFinalityConfig`, `getFee`, `getTokenTransferFeeConfig`, `getAllowedFinalityConfig` | v2.0.0 only |
 | CCVs & hooks | `deployAdvancedPoolHooks`, `updateAdvancedPoolHooks`, `getAdvancedPoolHooks`, plus the methods that take `poolAddress` and act on its bound hooks: `applyCCVConfigUpdates`, `getCCVConfig`, `getAllCCVConfigs`, `getRequiredCCVs`, `setPolicyEngine`, `getPolicyEngine`, `setThresholdAmount`, `getThresholdAmount`, `updateAdvancedPoolHooksAuthorizedCallers`, `getAllAdvancedPoolHooksAuthorizedCallers` | v2.0.0 only |
 | Lockbox | `getLockbox` | v2.0.0 only |
