@@ -1,6 +1,6 @@
 /**
- * getAllCCVConfigs — reads every configured remote-chain CCV requirement from the
- * `AdvancedPoolHooks` bound to a v2.0.0 pool.
+ * getAllCCVConfigs — reads every configured remote-chain CCV requirement from `AdvancedPoolHooks`,
+ * given directly or as the hooks bound to a v2.0.0 pool.
  *
  * @remarks Hooks may be shared, so the result is the configuration of every pool bound to the same
  * hooks, not one specific to `poolAddress`.
@@ -10,14 +10,16 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress } from '../../validate.ts'
-import { type CCVConfigUpdate, readAllCCVConfigs, resolveAdvancedPoolHooks } from '../contracts.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  type CCVConfigUpdate,
+  readAllCCVConfigs,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
+} from '../contracts.ts'
 
-/** Parameters for {@link GetAllCCVConfigs}. */
-export type GetAllCCVConfigsParams = {
-  /** v2.0.0 token pool whose bound hooks are read. */
-  poolAddress: string
-}
+/** Parameters for {@link GetAllCCVConfigs}: the hooks to read, directly or through a pool. */
+export type GetAllCCVConfigsParams = AdvancedPoolHooksTarget
 
 /** Complete CCV configs for configured remote chains, in the contract's enumerable-set order. */
 export type GetAllCCVConfigsResult = CCVConfigUpdate[]
@@ -26,25 +28,25 @@ export type GetAllCCVConfigsResult = CCVConfigUpdate[]
 export class GetAllCCVConfigs extends EVMQuery<GetAllCCVConfigsParams, GetAllCCVConfigsResult> {
   readonly name = 'getAllCCVConfigs'
 
-  /** @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid or zero */
+  /** @throws {@link CCTParamsInvalidError} if the target is invalid */
   protected prepare(params: GetAllCCVConfigsParams): GetAllCCVConfigsParams {
-    validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
+    validateAdvancedPoolHooksTarget(this.name, params)
     return params
   }
 
   /**
-   * Resolves the pool's bound hooks, then lists their configs.
-   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
-   * address is not `AdvancedPoolHooks`
+   * Resolves the target hooks, then lists their configs.
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`, or the
+   * pool's type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if the pool has no hooks bound
    */
   protected async read(
     chain: EVMChain,
-    { poolAddress }: GetAllCCVConfigsParams,
+    params: GetAllCCVConfigsParams,
   ): Promise<GetAllCCVConfigsResult> {
-    const hooks = await resolveAdvancedPoolHooks(this.name, chain, poolAddress)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
     return readAllCCVConfigs(chain, hooks)
   }
 }

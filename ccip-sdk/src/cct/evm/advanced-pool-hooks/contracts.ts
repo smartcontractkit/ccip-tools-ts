@@ -2,8 +2,9 @@
  * EVM `AdvancedPoolHooks` contract layer for CCT: the cached {@link Interface}
  * ({@link ADVANCED_POOL_HOOKS_INTERFACE}), the deploy artifact
  * ({@link getAdvancedPoolHooksArtifact}), the bind-target guard
- * ({@link assertAdvancedPoolHooksContract}), the pool-to-hooks resolution every hooks op targets
- * through ({@link resolveAdvancedPoolHooks}), and the owner guard its owner-gated writes pre-flight
+ * ({@link assertAdvancedPoolHooksContract}), the target every hooks op resolves — the hooks
+ * themselves or a pool's bound hooks ({@link resolveAdvancedPoolHooksTarget},
+ * {@link resolveAdvancedPoolHooks}) — and the owner guard its owner-gated writes pre-flight
  * `sender` against ({@link assertAdvancedPoolHooksOwner}). Only one version is deployable, so
  * there is no version framework here. Mirrors `lockbox/contracts.ts`.
  *
@@ -28,6 +29,7 @@ import {
   resolveEncoder,
   resolveTokenPool,
 } from '../token-pool/contracts.ts'
+import { validateNonZeroAddress } from '../validate.ts'
 
 /** The `typeAndVersion` contract type an `AdvancedPoolHooks` reports (`"AdvancedPoolHooks 2.0.0"`). */
 export const ADVANCED_POOL_HOOKS_TYPE = 'AdvancedPoolHooks'
@@ -308,4 +310,68 @@ export async function resolveAdvancedPoolHooks(
     )
   await assertAdvancedPoolHooksContract(chain, hooks)
   return hooks
+}
+
+/**
+ * The `AdvancedPoolHooks` a hooks op targets: the contract itself, or a v2.0.0 pool whose bound
+ * hooks are resolved with {@link resolveAdvancedPoolHooks}. Exactly one of the two.
+ *
+ * @remarks Address the hooks directly to configure them before they are bound — so a pool
+ * re-pointed to fresh hooks never runs on an unconfigured set — or in a multisig batch that also
+ * re-points the pool, where `poolAddress` would resolve to the hooks bound at build time.
+ */
+export type AdvancedPoolHooksTarget =
+  | {
+      /** `AdvancedPoolHooks` contract to target; must report type `AdvancedPoolHooks`. */
+      advancedPoolHooks: string
+      poolAddress?: never
+    }
+  | {
+      /**
+       * v2.0.0 token pool whose bound `AdvancedPoolHooks` are the target. Hooks may be shared, so a
+       * write through this pool changes every pool bound to the same hooks.
+       */
+      poolAddress: string
+      advancedPoolHooks?: never
+    }
+
+/**
+ * Validates an {@link AdvancedPoolHooksTarget} before any RPC: exactly one of `advancedPoolHooks`
+ * or `poolAddress`, and that one a non-zero address.
+ * @throws {@link CCTParamsInvalidError} if both or neither are given, or the given one is invalid
+ */
+export function validateAdvancedPoolHooksTarget(
+  operation: string,
+  target: AdvancedPoolHooksTarget,
+): void {
+  // Value semantics: an explicit `undefined` does not count as provided.
+  const hasHooks = target.advancedPoolHooks !== undefined
+  if (hasHooks === (target.poolAddress !== undefined))
+    throw new CCTParamsInvalidError(
+      operation,
+      'poolAddress',
+      'provide exactly one of poolAddress or advancedPoolHooks',
+    )
+  if (hasHooks) validateNonZeroAddress(operation, 'advancedPoolHooks', target.advancedPoolHooks)
+  else validateNonZeroAddress(operation, 'poolAddress', target.poolAddress)
+}
+
+/**
+ * Resolves an {@link AdvancedPoolHooksTarget} to the hooks contract: `advancedPoolHooks` as given,
+ * once {@link assertAdvancedPoolHooksContract} confirms it, or the hooks bound to `poolAddress`.
+ * @throws {@link CCTContractTypeInvalidError} if the target is not an `AdvancedPoolHooks`, or the
+ * pool's reported type is not supported
+ * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+ * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+ * @throws {@link CCTParamsInvalidError} if `poolAddress` has no hooks bound
+ */
+export async function resolveAdvancedPoolHooksTarget(
+  operation: string,
+  chain: EVMChain,
+  target: AdvancedPoolHooksTarget,
+): Promise<string> {
+  if (target.advancedPoolHooks === undefined)
+    return resolveAdvancedPoolHooks(operation, chain, target.poolAddress)
+  await assertAdvancedPoolHooksContract(chain, target.advancedPoolHooks)
+  return target.advancedPoolHooks
 }

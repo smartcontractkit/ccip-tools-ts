@@ -1,15 +1,15 @@
 /**
  * updateAdvancedPoolHooksAuthorizedCallers — adds and removes callers permitted to invoke the
- * preflight and postflight checks of the `AdvancedPoolHooks` bound to a v2.0.0 pool.
+ * preflight and postflight checks of `AdvancedPoolHooks`.
  *
  * @remarks Removes are applied before adds, so an address in both arrays remains authorized.
- * Owner-only — gated on the *hooks* owner; the bound hooks and a supplied sender are pre-flighted
+ * Owner-only — gated on the *hooks* owner; the target hooks and a supplied sender are pre-flighted
  * before calldata is built.
  *
- * @remarks The target is resolved from the pool: the tx goes to the hooks bound to `poolAddress`,
- * not to the pool. Hooks may be shared, so this edits the one caller set every pool bound to them
- * shares. To bring another pool onto shared hooks without a window where its transfers revert
- * `UnauthorizedCaller`, authorize it through a pool already bound to them, then bind it.
+ * @remarks The tx goes to the hooks — `advancedPoolHooks`, or those bound to `poolAddress` — not
+ * to the pool. Hooks may be shared, so this edits the one caller set every pool bound to them
+ * shares. To bring a pool onto hooks without a window where its transfers revert
+ * `UnauthorizedCaller`, authorize it first (addressing the hooks directly), then bind it.
  *
  * @packageDocumentation
  */
@@ -22,18 +22,18 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
+  type AdvancedPoolHooksTarget,
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksOwner,
-  resolveAdvancedPoolHooks,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
-/** Parameters for {@link UpdateAdvancedPoolHooksAuthorizedCallers}. */
-export type UpdateAdvancedPoolHooksAuthorizedCallersParams = {
-  /**
-   * v2.0.0 token pool whose bound `AdvancedPoolHooks` are reconfigured. The tx goes to those hooks,
-   * so it changes the caller set of every pool bound to them, not just this one.
-   */
-  poolAddress: string
+/**
+ * Parameters for {@link UpdateAdvancedPoolHooksAuthorizedCallers}; the hooks are given directly or
+ * through a pool.
+ */
+export type UpdateAdvancedPoolHooksAuthorizedCallersParams = AdvancedPoolHooksTarget & {
   /** Callers to authorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
   addedCallers?: string[]
   /** Callers to deauthorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
@@ -57,12 +57,9 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
   readonly name = 'updateAdvancedPoolHooksAuthorizedCallers'
 
   /** Validates addresses and requires at least one addition or removal before any RPC. */
-  protected override validate({
-    poolAddress,
-    addedCallers = [],
-    removedCallers = [],
-  }: UpdateAdvancedPoolHooksAuthorizedCallersParams): void {
-    validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
+  protected override validate(params: UpdateAdvancedPoolHooksAuthorizedCallersParams): void {
+    validateAdvancedPoolHooksTarget(this.name, params)
+    const { addedCallers = [], removedCallers = [] } = params
     validateCallers(this.name, 'addedCallers', addedCallers)
     validateCallers(this.name, 'removedCallers', removedCallers)
     if (addedCallers.length + removedCallers.length === 0)
@@ -74,8 +71,8 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
   }
 
   /**
-   * Resolves the hooks bound to the pool, confirming they are a deployed `AdvancedPoolHooks`, and —
-   * when `sender` is known — that it owns them; then builds `applyAuthorizedCallerUpdates` calldata
+   * Resolves the target hooks, confirming they are a deployed `AdvancedPoolHooks`, and — when
+   * `sender` is known — that it owns them; then builds `applyAuthorizedCallerUpdates` calldata
    * targeting the hooks.
    *
    * @remarks The hooks' contract-type pre-flight comes first because this call sent to an EOA
@@ -85,8 +82,8 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
    * before an offline or multisig signer submits the transaction.
    * @remarks Removes run before adds, so an address in both arrays remains authorized. Repeated
    * callers within either array are rejected, including addresses that differ only by casing.
-   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
-   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`, or the
+   * pool's type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if the pool has no hooks bound, or `sender` is not the
@@ -94,14 +91,10 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    {
-      poolAddress,
-      addedCallers = [],
-      removedCallers = [],
-      sender,
-    }: UpdateAdvancedPoolHooksAuthorizedCallersParams,
+    params: UpdateAdvancedPoolHooksAuthorizedCallersParams,
   ): Promise<UnsignedEVMTx> {
-    const hooks = await resolveAdvancedPoolHooks(this.name, chain, poolAddress)
+    const { addedCallers = [], removedCallers = [], sender } = params
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
     if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
       hooks,

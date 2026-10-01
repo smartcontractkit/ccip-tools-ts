@@ -5,12 +5,11 @@
  * bind it to a pool with `updateAdvancedPoolHooks` (or pass it as the pool constructor's
  * `advancedPoolHooks`). Mirrors `lockbox/operations/deploy-lockbox.ts`.
  *
- * @remarks **Bind before configuring.** Every other hooks op resolves its target from a bound
- * pool's `poolAddress`, so the hooks are reachable only once bound. Put what must hold from the
- * first transfer in the constructor: the allowlist, threshold, policy engine and authorized
- * callers. CCV requirements have no constructor argument — apply them with
- * `applyCCVConfigUpdates` after binding, before the pool's lanes carry transfers; until then the
- * pool requires no CCVs of its own.
+ * @remarks **Configure before binding.** Every other hooks op takes the hooks' own
+ * `advancedPoolHooks` address as well as a bound pool's `poolAddress`, so the hooks can be fully
+ * configured before any pool is bound to them. CCV requirements have no constructor argument —
+ * apply them with `applyCCVConfigUpdates` by `advancedPoolHooks`, then bind; a pool bound to hooks
+ * without them requires no CCVs of its own.
  *
  * @packageDocumentation
  */

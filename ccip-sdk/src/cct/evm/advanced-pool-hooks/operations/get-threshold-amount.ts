@@ -1,28 +1,29 @@
 /**
- * getThresholdAmount — reads the additional-CCV threshold of the `AdvancedPoolHooks` bound to a
- * v2.0.0 pool.
+ * getThresholdAmount — reads the additional-CCV threshold of `AdvancedPoolHooks`, given directly or
+ * as the hooks bound to a v2.0.0 pool.
  *
  * @packageDocumentation
  */
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress } from '../../validate.ts'
-import { readThresholdAmount, resolveAdvancedPoolHooks } from '../contracts.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  readThresholdAmount,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
+} from '../contracts.ts'
 
-/** Parameters for {@link GetThresholdAmount}. */
-export type GetThresholdAmountParams = {
-  /** v2.0.0 token pool whose bound hooks are read. */
-  poolAddress: string
-}
+/** Parameters for {@link GetThresholdAmount}: the hooks to read, directly or through a pool. */
+export type GetThresholdAmountParams = AdvancedPoolHooksTarget
 /** Amount at or above which additional CCVs apply; zero means they are disabled. */
 export type GetThresholdAmountResult = bigint
 
 /**
  * Reads the additional-CCV threshold amount.
- * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or the pool has no hooks bound
- * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
- * address is not `AdvancedPoolHooks`
+ * @throws {@link CCTParamsInvalidError} if the target is invalid, or the pool has no hooks bound
+ * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`, or the
+ * pool's type is not supported
  * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
  * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
  */
@@ -33,15 +34,15 @@ export class GetThresholdAmount extends EVMQuery<
   readonly name = 'getThresholdAmount'
 
   protected prepare(params: GetThresholdAmountParams): GetThresholdAmountParams {
-    validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
+    validateAdvancedPoolHooksTarget(this.name, params)
     return params
   }
 
   protected async read(
     chain: EVMChain,
-    { poolAddress }: GetThresholdAmountParams,
+    params: GetThresholdAmountParams,
   ): Promise<GetThresholdAmountResult> {
-    const hooks = await resolveAdvancedPoolHooks(this.name, chain, poolAddress)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
     return readThresholdAmount(chain, hooks)
   }
 }
