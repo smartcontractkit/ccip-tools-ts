@@ -115,8 +115,8 @@ export function resolveTokenEncoder<F>(
  *
  * Pinned to v1.5.1: the role functions, `mint`, the role reads and `transferOwnership` /
  * `acceptOwnership` are identical at v1.6.2 and on `HyperLiquidCompatibleERC20 1.6.2`, so there is
- * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, ruled out by
- * {@link readV1TokenRole} and {@link assertOwnable2StepToken}.
+ * nothing to dispatch on. v2.0.0's `CrossChainToken` is a different contract, routed away by
+ * {@link resolveToken} and ruled out by {@link readV1TokenRole}.
  */
 export function getErc20Token(): Interface {
   return TOKEN_INTERFACES[TokenVersion.V1_5_1]
@@ -232,40 +232,6 @@ export async function assertTokenDefaultAdmin(
   )
 }
 
-/**
- * Rejects a v2.0.0 `CrossChainToken` before an Ownable2Step ownership write is built: it declares
- * neither `transferOwnership` nor `acceptOwnership`, and its `owner()` alias passes the
- * {@link assertTokenOwner} pre-flight, so the tx would mine reverted.
- *
- * @remarks Only v2 reports that type, so *any* read failure (v1.5.1 predating
- * `typeAndVersion()`, a revert, a transient error) proceeds and v1.x is untouched.
- * @param operation - Operation name, for the error's `operation` field.
- * @param chain - Chain to read `typeAndVersion()` from.
- * @param tokenAddress - Token the ownership write targets.
- * @throws {@link CCTOperationUnsupportedError} if the token reports `CrossChainToken`
- */
-export async function assertOwnable2StepToken(
-  operation: string,
-  chain: EVMChain,
-  tokenAddress: string,
-): Promise<void> {
-  let contractType: string
-  let version: string
-  try {
-    ;[contractType, version] = await chain.typeAndVersion(tokenAddress)
-  } catch {
-    return // no typeAndVersion(), a revert, or a transient failure — proceed as v1.x
-  }
-  if (contractType !== CROSS_CHAIN_TOKEN_TYPE) return
-  throw new CCTOperationUnsupportedError(operation, version, {
-    context: { address: tokenAddress, contractType },
-    recovery:
-      `${CROSS_CHAIN_TOKEN_TYPE} ownership is AccessControlDefaultAdminRules, not Ownable2Step: ` +
-      'move it with beginDefaultAdminTransfer(newAdmin) then acceptDefaultAdminTransfer() under ' +
-      "DEFAULT_ADMIN_ROLE, after the contract's mandatory accept delay.",
-  })
-}
-
 /** `Ownable2Step.owner()`, declared identically by every supported token version. */
 type TokenOwnerGetter = Pick<TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>, 'owner'>
 
@@ -316,13 +282,15 @@ export async function assertTokenOwner(
 }
 
 /**
- * The token-side `assertPoolOwnershipTransfer`: bounds a two-step transfer against the token's
+ * The token-side `assertPoolOwnershipTransfer`: bounds a v1 two-step transfer against the token's
  * `owner()` in one `eth_call`.
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read the owner from.
  * @param tokenAddress - Token being written to.
  * @param newOwner - The address being proposed as the next owner.
  * @param sender - The address the tx will be sent from, when known.
+ * @param newOwnerParam - Param name `newOwner` is reported under, e.g. `newAdmin` for
+ * `beginDefaultAdminTransfer`.
  * @throws {@link CCTParamsInvalidError} if `sender` is not the owner, or `newOwner` already is
  */
 export async function assertTokenOwnershipTransfer(
@@ -331,6 +299,7 @@ export async function assertTokenOwnershipTransfer(
   tokenAddress: string,
   newOwner: string,
   sender?: string,
+  newOwnerParam = 'newOwner',
 ): Promise<void> {
   const owner = await readTokenOwner(chain, tokenAddress)
   if (sender !== undefined && getAddress(sender) !== owner)
@@ -342,7 +311,7 @@ export async function assertTokenOwnershipTransfer(
   if (getAddress(newOwner) === owner)
     throw new CCTParamsInvalidError(
       operation,
-      'newOwner',
+      newOwnerParam,
       `must differ from the current token owner (${owner}) — the token would revert CannotTransferToSelf`,
     )
 }

@@ -6,6 +6,7 @@ import { Interface, ZeroAddress, id } from 'ethers'
 import { CCIPWalletChainMismatchError, CCIPWalletInvalidError } from '../../errors/index.ts'
 import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
+import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { ChainFamily, networkInfo } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
 import { EVMTokenManager } from './index.ts'
@@ -979,6 +980,161 @@ describe('EVMTokenManager (cct/evm)', () => {
     it('isBurner answers the single-address burn-role check', async () => {
       const cct = EVMTokenManager.fromChain(tokenChain())
       assert.equal(await cct.isBurner({ tokenAddress: TOKEN, account: POOL }), true)
+    })
+  })
+
+  describe('token admin handoff', () => {
+    /** Fresh Interface — the manager's own cached one must not be what these assertions compare to. */
+    const HANDOFF = new Interface([
+      'function beginDefaultAdminTransfer(address newAdmin)',
+      'function acceptDefaultAdminTransfer()',
+      'function cancelDefaultAdminTransfer()',
+      'function transferOwnership(address to)',
+      'function acceptOwnership()',
+      'function owner() view returns (address)',
+      'function defaultAdmin() view returns (address)',
+      'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
+    ])
+
+    /**
+     * Chain stub for a token at `typeAndVersion`: `CURRENT_ADMIN` is both its v1 `owner()` and v2
+     * `defaultAdmin()`, and v2 has a transfer to `NEW_ADMIN` pending.
+     */
+    function handoffChain(typeAndVersion: [string, string]) {
+      return stubChain({
+        typeAndVersion: (() =>
+          Promise.resolve(typeAndVersion)) as unknown as EVMChain['typeAndVersion'],
+        provider: {
+          call: ({ data }: { data: string }) => {
+            const fn = HANDOFF.getFunction(data.slice(0, 10))!.name
+            return Promise.resolve(
+              HANDOFF.encodeFunctionResult(
+                fn,
+                fn === 'pendingDefaultAdmin' ? [NEW_ADMIN, 1n] : [CURRENT_ADMIN],
+              ),
+            )
+          },
+        } as never,
+      })
+    }
+    const V1: [string, string] = ['FactoryBurnMintERC20', '1.6.2']
+    const V2: [string, string] = ['CrossChainToken', '2.0.0']
+
+    const EXPECTED = {
+      v1: {
+        begin: HANDOFF.encodeFunctionData('transferOwnership', [NEW_ADMIN]),
+        accept: HANDOFF.encodeFunctionData('acceptOwnership'),
+        cancel: HANDOFF.encodeFunctionData('transferOwnership', [ZeroAddress]),
+      },
+      v2: {
+        begin: HANDOFF.encodeFunctionData('beginDefaultAdminTransfer', [NEW_ADMIN]),
+        accept: HANDOFF.encodeFunctionData('acceptDefaultAdminTransfer'),
+        cancel: HANDOFF.encodeFunctionData('cancelDefaultAdminTransfer'),
+      },
+    }
+
+    for (const [label, tv] of [
+      ['v1', V1],
+      ['v2', V2],
+    ] as const) {
+      it(`begin / accept / cancel encode the ${label} handoff`, async () => {
+        const cct = EVMTokenManager.fromChain(handoffChain(tv))
+        const data = async (p: Promise<UnsignedEVMTx>) => (await p).transactions[0]!.data
+        assert.equal(
+          await data(
+            cct.generateUnsignedBeginDefaultAdminTransfer({
+              tokenAddress: TOKEN,
+              newAdmin: NEW_ADMIN,
+              sender: CURRENT_ADMIN,
+            }),
+          ),
+          EXPECTED[label].begin,
+        )
+        assert.equal(
+          await data(
+            cct.generateUnsignedAcceptDefaultAdminTransfer({
+              tokenAddress: TOKEN,
+              sender: NEW_ADMIN,
+            }),
+          ),
+          EXPECTED[label].accept,
+        )
+        assert.equal(
+          await data(
+            cct.generateUnsignedCancelDefaultAdminTransfer({
+              tokenAddress: TOKEN,
+              sender: CURRENT_ADMIN,
+            }),
+          ),
+          EXPECTED[label].cancel,
+        )
+      })
+
+      it(`deprecated transferTokenOwnership / acceptTokenOwnership pass through on ${label}`, async () => {
+        const cct = EVMTokenManager.fromChain(handoffChain(tv))
+        assert.deepEqual(
+          await cct.generateUnsignedTransferTokenOwnership({
+            tokenAddress: TOKEN,
+            newOwner: NEW_ADMIN,
+            sender: CURRENT_ADMIN,
+          }),
+          await cct.generateUnsignedBeginDefaultAdminTransfer({
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            sender: CURRENT_ADMIN,
+          }),
+        )
+        assert.deepEqual(
+          await cct.generateUnsignedTransferTokenOwnership({
+            tokenAddress: TOKEN,
+            newOwner: ZeroAddress,
+            sender: CURRENT_ADMIN,
+          }),
+          await cct.generateUnsignedCancelDefaultAdminTransfer({
+            tokenAddress: TOKEN,
+            sender: CURRENT_ADMIN,
+          }),
+        )
+        assert.deepEqual(
+          await cct.generateUnsignedAcceptTokenOwnership({
+            tokenAddress: TOKEN,
+            sender: NEW_ADMIN,
+          }),
+          await cct.generateUnsignedAcceptDefaultAdminTransfer({
+            tokenAddress: TOKEN,
+            sender: NEW_ADMIN,
+          }),
+        )
+      })
+
+      it(`deprecated execute variants submit on ${label}`, async () => {
+        const cct = EVMTokenManager.fromChain(handoffChain(tv))
+        const transfer = await cct.transferTokenOwnership({
+          tokenAddress: TOKEN,
+          newOwner: NEW_ADMIN,
+          wallet: fakeSigner(CURRENT_ADMIN),
+        })
+        const accept = await cct.acceptTokenOwnership({
+          tokenAddress: TOKEN,
+          wallet: fakeSigner(NEW_ADMIN),
+        })
+        assert.deepEqual([transfer.hash, accept.hash], [HASH, HASH])
+      })
+    }
+
+    it('rejects a zero v1 newAdmin, pointing at cancelDefaultAdminTransfer', async () => {
+      const cct = EVMTokenManager.fromChain(handoffChain(V1))
+      await assert.rejects(
+        cct.generateUnsignedBeginDefaultAdminTransfer({
+          tokenAddress: TOKEN,
+          newAdmin: ZeroAddress,
+          sender: CURRENT_ADMIN,
+        }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'newAdmin' &&
+          /cancelDefaultAdminTransfer/.test(err.message),
+      )
     })
   })
 
