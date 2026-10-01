@@ -16,93 +16,64 @@ import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
   type ApplyCCVConfigUpdatesParams,
-  ApplyCCVConfigUpdates,
-} from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
-import {
   type DeployAdvancedPoolHooksParams,
-  DeployAdvancedPoolHooks,
-} from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
-import {
   type GetAllAdvancedPoolHooksAuthorizedCallersParams,
   type GetAllAdvancedPoolHooksAuthorizedCallersResult,
-  GetAllAdvancedPoolHooksAuthorizedCallers,
-} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
-import {
   type GetAllCCVConfigsParams,
   type GetAllCCVConfigsResult,
-  GetAllCCVConfigs,
-} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
-import {
   type GetCCVConfigParams,
   type GetCCVConfigResult,
-  GetCCVConfig,
-} from './advanced-pool-hooks/operations/get-ccv-config.ts'
-import {
   type GetPolicyEngineParams,
   type GetPolicyEngineResult,
-  GetPolicyEngine,
-} from './advanced-pool-hooks/operations/get-policy-engine.ts'
-import {
   type GetRequiredCCVsParams,
   type GetRequiredCCVsResult,
-  GetRequiredCCVs,
-} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
-import {
   type GetThresholdAmountParams,
   type GetThresholdAmountResult,
-  GetThresholdAmount,
-} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
-import {
   type SetPolicyEngineParams,
-  SetPolicyEngine,
-} from './advanced-pool-hooks/operations/set-policy-engine.ts'
-import {
   type SetThresholdAmountParams,
-  SetThresholdAmount,
-} from './advanced-pool-hooks/operations/set-threshold-amount.ts'
-import {
   type UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  ApplyCCVConfigUpdates,
+  DeployAdvancedPoolHooks,
+  GetAllAdvancedPoolHooksAuthorizedCallers,
+  GetAllCCVConfigs,
+  GetCCVConfig,
+  GetPolicyEngine,
+  GetRequiredCCVs,
+  GetThresholdAmount,
+  SetPolicyEngine,
+  SetThresholdAmount,
   UpdateAdvancedPoolHooksAuthorizedCallers,
-} from './advanced-pool-hooks/operations/update-authorized-callers.ts'
-import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
-import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+} from './advanced-pool-hooks/operations/index.ts'
 import {
+  type DeployLockboxParams,
+  type DepositToLockboxParams,
   type GetAllLockboxAuthorizedCallersParams,
   type GetAllLockboxAuthorizedCallersResult,
-  GetAllLockboxAuthorizedCallers,
-} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
-import {
   type UpdateLockboxAuthorizedCallersParams,
-  UpdateLockboxAuthorizedCallers,
-} from './lockbox/operations/update-authorized-callers.ts'
-import {
   type WithdrawFromLockboxParams,
+  DeployLockbox,
+  DepositToLockbox,
+  GetAllLockboxAuthorizedCallers,
+  UpdateLockboxAuthorizedCallers,
   WithdrawFromLockbox,
-} from './lockbox/operations/withdraw.ts'
+} from './lockbox/operations/index.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import {
   type AcceptAdminParams,
-  AcceptAdmin,
-} from './token-admin-registry/operations/accept-admin.ts'
-import {
   type GetSupportedTokensParams,
   type GetSupportedTokensResult,
-  GetSupportedTokens,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
-import {
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
-  GetTokenAdminRegistry,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
-import {
   type RegisterAdminParams,
-  RegisterAdmin,
-} from './token-admin-registry/operations/register-admin.ts'
-import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
-import {
+  type SetPoolParams,
   type TransferAdminParams,
+  AcceptAdmin,
+  GetSupportedTokens,
+  GetTokenAdminRegistry,
+  RegisterAdmin,
+  SetPool,
   TransferAdmin,
-} from './token-admin-registry/operations/transfer-admin.ts'
+} from './token-admin-registry/operations/index.ts'
 import {
   type DeployTokenAndTokenPoolViaFactoryParams,
   type DeployTokenPoolWithExistingTokenViaFactoryParams,
@@ -112,181 +83,128 @@ import {
 } from './token-pool-factory/deploy.ts'
 import {
   type AcceptPoolOwnershipParams,
-  AcceptPoolOwnership,
-} from './token-pool/operations/accept-pool-ownership.ts'
-import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
-import {
+  type AddRemotePoolParams,
   type ApplyAllowlistUpdatesParams,
-  ApplyAllowlistUpdates,
-} from './token-pool/operations/apply-allowlist-updates.ts'
-import {
   type ApplyChainUpdatesParams,
-  ApplyChainUpdates,
-} from './token-pool/operations/apply-chain-updates.ts'
-import {
   type ApplyTokenTransferFeeConfigUpdatesParams,
-  ApplyTokenTransferFeeConfigUpdates,
-} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
-import {
   type DeployTokenPoolParams,
-  DeployTokenPool,
-} from './token-pool/operations/deploy-token-pool.ts'
-import {
   type GetAdvancedPoolHooksParams,
   type GetAdvancedPoolHooksResult,
-  GetAdvancedPoolHooks,
-} from './token-pool/operations/get-advanced-pool-hooks.ts'
-import {
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
-  GetAllowedFinalityConfig,
-} from './token-pool/operations/get-allowed-finality-config.ts'
-import {
   type GetAllowlistEnabledParams,
   type GetAllowlistEnabledResult,
-  GetAllowlistEnabled,
-} from './token-pool/operations/get-allowlist-enabled.ts'
-import {
   type GetAllowlistParams,
   type GetAllowlistResult,
-  GetAllowlist,
-} from './token-pool/operations/get-allowlist.ts'
-import {
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
-  GetDynamicConfig,
-} from './token-pool/operations/get-dynamic-config.ts'
-import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
-import {
+  type GetFeeParams,
+  type GetFeeResult,
   type GetLockboxParams,
   type GetLockboxResult,
-  GetLockbox,
-} from './token-pool/operations/get-lockbox.ts'
-import {
   type GetRebalancerParams,
   type GetRebalancerResult,
-  GetRebalancer,
-} from './token-pool/operations/get-rebalancer.ts'
-import {
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
-  GetTokenPoolRemotes,
-} from './token-pool/operations/get-token-pool-remotes.ts'
-import {
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
-  GetTokenPoolState,
-} from './token-pool/operations/get-token-pool-state.ts'
-import {
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
-  GetTokenTransferFeeConfig,
-} from './token-pool/operations/get-token-transfer-fee-config.ts'
-import {
   type ProvideLiquidityParams,
-  ProvideLiquidity,
-} from './token-pool/operations/provide-liquidity.ts'
-import {
   type RemoveRemotePoolParams,
-  RemoveRemotePool,
-} from './token-pool/operations/remove-remote-pool.ts'
-import {
   type SetAllowedFinalityConfigParams,
-  SetAllowedFinalityConfig,
-} from './token-pool/operations/set-allowed-finality-config.ts'
-import {
   type SetChainRateLimiterConfigsParams,
-  SetChainRateLimiterConfigs,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
-import {
   type SetDynamicConfigParams,
-  SetDynamicConfig,
-} from './token-pool/operations/set-dynamic-config.ts'
-import {
   type SetRateLimitAdminParams,
-  SetRateLimitAdmin,
-} from './token-pool/operations/set-rate-limit-admin.ts'
-import { type SetRebalancerParams, SetRebalancer } from './token-pool/operations/set-rebalancer.ts'
-import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
-import {
+  type SetRebalancerParams,
+  type SetRemotePoolParams,
   type TransferLiquidityParams,
-  TransferLiquidity,
-} from './token-pool/operations/transfer-liquidity.ts'
-import {
   type TransferPoolOwnershipParams,
-  TransferPoolOwnership,
-} from './token-pool/operations/transfer-pool-ownership.ts'
-import {
   type UpdateAdvancedPoolHooksParams,
-  UpdateAdvancedPoolHooks,
-} from './token-pool/operations/update-advanced-pool-hooks.ts'
-import {
   type WithdrawFeeTokensParams,
-  WithdrawFeeTokens,
-} from './token-pool/operations/withdraw-fee-tokens.ts'
-import {
   type WithdrawLiquidityParams,
+  AcceptPoolOwnership,
+  AddRemotePool,
+  ApplyAllowlistUpdates,
+  ApplyChainUpdates,
+  ApplyTokenTransferFeeConfigUpdates,
+  DeployTokenPool,
+  GetAdvancedPoolHooks,
+  GetAllowedFinalityConfig,
+  GetAllowlist,
+  GetAllowlistEnabled,
+  GetDynamicConfig,
+  GetFee,
+  GetLockbox,
+  GetRebalancer,
+  GetTokenPoolRemotes,
+  GetTokenPoolState,
+  GetTokenTransferFeeConfig,
+  ProvideLiquidity,
+  RemoveRemotePool,
+  SetAllowedFinalityConfig,
+  SetChainRateLimiterConfigs,
+  SetDynamicConfig,
+  SetRateLimitAdmin,
+  SetRebalancer,
+  SetRemotePool,
+  TransferLiquidity,
+  TransferPoolOwnership,
+  UpdateAdvancedPoolHooks,
+  WithdrawFeeTokens,
   WithdrawLiquidity,
-} from './token-pool/operations/withdraw-liquidity.ts'
+} from './token-pool/operations/index.ts'
 import {
   type AcceptDefaultAdminTransferParams,
-  AcceptDefaultAdminTransfer,
-} from './token/operations/accept-default-admin-transfer.ts'
-import {
   type AcceptTokenOwnershipParams,
-  AcceptTokenOwnership,
-} from './token/operations/accept-token-ownership.ts'
-import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
-import {
+  type ApproveTokenParams,
   type BeginDefaultAdminTransferParams,
-  BeginDefaultAdminTransfer,
-} from './token/operations/begin-default-admin-transfer.ts'
-import {
   type CancelDefaultAdminTransferParams,
-  CancelDefaultAdminTransfer,
-} from './token/operations/cancel-default-admin-transfer.ts'
-import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
-import {
+  type DeployTokenParams,
   type GetBurnersParams,
   type GetBurnersResult,
-  GetBurners,
-} from './token/operations/get-burners.ts'
-import {
   type GetCCIPAdminParams,
   type GetCCIPAdminResult,
-  GetCCIPAdmin,
-} from './token/operations/get-ccip-admin.ts'
-import {
   type GetMintersParams,
   type GetMintersResult,
-  GetMinters,
-} from './token/operations/get-minters.ts'
-import {
   type GetTokenDefaultAdminParams,
   type GetTokenDefaultAdminResult,
-  GetTokenDefaultAdmin,
-} from './token/operations/get-token-default-admin.ts'
-import {
   type GetTokenOwnerParams,
   type GetTokenOwnerResult,
-  GetTokenOwner,
-} from './token/operations/get-token-owner.ts'
-import { type GrantBurnRoleParams, GrantBurnRole } from './token/operations/grant-burn-role.ts'
-import {
+  type GrantBurnRoleParams,
   type GrantMintAndBurnRolesParams,
-  GrantMintAndBurnRoles,
-} from './token/operations/grant-mint-and-burn-roles.ts'
-import { type GrantMintRoleParams, GrantMintRole } from './token/operations/grant-mint-role.ts'
-import { type IsBurnerParams, type IsBurnerResult, IsBurner } from './token/operations/is-burner.ts'
-import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/operations/is-minter.ts'
-import { type MintParams, Mint } from './token/operations/mint.ts'
-import { type RevokeBurnRoleParams, RevokeBurnRole } from './token/operations/revoke-burn-role.ts'
-import { type RevokeMintRoleParams, RevokeMintRole } from './token/operations/revoke-mint-role.ts'
-import { type SetCCIPAdminParams, SetCCIPAdmin } from './token/operations/set-ccip-admin.ts'
-import {
+  type GrantMintRoleParams,
+  type IsBurnerParams,
+  type IsBurnerResult,
+  type IsMinterParams,
+  type IsMinterResult,
+  type MintParams,
+  type RevokeBurnRoleParams,
+  type RevokeMintRoleParams,
+  type SetCCIPAdminParams,
   type TransferTokenOwnershipParams,
+  AcceptDefaultAdminTransfer,
+  AcceptTokenOwnership,
+  ApproveToken,
+  BeginDefaultAdminTransfer,
+  CancelDefaultAdminTransfer,
+  DeployToken,
+  GetBurners,
+  GetCCIPAdmin,
+  GetMinters,
+  GetTokenDefaultAdmin,
+  GetTokenOwner,
+  GrantBurnRole,
+  GrantMintAndBurnRoles,
+  GrantMintRole,
+  IsBurner,
+  IsMinter,
+  Mint,
+  RevokeBurnRole,
+  RevokeMintRole,
+  SetCCIPAdmin,
   TransferTokenOwnership,
-} from './token/operations/transfer-token-ownership.ts'
+} from './token/operations/index.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
@@ -3914,173 +3832,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export * from '../errors.ts'
-export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
-export type {
-  RegisterAdminMethod,
-  RegisterAdminParams,
-} from './token-admin-registry/operations/register-admin.ts'
-export type {
-  GetTokenAdminRegistryParams,
-  GetTokenAdminRegistryResult,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
-export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
-export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
-export type {
-  GetSupportedTokensParams,
-  GetSupportedTokensResult,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
+export type * from './token-admin-registry/operations/index.ts'
 export * from './token-admin-registry/contracts.ts'
-export type { DeployTokenParams } from './token/operations/deploy-token.ts'
-export type { BeginDefaultAdminTransferParams } from './token/operations/begin-default-admin-transfer.ts'
-export type { AcceptDefaultAdminTransferParams } from './token/operations/accept-default-admin-transfer.ts'
-export type { CancelDefaultAdminTransferParams } from './token/operations/cancel-default-admin-transfer.ts'
-export type { SetCCIPAdminParams } from './token/operations/set-ccip-admin.ts'
-export type { ApproveTokenParams } from './token/operations/approve-token.ts'
-export type { GrantMintAndBurnRolesParams } from './token/operations/grant-mint-and-burn-roles.ts'
-export type { GrantMintRoleParams } from './token/operations/grant-mint-role.ts'
-export type { GrantBurnRoleParams } from './token/operations/grant-burn-role.ts'
-export type { RevokeMintRoleParams } from './token/operations/revoke-mint-role.ts'
-export type { RevokeBurnRoleParams } from './token/operations/revoke-burn-role.ts'
-export type { MintParams } from './token/operations/mint.ts'
-export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
-export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
-export type {
-  GetTokenOwnerParams,
-  GetTokenOwnerResult,
-} from './token/operations/get-token-owner.ts'
-export type { GetCCIPAdminParams, GetCCIPAdminResult } from './token/operations/get-ccip-admin.ts'
-export type {
-  GetTokenDefaultAdminParams,
-  GetTokenDefaultAdminResult,
-  PendingTokenDefaultAdmin,
-} from './token/operations/get-token-default-admin.ts'
-export type { IsMinterParams, IsMinterResult } from './token/operations/is-minter.ts'
-export type { IsBurnerParams, IsBurnerResult } from './token/operations/is-burner.ts'
-export type { TransferTokenOwnershipParams } from './token/operations/transfer-token-ownership.ts'
-export type { AcceptTokenOwnershipParams } from './token/operations/accept-token-ownership.ts'
+export type * from './token/operations/index.ts'
 export * from './token/contracts.ts'
-export type { TransferPoolOwnershipParams } from './token-pool/operations/transfer-pool-ownership.ts'
-export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
-export type {
-  DeployTokenPoolParams,
-  DeployableTokenPoolType,
-} from './token-pool/operations/deploy-token-pool.ts'
-export type {
-  BurnMintTokenPoolStateV2_0_0,
-  GetTokenPoolStateParams,
-  GetTokenPoolStateResult,
-  LegacyTokenPoolState,
-  LockReleaseTokenPoolStateV2_0_0,
-  TokenPoolStateV2_0_0,
-} from './token-pool/operations/get-token-pool-state.ts'
-export type {
-  GetTokenPoolRemotesParams,
-  GetTokenPoolRemotesResult,
-} from './token-pool/operations/get-token-pool-remotes.ts'
-export type { SetRemotePoolParams } from './token-pool/operations/set-remote-pool.ts'
-export type { AddRemotePoolParams } from './token-pool/operations/add-remote-pool.ts'
-export type { RemoveRemotePoolParams } from './token-pool/operations/remove-remote-pool.ts'
-export type {
-  ApplyChainUpdatesParamVersion,
-  ApplyChainUpdatesParams,
-  ApplyChainUpdatesParamsV1_5_0,
-  ApplyChainUpdatesParamsV1_5_1,
-  ChainUpdateV1_5_0,
-  ChainUpdateV1_5_1,
-} from './token-pool/operations/apply-chain-updates.ts'
-export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
-export type {
-  GetAllowlistParams,
-  GetAllowlistResult,
-} from './token-pool/operations/get-allowlist.ts'
-export type {
-  GetAllowlistEnabledParams,
-  GetAllowlistEnabledResult,
-} from './token-pool/operations/get-allowlist-enabled.ts'
-export type {
-  GetDynamicConfigParams,
-  GetDynamicConfigResult,
-} from './token-pool/operations/get-dynamic-config.ts'
-export type { GetFeeParams, GetFeeResult } from './token-pool/operations/get-fee.ts'
-export type {
-  GetTokenTransferFeeConfigParams,
-  GetTokenTransferFeeConfigResult,
-} from './token-pool/operations/get-token-transfer-fee-config.ts'
-export type {
-  ApplyTokenTransferFeeConfigUpdatesParams,
-  TokenTransferFeeConfigUpdate,
-} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
+export type * from './token-pool/operations/index.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
 export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
-export type {
-  ChainRateLimitUpdate,
-  SetChainRateLimiterConfigsParams,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
-export type { ProvideLiquidityParams } from './token-pool/operations/provide-liquidity.ts'
-export type { WithdrawFeeTokensParams } from './token-pool/operations/withdraw-fee-tokens.ts'
-export type { WithdrawLiquidityParams } from './token-pool/operations/withdraw-liquidity.ts'
-export type { TransferLiquidityParams } from './token-pool/operations/transfer-liquidity.ts'
-export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'
-export type {
-  GetRebalancerParams,
-  GetRebalancerResult,
-} from './token-pool/operations/get-rebalancer.ts'
-export type { GetLockboxParams, GetLockboxResult } from './token-pool/operations/get-lockbox.ts'
-export type {
-  GetAllowedFinalityConfigParams,
-  GetAllowedFinalityConfigResult,
-} from './token-pool/operations/get-allowed-finality-config.ts'
-export type {
-  GetAdvancedPoolHooksParams,
-  GetAdvancedPoolHooksResult,
-} from './token-pool/operations/get-advanced-pool-hooks.ts'
-export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set-allowed-finality-config.ts'
-export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/update-advanced-pool-hooks.ts'
 export * from './token-pool/contracts.ts'
-export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
-export type { UpdateLockboxAuthorizedCallersParams } from './lockbox/operations/update-authorized-callers.ts'
-export type {
-  GetAllLockboxAuthorizedCallersParams,
-  GetAllLockboxAuthorizedCallersResult,
-} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+export type * from './lockbox/operations/index.ts'
 export * from './lockbox/contracts.ts'
-export type { UpdateAdvancedPoolHooksAuthorizedCallersParams } from './advanced-pool-hooks/operations/update-authorized-callers.ts'
-export type {
-  GetAllAdvancedPoolHooksAuthorizedCallersParams,
-  GetAllAdvancedPoolHooksAuthorizedCallersResult,
-} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
-export type {
-  GetPolicyEngineParams,
-  GetPolicyEngineResult,
-} from './advanced-pool-hooks/operations/get-policy-engine.ts'
-export type {
-  GetThresholdAmountParams,
-  GetThresholdAmountResult,
-} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
-export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
-export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
-export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
-export type {
-  GetAllCCVConfigsParams,
-  GetAllCCVConfigsResult,
-} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
-export type {
-  GetCCVConfigParams,
-  GetCCVConfigResult,
-} from './advanced-pool-hooks/operations/get-ccv-config.ts'
-export type {
-  CCVMessageDirection,
-  GetRequiredCCVsParams,
-  GetRequiredCCVsResult,
-} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
-export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
-export type { SetPolicyEngineParams } from './advanced-pool-hooks/operations/set-policy-engine.ts'
-export type { SetThresholdAmountParams } from './advanced-pool-hooks/operations/set-threshold-amount.ts'
+export type * from './advanced-pool-hooks/operations/index.ts'
 export * from './advanced-pool-hooks/contracts.ts'
 export type {
   DeployTokenAndTokenPoolViaFactoryParams,
