@@ -21,12 +21,11 @@ import { ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
 import {
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksOwner,
 } from '../../advanced-pool-hooks/contracts.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -250,22 +249,5 @@ export class ApplyAllowlistUpdates extends EVMOperation<
       holder,
       iface.encodeFunctionData('applyAllowListUpdates', [params.removes, params.adds]),
     )
-  }
-
-  /**
-   * Signs and submits as the holder's owner, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
-   * than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * if the wallet is not the holder's owner, or if any other param is invalid
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ApplyAllowlistUpdatesParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

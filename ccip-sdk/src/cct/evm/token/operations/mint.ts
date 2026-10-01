@@ -10,8 +10,7 @@ import { ZeroAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
 import { getErc20Token, resolveToken } from '../contracts.ts'
 import { resolveTokenRoleHandler } from '../roles.ts'
@@ -91,26 +90,5 @@ export class Mint extends EVMOperation<MintParams> {
       )
 
     return callTx(tokenAddress, getErc20Token().encodeFunctionData('mint', [account, amount]))
-  }
-
-  /**
-   * Signs and submits as a minter, defaulting `sender` to the signing wallet — the only address
-   * that can satisfy {@link buildUnsigned}'s role check for a broadcast tx. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, if
-   * the wallet does not hold the mint role, or if any other param is invalid (see
-   * {@link buildUnsigned})
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — e.g. the mint would
-   * exceed the token's `maxSupply`, which is not pre-flighted
-   * @throws {@link CCTTxFailedError} if submission fails before broadcast
-   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<MintParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }
