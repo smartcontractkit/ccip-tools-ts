@@ -6,8 +6,13 @@ import { Interface, ZeroAddress, makeError } from 'ethers'
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import {
+  CCTContractTypeInvalidError,
+  CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
+import { type PoolStub, POOL, withPool } from '../pool.test.helpers.ts'
 import { type SetThresholdAmountParams, SetThresholdAmount } from './set-threshold-amount.ts'
 
 const HOOKS = '0x' + '11'.repeat(20)
@@ -16,21 +21,34 @@ const NOT_OWNER = '0x' + '33'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const IFACE = new Interface(ADVANCED_POOL_HOOKS_V2_0_0_ABI)
 
-function stubChain(owner = OWNER, onCall?: () => void, hooksType = 'AdvancedPoolHooks'): EVMChain {
-  return {
-    provider: {
-      call: async ({ data }: { data: string }) => {
-        onCall?.()
-        assert.equal(data.slice(0, 10), IFACE.getFunction('owner')!.selector)
-        return IFACE.encodeFunctionResult('owner', [owner])
+/**
+ * {@link POOL} bound to {@link HOOKS} (see `pool`), which report `hooksType` and answer only
+ * `owner()`; `onCall` records hooks calls only.
+ */
+function stubChain(
+  owner = OWNER,
+  onCall?: () => void,
+  hooksType = 'AdvancedPoolHooks',
+  pool: Partial<PoolStub> = {},
+): EVMChain {
+  return withPool(
+    {
+      provider: {
+        call: async ({ to, data }: { to: string; data: string }) => {
+          onCall?.()
+          assert.equal(to.toLowerCase(), HOOKS)
+          assert.equal(data.slice(0, 10), IFACE.getFunction('owner')!.selector)
+          return IFACE.encodeFunctionResult('owner', [owner])
+        },
       },
-    },
-    network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
-    typeAndVersion: () => Promise.resolve([hooksType, '2.0.0']),
-    nextNonce: async () => 0,
-    rollbackNonce: () => {},
-  } as unknown as EVMChain
+      network: networkInfo('ethereum-testnet-sepolia-base-1'),
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      typeAndVersion: () => Promise.resolve([hooksType, '2.0.0']),
+      nextNonce: async () => 0,
+      rollbackNonce: () => {},
+    } as unknown as EVMChain,
+    { hooks: HOOKS, ...pool },
+  )
 }
 
 function fakeSigner(address = OWNER, waitError?: Error) {
@@ -49,7 +67,7 @@ function fakeSigner(address = OWNER, waitError?: Error) {
 const op = new SetThresholdAmount()
 const generate = (chain: EVMChain, overrides: Record<string, unknown> = {}) =>
   op.generate(chain, {
-    advancedPoolHooks: HOOKS,
+    poolAddress: POOL,
     thresholdAmount: 1_000n,
     sender: OWNER,
     ...overrides,
@@ -57,7 +75,7 @@ const generate = (chain: EVMChain, overrides: Record<string, unknown> = {}) =>
 
 describe('SetThresholdAmount (cct/evm advanced-pool-hooks)', () => {
   describe('generate', () => {
-    it('encodes setThresholdAmount', async () => {
+    it("encodes setThresholdAmount to the pool's bound hooks", async () => {
       const unsigned = await generate(stubChain())
       assert.equal(unsigned.family, ChainFamily.EVM)
       assert.equal(unsigned.transactions[0]!.to, HOOKS)
@@ -86,17 +104,43 @@ describe('SetThresholdAmount (cct/evm advanced-pool-hooks)', () => {
       assert.equal(calls, 0)
     })
 
-    it('rejects a target that is not AdvancedPoolHooks', async () => {
+    it('rejects a bound address that is not AdvancedPoolHooks', async () => {
       await assert.rejects(
         () => generate(stubChain(OWNER, undefined, 'BurnMintTokenPool')),
         CCTContractTypeInvalidError,
       )
     })
+
+    it('rejects a pre-v2.0.0 pool as unsupported, never reaching the hooks', async () => {
+      let calls = 0
+      await assert.rejects(
+        () =>
+          generate(
+            stubChain(OWNER, () => (calls += 1), undefined, {
+              typeAndVersion: 'BurnMintTokenPool 1.6.1',
+            }),
+          ),
+        CCTOperationUnsupportedError,
+      )
+      assert.equal(calls, 0)
+    })
+
+    it('rejects a pool with no hooks bound, never reaching the hooks', async () => {
+      let calls = 0
+      await assert.rejects(
+        () => generate(stubChain(OWNER, () => (calls += 1), undefined, { hooks: ZeroAddress })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'setThresholdAmount' &&
+          err.context.param === 'poolAddress',
+      )
+      assert.equal(calls, 0)
+    })
   })
 
   describe('validation', () => {
     for (const [overrides, param] of [
-      [{ advancedPoolHooks: ZeroAddress }, 'advancedPoolHooks'],
+      [{ poolAddress: ZeroAddress }, 'poolAddress'],
       [{ thresholdAmount: -1n }, 'thresholdAmount'],
       [{ thresholdAmount: 1_000 }, 'thresholdAmount'],
       [{ sender: 'bad' }, 'sender'],
@@ -106,7 +150,9 @@ describe('SetThresholdAmount (cct/evm advanced-pool-hooks)', () => {
         await assert.rejects(
           () =>
             generate(
-              stubChain(OWNER, () => (called = true)),
+              stubChain(OWNER, () => (called = true), undefined, {
+                onCall: () => (called = true),
+              }),
               overrides,
             ),
           (err: unknown) =>
@@ -129,7 +175,7 @@ describe('SetThresholdAmount (cct/evm advanced-pool-hooks)', () => {
   })
 
   describe('execute', () => {
-    const params = { advancedPoolHooks: HOOKS, thresholdAmount: 1_000n }
+    const params = { poolAddress: POOL, thresholdAmount: 1_000n }
 
     it('signs and submits as the hooks owner', async () => {
       assert.deepEqual(await op.execute(stubChain(), { ...params, wallet: fakeSigner() }), {

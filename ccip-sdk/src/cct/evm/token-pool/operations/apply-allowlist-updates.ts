@@ -202,7 +202,7 @@ export class ApplyAllowlistUpdates extends EVMOperation<
         context: { poolAddress: params.poolAddress, advancedPoolHooks: ZeroAddress },
         recovery:
           'A v2.0.0 pool holds no allowlist itself; it enforces the one on its bound AdvancedPoolHooks, and this pool has none bound. ' +
-          'Deploy hooks with a non-empty allowlist (deployAdvancedPoolHooks), authorize the pool on them, and bind them with updateAdvancedPoolHooks.',
+          'Deploy hooks with a non-empty allowlist and the pool in authorizedCallers (deployAdvancedPoolHooks), then bind them with updateAdvancedPoolHooks.',
       })
     // owner-gated on-chain; surface it as a param error here instead of an on-chain revert. The
     // hooks are owned separately from the pools bound to them.

@@ -13,6 +13,21 @@ This page is v2.0.0-only. On v1.5.0 through v1.6.1 pools the allowlist lives on 
 
 The examples below build an `EVMTokenManager` (referred to as `cct`) from a chain, as shown in the [EVM walkthrough](../evm). Every write method here has a `generateUnsigned<Op>` twin that returns an unsigned transaction for multisig or offline signing instead of signing and submitting; each section names the twin for its write.
 
+## How methods find the hooks
+
+Every method on this page except `deployAdvancedPoolHooks` takes the pool's `poolAddress`. The configuration methods for the allowlist, policy engine, threshold, authorized callers, and CCV requirements never take the hooks address. The SDK reads the hooks bound to that pool (`getAdvancedPoolHooks`), confirms the bound address reports `AdvancedPoolHooks`, and then reads from or writes to the hooks contract. Writes are sent to the hooks, not the pool, and are gated on the hooks owner. The hooks are a separately owned contract, so the pool owner can write through them only if it also owns the hooks.
+
+Two cases fail before the SDK reads from or builds a transaction for the hooks:
+
+- A pool older than v2.0.0 has no hooks binding, so the method throws `CCTOperationUnsupportedError`.
+- A v2.0.0 pool with no hooks bound throws `CCTParamsInvalidError` on `poolAddress`. Bind hooks with `updateAdvancedPoolHooks` first. The allowlist methods are the exception: `getAllowlist` returns `[]` and `applyAllowlistUpdates` throws `CCTOperationUnsupportedError`, as described in [Sender allowlist](#sender-allowlist).
+
+:::warning Hooks may be shared
+Several pools can be bound to the same `AdvancedPoolHooks`. A write made through pool A lands on the hooks, so it changes the allowlist, CCV requirements, policy engine, threshold, or authorized callers of every pool bound to those hooks, not just pool A. Reads likewise return the shared configuration. Check which pools share the hooks before you change them.
+:::
+
+The target is resolved when the transaction is built, not when it executes. Build a configuration transaction only after the binding it relies on has landed on-chain. If you generate a re-point (`updateAdvancedPoolHooks`) and a configuration change together, for example as one multisig batch, the configuration change targets the hooks the pool was bound to when you built it: the old hooks, or none.
+
 ## Deploy and bind hooks
 
 `deployAdvancedPoolHooks` deploys a fresh `AdvancedPoolHooks` and returns `{ hash, contractAddress, verification }`, where `verification` carries the contract name and ABI-encoded constructor arguments a block explorer needs. The constructor takes four optional arguments, and each one defaults to off:
@@ -22,10 +37,17 @@ The examples below build an `EVMTokenManager` (referred to as `cct`) from a chai
 - `policyEngine`: a policy engine run on every check. Defaults to the zero address.
 - `authorizedCallers`: pools permitted to call the hooks. Defaults to `[]`.
 
-Once deployed, bind the hooks to a pool with `updateAdvancedPoolHooks`. Binding and authorizing are two separate steps: the pool must also appear in the hooks' `authorizedCallers`, or every transfer reverts with `UnauthorizedCaller`. List the pool at deploy time, or add it later (see [Authorized callers](#authorized-callers)).
+Once deployed, bind the hooks to a pool with `updateAdvancedPoolHooks`. Binding and authorizing are two separate steps: the pool must also appear in the hooks' `authorizedCallers`, or every transfer reverts with `UnauthorizedCaller`. List the pool at deploy time. Adding it later is possible only through a pool that is already bound to the same hooks (see [Authorized callers](#authorized-callers)).
+
+Because every other method on this page reaches the hooks through a bound pool, the setup order is deploy, then bind, then configure:
+
+1. Deploy with every setting that must hold from the first transfer: `allowlist`, `thresholdAmount`, `policyEngine`, and the pool in `authorizedCallers`.
+2. Bind the hooks to the pool with `updateAdvancedPoolHooks`.
+3. Apply CCV requirements with `applyCCVConfigUpdates` (see [CCV requirements](#ccv-requirements)). The constructor has no CCV argument, so this step can only follow the bind.
 
 ```typescript
 const hooks = await cct.deployAdvancedPoolHooks({
+  allowlist: ['0xSender...'],
   authorizedCallers: [pool.contractAddress],
   wallet,
 })
@@ -35,7 +57,23 @@ await cct.updateAdvancedPoolHooks({
   advancedPoolHooks: hooks.contractAddress,
   wallet,
 })
+
+await cct.applyCCVConfigUpdates({
+  poolAddress: pool.contractAddress,
+  ccvConfigArgs: [
+    {
+      remoteChainSelector: 5009297550715157269n,
+      outboundCCVs: ['0xCCV...'],
+      thresholdOutboundCCVs: [],
+      inboundCCVs: ['0xCCV...'],
+      thresholdInboundCCVs: [],
+    },
+  ],
+  wallet,
+})
 ```
+
+Between the bind and `applyCCVConfigUpdates`, the hooks return no CCV requirements, so the pool adds none of its own: transfers need only the CCVs the lane and the sender already require. On a new pool, finish all three steps before the pool carries transfers, for example before `applyChainUpdates` adds its first lane. On a pool that already carries transfers, re-pointing it to new hooks opens the same window until their CCV requirements are applied.
 
 `updateAdvancedPoolHooks` re-points the binding, so a mis-bound hooks contract needs one transaction to fix, not a new pool. Pass the zero address to detach, which leaves the pool enforcing no allowlist and no CCV requirements. The op probes the target and rejects a re-point to the address already bound rather than mining a no-op. Read the current binding first with `getAdvancedPoolHooks({ poolAddress })`, which returns the zero address when nothing is bound.
 
@@ -69,11 +107,11 @@ The unsigned twin is `generateUnsignedApplyAllowlistUpdates`.
 
 A policy engine is an external contract the hooks call on every preflight and postflight check, the integration point for the Chainlink Automated Compliance Engine (ACE). See [Automated Compliance Engine](https://chain.link/automated-compliance-engine) for what a policy engine enforces and how ACE codifies transfer policy.
 
-`setPolicyEngine` takes `advancedPoolHooks` and `newPolicyEngine`, and is gated on the hooks owner. Pass the zero address to disable policy checks. `getPolicyEngine({ advancedPoolHooks })` reads the current engine, returning the zero address when checks are off.
+`setPolicyEngine` takes `poolAddress` and `newPolicyEngine`, sets the engine on the pool's bound hooks, and is gated on the hooks owner. Pass the zero address to disable policy checks. `getPolicyEngine({ poolAddress })` reads the current engine, returning the zero address when checks are off. A policy engine that must apply from the first transfer belongs in the `deployAdvancedPoolHooks` constructor instead.
 
 ```typescript
 await cct.setPolicyEngine({
-  advancedPoolHooks: hooks.contractAddress,
+  poolAddress: pool.contractAddress,
   newPolicyEngine: '0xPolicyEngine...',
   wallet,
 })
@@ -88,11 +126,11 @@ The unsigned twin is `generateUnsignedSetPolicyEngine`.
 
 ## Threshold amount
 
-The threshold is the amount at or above which a transfer must also satisfy the threshold CCV lists on top of the base lists. `setThresholdAmount` sets it. It takes `advancedPoolHooks` and `thresholdAmount` (the constructor's `thresholdAmountForAdditionalCCVs`) and is gated on the hooks owner. Pass `0n` to disable the threshold. Only the base CCVs then apply. `getThresholdAmount({ advancedPoolHooks })` reads the value back, where zero means threshold CCVs are off.
+The threshold is the amount at or above which a transfer must also satisfy the threshold CCV lists on top of the base lists. `setThresholdAmount` sets it. It takes `poolAddress` and `thresholdAmount` (the constructor's `thresholdAmountForAdditionalCCVs`), sets the threshold on the pool's bound hooks, and is gated on the hooks owner. Pass `0n` to disable the threshold. Only the base CCVs then apply. `getThresholdAmount({ poolAddress })` reads the value back, where zero means threshold CCVs are off.
 
 ```typescript
 await cct.setThresholdAmount({
-  advancedPoolHooks: hooks.contractAddress,
+  poolAddress: pool.contractAddress,
   thresholdAmount: 1_000_000n,
   wallet,
 })
@@ -104,17 +142,26 @@ The unsigned twin is `generateUnsignedSetThresholdAmount`.
 
 ## Authorized callers
 
-Authorized callers are the pools permitted to invoke the hooks' preflight and postflight checks. A pool that is bound to the hooks but absent from this set reverts `UnauthorizedCaller` on every transfer, so keep the two in step. `updateAdvancedPoolHooksAuthorizedCallers` edits the set, taking `addedCallers` and `removedCallers` arrays, gated on the hooks owner. Removes run before adds, so a caller in both lists stays authorized.
+Authorized callers are the pools permitted to invoke the hooks' preflight and postflight checks. A pool that is bound to the hooks but absent from this set reverts `UnauthorizedCaller` on every transfer, so keep the two in step. `updateAdvancedPoolHooksAuthorizedCallers` edits the set on the hooks bound to `poolAddress`, taking `addedCallers` and `removedCallers` arrays, gated on the hooks owner. Removes run before adds, so a caller in both lists stays authorized.
+
+The set belongs to the hooks, so every pool bound to them shares it. To bring another pool onto hooks that are already in use, authorize it through a pool that is already bound, then bind the new pool. Binding first works too, but the new pool's transfers revert `UnauthorizedCaller` until the authorization lands. Hooks that no pool is bound to yet cannot be reached this way, so list the first pool in the constructor's `authorizedCallers`.
 
 ```typescript
+// `pool` is already bound to the hooks; `otherPool` is about to be bound to them
 await cct.updateAdvancedPoolHooksAuthorizedCallers({
-  advancedPoolHooks: hooks.contractAddress,
-  addedCallers: [pool.contractAddress],
+  poolAddress: pool.contractAddress,
+  addedCallers: [otherPool.contractAddress],
+  wallet,
+})
+
+await cct.updateAdvancedPoolHooks({
+  poolAddress: otherPool.contractAddress,
+  advancedPoolHooks: await cct.getAdvancedPoolHooks({ poolAddress: pool.contractAddress }),
   wallet,
 })
 ```
 
-`getAllAdvancedPoolHooksAuthorizedCallers({ advancedPoolHooks })` lists the current set. The unsigned twin of the write is `generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers`.
+`getAllAdvancedPoolHooksAuthorizedCallers({ poolAddress })` lists the current set. The unsigned twin of the write is `generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers`.
 
 ## CCV requirements
 
@@ -125,11 +172,11 @@ CCV requirements say which Cross-Chain Verifiers a transfer must use for a given
 - `inboundCCVs`: required for every inbound transfer.
 - `thresholdInboundCCVs`: additional inbound CCVs required at or above the threshold amount.
 
-`applyCCVConfigUpdates` replaces the complete configuration for each remote chain in `ccvConfigArgs`, gated on the hooks owner. Every entry carries a `remoteChainSelector` plus the four lists. A threshold list requires a non-empty matching base list, and no address may repeat within or across a direction's base/threshold pair.
+`applyCCVConfigUpdates` replaces the complete configuration for each remote chain in `ccvConfigArgs` on the hooks bound to `poolAddress`, gated on the hooks owner. Every entry carries a `remoteChainSelector` plus the four lists. A threshold list requires a non-empty matching base list, and no address may repeat within or across a direction's base/threshold pair. The constructor has no CCV argument, so CCV requirements can only be applied after the hooks are bound (see [Deploy and bind hooks](#deploy-and-bind-hooks)).
 
 ```typescript
 await cct.applyCCVConfigUpdates({
-  advancedPoolHooks: hooks.contractAddress,
+  poolAddress: pool.contractAddress,
   ccvConfigArgs: [
     {
       remoteChainSelector: 5009297550715157269n,
@@ -145,13 +192,13 @@ await cct.applyCCVConfigUpdates({
 
 Three read methods cover the configuration:
 
-- `getCCVConfig({ advancedPoolHooks, remoteChainSelector })` returns one remote chain's four lists. An all-empty result is normal and means that selector has no configured requirements.
-- `getAllCCVConfigs({ advancedPoolHooks })` returns every remote chain with a non-empty base config, each as a `remoteChainSelector` plus the four lists. The order follows the contract's enumerable-set order, which is not a stable sort.
-- `getRequiredCCVs({ advancedPoolHooks, remoteChainSelector, amount, direction })` resolves the hooks' current decision for a proposed transfer, where `direction` is `'outbound'` or `'inbound'` and `amount` is a `bigint`. It includes threshold CCVs when `amount` reaches the configured threshold.
+- `getCCVConfig({ poolAddress, remoteChainSelector })` returns one remote chain's four lists. An all-empty result is normal and means that selector has no configured requirements.
+- `getAllCCVConfigs({ poolAddress })` returns every remote chain with a non-empty base config, each as a `remoteChainSelector` plus the four lists. The order follows the contract's enumerable-set order, which is not a stable sort.
+- `getRequiredCCVs({ poolAddress, remoteChainSelector, amount, direction })` resolves the hooks' current decision for a proposed transfer, where `direction` is `'outbound'` or `'inbound'` and `amount` is a `bigint`. It includes threshold CCVs when `amount` reaches the configured threshold. The SDK passes `amount` to the hooks unchanged. During a real transfer the pool first deducts an enabled outbound transfer fee, or converts an inbound amount to local decimals, before asking the hooks, so pass the amount the hooks will see.
 
 ```typescript
 const ccvs = await cct.getRequiredCCVs({
-  advancedPoolHooks: hooks.contractAddress,
+  poolAddress: pool.contractAddress,
   remoteChainSelector: 5009297550715157269n,
   amount: 1_000_000n,
   direction: 'outbound',

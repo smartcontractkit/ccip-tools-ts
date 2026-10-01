@@ -1545,7 +1545,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @remarks A v2.0.0 pool holds no sender allowlist and no CCV configuration itself — both live
    * on this contract. Deploy it, then bind it with {@link updateAdvancedPoolHooks} (or pass its
-   * address as `deployTokenPool`'s `advancedPoolHooks`).
+   * address as `deployTokenPool`'s `advancedPoolHooks`). The hooks' configuration methods take a
+   * bound pool's `poolAddress`, so bind before configuring.
    * @remarks The deployed address is only known once mined, so it is NOT returned here — use
    * {@link deployAdvancedPoolHooks} to receive it. The same applies to the constructor args
    * needed for explorer verification.
@@ -1578,8 +1579,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Returns the deployed address plus the `verification` input (contract name and
    * ABI-encoded constructor args) a block explorer needs to verify the source.
    * @remarks Binding the pool ({@link updateAdvancedPoolHooks}) and authorizing it on the hooks
-   * are independent: list every pool in `authorizedCallers` here, or add them later with the
-   * hooks' own `applyAuthorizedCallerUpdates`, otherwise transfers revert `UnauthorizedCaller`.
+   * are independent: list every pool in `authorizedCallers` here, or add them later with
+   * {@link updateAdvancedPoolHooksAuthorizedCallers} through a pool already bound to these hooks,
+   * otherwise transfers revert `UnauthorizedCaller`.
+   * @remarks **Bind before configuring.** Every hooks configuration method resolves the hooks from a
+   * bound pool, so set what must hold from the first transfer — allowlist, threshold, policy
+   * engine, authorized callers — here. CCV requirements have no constructor argument: apply them
+   * with {@link applyCCVConfigUpdates} right after binding, before the pool's lanes carry
+   * transfers; until then the pool requires no CCVs of its own.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
@@ -1605,19 +1612,25 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads one remote chain's complete CCV config from `AdvancedPoolHooks`.
+   * Reads one remote chain's complete CCV config from the `AdvancedPoolHooks` bound to a
+   * **v2.0.0** pool.
    *
    * @remarks An all-empty result is normal: the selector has no configured requirements. Base
    * lists apply to every transfer; threshold lists add requirements at or above the hooks'
    * threshold amount. `address(0)` selects the default CCV.
+   * @remarks Hooks may be shared, so this is the config of every pool bound to the same hooks.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` or `remoteChainSelector` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` or `remoteChainSelector` is invalid,
+   * or the pool has no hooks bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const config = await cct.getCCVConfig({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   remoteChainSelector: 5009297550715157269n,
    * })
    * ```
@@ -1627,17 +1640,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Lists every remote chain with a non-empty base CCV config.
+   * Lists every remote chain with a non-empty base CCV config on the `AdvancedPoolHooks` bound to
+   * a **v2.0.0** pool.
    *
    * @remarks The result follows the contract's enumerable-set order, which is not a stable sort.
    * A config with only threshold CCVs cannot exist; threshold CCVs require a base list.
+   * @remarks Hooks may be shared, so this is the config of every pool bound to the same hooks.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or the pool has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
-   * const configs = await cct.getAllCCVConfigs({ advancedPoolHooks: '0xHooks...' })
+   * const configs = await cct.getAllCCVConfigs({ poolAddress: '0xPool...' })
    * ```
    */
   getAllCCVConfigs(opts: GetAllCCVConfigsParams): Promise<GetAllCCVConfigsResult> {
@@ -1645,20 +1664,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Resolves the CCVs required for a proposed inbound or outbound transfer.
+   * Resolves the CCVs the `AdvancedPoolHooks` bound to a **v2.0.0** pool require for a proposed
+   * inbound or outbound transfer.
    *
    * @remarks This is the hooks contract's current decision for the selector, amount, and direction;
    * it includes threshold CCVs when the amount reaches the configured threshold. The standard
    * `AdvancedPoolHooks` ignores the interface's token/finality/extra-data arguments, so this query
    * supplies their neutral values internally.
+   * @remarks `amount` reaches the hooks unchanged. The pool's own `getRequiredCCVs` first deducts
+   * an enabled outbound transfer fee and rescales an inbound amount to local decimals, so pass the
+   * amount the hooks will see.
    *
-   * @throws {@link CCTParamsInvalidError} if a param is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, or the pool has no hooks bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const ccvs = await cct.getRequiredCCVs({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   remoteChainSelector: 5009297550715157269n,
    *   amount: 1_000_000n,
    *   direction: 'outbound',
@@ -1675,19 +1701,25 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @remarks Each entry replaces one remote chain's complete base and threshold CCV lists.
    * Threshold lists require a non-empty matching base list; CCVs cannot repeat within or across
-   * those paired lists. `address(0)` in any list selects the default CCV. The target is probed
-   * to confirm it reports `AdvancedPoolHooks` before calldata is returned.
+   * those paired lists. `address(0)` in any list selects the default CCV.
+   * @remarks The tx targets the `AdvancedPoolHooks` bound to the **v2.0.0** `poolAddress`, probed
+   * to confirm it reports `AdvancedPoolHooks` before calldata is returned. Hooks may be shared, so
+   * the update applies to every pool bound to the same hooks. The binding is read now, not at
+   * execution: build this only after the {@link updateAdvancedPoolHooks} it depends on has landed,
+   * or it targets the previously bound hooks.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
-   * list lacks base CCVs, or `sender` is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, CCVs
+   * are duplicated, a threshold list lacks base CCVs, or `sender` is not the hooks owner
    *
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedApplyCCVConfigUpdates({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   ccvConfigArgs: [{
    *     remoteChainSelector: 5009297550715157269n,
    *     outboundCCVs: ['0xCCV...'],
@@ -1709,15 +1741,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @remarks Base CCVs apply to every transfer; threshold CCVs add requirements only above the
    * hooks' configured threshold. `sender` defaults to the wallet address and, when supplied,
-   * must equal it. `address(0)` in any list selects the default CCV. The target is probed to
-   * confirm it is an `AdvancedPoolHooks` contract.
+   * must equal it. `address(0)` in any list selects the default CCV.
+   * @remarks The tx targets the `AdvancedPoolHooks` bound to the **v2.0.0** `poolAddress`, probed
+   * to confirm it is an `AdvancedPoolHooks` contract. Hooks may be shared, so the update applies
+   * to every pool bound to the same hooks.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
-   * list lacks base CCVs, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, CCVs
+   * are duplicated, a threshold list lacks base CCVs, `sender` differs from the wallet, or the
+   * wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1726,7 +1763,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.applyCCVConfigUpdates({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   ccvConfigArgs: [{
    *     remoteChainSelector: 5009297550715157269n,
    *     outboundCCVs: ['0xCCV...'],
@@ -1745,15 +1782,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Lists callers authorized for hooks preflight and postflight checks.
+   * Lists callers authorized for the preflight and postflight checks of the `AdvancedPoolHooks`
+   * bound to a **v2.0.0** pool.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @remarks Hooks may be shared, so the set can list other pools bound to the same hooks.
+   *
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or the pool has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    *
    * @example
    * ```ts
    * const callers = await cct.getAllAdvancedPoolHooksAuthorizedCallers({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    * })
    * ```
    */
@@ -1764,14 +1808,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads the hooks policy engine; the zero address means policy checks are disabled.
+   * Reads the policy engine of the `AdvancedPoolHooks` bound to a **v2.0.0** pool; the zero
+   * address means policy checks are disabled.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or the pool has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    *
    * @example
    * ```ts
-   * const policyEngine = await cct.getPolicyEngine({ advancedPoolHooks: '0xHooks...' })
+   * const policyEngine = await cct.getPolicyEngine({ poolAddress: '0xPool...' })
    * ```
    */
   getPolicyEngine(opts: GetPolicyEngineParams): Promise<GetPolicyEngineResult> {
@@ -1779,14 +1828,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Reads the amount at which additional CCVs apply; zero means they are disabled.
+   * Reads the amount at which the `AdvancedPoolHooks` bound to a **v2.0.0** pool apply additional
+   * CCVs; zero means they are disabled.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is invalid, or the pool has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    *
    * @example
    * ```ts
-   * const thresholdAmount = await cct.getThresholdAmount({ advancedPoolHooks: '0xHooks...' })
+   * const thresholdAmount = await cct.getThresholdAmount({ poolAddress: '0xPool...' })
    * ```
    */
   getThresholdAmount(opts: GetThresholdAmountParams): Promise<GetThresholdAmountResult> {
@@ -1794,23 +1848,30 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned authorized-caller update for an `AdvancedPoolHooks`; use
-   * {@link updateAdvancedPoolHooksAuthorizedCallers} to sign and submit it directly.
+   * Builds an unsigned authorized-caller update for the `AdvancedPoolHooks` bound to a
+   * **v2.0.0** pool; use {@link updateAdvancedPoolHooksAuthorizedCallers} to sign and submit it
+   * directly.
    *
    * @remarks Caller arrays reject duplicates (including different address casing). Removes run
-   * before adds, so a caller present in both lists remains authorized. The hooks target and
+   * before adds, so a caller present in both lists remains authorized. The bound hooks and
    * supplied owner are pre-flighted before calldata is returned.
+   * @remarks The tx targets the hooks, whose one caller set every pool bound to them shares. To
+   * bring another pool onto shared hooks, authorize it through a pool already bound to them
+   * before binding it, so its transfers never revert `UnauthorizedCaller`.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, or
+   * `sender` is not the hooks owner
    *
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers({
-   *   advancedPoolHooks: '0xHooks...',
-   *   addedCallers: ['0xPool...'],
+   *   poolAddress: '0xPool...', // already bound to the hooks
+   *   addedCallers: ['0xOtherPool...'],
    *   sender: '0xOwner...',
    * })
    * ```
@@ -1822,14 +1883,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Updates callers permitted to invoke hooks checks, signing + submitting as the hooks owner.
-   * Use {@link generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers} for multisig or offline signing.
+   * Updates callers permitted to invoke the checks of the `AdvancedPoolHooks` bound to a
+   * **v2.0.0** pool, signing + submitting as the hooks owner. Use
+   * {@link generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers} for multisig or offline
+   * signing.
+   *
+   * @remarks Hooks may be shared, so this edits the caller set of every pool bound to them.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
-   * or the wallet is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound,
+   * `sender` differs from the wallet, or the wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1838,8 +1905,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.updateAdvancedPoolHooksAuthorizedCallers({
-   *   advancedPoolHooks: '0xHooks...',
-   *   addedCallers: ['0xPool...'],
+   *   poolAddress: '0xPool...', // already bound to the hooks
+   *   addedCallers: ['0xOtherPool...'],
    *   wallet,
    * })
    * ```
@@ -1851,24 +1918,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `setPolicyEngine` tx for an `AdvancedPoolHooks`; use
-   * {@link setPolicyEngine} to sign and submit it directly.
+   * Builds an unsigned `setPolicyEngine` tx for the `AdvancedPoolHooks` bound to a **v2.0.0**
+   * pool; use {@link setPolicyEngine} to sign and submit it directly.
    *
    * @remarks The zero address disables policy checks. A non-zero engine must have deployed code
    * and implement `attach()` / `detach()`; code presence alone cannot verify that interface. The
-   * target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it must
-   * be the current hooks owner.
+   * bound hooks are probed to confirm they report `AdvancedPoolHooks`. When `sender` is supplied,
+   * it must be the current hooks owner.
+   * @remarks Hooks may be shared, so the engine applies to every pool bound to the same hooks.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
-   * code, or `sender` is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, a
+   * non-zero engine has no deployed code, or `sender` is not the hooks owner
    *
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetPolicyEngine({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   newPolicyEngine: '0xPolicyEngine...',
    *   sender: '0xOwner...',
    * })
@@ -1879,19 +1949,23 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Attaches a policy engine to an `AdvancedPoolHooks`, signing + submitting as its owner. Pass
-   * the zero address to disable policy checks. Use {@link generateUnsignedSetPolicyEngine} for
-   * multisig or offline signing.
+   * Attaches a policy engine to the `AdvancedPoolHooks` bound to a **v2.0.0** pool, signing +
+   * submitting as the hooks owner. Pass the zero address to disable policy checks. Use
+   * {@link generateUnsignedSetPolicyEngine} for multisig or offline signing.
    *
    * @remarks The hooks contract detaches the old engine before attaching the new one. A reverting
    * old-engine detach reverts this transaction; use the contract's explicit recovery setter if
    * that is intentional.
+   * @remarks Hooks may be shared, so the engine applies to every pool bound to the same hooks.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
-   * code, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, a
+   * non-zero engine has no deployed code, `sender` differs from the wallet, or the wallet is not
+   * the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1900,7 +1974,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.setPolicyEngine({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   newPolicyEngine: '0xPolicyEngine...',
    *   wallet,
    * })
@@ -1911,22 +1985,26 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `setThresholdAmount` tx for an `AdvancedPoolHooks`; use
-   * {@link setThresholdAmount} to sign and submit it directly.
+   * Builds an unsigned `setThresholdAmount` tx for the `AdvancedPoolHooks` bound to a **v2.0.0**
+   * pool; use {@link setThresholdAmount} to sign and submit it directly.
    *
-   * @remarks Zero disables threshold CCVs; base CCVs continue to apply. The target is probed to
-   * confirm it reports `AdvancedPoolHooks`; when `sender` is supplied, it must be the current
+   * @remarks Zero disables threshold CCVs; base CCVs continue to apply. The bound hooks are probed
+   * to confirm they report `AdvancedPoolHooks`; when `sender` is supplied, it must be the current
    * hooks owner.
+   * @remarks Hooks may be shared, so the threshold applies to every pool bound to the same hooks.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound, or
+   * `sender` is not the hooks owner
    *
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const unsigned = await cct.generateUnsignedSetThresholdAmount({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   thresholdAmount: 1_000_000n,
    *   sender: '0xOwner...',
    * })
@@ -1937,15 +2015,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Sets the amount at which an `AdvancedPoolHooks` requires additional CCVs, signing + submitting
-   * as its owner. Pass zero to disable threshold CCVs. Use
-   * {@link generateUnsignedSetThresholdAmount} for multisig or offline signing.
+   * Sets the amount at which the `AdvancedPoolHooks` bound to a **v2.0.0** pool require
+   * additional CCVs, signing + submitting as the hooks owner. Pass zero to disable threshold CCVs.
+   * Use {@link generateUnsignedSetThresholdAmount} for multisig or offline signing.
+   *
+   * @remarks Hooks may be shared, so the threshold applies to every pool bound to the same hooks.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
-   * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
-   * or the wallet is not the hooks owner
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not an `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the pool has no hooks bound,
+   * `sender` differs from the wallet, or the wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1954,7 +2036,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.setThresholdAmount({
-   *   advancedPoolHooks: '0xHooks...',
+   *   poolAddress: '0xPool...',
    *   thresholdAmount: 1_000_000n,
    *   wallet,
    * })

@@ -35,7 +35,7 @@ A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved 
 | Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry` | All versions |
 | Sender allowlist | `applyAllowlistUpdates` | v1.5.0 to v1.6.1 only (removed in v2.0.0) |
 | Transfer fees & finality | `applyTokenTransferFeeConfigUpdates`, `setAllowedFinalityConfig`, `getFee`, `getTokenTransferFeeConfig`, `getAllowedFinalityConfig` | v2.0.0 only |
-| CCVs & hooks | `applyCCVConfigUpdates`, `getCCVConfig`, `getAllCCVConfigs`, `getRequiredCCVs`, `deployAdvancedPoolHooks`, `updateAdvancedPoolHooks`, `getAdvancedPoolHooks` | v2.0.0 only |
+| CCVs & hooks | `deployAdvancedPoolHooks`, `updateAdvancedPoolHooks`, `getAdvancedPoolHooks`, plus the methods that take `poolAddress` and act on its bound hooks: `applyCCVConfigUpdates`, `getCCVConfig`, `getAllCCVConfigs`, `getRequiredCCVs`, `setPolicyEngine`, `getPolicyEngine`, `setThresholdAmount`, `getThresholdAmount`, `updateAdvancedPoolHooksAuthorizedCallers`, `getAllAdvancedPoolHooksAuthorizedCallers` | v2.0.0 only |
 | Lockbox | `getLockbox` | v2.0.0 only |
 
 ## Siloed liquidity pools

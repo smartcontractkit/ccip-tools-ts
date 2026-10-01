@@ -1,6 +1,6 @@
 /**
- * applyCCVConfigUpdates — replaces complete per-remote-chain CCV requirements on an
- * `AdvancedPoolHooks`.
+ * applyCCVConfigUpdates — replaces complete per-remote-chain CCV requirements on the
+ * `AdvancedPoolHooks` bound to a v2.0.0 pool.
  *
  * @remarks Base CCVs apply to every transfer; threshold CCVs add requirements above the hooks'
  * configured threshold. This writes all four lists for every supplied selector — it does not merge
@@ -9,8 +9,12 @@
  * `address(0)` is valid in any list and requests the default CCV alongside any explicitly named
  * CCVs.
  *
- * Owner-only. The target's `typeAndVersion()` is checked before building calldata, so an EOA or an
+ * @remarks The target is resolved from the pool: the tx goes to the hooks bound to `poolAddress`,
+ * not to the pool. Hooks may be shared, so the update applies to every pool bound to the same
+ * hooks. The bound address's `typeAndVersion()` is checked before building calldata, so an EOA or an
  * unrelated Ownable contract cannot produce an unsigned no-op or misrouted transaction.
+ *
+ * Owner-only — gated on the *hooks* owner, which need not be the pool owner.
  *
  * @packageDocumentation
  */
@@ -31,21 +35,24 @@ import {
 import {
   type CCVConfigUpdate,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
+  resolveAdvancedPoolHooks,
 } from '../contracts.ts'
 
 /** Parameters for {@link ApplyCCVConfigUpdates}. */
 export type ApplyCCVConfigUpdatesParams = {
-  /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
-  advancedPoolHooks: string
+  /**
+   * v2.0.0 token pool whose bound `AdvancedPoolHooks` are reconfigured. The tx goes to those hooks,
+   * so it changes every pool bound to them, not just this one.
+   */
+  poolAddress: string
   /** Complete replacements to apply; an empty array is a permitted on-chain no-op. */
   ccvConfigArgs: CCVConfigUpdate[]
   /**
-   * Hooks owner. Sets `tx.from` for offline / multisig signing and, when supplied, is checked
-   * against the hooks' on-chain `owner()` before calldata is built. Optional for
-   * {@link ApplyCCVConfigUpdates.generate}; {@link ApplyCCVConfigUpdates.execute} defaults it to
-   * the signing wallet.
+   * Hooks owner, which need not be the pool owner. Sets `tx.from` for offline / multisig signing
+   * and, when supplied, is checked against the hooks' on-chain `owner()` before calldata is built.
+   * Optional for {@link ApplyCCVConfigUpdates.generate}; {@link ApplyCCVConfigUpdates.execute}
+   * defaults it to the signing wallet.
    */
   sender?: string
 }
@@ -114,12 +121,9 @@ function validateCCVConfig(operation: string, param: string, value: unknown): vo
 export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesParams> {
   readonly name = 'applyCCVConfigUpdates'
 
-  /** Validates the hooks target and contract CCV constraints before any RPC. */
-  protected override validate({
-    advancedPoolHooks,
-    ccvConfigArgs,
-  }: ApplyCCVConfigUpdatesParams): void {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', advancedPoolHooks)
+  /** Validates the pool address and contract CCV constraints before any RPC. */
+  protected override validate({ poolAddress, ccvConfigArgs }: ApplyCCVConfigUpdatesParams): void {
+    validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateArray(this.name, 'ccvConfigArgs', ccvConfigArgs)
     ccvConfigArgs.forEach((config, i) =>
       validateCCVConfig(this.name, `ccvConfigArgs[${i}]`, config),
@@ -127,20 +131,23 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
   }
 
   /**
-   * Confirms the target is `AdvancedPoolHooks`, checks `sender` when supplied, then encodes the
-   * update calldata.
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
+   * Resolves the hooks bound to the pool (confirming they are `AdvancedPoolHooks`), checks
+   * `sender` against the hooks owner when supplied, then encodes the update calldata to the hooks.
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if the pool has no hooks bound, or `sender` is supplied
+   * and is not the hooks owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, ccvConfigArgs, sender }: ApplyCCVConfigUpdatesParams,
+    { poolAddress, ccvConfigArgs, sender }: ApplyCCVConfigUpdatesParams,
   ): Promise<UnsignedEVMTx> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
+    const hooks = await resolveAdvancedPoolHooks(this.name, chain, poolAddress)
+    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
-      advancedPoolHooks,
+      hooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('applyCCVConfigUpdates', [ccvConfigArgs]),
     )
   }

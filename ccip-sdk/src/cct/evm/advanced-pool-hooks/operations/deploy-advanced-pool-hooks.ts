@@ -5,6 +5,13 @@
  * bind it to a pool with `updateAdvancedPoolHooks` (or pass it as the pool constructor's
  * `advancedPoolHooks`). Mirrors `lockbox/operations/deploy-lockbox.ts`.
  *
+ * @remarks **Bind before configuring.** Every other hooks op resolves its target from a bound
+ * pool's `poolAddress`, so the hooks are reachable only once bound. Put what must hold from the
+ * first transfer in the constructor: the allowlist, threshold, policy engine and authorized
+ * callers. CCV requirements have no constructor argument — apply them with
+ * `applyCCVConfigUpdates` after binding, before the pool's lanes carry transfers; until then the
+ * pool requires no CCVs of its own.
+ *
  * @packageDocumentation
  */
 
@@ -42,7 +49,9 @@ export type DeployAdvancedPoolHooksParams = {
   /**
    * Pools permitted to call `preflightCheck` / `postflightCheck` on these hooks; defaults to `[]`.
    * @remarks Binding a pool with `updateAdvancedPoolHooks` does *not* authorize it here; a pool
-   * missing from this set reverts `UnauthorizedCaller` on every transfer.
+   * missing from this set reverts `UnauthorizedCaller` on every transfer. Pools can be added
+   * later with `updateAdvancedPoolHooksAuthorizedCallers`, but only through a pool already bound
+   * to these hooks.
    */
   authorizedCallers?: string[]
   /** Deployer address; sets `tx.from` for offline / multisig signing. */

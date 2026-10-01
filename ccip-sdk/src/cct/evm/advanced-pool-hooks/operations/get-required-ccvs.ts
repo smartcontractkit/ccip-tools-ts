@@ -1,8 +1,13 @@
 /**
- * Resolves the CCVs `AdvancedPoolHooks` requires for a proposed transfer.
+ * Resolves the CCVs the `AdvancedPoolHooks` bound to a v2.0.0 pool require for a proposed
+ * transfer.
  *
  * @remarks The deployed hooks ignore the interface's `localToken`, finality-config, and extra-data
  * arguments, so this query supplies their neutral values internally.
+ *
+ * @remarks This asks the hooks directly, with `amount` exactly as given. The pool's own
+ * `getRequiredCCVs` first deducts an enabled outbound transfer fee, and rescales an inbound amount
+ * to local decimals, before consulting the same hooks — pass the amount the hooks will see.
  *
  * @packageDocumentation
  */
@@ -11,7 +16,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateNonZeroAddress, validateUint256, validateUint64 } from '../../validate.ts'
-import { assertAdvancedPoolHooksContract, readRequiredCCVs } from '../contracts.ts'
+import { readRequiredCCVs, resolveAdvancedPoolHooks } from '../contracts.ts'
 
 /** Transfer direction accepted by `IPoolV2.MessageDirection`. */
 export type CCVMessageDirection = 'outbound' | 'inbound'
@@ -25,11 +30,11 @@ export type CCVMessageDirection = 'outbound' | 'inbound'
  * affect its result: selector, amount, and direction.
  */
 export type GetRequiredCCVsParams = {
-  /** Hooks contract to read. */
-  advancedPoolHooks: string
+  /** v2.0.0 token pool whose bound hooks are asked. */
+  poolAddress: string
   /** Remote CCIP chain selector (`uint64`). */
   remoteChainSelector: bigint
-  /** Transfer amount (`uint256`). */
+  /** Transfer amount (`uint256`), passed to the hooks unchanged. */
   amount: bigint
   /** Whether this resolves outbound or inbound requirements. */
   direction: CCVMessageDirection
@@ -42,8 +47,9 @@ export type GetRequiredCCVsResult = string[]
 export class GetRequiredCCVs extends EVMQuery<GetRequiredCCVsParams, GetRequiredCCVsResult> {
   readonly name = 'getRequiredCCVs'
 
+  /** @throws {@link CCTParamsInvalidError} if a param is invalid */
   protected prepare(params: GetRequiredCCVsParams): GetRequiredCCVsParams {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
     validateUint64(this.name, 'remoteChainSelector', params.remoteChainSelector)
     validateUint256(this.name, 'amount', params.amount)
     const direction: unknown = (params as { direction: unknown }).direction
@@ -52,14 +58,22 @@ export class GetRequiredCCVs extends EVMQuery<GetRequiredCCVsParams, GetRequired
     return params
   }
 
+  /**
+   * Resolves the pool's bound hooks, then asks them for the transfer's CCVs.
+   * @throws {@link CCTContractTypeInvalidError} if the pool's type is not supported, or the bound
+   * address is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if the pool has no hooks bound
+   */
   protected async read(
     chain: EVMChain,
     params: GetRequiredCCVsParams,
   ): Promise<GetRequiredCCVsResult> {
-    await assertAdvancedPoolHooksContract(chain, params.advancedPoolHooks)
+    const hooks = await resolveAdvancedPoolHooks(this.name, chain, params.poolAddress)
     return readRequiredCCVs(
       chain,
-      params.advancedPoolHooks,
+      hooks,
       params.remoteChainSelector,
       params.amount,
       params.direction === 'outbound' ? 0n : 1n,
