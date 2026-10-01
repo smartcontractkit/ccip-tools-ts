@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { AddressLookupTableProgram, Keypair, PublicKey } from '@solana/web3.js'
 
@@ -8,7 +9,7 @@ import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
-import { TOKEN_POOL_PROGRAMS } from '../../programs/token-pool.ts'
+import { TOKEN_POOL_PROGRAMS, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 import { AppendToLookupTable } from './append-to-lookup-table.ts'
 
 const TOKEN = Keypair.generate().publicKey.toBase58()
@@ -25,11 +26,31 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** Pool state for TOKEN whose only meaningful field is its router. */
+function poolState(): Buffer {
+  const key = PublicKey.default.toBuffer()
+  return Buffer.concat([
+    BorshAccountsCoder.accountDiscriminator('State'),
+    Buffer.from([1]),
+    TOKEN_PROGRAM_ID.toBuffer(),
+    new PublicKey(TOKEN).toBuffer(),
+    Buffer.from([6]),
+    ...Array.from({ length: 6 }, () => key),
+    new PublicKey(ROUTER).toBuffer(),
+    key,
+    Buffer.from([0, 0]),
+    Buffer.alloc(4),
+    key,
+  ])
+}
+
 type StubChainOptions = {
   addresses?: PublicKey[]
   authority?: string | null
   onGetLookupTable?: () => void
   missingLookupTable?: boolean
+  /** Programs holding the pool state of TOKEN. */
+  poolPrograms?: PublicKey[]
 }
 
 function stubChain({
@@ -37,11 +58,22 @@ function stubChain({
   authority = AUTHORITY,
   onGetLookupTable,
   missingLookupTable = false,
+  poolPrograms = [new PublicKey(POOL_PROGRAM)],
 }: StubChainOptions = {}): SolanaChain {
+  const states = new Map(
+    poolPrograms.map((poolProgram) => [
+      deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN)).toBase58(),
+      { owner: poolProgram, data: poolState() },
+    ]),
+  )
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
-      getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+      // Every other account, including the mint, is owned by the SPL Token program.
+      getAccountInfo: async (address: PublicKey) =>
+        states.get(address.toBase58()) ?? { owner: TOKEN_PROGRAM_ID },
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => states.get(address.toBase58()) ?? null),
       getAddressLookupTable: async () => {
         onGetLookupTable?.()
         return {
@@ -63,12 +95,10 @@ function stubChain({
       sendTransaction: async () => HASH,
       confirmTransaction: async () => ({ value: { err: null } }),
     },
-    getTokenPoolConfig: async () => ({
-      token: TOKEN,
-      router: ROUTER,
-      tokenPoolProgram: POOL_PROGRAM,
-    }),
-    _getRouterConfig: async () => ({ feeQuoter: FEE_QUOTER }),
+    _getRouterConfig: async (router: string) => {
+      assert.equal(router, ROUTER)
+      return { feeQuoter: FEE_QUOTER }
+    },
   } as unknown as SolanaChain
 }
 
@@ -112,6 +142,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
         lookupTableAddress: new PublicKey(LOOKUP_TABLE),
         tokenMint: new PublicKey(TOKEN),
         poolProgram: new PublicKey(POOL_PROGRAM),
+        router: new PublicKey(ROUTER),
       })
       const unsigned = await generate(
         {
@@ -138,11 +169,11 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
-    it('accepts a canonical pool type', async () => {
-      const unsigned = await generate({
-        tokenAddress: TOKEN,
-        poolType: 'burn-mint',
-      })
+    it('resolves the canonical pool program of the mint', async () => {
+      const unsigned = await generate(
+        { tokenAddress: TOKEN },
+        stubChain({ poolPrograms: [new PublicKey(TOKEN_POOL_PROGRAMS['burn-mint'])] }),
+      )
 
       assert.equal(unsigned.instructions.length, 1)
       assert.ok(
@@ -152,12 +183,11 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
-    it('ignores an undefined unused pool reference', async () => {
-      const unsigned = await generate({
-        tokenAddress: TOKEN,
-        poolProgramAddress: POOL_PROGRAM,
-        poolType: undefined,
-      })
+    it('treats an explicitly undefined pool program address as omitted', async () => {
+      const unsigned = await generate(
+        { tokenAddress: TOKEN, poolProgramAddress: undefined },
+        stubChain({ poolPrograms: [new PublicKey(TOKEN_POOL_PROGRAMS['lock-release'])] }),
+      )
 
       assert.equal(unsigned.instructions.length, 1)
     })
@@ -168,6 +198,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
         lookupTableAddress: new PublicKey(LOOKUP_TABLE),
         tokenMint: new PublicKey(TOKEN),
         poolProgram: new PublicKey(POOL_PROGRAM),
+        router: new PublicKey(ROUTER),
       })
 
       await assert.rejects(
@@ -188,6 +219,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
         lookupTableAddress: new PublicKey(LOOKUP_TABLE),
         tokenMint: new PublicKey(TOKEN),
         poolProgram: new PublicKey(POOL_PROGRAM),
+        router: new PublicKey(ROUTER),
       })
 
       await assert.rejects(
@@ -250,7 +282,7 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
-    it('rejects an ambiguous pool reference before the ALT RPC', async () => {
+    it('rejects a pool program address without a token before the ALT RPC', async () => {
       let getLookupTableCalls = 0
 
       await assert.rejects(
@@ -259,12 +291,12 @@ describe('AppendToLookupTable (cct/solana)', () => {
           {
             lookupTableAddress: LOOKUP_TABLE,
             payer: PAYER,
-            tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             poolProgramAddress: POOL_PROGRAM,
+            additionalAddresses: [Keypair.generate().publicKey.toBase58()],
           } as never,
         ),
-        CCTParamsInvalidError,
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
       )
 
       assert.equal(getLookupTableCalls, 0)
@@ -308,13 +340,14 @@ describe('AppendToLookupTable (cct/solana)', () => {
       )
     })
 
-    it('requires token and pool program together', async () => {
+    it('rejects a token whose pool program cannot be resolved', async () => {
       await assert.rejects(
         () => generate({ tokenAddress: TOKEN }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'appendToLookupTable' &&
-          err.context.param === 'tokenAddress',
+          err.context.param === 'tokenAddress' &&
+          /no canonical burn-mint or lock-release token pool/.test(err.message),
       )
     })
   })

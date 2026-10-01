@@ -11,20 +11,20 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import {
-  type CustomPoolProgramRef,
-  type LockReleasePoolProgramRef,
+  type PoolProgramRef,
   createLockReleaseTokenPoolProgram,
   deriveTokenPoolConfigPda,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolveLockReleasePoolProgram,
+  resolveExistingLockReleasePoolProgram,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana lock-release pool liquidity-acceptance generation and execution. */
-type SetCanAcceptLiquidityParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & {
+type SetCanAcceptLiquidityParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
   /** Whether to enable liquidity provision and withdrawal. */
@@ -35,7 +35,7 @@ type SetCanAcceptLiquidityParams = (LockReleasePoolProgramRef | CustomPoolProgra
 
 type ParsedSetCanAcceptLiquidityParams = {
   tokenAddress: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   allow: boolean
   payer: PublicKey
   authority: PublicKey
@@ -69,12 +69,15 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
       throw new CCTParamsInvalidError(this.name, 'allow', 'must be a boolean')
     }
 
-    const poolProgram = resolveLockReleasePoolProgram(this.name, params)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
 
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram,
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       allow: params.allow,
       payer,
       authority:
@@ -84,22 +87,28 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
     }
   }
 
-  /** Builds the unsigned Solana `setCanAcceptLiquidity` instruction. */
+  /** Resolves the lock-release pool program, then builds the unsigned `setCanAcceptLiquidity` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedSetCanAcceptLiquidityParams,
   ): Promise<UnsignedSolanaTx> {
-    const instruction = await createLockReleaseTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const poolProgram = await resolveExistingLockReleasePoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const instruction = await createLockReleaseTokenPoolProgram(chain, poolProgram, opts.payer)
       .methods.setCanAcceptLiquidity(opts.allow)
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state: deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress),
         mint: opts.tokenAddress,
         authority: opts.authority,
       })
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }

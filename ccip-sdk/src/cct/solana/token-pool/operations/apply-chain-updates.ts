@@ -22,10 +22,12 @@ import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
   U64_MAX,
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
+  validateOptionalPublicKey,
   validateUniqueChainSelectors,
 } from '../../validate.ts'
 import { DeleteChainRemoteConfig } from './delete-chain-remote-config.ts'
@@ -79,8 +81,10 @@ type ApplyChainUpdatesParams = PoolProgramRef & {
   authority?: string
 }
 
-type PoolInstructionParams = PoolProgramRef & {
+/** Shared component-op params; `poolProgramAddress` is the program resolved once per batch. */
+type PoolInstructionParams = {
   tokenAddress: string
+  poolProgramAddress: string
   payer: string
   authority: string
 }
@@ -220,7 +224,7 @@ export class ApplyChainUpdates extends SolanaOperation<
   protected override parse(params: GenerateApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
     parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     parsePublicKey(this.name, 'payer', params.payer)
-    resolvePoolProgram(this.name, params)
+    validateOptionalPublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)
     if (!Array.isArray(params.chainsToAdd)) {
       throw new CCTParamsInvalidError(this.name, 'chainsToAdd', 'must be an array')
     }
@@ -284,18 +288,26 @@ export class ApplyChainUpdates extends SolanaOperation<
     return [...init.instructions, ...edit.instructions, ...rateLimit.instructions]
   }
 
-  /** Builds ordered delete and per-chain update instruction groups. */
+  /**
+   * Resolves the pool program once, then builds ordered delete and per-chain update instruction
+   * groups. Component ops receive the resolved program as `poolProgramAddress`, which the
+   * resolver's cache confirms without another RPC.
+   */
   private async buildInstructionGroups(
     chain: SolanaChain,
     params: ParsedApplyChainUpdatesParams,
   ): Promise<InstructionGroup[]> {
+    const poolProgram = await resolveExistingPoolProgram(
+      this.name,
+      chain,
+      new PublicKey(params.tokenAddress),
+      parseOptionalPublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress),
+    )
     const pool: PoolInstructionParams = {
       tokenAddress: params.tokenAddress,
+      poolProgramAddress: poolProgram.toBase58(),
       payer: params.payer,
       authority: params.authority,
-      ...(params.poolType === undefined
-        ? { poolProgramAddress: params.poolProgramAddress }
-        : { poolType: params.poolType }),
     }
     const groups: InstructionGroup[] = []
 

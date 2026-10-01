@@ -1,21 +1,30 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
-import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
+import {
+  CCIPTokenAccountNotFoundError,
+  CCIPTokenPoolStateNotFoundError,
+} from '../../errors/index.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import {
   CCTParamsInvalidError,
   CCTTokenAccountMintMismatchError,
   CCTTxFailedError,
 } from '../errors.ts'
-import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
+import { TOKEN_POOL_PROGRAMS, deriveTokenPoolConfigPda } from './programs/token-pool.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
+  resolveExistingLockReleasePoolProgram,
+  resolveExistingPoolConfig,
+  resolveExistingPoolProgram,
+  resolveExistingPoolState,
   resolveExistingTokenAccount,
-  resolveLockReleasePoolProgram,
-  resolvePoolProgram,
+  resolvePoolProgramType,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -29,6 +38,58 @@ import {
   validateUniquePublicKeys,
   validateWritableIndexes,
 } from './validate.ts'
+
+const MINT = new PublicKey(Uint8Array.from({ length: 32 }, () => 2))
+const BURN_MINT = new PublicKey(TOKEN_POOL_PROGRAMS['burn-mint'])
+const LOCK_RELEASE = new PublicKey(TOKEN_POOL_PROGRAMS['lock-release'])
+const CUSTOM = new PublicKey(Uint8Array.from({ length: 32 }, () => 9))
+
+function poolStateData(): Buffer {
+  const key = PublicKey.default.toBuffer()
+  return Buffer.concat([
+    BorshAccountsCoder.accountDiscriminator('State'),
+    Buffer.from([1]),
+    TOKEN_PROGRAM_ID.toBuffer(),
+    MINT.toBuffer(),
+    Buffer.from([6]),
+    ...Array.from({ length: 8 }, () => key),
+    Buffer.from([0, 1]),
+    Buffer.alloc(4),
+    key,
+  ])
+}
+
+/**
+ * Stub chain whose token pool state for {@link MINT} exists only under `programs`, counting RPC
+ * reads. `typeAndVersion` rejects unless `type` is given, like a program without `typeVersion`.
+ */
+function poolChain(programs: PublicKey[], type?: string) {
+  const states = new Map(
+    programs.map((program) => [
+      deriveTokenPoolConfigPda(program, MINT).toBase58(),
+      { owner: program, data: poolStateData() },
+    ]),
+  )
+  const calls = { getAccountInfo: 0, getMultipleAccountsInfo: 0, typeAndVersion: 0 }
+  const chain = {
+    connection: {
+      getAccountInfo: async (address: PublicKey) => {
+        calls.getAccountInfo++
+        return states.get(address.toBase58()) ?? null
+      },
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) => {
+        calls.getMultipleAccountsInfo++
+        return addresses.map((address) => states.get(address.toBase58()) ?? null)
+      },
+    },
+    typeAndVersion: async () => {
+      calls.typeAndVersion++
+      if (type === undefined) throw new Error('typeVersion not implemented')
+      return [type, '1.6.0', `${type} 1.6.0`]
+    },
+  } as unknown as SolanaChain
+  return { chain, calls, states }
+}
 
 function mintData() {
   const data = Buffer.alloc(MINT_SIZE)
@@ -138,51 +199,194 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
-  it('resolves pool programs', () => {
-    assert.equal(
-      resolvePoolProgram('op', { poolType: 'burn-mint' }).toBase58(),
-      TOKEN_POOL_PROGRAMS['burn-mint'],
-    )
-    assert.ok(
-      resolvePoolProgram('op', { poolProgramAddress: PublicKey.default.toBase58() }).equals(
-        PublicKey.default,
-      ),
-    )
-
-    const invalidRefs: unknown[] = [
-      {},
-      { poolType: 'burn-mint', poolProgramAddress: PublicKey.default.toBase58() },
-      { poolType: 'nope' },
-      { poolProgramAddress: 'nope' },
-    ]
-    for (const params of invalidRefs) {
-      assert.throws(() => resolvePoolProgram('op', params as PoolProgramRef), CCTParamsInvalidError)
+  it('parses optional public keys', () => {
+    assert.equal(parseOptionalPublicKey('op', 'poolProgramAddress', undefined), undefined)
+    assert.ok(parseOptionalPublicKey('op', 'poolProgramAddress', CUSTOM.toBase58())?.equals(CUSTOM))
+    for (const value of [null, '', 'nope']) {
+      assert.throws(
+        () => parseOptionalPublicKey('op', 'poolProgramAddress', value),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'poolProgramAddress',
+      )
     }
   })
 
-  it('resolves pool references with the other key explicitly undefined', () => {
-    // Value semantics: an explicitly-set `undefined` key must not count as provided.
-    const custom = PublicKey.default.toBase58()
+  describe('existing pool resolution', () => {
+    it('resolves the only canonical pool for a mint in one read', async () => {
+      for (const program of [BURN_MINT, LOCK_RELEASE]) {
+        const { chain, calls } = poolChain([program])
+        const resolved = await resolveExistingPoolState('op', chain, MINT)
 
-    assert.equal(
-      resolvePoolProgram('op', { poolProgramAddress: custom, poolType: undefined }).toBase58(),
-      custom,
-    )
-    assert.equal(
-      resolvePoolProgram('op', {
-        poolType: 'burn-mint',
-        poolProgramAddress: undefined,
-      }).toBase58(),
-      TOKEN_POOL_PROGRAMS['burn-mint'],
-    )
-  })
+        assert.ok(resolved.poolProgram.equals(program))
+        assert.ok(resolved.state.equals(deriveTokenPoolConfigPda(program, MINT)))
+        assert.ok(resolved.account.owner.equals(program))
+        assert.deepEqual(calls, {
+          getAccountInfo: 0,
+          getMultipleAccountsInfo: 1,
+          typeAndVersion: 0,
+        })
+      }
+    })
 
-  it('resolves lock-release pool programs only', () => {
-    assert.ok(resolveLockReleasePoolProgram('op', { poolType: 'lock-release' }))
-    assert.throws(
-      () => resolveLockReleasePoolProgram('op', { poolType: 'burn-mint' }),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'poolType',
-    )
+    it('rejects a mint with both canonical pools', async () => {
+      const { chain } = poolChain([BURN_MINT, LOCK_RELEASE])
+
+      await assert.rejects(
+        resolveExistingPoolProgram('op', chain, MINT),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'poolProgramAddress' &&
+          /both canonical burn-mint and lock-release/.test(err.message),
+      )
+    })
+
+    it('rejects a mint without a canonical pool and does not cache the miss', async () => {
+      const { chain, calls, states } = poolChain([])
+      const rejectsNoPool = (err: unknown) =>
+        err instanceof CCTParamsInvalidError &&
+        err.context.param === 'tokenAddress' &&
+        /no canonical burn-mint or lock-release token pool/.test(err.message)
+
+      await assert.rejects(resolveExistingPoolProgram('op', chain, MINT), rejectsNoPool)
+      // A confirmed custom program is never used for canonical resolution.
+      states.set(deriveTokenPoolConfigPda(CUSTOM, MINT).toBase58(), {
+        owner: CUSTOM,
+        data: poolStateData(),
+      })
+      await resolveExistingPoolProgram('op', chain, MINT, CUSTOM)
+      await assert.rejects(resolveExistingPoolProgram('op', chain, MINT), rejectsNoPool)
+      assert.equal(calls.getMultipleAccountsInfo, 2)
+    })
+
+    it('reads only the state of an overriding pool program', async () => {
+      const { chain, calls } = poolChain([CUSTOM])
+      const resolved = await resolveExistingPoolState('op', chain, MINT, CUSTOM)
+
+      assert.ok(resolved.poolProgram.equals(CUSTOM))
+      assert.deepEqual(calls, { getAccountInfo: 1, getMultipleAccountsInfo: 0, typeAndVersion: 0 })
+    })
+
+    it('rejects an overriding pool program without state for the mint', async () => {
+      const { chain } = poolChain([BURN_MINT])
+
+      await assert.rejects(
+        resolveExistingPoolProgram('op', chain, MINT, CUSTOM),
+        (err: unknown) =>
+          err instanceof CCIPTokenPoolStateNotFoundError &&
+          err.context.tokenPool === deriveTokenPoolConfigPda(CUSTOM, MINT).toBase58() &&
+          err.context.mint === MINT.toBase58() &&
+          err.context.poolProgram === CUSTOM.toBase58(),
+      )
+    })
+
+    it('caches resolutions per chain and mint', async () => {
+      const { chain, calls } = poolChain([LOCK_RELEASE])
+
+      assert.ok((await resolveExistingPoolProgram('op', chain, MINT)).equals(LOCK_RELEASE))
+      assert.ok((await resolveExistingPoolProgram('op', chain, MINT)).equals(LOCK_RELEASE))
+      // The resolved program, passed back as an override, is confirmed without another read.
+      assert.ok(
+        (await resolveExistingPoolProgram('op', chain, MINT, LOCK_RELEASE)).equals(LOCK_RELEASE),
+      )
+      assert.deepEqual(calls, { getAccountInfo: 0, getMultipleAccountsInfo: 1, typeAndVersion: 0 })
+
+      // A state read reuses the resolution and reads the resolved PDA only.
+      await resolveExistingPoolState('op', chain, MINT)
+      assert.deepEqual(calls, { getAccountInfo: 1, getMultipleAccountsInfo: 1, typeAndVersion: 0 })
+
+      const other = poolChain([LOCK_RELEASE])
+      await resolveExistingPoolProgram('op', other.chain, MINT)
+      assert.equal(other.calls.getMultipleAccountsInfo, 1)
+    })
+
+    it('caches confirmed overriding pool programs', async () => {
+      const { chain, calls } = poolChain([CUSTOM])
+
+      await resolveExistingPoolProgram('op', chain, MINT, CUSTOM)
+      await resolveExistingPoolProgram('op', chain, MINT, CUSTOM)
+      assert.deepEqual(calls, { getAccountInfo: 1, getMultipleAccountsInfo: 0, typeAndVersion: 0 })
+    })
+
+    it('drops a cached resolution whose state is gone', async () => {
+      const { chain, calls, states } = poolChain([BURN_MINT])
+      await resolveExistingPoolProgram('op', chain, MINT)
+      states.clear()
+      states.set(deriveTokenPoolConfigPda(LOCK_RELEASE, MINT).toBase58(), {
+        owner: LOCK_RELEASE,
+        data: poolStateData(),
+      })
+
+      await assert.rejects(
+        resolveExistingPoolState('op', chain, MINT),
+        CCIPTokenPoolStateNotFoundError,
+      )
+      assert.ok((await resolveExistingPoolProgram('op', chain, MINT)).equals(LOCK_RELEASE))
+      assert.equal(calls.getMultipleAccountsInfo, 2)
+    })
+
+    it('decodes the resolved pool state', async () => {
+      const { chain } = poolChain([BURN_MINT])
+      const { poolProgram, version, config } = await resolveExistingPoolConfig('op', chain, MINT)
+
+      assert.ok(poolProgram.equals(BURN_MINT))
+      assert.equal(version, 1)
+      assert.ok(config.mint.equals(MINT))
+      assert.equal(config.decimals, 6)
+    })
+
+    it('identifies pool program types', async () => {
+      const canonical = poolChain([])
+      assert.equal(await resolvePoolProgramType(canonical.chain, BURN_MINT), 'burn-mint')
+      assert.equal(await resolvePoolProgramType(canonical.chain, LOCK_RELEASE), 'lock-release')
+      assert.equal(canonical.calls.typeAndVersion, 0)
+
+      const cases: [string | undefined, string | undefined][] = [
+        ['LockReleaseTokenPool', 'lock-release'],
+        ['lockreleaseTokenPool', 'lock-release'],
+        ['BurnMintTokenPool', 'burn-mint'],
+        ['burnmintTokenPool', 'burn-mint'],
+        ['CustomTokenPool', undefined],
+        [undefined, undefined],
+      ]
+      for (const [type, expected] of cases) {
+        assert.equal(await resolvePoolProgramType(poolChain([], type).chain, CUSTOM), expected)
+      }
+    })
+
+    it('rejects burn-mint pools for lock-release operations', async () => {
+      const rejects = (param: string) => (err: unknown) =>
+        err instanceof CCTParamsInvalidError && err.context.param === param
+
+      await assert.rejects(
+        resolveExistingLockReleasePoolProgram('op', poolChain([BURN_MINT]).chain, MINT),
+        rejects('tokenAddress'),
+      )
+      await assert.rejects(
+        resolveExistingLockReleasePoolProgram('op', poolChain([BURN_MINT]).chain, MINT, BURN_MINT),
+        rejects('poolProgramAddress'),
+      )
+      await assert.rejects(
+        resolveExistingLockReleasePoolProgram(
+          'op',
+          poolChain([CUSTOM], 'BurnMintTokenPool').chain,
+          MINT,
+          CUSTOM,
+        ),
+        rejects('poolProgramAddress'),
+      )
+
+      assert.ok(
+        (
+          await resolveExistingLockReleasePoolProgram('op', poolChain([LOCK_RELEASE]).chain, MINT)
+        ).equals(LOCK_RELEASE),
+      )
+      // A custom program of unknown type is accepted; it must match the lock-release layout.
+      assert.ok(
+        (
+          await resolveExistingLockReleasePoolProgram('op', poolChain([CUSTOM]).chain, MINT, CUSTOM)
+        ).equals(CUSTOM),
+      )
+    })
   })
 
   it('validates integers', () => {

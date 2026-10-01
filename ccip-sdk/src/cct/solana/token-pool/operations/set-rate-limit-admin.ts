@@ -16,8 +16,9 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
@@ -34,7 +35,7 @@ type SetRateLimitAdminParams = PoolProgramRef & {
 type ParsedSetRateLimitAdminParams = {
   tokenAddress: PublicKey
   newRateLimitAdmin: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   payer: PublicKey
   authority: PublicKey
 }
@@ -65,7 +66,11 @@ export class SetRateLimitAdmin extends SolanaOperation<
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       newRateLimitAdmin: parsePublicKey(this.name, 'newRateLimitAdmin', params.newRateLimitAdmin),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       payer,
       authority:
         params.authority === undefined
@@ -74,22 +79,28 @@ export class SetRateLimitAdmin extends SolanaOperation<
     }
   }
 
-  /** Builds the unsigned Solana `setRateLimitAdmin` instruction. */
+  /** Resolves the pool program on-chain, then builds the unsigned Solana `setRateLimitAdmin` instruction. */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedSetRateLimitAdminParams,
   ): Promise<UnsignedSolanaTx> {
-    const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const poolProgram = await resolveExistingPoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const program = createTokenPoolProgram(chain, poolProgram, opts.payer)
     const instruction = await program.methods
       .setRateLimitAdmin(opts.tokenAddress, opts.newRateLimitAdmin)
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state: deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress),
         authority: opts.authority,
       })
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }

@@ -78,12 +78,22 @@ function chain(
 ): SolanaChain {
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
+  const poolStateAccount = {
+    owner: poolProgram,
+    data: poolState(poolProgram, rebalancer, acceptsLiquidity),
+  }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    // Custom pool programs in these tests do not implement `typeVersion`.
+    typeAndVersion: async () => {
+      throw new Error('typeVersion not implemented')
+    },
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? poolStateAccount : null)),
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
+          ? poolStateAccount
           : tokenAccount(poolSigner, delegatedAmount, sourceBalance),
     },
   } as unknown as SolanaChain
@@ -96,12 +106,13 @@ function submitChain(): SolanaChain {
   )
   const poolProgram = resolveTokenPoolProgram('lock-release')
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
+  const poolStateAccount = { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? poolStateAccount : null)),
       getAccountInfo: async (address: PublicKey) =>
-        address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
-          : tokenAccount(poolSigner, 1_000_000n),
+        address.equals(state) ? poolStateAccount : tokenAccount(poolSigner, 1_000_000n),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -116,7 +127,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new ProvideLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     amount: 1_000_000n,
@@ -189,7 +199,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
           () =>
             new ProvideLiquidity().generate(pool, {
               tokenAddress: TOKEN,
-              poolType: 'lock-release',
               payer: PAYER,
               authority: AUTHORITY,
               amount: 1n,
@@ -204,7 +213,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         chain(resolveTokenPoolProgram('lock-release'), new PublicKey(PAYER)),
         {
           tokenAddress: TOKEN,
-          poolType: 'lock-release',
           payer: PAYER,
           amount: 1_000_000n,
         },
@@ -221,7 +229,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         {
           payer: PAYER,
           tokenAddress: TOKEN,
-          poolType: 'lock-release',
           authority: AUTHORITY,
           amount: 1_000_000n,
           includeApproval: true,
@@ -256,23 +263,38 @@ describe('ProvideLiquidity (cct/solana)', () => {
   })
 
   describe('validation', () => {
-    it('rejects invalid public keys, amounts, and burn-mint pools', async () => {
+    it('rejects invalid public keys and amounts', async () => {
       for (const [opts, param] of [
         [{ tokenAddress: 'invalid' }, 'tokenAddress'],
         [{ authority: 'invalid' }, 'authority'],
         [{ amount: 0n }, 'amount'],
         [{ amount: 0x1_0000_0000_0000_0000n }, 'amount'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
-        [
-          {
-            poolType: undefined,
-            poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
-          },
-          'poolProgramAddress',
-        ],
+        [{ poolProgramAddress: 'invalid' }, 'poolProgramAddress'],
       ]) {
         await assert.rejects(
           () => generate(opts),
+          (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+        )
+      }
+    })
+  })
+
+  describe('pool resolution', () => {
+    it('rejects a burn-mint pool, resolved or passed as poolProgramAddress', async () => {
+      const burnMint = resolveTokenPoolProgram('burn-mint')
+      for (const [opts, param] of [
+        [{}, 'tokenAddress'],
+        [{ poolProgramAddress: burnMint.toBase58() }, 'poolProgramAddress'],
+      ] as const) {
+        await assert.rejects(
+          () =>
+            new ProvideLiquidity().generate(chain(burnMint), {
+              tokenAddress: TOKEN,
+              payer: PAYER,
+              authority: AUTHORITY,
+              amount: 1n,
+              ...opts,
+            }),
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
@@ -283,7 +305,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new ProvideLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         amount: 1_000_000n,
         wallet: WALLET,
       })
@@ -296,7 +317,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         () =>
           new ProvideLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             amount: 1_000_000n,
             authority: AUTHORITY,
             wallet: WALLET,
