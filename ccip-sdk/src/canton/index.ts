@@ -46,7 +46,7 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
-import { sleep } from '../utils.ts'
+import { normalizeHex, sleep } from '../utils.ts'
 import {
   type CantonAddress,
   type PartyId,
@@ -681,16 +681,19 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Enumerate active contracts of a template matching a predicate. Deduplicates
-   * by contract ID; each result carries `createdEventBlob`/`synchronizerId` for disclosure.
+   * Enumerate active contracts of one or more templates matching a predicate, in
+   * a single ACS query. Deduplicates by contract ID; each result carries
+   * `createdEventBlob`/`synchronizerId` for disclosure, and its concrete
+   * `templateId` (to tell apart which of several templates it matched).
    *
-   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`).
+   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`), or several
+   *   (one `TemplateFilter` each, OR-ed by the ledger).
    * @param parties - Parties whose ACS visibility to query.
    * @param match - Predicate over the decoded `createArgument`.
    * @returns All matching active contracts (may be empty).
    */
   async findActiveContractsByTemplate(
-    templateId: string,
+    templateId: string | readonly string[],
     parties: string[],
     match: (createArgument: unknown) => boolean = () => true,
   ): Promise<CantonActiveContract[]> {
@@ -701,17 +704,22 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         'CantonChain.findActiveContractsByTemplate: at least one query party is required',
       )
     }
+    const templateIds = typeof templateId === 'string' ? [templateId] : templateId
+    if (templateIds.length === 0) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'CantonChain.findActiveContractsByTemplate: at least one template ID is required',
+      )
+    }
     const { offset } = await this.provider.getLedgerEnd()
     const partyFilter = {
-      cumulative: [
-        {
-          identifierFilter: {
-            TemplateFilter: {
-              value: { templateId, includeCreatedEventBlob: true },
-            },
+      cumulative: templateIds.map((id) => ({
+        identifierFilter: {
+          TemplateFilter: {
+            value: { templateId: id, includeCreatedEventBlob: true },
           },
         },
-      ],
+      })),
     }
     const filtersByParty: Record<string, typeof partyFilter> = {}
     for (const party of queryParties) filtersByParty[party] = partyFilter
@@ -758,24 +766,27 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * `"instanceId@party"`), not a raw contract ID — the SDK resolves the CID +
    * disclosure blob together, so the caller never handles `createdEventBlob`.
    *
-   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`).
+   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`), or several
+   *   queried together — a match on any counts, and a match on more than one is
+   *   still ambiguous; read the matched one off the result's `templateId`.
    * @param instanceAddress - Target `InstanceAddress` as `0x<64-hex>` (the
-   *   keccak256 hash), OR a `RawInstanceAddress` `"instanceId@party"` (computed
-   *   and compared as a hash when it contains `@`).
+   *   keccak256 hash; the `0x` prefix is optional), OR a `RawInstanceAddress`
+   *   `"instanceId@party"` (computed and compared as a hash when it contains `@`).
    * @param parties - Parties whose ACS visibility to query (the contract's
    *   signatory must be among them, or visible to them).
    * @returns The matching active contract (CID + disclosure blob), or `null`.
    */
   async findActiveContractByInstanceAddress(
-    templateId: string,
+    templateId: string | readonly string[],
     instanceAddress: string,
     parties: string[],
   ): Promise<CantonActiveContract | null> {
-    // Accept either the 0x-hex InstanceAddress (keccak256 hash) or the raw
-    // "instanceId@party" form; normalize the raw form to its hash for compare.
+    // Accept either the hex InstanceAddress (keccak256 hash, with or without
+    // `0x`) or the raw "instanceId@party" form; both normalize to the bare
+    // lower-case hash `hashedRawInstanceAddress` yields, for compare.
     const target = instanceAddress.includes('@')
       ? hashedRawInstanceAddress(instanceAddress)
-      : instanceAddress.toLowerCase()
+      : normalizeHex(instanceAddress)
 
     const contracts = await this.findActiveContractsByTemplate(templateId, parties)
     let match: CantonActiveContract | null = null

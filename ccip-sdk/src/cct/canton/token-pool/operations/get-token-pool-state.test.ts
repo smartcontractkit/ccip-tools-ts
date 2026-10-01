@@ -1,11 +1,12 @@
 /**
  * Unit tests for the Canton CCT `getTokenPoolState` read operation.
  *
- * Mocked {@link CantonChain} whose `findActiveContractByInstanceAddress` returns a
- * hand-crafted gRPC-JSON `BurnMintTokenPool` `createArgument`, exercising the
- * scalar decoders (poolOwner/instanceId/decimals/rateLimitAdmin/instrumentId)
- * and the defensive `remoteChainConfigs` Daml-`Map` decoder without a live
- * participant.
+ * ACS-backed {@link CantonChain} mock (see `acs.test.helpers.ts`) serving
+ * hand-crafted gRPC-JSON `BurnMintTokenPool` / `LockReleaseTokenPool`
+ * `createArgument`s, so the real InstanceAddress resolution runs (one query over
+ * both pool templates, pool type read off the match) alongside the scalar
+ * decoders (poolOwner/instanceId/decimals/rateLimitAdmin/instrumentId) and the
+ * defensive `remoteChainConfigs` Daml-`Map` decoder — no live participant.
  *
  * @packageDocumentation
  */
@@ -13,17 +14,23 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
+import type { CantonActiveContract } from '../../../../canton/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type AcsContract, acsChain, requestedTemplateIds } from '../../acs.test.helpers.ts'
 import { CantonTokenManager } from '../../index.ts'
-import { BURN_MINT_POOL_TEMPLATE_ID } from '../shared.ts'
+import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
 
-const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
-const RATE_LIMIT_ADMIN = 'rladmin::1220d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4'
-const INSTRUMENT_ADMIN = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
+const POOL_OWNER = `poolOwner::1220${'c3'.repeat(32)}`
+const RATE_LIMIT_ADMIN = `rladmin::1220${'d4'.repeat(32)}`
+const INSTRUMENT_ADMIN = `adminA::1220${'a1'.repeat(32)}`
+const LEDGER_PARTY = `ledger::1220${'e5'.repeat(32)}`
 const POOL_CID = '#pool-1'
 const POOL_INSTANCE_ID = 'pool-instance-1'
-const POOL_INSTANCE_ADDRESS = '0x' + 'cd'.repeat(32)
+/** The pool's raw instance address — its owner suffix is the reading party. */
+const POOL_RAW_ADDRESS = `${POOL_INSTANCE_ID}@${POOL_OWNER}`
+/** The same pool's hashed instance address (`0x`-prefixed keccak256 of the raw form). */
+const POOL_HASHED_ADDRESS = '0x' + hashedRawInstanceAddress(POOL_RAW_ADDRESS)
 
 const sum = (ctor: string, value: unknown) => ({ Sum: { [ctor]: value } })
 const text = (s: string) => sum('Text', s)
@@ -67,17 +74,20 @@ function remoteChainConfigsMap(
 
 function poolContract(
   opts: {
+    templateId?: string
+    contractId?: string
     rateLimitAdmin?: string
     remoteChainConfigs?: Record<string, unknown>
     observers?: string[]
   } = {},
-): CantonActiveContract {
+): AcsContract {
   return {
-    contractId: POOL_CID,
-    templateId: BURN_MINT_POOL_TEMPLATE_ID,
+    contractId: opts.contractId ?? POOL_CID,
+    templateId: opts.templateId ?? BURN_MINT_POOL_TEMPLATE_ID,
     createdEventBlob: 'pool-blob',
     synchronizerId: 'canton::global',
     signatories: [POOL_OWNER],
+    observers: opts.observers,
     createArgument: {
       fields: [
         field('instanceId', text(POOL_INSTANCE_ID)),
@@ -98,31 +108,18 @@ function poolContract(
   }
 }
 
-function chainWith(contract: CantonActiveContract | null): CantonChain {
-  // Real CantonChain instance (private fields make object-literal casts
-  // impossible); Object.assign overrides only what the test exercises.
-  return Object.assign(Object.create(CantonChain.prototype), {
-    network: { family: ChainFamily.Canton },
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
-    async findActiveContractByInstanceAddress(
-      _t: string,
-      instanceAddress: string,
-    ): Promise<CantonActiveContract | null> {
-      return contract && instanceAddress === POOL_INSTANCE_ADDRESS ? contract : null
-    },
-  })
+function managerWith(...contracts: CantonActiveContract[]) {
+  const { chain, requests } = acsChain(contracts, { ledgerParty: LEDGER_PARTY })
+  return { manager: CantonTokenManager.fromChain(chain), requests }
 }
 
 describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
-  it('decodes pool scalars: owner, instanceId, decimals, instrumentId', async () => {
-    const manager = CantonTokenManager.fromChain(chainWith(poolContract()))
+  it('decodes pool scalars: type, owner, instanceId, decimals, instrumentId', async () => {
+    const { manager } = managerWith(poolContract())
 
-    const result = await manager.getTokenPoolState({
-      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
-      poolOwner: POOL_OWNER,
-    })
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
 
+    assert.equal(result.poolType, 'burnMint')
     assert.equal(result.poolOwner, POOL_OWNER)
     assert.equal(result.poolInstanceId, POOL_INSTANCE_ID)
     assert.equal(result.decimals, 6)
@@ -133,62 +130,46 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
   })
 
   it('decodes observers (mandatory EDS auto-detection field)', async () => {
-    const manager = CantonTokenManager.fromChain(
-      chainWith(poolContract({ observers: [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN] })),
+    const { manager } = managerWith(
+      poolContract({ observers: [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN] }),
     )
 
-    const result = await manager.getTokenPoolState({
-      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
-      poolOwner: POOL_OWNER,
-    })
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
 
     assert.deepEqual(result.observers, [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN])
   })
 
   it('decodes the rate-limit admin when set (Optional Party)', async () => {
-    const manager = CantonTokenManager.fromChain(
-      chainWith(poolContract({ rateLimitAdmin: RATE_LIMIT_ADMIN })),
-    )
+    const { manager } = managerWith(poolContract({ rateLimitAdmin: RATE_LIMIT_ADMIN }))
 
-    const result = await manager.getTokenPoolState({
-      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
-      poolOwner: POOL_OWNER,
-    })
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
 
     assert.equal(result.rateLimitAdmin, RATE_LIMIT_ADMIN)
   })
 
   it('decodes remoteChainConfigs Daml Map entries', async () => {
-    const manager = CantonTokenManager.fromChain(
-      chainWith(
-        poolContract({
-          remoteChainConfigs: remoteChainConfigsMap([
-            {
-              selector: '5009297550715157269',
-              cfg: remoteChainConfig({
-                remotePools: ['0xpool-evm-1'],
-                remoteTokenAddress: '0xtoken-evm-1',
-              }),
-            },
-            {
-              selector: '16015286601757825753',
-              cfg: remoteChainConfig({
-                remotePools: ['0xpool-evm-2', '0xpool-evm-2b'],
-                remoteTokenAddress: '0xtoken-evm-2',
-              }),
-            },
-          ]),
-        }),
-      ),
+    const { manager } = managerWith(
+      poolContract({
+        remoteChainConfigs: remoteChainConfigsMap([
+          {
+            selector: '5009297550715157269',
+            cfg: remoteChainConfig({
+              remotePools: ['0xpool-evm-1'],
+              remoteTokenAddress: '0xtoken-evm-1',
+            }),
+          },
+          {
+            selector: '16015286601757825753',
+            cfg: remoteChainConfig({
+              remotePools: ['0xpool-evm-2', '0xpool-evm-2b'],
+              remoteTokenAddress: '0xtoken-evm-2',
+            }),
+          },
+        ]),
+      }),
     )
 
-    const result = await manager.getTokenPoolState({
-      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
-      poolOwner: POOL_OWNER,
-    })
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
 
     assert.equal(result.remoteChainConfigs.length, 2)
     assert.deepEqual(result.remoteChainConfigs[0], {
@@ -227,17 +208,11 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
         }),
       ],
     ]
-    const manager = CantonTokenManager.fromChain(
-      chainWith(
-        poolContract({ remoteChainConfigs: naturalMap as unknown as Record<string, unknown> }),
-      ),
+    const { manager } = managerWith(
+      poolContract({ remoteChainConfigs: naturalMap as unknown as Record<string, unknown> }),
     )
 
-    const result = await manager.getTokenPoolState({
-      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
-      poolOwner: POOL_OWNER,
-    })
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
 
     assert.equal(result.remoteChainConfigs.length, 1)
     assert.deepEqual(result.remoteChainConfigs[0], {
@@ -255,14 +230,97 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
   })
 
   it('throws when the pool is not active/visible', async () => {
-    const manager = CantonTokenManager.fromChain(chainWith(null))
+    const { manager } = managerWith()
     await assert.rejects(
-      manager.getTokenPoolState({
-        poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-        poolType: 'burnMint',
-        poolOwner: POOL_OWNER,
-      }),
+      manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS }),
       /not active or not visible/,
     )
+  })
+})
+
+describe('CantonTokenManager.getTokenPoolState pool resolution', () => {
+  it('queries both pool templates in a single ACS request, as the raw address owner', async () => {
+    const { manager, requests } = managerWith(poolContract())
+
+    await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
+
+    assert.equal(requests.length, 1)
+    assert.deepEqual(Object.keys(requests[0]!.eventFormat.filtersByParty), [POOL_OWNER])
+    assert.deepEqual(requestedTemplateIds(requests[0]!).sort(), [
+      BURN_MINT_POOL_TEMPLATE_ID,
+      LOCK_RELEASE_POOL_TEMPLATE_ID,
+    ])
+  })
+
+  it('reads the pool type off the matched template (concrete package-ID form)', async () => {
+    const { manager } = managerWith(
+      poolContract({
+        templateId: 'cafebabe:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool',
+      }),
+    )
+
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS })
+
+    assert.equal(result.poolType, 'lockRelease')
+  })
+
+  it('resolves the hashed 0x form, reading as the chain ledger party', async () => {
+    const { manager, requests } = managerWith(poolContract({ observers: [LEDGER_PARTY] }))
+
+    const result = await manager.getTokenPoolState({ poolInstanceAddress: POOL_HASHED_ADDRESS })
+
+    assert.equal(result.poolInstanceId, POOL_INSTANCE_ID)
+    assert.deepEqual(Object.keys(requests[0]!.eventFormat.filtersByParty), [LEDGER_PARTY])
+  })
+
+  it('resolves the hashed form with or without 0x, in any case', async () => {
+    for (const address of [
+      POOL_HASHED_ADDRESS.slice(2),
+      POOL_HASHED_ADDRESS.toUpperCase().replace('0X', '0x'),
+    ]) {
+      const { manager } = managerWith(poolContract())
+      const result = await manager.getTokenPoolState({
+        poolInstanceAddress: address,
+        poolOwner: POOL_OWNER,
+      })
+      assert.equal(result.poolInstanceId, POOL_INSTANCE_ID)
+    }
+  })
+
+  it('reads as an explicit poolOwner over the raw address owner', async () => {
+    const { manager, requests } = managerWith(poolContract({ observers: [RATE_LIMIT_ADMIN] }))
+
+    await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_RAW_ADDRESS,
+      poolOwner: RATE_LIMIT_ADMIN,
+    })
+
+    assert.deepEqual(Object.keys(requests[0]!.eventFormat.filtersByParty), [RATE_LIMIT_ADMIN])
+  })
+
+  it('throws when the instance address matches both a burn-mint and a lock-release pool', async () => {
+    const { manager } = managerWith(
+      poolContract(),
+      poolContract({ templateId: LOCK_RELEASE_POOL_TEMPLATE_ID, contractId: '#pool-2' }),
+    )
+
+    await assert.rejects(
+      manager.getTokenPoolState({ poolInstanceAddress: POOL_RAW_ADDRESS }),
+      /multiple active contracts match/,
+    )
+  })
+
+  it('rejects a malformed raw address before any ledger call', async () => {
+    const { manager, requests } = managerWith(poolContract())
+
+    await assert.rejects(
+      manager.getTokenPoolState({ poolInstanceAddress: `${POOL_INSTANCE_ID}@not-a-party` }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCTParamsInvalidError)
+        assert.equal(err.context.param, 'poolInstanceAddress')
+        return true
+      },
+    )
+    assert.equal(requests.length, 0)
   })
 })

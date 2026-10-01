@@ -10,19 +10,28 @@
  * place. Mirrors the Go E2E pattern (`submitCreateAndExercise` +
  * `BurnMintTokenPool.Initialize`).
  *
- * Unlike a bare `create` (no input contracts, fully offline), this needs an
- * ACS/EDS read to resolve + disclose the TAR contract `Initialize` exercises
- * internally — so `generate()` is NOT fully offline.
+ * Unlike a bare `create` (no input contracts, fully offline), this needs
+ * ledger reads to resolve + disclose the TAR contract `Initialize` exercises
+ * internally (EDS, falling back to the ACS) and to look up the instrument's
+ * existing `TokenConfig` (ACS) — so `generate()` is NOT fully offline.
+ *
+ * Everything the ledger already determines is derived rather than asked for:
+ *   - `poolOwner` is `instrumentId.admin` (the on-ledger `ensure` requires it).
+ *   - The TAR `Initialize` registers with is the pool's own `deps.tokenAdminRegistry`
+ *     (one source; defaults to the connected network's well-known TAR), and
+ *     `ccipOwner` is that TAR's signatory — the owner suffix of its raw address.
+ *   - `existingTokenConfigCid` is the CID of the instrument's TokenConfig when
+ *     one exists without an admin yet (third-party-admin flow: proposed out of
+ *     band), else `null` (fresh `ProposeAdministrator` + `AcceptAdminRole`
+ *     inline). The CID rotates on every TAR write, so a caller-supplied one
+ *     would be stale-prone; the SDK reads the current one at build time.
+ *   - `admin` defaults to `poolOwner` (self-issued tokens, matching the Go E2E
+ *     tests).
  *
  * `Initialize`'s controller is `poolOwner, admin` — BOTH parties must
  * authorize (Daml's multi-controller semantics require every listed party's
  * signature), so both go into `actAs` (deduplicated when they're the same
  * party, e.g. self-issued tokens where `admin == poolOwner`).
- *
- * `existingTokenConfigCid` (third-party-admin tokens with an already-accepted
- * TokenConfig) is intentionally not exposed yet — v1 assumes
- * `instrumentId.admin == poolOwner == admin`, matching the Go E2E tests; a
- * fresh `ProposeAdministrator` + `AcceptAdminRole` happens inline.
  *
  * On-ledger `ensure` constraints: `instrumentId.admin == poolOwner`, valid
  * `instanceId`, valid token `decimals`, non-empty `observers`.
@@ -35,7 +44,7 @@
 
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
-import type { CantonChain } from '../../../../canton/index.ts'
+import { type CantonChain, decodeDamlRecord } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import type { TransferTimeout } from '../../encoding.ts'
@@ -48,30 +57,30 @@ import {
 import {
   TAR_TEMPLATE_ID,
   TOKEN_CONFIG_TEMPLATE_ID,
+  decodeOptionalParty,
   deriveTokenConfigInstanceAddress,
   resolveTar,
 } from '../../token-admin-registry/shared.ts'
 import type { CantonDeployResult } from '../../types.ts'
-import { parseInstrumentId, parsePartyId } from '../../validate.ts'
+import { parseInstrumentId, parsePartyId, parseRawInstanceAddress } from '../../validate.ts'
 import {
   type LaneDeploySpec,
   type PoolFactoryDeps,
   type PoolReceiveContext,
-  BURN_MINT_POOL_TEMPLATE_ID,
-  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  type PoolType,
+  POOL_TEMPLATE_IDS,
   RATE_LIMITER_TEMPLATE_ID,
   buildInitializeChoiceArgument,
   buildPoolCreateArguments,
+  parseLaneRemoteAddresses,
   resolvePoolFactoryDeps,
 } from '../shared.ts'
-
-/** Pool type to deploy. */
-export type PoolType = 'burnMint' | 'lockRelease'
 
 export type {
   LaneDeploySpec,
   PoolFactoryDeps,
   PoolReceiveContext,
+  PoolType,
   RateLimiterDeploySpec,
 } from '../shared.ts'
 
@@ -81,11 +90,11 @@ export interface DeployTokenPoolParams {
   poolType: PoolType
   /** Pool instance ID (unique per pool; used to derive the pool instance address). */
   instanceId: string
-  /** Pool owner party ID (`hint::1220…`) — must equal `instrumentId.admin`. */
-  poolOwner: string
-  /** CCIP owner party ID (the protocol-level owner). */
-  ccipOwner: string
-  /** Instrument to bridge (`{ admin, id }` or `"admin::1220…::id"`). */
+  /**
+   * Instrument to bridge (`{ admin, id }` or `"admin::1220…::id"`). Its `admin`
+   * becomes the pool owner (the pool's signatory) — the on-ledger `ensure`
+   * requires `instrumentId.admin == poolOwner`.
+   */
   instrumentId: { admin: string; id: string } | string
   /**
    * The token's decimals ON CANTON (10 for Token Standard instruments) — NOT
@@ -103,10 +112,13 @@ export interface DeployTokenPoolParams {
   /** Optional rate-limit admin party. */
   rateLimitAdmin?: string
   /**
-   * Factory deps overrides (TAR, FeeQuoter, RMNRemote raw instance
-   * addresses). Any field left unset falls back to the well-known contracts
-   * registered for the connected network — end users on a known network
-   * omit `deps` entirely; overrides are for devnet / testing.
+   * Factory deps overrides (TAR, FeeQuoter, RMNRemote raw instance addresses,
+   * `"instanceId@party"`). Any field left unset falls back to the well-known
+   * contracts registered for the connected network — end users on a known
+   * network omit `deps` entirely; overrides are for devnet / testing.
+   *
+   * `tokenAdminRegistry` is also the TAR `Initialize` registers the pool with,
+   * and its owner suffix is taken as the pool's `ccipOwner`.
    */
   deps?: Partial<PoolFactoryDeps>
   /** Pool receive-context choice-context. */
@@ -114,36 +126,25 @@ export interface DeployTokenPoolParams {
   /** Transfer timeout (Daml variant; defaults to `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
   /**
-   * TAR `InstanceAddress` (`0x<64-hex>` or `"instanceId@ccipOwner"`).
-   * Resolved via the EDS disclosure service (preferred) or the ACS.
-   */
-  tokenAdminRegistryInstanceAddress: string
-  /**
-   * Token admin party — jointly authorizes `Initialize` with `poolOwner`, and
+   * Token admin party — jointly authorizes `Initialize` with the pool owner, and
    * must equal the TAR's `ccipOwner` or `instrumentId.admin` for the internal
    * `ProposeAdministrator` call to succeed (its `isOwner || isAdmin` check).
+   * Defaults to the pool owner (`instrumentId.admin`).
    */
-  admin: string
-  /**
-   * Existing `TokenConfig` contract ID, for the third-party-admin flow:
-   * the instrument's admin (or ccipOwner) proposed `admin` out of band, and
-   * `Initialize` accepts the role on the existing config instead of creating
-   * one. Resolve the current CID via `getTokenAdminRegistry` (it rotates on
-   * every write). NOTE: on-ledger, `ProposeAdministrator` rejects an existing
-   * config that already has an admin — so this cannot be used to re-deploy a
-   * pool for an instrument that already completed admin setup.
-   */
-  existingTokenConfigCid?: string
+  admin?: string
   /** Remote-chain lanes to wire up atomically with the pool (may be empty). */
   lanes: LaneDeploySpec[]
 }
 
-/** Parsed `deployTokenPool` params. */
+/** Parsed `deployTokenPool` params: instrument split, pool owner + admin resolved, lane remotes canonical. */
 type ParsedDeployTokenPoolParams = Omit<
   CantonGenerateParams<DeployTokenPoolParams>,
-  'instrumentId'
+  'instrumentId' | 'admin'
 > & {
   instrumentId: { admin: string; id: string }
+  /** Pool owner — `instrumentId.admin`. */
+  poolOwner: string
+  admin: string
 }
 
 /** Parameters for unsigned `deployTokenPool` generation. */
@@ -165,7 +166,7 @@ export class DeployTokenPool extends CantonOperation<
 > {
   readonly name = 'deployTokenPool'
 
-  /** Validates party IDs, instrument ID, instance ID, decimals, observers, and lanes. */
+  /** Validates party IDs, instrument ID, instance ID, decimals, observers, deps, and lanes. */
   protected override validate(p: GenerateDeployTokenPoolParams): void {
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (p.poolType !== 'burnMint' && p.poolType !== 'lockRelease') {
@@ -178,8 +179,6 @@ export class DeployTokenPool extends CantonOperation<
     if (!p.instanceId) {
       throw new CCTParamsInvalidError(this.name, 'instanceId', 'pool instance ID is required')
     }
-    parsePartyId(this.name, 'poolOwner', p.poolOwner)
-    parsePartyId(this.name, 'ccipOwner', p.ccipOwner)
     parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
     if (!Number.isInteger(p.decimals) || p.decimals < 0) {
       throw new CCTParamsInvalidError(
@@ -198,14 +197,14 @@ export class DeployTokenPool extends CantonOperation<
     }
     p.observers.forEach((o, i) => parsePartyId(this.name, `observers[${i}]`, o))
     if (p.rateLimitAdmin) parsePartyId(this.name, 'rateLimitAdmin', p.rateLimitAdmin)
-    if (!p.tokenAdminRegistryInstanceAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenAdminRegistryInstanceAddress',
-        'TAR InstanceAddress is required',
-      )
+    if (p.admin !== undefined) parsePartyId(this.name, 'admin', p.admin)
+    // Unset deps fall back to the well-known per-network contracts at build
+    // time (see resolvePoolFactoryDeps); overrides must be raw addresses, as
+    // the pool stores them verbatim.
+    for (const key of ['tokenAdminRegistry', 'feeQuoter', 'rmnRemote'] as const) {
+      const dep = p.deps?.[key]
+      if (dep !== undefined) parseRawInstanceAddress(this.name, `deps.${key}`, dep)
     }
-    parsePartyId(this.name, 'admin', p.admin)
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     for (const [i, l] of (p.lanes ?? []).entries()) {
       if (!l.remoteChainSelector) {
@@ -231,36 +230,53 @@ export class DeployTokenPool extends CantonOperation<
         )
       }
     }
-    // deps are NOT validated here: unset fields fall back to the well-known
-    // per-network contracts at build time (see resolvePoolFactoryDeps).
   }
 
-  /** Parses the instrument ID. */
+  /**
+   * Parses the instrument ID, derives the pool owner from it, defaults `admin`
+   * to the pool owner, and parses each lane's remote addresses in the remote
+   * chain's own format into their canonical spellings.
+   */
   protected override parse(p: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
+    const instrumentId = parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
     return {
       ...p,
-      instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
+      instrumentId,
+      poolOwner: instrumentId.admin,
+      admin: p.admin ?? instrumentId.admin,
+      // oxlint-disable-next-line typescript/no-unnecessary-condition
+      lanes: (p.lanes ?? []).map((l, i) => parseLaneRemoteAddresses(this.name, `lanes[${i}]`, l)),
     }
   }
 
   /**
-   * Resolves + discloses the TAR, then builds a single `CreateAndExercise`
-   * command: create the pool, then exercise `Initialize` on it.
+   * Resolves + discloses the TAR (and the instrument's TokenConfig, when one
+   * awaits an admin), then builds a single `CreateAndExercise` command: create
+   * the pool, then exercise `Initialize` on it.
    */
   protected async buildCommands(
     chain: CantonChain,
     p: ParsedDeployTokenPoolParams,
   ): Promise<JsCommands> {
-    const templateId =
-      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
-
     // Explicit deps win; missing fields resolve from the connected network's
     // well-known contracts (throws if the network has none registered).
     const deps = resolvePoolFactoryDeps(this.name, chain, p.deps)
+    const actAs = [...new Set([p.poolOwner, p.admin])]
 
-    // Disclosure-service-first resolution — no ccipOwner visibility required
-    // on the sender's participant.
-    const { tarContract } = await resolveTar(chain, p.sender, p.tokenAdminRegistryInstanceAddress)
+    // The pool's TAR dep is the TAR Initialize registers with — one source for
+    // both. Disclosure-service-first resolution: no ccipOwner visibility
+    // required on the sender's participant.
+    const tar = parseRawInstanceAddress(
+      this.name,
+      'deps.tokenAdminRegistry',
+      deps.tokenAdminRegistry,
+    )
+    const resolved = await resolveTar(chain, p.sender, deps.tokenAdminRegistry)
+    const { tarContract } = resolved
+    // The raw address's owner suffix IS the TAR's signatory (an instance
+    // address is `instanceId@signatory`); the resolved one is preferred when
+    // the ACS reported it.
+    const ccipOwner = resolved.ccipOwner ?? tar.owner
 
     const disclosedContracts = [
       {
@@ -271,55 +287,52 @@ export class DeployTokenPool extends CantonOperation<
       },
     ]
 
-    // Third-party-admin flow: the existing TokenConfig must be disclosed too —
-    // Initialize's internal ProposeAdministrator fetches it by CID, and the
-    // sender is not a signatory on it.
-    if (p.existingTokenConfigCid) {
-      const tokenConfigAddress = deriveTokenConfigInstanceAddress(p.instrumentId, p.ccipOwner)
-      const tokenConfig = await chain.findActiveContractByInstanceAddress(
-        TOKEN_CONFIG_TEMPLATE_ID,
-        tokenConfigAddress,
-        [p.sender],
+    // Third-party-admin flow: a TokenConfig proposed out of band (no admin
+    // yet) must be handed to Initialize's internal ProposeAdministrator by CID
+    // instead of creating another — and disclosed too, since the sender is not
+    // a signatory on it. A config that already has an admin is rejected
+    // on-ledger, so it is not passed.
+    const tokenConfigAddress = deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner)
+    const tokenConfig = await chain.findActiveContractByInstanceAddress(
+      TOKEN_CONFIG_TEMPLATE_ID,
+      tokenConfigAddress,
+      [...new Set([p.sender, ...actAs])],
+    )
+    let existingTokenConfigCid: string | undefined
+    if (tokenConfig) {
+      const currentAdmin = decodeOptionalParty(
+        decodeDamlRecord(tokenConfig.createArgument)['admin'],
       )
-      if (!tokenConfig) {
-        throw new CCTParamsInvalidError(
-          this.name,
-          'existingTokenConfigCid',
-          `no active TokenConfig found at the derived address ${tokenConfigAddress} — ` +
-            'create one first via the out-of-band propose flow',
+      if (currentAdmin === undefined) {
+        existingTokenConfigCid = tokenConfig.contractId
+        disclosedContracts.push({
+          // oxlint-disable-next-line typescript/no-unnecessary-condition
+          templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
+          contractId: tokenConfig.contractId,
+          createdEventBlob: tokenConfig.createdEventBlob,
+          synchronizerId: tokenConfig.synchronizerId,
+        })
+      } else {
+        chain.logger.warn(
+          `${this.name}: TokenConfig ${tokenConfigAddress} already has admin ${currentAdmin}; ` +
+            'Initialize will attempt a fresh registration for the instrument',
         )
       }
-      if (tokenConfig.contractId !== p.existingTokenConfigCid) {
-        throw new CCTParamsInvalidError(
-          this.name,
-          'existingTokenConfigCid',
-          `CID ${p.existingTokenConfigCid} does not match the current TokenConfig ` +
-            `${tokenConfig.contractId} (it rotates on every write — re-read it via getTokenAdminRegistry)`,
-        )
-      }
-      disclosedContracts.push({
-        // oxlint-disable-next-line typescript/no-unnecessary-condition
-        templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
-        contractId: tokenConfig.contractId,
-        createdEventBlob: tokenConfig.createdEventBlob,
-        synchronizerId: tokenConfig.synchronizerId,
-      })
     }
 
-    const createArguments = buildPoolCreateArguments({ ...p, deps })
+    const createArguments = buildPoolCreateArguments({ ...p, ccipOwner, deps })
     const choiceArgument = buildInitializeChoiceArgument({
       tokenAdminRegistryCid: tarContract.contractId,
-      existingTokenConfigCid: p.existingTokenConfigCid,
+      existingTokenConfigCid,
       admin: p.admin,
-      // oxlint-disable-next-line typescript/no-unnecessary-condition
-      lanes: p.lanes ?? [],
+      lanes: p.lanes,
     })
 
     return {
       commands: [
         {
           CreateAndExerciseCommand: {
-            templateId,
+            templateId: POOL_TEMPLATE_IDS[p.poolType],
             createArguments,
             choice: 'Initialize',
             choiceArgument,
@@ -329,7 +342,7 @@ export class DeployTokenPool extends CantonOperation<
       commandId: `cct-deploy-${p.poolType}-pool-${crypto.randomUUID()}`,
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
-      actAs: [...new Set([p.poolOwner, p.admin])],
+      actAs,
       disclosedContracts,
     }
   }
@@ -340,8 +353,7 @@ export class DeployTokenPool extends CantonOperation<
   ): Promise<ExecuteDeployTokenPoolResult> {
     const base = await super.execute(chain, params)
 
-    const templateId =
-      params.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
+    const templateId = POOL_TEMPLATE_IDS[params.poolType]
     const poolCids = extractCreatedContractIds(base.response, templateId)
     const [poolCid] = poolCids
     if (poolCids.length !== 1 || !poolCid) {
@@ -352,12 +364,13 @@ export class DeployTokenPool extends CantonOperation<
       )
     }
 
+    const { admin: poolOwner } = parseInstrumentId(this.name, 'instrumentId', params.instrumentId)
     return {
       ...base,
       poolCid,
       rateLimiterCids: extractCreatedContractIds(base.response, RATE_LIMITER_TEMPLATE_ID),
       tokenConfigCid: extractCreatedContractIds(base.response, TOKEN_CONFIG_TEMPLATE_ID)[0],
-      poolInstanceAddress: hashedRawInstanceAddress(`${params.instanceId}@${params.poolOwner}`),
+      poolInstanceAddress: hashedRawInstanceAddress(`${params.instanceId}@${poolOwner}`),
     }
   }
 }

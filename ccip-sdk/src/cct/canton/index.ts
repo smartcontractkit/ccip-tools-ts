@@ -39,6 +39,7 @@ import {
   type GetRateLimiterStateResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type PoolType,
   ApplyChainUpdates,
   DeployTokenPool,
   GetRateLimiterState,
@@ -88,6 +89,13 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
    * that creates the registry-pools `BurnMintTokenPool`/`LockReleaseTokenPool`
    * and atomically calls `Initialize` on it (TAR registration + lane rate
    * limiters).
+   *
+   * @remarks Derives what the ledger already determines: the pool owner is
+   * `instrumentId.admin`; the TAR is `deps.tokenAdminRegistry` (default: the
+   * network's well-known one) and `ccipOwner` its owner; `admin` defaults to
+   * the pool owner; an instrument's TokenConfig still awaiting an admin
+   * (third-party-admin flow) is looked up and passed to `Initialize`. Lane
+   * remote addresses are parsed in the remote chain's own format.
    */
   async generateUnsignedDeployTokenPool(
     opts: GenerateDeployTokenPoolParams,
@@ -95,21 +103,65 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
     return this.#deployTokenPool.generate(this.chain, opts)
   }
 
-  /** Atomically deploys and initializes a `BurnMintTokenPool`/`LockReleaseTokenPool` (registry-pools family). */
+  /**
+   * Atomically deploys and initializes a `BurnMintTokenPool`/`LockReleaseTokenPool`
+   * (registry-pools family). See {@link generateUnsignedDeployTokenPool} for
+   * the derived params.
+   *
+   * @example
+   * ```ts
+   * const cct = CantonTokenManager.fromChain(chain)
+   * const { poolInstanceAddress } = await cct.deployTokenPool({
+   *   wallet,
+   *   poolType: 'burnMint',
+   *   instanceId: 'my-token-pool-001',
+   *   instrumentId: { admin: wallet.party, id: 'MYTOKEN' },
+   *   decimals: 10,
+   *   observers: [wallet.party],
+   *   lanes: [],
+   * })
+   * ```
+   */
   async deployTokenPool(opts: ExecuteDeployTokenPoolParams): Promise<ExecuteDeployTokenPoolResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
   }
 
   // ─── Pool: applyChainUpdates ────────────────────────────────────────────
 
-  /** Builds unsigned `applyChainUpdates` commands. */
+  /**
+   * Builds unsigned `applyChainUpdates` commands.
+   *
+   * @remarks The pool is resolved by `poolInstanceAddress` alone, whichever
+   * pool type it is. Remote token / pool addresses are parsed in the remote
+   * chain's own format (`0x…` for EVM, base58 for Solana, …), the family taken
+   * from `remoteChainSelector`; that family must be registered (e.g.
+   * `import '@chainlink/ccip-sdk/all'`).
+   */
   async generateUnsignedApplyChainUpdates(
     opts: GenerateApplyChainUpdatesParams,
   ): Promise<GenerateApplyChainUpdatesResult> {
     return this.#applyChainUpdates.generate(this.chain, opts)
   }
 
-  /** Adds and/or removes remote-chain configs on a token pool. */
+  /**
+   * Adds and/or removes remote-chain configs on a token pool. See
+   * {@link generateUnsignedApplyChainUpdates} for how params are resolved.
+   *
+   * @example
+   * ```ts
+   * const { poolCid } = await cct.applyChainUpdates({
+   *   wallet,
+   *   poolInstanceAddress: `my-token-pool-001@${wallet.party}`,
+   *   chainsToAdd: [{
+   *     remoteChainSelector: 16015286601757825753n, // ethereum-testnet-sepolia
+   *     remotePools: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
+   *     inboundRateLimiter: `my-token-pool-001-rl-in@${wallet.party}`,
+   *     outboundRateLimiter: `my-token-pool-001-rl-out@${wallet.party}`,
+   *   }],
+   * })
+   * ```
+   */
   async applyChainUpdates(
     opts: ExecuteApplyChainUpdatesParams,
   ): Promise<ExecuteApplyChainUpdatesResult> {
@@ -118,7 +170,11 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   // ─── TAR: reads ─────────────────────────────────────────────────────────
 
-  /** Reads the TAR state for an instrument (admin, pendingAdmin, pool, factory wiring). */
+  /**
+   * Reads the TAR state for an instrument (admin, pendingAdmin, pool, factory
+   * wiring). The instrument's TokenConfig address is derived from
+   * `instrumentId` and the CCIP owner (default: the network's well-known one).
+   */
   async getTokenAdminRegistry(
     opts: GetTokenAdminRegistryParams,
   ): Promise<GetTokenAdminRegistryResult> {
@@ -127,12 +183,27 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   // ─── Pool: reads ────────────────────────────────────────────────────────
 
-  /** Reads a token pool's config from the ACS. */
+  /**
+   * Reads a token pool's config (including its `poolType`) from the ACS. The
+   * reading party defaults to the owner suffix of a raw
+   * `"instanceId@poolOwner"` address, else the chain's ledger party.
+   *
+   * @example
+   * ```ts
+   * const pool = await cct.getTokenPoolState({
+   *   poolInstanceAddress: `my-token-pool-001@${wallet.party}`,
+   * })
+   * console.log(pool.poolType, pool.remoteChainConfigs)
+   * ```
+   */
   async getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
 
-  /** Reads a `RateLimiter` contract's config (capacity/rate/enabled/observers) from the ACS. */
+  /**
+   * Reads a `RateLimiter` contract's config (capacity/rate/enabled/observers)
+   * from the ACS. The reading party defaults like {@link getTokenPoolState}'s.
+   */
   async getRateLimiterState(opts: GetRateLimiterStateParams): Promise<GetRateLimiterStateResult> {
     return this.#getRateLimiterState.query(this.chain, opts)
   }
@@ -149,6 +220,7 @@ export {
 export type {
   ApplyChainUpdatesParams,
   DeployTokenPoolParams,
+  PoolType,
   GetRateLimiterStateParams,
   GetRateLimiterStateResult,
   GetTokenAdminRegistryParams,

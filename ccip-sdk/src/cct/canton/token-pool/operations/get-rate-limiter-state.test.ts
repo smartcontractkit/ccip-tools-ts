@@ -1,11 +1,11 @@
 /**
  * Unit tests for the Canton CCT `getRateLimiterState` read operation.
  *
- * Mocked {@link CantonChain} whose `findActiveContractByInstanceAddress` returns a
- * hand-crafted gRPC-JSON `RateLimiter` `createArgument`, exercising the scalar
- * decoders (capacity/rate/tokens/isEnabled) and the `RateLimitDirection`/
- * `RateLimitMode` enum decoders (both natural bare-string and gRPC `{ Enum }`
- * encodings) without a live participant.
+ * ACS-backed {@link CantonChain} mock (see `acs.test.helpers.ts`) serving a
+ * hand-crafted gRPC-JSON `RateLimiter` `createArgument`, exercising the reading
+ * party resolution, the scalar decoders (capacity/rate/tokens/isEnabled) and the
+ * `RateLimitDirection`/`RateLimitMode` enum decoders (both natural bare-string
+ * and gRPC `{ Enum }` encodings) without a live participant.
  *
  * @packageDocumentation
  */
@@ -13,16 +13,21 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
-import { ChainFamily } from '../../../../networks.ts'
+import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
+import type { CantonChain } from '../../../../canton/index.ts'
+import { type AcsContract, acsChain } from '../../acs.test.helpers.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 
-const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
-const OBSERVER = 'observer::1220d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4'
+const POOL_OWNER = `poolOwner::1220${'c3'.repeat(32)}`
+const OBSERVER = `observer::1220${'d4'.repeat(32)}`
+const LEDGER_PARTY = `ledger::1220${'e5'.repeat(32)}`
 const RL_CID = '#rl-1'
 const RL_INSTANCE_ID = 'pool-1-rl-in-16015286601757825753'
-const RL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32)
+/** The limiter's raw instance address — its owner suffix is the reading party. */
+const RL_INSTANCE_ADDRESS = `${RL_INSTANCE_ID}@${POOL_OWNER}`
+/** The same limiter's hashed instance address. */
+const RL_HASHED_ADDRESS = '0x' + hashedRawInstanceAddress(RL_INSTANCE_ADDRESS)
 
 const sum = (ctor: string, value: unknown) => ({ Sum: { [ctor]: value } })
 const text = (s: string) => sum('Text', s)
@@ -42,7 +47,7 @@ function rateLimiterContract(
     tokens?: string
     observers?: string[]
   } = {},
-): CantonActiveContract {
+): AcsContract {
   return {
     contractId: RL_CID,
     templateId: RATE_LIMITER_TEMPLATE_ID,
@@ -71,19 +76,19 @@ function rateLimiterContract(
   }
 }
 
-function chainWith(contract: CantonActiveContract | null): CantonChain {
-  // Real CantonChain instance (private fields make object-literal casts
-  // impossible); Object.assign overrides only what the test exercises.
-  return Object.assign(Object.create(CantonChain.prototype), {
-    network: { family: ChainFamily.Canton },
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
-    async findActiveContractByInstanceAddress(
-      _t: string,
-      instanceAddress: string,
-    ): Promise<CantonActiveContract | null> {
-      return contract && instanceAddress === RL_INSTANCE_ADDRESS ? contract : null
-    },
-  })
+function chainWith(contract: AcsContract | null): CantonChain {
+  return acsChain(contract ? [contract] : [], { ledgerParty: LEDGER_PARTY }).chain
+}
+
+/** Parties the chain's (single) ACS request read as. */
+function readParties(
+  contract: AcsContract,
+  params: Parameters<CantonTokenManager['getRateLimiterState']>[0],
+) {
+  const { chain, requests } = acsChain([contract], { ledgerParty: LEDGER_PARTY })
+  return CantonTokenManager.fromChain(chain)
+    .getRateLimiterState(params)
+    .then(() => Object.keys(requests[0]!.eventFormat.filtersByParty))
 }
 
 describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
@@ -92,7 +97,6 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
 
     const result = await manager.getRateLimiterState({
       rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS,
-      poolOwner: POOL_OWNER,
     })
 
     assert.equal(result.instanceId, RL_INSTANCE_ID)
@@ -118,7 +122,6 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
 
     const result = await manager.getRateLimiterState({
       rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS,
-      poolOwner: POOL_OWNER,
     })
 
     assert.equal(result.direction, 'outbound')
@@ -137,7 +140,6 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
 
     const result = await manager.getRateLimiterState({
       rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS,
-      poolOwner: POOL_OWNER,
     })
 
     assert.equal(result.direction, 'outbound')
@@ -151,7 +153,6 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
 
     const result = await manager.getRateLimiterState({
       rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS,
-      poolOwner: POOL_OWNER,
     })
 
     assert.equal(result.isEnabled, false)
@@ -161,10 +162,45 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
     const manager = CantonTokenManager.fromChain(chainWith(null))
 
     await assert.rejects(() =>
-      manager.getRateLimiterState({
-        rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS,
-        poolOwner: POOL_OWNER,
+      manager.getRateLimiterState({ rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS }),
+    )
+  })
+})
+
+describe('CantonTokenManager.getRateLimiterState reading party', () => {
+  it('reads as the owner suffix of a raw address', async () => {
+    assert.deepEqual(
+      await readParties(rateLimiterContract(), { rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS }),
+      [POOL_OWNER],
+    )
+  })
+
+  it('reads a hashed address as the chain ledger party', async () => {
+    assert.deepEqual(
+      await readParties(
+        { ...rateLimiterContract(), observers: [LEDGER_PARTY] },
+        { rateLimiterInstanceAddress: RL_HASHED_ADDRESS },
+      ),
+      [LEDGER_PARTY],
+    )
+  })
+
+  it('reads as an explicit poolOwner over either default', async () => {
+    assert.deepEqual(
+      await readParties(
+        { ...rateLimiterContract(), observers: [OBSERVER] },
+        { rateLimiterInstanceAddress: RL_INSTANCE_ADDRESS, poolOwner: OBSERVER },
+      ),
+      [OBSERVER],
+    )
+  })
+
+  it('names the party it read as when the limiter is not visible', async () => {
+    await assert.rejects(
+      CantonTokenManager.fromChain(chainWith(rateLimiterContract())).getRateLimiterState({
+        rateLimiterInstanceAddress: RL_HASHED_ADDRESS,
       }),
+      new RegExp(`not active or not visible to ${LEDGER_PARTY}`),
     )
   })
 })

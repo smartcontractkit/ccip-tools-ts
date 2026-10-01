@@ -30,6 +30,51 @@ export function parsePartyId(operation: string, param: string, value: string): s
 }
 
 /**
+ * Validate a `RawInstanceAddress` (`"instanceId@party"`) and split it. The
+ * `party` suffix is the contract's sole signatory — the owner an instance
+ * address is derived from — so callers read it off instead of asking for it.
+ * @param operation - CCT operation name, for error context.
+ * @param param - Param name, for error context.
+ * @param value - Raw instance address to validate.
+ * @returns the instance ID and owner party.
+ */
+export function parseRawInstanceAddress(
+  operation: string,
+  param: string,
+  value: string,
+): { instanceId: string; owner: string } {
+  if (!value || typeof value !== 'string') {
+    throw new CCTParamsInvalidError(operation, param, 'raw instance address is required')
+  }
+  const parts = value.split('@')
+  if (parts.length !== 2 || !parts[0]) {
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      `expected a raw instance address "instanceId@hint::1220<64-hex>", got "${value}"`,
+    )
+  }
+  const owner = parsePartyId(operation, param, parts[1]!)
+  return { instanceId: parts[0], owner }
+}
+
+/**
+ * The owner party of an `InstanceAddress` given in raw `"instanceId@owner"`
+ * form (validated), or `undefined` for the hashed `0x<64-hex>` form — the hash
+ * is one-way, so the owner cannot be recovered from it.
+ * @param operation - CCT operation name, for error context.
+ * @param param - Param name, for error context.
+ * @param value - Instance address, raw or hashed.
+ */
+export function instanceAddressOwner(
+  operation: string,
+  param: string,
+  value: string,
+): string | undefined {
+  return value.includes('@') ? parseRawInstanceAddress(operation, param, value).owner : undefined
+}
+
+/**
  * Validate and return a Canton instrument ID. Accepts both the structured
  * `{ admin, id }` form and the string form `"hint::1220<fingerprint>::tokenId"`
  * (the first two `::`-separated segments are the admin party ID, the rest is
