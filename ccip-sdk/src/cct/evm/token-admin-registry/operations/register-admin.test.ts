@@ -395,10 +395,9 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
       )
     })
 
-    it('rejects a declared version that disagrees with the module on-chain', async () => {
-      // `registryModuleVersion` defaults to 1.6.0, so this declares 1.6.0 against a 1.5.0 module.
-      // Both versions encode the shared functions identically, so nothing downstream would notice —
-      // the resolved version is what makes the compile-time narrowing true.
+    it('rejects access-control-default-admin against a v1.5.0 module, which lacks it', async () => {
+      // Only the module's resolved version can tell: encoding the call against the v1.5.0 ABI would
+      // throw a bare ethers error instead.
       await assert.rejects(
         () =>
           new RegisterAdmin().generate(
@@ -412,27 +411,32 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
           ),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
-          err.context.param === 'registryModuleVersion' &&
+          err.context.param === 'registrationMethod' &&
           typeof err.context.reason === 'string' &&
           err.context.reason.includes('v1.5.0'),
       )
     })
 
-    it('accepts a v1.5.0 module when that version is declared', async () => {
-      // The union removes `access-control-default-admin` from `registrationMethod` here, so only
-      // the two getter-derived paths are even expressible.
-      const unsigned = await new RegisterAdmin().generate(
-        stubChain({ moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'] }),
-        {
-          tokenAddress: TOKEN,
-          registryModule: REGISTRY_MODULE,
-          address: ROUTER,
-          registryModuleVersion: '1.5.0',
-          sender: ADMIN,
-        },
-      )
-      assert.equal(unsigned.transactions[0]!.data, OWNER_DATA)
-    })
+    // The getter-derived paths encode identically at both module versions, so the same params
+    // serve a v1.5.0 module with nothing declared.
+    for (const [method, getter, data] of [
+      ['owner', 'owner', OWNER_DATA],
+      ['ccip-admin', 'getCCIPAdmin', CCIP_ADMIN_DATA],
+    ] as const) {
+      it(`accepts a v1.5.0 module for registrationMethod "${method}"`, async () => {
+        const unsigned = await new RegisterAdmin().generate(
+          stubChain({ moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'], getter }),
+          {
+            tokenAddress: TOKEN,
+            registryModule: REGISTRY_MODULE,
+            address: ROUTER,
+            registrationMethod: method,
+            sender: ADMIN,
+          },
+        )
+        assert.equal(unsigned.transactions[0]!.data, data)
+      })
+    }
 
     it('rejects an address that is not a RegistryModuleOwnerCustom', async () => {
       await assert.rejects(
