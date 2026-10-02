@@ -16,15 +16,15 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
+  type AdvancedPoolHooksTarget,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
 /** Parameters for {@link UpdateAdvancedPoolHooksAuthorizedCallers}. */
-export type UpdateAdvancedPoolHooksAuthorizedCallersParams = {
-  /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
-  advancedPoolHooks: string
+export type UpdateAdvancedPoolHooksAuthorizedCallersParams = AdvancedPoolHooksTarget & {
   /** Callers to authorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
   addedCallers?: string[]
   /** Callers to deauthorize; defaults to `[]`. Must be non-zero and contain no duplicates. */
@@ -48,12 +48,9 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
   readonly name = 'updateAdvancedPoolHooksAuthorizedCallers'
 
   /** Validates addresses and requires at least one addition or removal before any RPC. */
-  protected override validate({
-    advancedPoolHooks,
-    addedCallers = [],
-    removedCallers = [],
-  }: UpdateAdvancedPoolHooksAuthorizedCallersParams): void {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', advancedPoolHooks)
+  protected override validate(params: UpdateAdvancedPoolHooksAuthorizedCallersParams): void {
+    validateAdvancedPoolHooksTarget(this.name, params)
+    const { addedCallers = [], removedCallers = [] } = params
     validateCallers(this.name, 'addedCallers', addedCallers)
     validateCallers(this.name, 'removedCallers', removedCallers)
     if (addedCallers.length + removedCallers.length === 0)
@@ -65,8 +62,8 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
   }
 
   /**
-   * Confirms `advancedPoolHooks` is deployed `AdvancedPoolHooks` and, when `sender` is known, that
-   * it owns the hooks; then builds `applyAuthorizedCallerUpdates` calldata targeting it.
+   * Confirms the target hooks are a deployed `AdvancedPoolHooks` and, when `sender` is known, that
+   * it owns them; then builds `applyAuthorizedCallerUpdates` calldata targeting them.
    *
    * @remarks The contract-type pre-flight comes first because this call sent to an EOA succeeds
    * without changing hooks state. It also gates the owner read, since `owner()` is not a type check.
@@ -74,23 +71,19 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
    * before an offline or multisig signer submits the transaction.
    * @remarks Removes run before adds, so an address in both arrays remains authorized. Repeated
    * callers within either array are rejected, including addresses that differ only by casing.
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
    * @throws {@link CCTParamsInvalidError} if `sender` is not the hooks owner
+   * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    {
-      advancedPoolHooks,
-      addedCallers = [],
-      removedCallers = [],
-      sender,
-    }: UpdateAdvancedPoolHooksAuthorizedCallersParams,
+    params: UpdateAdvancedPoolHooksAuthorizedCallersParams,
   ): Promise<UnsignedEVMTx> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
+    const { addedCallers = [], removedCallers = [], sender } = params
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
-      advancedPoolHooks,
+      hooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('applyAuthorizedCallerUpdates', [
         { addedCallers, removedCallers },
       ]),

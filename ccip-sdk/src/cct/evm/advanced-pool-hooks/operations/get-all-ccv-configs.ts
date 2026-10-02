@@ -6,18 +6,16 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress } from '../../validate.ts'
 import {
+  type AdvancedPoolHooksTarget,
   type CCVConfigUpdate,
-  assertAdvancedPoolHooksContract,
   readAllCCVConfigs,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
 /** Parameters for {@link GetAllCCVConfigs}. */
-export type GetAllCCVConfigsParams = {
-  /** Hooks contract to read. */
-  advancedPoolHooks: string
-}
+export type GetAllCCVConfigsParams = AdvancedPoolHooksTarget
 
 /** Complete CCV configs for configured remote chains, in the contract's enumerable-set order. */
 export type GetAllCCVConfigsResult = CCVConfigUpdate[]
@@ -27,15 +25,15 @@ export class GetAllCCVConfigs extends EVMQuery<GetAllCCVConfigsParams, GetAllCCV
   readonly name = 'getAllCCVConfigs'
 
   protected prepare(params: GetAllCCVConfigsParams): GetAllCCVConfigsParams {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    validateAdvancedPoolHooksTarget(this.name, params)
     return params
   }
 
   protected async read(
     chain: EVMChain,
-    { advancedPoolHooks }: GetAllCCVConfigsParams,
+    params: GetAllCCVConfigsParams,
   ): Promise<GetAllCCVConfigsResult> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    return readAllCCVConfigs(chain, advancedPoolHooks)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    return readAllCCVConfigs(chain, hooks)
   }
 }
