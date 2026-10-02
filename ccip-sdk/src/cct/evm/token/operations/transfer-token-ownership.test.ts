@@ -7,7 +7,9 @@ import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../err
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { BeginDefaultAdminTransfer } from './begin-default-admin-transfer.ts'
+import { CancelDefaultAdminTransfer } from './cancel-default-admin-transfer.ts'
 import {
   type TransferTokenOwnershipParams,
   TransferTokenOwnership,
@@ -27,12 +29,15 @@ const HASH = '0x' + 'ab'.repeat(32)
 const IFACE = new Interface([
   'function transferOwnership(address to)',
   'function owner() view returns (address)',
+  'function defaultAdmin() view returns (address)',
+  'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
 ])
 const dataFor = (to: string) => IFACE.encodeFunctionData('transferOwnership', [to])
 
 /**
- * EVMChain stub: `provider.call` answers `owner()` and nothing else. `typeAndVersion` feeds the v2
- * guard; `typeAndVersion: undefined` reproduces a v1.5.1 token, which predates the function.
+ * EVMChain stub: `provider.call` answers `owner()`, and v2's `defaultAdmin()` (also `owner`) and
+ * `pendingDefaultAdmin()`. `typeAndVersion` picks the version; `typeAndVersion: undefined`
+ * reproduces a v1.5.1 token, which predates the function.
  */
 function stubChain({
   owner = OWNER,
@@ -48,7 +53,10 @@ function stubChain({
     provider: {
       call: ({ data }: { data: string }) => {
         onCall?.()
-        if (data.slice(0, 10) !== IFACE.getFunction('owner')!.selector)
+        const fn = IFACE.getFunction(data.slice(0, 10))?.name
+        if (fn === 'pendingDefaultAdmin')
+          return Promise.resolve(IFACE.encodeFunctionResult(fn, [NEW_OWNER, 1n]))
+        if (fn !== 'owner' && fn !== 'defaultAdmin')
           throw makeError('execution reverted', 'CALL_EXCEPTION', {
             action: 'call',
             data: '0x',
@@ -57,7 +65,7 @@ function stubChain({
             invocation: null,
             revert: null,
           })
-        return Promise.resolve(IFACE.encodeFunctionResult('owner', [owner]))
+        return Promise.resolve(IFACE.encodeFunctionResult(fn, [owner]))
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -169,40 +177,40 @@ describe('TransferTokenOwnership (cct/evm)', () => {
         assert.equal(called, false)
       })
     }
+  })
 
-    it('rejects a self-transfer before any RPC — the token would revert CannotTransferToSelf', async () => {
-      let called = false
+  describe('version dispatch', () => {
+    for (const typeAndVersion of ['FactoryBurnMintERC20 1.6.2', 'CrossChainToken 2.0.0'])
+      for (const [label, newOwner, Op] of [
+        ['a non-zero', NEW_OWNER, BeginDefaultAdminTransfer],
+        ['a zero', ZeroAddress, CancelDefaultAdminTransfer],
+      ] as const)
+        it(`builds exactly what ${Op.name} builds for ${label} newOwner (${typeAndVersion})`, async () => {
+          const chain = stubChain({ typeAndVersion })
+          const params = { tokenAddress: TOKEN, newAdmin: newOwner, sender: OWNER }
+          assert.deepEqual(
+            await generate(chain, { newOwner }),
+            await new Op().generate(chain, params),
+          )
+        })
+
+    it('reports errors of the zero-newOwner cancel path under its own name', async () => {
       await assert.rejects(
         () =>
-          generate(stubChain({ onCall: () => (called = true) }), {
-            newOwner: OWNER,
-            sender: OWNER,
+          generate(stubChain({ typeAndVersion: 'CrossChainToken 2.0.0', owner: NOT_THE_OWNER }), {
+            newOwner: ZeroAddress,
           }),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'transferTokenOwnership' &&
-          err.context.param === 'newOwner',
+          err.context.param === 'sender',
       )
-      assert.equal(called, false)
     })
-  })
 
-  describe('v2 CrossChainToken guard', () => {
-    it('rejects a v2.0.0 CrossChainToken before building calldata or reading owner()', async () => {
-      let calls = 0
-      await assert.rejects(
-        () =>
-          generate(
-            stubChain({ typeAndVersion: 'CrossChainToken 2.0.0', onCall: () => (calls += 1) }),
-          ),
-        (err: unknown) =>
-          err instanceof CCTOperationUnsupportedError &&
-          err.context.operation === 'transferTokenOwnership' &&
-          err.context.version === '2.0.0' &&
-          /beginDefaultAdminTransfer/.test(err.recovery ?? ''),
-      )
-      // owner() is never read: the guard precedes both the encoding and the owner pre-flight
-      assert.equal(calls, 0)
+    it('surfaces a transient typeAndVersion() failure instead of assuming v1', async () => {
+      const chain = stubChain()
+      chain.typeAndVersion = () => Promise.reject(makeError('timeout', 'TIMEOUT'))
+      await assert.rejects(() => generate(chain), /timeout/)
     })
 
     it('proceeds for a v1.6.2 FactoryBurnMintERC20', async () => {

@@ -6,7 +6,7 @@ import { Interface, ZeroAddress } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type AcceptDefaultAdminTransferParams,
   AcceptDefaultAdminTransfer,
@@ -18,19 +18,28 @@ const OTHER = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const FRESH = new Interface([
   'function acceptDefaultAdminTransfer()',
+  'function acceptOwnership()',
   'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
 ])
 
+/** `v1` stubs a FactoryBurnMintERC20 1.6.2, whose pending owner has no getter to read. */
 function stubChain({
   pendingAdmin = NEW_ADMIN,
   schedule = 1n,
-}: { pendingAdmin?: string; schedule?: bigint } = {}): EVMChain {
+  v1 = false,
+}: { pendingAdmin?: string; schedule?: bigint; v1?: boolean } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    typeAndVersion: () =>
+      Promise.resolve(
+        v1
+          ? ['FactoryBurnMintERC20', '1.6.2', 'FactoryBurnMintERC20 1.6.2']
+          : ['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0'],
+      ),
     provider: {
       call: ({ data }: { data: string }) => {
+        assert.ok(!v1, 'a v1 acceptance reads nothing')
         assert.equal(FRESH.getFunction(data.slice(0, 10))!.name, 'pendingDefaultAdmin')
         return Promise.resolve(
           FRESH.encodeFunctionResult('pendingDefaultAdmin', [pendingAdmin, schedule]),
@@ -69,6 +78,12 @@ describe('AcceptDefaultAdminTransfer (cct/evm)', () => {
         FRESH.encodeFunctionData('acceptDefaultAdminTransfer'),
       )
     })
+
+    it('encodes Ownable2Step acceptOwnership() to a v1 token, leaving sender unchecked', async () => {
+      const unsigned = await generate(stubChain({ v1: true }), { sender: OTHER })
+      assert.equal(unsigned.transactions[0]!.from, OTHER)
+      assert.equal(unsigned.transactions[0]!.data, FRESH.encodeFunctionData('acceptOwnership'))
+    })
   })
 
   describe('validation', () => {
@@ -86,15 +101,6 @@ describe('AcceptDefaultAdminTransfer (cct/evm)', () => {
   })
 
   describe('version and pending-transfer checks', () => {
-    it('rejects a contract that is not a CrossChainToken', async () => {
-      const chain = stubChain()
-      chain.typeAndVersion = () => Promise.resolve(['FactoryBurnMintERC20', '1.6.2', ''])
-      await assert.rejects(
-        () => generate(chain),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
-      )
-    })
-
     it('rejects when no transfer is pending', async () => {
       await assert.rejects(
         () => generate(stubChain({ schedule: 0n })),
