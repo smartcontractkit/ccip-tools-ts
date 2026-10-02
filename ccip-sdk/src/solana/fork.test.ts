@@ -8,6 +8,7 @@ import {
   NATIVE_MINT,
   createApproveInstruction,
   getAssociatedTokenAddressSync,
+  getMint,
 } from '@solana/spl-token'
 import {
   type AccountMeta,
@@ -33,7 +34,11 @@ import {
   MessageStatus,
 } from '../types.ts'
 import { executeV2 } from './exec-v2.ts'
-import { ETHEREUM_TO_SOLANA, SOLANA_DEVNET_V2_STAGING as STAGING } from './fork.test.data.ts'
+import {
+  ETHEREUM_TO_SOLANA,
+  SEPOLIA_TO_SOLANA_DEVNET_V2_NOEXEC as NOEXEC,
+  SOLANA_DEVNET_V2_STAGING as STAGING,
+} from './fork.test.data.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import {
@@ -814,6 +819,66 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         'buffered execution should read the buffer',
       )
       assert.equal(await connection!.getAccountInfo(buffer), null, 'the buffer should be closed')
+    })
+
+    // A message sent with NO_EXECUTION_ADDRESS stays unexecuted on devnet, so the fork executes it
+    // for real: a token-only transfer, which the pool mints to the token receiver's ATA
+    describe('an unexecuted message', () => {
+      const input = { encodedMessage: NOEXEC.encodedMessage, verifications: NOEXEC.verifications }
+
+      it('reads its verification policy', async () => {
+        const request = {
+          lane: {
+            sourceChainSelector: STAGING.sepoliaSelector,
+            destChainSelector: networkInfo('solana-devnet').chainSelector,
+            onRamp: NOEXEC.onRamp,
+            version: CCIPVersion.V2_0,
+          },
+          message: { messageId: NOEXEC.messageId, encodedMessage: NOEXEC.encodedMessage },
+          log: { blockTimestamp: 0 },
+        } as unknown as Parameters<SolanaChain['getVerifications']>[0]['request']
+
+        const result = await solanaChain!.getVerifications({
+          offRamp: STAGING.offRamp,
+          request,
+          indexer: [],
+          ccvData: Object.fromEntries(NOEXEC.verifications.map((v) => [v.destAddress, v.ccvData])),
+        })
+
+        assert.ok('verificationPolicy' in result)
+        assert.ok(result.verificationPolicy.requiredCCVs.includes(STAGING.committeeVerifier))
+        assert.deepEqual(
+          result.verifications.map(({ destAddress }) => destAddress),
+          [STAGING.committeeVerifier],
+        )
+      })
+
+      it('executes it', async () => {
+        const mint = new PublicKey(NOEXEC.destToken)
+        const ata = getAssociatedTokenAddressSync(mint, new PublicKey(NOEXEC.tokenReceiver))
+        // the ATA may not exist yet: execute_v2 creates it
+        const balance = async () =>
+          BigInt(
+            (await connection!.getTokenAccountBalance(ata).catch(() => null))?.value.amount ?? 0,
+          )
+        const before = await balance()
+        // the pool converts the amount from the source token's 18 decimals
+        const { decimals } = await getMint(connection!, mint)
+
+        const execution = await solanaChain!.execute({
+          offRamp: STAGING.offRamp,
+          input,
+          wallet: wallet!,
+        })
+
+        assert.equal(execution.receipt.messageId, NOEXEC.messageId)
+        assert.equal(execution.receipt.state, ExecutionState.Success, 'execution should succeed')
+        assert.equal(
+          (await balance()) - before,
+          (NOEXEC.amount * 10n ** BigInt(decimals)) / 10n ** 18n,
+          'tokens should reach the token receiver',
+        )
+      })
     })
   })
 
