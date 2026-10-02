@@ -4,7 +4,8 @@ import { describe, it } from 'node:test'
 import { concat, toBeHex } from 'ethers'
 
 import '../index.ts' // Import to ensure all chains are registered for decodeAddress
-import { decodeMessageV1 } from '../messages.ts'
+import { decodeMessageV1, decodeMessageV1Raw } from '../messages.ts'
+import { encodeMessageV1 } from './messageCodec.ts'
 import { type SourceTokenData, parseSourceTokenData } from './messages.ts'
 
 describe('encode/parseSourceTokenData', () => {
@@ -223,5 +224,57 @@ describe('decodeMessageV1', () => {
     const tooShort = '0x01' // Only version byte
 
     assert.throws(() => decodeMessageV1(tooShort), /MESSAGE_MIN_SIZE/)
+  })
+})
+
+describe('decodeMessageV1Raw', () => {
+  // EVM sources encode their addresses as abi.encode(address), i.e. left-padded to 32 bytes
+  const padded = (byte: string) => '0x' + '00'.repeat(12) + byte.repeat(20)
+  const encoded = encodeMessageV1({
+    sourceChainSelector: 5009297550715157269n, // Ethereum Mainnet
+    destChainSelector: 4949039107694359620n, // Arbitrum One
+    ccipReceiveGasLimit: 200_000,
+    finality: '0x0000000a',
+    onRampAddress: padded('11'),
+    offRampAddress: '0x' + '22'.repeat(20),
+    sender: padded('33'),
+    receiver: '0x' + '44'.repeat(20),
+    tokenTransfer: {
+      amount: 5n,
+      sourcePoolAddress: padded('55'),
+      sourceTokenAddress: padded('66'),
+      destTokenAddress: '0x' + '77'.repeat(20),
+      tokenReceiver: '0x' + '88'.repeat(20),
+    },
+    data: '0x1234',
+  })
+
+  it('keeps addresses as encoded, where decodeMessageV1 normalizes them', () => {
+    const raw = decodeMessageV1Raw(encoded)
+    const decoded = decodeMessageV1(encoded)
+
+    assert.equal(raw.onRampAddress, padded('11'))
+    assert.equal(raw.offRampAddress, '0x' + '22'.repeat(20))
+    assert.equal(raw.sender, padded('33'))
+    assert.equal(raw.receiver, '0x' + '44'.repeat(20))
+    assert.equal(raw.tokenTransfer[0]!.sourcePoolAddress, padded('55'))
+    assert.equal(raw.tokenTransfer[0]!.sourceTokenAddress, padded('66'))
+    assert.equal(decoded.sender, '0x' + '33'.repeat(20))
+    // everything else decodes the same
+    for (const field of [
+      'sourceChainSelector',
+      'destChainSelector',
+      'messageNumber',
+      'executionGasLimit',
+      'ccipReceiveGasLimit',
+      'finality',
+      'ccvAndExecutorHash',
+      'destBlob',
+      'data',
+    ] as const) {
+      assert.deepEqual(raw[field], decoded[field], field)
+    }
+    assert.equal(raw.tokenTransfer[0]!.amount, decoded.tokenTransfer[0]!.amount)
+    assert.equal(raw.tokenTransfer[0]!.extraData, decoded.tokenTransfer[0]!.extraData)
   })
 })

@@ -11,26 +11,34 @@ import {
   PublicKey,
   SendTransactionError,
 } from '@solana/web3.js'
+import { hexlify, toBeArray, toBeHex } from 'ethers'
 
+import '../index.ts' // registers the chain families MessageV1 decoding needs
 import { CCIPError } from '../errors/CCIPError.ts'
 import {
   CCIPSolanaAccountResolutionError,
   CCIPSolanaLookupTableNotFoundError,
 } from '../errors/index.ts'
+import { encodeMessageV1 } from '../evm/messageCodec.ts'
+import { networkInfo } from '../networks.ts'
 import {
   type ResolveAccountsResponse,
   CCIP_SEND_V2_DISCRIMINATOR,
   EXECUTE_V2_DISCRIMINATOR,
+  GET_CCVS_FOR_MSG_DISCRIMINATOR,
   GET_FEE_V2_DISCRIMINATOR,
   RESOLVE_ACCOUNTS_START_DISCRIMINATOR,
   decodeResolveAccountsResponse,
   encodeResolveAccountsIx,
   fetchLookupTables,
+  getCcvsForMsgParams,
   resolutionStageName,
   resolveAccounts,
   resolveExecuteV2,
+  resolveGetCcvsForMsg,
   resolveGetFeeV2,
 } from './resolution.ts'
+import { SIMULATION_PAYER } from './utils.ts'
 
 const silent = { debug() {}, info() {}, warn() {}, error() {} } as unknown as Console
 const randomKey = () => Keypair.generate().publicKey
@@ -42,6 +50,7 @@ const u32 = (n: number) => {
   return b
 }
 const vec = (items: Buffer[]) => Buffer.concat([u32(items.length), ...items])
+const toLeBytes = (n: bigint, width: number) => Buffer.from(toBeArray(n, width)).reverse()
 const bytes = (data: Buffer) => Buffer.concat([u32(data.length), data])
 function encodeResponse(r: ResolveAccountsResponse): Buffer {
   return Buffer.concat([
@@ -120,6 +129,7 @@ describe('account resolution codec', () => {
     assert.deepEqual([...GET_FEE_V2_DISCRIMINATOR], [178, 49, 15, 7, 35, 31, 31, 250])
     assert.deepEqual([...CCIP_SEND_V2_DISCRIMINATOR], [175, 63, 145, 145, 211, 111, 21, 183])
     assert.deepEqual([...EXECUTE_V2_DISCRIMINATOR], [110, 12, 255, 88, 93, 207, 223, 214])
+    assert.deepEqual([...GET_CCVS_FOR_MSG_DISCRIMINATOR], [86, 132, 32, 127, 168, 122, 87, 66])
   })
 
   it('names known stages and falls back to hex', () => {
@@ -414,7 +424,7 @@ describe('typed resolvers', () => {
     const bufferId = Buffer.alloc(32, 5)
     const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp)
     const [buffer] = PublicKey.findProgramAddressSync(
-      [Buffer.from('execution_report_buffer'), bufferId, caller.toBuffer()],
+      [Buffer.from('execution_inputs_buffer'), bufferId, caller.toBuffer()],
       offramp,
     )
     const { connection, simulateTransaction } = scriptedConnection(offramp, [
@@ -460,6 +470,118 @@ describe('typed resolvers', () => {
         vec([bytes(Buffer.from([1])), bytes(Buffer.alloc(0))]),
         u32(0),
       ]),
+    )
+  })
+})
+
+describe('get_ccvs_for_msg', () => {
+  const sepolia = networkInfo('ethereum-testnet-sepolia').chainSelector
+  const solanaDevnet = networkInfo('solana-devnet').chainSelector
+  // EVM sources encode their addresses as abi.encode(address), i.e. left-padded to 32 bytes
+  const evmSender = '0x' + '00'.repeat(12) + '33'.repeat(20)
+  const receiver = randomKey()
+  const mint = randomKey()
+  const encodedMessage = encodeMessageV1({
+    sourceChainSelector: sepolia,
+    destChainSelector: solanaDevnet,
+    ccipReceiveGasLimit: 200_000,
+    // an unknown flag (2) along with the block depth: both must reach the program as encoded
+    finality: '0x0002000a',
+    sender: evmSender,
+    receiver: hexlify(receiver.toBytes()),
+    tokenTransfer: {
+      amount: 10n ** 18n,
+      sourcePoolAddress: '0x' + '00'.repeat(12) + '44'.repeat(20),
+      sourceTokenAddress: '0x' + '00'.repeat(12) + '55'.repeat(20),
+      destTokenAddress: hexlify(mint.toBytes()),
+      tokenReceiver: hexlify(receiver.toBytes()),
+      extraData: '0xabcd',
+    },
+    data: '0x010203',
+  })
+
+  it('takes the params from the encoded message, byte for byte', () => {
+    const params = getCcvsForMsgParams(encodedMessage, Buffer.from([7]))
+
+    assert.ok(params.messageReceiver.equals(receiver))
+    assert.equal(params.dataLen, 3)
+    assert.equal(params.ccipReceiveGasLimit, 200_000)
+    assert.equal(hexlify(params.sender), evmSender, 'sender should keep its padding')
+    assert.deepEqual(params.resolutionMetadata, Buffer.from([7]))
+    assert.equal(params.remoteChainSelector.toString(), sepolia.toString())
+    assert.deepEqual(params.requestedFinality, { flags: 2, blockDepth: 10 })
+    const tokenTransfer = params.tokenTransfer!
+    assert.equal(tokenTransfer.version, 1)
+    assert.equal(hexlify(Uint8Array.from(tokenTransfer.amount.beBytes)), toBeHex(10n ** 18n, 32))
+    assert.equal(hexlify(tokenTransfer.sourcePoolAddress), '0x' + '00'.repeat(12) + '44'.repeat(20))
+    assert.equal(
+      hexlify(tokenTransfer.sourceTokenAddress),
+      '0x' + '00'.repeat(12) + '55'.repeat(20),
+    )
+    assert.deepEqual(tokenTransfer.destTokenAddress, mint.toBuffer())
+    assert.deepEqual(tokenTransfer.tokenReceiver, receiver.toBuffer())
+    assert.equal(hexlify(tokenTransfer.extraData), '0xabcd')
+  })
+
+  it('makes a message without receiver or token transfer a token-only one', () => {
+    const params = getCcvsForMsgParams(
+      encodeMessageV1({
+        sourceChainSelector: sepolia,
+        destChainSelector: solanaDevnet,
+        ccipReceiveGasLimit: 0,
+        finality: '0x00000000',
+        sender: evmSender,
+        receiver: '0x',
+      }),
+      Buffer.alloc(0),
+    )
+    assert.ok(params.messageReceiver.equals(PublicKey.default))
+    assert.equal(params.tokenTransfer, null)
+    assert.equal(params.dataLen, 0)
+    assert.equal(params.ccipReceiveGasLimit, 0)
+    assert.deepEqual(params.requestedFinality, { flags: 0, blockDepth: 0 })
+  })
+
+  it('leaves it to the program to make token-only a message with neither data nor callback gas', () => {
+    const params = getCcvsForMsgParams(
+      encodeMessageV1({
+        sourceChainSelector: sepolia,
+        destChainSelector: solanaDevnet,
+        ccipReceiveGasLimit: 0,
+        finality: '0x00000000',
+        sender: evmSender,
+        receiver: hexlify(receiver.toBytes()),
+      }),
+      Buffer.alloc(0),
+    )
+    // the receiver is passed as is: the offramp reads dataLen and ccipReceiveGasLimit along with it
+    assert.ok(params.messageReceiver.equals(receiver))
+    assert.equal(params.dataLen, 0)
+    assert.equal(params.ccipReceiveGasLimit, 0)
+  })
+
+  it('resolves get_ccvs_for_msg as a read-only view', async () => {
+    const offramp = randomKey()
+    const saved = [meta(randomKey()), meta(randomKey())]
+    const { connection, simulateTransaction } = scriptedConnection(offramp, [
+      response({ accountsToSave: saved, lookupTablesToSave: [randomKey()] }),
+    ])
+
+    const { instruction, lookupTables } = await resolveGetCcvsForMsg(
+      { connection, logger: silent },
+      { offramp, encodedMessage },
+    )
+
+    assert.deepEqual(instruction.keys, saved)
+    assert.equal(lookupTables.length, 1)
+    const start = lastInstruction(simulateTransaction.mock.calls[0]!.arguments[0]).data
+    // there's no signer to resolve for
+    assert.deepEqual(start.subarray(8, 40), SIMULATION_PAYER.toBuffer())
+    assert.deepEqual(instruction.data.subarray(0, 8), GET_CCVS_FOR_MSG_DISCRIMINATOR)
+    // the params end with the resolution metadata, remote chain selector and finality
+    assert.deepEqual(
+      instruction.data.subarray(-(4 + 8 + 4)),
+      Buffer.concat([u32(0), toLeBytes(sepolia, 8), Buffer.from([2, 0, 10, 0])]),
     )
   })
 })

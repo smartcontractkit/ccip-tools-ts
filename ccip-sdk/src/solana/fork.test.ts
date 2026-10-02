@@ -32,6 +32,7 @@ import {
   ExecutionState,
   MessageStatus,
 } from '../types.ts'
+import { executeV2 } from './exec-v2.ts'
 import { ETHEREUM_TO_SOLANA, SOLANA_DEVNET_V2_STAGING as STAGING } from './fork.test.data.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
@@ -42,7 +43,7 @@ import {
   resolveExecuteV2,
   resolveGetFeeV2,
 } from './resolution.ts'
-import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
+import { getExecutionInputsBufferPda, simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
 // Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
@@ -721,6 +722,98 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         msg.addressTableLookups.map(({ accountKey }) => accountKey.toBase58()),
       )
       assert.equal(hexlify(metadata.subarray(-32)), STAGING.executeMessageId)
+    })
+
+    /** The landed execution's inputs, as an `ExecutionInput`. */
+    async function landedInput() {
+      const tx = await connection!.getTransaction(STAGING.executeTx, {
+        maxSupportedTransactionVersion: 0,
+      })
+      const msg = tx!.transaction.message
+      const keys = msg.getAccountKeys({ accountKeysFromLookups: tx!.meta!.loadedAddresses })
+      const landed = msg.compiledInstructions.find((ix) =>
+        keys.get(ix.programIdIndex)?.equals(offRamp),
+      )!
+      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 }>(
+        'ExecuteParams',
+        Buffer.from(landed.data).subarray(8),
+      )
+      return {
+        encodedMessage: hexlify(execInputs.encodedMessage),
+        verifications: execInputs.ccvs.map((ccv, i) => ({
+          destAddress: ccv.toBase58(),
+          ccvData: hexlify(execInputs.verifierResults[i]!),
+        })),
+      }
+    }
+
+    // The policy of a message its landed verifier results satisfied: those cover it, without any
+    // indexer or API to fetch them from
+    it('reads the verification policy of a landed execution', async () => {
+      const input = await landedInput()
+      const request = {
+        lane: {
+          sourceChainSelector: STAGING.sepoliaSelector,
+          destChainSelector: networkInfo('solana-devnet').chainSelector,
+          onRamp: '',
+          version: CCIPVersion.V2_0,
+        },
+        message: { messageId: STAGING.executeMessageId, encodedMessage: input.encodedMessage },
+        log: { blockTimestamp: 0 },
+      } as unknown as Parameters<SolanaChain['getVerifications']>[0]['request']
+
+      const result = await solanaChain!.getVerifications({
+        offRamp: STAGING.offRamp,
+        request,
+        indexer: [],
+        ccvData: Object.fromEntries(input.verifications.map((v) => [v.destAddress, v.ccvData])),
+      })
+
+      assert.ok('verificationPolicy' in result)
+      const landedCcvs = input.verifications.map(({ destAddress }) => destAddress)
+      assert.ok(result.verificationPolicy.requiredCCVs.length, 'lanes require some CCV')
+      for (const ccv of result.verificationPolicy.requiredCCVs) assert.ok(landedCcvs.includes(ccv))
+      assert.deepEqual(
+        result.verifications.map(({ destAddress }) => destAddress).sort(),
+        [...landedCcvs].sort(),
+      )
+    })
+
+    // execute_v2 skips an already executed message after resolving and checking it, closing the
+    // buffer it came from, if any: this runs every path up to the CCV verification
+    it('executes a landed message again, inline and from a buffer', async () => {
+      const input = await landedInput()
+      const ctx_ = ctx()
+
+      const inline = await executeV2(ctx_, wallet!, { offramp: offRamp, input })
+      const inlineTx = await connection!.getTransaction(inline, {
+        maxSupportedTransactionVersion: 1,
+      })
+      assert.equal(inlineTx?.meta?.err, null, 'inline execution should succeed')
+
+      const buffered = await executeV2(ctx_, wallet!, {
+        offramp: offRamp,
+        input,
+        forceBuffer: true,
+      })
+      const bufferedTx = await connection!.getTransaction(buffered, {
+        maxSupportedTransactionVersion: 1,
+      })
+      assert.equal(bufferedTx?.meta?.err, null, 'buffered execution should succeed')
+      const buffer = getExecutionInputsBufferPda(
+        offRamp,
+        Buffer.from(STAGING.executeMessageId.slice(2), 'hex'),
+        wallet!.publicKey,
+      )
+      assert.ok(
+        bufferedTx.transaction.message
+          .getAccountKeys({ accountKeysFromLookups: bufferedTx.meta!.loadedAddresses })
+          .keySegments()
+          .flat()
+          .some((key) => key.equals(buffer)),
+        'buffered execution should read the buffer',
+      )
+      assert.equal(await connection!.getAccountInfo(buffer), null, 'the buffer should be closed')
     })
   })
 

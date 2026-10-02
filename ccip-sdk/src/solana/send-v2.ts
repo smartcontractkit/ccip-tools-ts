@@ -33,7 +33,7 @@ import {
 } from './resolution.ts'
 import { generateApproveIxs } from './send.ts'
 import type { UnsignedSolanaTx } from './types.ts'
-import { customInstructionErrorCode, simulateTransaction } from './utils.ts'
+import { SIMULATION_PAYER, customInstructionErrorCode, simulateTransaction } from './utils.ts'
 
 /*
  * CCIP 2.0 send path, and the choice between it and the 1.6 one.
@@ -52,11 +52,6 @@ export const OBSERVE_DEST_CHAIN_V2_DISCRIMINATOR = sighash('global', 'observe_de
 // Anchor errors `observe_dest_chain_v2` fails with when there's no 2.0 lane to observe
 const INSTRUCTION_FALLBACK_NOT_FOUND = 101 // the router doesn't have 2.0 support yet
 const ACCOUNT_NOT_INITIALIZED = 3012 // no `dest_chain_state_v2` account for the lane
-
-// Placeholder fee payer for read-only simulations, and `get_fee_v2` caller for quotes without a
-// sender (only allowed on lanes without an allowlist, see `selectSendLane`). Not the System Program
-// (`1111…1111`): a program id can't be the (writable) fee payer
-const SIMULATION_PAYER = new PublicKey('11111111111111111111111111111112')
 
 // WIP: account resolution doesn't return the deployment's fixed ccip_send lookup table yet (an
 // upstream oversight, to be fixed in the router), and 2.0 token transfers only fit a v0
@@ -295,6 +290,7 @@ export async function getFeeV2(
     router,
     destChainSelector,
     message,
+    // quotes without a sender are only allowed on lanes without an allowlist, see `selectSendLane`
     sender = SIMULATION_PAYER,
   }: { router: PublicKey; destChainSelector: bigint; message: AnyMessage; sender?: PublicKey },
 ): Promise<bigint> {
