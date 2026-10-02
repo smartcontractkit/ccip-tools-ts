@@ -18,8 +18,9 @@ import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 
-const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
+const POOL_OWNER = `poolOwner::1220${'c3'.repeat(32)}`
 const OBSERVER = 'observer::1220d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4'
+const LEDGER_PARTY = `ledger::1220${'e5'.repeat(32)}`
 const RL_CID = '#rl-1'
 const RL_INSTANCE_ID = 'pool-1-rl-in-16015286601757825753'
 const RL_INSTANCE_ADDRESS = '0x' + 'ab'.repeat(32)
@@ -76,6 +77,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
+    ledgerParty: LEDGER_PARTY,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
       _t: string,
@@ -167,4 +169,17 @@ describe('CantonTokenManager.getRateLimiterState (mocked chain)', () => {
       }),
     )
   })
+
+  for (const [label, rateLimiterInstanceAddress, reader] of [
+    ['its owner, for a raw address', `${RL_INSTANCE_ID}@${POOL_OWNER}`, POOL_OWNER],
+    ['the ledger party, for a hashed address', RL_INSTANCE_ADDRESS, LEDGER_PARTY],
+  ] as const) {
+    it(`reads as ${label}, when poolOwner is omitted`, async () => {
+      const manager = CantonTokenManager.fromChain(chainWith(null))
+      await assert.rejects(
+        manager.getRateLimiterState({ rateLimiterInstanceAddress }),
+        new RegExp(`not visible to ${reader}$`),
+      )
+    })
+  }
 })

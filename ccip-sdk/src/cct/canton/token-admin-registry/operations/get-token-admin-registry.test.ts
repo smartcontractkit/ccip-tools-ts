@@ -13,15 +13,19 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
+import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
-import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
+import { TOKEN_CONFIG_TEMPLATE_ID, deriveTokenConfigInstanceAddress } from '../shared.ts'
 
 const PARTY = 'participant::1220c250c250c250c250c250c250c250c250c250c250c250c250c250c250c250c'
-const ADMIN = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
+const ADMIN = `adminA::1220${'a1'.repeat(32)}`
 const PENDING = 'pendingB::1220b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2'
 const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
-const TOKEN_CONFIG_INSTANCE_ADDRESS = '0x' + 'ef'.repeat(32)
+const CCIP_OWNER = `ccipOwner::1220${'0f'.repeat(32)}`
+const TESTNET_CCIP_OWNER = CANTON_NETWORKS['canton:TestNet']!.ccipOwner
+const INSTRUMENT_ID = { admin: ADMIN, id: 'usdc' }
+const TOKEN_CONFIG_INSTANCE_ADDRESS = deriveTokenConfigInstanceAddress(INSTRUMENT_ID, PARTY)
 
 const sum = (ctor: string, value: unknown) => ({ Sum: { [ctor]: value } })
 const text = (s: string) => sum('Text', s)
@@ -72,11 +76,12 @@ function contract(arg: Record<string, unknown>, contractId = '#cfg-usdc'): Canto
 }
 
 /** Mocked chain: returns `contract` when the instance address matches. */
-function chainWith(contract: CantonActiveContract | null): CantonChain {
+function chainWith(contract: CantonActiveContract | null, chainId?: string): CantonChain {
   // Real CantonChain instance (private fields make object-literal casts
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
-    network: { family: ChainFamily.Canton },
+    network: { family: ChainFamily.Canton, chainId },
+    ccipParty: PARTY,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
       _t: string,
@@ -103,7 +108,7 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
     )
 
     const result = await manager.getTokenAdminRegistry({
-      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      instrumentId: INSTRUMENT_ID,
       adminParty: ADMIN,
     })
 
@@ -134,7 +139,7 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
     const manager = CantonTokenManager.fromChain(chainWith(contract(naturalArg)))
 
     const result = await manager.getTokenAdminRegistry({
-      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      instrumentId: INSTRUMENT_ID,
       adminParty: ADMIN,
     })
 
@@ -151,7 +156,7 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
     )
 
     const result = await manager.getTokenAdminRegistry({
-      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      instrumentId: INSTRUMENT_ID,
       adminParty: ADMIN,
     })
 
@@ -164,10 +169,29 @@ describe('CantonTokenManager.getTokenAdminRegistry (mocked chain)', () => {
   it('returns an empty result when no TokenConfig matches the instance address', async () => {
     const manager = CantonTokenManager.fromChain(chainWith(null))
     const result = await manager.getTokenAdminRegistry({
-      tokenConfigInstanceAddress: TOKEN_CONFIG_INSTANCE_ADDRESS,
+      instrumentId: INSTRUMENT_ID,
       adminParty: ADMIN,
     })
     assert.equal(result.tokenConfigCid, '')
     assert.equal(result.isCCIPManaged, false)
   })
+
+  for (const [label, chainId, ccipOwner, expectedOwner] of [
+    ["the chain's ccipParty", undefined, undefined, PARTY],
+    ["the network's well-known CCIP owner", 'canton:TestNet', undefined, TESTNET_CCIP_OWNER],
+    ['an explicit ccipOwner', 'canton:TestNet', CCIP_OWNER, CCIP_OWNER],
+  ] as const) {
+    it(`derives the TokenConfig address from the instrument and ${label}`, async () => {
+      const manager = CantonTokenManager.fromChain(chainWith(null, chainId))
+      const result = await manager.getTokenAdminRegistry({
+        instrumentId: `${ADMIN}::usdc`,
+        adminParty: ADMIN,
+        ccipOwner,
+      })
+      assert.equal(
+        result.tokenConfigInstanceAddress,
+        deriveTokenConfigInstanceAddress(INSTRUMENT_ID, expectedOwner),
+      )
+    })
+  }
 })

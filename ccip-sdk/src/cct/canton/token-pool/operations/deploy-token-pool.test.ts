@@ -10,13 +10,19 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+// registers the chain families lane remote addresses are parsed as
+import '../../../../evm/index.ts'
+import '../../../../solana/index.ts'
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
-import { CantonChain } from '../../../../canton/index.ts'
+import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import { TOKEN_CONFIG_TEMPLATE_ID } from '../../token-admin-registry/shared.ts'
+import {
+  TOKEN_CONFIG_TEMPLATE_ID,
+  deriveTokenConfigInstanceAddress,
+} from '../../token-admin-registry/shared.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 import { type GenerateDeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
@@ -24,20 +30,30 @@ const fp = (hex: string) => '1220' + hex.repeat(32)
 const POOL_OWNER = `poolOwner::${fp('ab')}`
 const CCIP_OWNER = `ccipOwner::${fp('cd')}`
 const OBSERVER = `observer::${fp('ef')}`
-const TAR_INSTANCE_ADDRESS = `tar-instance@ccipOwner::${fp('cd')}`
 const TAR_CID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry:00abc'
 const OVERRIDE_TAR = `tokenadminregistry-override@ccipOwner::${fp('cd')}`
 const OVERRIDE_FEE_QUOTER = `feequoter-override@ccipOwner::${fp('cd')}`
 const OVERRIDE_RMN_REMOTE = `rmn_remote-override@rmnOwner::${fp('cd')}`
+const TOKEN_CONFIG_CID = '#token-config-1'
+/** Where the TestNet TokenConfig of the `baseParams` instrument lives. */
+const TOKEN_CONFIG_ADDRESS = deriveTokenConfigInstanceAddress(
+  { admin: POOL_OWNER, id: 'TESTTOKEN' },
+  CANTON_NETWORKS['canton:TestNet']!.ccipOwner,
+)
 
 const LANE_RATE_LIMITER = { instanceId: 'rl-in', isEnabled: true, capacity: 100n, rate: 1n }
 
 /**
  * `CantonChain` mock: no EDS disclosure provider (forces the ACS-fallback
- * branch of `resolveTar`), `findActiveContractByInstanceAddress` returns a
- * fake TAR contract regardless of the requested InstanceAddress.
+ * branch of `resolveTar`), `findActiveContractByInstanceAddress` returns
+ * `tokenConfig` at {@link TOKEN_CONFIG_ADDRESS}, else a fake TAR signed by the
+ * requested raw address's owner.
  */
-function mockChain(chainId: string, overrides: Record<string, unknown> = {}): CantonChain {
+function mockChain(
+  chainId: string,
+  overrides: Record<string, unknown> = {},
+  tokenConfig: CantonActiveContract | null = null,
+): CantonChain {
   // Real CantonChain instance (private fields make object-literal casts
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
@@ -45,13 +61,18 @@ function mockChain(chainId: string, overrides: Record<string, unknown> = {}): Ca
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     edsDisclosureProvider: undefined,
-    findActiveContractByInstanceAddress: async () => ({
-      contractId: TAR_CID,
-      createdEventBlob: 'blob',
-      synchronizerId: 'sync-1',
-      templateId: '#pkg-id:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry',
-      signatories: [CCIP_OWNER],
-    }),
+    findActiveContractByInstanceAddress: async (templateId: string, address: string) =>
+      templateId === TOKEN_CONFIG_TEMPLATE_ID
+        ? address === TOKEN_CONFIG_ADDRESS
+          ? tokenConfig
+          : null
+        : {
+            contractId: TAR_CID,
+            createdEventBlob: 'blob',
+            synchronizerId: 'sync-1',
+            templateId: '#pkg-id:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry',
+            signatories: [address.split('@')[1]],
+          },
     ...overrides,
   })
 }
@@ -63,13 +84,9 @@ function baseParams(
     sender: POOL_OWNER,
     poolType: 'burnMint',
     instanceId: 'pool-1',
-    poolOwner: POOL_OWNER,
-    ccipOwner: CCIP_OWNER,
     instrumentId: { admin: POOL_OWNER, id: 'TESTTOKEN' },
     decimals: 18,
     observers: [OBSERVER],
-    tokenAdminRegistryInstanceAddress: TAR_INSTANCE_ADDRESS,
-    admin: POOL_OWNER,
     lanes: [],
     ...overrides,
   }
@@ -107,16 +124,16 @@ describe('deployTokenPool validation', () => {
     )
   })
 
-  it('rejects a missing tokenAdminRegistryInstanceAddress', async () => {
+  it('rejects a deps override that is not a raw instance address', async () => {
     await assert.rejects(
       () =>
         op.generate(
           mockChain('canton:TestNet'),
-          baseParams({ tokenAdminRegistryInstanceAddress: '' }),
+          baseParams({ deps: { tokenAdminRegistry: '0x' + 'ab'.repeat(32) } }),
         ),
       (err: unknown) => {
         assert.ok(err instanceof CCTParamsInvalidError)
-        assert.match(err.message, /tokenAdminRegistryInstanceAddress/)
+        assert.match(err.message, /deps\.tokenAdminRegistry/)
         return true
       },
     )
@@ -157,6 +174,7 @@ describe('deployTokenPool command building', () => {
 
     assert.match(templateId, /ccip-registry-burn-mint-token-pool/)
     assert.equal(choice, 'Initialize')
+    assert.equal(createArguments.poolOwner, POOL_OWNER) // instrumentId.admin
     assert.deepEqual(createArguments.observers, [OBSERVER])
     assert.equal(choiceArgument.tokenAdminRegistryCid, TAR_CID)
     assert.equal(choiceArgument.admin, POOL_OWNER)
@@ -269,6 +287,89 @@ describe('deployTokenPool deps resolution', () => {
         assert.doesNotMatch(err.message, /missing tokenAdminRegistry/)
         return true
       },
+    )
+  })
+
+  for (const [label, deps, ccipOwner] of [
+    ["the network's well-known TAR", undefined, testNet.ccipOwner],
+    ['an overridden TAR dep', { tokenAdminRegistry: OVERRIDE_TAR }, CCIP_OWNER],
+  ] as const) {
+    it(`registers with ${label}, taking its signatory as ccipOwner`, async () => {
+      const tx = await op.generate(mockChain('canton:TestNet'), baseParams({ deps }))
+      assert.equal(createAndExercise(tx).createArguments.ccipOwner, ccipOwner)
+    })
+  }
+
+  // Natural JSON (JSON Ledger API): `admin` is a bare party string, or `null` when unset.
+  const tokenConfig = (admin: string | null): CantonActiveContract => ({
+    contractId: TOKEN_CONFIG_CID,
+    templateId: TOKEN_CONFIG_TEMPLATE_ID,
+    createdEventBlob: 'token-config-blob',
+    synchronizerId: 'sync-1',
+    signatories: [testNet.ccipOwner],
+    createArgument: { admin },
+  })
+  for (const [label, existing, existingTokenConfigCid] of [
+    ['no TokenConfig yet', null, null],
+    ['a TokenConfig awaiting an admin', tokenConfig(null), TOKEN_CONFIG_CID],
+    ['a TokenConfig that already has an admin', tokenConfig(POOL_OWNER), null],
+  ] as const) {
+    it(`resolves existingTokenConfigCid for ${label}`, async () => {
+      const tx = await op.generate(mockChain('canton:TestNet', {}, existing), baseParams())
+      assert.equal(
+        createAndExercise(tx).choiceArgument.existingTokenConfigCid,
+        existingTokenConfigCid,
+      )
+      assert.deepEqual(
+        tx.commands.disclosedContracts?.map((c) => c.contractId),
+        existingTokenConfigCid ? [TAR_CID, TOKEN_CONFIG_CID] : [TAR_CID],
+      )
+    })
+  }
+})
+
+describe('deployTokenPool lane remote addresses', () => {
+  const op = new DeployTokenPool()
+  const EVM_SELECTOR = 16015286601757825753n // ethereum-testnet-sepolia
+  const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
+  const EVM_ADDRESS = '0x36E518336A67177CB102726C2DFA3D29B12F4C7B'
+  /** One Solana key, as base58 and as its 32 raw bytes. */
+  const SOLANA_ADDRESS = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+  const SOLANA_HEX = '6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb'
+  const lane = (remoteChainSelector: bigint, remote: string) => ({
+    remoteChainSelector,
+    remotePools: [remote],
+    remoteTokenAddress: remote,
+    inbound: LANE_RATE_LIMITER,
+    outbound: LANE_RATE_LIMITER,
+    inboundCustomFinality: LANE_RATE_LIMITER,
+  })
+
+  it('parses EVM and Solana remotes in their own format, stored as 32-byte bare hex', async () => {
+    const tx = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({
+        lanes: [lane(EVM_SELECTOR, EVM_ADDRESS), lane(SOLANA_SELECTOR, SOLANA_ADDRESS)],
+      }),
+    )
+    const lanes = createAndExercise(tx).choiceArgument.lanes as Array<Record<string, unknown>>
+    const evmStored = '0'.repeat(24) + EVM_ADDRESS.slice(2).toLowerCase()
+    assert.deepEqual(
+      lanes.map((l) => [l.remotePools, l.remoteTokenAddress]),
+      [
+        [[evmStored], evmStored],
+        [[SOLANA_HEX], SOLANA_HEX],
+      ],
+    )
+  })
+
+  it('rejects a remote not in the lane family format, blaming its path', async () => {
+    await assert.rejects(
+      op.generate(
+        mockChain('canton:TestNet'),
+        baseParams({ lanes: [lane(EVM_SELECTOR, SOLANA_ADDRESS)] }),
+      ),
+      /"lanes\[0\]\.remoteTokenAddress": must be a valid EVM address/,
     )
   })
 })
