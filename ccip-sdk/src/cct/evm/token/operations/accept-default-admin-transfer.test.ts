@@ -134,6 +134,14 @@ describe('AcceptDefaultAdminTransfer (cct/evm)', () => {
       )
     })
 
+    it('submits acceptOwnership() to a v1 token as the wallet', async () => {
+      const wallet = fakeSigner(OTHER)
+      assert.equal(
+        (await op.execute(stubChain({ v1: true }), { tokenAddress: TOKEN, wallet })).hash,
+        HASH,
+      )
+    })
+
     it('rejects a non-signer wallet', async () => {
       await assert.rejects(
         () => op.execute(stubChain(), { tokenAddress: TOKEN, wallet: {} }),
