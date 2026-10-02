@@ -78,13 +78,14 @@ function chain(
 ): SolanaChain {
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
+  const account = { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? account : null)),
       getAccountInfo: async (address: PublicKey) =>
-        address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
-          : tokenAccount(poolSigner, delegatedAmount, sourceBalance),
+        address.equals(state) ? account : tokenAccount(poolSigner, delegatedAmount, sourceBalance),
     },
   } as unknown as SolanaChain
 }
@@ -96,12 +97,13 @@ function submitChain(): SolanaChain {
   )
   const poolProgram = resolveTokenPoolProgram('lock-release')
   const state = deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN))
+  const account = { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? account : null)),
       getAccountInfo: async (address: PublicKey) =>
-        address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
-          : tokenAccount(poolSigner, 1_000_000n),
+        address.equals(state) ? account : tokenAccount(poolSigner, 1_000_000n),
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -116,7 +118,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new ProvideLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     amount: 1_000_000n,
@@ -189,7 +190,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
           () =>
             new ProvideLiquidity().generate(pool, {
               tokenAddress: TOKEN,
-              poolType: 'lock-release',
               payer: PAYER,
               authority: AUTHORITY,
               amount: 1n,
@@ -204,7 +204,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         chain(resolveTokenPoolProgram('lock-release'), new PublicKey(PAYER)),
         {
           tokenAddress: TOKEN,
-          poolType: 'lock-release',
           payer: PAYER,
           amount: 1_000_000n,
         },
@@ -221,7 +220,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         {
           payer: PAYER,
           tokenAddress: TOKEN,
-          poolType: 'lock-release',
           authority: AUTHORITY,
           amount: 1_000_000n,
           includeApproval: true,
@@ -262,20 +260,22 @@ describe('ProvideLiquidity (cct/solana)', () => {
         [{ authority: 'invalid' }, 'authority'],
         [{ amount: 0n }, 'amount'],
         [{ amount: 0x1_0000_0000_0000_0000n }, 'amount'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
-        [
-          {
-            poolType: undefined,
-            poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
-          },
-          'poolProgramAddress',
-        ],
       ]) {
         await assert.rejects(
           () => generate(opts),
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
+      await assert.rejects(
+        () =>
+          new ProvideLiquidity().generate(chain(resolveTokenPoolProgram('burn-mint')), {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            amount: 1n,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
     })
   })
 
@@ -283,7 +283,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new ProvideLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         amount: 1_000_000n,
         wallet: WALLET,
       })
@@ -296,7 +295,6 @@ describe('ProvideLiquidity (cct/solana)', () => {
         () =>
           new ProvideLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             amount: 1_000_000n,
             authority: AUTHORITY,
             wallet: WALLET,

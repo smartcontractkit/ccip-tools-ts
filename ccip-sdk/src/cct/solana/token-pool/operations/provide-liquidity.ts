@@ -12,26 +12,24 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import {
-  type CustomPoolProgramRef,
-  type LockReleasePoolProgramRef,
+  type PoolProgramRef,
   createLockReleaseTokenPoolProgram,
-  deriveTokenPoolConfigPda,
   deriveTokenPoolSignerPda,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import { ApproveToken } from '../../token/operations/approve-token.ts'
 import {
   U64_MAX,
+  parseOptionalPublicKey,
   parsePublicKey,
+  resolveExistingPoolConfig,
   resolveExistingTokenAccount,
-  resolveLockReleasePoolProgram,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
+  validateLockReleasePoolProgram,
   validatePoolLiquidityConfig,
 } from '../../validate.ts'
-
-type PoolProgramRef = LockReleasePoolProgramRef | CustomPoolProgramRef
 
 type ProvideLiquidityParams = PoolProgramRef & {
   /** Token mint address managed by the lock-release pool. */
@@ -47,7 +45,7 @@ type ProvideLiquidityParams = PoolProgramRef & {
 type ParsedProvideLiquidityParams = {
   tokenAddress: PublicKey
   amount: bigint
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   payer: PublicKey
   authority: PublicKey
   includeApproval: boolean
@@ -77,13 +75,16 @@ export class ProvideLiquidity extends SolanaOperation<
   protected override parse(params: GenerateProvideLiquidityParams): ParsedProvideLiquidityParams {
     validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
 
-    const poolProgram = resolveLockReleasePoolProgram(this.name, params)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
 
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       amount: params.amount,
-      poolProgram,
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       payer,
       authority:
         params.authority === undefined
@@ -98,14 +99,15 @@ export class ProvideLiquidity extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedProvideLiquidityParams,
   ): Promise<UnsignedSolanaTx> {
-    // The caller must be the configured rebalancer and the pool must accept deposits.
-    await validatePoolLiquidityConfig(
+    const { poolProgram, state, config } = await resolveExistingPoolConfig(
       this.name,
       chain,
-      opts.poolProgram,
       opts.tokenAddress,
-      opts.authority,
+      opts.poolProgramAddress,
     )
+    await validateLockReleasePoolProgram(this.name, chain, poolProgram, opts.poolProgramAddress)
+    // The caller must be the configured rebalancer and the pool must accept deposits.
+    validatePoolLiquidityConfig(this.name, config, opts.authority)
 
     // The rebalancer's source ATA must exist.
     const {
@@ -113,7 +115,7 @@ export class ProvideLiquidity extends SolanaOperation<
       tokenProgram,
       account: remoteTokenAccountInfo,
     } = await resolveExistingTokenAccount(chain.connection, opts.tokenAddress, opts.authority)
-    const poolSigner = deriveTokenPoolSignerPda(opts.poolProgram, opts.tokenAddress)
+    const poolSigner = deriveTokenPoolSignerPda(poolProgram, opts.tokenAddress)
 
     // Avoid an opaque SPL Token insufficient-funds failure.
     if (remoteTokenAccountInfo.amount < opts.amount)
@@ -144,12 +146,12 @@ export class ProvideLiquidity extends SolanaOperation<
 
     const provideLiquidityInstruction = await createLockReleaseTokenPoolProgram(
       chain,
-      opts.poolProgram,
+      poolProgram,
       opts.payer,
     )
       .methods.provideLiquidity(new BN(opts.amount.toString()))
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state,
         tokenProgram,
         mint: opts.tokenAddress,
         poolSigner,
@@ -172,7 +174,7 @@ export class ProvideLiquidity extends SolanaOperation<
     chain.logger.debug(
       `${
         this.name
-      }: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}, amount = ${
+      }: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}, amount = ${
         opts.amount
       }`,
     )
