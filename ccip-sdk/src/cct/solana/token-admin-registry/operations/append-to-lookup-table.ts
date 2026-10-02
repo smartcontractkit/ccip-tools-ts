@@ -18,8 +18,9 @@ import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolConfig,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
@@ -29,7 +30,6 @@ const EXTEND_CHUNK_SIZE = 30
 type AppendAdditionalAddressesParams = {
   additionalAddresses: string[]
   tokenAddress?: never
-  poolType?: never
   poolProgramAddress?: never
 }
 
@@ -41,7 +41,7 @@ type AppendCanonicalAddressesParams = {
 /**
  * Parameters shared by Solana TokenAdminRegistry `appendToLookupTable` generation and execution.
  *
- * Provide `tokenAddress` with exactly one of `poolType` or `poolProgramAddress` to append the
+ * Provide `tokenAddress` (plus `poolProgramAddress` for a custom pool program) to append the
  * canonical CCIP addresses. Additional addresses may also be included.
  *
  * Otherwise, provide `additionalAddresses` only.
@@ -61,7 +61,7 @@ type ParsedAppendToLookupTableParams = {
   lookupTableAddress: PublicKey
   additionalAddresses: PublicKey[]
   tokenMint?: PublicKey
-  poolProgram?: PublicKey
+  poolProgramAddress?: PublicKey
 }
 
 /** Unsigned append lookup table result. */
@@ -100,21 +100,21 @@ export class AppendToLookupTable extends SolanaOperation<
       params.lookupTableAddress,
     )
 
-    const hasTokenAddress = params.tokenAddress !== undefined
-    const hasPoolProgramAddress = params.poolProgramAddress !== undefined
-    const hasPoolProgram = params.poolType !== undefined || hasPoolProgramAddress
-    if (hasTokenAddress !== hasPoolProgram) {
+    // Runtime guard: the param union already forbids this for typed callers.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (params.poolProgramAddress !== undefined && params.tokenAddress === undefined) {
       throw new CCTParamsInvalidError(
         this.name,
         'tokenAddress',
-        'tokenAddress and exactly one of poolType or poolProgramAddress must be provided together',
+        'must be provided with poolProgramAddress',
       )
     }
-    const tokenMint =
-      params.tokenAddress === undefined
-        ? undefined
-        : parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
-    const poolProgram = hasPoolProgram ? resolvePoolProgram(this.name, params) : undefined
+    const tokenMint = parseOptionalPublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    const poolProgramAddress = parseOptionalPublicKey(
+      this.name,
+      'poolProgramAddress',
+      params.poolProgramAddress,
+    )
     const additionalAddresses = (params.additionalAddresses ?? []).map((address, i) =>
       parsePublicKey(this.name, `additionalAddresses[${i}]`, address),
     )
@@ -124,7 +124,7 @@ export class AppendToLookupTable extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'additionalAddresses',
-        'must provide tokenAddress/poolProgramAddress or additionalAddresses',
+        'must provide tokenAddress or additionalAddresses',
       )
     }
     return {
@@ -133,7 +133,7 @@ export class AppendToLookupTable extends SolanaOperation<
       lookupTableAddress,
       additionalAddresses,
       ...(tokenMint !== undefined && { tokenMint }),
-      ...(poolProgram !== undefined && { poolProgram }),
+      ...(poolProgramAddress !== undefined && { poolProgramAddress }),
     }
   }
 
@@ -142,7 +142,7 @@ export class AppendToLookupTable extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedAppendToLookupTableParams,
   ): Promise<GenerateAppendToLookupTableResult> {
-    const { payer, authority, lookupTableAddress, poolProgram } = opts
+    const { payer, authority, lookupTableAddress } = opts
     const lookupTable = await chain.connection.getAddressLookupTable(lookupTableAddress)
 
     if (!lookupTable.value) {
@@ -168,12 +168,20 @@ export class AppendToLookupTable extends SolanaOperation<
     )
     const addresses = [...opts.additionalAddresses]
 
-    if (opts.tokenMint && poolProgram) {
+    if (opts.tokenMint) {
       const { tokenMint } = opts
+      // One pool state read resolves the program and yields the router.
+      const { poolProgram, config } = await resolveExistingPoolConfig(
+        this.name,
+        chain,
+        tokenMint,
+        opts.poolProgramAddress,
+      )
       const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
         lookupTableAddress,
         tokenMint,
         poolProgram,
+        router: config.router,
       })
       if (ccipAddresses.some((address) => existingAddresses.has(address.toBase58()))) {
         throw new CCTParamsInvalidError(

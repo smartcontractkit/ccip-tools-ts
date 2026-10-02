@@ -17,8 +17,9 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
   validateUniquePublicKeys,
 } from '../../validate.ts'
@@ -37,7 +38,7 @@ type ConfigureAllowlistParams = PoolProgramRef & {
 
 type ParsedConfigureAllowlistParams = {
   tokenAddress: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   add: PublicKey[]
   enabled: boolean
   payer: PublicKey
@@ -86,7 +87,11 @@ export class ConfigureAllowlist extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       add,
       enabled: params.enabled,
       payer,
@@ -102,8 +107,14 @@ export class ConfigureAllowlist extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedConfigureAllowlistParams,
   ): Promise<UnsignedSolanaTx> {
-    const program = createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
-    const state = deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress)
+    const poolProgram = await resolveExistingPoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const program = createTokenPoolProgram(chain, poolProgram, opts.payer)
+    const state = deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress)
 
     const instruction = await program.methods
       .configureAllowList(opts.add, opts.enabled)
@@ -116,7 +127,7 @@ export class ConfigureAllowlist extends SolanaOperation<
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
