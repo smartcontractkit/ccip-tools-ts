@@ -1,12 +1,11 @@
 /**
  * Minimal CCIP v2 (`ccip-offramp 2.0.0-dev`) IDL.
  *
- * Only the pieces the SDK needs beyond the 1.6.0 offramp IDL: the `SourceChain` and
- * `ReferenceAddresses` accounts (whose layouts changed in v2), the
- * `ExecutionStateChangedV2` event, and the `get_ccvs_for_msg` view (which now also
- * requires the RMN Remote CPI accounts). The `ExecuteParams` types describe the
- * `execute_v2` instruction data, whose accounts come from account resolution
- * (see `resolution.ts`).
+ * Only the pieces the SDK needs beyond the 1.6.0 offramp IDL: the `SourceChain`,
+ * `ReferenceAddresses` (whose layouts changed in v2) and execution inputs `Buffer` accounts, the
+ * `ExecutionStateChangedV2` event, and the argument types of the `get_ccvs_for_msg`, `execute_v2`
+ * and execution inputs buffering instructions. Those instructions are encoded by hand, as their
+ * accounts come from account resolution (see `resolution.ts`) or are fixed PDAs (see `exec-v2.ts`).
  *
  * v2 `SourceChain` dropped the `state` field (`minSeqNr`) and reshaped `SourceChainConfig`
  * (replaced the single `on_ramp` with `on_ramps` Vec and added the CCV vecs). v2
@@ -16,26 +15,7 @@
 export type CcipOfframpV2 = {
   version: '2.0.0'
   name: 'ccip_offramp'
-  instructions: [
-    {
-      name: 'getCcvsForMsg'
-      docs: [
-        'Off-chain helper that predicts the CCV set an executor should supply to `execute_v2`.',
-        'Non-authoritative: `execute_v2` recomputes and enforces the real set on-chain.',
-      ]
-      accounts: [
-        { name: 'config'; isMut: false; isSigner: false },
-        { name: 'referenceAddresses'; isMut: false; isSigner: false },
-        { name: 'sourceChain'; isMut: false; isSigner: false },
-        // RMN Remote CPI accounts (UncheckedAccount). Validated via `reference_addresses.rmn_remote`.
-        { name: 'rmnRemote'; isMut: false; isSigner: false },
-        { name: 'rmnRemoteCurses'; isMut: false; isSigner: false },
-        { name: 'rmnRemoteConfig'; isMut: false; isSigner: false },
-      ]
-      args: [{ name: 'params'; type: { defined: 'GetCcvsForMsgParams' } }]
-      returns: { defined: 'GetCcvsForMsgResponse' }
-    },
-  ]
+  instructions: []
   accounts: [
     {
       name: 'sourceChain'
@@ -60,6 +40,22 @@ export type CcipOfframpV2 = {
           { name: 'feeQuoter'; type: 'publicKey' },
           { name: 'offrampLookupTable'; type: 'publicKey' },
           { name: 'rmnRemote'; type: 'publicKey' },
+        ]
+      }
+    },
+    {
+      name: 'buffer'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'version'; type: 'u8' },
+          { name: 'bump'; type: 'u8' },
+          { name: 'bufferId'; type: { array: ['u8', 32] } },
+          { name: 'authority'; type: 'publicKey' },
+          { name: 'chunkBitmap'; type: 'u64' },
+          { name: 'numChunks'; type: 'u8' },
+          { name: 'chunkLength'; type: 'u32' },
+          { name: 'data'; type: 'bytes' },
         ]
       }
     },
@@ -194,6 +190,26 @@ export type CcipOfframpV2 = {
       }
     },
     {
+      name: 'BufferExecutionInputsParams'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'bufferId'; type: { array: ['u8', 32] } },
+          { name: 'totalLength'; type: 'u32' },
+          { name: 'chunk'; type: 'bytes' },
+          { name: 'chunkIndex'; type: 'u8' },
+          { name: 'numChunks'; type: 'u8' },
+        ]
+      }
+    },
+    {
+      name: 'CloseExecutionInputsBufferParams'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'bufferId'; type: { array: ['u8', 32] } }]
+      }
+    },
+    {
       name: 'FinalityConfig'
       type: {
         kind: 'struct'
@@ -206,26 +222,7 @@ export type CcipOfframpV2 = {
 export const IDL: CcipOfframpV2 = {
   version: '2.0.0',
   name: 'ccip_offramp',
-  instructions: [
-    {
-      name: 'getCcvsForMsg',
-      docs: [
-        'Off-chain helper that predicts the CCV set an executor should supply to `execute_v2`.',
-        'Non-authoritative: `execute_v2` recomputes and enforces the real set on-chain.',
-      ],
-      accounts: [
-        { name: 'config', isMut: false, isSigner: false },
-        { name: 'referenceAddresses', isMut: false, isSigner: false },
-        { name: 'sourceChain', isMut: false, isSigner: false },
-        // RMN Remote CPI accounts (UncheckedAccount).
-        { name: 'rmnRemote', isMut: false, isSigner: false },
-        { name: 'rmnRemoteCurses', isMut: false, isSigner: false },
-        { name: 'rmnRemoteConfig', isMut: false, isSigner: false },
-      ],
-      args: [{ name: 'params', type: { defined: 'GetCcvsForMsgParams' } }],
-      returns: { defined: 'GetCcvsForMsgResponse' },
-    },
-  ],
+  instructions: [],
   accounts: [
     {
       name: 'sourceChain',
@@ -250,6 +247,22 @@ export const IDL: CcipOfframpV2 = {
           { name: 'feeQuoter', type: 'publicKey' },
           { name: 'offrampLookupTable', type: 'publicKey' },
           { name: 'rmnRemote', type: 'publicKey' },
+        ],
+      },
+    },
+    {
+      name: 'buffer',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'version', type: 'u8' },
+          { name: 'bump', type: 'u8' },
+          { name: 'bufferId', type: { array: ['u8', 32] } },
+          { name: 'authority', type: 'publicKey' },
+          { name: 'chunkBitmap', type: 'u64' },
+          { name: 'numChunks', type: 'u8' },
+          { name: 'chunkLength', type: 'u32' },
+          { name: 'data', type: 'bytes' },
         ],
       },
     },
@@ -384,6 +397,26 @@ export const IDL: CcipOfframpV2 = {
           { name: 'execInputs', type: { option: { defined: 'ExecutionInputsV2' } } },
           { name: 'resolutionMetadata', type: 'bytes' },
         ],
+      },
+    },
+    {
+      name: 'BufferExecutionInputsParams',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'bufferId', type: { array: ['u8', 32] } },
+          { name: 'totalLength', type: 'u32' },
+          { name: 'chunk', type: 'bytes' },
+          { name: 'chunkIndex', type: 'u8' },
+          { name: 'numChunks', type: 'u8' },
+        ],
+      },
+    },
+    {
+      name: 'CloseExecutionInputsBufferParams',
+      type: {
+        kind: 'struct',
+        fields: [{ name: 'bufferId', type: { array: ['u8', 32] } }],
       },
     },
     {

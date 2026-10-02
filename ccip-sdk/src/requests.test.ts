@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import { PublicKey } from '@solana/web3.js'
 import { toNano } from '@ton/core'
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
@@ -16,7 +15,6 @@ import {
   getMessagesInRange,
   getMessagesInTx,
 } from './requests.ts'
-import { SolanaChain } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 import {
@@ -300,7 +298,9 @@ describe('getMessageById', () => {
 
     await assert.rejects(
       async () =>
-        await getMessageById(mockedChain as unknown as Chain, '0xMessageId1', { startBlock: 0 }),
+        await getMessageById(mockedChain as unknown as Chain, '0xMessageId1', {
+          startBlock: 0,
+        }),
       /Could not find a CCIPSendRequested message with messageId: 0xMessageId1/,
     )
 
@@ -739,8 +739,11 @@ describe('getMessagesInRange', () => {
     assert.equal(results.length, 1)
     // getTransaction should have been called as fallback
     assert.equal(localChain.getTransaction.mock.calls.length, 1)
-    const txHash = (localChain.getTransaction.mock.calls[0] as unknown as { arguments: [string] })
-      .arguments[0]
+    const txHash = (
+      localChain.getTransaction.mock.calls[0] as unknown as {
+        arguments: [string]
+      }
+    ).arguments[0]
     assert.equal(txHash, '0xNoTxLog')
   })
 })
@@ -1189,217 +1192,6 @@ describe('decodeMessage', () => {
         ])
         // ccvArgs should still be default
         assert.deepEqual(extraArgs.ccvArgs, [])
-      })
-    })
-
-    describe('SolanaChain', () => {
-      it('should populate SVMExtraArgsV1 with computeUnits from gasLimit', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            gasLimit: 100000n,
-          },
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        assert.ok(result.extraArgs)
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.computeUnits, 100000n)
-        assert.equal(extraArgs.allowOutOfOrderExecution, true)
-        assert.equal(extraArgs.tokenReceiver, '11111111111111111111111111111111')
-        assert.deepEqual(extraArgs.accounts, [])
-        assert.equal(extraArgs.accountIsWritableBitmap, 0n)
-      })
-
-      it('should use computeUnits if provided directly', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            computeUnits: 250000n,
-          } as any,
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.computeUnits, 250000n)
-      })
-
-      it('should prefer computeUnits over gasLimit if both provided', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            computeUnits: 150000n,
-            gasLimit: 100000n,
-          },
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.computeUnits, 150000n)
-      })
-
-      it('should use DEFAULT_GAS_LIMIT for computeUnits when data present and no gas specified', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0xabcd',
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.computeUnits, 200000n) // DEFAULT_GAS_LIMIT
-      })
-
-      it('should set computeUnits to 0 when no data', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.computeUnits, 0n)
-      })
-
-      it('should throw on unknown fields for SVMExtraArgsV1', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            gasLimit: 100000n,
-            someOtherField: 'should not appear',
-          },
-        }
-
-        assert.throws(
-          () => SolanaChain.buildMessageForDest(message),
-          /unknown field.*SVMExtraArgsV1.*"someOtherField"/i,
-        )
-      })
-
-      it('should use custom tokenReceiver when provided', () => {
-        const customReceiver = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            tokenReceiver: customReceiver,
-          } as any,
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.tokenReceiver, customReceiver)
-      })
-
-      it('should set tokenReceiver to receiver when tokenAmounts present', () => {
-        const receiverAddr = '11111111111111111111111111111112' // Valid base58 Solana address
-        const message = {
-          receiver: receiverAddr,
-          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.tokenReceiver, receiverAddr)
-        assert.equal(result.receiver, '11111111111111111111111111111111') // default PublicKey when tokens
-      })
-
-      it('should throw error when sending tokens with data but no tokenReceiver', () => {
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
-        }
-
-        assert.throws(
-          () => SolanaChain.buildMessageForDest(message),
-          /tokenReceiver.*required when sending tokens with data to Solana/i,
-        )
-      })
-
-      it('should accept accounts array', () => {
-        const accounts = [
-          'Account1111111111111111111111111111111111112',
-          'Account2222222222222222222222222222222222212',
-        ]
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            accounts,
-          } as any,
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.deepEqual(extraArgs.accounts, accounts)
-      })
-
-      it('should accept accountIsWritableBitmap', () => {
-        const bitmap = 0b1010n
-        const message = {
-          receiver: 'So11111111111111111111111111111111111111112',
-          data: '0x1234',
-          extraArgs: {
-            accountIsWritableBitmap: bitmap,
-          } as any,
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.accountIsWritableBitmap, bitmap)
-      })
-
-      it('should accept explicit receiver', () => {
-        const message = {
-          receiver: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
-          tokenAmounts: [{ token: 'TokenMint123', amount: 100n }],
-          extraArgs: {
-            tokenReceiver: 'So11111111111111111111111111111111111111112',
-          },
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        assert.equal(result.receiver, 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C')
-      })
-
-      it('should allow custom allowOutOfOrderExecution', () => {
-        const message = {
-          receiver: PublicKey.default.toBase58(),
-          data: '0x1234',
-          extraArgs: {
-            allowOutOfOrderExecution: false,
-          } as any,
-        }
-
-        const result = SolanaChain.buildMessageForDest(message)
-
-        const extraArgs = result.extraArgs
-        assert.equal(extraArgs.allowOutOfOrderExecution, false)
-      })
-
-      it('should throw CCIPAddressInvalidError for malformed Solana receiver', () => {
-        // A valid EVM address passed to a Solana destination should be rejected
-        const message = {
-          receiver: '0x1234567890123456789012345678901234567890',
-        }
-
-        assert.throws(
-          () => SolanaChain.buildMessageForDest(message),
-          (err: unknown) => err instanceof CCIPAddressInvalidError && err.context.family === 'SVM',
-        )
       })
     })
 

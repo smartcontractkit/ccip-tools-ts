@@ -7,7 +7,9 @@ import { SuiExtraArgsV1Tag } from '../extra-args.ts'
 import { decodeMoveExtraArgs } from '../shared/bcs-codecs.ts'
 import { encodeSuiExtraArgsV1 } from '../sui/types.ts'
 import {
+  SVMTokenReceiverUsage,
   decodeSolanaSuiExtraArgsV1,
+  encodeSVMExecutorArgsV1,
   encodeSolanaGenericExtraArgsV3,
   encodeSolanaSuiExtraArgsV1,
 } from './extra-args.ts'
@@ -324,5 +326,36 @@ describe('GenericExtraArgsV3 Borsh codec (Solana source)', () => {
     // tag(4) + gas(4) + finality(4) + ccvs(4) + ccv_args(4) + executor(32) + 3 empty vecs(12)
     assert.equal(encoded.length, 64)
     assert.deepEqual(encoded.subarray(20, 52), new Uint8Array(32))
+  })
+})
+
+describe('encodeSVMExecutorArgsV1', () => {
+  // the program's `SVMDestBlob` legacy (abi.encodePacked) layout, which the EVM ExtraArgsCodec emits
+  it('packs tag, useATA, the writable bitmap (u64 BE) and the u8-prefixed accounts', () => {
+    const account = 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx'
+    const encoded = getBytes(
+      encodeSVMExecutorArgsV1({
+        useAta: SVMTokenReceiverUsage.UseAsIs,
+        accountIsWritableBitmap: 0x0102n,
+        accounts: [account, account],
+      }),
+    )
+    assert.deepEqual([...encoded.subarray(0, 4)], [0x1a, 0x2b, 0x3c, 0x4d])
+    assert.equal(encoded[4], 2)
+    assert.deepEqual([...encoded.subarray(5, 13)], [0, 0, 0, 0, 0, 0, 1, 2])
+    assert.equal(encoded[13], 2)
+    assert.equal(encoded.length, 14 + 2 * 32)
+  })
+
+  it('defaults to deriving and creating the associated token account, with no accounts', () => {
+    assert.equal(encodeSVMExecutorArgsV1({}), '0x1a2b3c4d' + '00'.repeat(10))
+  })
+
+  it('rejects more than 255 accounts', () => {
+    assert.throws(
+      () =>
+        encodeSVMExecutorArgsV1({ accounts: Array(256).fill('11111111111111111111111111111111') }),
+      /at most 255/,
+    )
   })
 })

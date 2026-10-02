@@ -195,7 +195,7 @@ export function camelToSnakeCase(str: string): string {
 }
 
 /**
- * Derives the offramp PDA holding a buffered execution report.
+ * Derives the (CCIP 1.6) offramp PDA holding a buffered execution report.
  * @param offramp - Offramp program ID.
  * @param bufferId - ID the report was buffered under.
  * @param caller - Account that buffered the report.
@@ -211,6 +211,30 @@ export function getExecutionReportBufferPda(
     offramp,
   )[0]
 }
+
+/**
+ * Derives the CCIP 2.0 offramp PDA holding buffered `execute_v2` inputs.
+ * @param offramp - Offramp program ID.
+ * @param bufferId - ID the inputs were buffered under.
+ * @param caller - Account that buffered the inputs, and will sign `execute_v2`.
+ * @returns Address of the execution inputs buffer.
+ */
+export function getExecutionInputsBufferPda(
+  offramp: PublicKey,
+  bufferId: Buffer,
+  caller: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('execution_inputs_buffer'), bufferId, caller.toBuffer()],
+    offramp,
+  )[0]
+}
+
+/**
+ * Placeholder fee payer for read-only simulations. Not the System Program (`1111…1111`): a program
+ * id can't be the (writable) fee payer.
+ */
+export const SIMULATION_PAYER = new PublicKey('11111111111111111111111111111112')
 
 type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'level' | 'type'>
 type OrderedParsedLog = ParsedLog & { order: number }
@@ -678,7 +702,7 @@ async function simulateRawV1(connection: Connection, wire: Uint8Array) {
  */
 export function simulationProvider(
   ctx: { connection: Connection } & WithLogger,
-  feePayer: PublicKey = new PublicKey('11111111111111111111111111111112'),
+  feePayer: PublicKey = SIMULATION_PAYER,
 ) {
   return {
     connection: ctx.connection,
@@ -730,6 +754,24 @@ export type SolanaSplitMode = 'partial' | 'resource' | 'atomic'
 
 /** A transaction confirmed by {@link simulateAndSendTxs}, carrying `instructions[start:end]`. */
 export type SolanaSentSlice = { signature: string; start: number; end: number }
+
+/**
+ * Whether an error (or the one that interrupted a partial submission) means the instructions
+ * don't fit a transaction, or their data an encoder's buffer: the cue to buffer them instead.
+ * @param err - Error thrown while resolving, simulating or sending the instructions.
+ * @returns True if the error is about size.
+ */
+export function isTransactionTooLargeError(err: unknown): boolean {
+  const cause =
+    err instanceof CCIPPartialTransactionSubmissionError && err.cause instanceof Error
+      ? err.cause
+      : err
+  return (
+    cause instanceof CCIPTransactionTooLargeError ||
+    (cause instanceof Error &&
+      ['encoding overruns Uint8Array', 'too large'].some((e) => cause.message.includes(e)))
+  )
+}
 
 /**
  * Returns the end of the next slice to try after simulating `instructions[start:end]` failed

@@ -21,17 +21,18 @@ export function sighash(nameSpace: string, ixName: string): Buffer {
   return Buffer.from(sha256(toUtf8Bytes(preimage)).slice(2, 18), 'hex')
 }
 
+// Largest encoding tried; fits e.g. CCIP 2.0 execution inputs as large as an offramp buffer holds
+const MAX_ENCODED_SIZE = 1 << 20
+
 function encodeLayout(layout: Layout_, value: unknown): Buffer {
-  let buffer = Buffer.alloc(512)
-  let len
-  try {
-    len = layout.encode(value, buffer)
-  } catch (err) {
-    if (!(err instanceof RangeError)) throw err
-    buffer = Buffer.alloc(32000)
-    len = layout.encode(value, buffer)
+  for (let size = 512; ; size *= 8) {
+    const buffer = Buffer.alloc(Math.min(size, MAX_ENCODED_SIZE))
+    try {
+      return buffer.subarray(0, layout.encode(value, buffer))
+    } catch (err) {
+      if (!(err instanceof RangeError) || buffer.length >= MAX_ENCODED_SIZE) throw err
+    }
   }
-  return buffer.subarray(0, len)
 }
 
 const coders = new WeakMap<Idl, BorshCoder>()
