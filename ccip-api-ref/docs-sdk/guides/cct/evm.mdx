@@ -219,7 +219,7 @@ const unsigned = await cct.generateUnsignedRegisterAdmin({
 
 `deployTokenPool` and the factory create v2.0.0 pools, which add a configuration surface beyond lanes and rate limits: per-destination transfer fees, faster-than-finality settings, and a pluggable `AdvancedPoolHooks` contract that holds the sender allowlist, Cross-Chain Verifier (CCV) requirements, an optional policy engine (ACE), and a threshold amount. The subsections below cover each, and a lock/release v2 pool also escrows through an [ERC20LockBox](#lockrelease-pools).
 
-Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool, and the sender allowlist exists only through v1.6.1. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
+Which configuration and read operations a pool supports depends on its version. A v2.0.0-only operation throws `CCTOperationUnsupportedError` on an older pool. The sender allowlist lives in the pool through v1.6.1 and in its bound `AdvancedPoolHooks` on v2.0.0; `applyAllowlistUpdates` targets whichever applies. Read the pool version with `getTokenPoolState` first, and see [Pool types](./reference/pool-types#operation-applicability-by-pool-version) for the full applicability matrix.
 
 ### Rate limits and transfer fees
 
@@ -293,11 +293,25 @@ await cct.applyTokenTransferFeeConfigUpdates({
 
 ### Advanced pool hooks and CCVs
 
-On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. Deploy hooks with the pool in `authorizedCallers`, then bind them to the pool. A pool omitted from `authorizedCallers` cannot transfer through the hooks.
+On v2 pools, sender allowlists and Cross-Chain Verifier (CCV) requirements live in `AdvancedPoolHooks`, not in the pool itself. The hooks methods take either the hooks' own `advancedPoolHooks` address or a bound pool's `poolAddress`. Configure the hooks before binding them, so the pool never runs on unconfigured hooks: deploy them with the pool in `authorizedCallers` (a pool omitted from it cannot transfer through the hooks), apply CCV requirements by `advancedPoolHooks`, then bind them to the pool.
 
 ```typescript
 const hooks = await cct.deployAdvancedPoolHooks({
   authorizedCallers: [pool.contractAddress],
+  wallet,
+})
+
+await cct.applyCCVConfigUpdates({
+  advancedPoolHooks: hooks.contractAddress, // not bound yet
+  ccvConfigArgs: [
+    {
+      remoteChainSelector: DEST_CHAIN_SELECTOR,
+      outboundCCVs: ['0xCCV...'],
+      thresholdOutboundCCVs: [],
+      inboundCCVs: ['0xCCV...'],
+      thresholdInboundCCVs: [],
+    },
+  ],
   wallet,
 })
 
@@ -307,6 +321,8 @@ await cct.updateAdvancedPoolHooks({
   wallet,
 })
 ```
+
+`poolAddress` resolves to the hooks bound when the transaction is built, so in a multisig batch that also re-points the pool, address the new hooks by `advancedPoolHooks`. Several pools can share one `AdvancedPoolHooks`, and a write through any of them changes them all.
 
 Binding is only the start. The hooks also carry the sender allowlist, per-remote-chain CCV requirements, an optional policy engine (ACE), a threshold amount, and their own authorized-caller set.
 

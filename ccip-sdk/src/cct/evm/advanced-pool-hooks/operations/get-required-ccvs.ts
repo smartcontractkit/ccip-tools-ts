@@ -10,8 +10,13 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress, validateUint256, validateUint64 } from '../../validate.ts'
-import { assertAdvancedPoolHooksContract, readRequiredCCVs } from '../contracts.ts'
+import { validateUint256, validateUint64 } from '../../validate.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  readRequiredCCVs,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
+} from '../contracts.ts'
 
 /** Transfer direction accepted by `IPoolV2.MessageDirection`. */
 export type CCVMessageDirection = 'outbound' | 'inbound'
@@ -24,12 +29,10 @@ export type CCVMessageDirection = 'outbound' | 'inbound'
  * query supplies their neutral values internally, so callers need only provide the inputs that
  * affect its result: selector, amount, and direction.
  */
-export type GetRequiredCCVsParams = {
-  /** Hooks contract to read. */
-  advancedPoolHooks: string
+export type GetRequiredCCVsParams = AdvancedPoolHooksTarget & {
   /** Remote CCIP chain selector (`uint64`). */
   remoteChainSelector: bigint
-  /** Transfer amount (`uint256`). */
+  /** Transfer amount (`uint256`) as the hooks see it, after any pool fee or decimal adjustment. */
   amount: bigint
   /** Whether this resolves outbound or inbound requirements. */
   direction: CCVMessageDirection
@@ -43,7 +46,7 @@ export class GetRequiredCCVs extends EVMQuery<GetRequiredCCVsParams, GetRequired
   readonly name = 'getRequiredCCVs'
 
   protected prepare(params: GetRequiredCCVsParams): GetRequiredCCVsParams {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    validateAdvancedPoolHooksTarget(this.name, params)
     validateUint64(this.name, 'remoteChainSelector', params.remoteChainSelector)
     validateUint256(this.name, 'amount', params.amount)
     const direction: unknown = (params as { direction: unknown }).direction
@@ -56,10 +59,10 @@ export class GetRequiredCCVs extends EVMQuery<GetRequiredCCVsParams, GetRequired
     chain: EVMChain,
     params: GetRequiredCCVsParams,
   ): Promise<GetRequiredCCVsResult> {
-    await assertAdvancedPoolHooksContract(chain, params.advancedPoolHooks)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
     return readRequiredCCVs(
       chain,
-      params.advancedPoolHooks,
+      hooks,
       params.remoteChainSelector,
       params.amount,
       params.direction === 'outbound' ? 0n : 1n,
