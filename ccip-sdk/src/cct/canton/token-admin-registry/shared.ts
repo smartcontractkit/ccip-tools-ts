@@ -5,7 +5,12 @@
  * @packageDocumentation
  */
 
-import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
+import {
+  type CantonActiveContract,
+  type CantonChain,
+  extractFieldValue,
+} from '../../../canton/index.ts'
+import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { hashedUtf8Hex } from '../../../shared/codec.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 
@@ -29,6 +34,32 @@ export function deriveTokenConfigInstanceAddress(
 ): string {
   const instanceId = hashedUtf8Hex(`${instrumentId.id}@${instrumentId.admin}`)
   return `${instanceId}@${ccipOwner}`
+}
+
+/**
+ * Default CCIP owner (TAR / TokenConfig signatory) for `chain`: the connected
+ * network's well-known `ccipOwner`, else `chain.ccipParty`.
+ */
+export function defaultCcipOwner(chain: CantonChain): string {
+  return getCantonNetworkConfig(String(chain.network.chainId))?.ccipOwner ?? chain.ccipParty
+}
+
+/** Decode a Daml `Optional Party` into a string (or `undefined` when `None`).
+ *  Handles three encodings:
+ *   - JSON Ledger API (natural): `Some` → bare string `"partyId"`; `None` → `null`.
+ *   - gRPC JSON: `Some` → `{ Some: { Sum: { Party: "partyId" } } }`; `None` → `{ None: {} }`. */
+export function decodeOptionalParty(value: unknown): string | undefined {
+  if (value == null) return undefined // JSON `null` (None) or absent
+  // Natural JSON: a bare string is `Some party`.
+  if (typeof value === 'string') return value
+  if (typeof value !== 'object') return undefined
+  const v = value as Record<string, unknown>
+  // gRPC JSON: `Some p` → { Some: { ... } }; `None` → { None: {} }
+  if ('Some' in v && v.Some != null) {
+    const inner = extractFieldValue(v.Some)
+    return typeof inner === 'string' ? inner : undefined
+  }
+  return undefined
 }
 
 /** A contract reference: a CID plus its disclosure blob. */
