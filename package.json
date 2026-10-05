@@ -54,7 +54,12 @@
     "lodash-es": "^4.18.1",
     "openapi-to-postmanv2": {
       "js-yaml": "^4.3.2"
-    }
+    },
+    "@ethersproject/providers": {
+      "ws": "8.21.0"
+    },
+    "tmp": "^0.2.6",
+    "jayson": "^5.0.0"
   },
   "allowScripts": {
     "@trufflesuite/bigint-buffer@1.1.10": true,
