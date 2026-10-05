@@ -242,13 +242,13 @@ export function closeExecutionInputsBufferIx(
  * Builds the instructions writing execution inputs to their buffer, in chunks. Picks up where an
  * earlier attempt left the buffer: chunks it already holds are skipped, and a buffer holding other
  * inputs is closed first.
- * @param connection - Solana connection, to read the buffer's current state.
+ * @param ctx - Context with the Solana connection, to read the buffer's current state, and logger.
  * @param opts - Offramp, account that will sign `execute_v2`, buffer ID and execution inputs.
  * @returns The instructions, in order; empty if the buffer already holds the inputs
  * @throws {@link CCIPTransactionTooLargeError} if the inputs exceed the buffer's capacity
  */
 export async function bufferExecutionInputsIxs(
-  connection: Connection,
+  ctx: { connection: Connection } & WithLogger,
   {
     offramp,
     caller,
@@ -274,7 +274,7 @@ export async function bufferExecutionInputsIxs(
 
   const instructions: TransactionInstruction[] = []
   let filled = 0n // bitmap of the chunks already in the buffer
-  const account = await connection.getAccountInfo(buffer)
+  const account = await ctx.connection.getAccountInfo(buffer)
   if (account) {
     const existing = offrampV2Coder.accounts.decode<ExecutionInputsBuffer>('buffer', account.data)
     const bitmap = BigInt(existing.chunkBitmap.toString())
@@ -361,7 +361,7 @@ export async function executeV2(
       } else {
         // the message ID makes an arbitrary but easy to track buffer ID
         const bufferId = bytesToBuffer(keccak256(getDataBytes(input.encodedMessage)))
-        const bufferingIxs = await bufferExecutionInputsIxs(ctx.connection, {
+        const bufferingIxs = await bufferExecutionInputsIxs(ctx, {
           offramp,
           caller,
           bufferId,

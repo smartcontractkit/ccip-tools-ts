@@ -309,7 +309,10 @@ describe('execution inputs buffer', () => {
 
   it('writes the serialized inputs in chunks', async () => {
     const { connection } = fakeOfframp(offramp)
-    const ixs = await bufferExecutionInputsIxs(connection, { offramp, caller, bufferId, inputs })
+    const ixs = await bufferExecutionInputsIxs(
+      { connection },
+      { offramp, caller, bufferId, inputs },
+    )
 
     assert.equal(ixs.length, 2)
     const chunks = ixs.map((ix) => {
@@ -339,7 +342,10 @@ describe('execution inputs buffer', () => {
         }),
       },
     })
-    const ixs = await bufferExecutionInputsIxs(connection, { offramp, caller, bufferId, inputs })
+    const ixs = await bufferExecutionInputsIxs(
+      { connection },
+      { offramp, caller, bufferId, inputs },
+    )
     assert.deepEqual(
       ixs.map(({ data }) => parseChunk(data).chunkIndex),
       [1],
@@ -358,7 +364,7 @@ describe('execution inputs buffer', () => {
       },
     })
     assert.deepEqual(
-      await bufferExecutionInputsIxs(connection, { offramp, caller, bufferId, inputs }),
+      await bufferExecutionInputsIxs({ connection }, { offramp, caller, bufferId, inputs }),
       [],
     )
   })
@@ -376,7 +382,10 @@ describe('execution inputs buffer', () => {
         }),
       },
     })
-    const ixs = await bufferExecutionInputsIxs(connection, { offramp, caller, bufferId, inputs })
+    const ixs = await bufferExecutionInputsIxs(
+      { connection },
+      { offramp, caller, bufferId, inputs },
+    )
 
     assert.equal(ixs.length, 3)
     const close = ixs[0]!
@@ -395,12 +404,15 @@ describe('execution inputs buffer', () => {
   it('rejects inputs over the 64 chunks a buffer holds', async () => {
     const { connection } = fakeOfframp(offramp)
     await assert.rejects(
-      bufferExecutionInputsIxs(connection, {
-        offramp,
-        caller,
-        bufferId,
-        inputs: { ...inputs, encodedMessage: Buffer.alloc(64 * 800) },
-      }),
+      bufferExecutionInputsIxs(
+        { connection },
+        {
+          offramp,
+          caller,
+          bufferId,
+          inputs: { ...inputs, encodedMessage: Buffer.alloc(64 * 800) },
+        },
+      ),
       CCIPTransactionTooLargeError,
     )
   })

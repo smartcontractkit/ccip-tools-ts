@@ -865,10 +865,13 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         // the pool converts the amount from the source token's 18 decimals
         const { decimals } = await getMint(connection!, mint)
 
+        // Surfpool 1.5.0 ignores the compute-unit limit of v1 transactions, capping this ~270k CU
+        // execution at the 200k default; a lookup table keeps it in a v0 transaction instead
         const execution = await solanaChain!.execute({
           offRamp: STAGING.offRamp,
           input,
           wallet: wallet!,
+          forceLookupTable: true,
         })
 
         assert.equal(execution.receipt.messageId, NOEXEC.messageId)
