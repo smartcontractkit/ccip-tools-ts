@@ -61,11 +61,13 @@ const REGISTRATION: Record<
   },
 }
 
-/** Registration paths a v1.5.0 module offers — both derive the administrator from a token getter. */
-export type RegisterAdminMethodV1_5_0 = Exclude<RegisterAdminMethod, 'access-control-default-admin'>
-
-/** Fields every registration path needs, whatever the module version. */
-type RegisterAdminBaseParams = {
+/**
+ * Parameters for {@link RegisterAdmin}. One shape for every RegistryModuleOwnerCustom version:
+ * {@link RegisterAdmin.buildUnsigned} resolves the module's own version, which only decides whether
+ * `access-control-default-admin` exists (added at v1.6.0). The administrator itself is never a
+ * parameter — see {@link REGISTRATION}.
+ */
+export type RegisterAdminParams = {
   /** Token to register. Stays unregistered until `acceptAdmin` is called by the proposed admin. */
   tokenAddress: string
   /**
@@ -80,6 +82,11 @@ type RegisterAdminBaseParams = {
    */
   address: string
   /**
+   * Selects how control is proved; defaults to `owner`. `access-control-default-admin` needs a
+   * v1.6.0+ module, and is rejected against a v1.5.0 one.
+   */
+  registrationMethod?: RegisterAdminMethod
+  /**
    * Address the registration is authorized against. Optional here, unlike `transferAdmin` and
    * `acceptAdmin` which reject an omitted `sender`: leaving it out SKIPS the token-authority probe
    * in {@link RegisterAdmin.buildUnsigned}, so the tx builds without that check and can then only
@@ -87,35 +94,6 @@ type RegisterAdminBaseParams = {
    */
   sender?: string
 }
-
-/**
- * Registration through a v1.5.0 `RegistryModuleOwnerCustom` — that version has no
- * `registerAccessControlDefaultAdmin`, so `registrationMethod` narrows to the two getter-derived
- * paths and the AccessControl one will not typecheck.
- */
-export type RegisterAdminParamsV1_5_0 = RegisterAdminBaseParams & {
-  registryModuleVersion: typeof RegistryModuleOwnerCustomVersion.V1_5_0
-  /** Selects which token getter proves control; defaults to `owner`. */
-  registrationMethod?: RegisterAdminMethodV1_5_0
-}
-
-/**
- * Registration through a v1.6.0 `RegistryModuleOwnerCustom` — the default, and the only version
- * offering `access-control-default-admin`.
- */
-export type RegisterAdminParamsV1_6_0 = RegisterAdminBaseParams & {
-  registryModuleVersion?: typeof RegistryModuleOwnerCustomVersion.V1_6_0
-  /** Selects how control is proved; defaults to `owner`. */
-  registrationMethod?: RegisterAdminMethod
-}
-
-/**
- * Parameters for {@link RegisterAdmin}, discriminated on `registryModuleVersion`: `1.5.0` drops
- * `access-control-default-admin` (a compile-time guarantee); omit it for the `1.6.0` default.
- * {@link RegisterAdmin.buildUnsigned} verifies the declaration against the module's on-chain
- * version. The administrator itself is never a parameter — see {@link REGISTRATION}.
- */
-export type RegisterAdminParams = RegisterAdminParamsV1_5_0 | RegisterAdminParamsV1_6_0
 
 /**
  * Proposes a token's administrator in the TokenAdminRegistry via a RegistryModuleOwnerCustom.
@@ -161,15 +139,17 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
       )
     }
 
-    // Both versions encode the shared functions identically, so a wrong `registryModuleVersion`
-    // would go unnoticed until the module rejected the call. Resolve and compare instead.
-    const onChainVersion = await resolveRegistryModuleOwnerCustom(chain, p.registryModule)
-    const declaredVersion = p.registryModuleVersion ?? RegistryModuleOwnerCustomVersion.V1_6_0
-    if (onChainVersion !== declaredVersion) {
+    // Both versions encode the shared functions identically; the module's version only decides
+    // whether the AccessControl path exists, which encoding against v1.5.0 would throw on.
+    const moduleVersion = await resolveRegistryModuleOwnerCustom(chain, p.registryModule)
+    if (
+      method === REGISTRATION_METHODS.ACCESS_CONTROL_DEFAULT_ADMIN &&
+      moduleVersion === RegistryModuleOwnerCustomVersion.V1_5_0
+    ) {
       throw new CCTParamsInvalidError(
         this.name,
-        'registryModuleVersion',
-        `${p.registryModule} is a v${onChainVersion} RegistryModuleOwnerCustom, but v${declaredVersion} was declared`,
+        'registrationMethod',
+        `"${method}" needs a v${RegistryModuleOwnerCustomVersion.V1_6_0}+ RegistryModuleOwnerCustom, but ${p.registryModule} is v${moduleVersion} — use "${REGISTRATION_METHODS.OWNER}" or "${REGISTRATION_METHODS.CCIP_ADMIN}"`,
       )
     }
 
@@ -235,10 +215,9 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
       )
     }
 
-    const data = getRegistryModuleOwnerCustomInterface(onChainVersion).encodeFunctionData(
-      moduleFn,
-      [p.tokenAddress],
-    )
+    const data = getRegistryModuleOwnerCustomInterface(moduleVersion).encodeFunctionData(moduleFn, [
+      p.tokenAddress,
+    ])
     return callTx(p.registryModule, data)
   }
 
