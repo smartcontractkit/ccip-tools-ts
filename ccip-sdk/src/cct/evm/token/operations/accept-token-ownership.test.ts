@@ -7,7 +7,8 @@ import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../err
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import { AcceptDefaultAdminTransfer } from './accept-default-admin-transfer.ts'
 import { type AcceptTokenOwnershipParams, AcceptTokenOwnership } from './accept-token-ownership.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
@@ -24,11 +25,15 @@ const EXPECTED = new Interface(['function acceptOwnership()']).encodeFunctionDat
   [],
 )
 
+const PENDING = new Interface([
+  'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
+])
+
 /**
- * EVMChain stub whose `eth_call`s all reject: this op gates on no role and cannot read the pending
- * owner, so any `call` would be a bug — `onCall` is what pins that. `typeAndVersion` is the one
- * read it does make (the v2 guard); `typeAndVersion: undefined` reproduces a v1.5.1 token, which
- * predates the function.
+ * EVMChain stub whose only `eth_call` answer is v2's `pendingDefaultAdmin()`, naming
+ * `PROPOSED_OWNER`: a v1 token cannot read its pending owner, so `onCall` pins that v1 makes no
+ * `call`. `typeAndVersion` is the one read it does make; `typeAndVersion: undefined` reproduces a
+ * v1.5.1 token, which predates the function.
  */
 function stubChain({
   typeAndVersion = 'FactoryBurnMintERC20 1.6.2',
@@ -37,16 +42,11 @@ function stubChain({
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
-      call: ({ data }: { data: string }) => {
+      call: () => {
         onCall?.('call')
-        throw makeError('execution reverted', 'CALL_EXCEPTION', {
-          action: 'call',
-          data: '0x',
-          reason: null,
-          transaction: { to: TOKEN, data },
-          invocation: null,
-          revert: null,
-        })
+        return Promise.resolve(
+          PENDING.encodeFunctionResult('pendingDefaultAdmin', [PROPOSED_OWNER, 1n]),
+        )
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -113,24 +113,29 @@ describe('AcceptTokenOwnership (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, EXPECTED)
     })
 
-    it('rejects a v2.0.0 CrossChainToken before building calldata', async () => {
-      const kinds: string[] = []
+    for (const typeAndVersion of ['FactoryBurnMintERC20 1.6.2', 'CrossChainToken 2.0.0'])
+      it(`builds exactly what AcceptDefaultAdminTransfer builds (${typeAndVersion})`, async () => {
+        const chain = stubChain({ typeAndVersion })
+        assert.deepEqual(
+          await generate(chain),
+          await new AcceptDefaultAdminTransfer().generate(chain, {
+            tokenAddress: TOKEN,
+            sender: PROPOSED_OWNER,
+          }),
+        )
+      })
+
+    it('reports a v2 pre-flight error under its own name', async () => {
       await assert.rejects(
         () =>
-          generate(
-            stubChain({
-              typeAndVersion: 'CrossChainToken 2.0.0',
-              onCall: (kind) => kinds.push(kind),
-            }),
-          ),
+          generate(stubChain({ typeAndVersion: 'CrossChainToken 2.0.0' }), {
+            sender: SOMEONE_ELSE,
+          }),
         (err: unknown) =>
-          err instanceof CCTOperationUnsupportedError &&
+          err instanceof CCTParamsInvalidError &&
           err.context.operation === 'acceptTokenOwnership' &&
-          err.context.version === '2.0.0' &&
-          /acceptDefaultAdminTransfer/.test(err.recovery ?? ''),
+          err.context.param === 'sender',
       )
-      // no `call`: the guard runs before any encoding or role read
-      assert.deepEqual(kinds, ['typeAndVersion'])
     })
 
     it('omits from when sender is not supplied', async () => {

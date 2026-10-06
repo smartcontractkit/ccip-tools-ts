@@ -6,7 +6,7 @@ import { Interface, ZeroAddress } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type BeginDefaultAdminTransferParams,
   BeginDefaultAdminTransfer,
@@ -19,18 +19,27 @@ const OTHER = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const FRESH = new Interface([
   'function beginDefaultAdminTransfer(address newAdmin)',
+  'function transferOwnership(address to)',
   'function defaultAdmin() view returns (address)',
+  'function owner() view returns (address)',
 ])
 
-function stubChain({ admin = ADMIN } = {}): EVMChain {
+/** `v1` stubs a FactoryBurnMintERC20 1.6.2, whose current admin is `owner()`. */
+function stubChain({ admin = ADMIN, v1 = false } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    typeAndVersion: () =>
+      Promise.resolve(
+        v1
+          ? ['FactoryBurnMintERC20', '1.6.2', 'FactoryBurnMintERC20 1.6.2']
+          : ['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0'],
+      ),
     provider: {
       call: ({ data }: { data: string }) => {
-        assert.equal(FRESH.getFunction(data.slice(0, 10))!.name, 'defaultAdmin')
-        return Promise.resolve(FRESH.encodeFunctionResult('defaultAdmin', [admin]))
+        const fn = FRESH.getFunction(data.slice(0, 10))!.name
+        assert.equal(fn, v1 ? 'owner' : 'defaultAdmin')
+        return Promise.resolve(FRESH.encodeFunctionResult(fn, [admin]))
       },
     },
     nextNonce: () => Promise.resolve(0),
@@ -78,6 +87,15 @@ describe('BeginDefaultAdminTransfer (cct/evm)', () => {
         FRESH.encodeFunctionData('beginDefaultAdminTransfer', [ZeroAddress]),
       )
     })
+
+    it('encodes Ownable2Step transferOwnership(address) to a v1 token', async () => {
+      const unsigned = await generate(stubChain({ v1: true }))
+      assert.equal(unsigned.transactions[0]!.from, ADMIN)
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        FRESH.encodeFunctionData('transferOwnership', [NEW_ADMIN]),
+      )
+    })
   })
 
   describe('validation', () => {
@@ -96,14 +114,21 @@ describe('BeginDefaultAdminTransfer (cct/evm)', () => {
   })
 
   describe('version and default-admin checks', () => {
-    it('rejects a contract that is not a CrossChainToken', async () => {
-      const chain = stubChain()
-      chain.typeAndVersion = () => Promise.resolve(['FactoryBurnMintERC20', '1.6.2', ''])
-      await assert.rejects(
-        () => generate(chain),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
-      )
-    })
+    for (const [label, overrides, param, message] of [
+      ['zero newAdmin, which would retract', { newAdmin: ZeroAddress }, 'newAdmin', /cancel/],
+      ['newAdmin that already owns it', { newAdmin: ADMIN, sender: undefined }, 'newAdmin', /Self/],
+      ['sender that is not its owner', { sender: OTHER }, 'sender', /current token owner/],
+    ] as const) {
+      it(`rejects, on a v1 token, a ${label}`, async () => {
+        await assert.rejects(
+          () => generate(stubChain({ v1: true }), overrides),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.param === param &&
+            message.test(err.message),
+        )
+      })
+    }
 
     it('rejects a token whose default admin was renounced', async () => {
       await assert.rejects(
@@ -126,6 +151,19 @@ describe('BeginDefaultAdminTransfer (cct/evm)', () => {
       assert.equal(
         (
           await op.execute(stubChain(), {
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            wallet: fakeSigner(),
+          })
+        ).hash,
+        HASH,
+      )
+    })
+
+    it('submits transferOwnership(address) to a v1 token as its owner', async () => {
+      assert.equal(
+        (
+          await op.execute(stubChain({ v1: true }), {
             tokenAddress: TOKEN,
             newAdmin: NEW_ADMIN,
             wallet: fakeSigner(),
