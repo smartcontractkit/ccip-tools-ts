@@ -277,6 +277,17 @@ describe('observe_dest_chain_v2', () => {
     )
   })
 
+  it('reads a prefunded, system-owned dest_chain_state_v2 as a lane not configured for 2.0', async () => {
+    const { connection } = routerConnection(STAGING_ROUTER, { observation: simulationError(3007) })
+    assert.deepEqual(
+      await observeDestChainV2(
+        { connection, logger: silent },
+        { router: STAGING_ROUTER, destChainSelector: SEPOLIA },
+      ),
+      { reason: 'lane-not-configured' },
+    )
+  })
+
   it('reads an unknown instruction as a router without 2.0 support yet', async () => {
     const { connection } = routerConnection(STAGING_ROUTER, { observation: simulationError(101) })
     assert.deepEqual(
@@ -399,9 +410,10 @@ describe('selectSendLane', () => {
 
   for (const [custom, reason] of [
     [3012, 'lane-not-configured'],
+    [3007, 'lane-not-configured'],
     [101, 'router-without-v2-support'],
   ] as const) {
-    it(`falls back to 1.6 for legacy args when ${reason}`, async () => {
+    it(`falls back to 1.6 for legacy args when ${reason} (${custom})`, async () => {
       const { connection } = routerConnection(STAGING_ROUTER, {
         observation: simulationError(custom),
       })
@@ -411,7 +423,7 @@ describe('selectSendLane', () => {
       assert.equal(lane.message.extraArgs, legacy, 'the legacy args should be kept')
     })
 
-    it(`throws for GenericExtraArgsV3 when ${reason}`, async () => {
+    it(`throws for GenericExtraArgsV3 when ${reason} (${custom})`, async () => {
       const { connection } = routerConnection(STAGING_ROUTER, {
         observation: simulationError(custom),
       })

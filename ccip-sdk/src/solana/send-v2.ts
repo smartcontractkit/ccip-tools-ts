@@ -52,6 +52,8 @@ export const OBSERVE_DEST_CHAIN_V2_DISCRIMINATOR = sighash('global', 'observe_de
 // Anchor errors `observe_dest_chain_v2` fails with when there's no 2.0 lane to observe
 const INSTRUCTION_FALLBACK_NOT_FOUND = 101 // the router doesn't have 2.0 support yet
 const ACCOUNT_NOT_INITIALIZED = 3012 // no `dest_chain_state_v2` account for the lane
+// `dest_chain_state_v2` is still system-owned, but was prefunded (anyone can send lamports to it)
+const ACCOUNT_OWNED_BY_WRONG_PROGRAM = 3007
 
 // WIP: account resolution doesn't return the deployment's fixed ccip_send lookup table yet (an
 // upstream oversight, to be fixed in the router), and 2.0 token transfers only fit a v0
@@ -165,7 +167,8 @@ export async function observeDestChainV2(
   } catch (error) {
     if (!(error instanceof SendTransactionError)) throw error
     const custom = customInstructionErrorCode(error)
-    if (custom === ACCOUNT_NOT_INITIALIZED) return { reason: 'lane-not-configured' }
+    if (custom === ACCOUNT_NOT_INITIALIZED || custom === ACCOUNT_OWNED_BY_WRONG_PROGRAM)
+      return { reason: 'lane-not-configured' }
     if (custom === INSTRUCTION_FALLBACK_NOT_FOUND) return { reason: 'router-without-v2-support' }
     throw error
   }

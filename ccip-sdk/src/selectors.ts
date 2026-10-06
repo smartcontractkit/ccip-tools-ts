@@ -294,6 +294,7 @@ const SELECTORS: Selectors = {
     selector: 3768048213127883732n,
     name: 'fantom-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '252': {
@@ -538,12 +539,14 @@ const SELECTORS: Selectors = {
     selector: 1252863800116739621n,
     name: 'polkadot-mainnet-moonbeam',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1285': {
     selector: 1355020143337428062n,
     name: 'kusama-mainnet-moonriver',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1287': {
@@ -734,6 +737,7 @@ const SELECTORS: Selectors = {
     selector: 1654667687261492630n,
     name: 'ethereum-testnet-sepolia-polygon-zkevm-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '2522': {
@@ -798,6 +802,7 @@ const SELECTORS: Selectors = {
     selector: 4905564228793744293n,
     name: 'fantom-testnet',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '4200': {
