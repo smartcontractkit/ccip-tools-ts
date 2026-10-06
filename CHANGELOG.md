@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CCT SDK (EVM): `registerAdmin` takes one params shape for every RegistryModuleOwnerCustom version; the module's on-chain version only gates `access-control-default-admin` (v1.6.0+). Breaking: `registryModuleVersion` and the `RegisterAdminParamsV1_5_0`/`RegisterAdminParamsV1_6_0`/`RegisterAdminMethodV1_5_0` types are removed
 - CCT SDK (EVM): `beginDefaultAdminTransfer`, `acceptDefaultAdminTransfer` and `cancelDefaultAdminTransfer` also work on v1 `FactoryBurnMintERC20` tokens (via Ownable2Step), where a zero `newAdmin` is rejected; `transferTokenOwnership`/`acceptTokenOwnership` are deprecated pass-throughs (a zero `newOwner` cancels). Breaking: `assertOwnable2StepToken` is removed
 - CCT SDK (EVM): AdvancedPoolHooks operations (all but `deployAdvancedPoolHooks`) take either `advancedPoolHooks` or a v2.0.0 pool's `poolAddress`, resolving the hooks bound to it (`CCTOperationUnsupportedError` on older pools, `CCTParamsInvalidError` when none are bound)
+- CCT SDK (Solana): operations on an existing token pool resolve its program on-chain from `tokenAddress`, and `getTokenPoolState` returns lock-release fields per the resolved program. Breaking: `poolType` is removed from those operations (`deployTokenPool`/`createTokenMultisig` keep it), `poolProgramAddress` is an optional override for custom programs, and the `BurnMintPoolProgramRef`/`LockReleasePoolProgramRef`/`CustomPoolProgramRef` types are removed
 
 ## [1.15.0] - 2026-09-30
 

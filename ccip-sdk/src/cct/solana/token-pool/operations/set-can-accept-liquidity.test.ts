@@ -23,13 +23,17 @@ const WALLET = {
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: {
+      getMultipleAccountsInfo: async () => [null, {}], // only the canonical lock-release pool
+      getAccountInfo: async () => ({}), // any custom pool program's state
+    },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async () => [null, {}],
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -44,7 +48,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new SetCanAcceptLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     allow: ALLOW,
@@ -92,7 +95,7 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -103,10 +106,8 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
       for (const [opts, param] of [
         [{ tokenAddress: 'invalid' }, 'tokenAddress'],
         [{ allow: 'true' }, 'allow'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
         [
           {
-            poolType: undefined,
             poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
           },
           'poolProgramAddress',
@@ -124,7 +125,6 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new SetCanAcceptLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         allow: ALLOW,
         wallet: WALLET,
       })
@@ -137,7 +137,6 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
         () =>
           new SetCanAcceptLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             allow: ALLOW,
             authority: AUTHORITY,
             wallet: WALLET,

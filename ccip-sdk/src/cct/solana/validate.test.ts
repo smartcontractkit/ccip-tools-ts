@@ -1,21 +1,28 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 
 import { MINT_SIZE, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { PublicKey } from '@solana/web3.js'
 
-import { CCIPTokenAccountNotFoundError } from '../../errors/index.ts'
+import {
+  CCIPTokenAccountNotFoundError,
+  CCIPTokenPoolStateNotFoundError,
+} from '../../errors/index.ts'
+import type { SolanaChain } from '../../solana/index.ts'
 import {
   CCTParamsInvalidError,
   CCTTokenAccountMintMismatchError,
   CCTTxFailedError,
 } from '../errors.ts'
-import { type PoolProgramRef, TOKEN_POOL_PROGRAMS } from './programs/token-pool.ts'
+import { TOKEN_POOL_PROGRAMS, deriveTokenPoolConfigPda } from './programs/token-pool.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
+  resolveExistingLockReleasePoolProgram,
+  resolveExistingPoolProgram,
+  resolveExistingPoolState,
   resolveExistingTokenAccount,
-  resolveLockReleasePoolProgram,
-  resolvePoolProgram,
+  resolvePoolProgramType,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -70,6 +77,7 @@ describe('Validate (cct/solana)', () => {
         () => validateOptionalPublicKey('op', 'authority', value),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
       )
+      assert.throws(() => parseOptionalPublicKey('op', 'authority', value), CCTParamsInvalidError)
     }
   })
 
@@ -138,51 +146,113 @@ describe('Validate (cct/solana)', () => {
     )
   })
 
-  it('resolves pool programs', () => {
-    assert.equal(
-      resolvePoolProgram('op', { poolType: 'burn-mint' }).toBase58(),
-      TOKEN_POOL_PROGRAMS['burn-mint'],
-    )
-    assert.ok(
-      resolvePoolProgram('op', { poolProgramAddress: PublicKey.default.toBase58() }).equals(
-        PublicKey.default,
-      ),
-    )
+  describe('existing pool resolution', () => {
+    const MINT = PublicKey.unique()
+    const CUSTOM = PublicKey.unique()
+    const BURN_MINT = new PublicKey(TOKEN_POOL_PROGRAMS['burn-mint'])
+    const LOCK_RELEASE = new PublicKey(TOKEN_POOL_PROGRAMS['lock-release'])
 
-    const invalidRefs: unknown[] = [
-      {},
-      { poolType: 'burn-mint', poolProgramAddress: PublicKey.default.toBase58() },
-      { poolType: 'nope' },
-      { poolProgramAddress: 'nope' },
-    ]
-    for (const params of invalidRefs) {
-      assert.throws(() => resolvePoolProgram('op', params as PoolProgramRef), CCTParamsInvalidError)
+    /** Chain holding a pool state for MINT under `programs` only; `type` names a custom program. */
+    function poolChain(programs: PublicKey[], type?: string) {
+      const states = new Set(programs.map((p) => deriveTokenPoolConfigPda(p, MINT).toBase58()))
+      const account = (address: PublicKey) => (states.has(address.toBase58()) ? {} : null)
+      const connection = {
+        getAccountInfo: mock.fn(async (address: PublicKey) => account(address)),
+        getMultipleAccountsInfo: mock.fn(async (addresses: PublicKey[]) => addresses.map(account)),
+      }
+      // without a `type`, the program does not implement `typeVersion`
+      const typeAndVersion = async () => (type ? [type] : Promise.reject(new Error('typeVersion')))
+      /** Call counts of `[getAccountInfo, getMultipleAccountsInfo]`. */
+      const reads = () => Object.values(connection).map((rpc) => rpc.mock.callCount())
+      return { chain: { connection, typeAndVersion } as unknown as SolanaChain, reads, states }
     }
-  })
 
-  it('resolves pool references with the other key explicitly undefined', () => {
-    // Value semantics: an explicitly-set `undefined` key must not count as provided.
-    const custom = PublicKey.default.toBase58()
+    it('resolves the canonical pool of a mint in one read, then from cache', async () => {
+      for (const program of [BURN_MINT, LOCK_RELEASE]) {
+        const { chain, reads } = poolChain([program])
+        const resolved = await resolveExistingPoolState('op', chain, MINT)
 
-    assert.equal(
-      resolvePoolProgram('op', { poolProgramAddress: custom, poolType: undefined }).toBase58(),
-      custom,
-    )
-    assert.equal(
-      resolvePoolProgram('op', {
-        poolType: 'burn-mint',
-        poolProgramAddress: undefined,
-      }).toBase58(),
-      TOKEN_POOL_PROGRAMS['burn-mint'],
-    )
-  })
+        assert.ok(resolved.poolProgram.equals(program))
+        assert.ok(resolved.state.equals(deriveTokenPoolConfigPda(program, MINT)))
+        assert.ok((await resolveExistingPoolProgram('op', chain, MINT)).equals(program))
+        assert.ok((await resolveExistingPoolProgram('op', chain, MINT, program)).equals(program))
+        assert.deepEqual(reads(), [0, 1])
+      }
+    })
 
-  it('resolves lock-release pool programs only', () => {
-    assert.ok(resolveLockReleasePoolProgram('op', { poolType: 'lock-release' }))
-    assert.throws(
-      () => resolveLockReleasePoolProgram('op', { poolType: 'burn-mint' }),
-      (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'poolType',
-    )
+    it('rejects a mint with no canonical pool, or both, on every call', async () => {
+      for (const [programs, param] of [
+        [[], 'tokenAddress'],
+        [[BURN_MINT, LOCK_RELEASE], 'poolProgramAddress'],
+      ] as const) {
+        const { chain, reads } = poolChain([...programs])
+        for (const _ of [1, 2]) {
+          await assert.rejects(
+            resolveExistingPoolProgram('op', chain, MINT),
+            (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+          )
+        }
+        assert.deepEqual(reads(), [0, 2])
+      }
+    })
+
+    it('reads only the state under poolProgramAddress', async () => {
+      const { chain, reads } = poolChain([CUSTOM])
+      await resolveExistingPoolProgram('op', chain, MINT, CUSTOM)
+      await resolveExistingPoolProgram('op', chain, MINT, CUSTOM)
+      assert.deepEqual(reads(), [1, 0])
+      await assert.rejects(
+        resolveExistingPoolProgram('op', chain, MINT, LOCK_RELEASE),
+        CCIPTokenPoolStateNotFoundError,
+      )
+    })
+
+    it('drops a cached resolution whose state is gone', async () => {
+      const { chain, reads, states } = poolChain([BURN_MINT])
+      await resolveExistingPoolProgram('op', chain, MINT)
+      states.clear()
+
+      await assert.rejects(
+        resolveExistingPoolState('op', chain, MINT),
+        CCIPTokenPoolStateNotFoundError,
+      )
+      await assert.rejects(resolveExistingPoolState('op', chain, MINT), CCTParamsInvalidError)
+      assert.deepEqual(reads(), [1, 2])
+    })
+
+    it('identifies pool program types', async () => {
+      for (const [program, type, expected] of [
+        [BURN_MINT, undefined, 'burn-mint'],
+        [LOCK_RELEASE, undefined, 'lock-release'],
+        [CUSTOM, 'LockReleaseTokenPool', 'lock-release'],
+        [CUSTOM, 'BurnMintTokenPool', 'burn-mint'],
+        [CUSTOM, 'CustomTokenPool', undefined],
+        [CUSTOM, undefined, undefined],
+      ] as const) {
+        assert.equal(await resolvePoolProgramType(poolChain([], type).chain, program), expected)
+      }
+    })
+
+    it('rejects burn-mint pools for lock-release operations', async () => {
+      // [programs holding a pool state, poolProgramAddress, custom program type, rejected param]
+      for (const [programs, override, type, param] of [
+        [[BURN_MINT], undefined, undefined, 'tokenAddress'],
+        [[BURN_MINT], BURN_MINT, undefined, 'poolProgramAddress'],
+        [[CUSTOM], CUSTOM, 'BurnMintTokenPool', 'poolProgramAddress'],
+        [[LOCK_RELEASE], undefined, undefined, undefined],
+        [[CUSTOM], CUSTOM, undefined, undefined],
+      ] as const) {
+        const { chain } = poolChain([...programs], type)
+        const resolved = resolveExistingLockReleasePoolProgram('op', chain, MINT, override)
+        if (param === undefined) assert.ok((await resolved).equals(programs[0]))
+        else {
+          await assert.rejects(
+            resolved,
+            (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
+          )
+        }
+      }
+    })
   })
 
   it('validates integers', () => {

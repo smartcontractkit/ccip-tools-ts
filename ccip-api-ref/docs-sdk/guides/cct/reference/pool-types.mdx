@@ -65,7 +65,7 @@ Each cell links the pool contract at a version-pinned commit. An `n/a` cell mean
 
 ### Solana
 
-Solana has one burn-mint program and one lock-release program, with no type-and-version matrix. Both are pinned to the `solana-v1.6.4` release tag.
+Solana has one burn-mint program and one lock-release program, with no type-and-version matrix. Both are pinned to the `solana-v1.6.4` release tag. Choose one with `poolType` when deploying the pool; operations on the deployed pool resolve its program on-chain from the mint.
 
 - burn-mint (`poolType: 'burn-mint'`): [burnmint-token-pool](https://github.com/smartcontractkit/chainlink-ccip/tree/c73892d4d33926195eee87b77013883e650a833c/chains/solana/contracts/programs/burnmint-token-pool)
 - lock-release (`poolType: 'lock-release'`): [lockrelease-token-pool](https://github.com/smartcontractkit/chainlink-ccip/tree/c73892d4d33926195eee87b77013883e650a833c/chains/solana/contracts/programs/lockrelease-token-pool)

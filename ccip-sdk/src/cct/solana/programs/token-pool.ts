@@ -24,29 +24,20 @@ export const TOKEN_POOL_PROGRAMS = {
 /** Canonical Solana token pool program type. */
 export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
 
-/** Identifies a canonical burn-mint token pool program. */
-export type BurnMintPoolProgramRef = {
-  poolType: 'burn-mint'
-  poolProgramAddress?: never
+/**
+ * Identifies the program of an existing token pool.
+ *
+ * @remarks Operations throw `CCTParamsInvalidError` if `poolProgramAddress` is omitted and the mint
+ * has no canonical pool, or both, and `CCIPTokenPoolStateNotFoundError` if no pool state exists
+ * under the given `poolProgramAddress`.
+ */
+export type PoolProgramRef = {
+  /**
+   * Custom token pool program that owns the pool. Omit for a canonical burn-mint or lock-release
+   * pool, which is resolved on-chain from `tokenAddress`.
+   */
+  poolProgramAddress?: string
 }
-
-/** Identifies a canonical lock-release token pool program. */
-export type LockReleasePoolProgramRef = {
-  poolType: 'lock-release'
-  poolProgramAddress?: never
-}
-
-/** Identifies a custom token pool program. */
-export type CustomPoolProgramRef = {
-  poolProgramAddress: string
-  poolType?: never
-}
-
-/** Identifies a canonical token pool or a custom pool program. */
-export type PoolProgramRef =
-  | BurnMintPoolProgramRef
-  | LockReleasePoolProgramRef
-  | CustomPoolProgramRef
 
 type TokenPoolStateDecodeContext = {
   tokenPool: string

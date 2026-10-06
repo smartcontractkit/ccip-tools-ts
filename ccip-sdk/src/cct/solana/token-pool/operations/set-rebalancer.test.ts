@@ -23,13 +23,17 @@ const WALLET = {
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    connection: {
+      getMultipleAccountsInfo: async () => [null, {}], // only the canonical lock-release pool
+      getAccountInfo: async () => ({}), // any custom pool program's state
+    },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async () => [null, {}],
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -44,7 +48,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new SetRebalancer().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     rebalancer: REBALANCER,
@@ -95,7 +98,7 @@ describe('SetRebalancer (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -106,10 +109,8 @@ describe('SetRebalancer (cct/solana)', () => {
       for (const [opts, param] of [
         [{ tokenAddress: 'invalid' }, 'tokenAddress'],
         [{ rebalancer: 'invalid' }, 'rebalancer'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
         [
           {
-            poolType: undefined,
             poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
           },
           'poolProgramAddress',
@@ -127,7 +128,6 @@ describe('SetRebalancer (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new SetRebalancer().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         rebalancer: REBALANCER,
         wallet: WALLET,
       })
@@ -140,7 +140,6 @@ describe('SetRebalancer (cct/solana)', () => {
         () =>
           new SetRebalancer().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             rebalancer: REBALANCER,
             authority: AUTHORITY,
             wallet: WALLET,

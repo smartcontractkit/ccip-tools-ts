@@ -29,6 +29,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
 
   function chain(): SolanaChain {
     return {
+      connection: { getAccountInfo: async () => ({}) }, // the pool state under `program`
       getTokenPoolRemotes: async (state: string, remoteChainSelector?: bigint) => {
         assert.equal(state, deriveTokenPoolConfigPda(program, mint).toBase58())
         assert.equal(remoteChainSelector, selector)
@@ -50,6 +51,7 @@ describe('GetTokenPoolRemotes (cct/solana)', () => {
 
     it('omits the selector to read all remote configs', async () => {
       const chainWithAll = {
+        connection: { getAccountInfo: async () => ({}) },
         getTokenPoolRemotes: async (_state: string, remoteChainSelector?: bigint) => {
           assert.equal(remoteChainSelector, undefined)
           return REMOTES

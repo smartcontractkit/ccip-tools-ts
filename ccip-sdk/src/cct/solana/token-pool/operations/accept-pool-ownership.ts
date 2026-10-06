@@ -10,18 +10,14 @@ import {
   type SolanaGenerateParams,
   SolanaOperation,
 } from '../../operation.ts'
-import {
-  type PoolProgramRef,
-  createTokenPoolProgram,
-  deriveTokenPoolConfigPda,
-} from '../../programs/token-pool.ts'
+import { type PoolProgramRef, createTokenPoolProgram } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolvePoolProgram,
+  resolveExistingPoolConfig,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
-import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 /** Parameters shared by Solana token pool ownership-acceptance generation and execution. */
 type AcceptPoolOwnershipParams = PoolProgramRef & {
@@ -33,7 +29,7 @@ type AcceptPoolOwnershipParams = PoolProgramRef & {
 
 type ParsedAcceptPoolOwnershipParams = {
   tokenAddress: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   payer: PublicKey
   authority: PublicKey
 }
@@ -65,7 +61,11 @@ export class AcceptPoolOwnership extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolvePoolProgram(this.name, params),
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       payer,
       authority:
         params.authority === undefined
@@ -79,29 +79,30 @@ export class AcceptPoolOwnership extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedAcceptPoolOwnershipParams,
   ): Promise<UnsignedSolanaTx> {
-    const { config } = await new GetTokenPoolState().query(chain, {
-      tokenAddress: opts.tokenAddress.toBase58(),
-      poolProgramAddress: opts.poolProgram.toBase58(),
-    })
-    const proposedOwner = new PublicKey(config.proposedOwner)
-    if (proposedOwner.equals(PublicKey.default)) {
+    const { poolProgram, state, config } = await resolveExistingPoolConfig(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    if (config.proposedOwner.equals(PublicKey.default)) {
       throw new CCTParamsInvalidError(this.name, 'authority', 'no proposed owner')
     }
-    if (!proposedOwner.equals(opts.authority)) {
+    if (!config.proposedOwner.equals(opts.authority)) {
       throw new CCTParamsInvalidError(this.name, 'authority', 'must be the proposed owner')
     }
 
-    const instruction = await createTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const instruction = await createTokenPoolProgram(chain, poolProgram, opts.payer)
       .methods.acceptOwnership()
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state,
         mint: opts.tokenAddress,
         authority: opts.authority,
       })
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }
