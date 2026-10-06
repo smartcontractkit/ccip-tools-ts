@@ -14,6 +14,7 @@
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { CantonQuery } from '../../query.ts'
+import { instanceAddressOwner, parsePartyId } from '../../validate.ts'
 import { RATE_LIMITER_TEMPLATE_ID } from '../shared.ts'
 
 /** Result of `getRateLimiterState`: the rate limiter's config. */
@@ -45,15 +46,19 @@ export interface GetRateLimiterStateResult {
 /** Parsed params for {@link GetRateLimiterState.read}. */
 interface ParsedGetRateLimiterState {
   rateLimiterInstanceAddress: string
-  poolOwner: string
+  /** Party to read as; `undefined` → the chain's ledger party. */
+  poolOwner?: string
 }
 
 /** Parameters for `getRateLimiterState`. */
 export interface GetRateLimiterStateParams {
   /** RateLimiter `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
   rateLimiterInstanceAddress: string
-  /** Pool owner party (for ACS visibility — the RateLimiter's sole signatory). */
-  poolOwner: string
+  /**
+   * Pool owner party (for ACS visibility — the RateLimiter's sole signatory).
+   * Defaults to a raw address's `@poolOwner` suffix, else the chain's ledger party.
+   */
+  poolOwner?: string
 }
 
 /** Read a `RateLimiter` contract's config from the ACS. */
@@ -64,7 +69,7 @@ export class GetRateLimiterState extends CantonQuery<
 > {
   readonly name = 'getRateLimiterState'
 
-  /** Validates the rate-limiter target + owner. */
+  /** Validates the rate-limiter target + owner (defaulted from a raw address). */
   protected prepare(p: GetRateLimiterStateParams): ParsedGetRateLimiterState {
     if (!p.rateLimiterInstanceAddress) {
       throw new CCTParamsInvalidError(
@@ -73,9 +78,14 @@ export class GetRateLimiterState extends CantonQuery<
         'RateLimiter InstanceAddress is required',
       )
     }
+    const derivedOwner = instanceAddressOwner(
+      this.name,
+      'rateLimiterInstanceAddress',
+      p.rateLimiterInstanceAddress,
+    )
     return {
       rateLimiterInstanceAddress: p.rateLimiterInstanceAddress,
-      poolOwner: p.poolOwner,
+      poolOwner: p.poolOwner ? parsePartyId(this.name, 'poolOwner', p.poolOwner) : derivedOwner,
     }
   }
 
@@ -87,16 +97,17 @@ export class GetRateLimiterState extends CantonQuery<
     chain: CantonChain,
     p: ParsedGetRateLimiterState,
   ): Promise<GetRateLimiterStateResult> {
+    const party = p.poolOwner ?? chain.ledgerParty
     const contract = await chain.findActiveContractByInstanceAddress(
       RATE_LIMITER_TEMPLATE_ID,
       p.rateLimiterInstanceAddress,
-      [p.poolOwner],
+      [party],
     )
     if (!contract) {
       throw new CCTParamsInvalidError(
         this.name,
         'rateLimiterInstanceAddress',
-        `RateLimiter ${p.rateLimiterInstanceAddress} is not active or not visible to ${p.poolOwner}`,
+        `RateLimiter ${p.rateLimiterInstanceAddress} is not active or not visible to ${party}`,
       )
     }
 

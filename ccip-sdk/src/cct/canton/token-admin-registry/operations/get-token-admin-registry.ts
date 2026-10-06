@@ -11,16 +11,26 @@
  */
 
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import { CantonQuery } from '../../query.ts'
-import { TOKEN_CONFIG_TEMPLATE_ID } from '../shared.ts'
+import { parseInstrumentId, parsePartyId } from '../../validate.ts'
+import {
+  TOKEN_CONFIG_TEMPLATE_ID,
+  decodeOptionalParty,
+  defaultCcipOwner,
+  deriveTokenConfigInstanceAddress,
+} from '../shared.ts'
 
 /** Parameters for `getTokenAdminRegistry`. */
 export interface GetTokenAdminRegistryParams {
-  /** TokenConfig `InstanceAddress` (`0x<64-hex>` or `"instanceId@admin"`). Resolved via ACS. */
-  tokenConfigInstanceAddress: string
+  /** Instrument (`{ admin, id }` or `"admin::1220…::id"`) whose TokenConfig to read. */
+  instrumentId: { admin: string; id: string } | string
   /** Admin party (for ACS visibility — must be a stakeholder/signatory of the TokenConfig). */
   adminParty: string
+  /**
+   * CCIP owner party (the TokenConfig's signatory). Defaults to the network's
+   * well-known one, else the chain's `ccipParty`.
+   */
+  ccipOwner?: string
 }
 
 /** Result of `getTokenAdminRegistry`: the TAR view of an instrument. */
@@ -35,6 +45,8 @@ export interface GetTokenAdminRegistryResult {
   isCCIPManaged: boolean
   /** `TokenConfig` contract ID for the instrument. */
   tokenConfigCid: string
+  /** Raw instance address the TokenConfig was looked up at. */
+  tokenConfigInstanceAddress: string
   /** Whether a burn-mint factory is wired (SetBurnMintFactory) — required for pool send/execute. */
   burnMintFactorySet: boolean
   /** Whether a transfer factory is wired (SetTransferFactory). */
@@ -47,8 +59,9 @@ export interface GetTokenAdminRegistryResult {
 
 /** Parsed params for {@link GetTokenAdminRegistry.read}. */
 interface ParsedGetTokenAdminRegistry {
-  tokenConfigInstanceAddress: string
+  instrumentId: { admin: string; id: string }
   adminParty: string
+  ccipOwner?: string
 }
 
 /** Read the TAR state for an instrument. */
@@ -59,33 +72,31 @@ export class GetTokenAdminRegistry extends CantonQuery<
 > {
   readonly name = 'getTokenAdminRegistry'
 
-  /** Validates the TokenConfig instance address + admin party. */
+  /** Validates the instrument ID, admin party, and optional CCIP owner. */
   protected prepare(p: GetTokenAdminRegistryParams): ParsedGetTokenAdminRegistry {
-    if (!p.tokenConfigInstanceAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'tokenConfigInstanceAddress',
-        'TokenConfig InstanceAddress is required',
-      )
-    }
     return {
-      tokenConfigInstanceAddress: p.tokenConfigInstanceAddress,
-      adminParty: p.adminParty,
+      instrumentId: parseInstrumentId(this.name, 'instrumentId', p.instrumentId),
+      adminParty: parsePartyId(this.name, 'adminParty', p.adminParty),
+      ccipOwner: p.ccipOwner ? parsePartyId(this.name, 'ccipOwner', p.ccipOwner) : undefined,
     }
   }
 
   /**
-   * Reads the active `TokenConfig` by InstanceAddress from the ACS and decodes
-   * its fields into the TAR view. Returns an empty result (`tokenConfigCid: ''`)
-   * when the TokenConfig is not active/visible.
+   * Reads the active `TokenConfig` at the instrument's derived address from the
+   * ACS and decodes its fields into the TAR view. Returns an empty result
+   * (`tokenConfigCid: ''`) when the TokenConfig is not active/visible.
    */
   protected async read(
     chain: CantonChain,
     p: ParsedGetTokenAdminRegistry,
   ): Promise<GetTokenAdminRegistryResult> {
+    const tokenConfigInstanceAddress = deriveTokenConfigInstanceAddress(
+      p.instrumentId,
+      p.ccipOwner ?? defaultCcipOwner(chain),
+    )
     const contract = await chain.findActiveContractByInstanceAddress(
       TOKEN_CONFIG_TEMPLATE_ID,
-      p.tokenConfigInstanceAddress,
+      tokenConfigInstanceAddress,
       [p.adminParty],
     )
 
@@ -93,6 +104,7 @@ export class GetTokenAdminRegistry extends CantonQuery<
       return {
         isCCIPManaged: false,
         tokenConfigCid: '',
+        tokenConfigInstanceAddress,
         burnMintFactorySet: false,
         transferFactorySet: false,
         factoryFieldsSupported: false,
@@ -106,6 +118,7 @@ export class GetTokenAdminRegistry extends CantonQuery<
       tokenPool: decodeTokenPool(fields['tokenPool']),
       isCCIPManaged: decodeBool(fields['isCCIPManaged']),
       tokenConfigCid: contract.contractId,
+      tokenConfigInstanceAddress,
       burnMintFactorySet: decodeOptionalPresent(fields['burnMintFactory']),
       transferFactorySet: decodeOptionalPresent(fields['transferFactory']),
       factoryFieldsSupported: 'burnMintFactory' in fields || 'transferFactory' in fields,
@@ -118,24 +131,6 @@ function decodeOptionalPresent(value: unknown): boolean {
   if (value == null) return false
   if (typeof value === 'object' && 'None' in (value as Record<string, unknown>)) return false
   return true
-}
-
-/** Decode a Daml `Optional Party` into a string (or `undefined` when `None`).
- *  Handles three encodings:
- *   - JSON Ledger API (natural): `Some` → bare string `"partyId"`; `None` → `null`.
- *   - gRPC JSON: `Some` → `{ Some: { Sum: { Party: "partyId" } } }`; `None` → `{ None: {} }`. */
-function decodeOptionalParty(value: unknown): string | undefined {
-  if (value == null) return undefined // JSON `null` (None) or absent
-  // Natural JSON: a bare string is `Some party`.
-  if (typeof value === 'string') return value
-  if (typeof value !== 'object') return undefined
-  const v = value as Record<string, unknown>
-  // gRPC JSON: `Some p` → { Some: { ... } }; `None` → { None: {} }
-  if ('Some' in v && v.Some != null) {
-    const inner = extractFieldValue(v.Some)
-    return typeof inner === 'string' ? inner : undefined
-  }
-  return undefined
 }
 
 /** Decode a Daml `Bool` (gRPC `{ Sum: { Bool: true } }` or bare `true`). */
