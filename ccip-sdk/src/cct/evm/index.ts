@@ -3832,7 +3832,6 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 }
 
-export * from '../errors.ts'
 export type * from './token-admin-registry/operations/index.ts'
 export * from './token-admin-registry/contracts.ts'
 export type * from './token/operations/index.ts'

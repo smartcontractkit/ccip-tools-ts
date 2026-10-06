@@ -2380,7 +2380,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 }
 
-export * from '../errors.ts'
 export {
   type TokenPoolType,
   TOKEN_POOL_PROGRAMS,
