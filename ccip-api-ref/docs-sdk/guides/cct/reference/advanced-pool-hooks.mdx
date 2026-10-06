@@ -13,6 +13,19 @@ This page is v2.0.0-only. On v1.5.0 through v1.6.1 pools the allowlist lives on 
 
 The examples below build an `EVMTokenManager` (referred to as `cct`) from a chain, as shown in the [EVM walkthrough](../evm). Every write method here has a `generateUnsigned<Op>` twin that returns an unsigned transaction for multisig or offline signing instead of signing and submitting; each section names the twin for its write.
 
+## How methods find the hooks
+
+The policy engine, threshold, authorized-caller, and CCV methods take exactly one of:
+
+- `advancedPoolHooks`: the hooks contract itself.
+- `poolAddress`: a v2.0.0 pool, whose bound hooks the SDK reads with `getAdvancedPoolHooks`. A pool older than v2.0.0 throws `CCTOperationUnsupportedError`, and a pool with no hooks bound throws `CCTParamsInvalidError`.
+
+Either way the SDK confirms the target reports `AdvancedPoolHooks`, and writes go to the hooks contract, gated on the hooks owner. A `poolAddress` is resolved when the transaction is built, so in a multisig batch that also re-points the pool, address the new hooks by `advancedPoolHooks`.
+
+:::warning Hooks may be shared
+Several pools can be bound to the same `AdvancedPoolHooks`. A write made through one pool changes the configuration of every pool bound to those hooks, and reads return that shared configuration.
+:::
+
 ## Deploy and bind hooks
 
 `deployAdvancedPoolHooks` deploys a fresh `AdvancedPoolHooks` and returns `{ hash, contractAddress, verification }`, where `verification` carries the contract name and ABI-encoded constructor arguments a block explorer needs. The constructor takes four optional arguments, and each one defaults to off:
@@ -24,9 +37,25 @@ The examples below build an `EVMTokenManager` (referred to as `cct`) from a chai
 
 Once deployed, bind the hooks to a pool with `updateAdvancedPoolHooks`. Binding and authorizing are two separate steps: the pool must also appear in the hooks' `authorizedCallers`, or every transfer reverts with `UnauthorizedCaller`. List the pool at deploy time, or add it later (see [Authorized callers](#authorized-callers)).
 
+Configure the hooks before binding them, so the pool never runs on unconfigured hooks. The constructor has no CCV argument, so apply CCV requirements by `advancedPoolHooks` first (see [CCV requirements](#ccv-requirements)):
+
 ```typescript
 const hooks = await cct.deployAdvancedPoolHooks({
   authorizedCallers: [pool.contractAddress],
+  wallet,
+})
+
+await cct.applyCCVConfigUpdates({
+  advancedPoolHooks: hooks.contractAddress, // not bound yet
+  ccvConfigArgs: [
+    {
+      remoteChainSelector: 5009297550715157269n,
+      outboundCCVs: ['0xCCV...'],
+      thresholdOutboundCCVs: [],
+      inboundCCVs: ['0xCCV...'],
+      thresholdInboundCCVs: [],
+    },
+  ],
   wallet,
 })
 
