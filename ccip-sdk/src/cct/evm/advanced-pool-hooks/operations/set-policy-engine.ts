@@ -19,18 +19,18 @@ import { ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
-import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
+import { validateAddress } from '../../validate.ts'
 import {
+  type AdvancedPoolHooksTarget,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
   assertPolicyEngineContract,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
 /** Parameters for {@link SetPolicyEngine}. */
-export type SetPolicyEngineParams = {
-  /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
-  advancedPoolHooks: string
+export type SetPolicyEngineParams = AdvancedPoolHooksTarget & {
   /** Policy engine to attach; must have deployed code unless zero, which disables policy checks.
    * It must also implement the required `attach()` / `detach()` hooks. */
   newPolicyEngine: string
@@ -48,29 +48,30 @@ export class SetPolicyEngine extends EVMOperation<SetPolicyEngineParams> {
   readonly name = 'setPolicyEngine'
 
   /** Validates addresses before any RPC; zero `newPolicyEngine` deliberately disables checks. */
-  protected override validate({ advancedPoolHooks, newPolicyEngine }: SetPolicyEngineParams): void {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', advancedPoolHooks)
-    validateAddress(this.name, 'newPolicyEngine', newPolicyEngine)
+  protected override validate(params: SetPolicyEngineParams): void {
+    validateAdvancedPoolHooksTarget(this.name, params)
+    validateAddress(this.name, 'newPolicyEngine', params.newPolicyEngine)
   }
 
   /**
    * Confirms the target, policy engine code, and supplied owner before encoding
    * `setPolicyEngine(address)`.
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
    * @throws {@link CCTParamsInvalidError} if non-zero `newPolicyEngine` has no deployed code
    * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
+   * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, newPolicyEngine, sender }: SetPolicyEngineParams,
+    params: SetPolicyEngineParams,
   ): Promise<UnsignedEVMTx> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
+    const { newPolicyEngine, sender } = params
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
     if (getAddress(newPolicyEngine) !== ZeroAddress)
       await assertPolicyEngineContract(this.name, 'newPolicyEngine', chain, newPolicyEngine)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
+    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
-      advancedPoolHooks,
+      hooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('setPolicyEngine', [newPolicyEngine]),
     )
   }

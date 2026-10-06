@@ -57,6 +57,8 @@ const payer = wallet.publicKey // fee payer for unsigned flows
 
 The SDK deploy operation targets the canonical CCIP `burn-mint` and `lock-release` pool programs. It returns the pool state PDA and pool signer PDA.
 
+`poolType` is chosen only here and in `createTokenMultisig`. Operations on an existing pool take its `tokenAddress` and resolve the pool program on-chain from the pool state account that exists for the mint; pass `poolProgramAddress` only for a custom pool program, or when a mint has both a burn-mint and a lock-release pool.
+
 ```typescript
 const result = await cct.deployTokenPool({
   wallet,
@@ -165,7 +167,6 @@ Configure the remote token, pool, decimals, and rate limits after both sides hav
 await cct.applyChainUpdates({
   wallet,
   tokenAddress: mint.toBase58(),
-  poolType: 'lock-release',
   remoteChainSelectorsToRemove: [],
   chainsToAdd: [
     {
@@ -202,7 +203,6 @@ Set rate limits deliberately, the same as on EVM. `capacity` (bucket max) and `r
 const lookupTable = await cct.createLookupTable({
   wallet,
   tokenAddress: mint.toBase58(),
-  poolType: 'lock-release',
 })
 
 console.log('Pool lookup table:', lookupTable.lookupTableAddress)
@@ -236,7 +236,6 @@ await cct.approveToken({
 await cct.provideLiquidity({
   wallet,
   tokenAddress: mint.toBase58(),
-  poolType: 'lock-release',
   amount: 1_000_000n,
 })
 ```
@@ -259,22 +258,20 @@ await cct.mintTokens({
 
 ## Verify and test a transfer
 
-Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to confirm the accepted administrator, registered lookup table, pool PDA, remote addresses, and rate limits. Solana pool reads identify the pool by `tokenAddress` plus `poolType`, so pass both:
+Read `getTokenAdminRegistry`, `getTokenPoolState`, and `getTokenPoolRemotes` to confirm the accepted administrator, registered lookup table, pool PDA, remote addresses, and rate limits. Solana pool reads identify the pool by its `tokenAddress`; the SDK resolves the pool program on-chain:
 
 ```typescript
 const state = await cct.getTokenPoolState({
   tokenAddress: mint.toBase58(),
-  poolType: 'burn-mint',
 })
 
 const remotes = await cct.getTokenPoolRemotes({
   tokenAddress: mint.toBase58(),
-  poolType: 'burn-mint',
   remoteChainSelector: BigInt(process.env.DEST_CHAIN_SELECTOR!),
 })
 ```
 
-Omitting `poolType` (or `poolProgramAddress`) throws `CCTParamsInvalidError: provide exactly one of poolType or poolProgramAddress`. Then run [Pre-Send Validation](../pre-send-validation) before sending a production transfer.
+`getTokenPoolState` includes the lock-release liquidity fields (`rebalancer`, `canAcceptLiquidity`) only for a lock-release pool, so check for them with `'rebalancer' in state.config`. A mint with no canonical pool, or with both a burn-mint and a lock-release pool, throws `CCTParamsInvalidError`; pass `poolProgramAddress` to name the pool program. Then run [Pre-Send Validation](../pre-send-validation) before sending a production transfer.
 
 Send a first transfer with the CLI. Use the CCIP network identifier or its numeric selector for `-s`/`-d`, and pass a Solana keypair file to `-w` (defaults to `~/.config/solana/id.json`):
 

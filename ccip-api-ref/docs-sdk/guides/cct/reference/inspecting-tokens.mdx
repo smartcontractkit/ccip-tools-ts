@@ -99,7 +99,7 @@ if ('pendingDefaultAdmin' in result) {
 }
 ```
 
-A token's *proposed* owner is not readable on EVM. Both a v1 token's Ownable2Step pending owner and a token pool's pending owner live in a `private` slot with no getter, so `getTokenOwner` reports the current owner only. The v2 default admin is the exception, since its pending transfer is public and surfaced by `getTokenDefaultAdmin`.
+A token's *proposed* owner is not readable on EVM. Both a v1 token's Ownable2Step pending owner and a token pool's pending owner live in a `private` slot with no getter, so `getTokenOwner` reports the current owner only, and `acceptDefaultAdminTransfer` cannot check `sender` before signing on a v1 token. The v2 default admin is the exception, since its pending transfer is public and surfaced by `getTokenDefaultAdmin`.
 
 ## Reading tokens on Solana
 

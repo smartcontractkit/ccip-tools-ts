@@ -79,12 +79,15 @@ function chain(
   const state = deriveTokenPoolConfigPda(poolProgram, mint)
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, mint)
   const poolTokenAccount = getAssociatedTokenAddressSync(mint, poolSigner, true)
+  const account = { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? account : null)),
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, rebalancer, acceptsLiquidity) }
+          ? account
           : address.equals(poolTokenAccount)
             ? tokenAccount(poolSigner, poolBalance)
             : tokenAccount(rebalancer),
@@ -98,11 +101,14 @@ function submitChain(): SolanaChain {
   const state = deriveTokenPoolConfigPda(poolProgram, mint)
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, mint)
   const poolTokenAccount = getAssociatedTokenAddressSync(mint, poolSigner, true)
+  const account = { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async (addresses: PublicKey[]) =>
+        addresses.map((address) => (address.equals(state) ? account : null)),
       getAccountInfo: async (address: PublicKey) =>
         address.equals(state)
-          ? { owner: poolProgram, data: poolState(poolProgram, WALLET.publicKey) }
+          ? account
           : address.equals(poolTokenAccount)
             ? tokenAccount(poolSigner)
             : tokenAccount(WALLET.publicKey),
@@ -120,7 +126,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new WithdrawLiquidity().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'lock-release',
     payer: PAYER,
     authority: AUTHORITY,
     amount: 1_000_000n,
@@ -193,7 +198,6 @@ describe('WithdrawLiquidity (cct/solana)', () => {
           () =>
             new WithdrawLiquidity().generate(pool, {
               tokenAddress: TOKEN,
-              poolType: 'lock-release',
               payer: PAYER,
               authority: AUTHORITY,
               amount: 1n,
@@ -208,7 +212,6 @@ describe('WithdrawLiquidity (cct/solana)', () => {
         chain(resolveTokenPoolProgram('lock-release'), new PublicKey(PAYER)),
         {
           tokenAddress: TOKEN,
-          poolType: 'lock-release',
           payer: PAYER,
           amount: 1_000_000n,
         },
@@ -241,20 +244,22 @@ describe('WithdrawLiquidity (cct/solana)', () => {
         [{ authority: 'invalid' }, 'authority'],
         [{ amount: 0n }, 'amount'],
         [{ amount: 0x1_0000_0000_0000_0000n }, 'amount'],
-        [{ poolType: 'burn-mint' as const }, 'poolType'],
-        [
-          {
-            poolType: undefined,
-            poolProgramAddress: resolveTokenPoolProgram('burn-mint').toBase58(),
-          },
-          'poolProgramAddress',
-        ],
       ]) {
         await assert.rejects(
           () => generate(opts),
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
+      await assert.rejects(
+        () =>
+          new WithdrawLiquidity().generate(chain(resolveTokenPoolProgram('burn-mint')), {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            amount: 1n,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+      )
     })
   })
 
@@ -262,7 +267,6 @@ describe('WithdrawLiquidity (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new WithdrawLiquidity().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'lock-release',
         amount: 1_000_000n,
         wallet: WALLET,
       })
@@ -275,7 +279,6 @@ describe('WithdrawLiquidity (cct/solana)', () => {
         () =>
           new WithdrawLiquidity().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'lock-release',
             amount: 1_000_000n,
             authority: AUTHORITY,
             wallet: WALLET,

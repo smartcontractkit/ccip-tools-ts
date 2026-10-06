@@ -1626,6 +1626,12 @@ const SELECTORS: Selectors = {
     network_type: 'TESTNET',
     family: 'EVM',
   },
+  '936486': {
+    selector: 4611245740287073885n,
+    name: 't-rex-testnet-zenith',
+    network_type: 'TESTNET',
+    family: 'EVM',
+  },
   '978657': {
     selector: 10443705513486043421n,
     name: 'ethereum-testnet-sepolia-arbitrum-1-treasure-1',

@@ -282,7 +282,7 @@ describe('recovery hints', () => {
     it('should explain how to find a missing token pool state', () => {
       assert.equal(
         DEFAULT_RECOVERY_HINTS.TOKEN_POOL_STATE_NOT_FOUND,
-        'Verify poolType matches the deployed pool, pass poolProgramAddress for a custom pool, and confirm the pool is initialized for this mint on this cluster.',
+        'Confirm the pool is initialized for this mint on this cluster; for a custom pool, verify poolProgramAddress is the program that owns it.',
       )
     })
   })

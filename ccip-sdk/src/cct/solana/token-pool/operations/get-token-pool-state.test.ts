@@ -7,7 +7,7 @@ import { PublicKey } from '@solana/web3.js'
 import { CCIPTokenPoolStateNotFoundError } from '../../../../errors/index.ts'
 import { tokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTDataDecodeError } from '../../../errors.ts'
+import { CCTDataDecodeError, CCTParamsInvalidError } from '../../../errors.ts'
 import { decodeTokenPoolState, deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 
@@ -42,21 +42,25 @@ describe('GetTokenPoolState (cct/solana)', () => {
   describe('query', () => {
     it('returns decoded state fields', async () => {
       const mint = key(2)
-      const chain = {
-        connection: { getAccountInfo: async () => ({ owner: key(1), data: stateData(mint) }) },
-      } as unknown as SolanaChain
+      const account = { owner: key(1), data: stateData(mint) }
+      // `canonical` lists the burn-mint and lock-release state accounts, in that order.
+      const chain = (...canonical: unknown[]) =>
+        ({
+          connection: {
+            getAccountInfo: async () => account,
+            getMultipleAccountsInfo: async () => canonical,
+          },
+        }) as unknown as SolanaChain
 
       const getTokenPoolState = new GetTokenPoolState()
-      const lockRelease = await getTokenPoolState.query(chain, {
-        poolType: 'lock-release',
+      const lockRelease = await getTokenPoolState.query(chain(null, account), {
         tokenAddress: mint.toBase58(),
       })
-      const burnMint = await getTokenPoolState.query(chain, {
-        poolType: 'burn-mint',
+      const burnMint = await getTokenPoolState.query(chain(account, null), {
         tokenAddress: mint.toBase58(),
       })
       const customProgram = key(15).toBase58()
-      const custom = await getTokenPoolState.query(chain, {
+      const custom = await getTokenPoolState.query(chain(), {
         poolProgramAddress: customProgram,
         tokenAddress: mint.toBase58(),
       })
@@ -64,7 +68,6 @@ describe('GetTokenPoolState (cct/solana)', () => {
       assert.equal(lockRelease.version, 1)
       assert.equal(lockRelease.config.mint, mint.toBase58())
       assert.equal(lockRelease.config.decimals, 6)
-      // the op resolves to the union; the facade's overloads are what narrow for callers
       assert.ok('canAcceptLiquidity' in lockRelease.config)
       assert.equal(lockRelease.config.canAcceptLiquidity, true)
       assert.equal(lockRelease.config.listEnabled, true)
@@ -149,22 +152,18 @@ describe('GetTokenPoolState (cct/solana)', () => {
   })
 
   describe('validation', () => {
-    it('requires exactly one pool program reference', async () => {
+    it('rejects an invalid pool program address', async () => {
       const getTokenPoolState = new GetTokenPoolState()
       const tokenAddress = key(2).toBase58()
-      const poolProgramAddress = key(15).toBase58()
+      const poolProgramAddress = 'nope'
 
       await assert.rejects(
-        getTokenPoolState.query(
-          {} as SolanaChain,
-          {
-            tokenAddress,
-            poolType: 'burn-mint',
-            poolProgramAddress,
-          } as never,
-        ),
+        getTokenPoolState.query({} as SolanaChain, {
+          tokenAddress,
+          poolProgramAddress,
+        }),
+        CCTParamsInvalidError,
       )
-      await assert.rejects(getTokenPoolState.query({} as SolanaChain, { tokenAddress } as never))
     })
   })
 })

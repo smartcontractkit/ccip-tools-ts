@@ -3,8 +3,8 @@
  * owner completes it with {@link AcceptPoolOwnership}).
  *
  * @remarks Named for its target rather than for the selector it encodes, to keep it apart from
- * {@link TransferTokenOwnership} — the two write the same `transferOwnership(address)` calldata to
- * different contracts — and from `transferAdmin`, which moves the registry's administrator role.
+ * `beginDefaultAdminTransfer` — which writes the same `transferOwnership(address)` calldata to a
+ * v1 token — and from `transferAdmin`, which moves the registry's administrator role.
  *
  * @remarks Nothing changes on-chain until the proposed owner accepts: this only writes
  * `s_pendingOwner`, and the current owner keeps every privilege until then.
