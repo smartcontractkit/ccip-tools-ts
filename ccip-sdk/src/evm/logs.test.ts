@@ -606,6 +606,67 @@ describe('getEvmLogs — backfill invariants', () => {
     assert.equal(calls[3]!.fromBlock, 3001)
     assert.equal(calls[3]!.toBlock, 'latest', 'the new terminal chunk must be fetched by the tag')
   })
+
+  it('A12 — stated limit below the floor: tries 100 blocks first, then honors the limit', async () => {
+    const url = 'https://fake-bf-a12.example.com/rpc'
+    // Alchemy's free plan; parses to maxRange=10 (and a suggestedRange).
+    const { provider, calls } = recordingProvider({
+      maxSpan: 10,
+      url,
+      errorMessage:
+        'Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. ' +
+        'Based on your parameters, this block range should work: [0x1, 0xa]. ' +
+        'Upgrade to PAYG for expanded block range.',
+    })
+
+    const logs = await collect(
+      getEvmLogs(
+        { startBlock: 1, endBlock: 1000 },
+        { provider, getBlockInfo, logger: silentLogger },
+      ),
+    )
+
+    assert.deepEqual(
+      calls.slice(0, 2).map((c) => [c.span, c.ok]),
+      [
+        [1000, false],
+        [100, false],
+      ],
+      'the floor-sized chunk must be tried before going below it',
+    )
+    const successful = ok(calls)
+    for (const c of successful) {
+      assert.ok(c.span <= 10, `successful chunks must fit the stated limit, got ${c.span}`)
+    }
+    assert.equal(
+      successful.reduce((sum, c) => sum + c.span, 0),
+      1000,
+      'must cover [1,1000] exactly',
+    )
+    assert.equal(logs.length, successful.length)
+    assert.equal(getEndpointLogRange(url), 10, 'learned page must persist as 10 in the registry')
+  })
+
+  it('A13 — stated limit below the floor is not used while 100-block chunks succeed', async () => {
+    const url = 'https://fake-bf-a13.example.com/rpc'
+    // States 10 but serves 500: the floor alone makes progress, so pages stay at 100.
+    const { provider, calls } = recordingProvider({
+      maxSpan: 500,
+      url,
+      errorMessage: 'getLogs failed: up to a 10 block range is allowed',
+    })
+
+    await collect(
+      getEvmLogs(
+        { startBlock: 1, endBlock: 1000 },
+        { provider, getBlockInfo, logger: silentLogger },
+      ),
+    )
+
+    for (const c of calls) {
+      assert.ok(c.span >= 100, `no getLogs may be issued with span <100, got ${c.span}`)
+    }
+  })
 })
 
 // ── Watch invariants ────────────────────────────────────────────────────────
@@ -1004,6 +1065,61 @@ describe('getEvmLogs — watch invariants', () => {
       assert.equal(calls.length, 0, 'expected no getLogs before the finality guard threw')
     },
   )
+
+  // B11 — a stated limit below the floor (Alchemy's free plan allows 10 blocks) in
+  // the watch offload: the floor-sized chunk fails, then the stated limit is honored.
+  it('B11: watch offload honors a stated limit below the floor', { timeout: 5000 }, async () => {
+    const controller = new AbortController()
+    const url = 'https://watch-b11.example.com/rpc'
+    const maxSpan = 10
+    let optimisticCalls = 0
+    const rangeError = () =>
+      Object.assign(new Error(`getLogs failed: up to a ${maxSpan} block range is allowed`), {
+        error: { code: -32005 },
+      })
+    const { provider, calls } = makeWatchProvider(10_000, url, async (filter, c, spanOf) => {
+      if (!c[c.length - 1]!.watch) return [] // backfill no-op
+      if (typeof filter.toBlock === 'string') {
+        optimisticCalls += 1
+        if (optimisticCalls >= 2) {
+          controller.abort()
+          return []
+        }
+        throw rangeError() // force the offload
+      }
+      // watch offload (numeric) chunk
+      if (spanOf(filter) > maxSpan) throw rangeError()
+      return [makeLog(filter.fromBlock)]
+    })
+
+    const logs = await collect(
+      getEvmLogs(
+        { startBlock: 9000, endBlock: 'latest', watch: controller.signal },
+        { provider, getBlockInfo, logger: console },
+      ),
+    )
+
+    assert.ok(logs.length > 0, 'expected logs emitted from the offloaded streamLogs')
+    // watchFrom = 9000, so the offload covers [9000,10000]: 1001 fails, then 100
+    // fails, then 10-block chunks.
+    const spans = calls
+      .filter((c) => c.watch && typeof c.toBlock === 'number')
+      .map((c) => (c.toBlock as number) - c.fromBlock + 1)
+    assert.deepEqual(spans.slice(0, 2), [1001, 100])
+    for (const span of spans.slice(2)) {
+      assert.ok(span <= maxSpan, `offload chunks must fit the stated limit, got ${span}`)
+    }
+    assert.equal(
+      spans.slice(2).reduce((sum, span) => sum + span, 0),
+      1001,
+      'must cover [9000,10000] exactly',
+    )
+    const optimistic = calls.filter(isWatchOptimistic)
+    assert.ok(
+      optimistic[1]!.fromBlock > 10_000,
+      `2nd watch fromBlock must be past the covered range, got ${optimistic[1]!.fromBlock}`,
+    )
+  })
 })
 
 describe('getEvmLogs — typeAndVersions filter', () => {

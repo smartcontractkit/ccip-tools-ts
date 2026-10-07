@@ -198,7 +198,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Invalid Aptos event topic. Ensure the topic matches a known CCIP event type.',
 
   LOG_RANGE_TOO_LARGE:
-    'The RPC endpoint limits getLogs block range. The SDK auto-paginates by halving the range; if this persists, the range cannot be subdivided further.',
+    'The RPC endpoint rejected the getLogs block range, and the SDK could not find a smaller range it accepts. Use an RPC endpoint or plan that allows wider getLogs ranges.',
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
   TIMEOUT:
