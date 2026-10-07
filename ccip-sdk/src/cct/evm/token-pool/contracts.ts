@@ -863,7 +863,11 @@ export async function assertPoolLiquidity(
   if (liquidity >= amount) return
   throw new CCTTxFailedError(
     operation,
-    `pool ${poolAddress} ${describeLiquidity(type, liquidity, token)}, but ${amount} is required; it would revert InsufficientLiquidity`,
+    `pool ${poolAddress} ${describeLiquidity(
+      type,
+      liquidity,
+      token,
+    )}, but ${amount} is required; it would revert InsufficientLiquidity`,
   )
 }
 
@@ -1109,6 +1113,23 @@ export async function assertSiloLiquidity(
   )
 }
 
+/** EVM deployable pool contract types with vendored 2.0.0 creation bytecode. */
+export const DEPLOYABLE_TOKEN_POOL_TYPES = [
+  'BurnMintTokenPool',
+  'BurnFromMintTokenPool',
+  'BurnWithFromMintTokenPool',
+  'LockReleaseTokenPool',
+  'SiloedLockReleaseTokenPool',
+] as const satisfies readonly TokenPoolType[]
+
+/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
+export type DeployableTokenPoolType = (typeof DEPLOYABLE_TOKEN_POOL_TYPES)[number]
+
+/** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
+export function isDeployableTokenPoolType(value: string): value is DeployableTokenPoolType {
+  return (DEPLOYABLE_TOKEN_POOL_TYPES as readonly string[]).includes(value)
+}
+
 /**
  * Creation bytecode per deployable pool type (2.0.0 only — pre-2.0.0 bytecode is not vendored).
  * The keys define the deployable set ({@link DeployableTokenPoolType}). The burn-* variants share
@@ -1120,15 +1141,7 @@ const TOKEN_POOL_BYTECODE = {
   BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
   LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
   SiloedLockReleaseTokenPool: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
-
-/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
-export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
-
-/** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
-export function isDeployableTokenPoolType(type: string): type is DeployableTokenPoolType {
-  return Object.hasOwn(TOKEN_POOL_BYTECODE, type)
-}
+} satisfies Record<DeployableTokenPoolType, `0x${string}`>
 
 /**
  * Deploy artifact for a deployable pool `type` (v2.0.0): contract name (= `type`), the cached
