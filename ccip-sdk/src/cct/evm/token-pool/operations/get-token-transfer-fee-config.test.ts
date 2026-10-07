@@ -4,7 +4,12 @@ import { describe, it } from 'node:test'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type GetTokenTransferFeeConfigParams,
   GetTokenTransferFeeConfig,
@@ -12,9 +17,10 @@ import {
 
 const POOL = '0x' + '11'.repeat(20)
 const TOKEN = '0x' + '22'.repeat(20)
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 const CONFIG = {
   destGasOverhead: 100_000,
@@ -35,7 +41,7 @@ function stubChain({
   version?: TokenPoolVersion
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], TokenPoolVersion.V2_0_0)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

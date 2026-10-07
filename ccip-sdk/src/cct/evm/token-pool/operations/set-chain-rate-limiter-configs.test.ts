@@ -8,7 +8,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type ChainRateLimitUpdate,
   type SetChainRateLimiterConfigsParams,
@@ -125,9 +130,10 @@ const roleReads = (
     ? { owner: [owner], getDynamicConfig: [ROUTER, rateLimitAdmin, FEE_ADMIN] }
     : { owner: [owner], getRateLimitAdmin: [rateLimitAdmin] }
 
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -146,7 +152,7 @@ function stubChain({
   reads?: Reads
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   const responses = new Map(
     Object.entries(reads).map(([fn, values]) => [
       iface.getFunction(fn)!.selector,

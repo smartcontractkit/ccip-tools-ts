@@ -6,15 +6,22 @@ import { ZeroAddress, getAddress, makeError } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { GetAdvancedPoolHooks } from './get-advanced-pool-hooks.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const HOOKS_LOWER = '0x' + '44'.repeat(20)
 
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /** Answers only `getAdvancedPoolHooks()`, pinning it as this query's sole contract read. */
@@ -29,7 +36,7 @@ function stubChain({
   hooks?: string
   onCall?: (selector?: string) => void
 } = {}): EVMChain {
-  const v2 = TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0]
+  const v2 = getTokenPoolInterface(POOL_TYPE[family], TokenPoolVersion.V2_0_0)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

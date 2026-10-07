@@ -3078,9 +3078,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
-   * `BurnWithFromMintTokenPool`, or `LockReleaseTokenPool`; all v2.0.0). The deployed address is
-   * only known once mined, so it is NOT returned here — use {@link deployTokenPool} to receive
-   * `{ hash, contractAddress, verification }`.
+   * `BurnWithFromMintTokenPool`, `LockReleaseTokenPool`, or `SiloedLockReleaseTokenPool`; all
+   * v2.0.0). The deployed address is only known once mined, so it is NOT returned here — use
+   * {@link deployTokenPool} to receive `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
    * additionally requires a pre-deployed `lockbox` ({@link DeployLockReleaseTokenPoolParams})
@@ -3088,7 +3088,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * → {@link deployTokenPool} (passing the lockbox) → {@link updateLockboxAuthorizedCallers}
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
-   * its lockbox holds liquidity.
+   * its lockbox holds liquidity. `SiloedLockReleaseTokenPool` takes no `lockbox`; its lockboxes
+   * are bound per lane after deploy (see {@link DeploySiloedLockReleaseTokenPoolParams}).
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -3118,7 +3119,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * sequence: {@link deployToken} → {@link deployLockbox} → {@link deployTokenPool} (passing the
    * lockbox) → {@link updateLockboxAuthorizedCallers} (`addedCallers: [pool]`, plus whoever funds it) →
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
-   * v2.0.0 pool cannot release until its lockbox holds liquidity.
+   * v2.0.0 pool cannot release until its lockbox holds liquidity. `SiloedLockReleaseTokenPool`
+   * takes no `lockbox`; its lockboxes are bound per lane after deploy (see
+   * {@link DeploySiloedLockReleaseTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -3960,6 +3963,9 @@ export * from './token/contracts.ts'
 export type { TransferPoolOwnershipParams } from './token-pool/operations/transfer-pool-ownership.ts'
 export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
 export type {
+  DeployBurnMintTokenPoolParams,
+  DeployLockReleaseTokenPoolParams,
+  DeploySiloedLockReleaseTokenPoolParams,
   DeployTokenPoolParams,
   DeployableTokenPoolType,
 } from './token-pool/operations/deploy-token-pool.ts'
@@ -3969,6 +3975,7 @@ export type {
   GetTokenPoolStateResult,
   LegacyTokenPoolState,
   LockReleaseTokenPoolStateV2_0_0,
+  SiloedLockReleaseTokenPoolStateV2_0_0,
   TokenPoolStateV2_0_0,
 } from './token-pool/operations/get-token-pool-state.ts'
 export type {

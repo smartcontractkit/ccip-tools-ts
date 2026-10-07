@@ -33,7 +33,7 @@ export const FACTORY_VERSION = '2.0.0'
 
 /**
  * The factory's `PoolType` enum, `BURN_MINT = 0`, `LOCK_RELEASE = 1`. Keyed by the SDK's family
- * names so the local pool `type` maps through `getTokenPoolFamily`.
+ * names; the factory has no siloed pool type, so `SiloedLockRelease` has no entry.
  */
 export const FACTORY_POOL_TYPE = { BurnMint: 0, LockRelease: 1 } as const
 

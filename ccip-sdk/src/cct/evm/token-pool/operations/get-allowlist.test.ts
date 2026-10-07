@@ -7,7 +7,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { ADVANCED_POOL_HOOKS_INTERFACE } from '../../advanced-pool-hooks/contracts.ts'
-import { TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import { TokenPoolVersion, getTokenPoolInterface } from '../contracts.ts'
 import { GetAllowlist } from './get-allowlist.ts'
 
 const POOL = '0x' + '11'.repeat(20)
@@ -32,7 +32,7 @@ function stubChain({
   entries?: string[]
   onCall?: () => void
 } = {}): EVMChain {
-  const pool = TOKEN_POOL_INTERFACES.BurnMint[version]
+  const pool = getTokenPoolInterface('BurnMintTokenPool', version)
   const v2 = version === TokenPoolVersion.V2_0_0
   const [holder, iface] = v2 ? [hooks, ADVANCED_POOL_HOOKS_INTERFACE] : [POOL, pool]
   const results: [string, Interface, string, unknown][] = [

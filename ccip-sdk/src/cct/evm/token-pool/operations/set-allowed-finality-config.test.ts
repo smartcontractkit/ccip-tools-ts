@@ -8,7 +8,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type SetAllowedFinalityConfigParams,
   SetAllowedFinalityConfig,
@@ -23,9 +28,10 @@ const IFACE = new Interface(['function setAllowedFinalityConfig(bytes4 allowedFi
 const dataFor = (allowedFinality: number) =>
   IFACE.encodeFunctionData('setAllowedFinalityConfig', [toBeHex(allowedFinality, 4)])
 
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /** Answers only `owner()`, pinning the owner preflight as this operation's sole contract read. */
@@ -40,7 +46,7 @@ function stubChain({
   owner?: string
   onCall?: (selector?: string) => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
