@@ -122,9 +122,6 @@ import {
 } from './extra-args.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
-import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
-import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
-import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
@@ -143,6 +140,12 @@ import {
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
+import {
+  decodeTokenPoolChainConfig,
+  decodeTokenPoolChainConfigOverride,
+  decodeTokenPoolStateConfig,
+  deriveTokenPoolChainConfigOverridePda,
+} from './token-pool.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
   type SolanaSentSlice,
@@ -161,21 +164,6 @@ const routerCoder = sizedCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
 const offrampCoder = sizedCoder(CCIP_OFFRAMP_IDL)
 const offrampV2Coder = sizedCoder(CCIP_OFFRAMP_V2_IDL)
-const TOKEN_POOL_IDL = {
-  ...BURN_MINT_TOKEN_POOL,
-  types: BASE_TOKEN_POOL.types,
-  events: BASE_TOKEN_POOL.events,
-  errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
-}
-
-const tokenPoolCoder = sizedCoder(TOKEN_POOL_IDL)
-const CCTP_TOKEN_POOL_IDL = {
-  ...CCIP_CCTP_TOKEN_POOL,
-  types: [...BASE_TOKEN_POOL.types, ...CCIP_CCTP_TOKEN_POOL.types],
-  events: [...BASE_TOKEN_POOL.events, ...CCIP_CCTP_TOKEN_POOL.events],
-  errors: [...BASE_TOKEN_POOL.errors, ...CCIP_CCTP_TOKEN_POOL.errors],
-}
-const cctpTokenPoolCoder = sizedCoder(CCTP_TOKEN_POOL_IDL)
 // const commonCoder = sizedCoder(CCIP_COMMON_IDL)
 
 interface ParsedTokenInfo {
@@ -2024,28 +2012,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     tokenPoolProgram: string
     typeAndVersion?: string
   }> {
-    // `tokenPool` is actually a State PDA in the tokenPoolProgram
-    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState || tokenPoolState.data.length < 266 + 32)
-      throw new CCIPTokenPoolStateNotFoundError(tokenPool)
-    const tokenPoolProgram = tokenPoolState.owner.toBase58()
+    const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
     let typeAndVersion
     try {
-      ;[, , typeAndVersion] = await this.typeAndVersion(tokenPoolProgram)
+      ;[, , typeAndVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
     } catch (_) {
       // TokenPool may not have a typeAndVersion
     }
 
-    // const { config }: { config: IdlTypes<typeof BASE_TOKEN_POOL>['BaseConfig'] } =
-    //   tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
-    const mint = new PublicKey(tokenPoolState.data.subarray(41, 41 + 32))
-    const router = new PublicKey(tokenPoolState.data.subarray(266, 266 + 32))
-
     return {
-      token: mint.toBase58(),
-      router: router.toBase58(),
-      tokenPoolProgram,
+      token: config.mint.toBase58(),
+      router: config.router.toBase58(),
+      tokenPoolProgram: tokenPoolProgram.toBase58(),
       typeAndVersion,
     }
   }
@@ -2054,19 +2033,24 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getTokenPoolRemotes}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if chain config not found for specified selector
+   *
+   * @remarks
+   * 2.0 pools also return their faster-than-finality rate limits
+   * (`fastOutboundRateLimiterState` / `fastInboundRateLimiterState`), from their per-chain FTF
+   * override; `null` when it's unset or disabled, as FTF transfers then use the standard limits.
    */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>> {
-    // `tokenPool` is actually a State PDA in the tokenPoolProgram
-    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState) throw new CCIPTokenPoolStateNotFoundError(tokenPool)
+    const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
-    const tokenPoolProgram = tokenPoolState.owner
-
-    const { config }: { config: { mint: PublicKey; router: PublicKey } } =
-      tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+    let poolType: string | undefined, poolVersion: string | undefined
+    try {
+      ;[poolType, poolVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
+    } catch (_) {
+      // Custom pool programs may not implement `typeVersion`
+    }
 
     // Get all supported chains by fetching ChainConfig PDAs
     // We need to scan for all ChainConfig accounts owned by this token pool program
@@ -2110,14 +2094,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         ],
       })
 
+    const remoteSelectors = new Map<string, bigint>()
     for (const acc of accounts) {
       try {
-        let base: IdlTypes<typeof BASE_TOKEN_POOL>['BaseChain']
-        try {
-          ;({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
-        } catch (_) {
-          ;({ base } = cctpTokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
-        }
+        const base = decodeTokenPoolChainConfig(acc.account.data, poolType)
 
         let remoteChainSelector
         // test all selectors, to find the correct seed
@@ -2154,12 +2134,68 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           inboundRateLimiterState,
           outboundRateLimiterState,
         }
+        remoteSelectors.set(remoteNetwork.name, remoteChainSelector)
       } catch (err) {
         this.logger.warn('Failed to decode ChainConfig account:', err)
       }
     }
 
+    // FTF overrides only exist on 2.0 pools; probe them on pools of unknown version too
+    if (poolVersion != null && poolVersion < CCIPVersion.V2_0) return remotes
+    const names = [...remoteSelectors.keys()]
+    const overridePdas = names.map((name) =>
+      deriveTokenPoolChainConfigOverridePda(
+        tokenPoolProgram,
+        remoteSelectors.get(name)!,
+        config.mint,
+      ),
+    )
+    const overrides = []
+    for (let i = 0; i < overridePdas.length; i += 100) {
+      overrides.push(
+        ...(await this.connection.getMultipleAccountsInfo(overridePdas.slice(i, i + 100))),
+      )
+    }
+    for (const [i, name] of names.entries()) {
+      const override = overrides[i]
+      // a pool of unknown version without overrides may not be a 2.0 pool
+      if (!override && poolVersion == null) continue
+      let fast
+      try {
+        fast = override && decodeTokenPoolChainConfigOverride(override.data)
+      } catch (err) {
+        this.logger.warn('Failed to decode ChainConfigOverride account:', err)
+        continue
+      }
+      remotes[name] = {
+        ...remotes[name]!,
+        fastOutboundRateLimiterState: fast ? convertRateLimiter(fast.outboundRateLimit) : null,
+        fastInboundRateLimiterState: fast ? convertRateLimiter(fast.inboundRateLimit) : null,
+      }
+    }
+
     return remotes
+  }
+
+  /**
+   * Fetches and decodes a token pool's State account.
+   * @param tokenPool - Token pool State PDA.
+   * @returns The program owning the pool, and its config.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} if `tokenPool` isn't a token pool State account
+   */
+  private async _getTokenPoolState(tokenPool: string) {
+    // `tokenPool` is actually a State PDA in the tokenPoolProgram
+    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
+    if (!tokenPoolState) throw new CCIPTokenPoolStateNotFoundError(tokenPool)
+    let config
+    try {
+      config = decodeTokenPoolStateConfig(tokenPoolState.data)
+    } catch (err) {
+      throw new CCIPTokenPoolStateNotFoundError(tokenPool, {
+        ...(err instanceof Error && { cause: err }),
+      })
+    }
+    return { tokenPoolProgram: tokenPoolState.owner, config }
   }
 
   /** {@inheritDoc Chain.getSupportedTokens} */

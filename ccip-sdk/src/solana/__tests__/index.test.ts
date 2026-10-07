@@ -3,15 +3,21 @@ import { beforeEach, describe, it, mock } from 'node:test'
 
 import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { type Connection, PublicKey } from '@solana/web3.js'
+import BN from 'bn.js'
 
 import {
   CCIPCommitHistoryPrunedError,
   CCIPCommitNotFoundError,
   CCIPDataFormatUnsupportedError,
+  CCIPTokenPoolStateNotFoundError,
 } from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
 import { CCIPVersion } from '../../types.ts'
+import { toLeArray } from '../../utils.ts'
+import { sizedCoder } from '../coder.ts'
+import { IDL as BASE_TOKEN_POOL_V2 } from '../idl/2.0.0/BASE_TOKEN_POOL.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
+import { deriveTokenPoolChainConfigOverridePda } from '../token-pool.ts'
 import { hexDiscriminator } from '../utils.ts'
 
 // Create mock functions
@@ -689,6 +695,176 @@ describe('SolanaChain getRegistryTokenConfig', () => {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
     })
+  })
+})
+
+describe('SolanaChain token pool readers', () => {
+  const key = (byte: number) => new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
+  const coder = sizedCoder(BASE_TOKEN_POOL_V2)
+
+  const router = key(1)
+  const mint = key(2)
+  const poolProgram = key(3)
+  const tokenPool = key(4)
+  const remoteSelector = 16423721717087811551n // solana-devnet
+  const chainConfigPda = PublicKey.findProgramAddressSync(
+    [Buffer.from('ccip_tokenpool_chainconfig'), toLeArray(remoteSelector, 8), mint.toBuffer()],
+    poolProgram,
+  )[0]
+  const overridePda = deriveTokenPoolChainConfigOverridePda(poolProgram, remoteSelector, mint)
+
+  const bucket = (enabled: boolean, capacity: number, rate: number) => ({
+    tokens: new BN(capacity),
+    lastUpdated: new BN(Math.floor(Date.now() / 1000)),
+    cfg: { enabled, capacity: new BN(capacity), rate: new BN(rate) },
+  })
+  const encode = (name: string, data: unknown) => coder.accounts.encode(name, data)
+
+  async function poolChain({
+    typeAndVersion,
+    override,
+  }: {
+    typeAndVersion: () => Promise<[string, string, string]>
+    override?: { enabled: boolean }
+  }) {
+    const state = await encode('state', {
+      version: 1,
+      config: {
+        tokenProgram: key(10),
+        mint,
+        decimals: 9,
+        poolSigner: key(11),
+        poolTokenAccount: key(12),
+        owner: key(13),
+        proposedOwner: key(14),
+        rateLimitAdmin: key(15),
+        routerOnrampAuthority: key(16),
+        router,
+      },
+    })
+    const chainConfig = await encode('chainConfig', {
+      base: {
+        remote: {
+          poolAddresses: [{ address: key(0xbb).toBuffer() }],
+          tokenAddress: { address: key(0xaa).toBuffer() },
+          decimals: 18,
+        },
+        inboundRateLimit: bucket(true, 100, 1),
+        outboundRateLimit: bucket(true, 200, 2),
+      },
+    })
+    const overrideData =
+      override &&
+      (await encode('chainConfigOverride', {
+        bump: 254,
+        version: 1,
+        base: {
+          remoteChainSelector: new BN(remoteSelector.toString()),
+          mint,
+          inboundRateLimit: bucket(override.enabled, 10, 3),
+          outboundRateLimit: bucket(override.enabled, 20, 4),
+          overrideType: { ftf: {} },
+        },
+      }))
+
+    const accounts = new Map([
+      [tokenPool.toBase58(), { owner: poolProgram, data: state }],
+      [chainConfigPda.toBase58(), { owner: poolProgram, data: chainConfig }],
+      ...(overrideData
+        ? [[overridePda.toBase58(), { owner: poolProgram, data: overrideData }] as const]
+        : []),
+    ])
+    const getMultipleAccountsInfo = mock.fn(async (keys: PublicKey[]) =>
+      keys.map((k) => accounts.get(k.toBase58()) ?? null),
+    )
+    const chain = new SolanaChain(
+      {
+        getAccountInfo: async (k: PublicKey) => accounts.get(k.toBase58()) ?? null,
+        getProgramAccounts: async () => [
+          { pubkey: chainConfigPda, account: accounts.get(chainConfigPda.toBase58()) },
+        ],
+        getMultipleAccountsInfo,
+        getSignaturesForAddress: async () => [],
+      } as unknown as Connection,
+      mockNetworkInfo,
+    )
+    mock.method(chain, 'typeAndVersion', typeAndVersion)
+    return { chain, getMultipleAccountsInfo }
+  }
+
+  const v2Pool = async () =>
+    ['burnmint-token-pool', CCIPVersion.V2_0, 'burnmint-token-pool 2.0.0-dev'] as [
+      string,
+      string,
+      string,
+    ]
+  const v16Pool = async () =>
+    ['burnmint-token-pool', CCIPVersion.V1_6, 'burnmint-token-pool 1.6.2'] as [
+      string,
+      string,
+      string,
+    ]
+  const customPool = async (): Promise<[string, string, string]> => {
+    throw new Error('typeVersion not implemented')
+  }
+
+  it('returns the token, router and pool program of a pool', async () => {
+    const { chain } = await poolChain({ typeAndVersion: v2Pool })
+    assert.deepEqual(await chain.getTokenPoolConfig(tokenPool.toBase58()), {
+      token: mint.toBase58(),
+      router: router.toBase58(),
+      tokenPoolProgram: poolProgram.toBase58(),
+      typeAndVersion: 'burnmint-token-pool 2.0.0-dev',
+    })
+  })
+
+  it('rejects accounts that are not a pool State', async () => {
+    const { chain } = await poolChain({ typeAndVersion: v2Pool })
+    await assert.rejects(
+      chain.getTokenPoolConfig(chainConfigPda.toBase58()),
+      CCIPTokenPoolStateNotFoundError,
+    )
+  })
+
+  it("returns a 2.0 pool's FTF rate limits from its override", async () => {
+    const { chain } = await poolChain({ typeAndVersion: v2Pool, override: { enabled: true } })
+    const remotes = await chain.getTokenPoolRemotes(tokenPool.toBase58())
+    const remote = remotes['solana-devnet']!
+    assert.equal(remote.remoteToken, key(0xaa).toBase58())
+    assert.deepEqual(remote.remotePools, [key(0xbb).toBase58()])
+    assert.equal(remote.outboundRateLimiterState?.capacity, 200n)
+    assert.ok('fastOutboundRateLimiterState' in remote)
+    assert.equal(remote.fastOutboundRateLimiterState?.capacity, 20n)
+    assert.equal(remote.fastOutboundRateLimiterState.rate, 4n)
+    assert.equal(remote.fastInboundRateLimiterState?.capacity, 10n)
+  })
+
+  it('returns null FTF rate limits for 2.0 pools without an enabled override', async () => {
+    for (const override of [undefined, { enabled: false }]) {
+      const { chain } = await poolChain({ typeAndVersion: v2Pool, override })
+      const remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+      assert.ok('fastOutboundRateLimiterState' in remote)
+      assert.equal(remote.fastOutboundRateLimiterState, null)
+      assert.equal(remote.fastInboundRateLimiterState, null)
+    }
+  })
+
+  it('omits FTF rate limits for 1.6 pools without probing overrides', async () => {
+    const { chain, getMultipleAccountsInfo } = await poolChain({ typeAndVersion: v16Pool })
+    const remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.equal(remote.outboundRateLimiterState?.capacity, 200n)
+    assert.ok(!('fastOutboundRateLimiterState' in remote))
+    assert.equal(getMultipleAccountsInfo.mock.callCount(), 0)
+  })
+
+  it('returns FTF rate limits of pools of unknown version only if they have an override', async () => {
+    let { chain } = await poolChain({ typeAndVersion: customPool })
+    let remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok(!('fastOutboundRateLimiterState' in remote))
+    ;({ chain } = await poolChain({ typeAndVersion: customPool, override: { enabled: true } }))
+    remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok('fastOutboundRateLimiterState' in remote)
+    assert.equal(remote.fastOutboundRateLimiterState?.capacity, 20n)
   })
 })
 
