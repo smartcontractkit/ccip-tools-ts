@@ -240,6 +240,24 @@ describe('GrantMintRole (cct/evm)', () => {
         (err: unknown) => err instanceof CCTContractTypeInvalidError,
       )
     })
+
+    it('reports the family check even when an owner() read would fail faster', async () => {
+      // An EOA: owner() fails to decode at once, isMinter only after a slower round trip. Racing
+      // the two would surface the raw decode error; the role read must settle first.
+      const seen: string[] = []
+      const chain = stubChain()
+      chain.provider.call = (({ data }: { data: string }) => {
+        const fn = FRESH.getFunction(data.slice(0, 10))!.name
+        seen.push(fn)
+        if (fn === 'owner') return Promise.reject(makeError('could not decode result', 'BAD_DATA'))
+        return new Promise((_, reject) => setTimeout(() => reject(missingFunction()), 10))
+      }) as typeof chain.provider.call
+      await assert.rejects(
+        () => generate(chain),
+        (err: unknown) => err instanceof CCTContractTypeInvalidError,
+      )
+      assert.deepEqual(seen, ['isMinter'])
+    })
   })
 
   describe('no-op guard', () => {
