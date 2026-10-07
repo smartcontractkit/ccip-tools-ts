@@ -187,6 +187,17 @@ export type ChainContext = WithLogger & {
    * When the signal fires, the provider is destroyed and all active getLogs watch loops exit.
    */
   abort?: AbortSignal
+
+  /**
+   * Solana: also send over CCIP 2.0 lanes with their sender allowlist enabled, which are otherwise
+   * treated as not supporting 2.0, so quotes and sends never depend on the sender. When enabled,
+   * every sender goes over 2.0 on those lanes, and the router rejects senders off the allowlist on
+   * send. Meant for testing allowlisted lanes.
+   *
+   * Default: `false`
+   * @internal
+   */
+  solanaSendV2OnAllowlistedLanes?: boolean
 } & WithCantonConfig
 
 /**
@@ -1647,7 +1658,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Fetch the current fee for a given intended message.
    *
-   * @param opts - {@link SendMessageOpts} without approveMax, plus the optional `sender`
+   * @param opts - {@link SendMessageOpts} without approveMax
    * @returns Fee amount in the feeToken's smallest units
    *
    * @example Calculate message fee
@@ -1660,15 +1671,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Fee: ${fee} wei`)
    * ```
    */
-  abstract getFee(
-    opts: Omit<SendMessageOpts, 'approveMax'> & {
-      /**
-       * Address of the wallet which will send the message. Families whose route or fee depends on
-       * it use it to quote what `sendMessage` will charge; others ignore it.
-       */
-      sender?: string
-    },
-  ): Promise<bigint>
+  abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
    * Generate unsigned txs for ccipSend'ing a message.
    *

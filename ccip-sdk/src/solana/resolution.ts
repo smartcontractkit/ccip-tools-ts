@@ -369,10 +369,11 @@ async function resolveInstruction(
 
 /**
  * Resolves the router's `get_fee_v2` instruction for a message. The instruction returns a
- * `GetFeeResultV2` when simulated.
+ * `GetFeeResultV2` when simulated. Quotes don't depend on the sender: the router resolves and
+ * validates token accounts against a fixed placeholder sender, without requiring them to exist.
  * @param ctx - Context with the Solana connection and logger.
- * @param opts - Router, destination selector, message sender and message; `payer` overrides
- *   the simulation fee payer when `sender` isn't funded.
+ * @param opts - Router, destination selector and message; `payer` is the simulation fee payer,
+ *   and the resolution caller, which quotes ignore.
  * @returns The resolved `get_fee_v2` instruction and its lookup tables.
  */
 export function resolveGetFeeV2(
@@ -380,27 +381,23 @@ export function resolveGetFeeV2(
   {
     router,
     destChainSelector,
-    sender,
     message,
     payer,
   }: {
     router: PublicKey
     destChainSelector: bigint
-    sender: PublicKey
     message: AnyMessage
-    payer?: PublicKey
+    payer: PublicKey
   },
 ): Promise<ResolvedInstruction> {
   const svmMessage = anyToSvmMessage(message)
   return resolveInstruction(ctx, {
     programId: router,
-    caller: sender,
-    payer,
+    caller: payer,
     discriminator: GET_FEE_V2_DISCRIMINATOR,
     encodeArgs: (resolutionMetadata) =>
       routerV2Coder.types.encode('GetFeeParams', {
         destChainSelector: new BN(destChainSelector.toString()),
-        sender,
         message: svmMessage,
         resolutionMetadata,
       }),

@@ -11,10 +11,9 @@ import {
   PublicKey,
   SendTransactionError,
 } from '@solana/web3.js'
-import BN from 'bn.js'
 
+import type { ChainContext } from '../chain.ts'
 import {
-  CCIPArgumentInvalidError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPSolanaV2LaneUnavailableError,
 } from '../errors/index.ts'
@@ -126,7 +125,6 @@ function routerConnection(
     saved = [{ pubkey: randomKey(), isSigner: false, isWritable: false }] as AccountMeta[],
     lookupTablesToSave = [] as PublicKey[],
     fee = 12_345n,
-    destChainAccount = undefined as Buffer | undefined,
     other = { err: { InstructionError: [1, { Custom: 9999 }] } } as SimulationResult,
   } = {},
 ) {
@@ -158,23 +156,13 @@ function routerConnection(
   const getAddressLookupTable = mock.fn(async (key: PublicKey) => ({
     value: { key, state: { addresses: [] } },
   }))
-  const getAccountInfoAndContext = mock.fn(async () => ({
-    context: { slot: 1 },
-    value: destChainAccount && {
-      data: destChainAccount,
-      owner: router,
-      lamports: 1,
-      executable: false,
-    },
-  }))
   const connection = {
     simulateTransaction,
     getAddressLookupTable,
-    getAccountInfoAndContext,
     getAccountInfo: mock.fn(async () => null),
     getSignaturesForAddress: mock.fn(async () => []),
   } as unknown as Connection
-  return { connection, simulateTransaction, getAddressLookupTable, getAccountInfoAndContext }
+  return { connection, simulateTransaction, getAddressLookupTable }
 }
 
 /** Staging's Sepolia observation, with its allowlist enabled. */
@@ -187,35 +175,6 @@ function allowlistedObservation(): Buffer {
     ...observation,
     allowListEnabled: true,
     allowedSendersCount: 1,
-  })
-}
-
-/** A `destChainCcipV2` account whose allowlist holds `allowedSenders`. */
-function destChainAccount(allowedSenders: PublicKey[]): Promise<Buffer> {
-  return routerV2Coder.accounts.encode('destChainCcipV2', {
-    bump: 255,
-    version: 1,
-    chainSelector: new BN(SEPOLIA.toString()),
-    state: {
-      messageNumber: new BN(1),
-      messageNumberToRestore: new BN(0),
-      restoreOnAction: { none: {} },
-    },
-    config: {
-      laneCodeVersion: { default: {} },
-      addressBytesLength: 20,
-      tokenReceiverAllowed: false,
-      allowedSenders,
-      allowListEnabled: true,
-      defaultCcvs: [],
-      laneMandatedCcvs: [],
-      defaultExecutor: randomKey(),
-      offramp: Buffer.alloc(20, 1),
-      messageNetworkFee: 0,
-      tokenTransferNetworkFee: 0,
-      baseExecutionGasCost: 0,
-      maxFeePerMessage: 0,
-    },
   })
 }
 
@@ -375,10 +334,19 @@ describe('selectSendLane', () => {
     data: '0x',
     extraArgs,
   })
-  const select = (connection: Connection, extraArgs: ExtraArgs, sender?: PublicKey) =>
+  const select = (
+    connection: Connection,
+    extraArgs: ExtraArgs,
+    sendV2OnAllowlistedLanes?: boolean,
+  ) =>
     selectSendLane(
       { connection, logger: silent },
-      { router: STAGING_ROUTER, destChainSelector: SEPOLIA, message: message(extraArgs), sender },
+      {
+        router: STAGING_ROUTER,
+        destChainSelector: SEPOLIA,
+        message: message(extraArgs),
+        sendV2OnAllowlistedLanes,
+      },
     )
 
   it('prefers 2.0 for legacy args, converting them', async () => {
@@ -397,14 +365,14 @@ describe('selectSendLane', () => {
     assert.equal(lane.message.extraArgs, v3)
   })
 
-  for (const [custom, reason] of [
-    [3012, 'lane-not-configured'],
-    [101, 'router-without-v2-support'],
+  // an enabled allowlist counts as no 2.0, whoever the sender: the choice can't depend on it
+  for (const [observation, reason] of [
+    [simulationError(3012), 'lane-not-configured'],
+    [simulationError(101), 'router-without-v2-support'],
+    [allowlistedObservation(), 'allowlist-enabled'],
   ] as const) {
     it(`falls back to 1.6 for legacy args when ${reason}`, async () => {
-      const { connection } = routerConnection(STAGING_ROUTER, {
-        observation: simulationError(custom),
-      })
+      const { connection } = routerConnection(STAGING_ROUTER, { observation })
       const legacy = { gasLimit: 5n, allowOutOfOrderExecution: true }
       const lane = await select(connection, legacy)
       assert.equal(lane.version, CCIPVersion.V1_6)
@@ -412,9 +380,7 @@ describe('selectSendLane', () => {
     })
 
     it(`throws for GenericExtraArgsV3 when ${reason}`, async () => {
-      const { connection } = routerConnection(STAGING_ROUTER, {
-        observation: simulationError(custom),
-      })
+      const { connection } = routerConnection(STAGING_ROUTER, { observation })
       await assert.rejects(
         select(connection, LANE_DEFAULTS_V3),
         (err: unknown) =>
@@ -427,68 +393,22 @@ describe('selectSendLane', () => {
     })
   }
 
+  it('uses 2.0 on a lane with its allowlist enabled when opted in', async () => {
+    const { connection } = routerConnection(STAGING_ROUTER, {
+      observation: allowlistedObservation(),
+    })
+    const legacy = await select(connection, { gasLimit: 5n }, true)
+    assert.equal(legacy.version, CCIPVersion.V2_0)
+    assert.deepEqual(legacy.message.extraArgs, { ...LANE_DEFAULTS_V3, gasLimit: 5n })
+    const v3 = await select(connection, LANE_DEFAULTS_V3, true)
+    assert.equal(v3.version, CCIPVersion.V2_0)
+  })
+
   it('sends args without a V3 equivalent over 1.6, without observing the lane', async () => {
     const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER)
     const lane = await select(connection, { gasLimit: 0x1_0000_0000n })
     assert.equal(lane.version, CCIPVersion.V1_6)
     assert.equal(simulateTransaction.mock.calls.length, 0)
-  })
-
-  describe('with the lane allowlist enabled', () => {
-    const allowed = randomKey()
-
-    it('uses 2.0 for an allowlisted sender', async () => {
-      const { connection } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-        destChainAccount: await destChainAccount([randomKey(), allowed]),
-      })
-      const lane = await select(connection, LANE_DEFAULTS_V3, allowed)
-      assert.equal(lane.version, CCIPVersion.V2_0)
-    })
-
-    it('falls back to 1.6 for another sender with legacy args, and throws with V3', async () => {
-      const { connection } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-        destChainAccount: await destChainAccount([allowed]),
-      })
-      const sender = randomKey()
-      const lane = await select(connection, { gasLimit: 5n }, sender)
-      assert.equal(lane.version, CCIPVersion.V1_6)
-      await assert.rejects(
-        select(connection, LANE_DEFAULTS_V3, sender),
-        (err: unknown) =>
-          err instanceof CCIPSolanaV2LaneUnavailableError &&
-          err.context.reason === 'sender-not-allowed' &&
-          err.context.sender === sender.toBase58() &&
-          err.message.includes(sender.toBase58()),
-      )
-    })
-
-    it('requires the sender, which decides the entrypoint', async () => {
-      const { connection, getAccountInfoAndContext } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-      })
-      for (const extraArgs of [LANE_DEFAULTS_V3, { gasLimit: 5n }]) {
-        await assert.rejects(
-          select(connection, extraArgs),
-          (err: unknown) =>
-            err instanceof CCIPArgumentInvalidError &&
-            err.context.argument === 'sender' &&
-            err.context.router === STAGING_ROUTER.toBase58() &&
-            err.context.destChainSelector === SEPOLIA,
-        )
-      }
-      assert.equal(getAccountInfoAndContext.mock.calls.length, 0)
-    })
-
-    it("doesn't require it for args without a V3 equivalent, which can only go over 1.6", async () => {
-      const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-      })
-      const lane = await select(connection, { gasLimit: 0x1_0000_0000n })
-      assert.equal(lane.version, CCIPVersion.V1_6)
-      assert.equal(simulateTransaction.mock.calls.length, 0)
-    })
   })
 })
 
@@ -501,22 +421,22 @@ describe('getFeeV2', () => {
       STAGING_ROUTER,
       { fee: 42n, lookupTablesToSave: [resolvedLut] },
     )
-    const sender = randomKey()
-
     const fee = await getFeeV2(
       { connection, logger: silent },
-      { router: STAGING_ROUTER, destChainSelector: SEPOLIA, message, sender },
+      { router: STAGING_ROUTER, destChainSelector: SEPOLIA, message },
     )
 
     assert.equal(fee, 42n)
-    const [start, quote] = simulateTransaction.mock.calls.map((call) =>
-      lastInstruction(call.arguments[0]),
-    )
-    // resolution runs as the sender, then the quote runs with a heap frame
-    assert.deepEqual(start!.data.subarray(8, 40), sender.toBuffer())
-    assert.deepEqual(quote!.data.subarray(0, 8), GET_FEE_V2_DISCRIMINATOR)
+    const [resolutionTx, quoteTx] = simulateTransaction.mock.calls.map((call) => call.arguments[0])
+    const quote = lastInstruction(quoteTx!)
+    // both run as the same placeholder payer, whoever sends: quotes don't depend on the sender
+    const payer = resolutionTx!.message.staticAccountKeys[0]!
+    assert.ok(quoteTx!.message.staticAccountKeys[0]!.equals(payer))
+    assert.deepEqual(lastInstruction(resolutionTx!).data.subarray(8, 40), payer.toBuffer())
+    // then the quote runs with a heap frame
+    assert.deepEqual(quote.data.subarray(0, 8), GET_FEE_V2_DISCRIMINATOR)
     assert.deepEqual(
-      quote!.programIds.map((id) => id.toBase58()),
+      quote.programIds.map((id) => id.toBase58()),
       [
         ComputeBudgetProgram.programId.toBase58(),
         ComputeBudgetProgram.programId.toBase58(),
@@ -538,8 +458,12 @@ describe('getFeeV2', () => {
 })
 
 describe('SolanaChain send lane routing', () => {
-  const chain = (connection: Connection) =>
-    new SolanaChain(connection, networkInfo('solana-devnet'), { apiClient: null, logger: silent })
+  const chain = (connection: Connection, ctx?: ChainContext) =>
+    new SolanaChain(connection, networkInfo('solana-devnet'), {
+      apiClient: null,
+      logger: silent,
+      ...ctx,
+    })
   const sender = randomKey()
   const opts = (extraArgs: Record<string, unknown>, fee?: bigint) => ({
     router: STAGING_ROUTER.toBase58(),
@@ -584,7 +508,7 @@ describe('SolanaChain send lane routing', () => {
       unsigned.lookupTables?.map(({ key }) => key.toBase58()),
       [STAGING_SEND_LOOKUP_TABLE],
     )
-    // one observation, then get_fee_v2 (start + quote) and ccip_send_v2 (start) as the sender
+    // one observation, then get_fee_v2 (start + quote), then ccip_send_v2 (start) as the sender
     const discriminators = simulateTransaction.mock.calls.map((call) =>
       lastInstruction(call.arguments[0]).data.subarray(0, 8),
     )
@@ -612,38 +536,57 @@ describe('SolanaChain send lane routing', () => {
   })
 
   describe('on a lane with its allowlist enabled', () => {
-    it('quotes over 2.0 for an allowlisted sender, resolving get_fee_v2 as it', async () => {
+    it('quotes over 1.6, as sendMessage would send it', async () => {
       const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-        destChainAccount: await destChainAccount([sender]),
-        fee: 99n,
-      })
-      assert.equal(await chain(connection).getFee(opts({ gasLimit: 0n })), 99n)
-      const start = simulateTransaction.mock.calls
-        .map((call) => lastInstruction(call.arguments[0]).data)
-        .find((data) => data.subarray(0, 8).equals(RESOLVE_ACCOUNTS_START_DISCRIMINATOR))
-      assert.deepEqual(start?.subarray(8, 40), sender.toBuffer())
-    })
-
-    it('quotes over 1.6 for another sender, as sendMessage would send it', async () => {
-      const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
-        observation: allowlistedObservation(),
-        destChainAccount: await destChainAccount([randomKey()]),
-      })
-      // the 1.6 quote reads the router config, which this mock doesn't have
-      await assert.rejects(
-        chain(connection).getFee(opts({ gasLimit: 0n })),
-        CCIPSolanaRouterConfigNotFoundError,
-      )
-      assert.equal(simulateTransaction.mock.calls.length, 1, 'only the observation was simulated')
-    })
-
-    it('rejects a quote without the sender', async () => {
-      const { connection } = routerConnection(STAGING_ROUTER, {
         observation: allowlistedObservation(),
       })
       const { sender: _, ...feeOpts } = opts({ gasLimit: 0n })
-      await assert.rejects(chain(connection).getFee(feeOpts), CCIPArgumentInvalidError)
+      // the 1.6 quote reads the router config, which this mock doesn't have
+      await assert.rejects(chain(connection).getFee(feeOpts), CCIPSolanaRouterConfigNotFoundError)
+      assert.equal(simulateTransaction.mock.calls.length, 1, 'only the observation was simulated')
+    })
+
+    it('sends over 1.6, whoever the sender', async () => {
+      const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
+        observation: allowlistedObservation(),
+      })
+      // the 1.6 derivation is answered with a program error, which surfaces as-is
+      await assert.rejects(
+        chain(connection).generateUnsignedSendMessage(opts({ gasLimit: 0n }, 1n)),
+        SendTransactionError,
+      )
+      const derive = lastInstruction(simulateTransaction.mock.calls[1]!.arguments[0])
+      assert.deepEqual(derive.data.subarray(0, 8), sighash('global', 'derive_accounts_ccip_send'))
+    })
+
+    it('rejects GenericExtraArgsV3 in quotes and sends', async () => {
+      const { connection } = routerConnection(STAGING_ROUTER, {
+        observation: allowlistedObservation(),
+      })
+      const allowlistEnabled = (err: unknown) =>
+        err instanceof CCIPSolanaV2LaneUnavailableError &&
+        err.context.reason === 'allowlist-enabled'
+      const { sender: _, ...feeOpts } = opts({ finality: 'safe' })
+      await assert.rejects(chain(connection).getFee(feeOpts), allowlistEnabled)
+      await assert.rejects(
+        chain(connection).generateUnsignedSendMessage(opts({ finality: 'safe' })),
+        allowlistEnabled,
+      )
+    })
+
+    it('quotes and sends over 2.0 with solanaSendV2OnAllowlistedLanes', async () => {
+      const { connection } = routerConnection(STAGING_ROUTER, {
+        observation: allowlistedObservation(),
+        fee: 99n,
+      })
+      const optedIn = chain(connection, { solanaSendV2OnAllowlistedLanes: true })
+      const { sender: _, ...feeOpts } = opts({ gasLimit: 0n })
+      assert.equal(await optedIn.getFee(feeOpts), 99n)
+      const unsigned = await optedIn.generateUnsignedSendMessage(opts({ finality: 'safe' }))
+      assert.deepEqual(
+        unsigned.instructions.at(-1)!.data.subarray(0, 8),
+        CCIP_SEND_V2_DISCRIMINATOR,
+      )
     })
   })
 
@@ -670,8 +613,7 @@ describe('SolanaChain send lane routing', () => {
       chain(connection).generateUnsignedSendMessage(opts({ finality: 'safe' })),
       (err: unknown) =>
         err instanceof CCIPSolanaV2LaneUnavailableError &&
-        err.context.reason === 'router-without-v2-support' &&
-        err.context.sender === sender.toBase58(),
+        err.context.reason === 'router-without-v2-support',
     )
     assert.equal(simulateTransaction.mock.calls.length, 1, 'only the observation was simulated')
   })

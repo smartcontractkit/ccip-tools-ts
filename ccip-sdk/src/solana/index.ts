@@ -244,6 +244,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   connection: Connection
   commitment: Commitment = 'confirmed'
+  // see ChainContext.solanaSendV2OnAllowlistedLanes
+  private readonly sendV2OnAllowlistedLanes: boolean
 
   /**
    * Creates a new SolanaChain instance.
@@ -254,6 +256,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     super(network, ctx)
 
     this.connection = connection
+    this.sendV2OnAllowlistedLanes = ctx?.solanaSendV2OnAllowlistedLanes ?? false
 
     // Memoize expensive operations
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -1383,27 +1386,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getFee}
    *
    * Solana routers expose separate CCIP 1.6 and 2.0 entrypoints, chosen per message: 2.0 whenever
-   * the lane supports it (and allowlists the sender, if its allowlist is enabled) and the extraArgs
-   * are (or convert to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
-   * {@link SolanaChain.sendMessage}, so pass the `sender` it'll use: it's required on 2.0 lanes
-   * with an allowlist enabled.
+   * the lane supports it (without its sender allowlist enabled) and the extraArgs are (or convert
+   * to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
+   * {@link SolanaChain.sendMessage}.
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
-   *   the lane doesn't support CCIP 2.0, or its allowlist excludes the sender
-   * @throws {@link CCIPArgumentInvalidError} if `sender` is missing on a 2.0 lane with an
-   *   allowlist enabled
+   *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
   async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
     await this.checkSendMessage(opts)
     const { router, destChainSelector, message } = opts
-    const sender = opts.sender ? new PublicKey(opts.sender) : undefined
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     const lane = await selectSendLane(this, {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sender,
+      sendV2OnAllowlistedLanes: this.sendV2OnAllowlistedLanes,
     })
-    return this.quoteSendLane(router, destChainSelector, lane, sender)
+    return this.quoteSendLane(router, destChainSelector, lane)
   }
 
   // Quotes a message on the entrypoint `selectSendLane` chose for it
@@ -1411,14 +1410,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     router: string,
     destChainSelector: bigint,
     lane: SolanaSendLane,
-    sender?: PublicKey,
   ): Promise<bigint> {
     if (lane.version === CCIPVersion.V2_0) {
       return getFeeV2(this, {
         router: new PublicKey(router),
         destChainSelector,
         message: lane.message,
-        sender,
       })
     }
     return getFee(this, router, destChainSelector, lane.message)
@@ -1428,14 +1425,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.generateUnsignedSendMessage}
    *
    * Sends through the router's CCIP 2.0 entrypoint (`ccip_send_v2`) when possible, and its 1.6 one
-   * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane whose allowlist excludes
-   * the sender counts as unsupported.
+   * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane with its sender allowlist
+   * enabled counts as unsupported, whether or not it includes the sender.
    * @returns instructions - array of instructions; the send instruction is last, after any
    *   approval (and, for 2.0, a heap frame request, which must share its transaction)
    *   lookupTables - array of lookup tables for the send instruction
    *   mainIndex - instructions.length - 1
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
-   *   the lane doesn't support CCIP 2.0, or its allowlist excludes the sender
+   *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
   async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
@@ -1450,12 +1447,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sender,
+      sendV2OnAllowlistedLanes: this.sendV2OnAllowlistedLanes,
     })
     let fee = opts.message.fee
     if (fee == null) {
       await this.checkSendMessage({ ...opts, message: populatedMessage })
-      fee = await this.quoteSendLane(router, destChainSelector, lane, sender)
+      fee = await this.quoteSendLane(router, destChainSelector, lane)
     }
     const message = { ...lane.message, fee }
     const generate =
