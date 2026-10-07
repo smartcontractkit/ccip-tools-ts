@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Solana: CCIP 2.0 executions too large to go inline can be generated unsigned, for signers without v1 transaction support (e.g. Ledger). New `SolanaChain.generateUnsignedExecuteBuffer` returns the instructions writing a message's execution inputs to the payer's buffer, skipping chunks already written. Once they land, `generateUnsignedExecute` resolves `execute_v2` from the complete buffer, and accepts `forceBuffer` for 2.0 messages, which used to throw `CCIPArgumentInvalidError`. A complete buffer is used even without `forceBuffer`, by `execute` too. The buffer has to be complete before the execution can be generated, since `execute_v2`'s accounts are resolved from it: with `forceBuffer`, an incomplete buffer throws the new `CCIPSolanaExecutionBufferIncompleteError`
 - CCT SDK (EVM): add v1.6.x per-silo liquidity ops for `SiloedLockReleaseTokenPool`: `provideSiloedLiquidity`, `withdrawSiloedLiquidity`, `setSiloRebalancer`, `updateSiloDesignations`, `getAvailableTokens`, `getChainRebalancer`, `isSiloed`
 - CCT SDK: typed CCT errors can now be imported from `@chainlink/ccip-sdk`.
-- CCT SDK (EVM): export `DEPLOYABLE_TOKEN_POOL_TYPES`, `DeployableTokenPoolType` and `isDeployableTokenPoolType` from `@chainlink/ccip-sdk/cct/evm` for validating deployable pool types at runtime
+- CCT SDK (EVM): export `DEPLOYABLE_TOKEN_POOL_TYPES`, `DeployableTokenPoolType` and `isDeployableTokenPoolType` from `@chainlink/ccip-sdk/cct/evm` for runtime validation and compile-time typing of deployable pool types
 
 ## [1.15.0] - 2026-09-30
 
