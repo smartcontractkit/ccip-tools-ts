@@ -17,7 +17,9 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SendTransactionError,
+  TransactionInstruction,
 } from '@solana/web3.js'
+import BN from 'bn.js'
 import { hexlify } from 'ethers'
 
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
@@ -27,6 +29,7 @@ import { CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
 import {
+  type AnyMessage,
   type CCIPMessage,
   type MessageInput,
   CCIPVersion,
@@ -38,11 +41,13 @@ import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import {
   type ExecutionInputsV2,
+  GET_FEE_V2_DISCRIMINATOR,
   fetchLookupTables,
+  resolveAccounts,
   resolveCcipSendV2,
   resolveExecuteV2,
-  resolveGetFeeV2,
 } from './resolution.ts'
+import { anyToSvmMessage } from './send.ts'
 import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
@@ -482,14 +487,51 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
 
   const ctx = () => ({ connection: connection!, logger: testLogger })
 
-  /** Simulates a resolved get_fee_v2 and decodes its GetFeeResultV2. */
-  async function quote(message: Parameters<typeof resolveGetFeeV2>[1]['message']) {
-    const { instruction, lookupTables, metadata } = await resolveGetFeeV2(ctx(), {
-      router,
-      destChainSelector: STAGING.sepoliaSelector,
-      message,
-      payer: wallet!.publicKey,
+  /**
+   * Resolves get_fee_v2 in the layout of routers deployed before it dropped its `sender` param,
+   * quoting as the wallet.
+   *
+   * TODO: staging still runs such a router, while the SDK speaks the new layout, so these tests
+   * quote with this instead of `resolveGetFeeV2`, and the tests quoting through the SDK are `todo`.
+   * Once these start failing (staging redeployed), switch back to `resolveGetFeeV2` and drop this
+   * and the `todo`s.
+   */
+  async function resolveLegacyGetFeeV2(message: AnyMessage) {
+    const sender = wallet!.publicKey
+    const svmMessage = anyToSvmMessage(message)
+    const encode = (resolutionMetadata: Buffer) => {
+      const args = routerV2Coder.types.encode('GetFeeParams', {
+        destChainSelector: new BN(STAGING.sepoliaSelector.toString()),
+        message: svmMessage,
+        resolutionMetadata,
+      })
+      // the legacy layout has the sender right after the u64 destChainSelector
+      return Buffer.concat([
+        GET_FEE_V2_DISCRIMINATOR,
+        args.subarray(0, 8),
+        sender.toBuffer(),
+        args.subarray(8),
+      ])
+    }
+    const resolved = await resolveAccounts(ctx(), {
+      programId: router,
+      caller: sender,
+      ixData: encode(Buffer.alloc(0)),
     })
+    return {
+      instruction: new TransactionInstruction({
+        programId: router,
+        keys: resolved.accounts,
+        data: encode(resolved.metadata),
+      }),
+      lookupTables: await fetchLookupTables(connection!, resolved.lookupTables),
+      metadata: resolved.metadata,
+    }
+  }
+
+  /** Simulates a resolved get_fee_v2 and decodes its GetFeeResultV2. */
+  async function quote(message: AnyMessage) {
+    const { instruction, lookupTables, metadata } = await resolveLegacyGetFeeV2(message)
     // the fixed deployment lookup table isn't part of resolution; token transfers need it to fit v0
     const [sendLookupTable] = await fetchLookupTables(connection!, [
       new PublicKey(STAGING.sendLookupTable),
@@ -742,37 +784,50 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       return tx
     }
 
-    it('quotes legacy extraArgs over 2.0, as their GenericExtraArgsV3 conversion', async () => {
-      const fee = await solanaChain!.getFee({
-        router: STAGING.router,
-        destChainSelector: STAGING.sepoliaSelector,
-        message: { receiver, data: '0x1337', extraArgs: legacyArgs },
-      })
-      const { amount } = await quote({ receiver, data: '0x1337', extraArgs })
-      assert.equal(fee, amount)
-    })
+    // TODO: quotes through the SDK; see `resolveLegacyGetFeeV2`
+    const sdkQuotes = { todo: "staging's get_fee_v2 still takes a sender" }
 
-    it('quotes a token transfer over 2.0 without a sender, at what the send charges', async () => {
-      const message = {
-        receiver,
-        data: '0x',
-        tokenAmounts: [{ token: STAGING.sepoliaToken, amount: 1n }],
-        extraArgs: legacyArgs,
-      }
-      const fee = await solanaChain!.getFee({
-        router: STAGING.router,
-        destChainSelector: STAGING.sepoliaSelector,
-        message,
-      })
-      const request = await solanaChain!.sendMessage(sendOpts(message))
-      assert.equal(request.lane.version, CCIPVersion.V2_0)
-      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
-      assert.equal(sent.feeTokenAmount, fee, 'the send should charge the sender-less quote')
-    })
+    it(
+      'quotes legacy extraArgs over 2.0, as their GenericExtraArgsV3 conversion',
+      sdkQuotes,
+      async () => {
+        const fee = await solanaChain!.getFee({
+          router: STAGING.router,
+          destChainSelector: STAGING.sepoliaSelector,
+          message: { receiver, data: '0x1337', extraArgs: legacyArgs },
+        })
+        const { amount } = await quote({ receiver, data: '0x1337', extraArgs })
+        assert.equal(fee, amount)
+      },
+    )
+
+    it(
+      'quotes a token transfer over 2.0 without a sender, at what the send charges',
+      sdkQuotes,
+      async () => {
+        const message = {
+          receiver,
+          data: '0x',
+          tokenAmounts: [{ token: STAGING.sepoliaToken, amount: 1n }],
+          extraArgs: legacyArgs,
+        }
+        const fee = await solanaChain!.getFee({
+          router: STAGING.router,
+          destChainSelector: STAGING.sepoliaSelector,
+          message,
+        })
+        const request = await solanaChain!.sendMessage(sendOpts(message))
+        assert.equal(request.lane.version, CCIPVersion.V2_0)
+        const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+        assert.equal(sent.feeTokenAmount, fee, 'the send should charge the sender-less quote')
+      },
+    )
 
     it('sends legacy extraArgs over 2.0', async () => {
+      // TODO: let the SDK quote; see `resolveLegacyGetFeeV2`
+      const { amount: fee } = await quote({ receiver, data: '0x1337', extraArgs })
       const request = await solanaChain!.sendMessage(
-        sendOpts({ receiver, data: '0x1337', extraArgs: legacyArgs }),
+        sendOpts({ receiver, data: '0x1337', extraArgs: legacyArgs, fee }),
       )
       assert.equal(request.lane.version, CCIPVersion.V2_0)
       assert.equal(request.log.address, STAGING.router)
@@ -792,11 +847,19 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         BigInt((await connection!.getTokenAccountBalance(ata)).value.amount)
       const tokensBefore = await tokenBalance()
 
+      // TODO: let the SDK quote; see `resolveLegacyGetFeeV2`
+      const { amount: fee } = await quote({
+        receiver,
+        data: '0x',
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
+        extraArgs,
+      })
       const request = await solanaChain!.sendMessage(
         sendOpts({
           receiver,
           tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
           extraArgs: { finality: 'finalized' },
+          fee,
         }),
       )
 
@@ -900,20 +963,26 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
             solanaSendV2OnAllowlistedLanes: true,
           })
 
-        it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
-          await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-          const chain = optedIn()
-          const fee = await chain.getFee(feeOpts(v3))
-          const request = await chain.sendMessage(sendOpts({ ...v3, fee }))
-          assert.equal(request.lane.version, CCIPVersion.V2_0)
-          const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
-          assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
-        })
+        it(
+          'quotes and sends over 2.0 for an allowlisted sender, at the quoted fee',
+          sdkQuotes,
+          async () => {
+            await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
+            const chain = optedIn()
+            const fee = await chain.getFee(feeOpts(v3))
+            const request = await chain.sendMessage(sendOpts({ ...v3, fee }))
+            assert.equal(request.lane.version, CCIPVersion.V2_0)
+            const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+            assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+          },
+        )
 
         it('leaves rejecting a sender off the allowlist to the router', async () => {
           await setAllowlist([Keypair.generate().publicKey])
+          // TODO: let the SDK quote; see `resolveLegacyGetFeeV2`
+          const { amount: fee } = await quote({ receiver, data: '0x1337', extraArgs })
           await assert.rejects(
-            optedIn().sendMessage(sendOpts(v3)),
+            optedIn().sendMessage(sendOpts({ ...v3, fee })),
             (err: unknown) =>
               err instanceof SendTransactionError &&
               !!err.logs?.some((log) => log.includes('SenderNotAllowed')),
