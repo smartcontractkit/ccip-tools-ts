@@ -18,9 +18,10 @@ import { ChainFamily } from '../../../../networks.ts'
 import { CantonTokenManager } from '../../index.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID } from '../shared.ts'
 
-const POOL_OWNER = 'poolOwner::1220c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'
+const POOL_OWNER = `poolOwner::1220${'c3'.repeat(32)}`
 const RATE_LIMIT_ADMIN = 'rladmin::1220d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4'
 const INSTRUMENT_ADMIN = 'adminA::1220a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
+const LEDGER_PARTY = `ledger::1220${'e5'.repeat(32)}`
 const POOL_CID = '#pool-1'
 const POOL_INSTANCE_ID = 'pool-instance-1'
 const POOL_INSTANCE_ADDRESS = '0x' + 'cd'.repeat(32)
@@ -68,6 +69,8 @@ function remoteChainConfigsMap(
 function poolContract(
   opts: {
     rateLimitAdmin?: string
+    /** Raw `rateLimitAdmin` field, overriding the gRPC `Some`/`None` form. */
+    rateLimitAdminField?: unknown
     remoteChainConfigs?: Record<string, unknown>
     observers?: string[]
   } = {},
@@ -87,7 +90,14 @@ function poolContract(
           fields: [field('admin', party(INSTRUMENT_ADMIN)), field('id', text('usdc'))],
         }),
         field('decimals', int(6)),
-        field('rateLimitAdmin', opts.rateLimitAdmin ? some(party(opts.rateLimitAdmin)) : none()),
+        field(
+          'rateLimitAdmin',
+          'rateLimitAdminField' in opts
+            ? opts.rateLimitAdminField
+            : opts.rateLimitAdmin
+              ? some(party(opts.rateLimitAdmin))
+              : none(),
+        ),
         field('remoteChainConfigs', opts.remoteChainConfigs ?? remoteChainConfigsMap([])),
         field(
           'observers',
@@ -103,6 +113,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
+    ledgerParty: LEDGER_PARTY,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
       _t: string,
@@ -119,10 +130,10 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     const result = await manager.getTokenPoolState({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
 
+    assert.equal(result.poolType, 'burnMint')
     assert.equal(result.poolOwner, POOL_OWNER)
     assert.equal(result.poolInstanceId, POOL_INSTANCE_ID)
     assert.equal(result.decimals, 6)
@@ -139,7 +150,6 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     const result = await manager.getTokenPoolState({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
 
@@ -153,11 +163,41 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     const result = await manager.getTokenPoolState({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
 
     assert.equal(result.rateLimitAdmin, RATE_LIMIT_ADMIN)
+  })
+
+  // The JSON Ledger API spells `Some party` as the bare party string and `None` as `null`.
+  for (const [label, value, expected] of [
+    ['bare-string Some', RATE_LIMIT_ADMIN, RATE_LIMIT_ADMIN],
+    ['null None', null, undefined],
+  ] as const) {
+    it(`decodes the rate-limit admin from the JSON Ledger API form (${label})`, async () => {
+      const manager = CantonTokenManager.fromChain(
+        chainWith(poolContract({ rateLimitAdminField: value })),
+      )
+
+      const result = await manager.getTokenPoolState({
+        poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+        poolOwner: POOL_OWNER,
+      })
+
+      assert.equal(result.rateLimitAdmin, expected)
+    })
+  }
+
+  it('reads the pool type off the matched template (concrete package-ID form)', async () => {
+    const templateId = 'cafebabe:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+    const manager = CantonTokenManager.fromChain(chainWith({ ...poolContract(), templateId }))
+
+    const result = await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+      poolOwner: POOL_OWNER,
+    })
+
+    assert.equal(result.poolType, 'lockRelease')
   })
 
   it('decodes remoteChainConfigs Daml Map entries', async () => {
@@ -186,7 +226,6 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     const result = await manager.getTokenPoolState({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
 
@@ -235,7 +274,6 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
 
     const result = await manager.getTokenPoolState({
       poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-      poolType: 'burnMint',
       poolOwner: POOL_OWNER,
     })
 
@@ -259,10 +297,22 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     await assert.rejects(
       manager.getTokenPoolState({
         poolInstanceAddress: POOL_INSTANCE_ADDRESS,
-        poolType: 'burnMint',
         poolOwner: POOL_OWNER,
       }),
       /not active or not visible/,
     )
   })
+
+  for (const [label, poolInstanceAddress, reader] of [
+    ['its owner, for a raw address', `${POOL_INSTANCE_ID}@${POOL_OWNER}`, POOL_OWNER],
+    ['the ledger party, for a hashed address', POOL_INSTANCE_ADDRESS, LEDGER_PARTY],
+  ] as const) {
+    it(`reads as ${label}, when poolOwner is omitted`, async () => {
+      const manager = CantonTokenManager.fromChain(chainWith(null))
+      await assert.rejects(
+        manager.getTokenPoolState({ poolInstanceAddress }),
+        new RegExp(`not visible to ${reader}$`),
+      )
+    })
+  }
 })

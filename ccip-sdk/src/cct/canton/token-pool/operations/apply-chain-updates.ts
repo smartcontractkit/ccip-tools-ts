@@ -21,21 +21,23 @@ import {
   extractExerciseResult,
 } from '../../operation.ts'
 import type { CantonTransactionResult } from '../../types.ts'
+import { parseRawInstanceAddress } from '../../validate.ts'
 import {
-  BURN_MINT_POOL_TEMPLATE_ID,
-  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  POOL_TEMPLATE_IDS,
   buildPoolExercise,
-  normalizeRemoteAddress,
-  resolvePoolRef,
+  encodeRemoteAddress,
+  parseLaneRemoteAddresses,
+  resolvePool,
+  toContractRef,
 } from '../shared.ts'
 
 /** A single remote-chain config to add to the pool. */
 export interface ChainUpdate {
   /** Remote chain selector. */
   remoteChainSelector: bigint
-  /** Remote pool addresses (encoded). */
+  /** Remote pool addresses, in the remote chain's own format (unique). */
   remotePools: string[]
-  /** Remote token address (encoded instrument ID). */
+  /** Remote token address, in the remote chain's own format (`0x…` EVM, base58 Solana, …). */
   remoteTokenAddress: string
   /** Inbound committee-verifier raw instance addresses (`"instanceId@party"`). */
   inboundCCVs?: string[]
@@ -50,7 +52,7 @@ export interface ChainUpdate {
   inboundRateLimiter: string
   /**
    * Inbound custom-block-confirmations rate-limiter raw instance address.
-   * Required when `finalityConfig` is faster than finality.
+   * Required when `finalityConfig` is faster than finality (`WaitForSafe` or `BlockDepth`).
    */
   inboundCustomBlockConfirmationsRateLimiter?: string
   /** Outbound rate-limiter raw instance address. Required, distinct from inbound. */
@@ -59,10 +61,8 @@ export interface ChainUpdate {
 
 /** Parameters shared by `applyChainUpdates` generation and execution. */
 export interface ApplyChainUpdatesParams {
-  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`). */
+  /** Pool `InstanceAddress` (`0x<64-hex>` or `"instanceId@poolOwner"`), of either pool type. */
   poolInstanceAddress: string
-  /** Pool type (determines the template ID). */
-  poolType: 'burnMint' | 'lockRelease'
   /** Remote chain selectors to remove from the pool config. */
   remoteChainSelectorsToRemove?: bigint[]
   /** Remote chain configs to add to the pool config. */
@@ -88,7 +88,7 @@ export type ExecuteApplyChainUpdatesResult = CantonTransactionResult & {
 export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> {
   readonly name = 'applyChainUpdates'
 
-  /** Validates the pool target and that at least one add/remove is specified. */
+  /** Validates the pool target, that at least one add/remove is specified, and rate limiters. */
   protected override validate(p: GenerateApplyChainUpdatesParams): void {
     if (!p.poolInstanceAddress) {
       throw new CCTParamsInvalidError(
@@ -138,6 +138,43 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
           'inbound and outbound rate limiters must be distinct',
         )
       }
+      parseRawInstanceAddress(
+        this.name,
+        `chainsToAdd[${i}].inboundRateLimiter`,
+        c.inboundRateLimiter,
+      )
+      parseRawInstanceAddress(
+        this.name,
+        `chainsToAdd[${i}].outboundRateLimiter`,
+        c.outboundRateLimiter,
+      )
+      // Faster-than-finality inbound transfers draw on the custom-finality
+      // limiter, so a lane that allows them must reference one.
+      const finality = c.finalityConfig?.type ?? 'WaitForFinality'
+      if (c.inboundCustomBlockConfirmationsRateLimiter) {
+        parseRawInstanceAddress(
+          this.name,
+          `chainsToAdd[${i}].inboundCustomBlockConfirmationsRateLimiter`,
+          c.inboundCustomBlockConfirmationsRateLimiter,
+        )
+      } else if (finality !== 'WaitForFinality') {
+        throw new CCTParamsInvalidError(
+          this.name,
+          `chainsToAdd[${i}].inboundCustomBlockConfirmationsRateLimiter`,
+          `is required when finalityConfig is faster than finality (got ${finality})`,
+        )
+      }
+    }
+  }
+
+  /** Parses each added lane's remote addresses into their canonical spellings. */
+  protected override parse(p: GenerateApplyChainUpdatesParams): GenerateApplyChainUpdatesParams {
+    if (!p.chainsToAdd) return p
+    return {
+      ...p,
+      chainsToAdd: p.chainsToAdd.map((c, i) =>
+        parseLaneRemoteAddresses(this.name, `chainsToAdd[${i}]`, c),
+      ),
     }
   }
 
@@ -146,10 +183,12 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
     chain: CantonChain,
     p: CantonGenerateParams<ApplyChainUpdatesParams>,
   ): Promise<JsCommands> {
-    const templateId =
-      p.poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
-
-    const poolContract = await resolvePoolRef(chain, p.poolType, p.sender, p.poolInstanceAddress)
+    const { contract, poolType } = await resolvePool(
+      this.name,
+      chain,
+      p.sender,
+      p.poolInstanceAddress,
+    )
 
     // RawInstanceAddress newtypes encode as {unpack: raw}; FinalityConfig is a
     // Daml variant ({tag, value}).
@@ -157,8 +196,8 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
       remoteChainSelectorsToRemove: (p.remoteChainSelectorsToRemove ?? []).map((s) => s.toString()),
       chainsToAdd: (p.chainsToAdd ?? []).map((c) => ({
         remoteChainSelector: c.remoteChainSelector.toString(),
-        remotePools: c.remotePools.map(normalizeRemoteAddress),
-        remoteTokenAddress: normalizeRemoteAddress(c.remoteTokenAddress),
+        remotePools: c.remotePools.map(encodeRemoteAddress),
+        remoteTokenAddress: encodeRemoteAddress(c.remoteTokenAddress),
         inboundCCVs: (c.inboundCCVs ?? []).map(rawInstanceAddress),
         outboundCCVs: (c.outboundCCVs ?? []).map(rawInstanceAddress),
         finalityConfig: encodeFinalityConfig(c.finalityConfig ?? { type: 'WaitForFinality' }),
@@ -172,8 +211,8 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
 
     return buildPoolExercise({
       choice: 'ApplyChainUpdates',
-      templateId,
-      poolContract,
+      templateId: POOL_TEMPLATE_IDS[poolType],
+      poolContract: toContractRef(contract),
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-apply-chain-updates',

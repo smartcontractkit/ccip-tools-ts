@@ -745,17 +745,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned token `transferOwnership` tx (for multisig / offline signing), for a v1.x
-   * `FactoryBurnMintERC20`. The token owner grants and revokes mint/burn roles, and is independent
-   * of the pool's owner ({@link generateUnsignedTransferPoolOwnership}) — moving one leaves the
-   * other untouched. Same two-step and zero-address semantics, completed by
-   * {@link acceptTokenOwnership}, and the same `owner()` pre-flight of `sender`.
-   * @remarks v1.x only: a v2.0.0 `CrossChainToken` uses
-   * {@link generateUnsignedBeginDefaultAdminTransfer} instead and is rejected before calldata is
-   * built.
-   * @throws {@link CCTOperationUnsupportedError} if `tokenAddress` is a v2.0.0 CrossChainToken
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals `sender`,
-   * or if `sender` is given and is not the token owner
+   * Builds an unsigned token-admin proposal (for multisig / offline signing), or a retraction when
+   * `newOwner` is zero, on either token version.
+   * @deprecated Use {@link generateUnsignedBeginDefaultAdminTransfer}, or
+   * {@link generateUnsignedCancelDefaultAdminTransfer} to retract; this builds exactly what they do.
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedTransferTokenOwnership({
@@ -772,14 +765,14 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Proposes a new token owner, signing + submitting with `opts.wallet` — which must be the
-   * token's current owner, and is what `sender` defaults to. Two-step, and v1.x-only without a
-   * version check, per {@link generateUnsignedTransferTokenOwnership}.
+   * Proposes a new token admin (or retracts, for a zero `newOwner`), signing + submitting with
+   * `opts.wallet` — which must be the token's current admin, and is what `sender` defaults to.
+   * @deprecated Use {@link beginDefaultAdminTransfer}, or {@link cancelDefaultAdminTransfer} to
+   * retract.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `newOwner` equals the
-   * signer, if `sender` is given and is not the wallet's address, or if the signer is not the
-   * token owner
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if `sender` is given and is not
+   * the wallet's address, or per the method it routes to
    * @throws {@link CCTTxFailedError} if the tx reverts or fails
    * @example
    * ```typescript
@@ -797,13 +790,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned token `acceptOwnership` tx (for multisig / offline signing), completing a
-   * transfer proposed by {@link generateUnsignedTransferTokenOwnership}. v1.x tokens only, and not
-   * pre-flightable for the same reason as {@link generateUnsignedAcceptPoolOwnership}: the pending
-   * owner is a `private` slot with no getter, so `sender` only sets `tx.from`.
-   * @remarks Builds without touching the chain: there is neither a version to resolve nor a role
-   * to read.
-   * @throws {@link CCTParamsInvalidError} if `tokenAddress` or `sender` is invalid
+   * Builds an unsigned acceptance of a pending token-admin transfer (for multisig / offline
+   * signing), on either token version.
+   * @deprecated Use {@link generateUnsignedAcceptDefaultAdminTransfer}; this builds exactly what it
+   * does.
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedAcceptTokenOwnership({
@@ -817,14 +807,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Completes a pending token ownership transfer, signing + submitting with `opts.wallet` — which
-   * must be the address {@link transferTokenOwnership} proposed. Ownership moves in this tx.
+   * Completes a pending token-admin transfer, signing + submitting with `opts.wallet` — which
+   * must be the proposed admin. Admin rights move in this tx.
+   * @deprecated Use {@link acceptDefaultAdminTransfer}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is invalid, or `sender` is given and
-   * is not the wallet's address
+   * @throws {@link CCTParamsInvalidError} if `tokenAddress` is invalid, `sender` is given and is
+   * not the wallet's address, or per {@link acceptDefaultAdminTransfer}
    * @throws {@link CCTTxFailedError} if the tx reverts or fails — notably when the wallet is not
-   * the token's proposed owner
+   * the token's proposed admin
    * @example
    * ```typescript
    * const { hash } = await cct.acceptTokenOwnership({
@@ -840,19 +831,20 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `beginDefaultAdminTransfer` tx (for multisig / offline signing), scheduling
-   * a CrossChainToken default-admin transfer. The proposed admin accepts only after the token's
-   * mandatory delay; {@link generateUnsignedAcceptDefaultAdminTransfer} builds that second tx.
+   * Builds an unsigned token-admin proposal (for multisig / offline signing):
+   * `beginDefaultAdminTransfer` on a v2.0.0 CrossChainToken, whose proposed admin accepts only
+   * after the token's mandatory delay, or Ownable2Step `transferOwnership` on a v1.x
+   * `FactoryBurnMintERC20`. {@link generateUnsignedAcceptDefaultAdminTransfer} builds the second tx.
    *
-   * @remarks v2.0.0 and later supported CrossChainToken versions. `newAdmin = 0x0` deliberately
-   * schedules default-admin renunciation, completed with `renounceRole`, not
-   * {@link acceptDefaultAdminTransfer}. Replacing a pending transfer is valid and cancels the old
-   * proposal on-chain.
+   * @remarks On v2, `newAdmin = 0x0` deliberately schedules default-admin renunciation, completed
+   * with `renounceRole`, not {@link acceptDefaultAdminTransfer}. Replacing a pending transfer is
+   * valid and cancels the old proposal on-chain. On v1, where a zero proposal would retract, zero
+   * is rejected: use {@link generateUnsignedCancelDefaultAdminTransfer}.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
-   * @throws {@link CCTParamsInvalidError} if any address is invalid, the token has no current
-   * default admin, or `sender` is not it
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
+   * @throws {@link CCTParamsInvalidError} if any address is invalid, a v2 token has no current
+   * default admin, `sender` is not the current admin, or a v1 `newAdmin` is zero or the owner
    *
    * @example
    * ```typescript
@@ -871,19 +863,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Schedules a CrossChainToken default-admin transfer, signing + submitting with `opts.wallet`
-   * (the current default admin).
+   * Proposes a new token admin, signing + submitting with `opts.wallet` (the current admin: v2
+   * default admin, v1 owner).
    *
    * @remarks See {@link generateUnsignedBeginDefaultAdminTransfer} for version, delay, and
-   * renunciation rules. `sender` defaults to the wallet address, so the default-admin gate runs
-   * before broadcast.
+   * zero-address rules. `sender` defaults to the wallet address, so the admin gate runs before
+   * broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
-   * wallet, the token has no current default admin, or the wallet is not it
+   * wallet, or per {@link generateUnsignedBeginDefaultAdminTransfer}
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -894,7 +886,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const { hash } = await cct.beginDefaultAdminTransfer({
    *   tokenAddress: '0xToken...',
    *   newAdmin: '0xNewAdmin...',
-   *   wallet, // current default admin
+   *   wallet, // current admin
    * })
    * ```
    */
@@ -905,17 +897,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `acceptDefaultAdminTransfer` tx (for multisig / offline signing), completing
-   * a pending CrossChainToken transfer. The contract enforces its mandatory delay when mined.
+   * Builds an unsigned token-admin acceptance (for multisig / offline signing):
+   * `acceptDefaultAdminTransfer` on a v2.0.0 CrossChainToken, whose contract enforces its mandatory
+   * delay when mined, or Ownable2Step `acceptOwnership` on a v1.x `FactoryBurnMintERC20`.
    *
-   * @remarks The pending admin and schedule are public, so this rejects a missing transfer or a
+   * @remarks v2's pending admin and schedule are public, so this rejects a missing transfer or a
    * known `sender` other than the pending admin before signing. It cannot safely reject a schedule
-   * that has not passed yet: an offline tx may be executed after it does.
+   * that has not passed yet: an offline tx may be executed after it does. v1's pending owner has no
+   * getter, so `sender` only sets `tx.from` there.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
-   * @throws {@link CCTParamsInvalidError} if no transfer is pending, it schedules renunciation, or
-   * `sender` is not its pending default admin
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
+   * @throws {@link CCTParamsInvalidError} if no v2 transfer is pending, it schedules renunciation,
+   * or `sender` is not its pending default admin
    *
    * @example
    * ```typescript
@@ -933,20 +927,21 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Accepts a delayed CrossChainToken default-admin transfer, signing + submitting with
-   * `opts.wallet` (the pending default admin).
+   * Completes a pending token-admin transfer, signing + submitting with `opts.wallet` (the
+   * proposed admin).
    *
-   * @remarks See {@link generateUnsignedAcceptDefaultAdminTransfer} for pending-transfer and
-   * delay rules. The contract is the final authority on whether its schedule has passed.
+   * @remarks See {@link generateUnsignedAcceptDefaultAdminTransfer} for version and delay rules.
+   * The contract is the final authority on whether v2's schedule has passed and, on v1, on whether
+   * the wallet is the proposed owner.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
-   * wallet, no transfer is pending, or the wallet is not its pending default admin
-   * @throws {@link CCIPExecTxRevertedError} if the mandatory delay has not passed or the tx reverts
-   * on-chain
+   * wallet, or on v2 no transfer is pending or the wallet is not its pending default admin
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain — notably before v2's delay
+   * has passed, or when the wallet is not v1's proposed owner
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
    *
@@ -955,7 +950,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.acceptDefaultAdminTransfer({
    *   tokenAddress: '0xToken...',
-   *   wallet, // pending default admin
+   *   wallet, // pending admin
    * })
    * ```
    */
@@ -966,16 +961,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Builds an unsigned `cancelDefaultAdminTransfer` tx (for multisig / offline signing), canceling
-   * a pending CrossChainToken default-admin transfer.
+   * Builds an unsigned token-admin cancellation (for multisig / offline signing):
+   * `cancelDefaultAdminTransfer` on a v2.0.0 CrossChainToken, Ownable2Step `transferOwnership(0x0)`
+   * on a v1.x `FactoryBurnMintERC20`.
    *
-   * @remarks A cancellation with no pending transfer is rejected even though OpenZeppelin would
-   * mine it as a silent no-op.
+   * @remarks On v2, a cancellation with no pending transfer is rejected even though OpenZeppelin
+   * would mine it as a silent no-op. v1's pending owner has no getter, so this is not checked there.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
-   * @throws {@link CCTParamsInvalidError} if no transfer is pending, the token has no current
-   * default admin, or `sender` is not it
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
+   * @throws {@link CCTParamsInvalidError} if no v2 transfer is pending, the token has no current
+   * default admin, or `sender` is not the current admin (v2 default admin, v1 owner)
    *
    * @example
    * ```typescript
@@ -993,17 +989,19 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Cancels a pending CrossChainToken default-admin transfer, signing + submitting with
-   * `opts.wallet` (the current default admin).
+   * Cancels a pending token-admin transfer, signing + submitting with `opts.wallet` (the current
+   * admin: v2 default admin, v1 owner).
    *
-   * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for pending-transfer rules.
+   * @remarks See {@link generateUnsignedCancelDefaultAdminTransfer} for version and
+   * pending-transfer rules.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTContractVersionUnsupportedError} if a CrossChainToken reports an unknown
+   * version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
-   * wallet, no transfer is pending, the token has no current default admin, or the wallet is not it
+   * wallet, no v2 transfer is pending, the token has no current default admin, or the wallet is not
+   * the current admin
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1013,7 +1011,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * const cct = EVMTokenManager.fromChain(chain)
    * const { hash } = await cct.cancelDefaultAdminTransfer({
    *   tokenAddress: '0xToken...',
-   *   wallet, // current default admin
+   *   wallet, // current admin
    * })
    * ```
    */
@@ -1545,7 +1543,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @remarks A v2.0.0 pool holds no sender allowlist and no CCV configuration itself — both live
    * on this contract. Deploy it, then bind it with {@link updateAdvancedPoolHooks} (or pass its
-   * address as `deployTokenPool`'s `advancedPoolHooks`).
+   * address as `deployTokenPool`'s `advancedPoolHooks`). The hooks' configuration methods take
+   * the hooks' own `advancedPoolHooks` or a bound pool's `poolAddress`, so hooks can be configured
+   * before binding.
    * @remarks The deployed address is only known once mined, so it is NOT returned here — use
    * {@link deployAdvancedPoolHooks} to receive it. The same applies to the constructor args
    * needed for explorer verification.
@@ -1611,8 +1611,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * lists apply to every transfer; threshold lists add requirements at or above the hooks'
    * threshold amount. `address(0)` selects the default CCV.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` or `remoteChainSelector` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if the target or `remoteChainSelector` is invalid, or
+   * `poolAddress` has no hooks bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
@@ -1632,8 +1634,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The result follows the contract's enumerable-set order, which is not a stable sort.
    * A config with only threshold CCVs cannot exist; threshold CCVs require a base list.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if the target is invalid, or `poolAddress` has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
@@ -1652,8 +1656,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `AdvancedPoolHooks` ignores the interface's token/finality/extra-data arguments, so this query
    * supplies their neutral values internally.
    *
-   * @throws {@link CCTParamsInvalidError} if a param is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, or `poolAddress` has no hooks bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    * @example
    * ```ts
    * const cct = EVMTokenManager.fromChain(chain)
@@ -1678,10 +1683,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * those paired lists. `address(0)` in any list selects the default CCV. The target is probed
    * to confirm it reports `AdvancedPoolHooks` before calldata is returned.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
-   * list lacks base CCVs, or `sender` is not the hooks owner
+   * list lacks base CCVs, `poolAddress` has no hooks bound, or `sender` is not the hooks owner
    *
    * @example
    * ```ts
@@ -1714,10 +1720,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if a param is invalid, CCVs are duplicated, a threshold
-   * list lacks base CCVs, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * list lacks base CCVs, `poolAddress` has no hooks bound, `sender` differs from the wallet, or
+   * the wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1747,8 +1755,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Lists callers authorized for hooks preflight and postflight checks.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if the target is invalid, or `poolAddress` has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    *
    * @example
    * ```ts
@@ -1766,8 +1776,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Reads the hooks policy engine; the zero address means policy checks are disabled.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if the target is invalid, or `poolAddress` has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    *
    * @example
    * ```ts
@@ -1781,8 +1793,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Reads the amount at which additional CCVs apply; zero means they are disabled.
    *
-   * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTParamsInvalidError} if the target is invalid, or `poolAddress` has no hooks
+   * bound
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
    *
    * @example
    * ```ts
@@ -1801,9 +1815,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * before adds, so a caller present in both lists remains authorized. The hooks target and
    * supplied owner are pre-flighted before calldata is returned.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * or `sender` is not the hooks owner
    *
    * @example
    * ```ts
@@ -1826,10 +1842,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Use {@link generateUnsignedUpdateAdvancedPoolHooksAuthorizedCallers} for multisig or offline signing.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
-   * or the wallet is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * `sender` differs from the wallet, or the wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1859,10 +1876,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * target is probed to confirm it reports `AdvancedPoolHooks`. When `sender` is supplied, it must
    * be the current hooks owner.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
-   * code, or `sender` is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * a non-zero engine has no deployed code, or `sender` is not the hooks owner
    *
    * @example
    * ```ts
@@ -1888,10 +1906,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * that is intentional.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, a non-zero engine has no deployed
-   * code, `sender` differs from the wallet, or the wallet is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * a non-zero engine has no deployed code, `sender` differs from the wallet, or the wallet is not
+   * the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -1918,9 +1938,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * confirm it reports `AdvancedPoolHooks`; when `sender` is supplied, it must be the current
    * hooks owner.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid or `sender` is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * or `sender` is not the hooks owner
    *
    * @example
    * ```ts
@@ -1942,10 +1964,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link generateUnsignedSetThresholdAmount} for multisig or offline signing.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not an
+   * @throws {@link CCTContractTypeInvalidError} if the target is not an
    * `AdvancedPoolHooks` contract
-   * @throws {@link CCTParamsInvalidError} if a param is invalid, `sender` differs from the wallet,
-   * or the wallet is not the hooks owner
+   * @throws {@link CCTOperationUnsupportedError} if `poolAddress` is a pre-v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, `poolAddress` has no hooks bound,
+   * `sender` differs from the wallet, or the wallet is not the hooks owner
    * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
@@ -3001,8 +3024,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Reads a token's current `owner()` (Ownable2Step), checksummed — the authority that grants and
    * revokes mint/burn roles on a BurnMintERC677 token.
    * @remarks Current owner only. A token's *proposed* owner is a `private` slot with no getter, so
-   * a pending transfer cannot be read on EVM (same limitation as `acceptTokenOwnership` /
-   * `acceptPoolOwnership`). On a v2.0.0 `CrossChainToken`, `owner()` aliases the
+   * a pending transfer cannot be read on EVM (same limitation as a v1 `acceptDefaultAdminTransfer`
+   * / `acceptPoolOwnership`). On a v2.0.0 `CrossChainToken`, `owner()` aliases the
    * `DEFAULT_ADMIN_ROLE` holder — use {@link getTokenDefaultAdmin} for its pending transfer.
    * @throws {@link CCTParamsInvalidError} if `tokenAddress` is not a valid, non-zero address
    * @example

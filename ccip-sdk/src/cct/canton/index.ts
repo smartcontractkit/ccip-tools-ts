@@ -39,6 +39,7 @@ import {
   type GetRateLimiterStateResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type PoolType,
   ApplyChainUpdates,
   DeployTokenPool,
   GetRateLimiterState,
@@ -88,6 +89,9 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
    * that creates the registry-pools `BurnMintTokenPool`/`LockReleaseTokenPool`
    * and atomically calls `Initialize` on it (TAR registration + lane rate
    * limiters).
+   *
+   * @remarks The pool owner is `instrumentId.admin` and `admin` defaults to it;
+   * the TAR (and so `ccipOwner`) is `deps.tokenAdminRegistry`.
    */
   async generateUnsignedDeployTokenPool(
     opts: GenerateDeployTokenPoolParams,
@@ -102,7 +106,12 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   // ─── Pool: applyChainUpdates ────────────────────────────────────────────
 
-  /** Builds unsigned `applyChainUpdates` commands. */
+  /**
+   * Builds unsigned `applyChainUpdates` commands.
+   *
+   * @remarks Remote addresses are in the remote chain's own format; its chain
+   * family must be registered (e.g. `import '@chainlink/ccip-sdk/all'`).
+   */
   async generateUnsignedApplyChainUpdates(
     opts: GenerateApplyChainUpdatesParams,
   ): Promise<GenerateApplyChainUpdatesResult> {
@@ -127,7 +136,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
 
   // ─── Pool: reads ────────────────────────────────────────────────────────
 
-  /** Reads a token pool's config from the ACS. */
+  /** Reads a token pool's config (including its `poolType`) from the ACS. */
   async getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
     return this.#getTokenPoolState.query(this.chain, opts)
   }
@@ -149,6 +158,7 @@ export {
 export type {
   ApplyChainUpdatesParams,
   DeployTokenPoolParams,
+  PoolType,
   GetRateLimiterStateParams,
   GetRateLimiterStateResult,
   GetTokenAdminRegistryParams,

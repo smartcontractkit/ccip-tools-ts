@@ -6,7 +6,7 @@ import { Interface, ZeroAddress } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type CancelDefaultAdminTransferParams,
   CancelDefaultAdminTransfer,
@@ -18,19 +18,29 @@ const OTHER = '0x' + '44'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 const FRESH = new Interface([
   'function cancelDefaultAdminTransfer()',
+  'function transferOwnership(address to)',
   'function defaultAdmin() view returns (address)',
+  'function owner() view returns (address)',
   'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
 ])
 
-function stubChain({ schedule = 1n, admin = ADMIN } = {}): EVMChain {
+/** `v1` stubs a FactoryBurnMintERC20 1.6.2, whose current admin is `owner()`. */
+function stubChain({ schedule = 1n, admin = ADMIN, v1 = false } = {}): EVMChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
-    typeAndVersion: () => Promise.resolve(['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0']),
+    typeAndVersion: () =>
+      Promise.resolve(
+        v1
+          ? ['FactoryBurnMintERC20', '1.6.2', 'FactoryBurnMintERC20 1.6.2']
+          : ['CrossChainToken', '2.0.0', 'CrossChainToken 2.0.0'],
+      ),
     provider: {
       call: ({ data }: { data: string }) => {
         const fn = FRESH.getFunction(data.slice(0, 10))!.name
-        if (fn === 'defaultAdmin') return Promise.resolve(FRESH.encodeFunctionResult(fn, [admin]))
+        if (v1) assert.equal(fn, 'owner')
+        if (fn === 'defaultAdmin' || fn === 'owner')
+          return Promise.resolve(FRESH.encodeFunctionResult(fn, [admin]))
         return Promise.resolve(FRESH.encodeFunctionResult(fn, [OTHER, schedule]))
       },
     },
@@ -66,6 +76,15 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
         FRESH.encodeFunctionData('cancelDefaultAdminTransfer'),
       )
     })
+
+    it('encodes Ownable2Step transferOwnership(0x0) to a v1 token', async () => {
+      const unsigned = await generate(stubChain({ v1: true }))
+      assert.equal(unsigned.transactions[0]!.from, ADMIN)
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        FRESH.encodeFunctionData('transferOwnership', [ZeroAddress]),
+      )
+    })
   })
 
   describe('validation', () => {
@@ -83,12 +102,13 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
   })
 
   describe('version and default-admin checks', () => {
-    it('rejects a contract that is not a CrossChainToken', async () => {
-      const chain = stubChain()
-      chain.typeAndVersion = () => Promise.resolve(['FactoryBurnMintERC20', '1.6.2', ''])
+    it('rejects a sender that is not the owner of a v1 token', async () => {
       await assert.rejects(
-        () => generate(chain),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
+        () => generate(stubChain({ v1: true }), { sender: OTHER }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          /current token owner/.test(err.message),
       )
     })
 
@@ -119,6 +139,14 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
     it('submits as the current default admin', async () => {
       assert.equal(
         (await op.execute(stubChain(), { tokenAddress: TOKEN, wallet: fakeSigner() })).hash,
+        HASH,
+      )
+    })
+
+    it('submits transferOwnership(0x0) to a v1 token as its owner', async () => {
+      assert.equal(
+        (await op.execute(stubChain({ v1: true }), { tokenAddress: TOKEN, wallet: fakeSigner() }))
+          .hash,
         HASH,
       )
     })

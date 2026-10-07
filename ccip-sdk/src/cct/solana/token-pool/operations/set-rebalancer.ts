@@ -10,20 +10,20 @@ import {
   SolanaOperation,
 } from '../../operation.ts'
 import {
-  type CustomPoolProgramRef,
-  type LockReleasePoolProgramRef,
+  type PoolProgramRef,
   createLockReleaseTokenPoolProgram,
   deriveTokenPoolConfigPda,
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
-  resolveLockReleasePoolProgram,
+  resolveExistingLockReleasePoolProgram,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana lock-release pool rebalancer generation and execution. */
-type SetRebalancerParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & {
+type SetRebalancerParams = PoolProgramRef & {
   /** Token mint address managed by the pool. */
   tokenAddress: string
   /** Address authorized to provide or withdraw pool liquidity (stored on the pool; not a transaction signer). Use the default/zero address (`11111111111111111111111111111111`) to disable rebalancing. */
@@ -35,7 +35,7 @@ type SetRebalancerParams = (LockReleasePoolProgramRef | CustomPoolProgramRef) & 
 type ParsedSetRebalancerParams = {
   tokenAddress: PublicKey
   rebalancer: PublicKey
-  poolProgram: PublicKey
+  poolProgramAddress?: PublicKey
   payer: PublicKey
   authority: PublicKey
 }
@@ -62,13 +62,16 @@ export class SetRebalancer extends SolanaOperation<
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
   protected override parse(params: GenerateSetRebalancerParams): ParsedSetRebalancerParams {
-    const poolProgram = resolveLockReleasePoolProgram(this.name, params)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
 
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
       rebalancer: parsePublicKey(this.name, 'rebalancer', params.rebalancer),
-      poolProgram,
+      poolProgramAddress: parseOptionalPublicKey(
+        this.name,
+        'poolProgramAddress',
+        params.poolProgramAddress,
+      ),
       payer,
       authority:
         params.authority === undefined
@@ -82,17 +85,23 @@ export class SetRebalancer extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedSetRebalancerParams,
   ): Promise<UnsignedSolanaTx> {
-    const instruction = await createLockReleaseTokenPoolProgram(chain, opts.poolProgram, opts.payer)
+    const poolProgram = await resolveExistingLockReleasePoolProgram(
+      this.name,
+      chain,
+      opts.tokenAddress,
+      opts.poolProgramAddress,
+    )
+    const instruction = await createLockReleaseTokenPoolProgram(chain, poolProgram, opts.payer)
       .methods.setRebalancer(opts.rebalancer)
       .accountsStrict({
-        state: deriveTokenPoolConfigPda(opts.poolProgram, opts.tokenAddress),
+        state: deriveTokenPoolConfigPda(poolProgram, opts.tokenAddress),
         mint: opts.tokenAddress,
         authority: opts.authority,
       })
       .instruction()
 
     chain.logger.debug(
-      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${opts.poolProgram.toBase58()}`,
+      `${this.name}: token = ${opts.tokenAddress.toBase58()}, poolProgram = ${poolProgram.toBase58()}`,
     )
     return { family: ChainFamily.Solana, instructions: [instruction], mainIndex: 0 }
   }

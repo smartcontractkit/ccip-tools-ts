@@ -21,6 +21,8 @@ type DeriveCcipLookupTableAddressesParams = {
   lookupTableAddress: PublicKey
   tokenMint: PublicKey
   poolProgram: PublicKey
+  /** Router recorded in the pool state. */
+  router: PublicKey
 }
 
 type BuildCreateLookupTableInstructionParams = {
@@ -72,13 +74,11 @@ export function buildCreateLookupTableInstruction({
 /** Derives the standard CCIP token pool addresses stored in a pool lookup table. */
 export async function deriveCcipLookupTableAddresses(
   chain: SolanaChain,
-  { lookupTableAddress, tokenMint, poolProgram }: DeriveCcipLookupTableAddressesParams,
+  { lookupTableAddress, tokenMint, poolProgram, router }: DeriveCcipLookupTableAddressesParams,
 ): Promise<PublicKey[]> {
   const tokenProgram = await resolveTokenProgram(chain.connection, tokenMint)
   const poolConfig = deriveTokenPoolConfigPda(poolProgram, tokenMint)
-  const { router: routerAddress } = await chain.getTokenPoolConfig(poolConfig.toBase58())
-  const router = new PublicKey(routerAddress)
-  const { feeQuoter } = await chain._getRouterConfig(routerAddress)
+  const { feeQuoter } = await chain._getRouterConfig(router.toBase58())
 
   const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
   const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)

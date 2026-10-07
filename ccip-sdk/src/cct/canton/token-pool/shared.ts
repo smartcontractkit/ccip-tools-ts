@@ -8,7 +8,9 @@
 import type { JsCommands } from '../../../canton/client/index.ts'
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
+import { encodeAddressToAny, getAddressBytes } from '../../../utils.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
+import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../remote-address.ts'
 import type {
   BurnMintTokenPoolArg,
   InitializeArg,
@@ -49,6 +51,26 @@ export const BURN_MINT_POOL_TEMPLATE_ID =
 export const LOCK_RELEASE_POOL_TEMPLATE_ID =
   '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
+/** Pool type: which registry-pools template a pool is. */
+export type PoolType = 'burnMint' | 'lockRelease'
+
+/** Symbolic template ID per {@link PoolType}. */
+export const POOL_TEMPLATE_IDS: Readonly<Record<PoolType, string>> = {
+  burnMint: BURN_MINT_POOL_TEMPLATE_ID,
+  lockRelease: LOCK_RELEASE_POOL_TEMPLATE_ID,
+}
+
+/**
+ * The {@link PoolType} of a template ID (symbolic `#<pkg-name>:…` or concrete
+ * `<pkg-id>:…`), or `undefined` for any other template.
+ */
+export function poolTypeOfTemplateId(templateId: string): PoolType | undefined {
+  const qualifiedName = templateId.split(':').slice(-2).join(':')
+  return (Object.keys(POOL_TEMPLATE_IDS) as PoolType[]).find(
+    (t) => POOL_TEMPLATE_IDS[t].split(':').slice(-2).join(':') === qualifiedName,
+  )
+}
+
 /** RateLimiter template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
 export const RATE_LIMITER_TEMPLATE_ID =
   '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'
@@ -66,7 +88,7 @@ export interface PoolContractRef {
    * by the ACS. Preferred over the symbolic `#<pkg-name>:…` form — the
    * participant's interactive-submission path rejects package-name references
    * (`#…`) in exercise commands
-   * (`non expected character 0x23 in Daml-LF Package ID`). Populated by {@link resolvePoolRef} / {@link toContractRef}.
+   * (`non expected character 0x23 in Daml-LF Package ID`). Populated by {@link toContractRef}.
    */
   templateId?: string
 }
@@ -270,39 +292,53 @@ export async function resolveFactoryRef(
   return toContractRef(contract)
 }
 
+/** A pool resolved by {@link resolvePool}. */
+export interface ResolvedPool {
+  /** The pool's active contract. */
+  contract: CantonActiveContract
+  /** Pool type, read off the matched contract's template. */
+  poolType: PoolType
+}
+
 /**
- * Resolve a pool contract reference by its `InstanceAddress` (the canonical
+ * Resolve a pool (either type) by its `InstanceAddress` (the canonical
  * Canton resolution path, mirroring Go `FindActiveContractByInstanceAddress`).
  *
  * `poolInstanceAddress` is the pool's `InstanceAddress` — either the `0x<64-hex>`
  * keccak256 hash, or the `RawInstanceAddress` `"instanceId@poolOwner"` form
- * (resolved to the hash internally). The SDK queries the ACS by pool template,
+ * (resolved to the hash internally). The SDK queries the ACS over both pool templates,
  * derives each contract's instance address from its `instanceId` create-arg +
  * sole signatory, and matches — returning the CID + disclosure blob together so
- * the caller never handles `createdEventBlob`.
+ * the caller never handles `createdEventBlob`, and the pool type of the match.
+ * @throws {@link CCTParamsInvalidError} if no visible pool matches
  */
-export async function resolvePoolRef(
+export async function resolvePool(
+  opName: string,
   chain: CantonChain,
-  poolType: 'burnMint' | 'lockRelease',
-  poolOwner: string,
+  party: string,
   poolInstanceAddress: string,
-): Promise<PoolContractRef> {
-  const templateId =
-    poolType === 'burnMint' ? BURN_MINT_POOL_TEMPLATE_ID : LOCK_RELEASE_POOL_TEMPLATE_ID
-
+): Promise<ResolvedPool> {
   const contract = await chain.findActiveContractByInstanceAddress(
-    templateId,
+    Object.values(POOL_TEMPLATE_IDS),
     poolInstanceAddress,
-    [poolOwner],
+    [party],
   )
   if (!contract) {
     throw new CCTParamsInvalidError(
-      'resolvePoolRef',
+      opName,
       'poolInstanceAddress',
-      `pool ${poolInstanceAddress} is not active or not visible to ${poolOwner}`,
+      `pool ${poolInstanceAddress} is not active or not visible to ${party}`,
     )
   }
-  return toContractRef(contract)
+  const poolType = poolTypeOfTemplateId(contract.templateId)
+  if (!poolType) {
+    throw new CCTParamsInvalidError(
+      opName,
+      'poolInstanceAddress',
+      `${poolInstanceAddress} resolved to a ${contract.templateId}, not a registry-pools token pool`,
+    )
+  }
+  return { contract, poolType }
 }
 
 /**
@@ -416,9 +452,9 @@ export interface RateLimiterDeploySpec {
 export interface LaneDeploySpec {
   /** Remote chain selector. */
   remoteChainSelector: bigint
-  /** Remote pool addresses (encoded). */
+  /** Remote pool addresses, in the remote chain's own format (unique). */
   remotePools: string[]
-  /** Remote token address (encoded instrument ID). */
+  /** Remote token address, in the remote chain's own format (`0x…` EVM, base58 Solana, …). */
   remoteTokenAddress: string
   /** Inbound committee-verifier raw instance addresses (`"instanceId@party"`). */
   inboundCCVs?: string[]
@@ -444,32 +480,95 @@ function encodeRateLimiterDeploySpec(s: RateLimiterDeploySpec): RateLimiterDeplo
   }
 }
 
+/** Max bytes a pool's remote chain config stores per remote address. */
+const MAX_REMOTE_ADDRESS_BYTES = 32
+
 /**
- * Normalize an address for on-ledger storage in a pool's remote chain config:
- * strip an optional `0x` prefix and left-pad to 32 bytes (throws on anything
- * over 32 bytes or non-hex). Canonical form is 32-byte-padded bare hex: inbound executes compare
- * the stored value verbatim against the message's 32-byte-padded
- * sourcePoolAddress/sourceTokenAddress, while outbound sends strip the padding
- * again for sub-32-byte destination chains (validateDestChainAddress).
+ * Parse a remote address with {@link parseRemoteAddress}, also rejecting any over
+ * the 32 bytes a Canton pool stores.
+ * @returns The canonical address (e.g. checksummed `0x…` for EVM, base58 for Solana).
  */
-export function normalizeRemoteAddress(s: string): string {
-  const bare = s.startsWith('0x') ? s.slice(2) : s
-  if (!/^[0-9a-fA-F]+$/.test(bare) || bare.length > 64) {
+export function parseCantonRemoteAddress(
+  operation: string,
+  param: string,
+  value: unknown,
+  remoteChainSelector: bigint,
+): string {
+  const address = parseRemoteAddress(operation, param, value, remoteChainSelector)
+  assertStorableRemoteAddress(operation, param, address)
+  return address
+}
+
+/** Throws unless a canonical remote address fits the 32 bytes a pool stores. */
+function assertStorableRemoteAddress(operation: string, param: string, address: string): void {
+  const length = getAddressBytes(address).length
+  if (length > MAX_REMOTE_ADDRESS_BYTES) {
     throw new CCTParamsInvalidError(
-      'normalizeRemoteAddress',
-      'address',
-      `expected a hex address of at most 32 bytes, got "${s}"`,
+      operation,
+      param,
+      `encodes to ${length} bytes; Canton pools store remote addresses of at most ${MAX_REMOTE_ADDRESS_BYTES} bytes`,
     )
   }
-  return bare.padStart(64, '0')
+}
+
+/**
+ * Canonicalize a lane's remote token + (unique) pool addresses with
+ * {@link parseCantonRemoteAddress}.
+ * @returns A copy of `lane` with the canonical addresses.
+ */
+export function parseLaneRemoteAddresses<
+  L extends { remoteChainSelector: bigint; remotePools: string[]; remoteTokenAddress: string },
+>(operation: string, path: string, lane: L): L {
+  const remoteTokenAddress = parseCantonRemoteAddress(
+    operation,
+    `${path}.remoteTokenAddress`,
+    lane.remoteTokenAddress,
+    lane.remoteChainSelector,
+  )
+  if (!Array.isArray(lane.remotePools)) {
+    throw new CCTParamsInvalidError(operation, `${path}.remotePools`, 'must be an array')
+  }
+  const remotePools = parseUniqueRemoteAddresses(
+    operation,
+    `${path}.remotePools`,
+    lane.remotePools,
+    lane.remoteChainSelector,
+  )
+  remotePools.forEach((pool, i) =>
+    assertStorableRemoteAddress(operation, `${path}.remotePools[${i}]`, pool),
+  )
+  return { ...lane, remoteTokenAddress, remotePools }
+}
+
+/**
+ * Encode a canonical remote address (see {@link parseCantonRemoteAddress}) for
+ * on-ledger storage in a pool's remote chain config, as 32-byte-padded bare hex:
+ * inbound executes compare the stored value verbatim against the message's
+ * 32-byte-padded sourcePoolAddress/sourceTokenAddress, while outbound sends
+ * strip the padding again for sub-32-byte destination chains
+ * (validateDestChainAddress).
+ */
+export function encodeRemoteAddress(address: string): string {
+  return encodeAddressToAny(address).toString('hex')
+}
+
+/**
+ * Normalize a remote address (in the remote chain's own format) to the form a
+ * pool's remote chain config stores, e.g. to compare against `getTokenPoolState`.
+ * @throws {@link CCTParamsInvalidError} if invalid for the remote family or over 32 bytes
+ */
+export function normalizeRemoteAddress(address: string, remoteChainSelector: bigint): string {
+  return encodeRemoteAddress(
+    parseCantonRemoteAddress('normalizeRemoteAddress', 'address', address, remoteChainSelector),
+  )
 }
 
 /** Encode a {@link LaneDeploySpec} for the `Initialize` choice argument. */
 export function encodeLaneDeploySpec(l: LaneDeploySpec): LaneDeploySpecArg {
   return {
     remoteChainSelector: l.remoteChainSelector.toString(),
-    remotePools: l.remotePools.map(normalizeRemoteAddress),
-    remoteTokenAddress: normalizeRemoteAddress(l.remoteTokenAddress),
+    remotePools: l.remotePools.map(encodeRemoteAddress),
+    remoteTokenAddress: encodeRemoteAddress(l.remoteTokenAddress),
     inboundCCVs: (l.inboundCCVs ?? []).map(rawInstanceAddress),
     outboundCCVs: (l.outboundCCVs ?? []).map(rawInstanceAddress),
     finalityConfig: encodeFinalityConfig(l.finalityConfig ?? { type: 'WaitForFinality' }),
@@ -484,9 +583,9 @@ export interface InitializeChoiceArgsInput {
   /** TAR contract ID (resolved + disclosed by the caller — see `resolveTar`). */
   tokenAdminRegistryCid: string
   /**
-   * Existing `TokenConfig` CID, for third-party-admin tokens that already went
-   * through a separate propose/accept flow. Not yet supported by the SDK —
-   * always `null` (fresh `ProposeAdministrator` + `AcceptAdminRole` inline).
+   * Existing `TokenConfig` CID, for third-party-admin tokens proposed out of
+   * band (no admin yet). Omitted → `null` (fresh `ProposeAdministrator` +
+   * `AcceptAdminRole` inline).
    */
   existingTokenConfigCid?: string
   /** Token admin party — authorizes the choice jointly with `poolOwner`. */

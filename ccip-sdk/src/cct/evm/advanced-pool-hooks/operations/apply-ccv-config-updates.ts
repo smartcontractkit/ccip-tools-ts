@@ -21,24 +21,18 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
+import { parseRecord, validateAddress, validateArray, validateUint64 } from '../../validate.ts'
 import {
-  parseRecord,
-  validateAddress,
-  validateArray,
-  validateNonZeroAddress,
-  validateUint64,
-} from '../../validate.ts'
-import {
+  type AdvancedPoolHooksTarget,
   type CCVConfigUpdate,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
 /** Parameters for {@link ApplyCCVConfigUpdates}. */
-export type ApplyCCVConfigUpdatesParams = {
-  /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
-  advancedPoolHooks: string
+export type ApplyCCVConfigUpdatesParams = AdvancedPoolHooksTarget & {
   /** Complete replacements to apply; an empty array is a permitted on-chain no-op. */
   ccvConfigArgs: CCVConfigUpdate[]
   /**
@@ -115,11 +109,9 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
   readonly name = 'applyCCVConfigUpdates'
 
   /** Validates the hooks target and contract CCV constraints before any RPC. */
-  protected override validate({
-    advancedPoolHooks,
-    ccvConfigArgs,
-  }: ApplyCCVConfigUpdatesParams): void {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', advancedPoolHooks)
+  protected override validate(params: ApplyCCVConfigUpdatesParams): void {
+    validateAdvancedPoolHooksTarget(this.name, params)
+    const { ccvConfigArgs } = params
     validateArray(this.name, 'ccvConfigArgs', ccvConfigArgs)
     ccvConfigArgs.forEach((config, i) =>
       validateCCVConfig(this.name, `ccvConfigArgs[${i}]`, config),
@@ -129,18 +121,19 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
   /**
    * Confirms the target is `AdvancedPoolHooks`, checks `sender` when supplied, then encodes the
    * update calldata.
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
    * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
+   * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, ccvConfigArgs, sender }: ApplyCCVConfigUpdatesParams,
+    params: ApplyCCVConfigUpdatesParams,
   ): Promise<UnsignedEVMTx> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
+    const { ccvConfigArgs, sender } = params
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
-      advancedPoolHooks,
+      hooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('applyCCVConfigUpdates', [ccvConfigArgs]),
     )
   }

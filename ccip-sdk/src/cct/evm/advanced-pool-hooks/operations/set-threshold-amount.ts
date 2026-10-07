@@ -12,17 +12,17 @@
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
-import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
+import { validateUint256 } from '../../validate.ts'
 import {
+  type AdvancedPoolHooksTarget,
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksContract,
   assertAdvancedPoolHooksOwner,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
 } from '../contracts.ts'
 
 /** Parameters for {@link SetThresholdAmount}. */
-export type SetThresholdAmountParams = {
-  /** Hooks contract to reconfigure. Must be non-zero and report type `AdvancedPoolHooks`. */
-  advancedPoolHooks: string
+export type SetThresholdAmountParams = AdvancedPoolHooksTarget & {
   /** Amount at or above which threshold CCVs apply; zero disables threshold CCVs. */
   thresholdAmount: bigint
   /**
@@ -38,29 +38,27 @@ export type SetThresholdAmountParams = {
 export class SetThresholdAmount extends EVMOperation<SetThresholdAmountParams> {
   readonly name = 'setThresholdAmount'
 
-  /** Validates the hooks address and Solidity `uint256` threshold before any RPC. */
-  protected override validate({
-    advancedPoolHooks,
-    thresholdAmount,
-  }: SetThresholdAmountParams): void {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', advancedPoolHooks)
-    validateUint256(this.name, 'thresholdAmount', thresholdAmount)
+  /** Validates the target and Solidity `uint256` threshold before any RPC. */
+  protected override validate(params: SetThresholdAmountParams): void {
+    validateAdvancedPoolHooksTarget(this.name, params)
+    validateUint256(this.name, 'thresholdAmount', params.thresholdAmount)
   }
 
   /**
    * Confirms the target and supplied owner before encoding `setThresholdAmount(uint256)`.
-   * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+   * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
    * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is not the hooks owner
+   * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
    */
   protected async buildUnsigned(
     chain: EVMChain,
-    { advancedPoolHooks, thresholdAmount, sender }: SetThresholdAmountParams,
+    params: SetThresholdAmountParams,
   ): Promise<UnsignedEVMTx> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    if (sender !== undefined)
-      await assertAdvancedPoolHooksOwner(this.name, chain, advancedPoolHooks, sender)
+    const { thresholdAmount, sender } = params
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    if (sender !== undefined) await assertAdvancedPoolHooksOwner(this.name, chain, hooks, sender)
     return callTx(
-      advancedPoolHooks,
+      hooks,
       ADVANCED_POOL_HOOKS_INTERFACE.encodeFunctionData('setThresholdAmount', [thresholdAmount]),
     )
   }

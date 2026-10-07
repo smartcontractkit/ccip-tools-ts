@@ -31,13 +31,15 @@ const WALLET = {
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    // only the canonical burn-mint pool exists, and the pool state of any custom program
+    connection: { getMultipleAccountsInfo: async () => [{}], getAccountInfo: async () => ({}) },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async () => [{}],
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -52,7 +54,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new EditChainRemoteConfig().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     remoteChainSelector: SELECTOR,
@@ -133,7 +134,7 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
 
     it('uses a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -172,7 +173,6 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new EditChainRemoteConfig().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         remoteChainSelector: SELECTOR,
         remoteTokenAddress: REMOTE_TOKEN,
         remotePoolAddresses: REMOTE_POOLS,
@@ -188,7 +188,6 @@ describe('EditChainRemoteConfig (cct/solana)', () => {
         () =>
           new EditChainRemoteConfig().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             authority: AUTHORITY,
             remoteChainSelector: SELECTOR,
             remoteTokenAddress: REMOTE_TOKEN,

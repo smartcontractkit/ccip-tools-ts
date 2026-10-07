@@ -982,6 +982,73 @@ describe('EVMTokenManager (cct/evm)', () => {
     })
   })
 
+  describe('token admin handoff', () => {
+    const HANDOFF = new Interface([
+      'function beginDefaultAdminTransfer(address newAdmin)',
+      'function acceptDefaultAdminTransfer()',
+      'function cancelDefaultAdminTransfer()',
+      'function transferOwnership(address to)',
+      'function acceptOwnership()',
+      'function owner() view returns (address)',
+      'function defaultAdmin() view returns (address)',
+      'function pendingDefaultAdmin() view returns (address newAdmin, uint48 schedule)',
+    ])
+    const encode = (fn: string, args: unknown[] = []) => HANDOFF.encodeFunctionData(fn, args)
+
+    for (const [typeAndVersion, expected] of [
+      [
+        ['FactoryBurnMintERC20', '1.6.2'],
+        [
+          encode('transferOwnership', [NEW_ADMIN]),
+          encode('acceptOwnership'),
+          encode('transferOwnership', [ZeroAddress]),
+        ],
+      ],
+      [
+        ['CrossChainToken', '2.0.0'],
+        [
+          encode('beginDefaultAdminTransfer', [NEW_ADMIN]),
+          encode('acceptDefaultAdminTransfer'),
+          encode('cancelDefaultAdminTransfer'),
+        ],
+      ],
+    ] as const) {
+      it(`begin / accept / cancel, and their deprecated aliases, on ${typeAndVersion[0]}`, async () => {
+        const cct = EVMTokenManager.fromChain(
+          stubChain({
+            typeAndVersion: (() => Promise.resolve(typeAndVersion)) as never,
+            provider: {
+              call: ({ data }: { data: string }) => {
+                const fn = HANDOFF.getFunction(data.slice(0, 10))!.name
+                const result = fn === 'pendingDefaultAdmin' ? [NEW_ADMIN, 1n] : [CURRENT_ADMIN]
+                return Promise.resolve(HANDOFF.encodeFunctionResult(fn, result))
+              },
+            } as never,
+          }),
+        )
+        const current = { tokenAddress: TOKEN, sender: CURRENT_ADMIN }
+        const proposed = { tokenAddress: TOKEN, sender: NEW_ADMIN }
+        const txs = await Promise.all([
+          cct.generateUnsignedBeginDefaultAdminTransfer({ ...current, newAdmin: NEW_ADMIN }),
+          cct.generateUnsignedAcceptDefaultAdminTransfer(proposed),
+          cct.generateUnsignedCancelDefaultAdminTransfer(current),
+        ])
+        assert.deepEqual(
+          txs.map((unsigned) => unsigned.transactions[0]!.data),
+          expected,
+        )
+        assert.deepEqual(
+          await Promise.all([
+            cct.generateUnsignedTransferTokenOwnership({ ...current, newOwner: NEW_ADMIN }),
+            cct.generateUnsignedAcceptTokenOwnership(proposed),
+            cct.generateUnsignedTransferTokenOwnership({ ...current, newOwner: ZeroAddress }),
+          ]),
+          txs,
+        )
+      })
+    }
+  })
+
   // TOB-CLCCT-3: a wallet on chain B used to sign chain A's calldata as a B transaction.
   describe('wallet chain binding', () => {
     it('rejects setPool when the wallet is on another chain, writing nothing', async () => {

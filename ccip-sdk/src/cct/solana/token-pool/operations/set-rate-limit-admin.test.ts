@@ -23,13 +23,15 @@ const WALLET = {
 function chain(): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    connection: {},
+    // only the canonical burn-mint pool exists, and the pool state of any custom program
+    connection: { getMultipleAccountsInfo: async () => [{}], getAccountInfo: async () => ({}) },
   } as unknown as SolanaChain
 }
 
 function submitChain(): SolanaChain {
   return Object.assign(chain(), {
     connection: {
+      getMultipleAccountsInfo: async () => [{}],
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -44,7 +46,6 @@ function submitChain(): SolanaChain {
 function generate(opts = {}) {
   return new SetRateLimitAdmin().generate(chain(), {
     tokenAddress: TOKEN,
-    poolType: 'burn-mint',
     payer: PAYER,
     authority: AUTHORITY,
     newRateLimitAdmin: NEW_RATE_LIMIT_ADMIN,
@@ -93,7 +94,7 @@ describe('SetRateLimitAdmin (cct/solana)', () => {
 
     it('supports a compatible custom pool program', async () => {
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const unsigned = await generate({ poolType: undefined, poolProgramAddress })
+      const unsigned = await generate({ poolProgramAddress })
 
       assert.equal(unsigned.instructions[0]?.programId.toBase58(), poolProgramAddress)
     })
@@ -117,7 +118,6 @@ describe('SetRateLimitAdmin (cct/solana)', () => {
     it('signs, submits, and returns the tx hash', async () => {
       const result = await new SetRateLimitAdmin().execute(submitChain(), {
         tokenAddress: TOKEN,
-        poolType: 'burn-mint',
         newRateLimitAdmin: NEW_RATE_LIMIT_ADMIN,
         wallet: WALLET,
       })
@@ -130,7 +130,6 @@ describe('SetRateLimitAdmin (cct/solana)', () => {
         () =>
           new SetRateLimitAdmin().execute(chain(), {
             tokenAddress: TOKEN,
-            poolType: 'burn-mint',
             newRateLimitAdmin: NEW_RATE_LIMIT_ADMIN,
             authority: AUTHORITY,
             wallet: WALLET,

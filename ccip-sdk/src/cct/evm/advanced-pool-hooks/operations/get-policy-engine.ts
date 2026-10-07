@@ -6,32 +6,37 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress } from '../../validate.ts'
-import { assertAdvancedPoolHooksContract, readPolicyEngine } from '../contracts.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  readPolicyEngine,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
+} from '../contracts.ts'
 
 /** Parameters for {@link GetPolicyEngine}. */
-export type GetPolicyEngineParams = { advancedPoolHooks: string }
+export type GetPolicyEngineParams = AdvancedPoolHooksTarget
 /** Current policy engine; the zero address means policy checks are disabled. */
 export type GetPolicyEngineResult = string
 
 /**
  * Reads the current policy engine.
- * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
- * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+ * @throws {@link CCTParamsInvalidError} if the target is invalid
+ * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+ * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
  */
 export class GetPolicyEngine extends EVMQuery<GetPolicyEngineParams, GetPolicyEngineResult> {
   readonly name = 'getPolicyEngine'
 
   protected prepare(params: GetPolicyEngineParams): GetPolicyEngineParams {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    validateAdvancedPoolHooksTarget(this.name, params)
     return params
   }
 
   protected async read(
     chain: EVMChain,
-    { advancedPoolHooks }: GetPolicyEngineParams,
+    params: GetPolicyEngineParams,
   ): Promise<GetPolicyEngineResult> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    return readPolicyEngine(chain, advancedPoolHooks)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    return readPolicyEngine(chain, hooks)
   }
 }

@@ -6,18 +6,23 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { EVMQuery } from '../../query.ts'
-import { validateNonZeroAddress } from '../../validate.ts'
-import { assertAdvancedPoolHooksContract, readThresholdAmount } from '../contracts.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  readThresholdAmount,
+  resolveAdvancedPoolHooksTarget,
+  validateAdvancedPoolHooksTarget,
+} from '../contracts.ts'
 
 /** Parameters for {@link GetThresholdAmount}. */
-export type GetThresholdAmountParams = { advancedPoolHooks: string }
+export type GetThresholdAmountParams = AdvancedPoolHooksTarget
 /** Amount at or above which additional CCVs apply; zero means they are disabled. */
 export type GetThresholdAmountResult = bigint
 
 /**
  * Reads the additional-CCV threshold amount.
- * @throws {@link CCTParamsInvalidError} if `advancedPoolHooks` is invalid
- * @throws {@link CCTContractTypeInvalidError} if `advancedPoolHooks` is not `AdvancedPoolHooks`
+ * @throws {@link CCTParamsInvalidError} if the target is invalid
+ * @throws {@link CCTContractTypeInvalidError} if the target is not `AdvancedPoolHooks`
+ * @throws as {@link resolveAdvancedPoolHooks} for a `poolAddress` target
  */
 export class GetThresholdAmount extends EVMQuery<
   GetThresholdAmountParams,
@@ -26,15 +31,15 @@ export class GetThresholdAmount extends EVMQuery<
   readonly name = 'getThresholdAmount'
 
   protected prepare(params: GetThresholdAmountParams): GetThresholdAmountParams {
-    validateNonZeroAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
+    validateAdvancedPoolHooksTarget(this.name, params)
     return params
   }
 
   protected async read(
     chain: EVMChain,
-    { advancedPoolHooks }: GetThresholdAmountParams,
+    params: GetThresholdAmountParams,
   ): Promise<GetThresholdAmountResult> {
-    await assertAdvancedPoolHooksContract(chain, advancedPoolHooks)
-    return readThresholdAmount(chain, advancedPoolHooks)
+    const hooks = await resolveAdvancedPoolHooksTarget(this.name, chain, params)
+    return readThresholdAmount(chain, hooks)
   }
 }
