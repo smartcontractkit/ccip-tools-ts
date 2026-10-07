@@ -61,13 +61,14 @@ export class SetCCIPAdmin extends EVMOperation<SetCCIPAdminParams> {
 
   /**
    * Confirms the token has a default admin and, when known, that `sender` is it.
-   * @remarks Reported rather than thrown outright so this can be planned behind the step that
-   * makes `sender` the default admin.
+   * @remarks A wrong `sender` is reported rather than thrown outright so this can be planned
+   * behind the step that makes `sender` the default admin; a renounced admin stays fatal.
+   * @throws {@link CCTParamsInvalidError} if the token has no default admin
    */
   protected override async preconditions(
     chain: EVMChain,
     { tokenAddress, sender }: SetCCIPAdminParams,
   ): Promise<PreconditionError[]> {
-    return unmet(await checkTokenDefaultAdmin(chain, tokenAddress, sender))
+    return unmet(await checkTokenDefaultAdmin(this.name, chain, tokenAddress, sender))
   }
 }

@@ -43,10 +43,11 @@ type Builder = (
   param: string,
 ) => UnsignedEVMTx
 
-/** Reports one version's unmet on-chain requirements; `param` names `newAdmin` in them. */
+/** Reports one version's unmet on-chain requirements; `operation` / `param` attribute them. */
 type Checker = (
   chain: EVMChain,
   params: BeginDefaultAdminTransferParams,
+  operation: string,
   param: string,
 ) => Promise<PreconditionError[]>
 
@@ -63,11 +64,11 @@ const buildV1: Builder = (iface, { tokenAddress, newAdmin }, operation, param) =
 const buildV2: Builder = (iface, { tokenAddress, newAdmin }) =>
   callTx(tokenAddress, iface.encodeFunctionData('beginDefaultAdminTransfer', [newAdmin]))
 
-const checkV1: Checker = (chain, { tokenAddress, newAdmin, sender }, param) =>
+const checkV1: Checker = (chain, { tokenAddress, newAdmin, sender }, _operation, param) =>
   checkTokenOwnershipTransfer(chain, tokenAddress, newAdmin, sender, param)
 
-const checkV2: Checker = async (chain, { tokenAddress, sender }) =>
-  unmet(await checkTokenDefaultAdmin(chain, tokenAddress, sender))
+const checkV2: Checker = async (chain, { tokenAddress, sender }, operation) =>
+  unmet(await checkTokenDefaultAdmin(operation, chain, tokenAddress, sender))
 
 const BUILDERS: Partial<Record<TokenVersion, Builder>> = {
   [TokenVersion.V1_5_1]: buildV1,
@@ -106,7 +107,7 @@ export async function checkBeginDefaultAdminTransfer(
 ): Promise<PreconditionError[]> {
   const version = await resolveToken(chain, params.tokenAddress)
   const check = resolveTokenEncoder(CHECKERS, version, operation)
-  return check(chain, params, newAdminParam)
+  return check(chain, params, operation, newAdminParam)
 }
 
 /** Proposes a new token admin: v2 `beginDefaultAdminTransfer`, v1 Ownable2Step `transferOwnership`. */
@@ -139,7 +140,8 @@ export class BeginDefaultAdminTransfer extends EVMOperation<BeginDefaultAdminTra
    * replacing an existing pending transfer and permits the zero-address proposal used for
    * renunciation, so neither is reported.
    * @remarks Reported rather than thrown outright so this can be planned behind the step that
-   * makes `sender` the admin.
+   * makes `sender` the admin. A renounced v2 admin stays fatal.
+   * @throws {@link CCTParamsInvalidError} if a v2 token has no default admin
    */
   protected override preconditions(
     chain: EVMChain,

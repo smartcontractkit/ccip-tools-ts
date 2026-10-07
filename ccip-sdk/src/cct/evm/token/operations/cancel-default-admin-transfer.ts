@@ -36,10 +36,11 @@ export type CancelDefaultAdminTransferParams = {
 /** Encodes one version's retraction. */
 type Builder = (iface: Interface, params: CancelDefaultAdminTransferParams) => UnsignedEVMTx
 
-/** Reports one version's unmet on-chain requirements. */
+/** Reports one version's unmet on-chain requirements; `operation` attributes them. */
 type Checker = (
   chain: EVMChain,
   params: CancelDefaultAdminTransferParams,
+  operation: string,
 ) => Promise<PreconditionError[]>
 
 const buildV1: Builder = (iface, { tokenAddress }) =>
@@ -51,10 +52,12 @@ const buildV2: Builder = (iface, { tokenAddress }) =>
 const checkV1: Checker = async (chain, { tokenAddress, sender }) =>
   sender === undefined ? [] : unmet(await checkTokenOwner(chain, tokenAddress, sender))
 
-const checkV2: Checker = async (chain, { tokenAddress, sender }) => {
+const checkV2: Checker = async (chain, { tokenAddress, sender }, operation) => {
   const [{ schedule }, admin] = await Promise.all([
     readPendingTokenDefaultAdmin(chain, tokenAddress),
-    sender === undefined ? undefined : checkTokenDefaultAdmin(chain, tokenAddress, sender),
+    sender === undefined
+      ? undefined
+      : checkTokenDefaultAdmin(operation, chain, tokenAddress, sender),
   ])
   return unmet(
     schedule === 0n
@@ -99,7 +102,7 @@ export async function checkCancelDefaultAdminTransfer(
 ): Promise<PreconditionError[]> {
   const version = await resolveToken(chain, params.tokenAddress)
   const check = resolveTokenEncoder(CHECKERS, version, operation)
-  return check(chain, params)
+  return check(chain, params, operation)
 }
 
 /** Retracts a pending token-admin transfer: v2 `cancelDefaultAdminTransfer`, v1 `transferOwnership(0x0)`. */

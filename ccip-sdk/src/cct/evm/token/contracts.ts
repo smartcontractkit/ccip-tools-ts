@@ -21,6 +21,7 @@ import {
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
 } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import FACTORY_BURN_MINT_ERC20_V1_6_2_ABI from '../artifacts/abi/V1_6_2/factory-burn-mint-erc20.ts'
@@ -216,17 +217,26 @@ export async function readCCIPAdmin(chain: EVMChain, tokenAddress: string): Prom
 
 /**
  * Confirms a CrossChainToken has a default admin and, when supplied, checks `sender` against it.
- * @returns The unmet requirement, or `undefined` if `sender` already holds the role. The two are
- * exclusive — with no admin there is nothing to compare `sender` to.
+ * @remarks A zero default admin throws rather than being reported: it only arises from a completed
+ * renunciation, after which no one holds `DEFAULT_ADMIN_ROLE` to begin a new transfer, so no
+ * earlier plan step can restore one.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @returns The unmet requirement, or `undefined` if `sender` already holds the role.
+ * @throws {@link CCTParamsInvalidError} if the token has no default admin
  */
 export async function checkTokenDefaultAdmin(
+  operation: string,
   chain: EVMChain,
   tokenAddress: string,
   sender?: string,
 ): Promise<PreconditionError | undefined> {
   const admin = await readTokenDefaultAdmin(chain, tokenAddress)
   if (admin === ZeroAddress)
-    return { param: 'tokenAddress', reason: 'has no current default admin' }
+    throw new CCTParamsInvalidError(
+      operation,
+      'tokenAddress',
+      'has no current default admin — it was renounced, and nothing can grant it again',
+    )
   if (sender === undefined || getAddress(sender) === admin) return undefined
   return { param: 'sender', reason: `must be the current default admin (${admin})` }
 }

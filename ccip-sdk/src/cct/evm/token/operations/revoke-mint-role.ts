@@ -83,12 +83,14 @@ export class RevokeMintRole extends EVMOperation<RevokeMintRoleParams> {
     { tokenAddress, minter, sender }: RevokeMintRoleParams,
   ): Promise<PreconditionError[]> {
     const roleHandler = resolveTokenRoleHandler(await resolveToken(chain, tokenAddress), this.name)
-    const [holdsRole, admin] = await Promise.all([
-      roleHandler.hasRole(chain, tokenAddress, 'mint', minter),
+    // Role read first: on v1 it doubles as the family check, so an EOA or a non-BurnMintERC677
+    // contract surfaces as CCTContractTypeInvalidError rather than as whichever raw `owner()`
+    // decode failure won a race against it. Costs a round trip only when `sender` is given.
+    const holdsRole = await roleHandler.hasRole(chain, tokenAddress, 'mint', minter)
+    const admin =
       sender === undefined
         ? undefined
-        : roleHandler.checkAdmin(chain, tokenAddress, 'mint', sender),
-    ])
+        : await roleHandler.checkAdmin(chain, tokenAddress, 'mint', sender)
     return unmet(
       holdsRole
         ? undefined
