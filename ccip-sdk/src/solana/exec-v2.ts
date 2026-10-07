@@ -142,7 +142,7 @@ export async function getVerificationPolicyV2(
 // The resolved `execute_v2` after its heap frame request, which must share its transaction; with
 // `forceLookupTable`, sandwiched between the creation and deactivation of a lookup table with its
 // accounts, like CCIP 1.6's `manuallyExecute`
-async function unsignedExecuteV2Tx(
+async function wrapExecuteV2Ix(
   ctx: { connection: Connection } & WithLogger,
   caller: PublicKey,
   instruction: TransactionInstruction,
@@ -189,7 +189,7 @@ export async function generateUnsignedExecuteV2(
     caller,
     execInputs: toExecutionInputsV2(input),
   })
-  return unsignedExecuteV2Tx(ctx, caller, instruction, lookupTables, opts)
+  return wrapExecuteV2Ix(ctx, caller, instruction, lookupTables, opts)
 }
 
 // Accounts of `buffer_execution_inputs` and `close_execution_inputs_buffer`, the last two for
@@ -378,7 +378,7 @@ export async function executeV2(
           caller,
           bufferId,
         })
-        unsigned = await unsignedExecuteV2Tx(ctx, caller, instruction, lookupTables, {
+        unsigned = await wrapExecuteV2Ix(ctx, caller, instruction, lookupTables, {
           forceLookupTable,
         })
       }
