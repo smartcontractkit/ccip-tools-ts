@@ -15,6 +15,12 @@ export type TokenPoolStateConfig = TokenPoolTypes['BaseConfig']
 /** Remote token, pools and rate limits a token pool stores per remote chain. */
 export type TokenPoolChainConfig = TokenPoolTypes['BaseChain']
 
+/** Allowed finality and token transfer fees a 2.0 token pool configures per remote chain. */
+export type TokenPoolChainConfigV2 = {
+  allowedFinalityConfig: TokenPoolTypes['FinalityConfig']
+  tokenTransferFeeConfig: TokenPoolTypes['TokenTransferFeeConfig']
+}
+
 /** Rate limits a 2.0 token pool applies to faster-than-finality transfers on a remote chain. */
 export type TokenPoolChainConfigOverride = TokenPoolTypes['BaseOverrideConfig']
 
@@ -72,6 +78,39 @@ export function decodeTokenPoolChainConfig(data: Buffer, poolType?: string): Tok
     }
   }
   throw error
+}
+
+/**
+ * Decodes a 2.0 token pool's `ChainConfigV2` account.
+ *
+ * @param data - Raw `ChainConfigV2` account data.
+ * @returns The pool's allowed finality and token transfer fees for the account's remote chain.
+ */
+export function decodeTokenPoolChainConfigV2(data: Buffer): TokenPoolChainConfigV2 {
+  return tokenPoolCoder.accounts.decode<TokenPoolChainConfigV2>('chainConfigV2', data)
+}
+
+/**
+ * Derives a 2.0 token pool's `ChainConfigV2` PDA for a remote chain.
+ *
+ * @param poolProgram - Token pool program.
+ * @param remoteChainSelector - Remote chain selector.
+ * @param mint - Token mint the pool manages.
+ * @returns The `ChainConfigV2` PDA, which may not be initialized.
+ */
+export function deriveTokenPoolChainConfigV2Pda(
+  poolProgram: PublicKey,
+  remoteChainSelector: bigint,
+  mint: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from('ccip_tokenpool_chainconfig_2_0'),
+      toLeArray(remoteChainSelector, 8),
+      mint.toBuffer(),
+    ],
+    poolProgram,
+  )[0]
 }
 
 /**

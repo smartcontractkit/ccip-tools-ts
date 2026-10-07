@@ -33,6 +33,7 @@ import {
   type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
+  type TokenPoolConfig,
   type TokenPoolRemote,
   type TokenPrice,
   type TokenTransferFeeOpts,
@@ -66,12 +67,14 @@ import {
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type FinalityAllowed,
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
+  decodeFinalityAllowed,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
@@ -132,6 +135,7 @@ import {
   type SolanaSendLane,
   generateUnsignedCcipSendV2,
   getFeeV2,
+  observeDestChainV2,
   selectSendLane,
 } from './send-v2.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
@@ -143,8 +147,10 @@ import {
 import {
   decodeTokenPoolChainConfig,
   decodeTokenPoolChainConfigOverride,
+  decodeTokenPoolChainConfigV2,
   decodeTokenPoolStateConfig,
   deriveTokenPoolChainConfigOverridePda,
+  deriveTokenPoolChainConfigV2Pda,
 } from './token-pool.ts'
 import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
 import {
@@ -2002,31 +2008,105 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
+   *
+   * @remarks
+   * 2.0 pools configure their allowed finality per remote chain (EVM pools, pool-wide), so
+   * `finalityDepth`/`finalitySafe` are only returned with `feeOpts`, for its `destChainSelector`,
+   * along with `tokenTransferFeeConfig`. A lane without a 2.0 config allows only finalized
+   * transfers, without fees (`finalityDepth: 0`, `tokenTransferFeeConfig.isEnabled: false`).
    */
   async getTokenPoolConfig(
     tokenPool: string,
-    _feeOpts?: TokenTransferFeeOpts,
-  ): Promise<{
-    token: string
-    router: string
-    tokenPoolProgram: string
-    typeAndVersion?: string
-  }> {
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig & { tokenPoolProgram: string }> {
     const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
-    let typeAndVersion
+    let version, typeAndVersion
     try {
-      ;[, , typeAndVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
+      ;[, version, typeAndVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
     } catch (_) {
       // TokenPool may not have a typeAndVersion
     }
 
-    return {
+    const poolConfig = {
       token: config.mint.toBase58(),
       router: config.router.toBase58(),
       tokenPoolProgram: tokenPoolProgram.toBase58(),
       typeAndVersion,
     }
+    // 2.0 configs only exist on 2.0 pools; probe them on pools of unknown version too
+    if (!feeOpts || (version != null && version < CCIPVersion.V2_0)) return poolConfig
+
+    const chainConfigV2 = await this.connection.getAccountInfo(
+      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, feeOpts.destChainSelector, config.mint),
+    )
+    // a pool of unknown version without a 2.0 config may not be a 2.0 pool
+    if (!chainConfigV2 && version == null) return poolConfig
+    let allowedFinalityConfig = { flags: 0, blockDepth: 0 }
+    let tokenTransferFeeConfig = {
+      destGasOverhead: 0,
+      destBytesOverhead: 0,
+      finalityFee: 0,
+      fastFinalityFee: 0,
+      finalityBpsFee: 0,
+      fastFinalityBpsFee: 0,
+      isEnabled: false,
+    }
+    if (chainConfigV2) {
+      try {
+        ;({ allowedFinalityConfig, tokenTransferFeeConfig } = decodeTokenPoolChainConfigV2(
+          chainConfigV2.data,
+        ))
+      } catch (err) {
+        this.logger.warn('Failed to decode ChainConfigV2 account:', err)
+        return poolConfig
+      }
+    }
+    return {
+      ...poolConfig,
+      // same encoding as EVM's allowed finality: flags in the high 16 bits, block depth in the low
+      ...decodeFinalityAllowed(
+        allowedFinalityConfig.flags * 2 ** 16 + allowedFinalityConfig.blockDepth,
+      ),
+      tokenTransferFeeConfig: {
+        destGasOverhead: tokenTransferFeeConfig.destGasOverhead,
+        destBytesOverhead: tokenTransferFeeConfig.destBytesOverhead,
+        finalityFeeUSDCents: tokenTransferFeeConfig.finalityFee,
+        fastFinalityFeeUSDCents: tokenTransferFeeConfig.fastFinalityFee,
+        finalityTransferFeeBps: tokenTransferFeeConfig.finalityBpsFee,
+        fastFinalityTransferFeeBps: tokenTransferFeeConfig.fastFinalityBpsFee,
+        isEnabled: tokenTransferFeeConfig.isEnabled,
+      },
+    }
+  }
+
+  /**
+   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if the router
+   * has a 2.0 path to it (it may still allowlist senders).
+   */
+  protected override async laneSupportsFastFinality(
+    router: string,
+    destChainSelector: bigint,
+  ): Promise<boolean> {
+    if (!(await super.laneSupportsFastFinality(router, destChainSelector))) return false
+    const lane = await observeDestChainV2(this, {
+      router: new PublicKey(router),
+      destChainSelector,
+    })
+    return 'observation' in lane
+  }
+
+  /** Solana token pools configure their allowed finality per remote chain. */
+  protected override async getTokenPoolFinality(
+    tokenPool: string,
+    destChainSelector: bigint,
+  ): Promise<Partial<FinalityAllowed>> {
+    const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool, {
+      destChainSelector,
+      finality: 'finalized',
+      tokenArgs: '0x',
+    })
+    return { finalityDepth, finalitySafe }
   }
 
   /**

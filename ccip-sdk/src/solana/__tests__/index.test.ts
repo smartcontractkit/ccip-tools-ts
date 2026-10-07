@@ -5,6 +5,7 @@ import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { type Connection, PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
+import { LaneFeature } from '../../chain.ts'
 import {
   CCIPCommitHistoryPrunedError,
   CCIPCommitNotFoundError,
@@ -13,11 +14,14 @@ import {
 } from '../../errors/index.ts'
 import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
 import { CCIPVersion } from '../../types.ts'
-import { toLeArray } from '../../utils.ts'
+import { parseTypeAndVersion, toLeArray } from '../../utils.ts'
 import { sizedCoder } from '../coder.ts'
 import { IDL as BASE_TOKEN_POOL_V2 } from '../idl/2.0.0/BASE_TOKEN_POOL.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
-import { deriveTokenPoolChainConfigOverridePda } from '../token-pool.ts'
+import {
+  deriveTokenPoolChainConfigOverridePda,
+  deriveTokenPoolChainConfigV2Pda,
+} from '../token-pool.ts'
 import { hexDiscriminator } from '../utils.ts'
 
 // Create mock functions
@@ -711,7 +715,18 @@ describe('SolanaChain token pool readers', () => {
     [Buffer.from('ccip_tokenpool_chainconfig'), toLeArray(remoteSelector, 8), mint.toBuffer()],
     poolProgram,
   )[0]
+  const chainConfigV2Pda = deriveTokenPoolChainConfigV2Pda(poolProgram, remoteSelector, mint)
   const overridePda = deriveTokenPoolChainConfigOverridePda(poolProgram, remoteSelector, mint)
+  const feeOpts = {
+    destChainSelector: remoteSelector,
+    finality: 'finalized',
+    tokenArgs: '0x',
+  } as const
+  // a recorded `observe_dest_chain_v2` return of the 2.0 staging router
+  const laneObservation = Buffer.from(
+    'AQAVAAAAY2NpcC1yb3V0ZXIgMi4wLjAtZGV2Adka2clPukHe+C8AAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAqrP9/xjtfoHo/uM627bDkPLOn1AD0u3u1en80sNL1vwAAAAAz2m0emq6bEJQWd2XuYl2ULtp755IijYPP8xb+H7mG4QUAAAA66XXlFlITlQ70VYHpiHs4pspypkyAAAAlgAAAEANAwA=',
+    'base64',
+  )
 
   const bucket = (enabled: boolean, capacity: number, rate: number) => ({
     tokens: new BN(capacity),
@@ -720,12 +735,21 @@ describe('SolanaChain token pool readers', () => {
   })
   const encode = (name: string, data: unknown) => coder.accounts.encode(name, data)
 
+  /**
+   * A chain with a 2.0 router and a pool of `poolTypeAndVersion` (`null` for a custom pool without
+   * `typeVersion`) with a ChainConfig to `remoteSelector`, and optionally a ChainConfigV2 and FTF
+   * override; the router has a 2.0 lane to `remoteSelector` unless `laneV2` is false.
+   */
   async function poolChain({
-    typeAndVersion,
+    poolTypeAndVersion,
     override,
+    chainConfigV2,
+    laneV2 = true,
   }: {
-    typeAndVersion: () => Promise<[string, string, string]>
+    poolTypeAndVersion: string | null
     override?: { enabled: boolean }
+    chainConfigV2?: { flags: number; blockDepth: number }
+    laneV2?: boolean
   }) {
     const state = await encode('state', {
       version: 1,
@@ -753,6 +777,24 @@ describe('SolanaChain token pool readers', () => {
         outboundRateLimit: bucket(true, 200, 2),
       },
     })
+    const chainConfigV2Data =
+      chainConfigV2 &&
+      (await encode('chainConfigV2', {
+        bump: 254,
+        version: 1,
+        remoteChainSelector: new BN(remoteSelector.toString()),
+        mint,
+        allowedFinalityConfig: chainConfigV2,
+        tokenTransferFeeConfig: {
+          destGasOverhead: 90_000,
+          destBytesOverhead: 32,
+          finalityFee: 25,
+          fastFinalityFee: 50,
+          finalityBpsFee: 10,
+          fastFinalityBpsFee: 20,
+          isEnabled: true,
+        },
+      }))
     const overrideData =
       override &&
       (await encode('chainConfigOverride', {
@@ -767,49 +809,69 @@ describe('SolanaChain token pool readers', () => {
         },
       }))
 
-    const accounts = new Map([
+    const accounts = new Map<string, { owner: PublicKey; data: Buffer }>([
       [tokenPool.toBase58(), { owner: poolProgram, data: state }],
       [chainConfigPda.toBase58(), { owner: poolProgram, data: chainConfig }],
-      ...(overrideData
-        ? [[overridePda.toBase58(), { owner: poolProgram, data: overrideData }] as const]
-        : []),
     ])
+    if (chainConfigV2Data)
+      accounts.set(chainConfigV2Pda.toBase58(), { owner: poolProgram, data: chainConfigV2Data })
+    if (overrideData)
+      accounts.set(overridePda.toBase58(), { owner: poolProgram, data: overrideData })
+    const getAccountInfo = mock.fn(async (k: PublicKey) => accounts.get(k.toBase58()) ?? null)
     const getMultipleAccountsInfo = mock.fn(async (keys: PublicKey[]) =>
       keys.map((k) => accounts.get(k.toBase58()) ?? null),
     )
     const chain = new SolanaChain(
       {
-        getAccountInfo: async (k: PublicKey) => accounts.get(k.toBase58()) ?? null,
+        getAccountInfo,
         getProgramAccounts: async () => [
           { pubkey: chainConfigPda, account: accounts.get(chainConfigPda.toBase58()) },
         ],
         getMultipleAccountsInfo,
         getSignaturesForAddress: async () => [],
+        // `observe_dest_chain_v2`, failing with AccountNotInitialized without a 2.0 lane
+        simulateTransaction: async () => ({
+          value: laneV2
+            ? {
+                err: null,
+                logs: [],
+                unitsConsumed: 1,
+                returnData: {
+                  programId: router.toBase58(),
+                  data: [laneObservation.toString('base64'), 'base64'],
+                },
+              }
+            : { err: { InstructionError: [0, { Custom: 3012 }] }, logs: [], unitsConsumed: 1 },
+        }),
+        getLatestBlockhash: async () => ({
+          blockhash: PublicKey.default.toBase58(),
+          lastValidBlockHeight: 1,
+        }),
       } as unknown as Connection,
       mockNetworkInfo,
     )
-    mock.method(chain, 'typeAndVersion', typeAndVersion)
-    return { chain, getMultipleAccountsInfo }
+    mock.method(chain, 'typeAndVersion', async (address: string) => {
+      if (address === router.toBase58()) return parseTypeAndVersion('ccip-router 2.0.0-dev')
+      if (poolTypeAndVersion == null) throw new Error('typeVersion not implemented')
+      return parseTypeAndVersion(poolTypeAndVersion)
+    })
+    mock.method(chain, 'getRegistryTokenConfig', async () => ({
+      administrator: key(20).toBase58(),
+      tokenPool: tokenPool.toBase58(),
+    }))
+    return { chain, getAccountInfo, getMultipleAccountsInfo }
   }
 
-  const v2Pool = async () =>
-    ['burnmint-token-pool', CCIPVersion.V2_0, 'burnmint-token-pool 2.0.0-dev'] as [
-      string,
-      string,
-      string,
-    ]
-  const v16Pool = async () =>
-    ['burnmint-token-pool', CCIPVersion.V1_6, 'burnmint-token-pool 1.6.2'] as [
-      string,
-      string,
-      string,
-    ]
-  const customPool = async (): Promise<[string, string, string]> => {
-    throw new Error('typeVersion not implemented')
-  }
+  const v2Pool = 'burnmint-token-pool 2.0.0-dev'
+  const v16Pool = 'burnmint-token-pool 1.6.2'
+  const v2ChainConfig = { flags: 0, blockDepth: 5 }
+  const chainConfigV2Reads = (getAccountInfo: { mock: { calls: { arguments: unknown[] }[] } }) =>
+    getAccountInfo.mock.calls.filter(({ arguments: [k] }) =>
+      (k as PublicKey).equals(chainConfigV2Pda),
+    ).length
 
   it('returns the token, router and pool program of a pool', async () => {
-    const { chain } = await poolChain({ typeAndVersion: v2Pool })
+    const { chain } = await poolChain({ poolTypeAndVersion: v2Pool, chainConfigV2: v2ChainConfig })
     assert.deepEqual(await chain.getTokenPoolConfig(tokenPool.toBase58()), {
       token: mint.toBase58(),
       router: router.toBase58(),
@@ -819,15 +881,73 @@ describe('SolanaChain token pool readers', () => {
   })
 
   it('rejects accounts that are not a pool State', async () => {
-    const { chain } = await poolChain({ typeAndVersion: v2Pool })
+    const { chain } = await poolChain({ poolTypeAndVersion: v2Pool })
     await assert.rejects(
       chain.getTokenPoolConfig(chainConfigPda.toBase58()),
       CCIPTokenPoolStateNotFoundError,
     )
   })
 
+  it("returns a 2.0 pool's finality and fees for the lane of feeOpts", async () => {
+    const { chain } = await poolChain({ poolTypeAndVersion: v2Pool, chainConfigV2: v2ChainConfig })
+    const config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.equal(config.finalityDepth, 5)
+    assert.equal(config.finalitySafe, undefined)
+    assert.deepEqual(config.tokenTransferFeeConfig, {
+      destGasOverhead: 90_000,
+      destBytesOverhead: 32,
+      finalityFeeUSDCents: 25,
+      fastFinalityFeeUSDCents: 50,
+      finalityTransferFeeBps: 10,
+      fastFinalityTransferFeeBps: 20,
+      isEnabled: true,
+    })
+
+    const { chain: safeChain } = await poolChain({
+      poolTypeAndVersion: v2Pool,
+      chainConfigV2: { flags: 1, blockDepth: 0 },
+    })
+    const safe = await safeChain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.equal(safe.finalitySafe, true)
+    assert.equal(safe.finalityDepth, 0)
+  })
+
+  it('reads a 2.0 lane without ChainConfigV2 as finalized-only, without fees', async () => {
+    const { chain } = await poolChain({ poolTypeAndVersion: v2Pool })
+    const config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.equal(config.finalityDepth, 0)
+    assert.equal(config.finalitySafe, undefined)
+    assert.equal(config.tokenTransferFeeConfig?.isEnabled, false)
+  })
+
+  it('reads no finality without feeOpts, or from 1.6 pools', async () => {
+    let { chain, getAccountInfo } = await poolChain({
+      poolTypeAndVersion: v2Pool,
+      chainConfigV2: v2ChainConfig,
+    })
+    let config = await chain.getTokenPoolConfig(tokenPool.toBase58())
+    assert.ok(!('finalityDepth' in config) && !('tokenTransferFeeConfig' in config))
+
+    ;({ chain, getAccountInfo } = await poolChain({
+      poolTypeAndVersion: v16Pool,
+      chainConfigV2: v2ChainConfig,
+    }))
+    config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.ok(!('finalityDepth' in config) && !('tokenTransferFeeConfig' in config))
+    assert.equal(chainConfigV2Reads(getAccountInfo), 0)
+  })
+
+  it('reads the finality of pools of unknown version only if they have a ChainConfigV2', async () => {
+    let { chain } = await poolChain({ poolTypeAndVersion: null })
+    let config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.ok(!('finalityDepth' in config))
+    ;({ chain } = await poolChain({ poolTypeAndVersion: null, chainConfigV2: v2ChainConfig }))
+    config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
+    assert.equal(config.finalityDepth, 5)
+  })
+
   it("returns a 2.0 pool's FTF rate limits from its override", async () => {
-    const { chain } = await poolChain({ typeAndVersion: v2Pool, override: { enabled: true } })
+    const { chain } = await poolChain({ poolTypeAndVersion: v2Pool, override: { enabled: true } })
     const remotes = await chain.getTokenPoolRemotes(tokenPool.toBase58())
     const remote = remotes['solana-devnet']!
     assert.equal(remote.remoteToken, key(0xaa).toBase58())
@@ -841,7 +961,7 @@ describe('SolanaChain token pool readers', () => {
 
   it('returns null FTF rate limits for 2.0 pools without an enabled override', async () => {
     for (const override of [undefined, { enabled: false }]) {
-      const { chain } = await poolChain({ typeAndVersion: v2Pool, override })
+      const { chain } = await poolChain({ poolTypeAndVersion: v2Pool, override })
       const remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
       assert.ok('fastOutboundRateLimiterState' in remote)
       assert.equal(remote.fastOutboundRateLimiterState, null)
@@ -850,7 +970,7 @@ describe('SolanaChain token pool readers', () => {
   })
 
   it('omits FTF rate limits for 1.6 pools without probing overrides', async () => {
-    const { chain, getMultipleAccountsInfo } = await poolChain({ typeAndVersion: v16Pool })
+    const { chain, getMultipleAccountsInfo } = await poolChain({ poolTypeAndVersion: v16Pool })
     const remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
     assert.equal(remote.outboundRateLimiterState?.capacity, 200n)
     assert.ok(!('fastOutboundRateLimiterState' in remote))
@@ -858,13 +978,64 @@ describe('SolanaChain token pool readers', () => {
   })
 
   it('returns FTF rate limits of pools of unknown version only if they have an override', async () => {
-    let { chain } = await poolChain({ typeAndVersion: customPool })
+    let { chain } = await poolChain({ poolTypeAndVersion: null })
     let remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
     assert.ok(!('fastOutboundRateLimiterState' in remote))
-    ;({ chain } = await poolChain({ typeAndVersion: customPool, override: { enabled: true } }))
+    ;({ chain } = await poolChain({ poolTypeAndVersion: null, override: { enabled: true } }))
     remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
     assert.ok('fastOutboundRateLimiterState' in remote)
     assert.equal(remote.fastOutboundRateLimiterState?.capacity, 20n)
+  })
+
+  describe('getLaneFeatures', () => {
+    const laneFeatures = (chain: SolanaChain, token?: PublicKey) =>
+      chain.getLaneFeatures({
+        router: router.toBase58(),
+        destChainSelector: remoteSelector,
+        ...(token && { token: token.toBase58() }),
+      })
+
+    it("reports the lane's pool finality and FTF rate limits", async () => {
+      const { chain } = await poolChain({
+        poolTypeAndVersion: v2Pool,
+        chainConfigV2: v2ChainConfig,
+        override: { enabled: true },
+      })
+      const features = await laneFeatures(chain, mint)
+      assert.equal(features[LaneFeature.FINALITY_FAST], 5)
+      assert.equal(features[LaneFeature.FINALITY_SAFE], undefined)
+      assert.equal(features[LaneFeature.RATE_LIMITS]?.capacity, 200n)
+      assert.equal(features[LaneFeature.FAST_RATE_LIMITS]?.capacity, 20n)
+    })
+
+    it('reports FTF as not enabled for a pool without a 2.0 config on the lane', async () => {
+      const { chain } = await poolChain({ poolTypeAndVersion: v2Pool })
+      const features = await laneFeatures(chain, mint)
+      assert.equal(features[LaneFeature.FINALITY_FAST], 0)
+      assert.ok(!(LaneFeature.FAST_RATE_LIMITS in features))
+    })
+
+    it('reports no fast finality on lanes the 2.0 router serves over 1.6', async () => {
+      const { chain, getAccountInfo } = await poolChain({
+        poolTypeAndVersion: v2Pool,
+        chainConfigV2: v2ChainConfig,
+        override: { enabled: true },
+        laneV2: false,
+      })
+      for (const features of [await laneFeatures(chain), await laneFeatures(chain, mint)]) {
+        assert.ok(!(LaneFeature.FINALITY_FAST in features))
+        assert.ok(!(LaneFeature.FINALITY_SAFE in features))
+        assert.ok(!(LaneFeature.FAST_RATE_LIMITS in features))
+      }
+      assert.equal(chainConfigV2Reads(getAccountInfo), 0)
+    })
+
+    it('defaults to fast and safe finality on 2.0 lanes without a token', async () => {
+      const { chain } = await poolChain({ poolTypeAndVersion: v2Pool })
+      const features = await laneFeatures(chain)
+      assert.equal(features[LaneFeature.FINALITY_FAST], 1)
+      assert.equal(features[LaneFeature.FINALITY_SAFE], true)
+    })
   })
 })
 

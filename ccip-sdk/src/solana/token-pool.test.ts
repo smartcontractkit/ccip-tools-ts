@@ -8,11 +8,17 @@ import { PublicKey } from '@solana/web3.js'
 import {
   decodeTokenPoolChainConfig,
   decodeTokenPoolChainConfigOverride,
+  decodeTokenPoolChainConfigV2,
   decodeTokenPoolStateConfig,
 } from './token-pool.ts'
 
 const key = (byte: number) => new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
 const u8 = (n: number) => Buffer.from([n])
+const u16 = (n: number) => {
+  const b = Buffer.alloc(2)
+  b.writeUInt16LE(n)
+  return b
+}
 const u32 = (n: number) => {
   const b = Buffer.alloc(4)
   b.writeUInt32LE(n)
@@ -116,6 +122,42 @@ describe('decodeTokenPoolChainConfig', () => {
 
   it('rejects non-ChainConfig accounts', () => {
     assert.throws(() => decodeTokenPoolChainConfig(account('State', baseChain)))
+  })
+})
+
+describe('decodeTokenPoolChainConfigV2', () => {
+  it('decodes the allowed finality and token transfer fees, ignoring the CCV config', () => {
+    const config = decodeTokenPoolChainConfigV2(
+      account(
+        'ChainConfigV2',
+        u8(254), // bump
+        u8(1), // version
+        u64(16015286601757825753n),
+        key(1).toBuffer(),
+        u16(1), // allowed_finality_config.flags
+        u16(12), // allowed_finality_config.block_depth
+        u32(90_000), // dest_gas_overhead
+        u32(32), // dest_bytes_overhead
+        u32(25), // finality_fee
+        u32(50), // fast_finality_fee
+        u16(10), // finality_bps_fee
+        u16(20), // fast_finality_bps_fee
+        u8(1), // is_enabled
+        u64(0n), // ccv_config.threshold_amount
+        ...[1, 0, 0, 0].map(u32), // ccv_config's 4 CCV lists
+        key(5).toBuffer(),
+      ),
+    )
+    assert.deepEqual(config.allowedFinalityConfig, { flags: 1, blockDepth: 12 })
+    assert.deepEqual(config.tokenTransferFeeConfig, {
+      destGasOverhead: 90_000,
+      destBytesOverhead: 32,
+      finalityFee: 25,
+      fastFinalityFee: 50,
+      finalityBpsFee: 10,
+      fastFinalityBpsFee: 20,
+      isEnabled: true,
+    })
   })
 })
 

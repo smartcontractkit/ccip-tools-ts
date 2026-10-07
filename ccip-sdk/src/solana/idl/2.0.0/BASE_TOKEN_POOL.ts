@@ -2,10 +2,12 @@
  * Minimal CCIP v2 (`burnmint-token-pool 2.0.0-dev`) token pool IDL.
  *
  * Describes the accounts the SDK reads from canonical token pools: the pool `State`, the per-remote
- * `ChainConfig`, and the faster-than-finality (FTF) `ChainConfigOverride`. `State` and `ChainConfig`
- * are Borsh-identical to their 1.6 layouts, so this IDL reads both 1.6 and 2.0 pools. `BaseConfig`
- * only declares its fields up to `router`: Borsh ignores trailing bytes, so pools whose `State`
- * carries extra or older trailing fields still decode. `ChainConfig` is the burn-mint and
+ * `ChainConfig`, the 2.0 per-remote `ChainConfigV2` (finality and fee config), and the
+ * faster-than-finality (FTF) `ChainConfigOverride`. `State` and `ChainConfig` are Borsh-identical to
+ * their 1.6 layouts, so this IDL reads both 1.6 and 2.0 pools. Some structs only declare their
+ * leading fields, as Borsh ignores trailing bytes: `BaseConfig` stops at `router` (so pools whose
+ * `State` carries extra or older trailing fields still decode), and `ChainConfigV2` before its
+ * `ccv_config`. The `CrossChainGas` and `UsdCents` newtypes are declared as their `u32`. `ChainConfig` is the burn-mint and
  * lock-release layout; CCTP and Lombard pools prefix it with a schema version byte. Instructions are
  * not listed. Anchor 0.29 IDL format.
  */
@@ -29,6 +31,20 @@ export type BaseTokenPoolV2 = {
       type: {
         kind: 'struct'
         fields: [{ name: 'base'; type: { defined: 'BaseChain' } }]
+      }
+    },
+    {
+      name: 'chainConfigV2'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'bump'; type: 'u8' },
+          { name: 'version'; type: 'u8' },
+          { name: 'remoteChainSelector'; type: 'u64' },
+          { name: 'mint'; type: 'publicKey' },
+          { name: 'allowedFinalityConfig'; type: { defined: 'FinalityConfig' } },
+          { name: 'tokenTransferFeeConfig'; type: { defined: 'TokenTransferFeeConfig' } },
+        ]
       }
     },
     {
@@ -70,6 +86,28 @@ export type BaseTokenPoolV2 = {
           { name: 'remote'; type: { defined: 'RemoteConfig' } },
           { name: 'inboundRateLimit'; type: { defined: 'RateLimitTokenBucket' } },
           { name: 'outboundRateLimit'; type: { defined: 'RateLimitTokenBucket' } },
+        ]
+      }
+    },
+    {
+      name: 'FinalityConfig'
+      type: {
+        kind: 'struct'
+        fields: [{ name: 'flags'; type: 'u16' }, { name: 'blockDepth'; type: 'u16' }]
+      }
+    },
+    {
+      name: 'TokenTransferFeeConfig'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'destGasOverhead'; type: 'u32' },
+          { name: 'destBytesOverhead'; type: 'u32' },
+          { name: 'finalityFee'; type: 'u32' },
+          { name: 'fastFinalityFee'; type: 'u32' },
+          { name: 'finalityBpsFee'; type: 'u16' },
+          { name: 'fastFinalityBpsFee'; type: 'u16' },
+          { name: 'isEnabled'; type: 'bool' },
         ]
       }
     },
@@ -156,6 +194,20 @@ export const IDL: BaseTokenPoolV2 = {
       },
     },
     {
+      name: 'chainConfigV2',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'bump', type: 'u8' },
+          { name: 'version', type: 'u8' },
+          { name: 'remoteChainSelector', type: 'u64' },
+          { name: 'mint', type: 'publicKey' },
+          { name: 'allowedFinalityConfig', type: { defined: 'FinalityConfig' } },
+          { name: 'tokenTransferFeeConfig', type: { defined: 'TokenTransferFeeConfig' } },
+        ],
+      },
+    },
+    {
       name: 'chainConfigOverride',
       type: {
         kind: 'struct',
@@ -194,6 +246,31 @@ export const IDL: BaseTokenPoolV2 = {
           { name: 'remote', type: { defined: 'RemoteConfig' } },
           { name: 'inboundRateLimit', type: { defined: 'RateLimitTokenBucket' } },
           { name: 'outboundRateLimit', type: { defined: 'RateLimitTokenBucket' } },
+        ],
+      },
+    },
+    {
+      name: 'FinalityConfig',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'flags', type: 'u16' },
+          { name: 'blockDepth', type: 'u16' },
+        ],
+      },
+    },
+    {
+      name: 'TokenTransferFeeConfig',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'destGasOverhead', type: 'u32' },
+          { name: 'destBytesOverhead', type: 'u32' },
+          { name: 'finalityFee', type: 'u32' },
+          { name: 'fastFinalityFee', type: 'u32' },
+          { name: 'finalityBpsFee', type: 'u16' },
+          { name: 'fastFinalityBpsFee', type: 'u16' },
+          { name: 'isEnabled', type: 'bool' },
         ],
       },
     },
