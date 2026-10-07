@@ -261,9 +261,13 @@ export class SetChainRateLimiterConfigs extends EVMOperation<SetChainRateLimiter
    * version is resolved, so the version-specific encoder is what rejects those (see
    * {@link parseUpdates}).
    */
-  protected override validate({ poolAddress, updates }: SetChainRateLimiterConfigsParams): void {
+  protected override prepare(
+    params: SetChainRateLimiterConfigsParams,
+  ): SetChainRateLimiterConfigsParams {
+    const { poolAddress, updates } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     parseUpdates(this.name, updates, true, null)
+    return params
   }
 
   /**

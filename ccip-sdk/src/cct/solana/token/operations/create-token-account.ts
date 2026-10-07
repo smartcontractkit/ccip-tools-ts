@@ -49,7 +49,7 @@ export class CreateTokenAccount extends SolanaOperation<
   readonly name = 'createTokenAccount'
 
   /** Parses create-token-account parameters. */
-  protected override parse(
+  protected override prepare(
     params: GenerateCreateTokenAccountParams,
   ): ParsedCreateTokenAccountParams {
     return {

@@ -94,12 +94,13 @@ export class SetAllowedFinalityConfig extends EVMOperation<SetAllowedFinalityCon
   }
 
   /** Validates the pool address and semantic finality config before any RPC. */
-  protected override validate({
-    poolAddress,
-    allowedFinality,
-  }: SetAllowedFinalityConfigParams): void {
+  protected override prepare(
+    params: SetAllowedFinalityConfigParams,
+  ): SetAllowedFinalityConfigParams {
+    const { poolAddress, allowedFinality } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateAllowedFinality(this.name, allowedFinality)
+    return params
   }
 
   /**

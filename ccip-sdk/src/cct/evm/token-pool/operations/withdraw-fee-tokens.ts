@@ -50,17 +50,15 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
   }
 
   /** Validates every ABI address before any RPC; an empty token list would mine as a no-op. */
-  protected override validate({
-    poolAddress,
-    feeTokens,
-    recipient,
-  }: WithdrawFeeTokensParams): void {
+  protected override prepare(params: WithdrawFeeTokensParams): WithdrawFeeTokensParams {
+    const { poolAddress, feeTokens, recipient } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateArray(this.name, 'feeTokens', feeTokens, 1)
     feeTokens.forEach((feeToken, i) =>
       validateNonZeroAddress(this.name, `feeTokens[${i}]`, feeToken),
     )
     validateNonZeroAddress(this.name, 'recipient', recipient)
+    return params
   }
 
   /**

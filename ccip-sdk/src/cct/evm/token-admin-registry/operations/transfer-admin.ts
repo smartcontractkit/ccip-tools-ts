@@ -28,7 +28,7 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
  * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
  * for {@link TransferAdmin.generate}: the pre-tx check below has nothing to compare
  * `administrator` against without it, so an omitted `sender` is rejected in
- * {@link TransferAdmin.parse}. {@link TransferAdmin.execute} relaxes this — it defaults
+ * {@link TransferAdmin.prepare}. {@link TransferAdmin.execute} relaxes this — it defaults
  * `sender` to the signing wallet's own address, the only address that can satisfy the
  * current-administrator check for a signed submission (see {@link TransferAdmin.execute}).
  */
@@ -55,7 +55,7 @@ export type TransferAdminParams = {
   sender?: string
 }
 
-/** {@link TransferAdminParams} as {@link TransferAdmin.parse} leaves it: `sender` present and checksummed. */
+/** {@link TransferAdminParams} as {@link TransferAdmin.prepare} leaves it: `sender` present and checksummed. */
 type ParsedTransferAdminParams = TransferAdminParams & { sender: string }
 
 /**
@@ -71,7 +71,7 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
    * checksums `sender` so {@link buildUnsigned} can compare it against the registry's own
    * checksummed `administrator` without re-asserting it.
    */
-  protected override parse(p: TransferAdminParams): ParsedTransferAdminParams {
+  protected override prepare(p: TransferAdminParams): ParsedTransferAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'newAdmin', p.newAdmin)
     validateAddress(this.name, 'address', p.address)

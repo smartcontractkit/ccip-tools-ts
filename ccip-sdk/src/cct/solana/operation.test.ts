@@ -14,8 +14,9 @@ class TestOperation extends SolanaOperation<{ value: string }> {
   captured?: string
   validated?: string
 
-  protected override validate(params: { payer: string }): void {
+  protected override prepare(params: { payer: string; value: string }) {
     this.validated = params.payer
+    return params
   }
 
   protected buildUnsigned(
@@ -39,15 +40,11 @@ class ParsedTestOperation extends SolanaOperation<
   readonly lifecycle: string[] = []
   captured?: { payer: string; value: number }
 
-  protected override validate(params: { payer: string; value: string }): void {
-    this.lifecycle.push(`validate:${params.value}`)
-  }
-
-  protected override parse(params: { payer: string; value: string }): {
+  protected override prepare(params: { payer: string; value: string }): {
     payer: string
     value: number
   } {
-    this.lifecycle.push(`parse:${params.value}`)
+    this.lifecycle.push(`prepare:${params.value}`)
     return { ...params, value: Number(params.value) }
   }
 
@@ -57,7 +54,10 @@ class ParsedTestOperation extends SolanaOperation<
   ): Promise<UnsignedSolanaTx> {
     this.lifecycle.push(`build:${params.value}`)
     this.captured = params
-    return Promise.resolve({ family: ChainFamily.Solana, instructions: [] })
+    return Promise.resolve({
+      family: ChainFamily.Solana,
+      instructions: [new TransactionInstruction({ keys: [], programId: PublicKey.default })],
+    })
   }
 }
 
@@ -75,21 +75,37 @@ const chain = {
 } as unknown as SolanaChain
 
 describe('SolanaOperation', () => {
-  it('validates, parses, then builds without mutating input', async () => {
+  it('prepares once, then builds without mutating input', async () => {
     const op = new ParsedTestOperation()
     const params = { payer: PublicKey.default.toBase58(), value: '42' }
 
     await op.generate(chain, params)
 
-    assert.deepEqual(op.lifecycle, ['validate:42', 'parse:42', 'build:42'])
+    assert.deepEqual(op.lifecycle, ['prepare:42', 'build:42'])
     assert.deepEqual(op.captured, { payer: params.payer, value: 42 })
     assert.equal(params.value, '42')
   })
 
-  it('stops before parsing or building when validation fails', async () => {
+  it('prepares once on signed execution without mutating input', async () => {
+    const op = new ParsedTestOperation()
+    const wallet = {
+      publicKey: Keypair.generate().publicKey,
+      signTransaction: async <T>(tx: T) => tx,
+    }
+    const params = { value: '42', payer: PublicKey.default.toBase58(), wallet }
+
+    await op.execute(chain, params)
+
+    assert.deepEqual(op.lifecycle, ['prepare:42', 'build:42'])
+    assert.deepEqual(op.captured, { payer: wallet.publicKey.toBase58(), value: 42 })
+    assert.equal(params.value, '42')
+    assert.equal(params.payer, PublicKey.default.toBase58())
+  })
+
+  it('stops before building when preparation fails', async () => {
     class RejectingOperation extends ParsedTestOperation {
-      protected override validate(params: { payer: string; value: string }): void {
-        this.lifecycle.push(`validate:${params.value}`)
+      protected override prepare(params: { payer: string; value: string }): never {
+        this.lifecycle.push(`prepare:${params.value}`)
         throw new Error('invalid params')
       }
     }
@@ -97,7 +113,7 @@ describe('SolanaOperation', () => {
     const op = new RejectingOperation()
 
     await assert.rejects(() => op.generate(chain, { payer: 'payer', value: '42' }))
-    assert.deepEqual(op.lifecycle, ['validate:42'])
+    assert.deepEqual(op.lifecycle, ['prepare:42'])
   })
 
   it('uses wallet public key as payer without mutating caller params', async () => {

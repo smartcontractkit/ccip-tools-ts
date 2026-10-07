@@ -81,7 +81,7 @@ export class InitChainRemoteConfig extends SolanaOperation<
   readonly name = 'initChainRemoteConfig'
 
   /** Parses config values and defaults authority to payer without mutating caller params. */
-  protected override parse(
+  protected override prepare(
     params: GenerateInitChainRemoteConfigParams,
   ): ParsedInitChainRemoteConfigParams {
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)

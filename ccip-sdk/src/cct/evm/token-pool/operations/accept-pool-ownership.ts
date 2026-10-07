@@ -55,8 +55,10 @@ export class AcceptPoolOwnership extends EVMOperation<AcceptPoolOwnershipParams>
   }
 
   /** Validates the pool address before any RPC; there is no other parameter to check. */
-  protected override validate({ poolAddress }: AcceptPoolOwnershipParams): void {
+  protected override prepare(params: AcceptPoolOwnershipParams): AcceptPoolOwnershipParams {
+    const { poolAddress } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
+    return params
   }
 
   /**

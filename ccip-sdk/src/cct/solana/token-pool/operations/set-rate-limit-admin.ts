@@ -61,7 +61,9 @@ export class SetRateLimitAdmin extends SolanaOperation<
   readonly name = 'setRateLimitAdmin'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateSetRateLimitAdminParams): ParsedSetRateLimitAdminParams {
+  protected override prepare(
+    params: GenerateSetRateLimitAdminParams,
+  ): ParsedSetRateLimitAdminParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),

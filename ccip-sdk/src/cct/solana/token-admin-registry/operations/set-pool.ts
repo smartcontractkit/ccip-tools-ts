@@ -69,7 +69,7 @@ export class SetPool extends SolanaOperation<SetPoolParams, UnsignedSolanaTx, Pa
   readonly name = 'setPool'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(params: GenerateSetPoolParams): ParsedSetPoolParams {
+  protected override prepare(params: GenerateSetPoolParams): ParsedSetPoolParams {
     validateWritableIndexes(this.name, 'writableIndexes', params.writableIndexes)
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {

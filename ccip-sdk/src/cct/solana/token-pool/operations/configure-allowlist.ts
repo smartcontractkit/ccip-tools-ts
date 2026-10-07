@@ -69,7 +69,7 @@ export class ConfigureAllowlist extends SolanaOperation<
   readonly name = 'configureAllowlist'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(
+  protected override prepare(
     params: GenerateConfigureAllowlistParams,
   ): ParsedConfigureAllowlistParams {
     if (!Array.isArray(params.add)) {

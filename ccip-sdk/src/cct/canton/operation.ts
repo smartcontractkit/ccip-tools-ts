@@ -1,5 +1,5 @@
 /**
- * Canton {@link Operation} lifecycle: validate → parse → build unsigned
+ * Canton {@link Operation} lifecycle: prepare → build unsigned
  * `JsCommands` → submit via {@link submitCantonCommands}.
  *
  * Mirrors the Solana split: {@link CantonGenerateParams} (with an explicit
@@ -52,7 +52,7 @@ export type CantonExecuteParams<P extends object> = P & {
 }
 
 /**
- * Canton CCT write base. Subclasses supply {@link parse} and
+ * Canton CCT write base. Subclasses supply {@link prepare} and
  * {@link buildCommands}.
  *
  * `generate` returns an {@link UnsignedCantonTx} (a `JsCommands` ready for
@@ -72,32 +72,6 @@ export abstract class CantonOperation<
   CantonTransactionResult,
   Parsed
 > {
-  /**
-   * Optional validation hook required by the shared CCT operation contract.
-   *
-   * The default performs no validation. Prefer {@link parse} for Canton
-   * operation validation and normalization; override this only when parsing
-   * is unnecessary.
-   */
-  protected override validate(_params: CantonGenerateParams<P>): void {}
-
-  /**
-   * Normalize params without mutating the caller's input.
-   *
-   * The default returns params unchanged. Override whenever `Parsed` differs
-   * from `CantonGenerateParams<P>`, e.g. to parse party IDs / instrument IDs
-   * into validated forms or apply defaults.
-   */
-  protected override parse(params: CantonGenerateParams<P>): Parsed {
-    return params as Parsed
-  }
-
-  /** Validates and normalizes params for generation or execution. */
-  protected override prepare(params: CantonGenerateParams<P>): Parsed {
-    this.validate(params)
-    return this.parse(params)
-  }
-
   /**
    * Build the `JsCommands` exercise-choice payload from validated, parsed
    * params. Subclasses fetch disclosures via `chain.acsDisclosureProvider` /

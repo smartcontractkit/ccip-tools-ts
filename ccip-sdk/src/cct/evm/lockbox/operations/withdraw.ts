@@ -69,16 +69,13 @@ export class WithdrawFromLockbox extends EVMOperation<WithdrawFromLockboxParams>
   readonly name = 'withdrawFromLockbox'
 
   /** Validates every param before any RPC; a zero `amount` reverts `TokenAmountCannotBeZero`. */
-  protected override validate({
-    lockbox,
-    token,
-    amount,
-    recipient,
-  }: WithdrawFromLockboxParams): void {
+  protected override prepare(params: WithdrawFromLockboxParams): WithdrawFromLockboxParams {
+    const { lockbox, token, amount, recipient } = params
     validateNonZeroAddress(this.name, 'lockbox', lockbox)
     validateNonZeroAddress(this.name, 'token', token)
     validatePositiveUint256(this.name, 'amount', amount)
     validateNonZeroAddress(this.name, 'recipient', recipient)
+    return params
   }
 
   /**

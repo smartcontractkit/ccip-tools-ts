@@ -36,7 +36,7 @@ import {
  */
 export type SetRemotePoolParams = RemotePoolParams
 
-/** {@link SetRemotePoolParams} as {@link SetRemotePool.parse} leaves it. */
+/** {@link SetRemotePoolParams} as {@link SetRemotePool.prepare} leaves it. */
 type ParsedSetRemotePoolParams = ParsedRemotePoolParams
 
 /** Encodes `setRemotePool` calldata against the resolved pool {@link Interface}. */
@@ -73,7 +73,7 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
    * Validates the pool address, lane selector and remote pool address before any RPC, keeping the
    * parsed `remotePoolAddress` so {@link buildUnsigned} encodes it without re-parsing.
    */
-  protected override parse(params: SetRemotePoolParams): ParsedSetRemotePoolParams {
+  protected override prepare(params: SetRemotePoolParams): ParsedSetRemotePoolParams {
     return parseRemotePoolParams(this.name, params)
   }
 

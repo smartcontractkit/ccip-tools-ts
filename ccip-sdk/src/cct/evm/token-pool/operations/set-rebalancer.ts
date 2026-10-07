@@ -73,9 +73,11 @@ export class SetRebalancer extends EVMOperation<SetRebalancerParams> {
   }
 
   /** Validates both addresses before any RPC; a zero `rebalancer` revokes the role. */
-  protected override validate({ poolAddress, rebalancer }: SetRebalancerParams): void {
+  protected override prepare(params: SetRebalancerParams): SetRebalancerParams {
+    const { poolAddress, rebalancer } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateAddress(this.name, 'rebalancer', rebalancer)
+    return params
   }
 
   /**

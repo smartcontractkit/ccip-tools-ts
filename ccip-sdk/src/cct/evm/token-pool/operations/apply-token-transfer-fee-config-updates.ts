@@ -125,7 +125,7 @@ export class ApplyTokenTransferFeeConfigUpdates extends EVMOperation<
    * @throws {@link CCTParamsInvalidError} if a selector or fee field cannot be encoded, a selector
    * is zero, duplicated, or overlaps the other list, or both lists are empty
    */
-  protected override parse({
+  protected override prepare({
     poolAddress,
     updates = [],
     disables = [],

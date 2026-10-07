@@ -50,11 +50,10 @@ export class UpdateLockboxAuthorizedCallers extends EVMOperation<UpdateLockboxAu
   readonly name = 'updateLockboxAuthorizedCallers'
 
   /** Validates the lockbox and every caller address; requires at least one caller. */
-  protected override validate({
-    lockbox,
-    addedCallers = [],
-    removedCallers = [],
-  }: UpdateLockboxAuthorizedCallersParams): void {
+  protected override prepare(
+    params: UpdateLockboxAuthorizedCallersParams,
+  ): UpdateLockboxAuthorizedCallersParams {
+    const { lockbox, addedCallers = [], removedCallers = [] } = params
     validateNonZeroAddress(this.name, 'lockbox', lockbox)
     validateCallers(this.name, 'addedCallers', addedCallers)
     validateCallers(this.name, 'removedCallers', removedCallers)
@@ -65,6 +64,7 @@ export class UpdateLockboxAuthorizedCallers extends EVMOperation<UpdateLockboxAu
         'at least one caller must be added or removed',
       )
     }
+    return params
   }
 
   /**

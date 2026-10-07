@@ -103,16 +103,13 @@ export class SetDynamicConfig extends EVMOperation<SetDynamicConfigParams> {
   }
 
   /** Validates all four addresses before any RPC; only `router` and `poolAddress` must be non-zero. */
-  protected override validate({
-    poolAddress,
-    router,
-    rateLimitAdmin,
-    feeAdmin,
-  }: SetDynamicConfigParams): void {
+  protected override prepare(params: SetDynamicConfigParams): SetDynamicConfigParams {
+    const { poolAddress, router, rateLimitAdmin, feeAdmin } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateNonZeroAddress(this.name, 'router', router)
     validateAddress(this.name, 'rateLimitAdmin', rateLimitAdmin)
     validateAddress(this.name, 'feeAdmin', feeAdmin)
+    return params
   }
 
   /**

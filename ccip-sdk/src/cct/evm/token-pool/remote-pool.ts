@@ -62,7 +62,7 @@ export function validateRemotePoolParams(operation: string, params: RemotePoolPa
 }
 
 /**
- * The three ops' {@link Operation.parse}: validates every field before any RPC and returns the
+ * The three ops' {@link Operation.prepare}: validates every field before any RPC and returns the
  * params with `remotePoolAddress` already canonical. Spreads the result of
  * {@link validateRemotePoolParams} back over the params.
  * @throws {@link CCTParamsInvalidError} if any field is invalid (see {@link validateRemotePoolParams})

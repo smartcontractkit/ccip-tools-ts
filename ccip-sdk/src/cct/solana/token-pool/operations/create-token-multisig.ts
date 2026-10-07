@@ -142,7 +142,7 @@ export class CreateTokenMultisig extends SolanaOperation<
   readonly name = 'createTokenMultisig'
 
   /** Parses public keys, threshold, and optional seed before mint/account RPCs. */
-  protected override parse(
+  protected override prepare(
     params: GenerateCreateTokenMultisigParams,
   ): ParsedCreateTokenMultisigParams {
     validatePoolType(this.name, 'poolType', params.poolType)

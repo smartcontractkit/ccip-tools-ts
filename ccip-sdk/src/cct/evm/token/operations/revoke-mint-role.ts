@@ -44,9 +44,11 @@ export class RevokeMintRole extends EVMOperation<RevokeMintRoleParams> {
    * Validates both addresses before any RPC. Neither may be zero: a tx to `0x0` hits no code, and
    * revoking a role from `0x0` mines as a no-op.
    */
-  protected override validate({ tokenAddress, minter }: RevokeMintRoleParams): void {
+  protected override prepare(params: RevokeMintRoleParams): RevokeMintRoleParams {
+    const { tokenAddress, minter } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'minter', minter)
+    return params
   }
 
   /**

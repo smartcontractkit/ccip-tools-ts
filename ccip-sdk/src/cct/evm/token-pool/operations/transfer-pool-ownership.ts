@@ -79,14 +79,11 @@ export class TransferPoolOwnership extends EVMOperation<TransferPoolOwnershipPar
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is zero or malformed, `newOwner` is
    * malformed, or `newOwner` equals `sender`
    */
-  protected override validate({
-    poolAddress,
-    newOwner,
-    sender,
-  }: TransferPoolOwnershipParams): void {
+  protected override prepare(params: TransferPoolOwnershipParams): TransferPoolOwnershipParams {
+    const { poolAddress, newOwner, sender } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateAddress(this.name, 'newOwner', newOwner)
-    if (sender === undefined) return
+    if (sender === undefined) return params
     // `generate` validates `sender` only after this hook, so the comparison below would otherwise
     // run on an unvalidated string and leak a raw ethers error for a malformed one.
     validateAddress(this.name, 'sender', sender)
@@ -96,6 +93,7 @@ export class TransferPoolOwnership extends EVMOperation<TransferPoolOwnershipPar
         'newOwner',
         `must differ from sender (${sender}) — the pool already has that owner and would revert CannotTransferToSelf`,
       )
+    return params
   }
 
   /**
