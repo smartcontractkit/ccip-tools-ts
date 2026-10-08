@@ -6,7 +6,6 @@ import { Connection, PublicKey } from '@solana/web3.js'
 
 import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
-import { CCIPMessageNotVerifiedYetError } from '../../errors/index.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
@@ -459,7 +458,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     assert.ok(config.rmnRemote, 'offRampConfig should expose rmnRemote')
   })
 
-  it('should resolve v2 verifications policy via get_ccvs_for_msg (RMN accounts) without a simulation panic', async () => {
+  it('should resolve the v2 verification policy of a message to a v2 receiver via get_ccvs_for_msg', async () => {
     await using disposer = new AsyncDisposableStack()
     const source = disposer.adopt(
       await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger }),
@@ -470,23 +469,20 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     assert.equal(requests.length, 1)
     const request = requests[0]!
 
-    // The v2 indexer has no verifier results for this message yet, so this must surface a
-    // CCIPMessageNotVerifiedYetError — NOT an Anchor simulation failure. Reaching that error proves
-    // the `get_ccvs_for_msg` view (with its RMN Remote accounts) simulated cleanly, and its context
-    // carries the policy the view resolved: the receiver is a v2 receiver, consulted via CPI.
-    await assert.rejects(
-      solanaChain.getVerifications({ offRamp: SOLANA_V2_OFFRAMP, request }),
-      (err: unknown) => {
-        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
-        assert.deepEqual(err.context.policy, {
-          requiredCCVs: [SOLANA_V2_REQUIRED_CCV],
-          optionalCCVs: [],
-          optionalThreshold: 0,
-        })
-        assert.deepEqual(err.context.missingCCVs, [SOLANA_V2_REQUIRED_CCV])
-        return true
-      },
-    )
+    // The policy comes from the `get_ccvs_for_msg` view (RMN Remote accounts, and a CPI to this
+    // v2 receiver). Supplying data for the expected CCV covers it without any indexer: a policy
+    // requiring another CCV would go on to the indexers, which have no results for this message.
+    const verifications = await solanaChain.getVerifications({
+      offRamp: SOLANA_V2_OFFRAMP,
+      request,
+      ccvData: { [SOLANA_V2_REQUIRED_CCV]: '0x00' },
+    })
+    assert.ok('verificationPolicy' in verifications)
+    assert.deepEqual(verifications.verificationPolicy, {
+      requiredCCVs: [SOLANA_V2_REQUIRED_CCV],
+      optionalCCVs: [],
+      optionalThreshold: 0,
+    })
   })
 
   it('should decode the latest Solana -> Sepolia v2 message and discover its offRamp', async () => {
@@ -616,22 +612,19 @@ describe('Solana Devnet CCIP v2 token transfer', { skip, timeout: 300_000 }, () 
     )
 
     const simulate = mock.method(solanaChain.connection, 'simulateTransaction')
-    let policy
+    let verifications
     try {
-      policy = await solanaChain.getVerifications({ offRamp: SOLANA_V2_OFFRAMP, request }).then(
-        (verifications) => {
-          assert.ok('verificationPolicy' in verifications)
-          return verifications.verificationPolicy
-        },
-        (err: unknown) => {
-          // the indexer had no verifier results for this message when it was recorded
-          assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
-          return err.context.policy
-        },
-      )
+      // data for the expected CCV covers the policy without any indexer (see the data message
+      // test above)
+      verifications = await solanaChain.getVerifications({
+        offRamp: SOLANA_V2_OFFRAMP,
+        request,
+        ccvData: { [SOLANA_V2_REQUIRED_CCV]: '0x00' },
+      })
     } finally {
       simulate.mock.restore()
     }
+    assert.ok('verificationPolicy' in verifications)
     // the view's own simulation, as opposed to the account resolution stages before it
     const viewLogs = (
       await Promise.all(simulate.mock.calls.map((call) => Promise.resolve(call.result)))
@@ -648,7 +641,7 @@ describe('Solana Devnet CCIP v2 token transfer', { skip, timeout: 300_000 }, () 
       ),
       'the view consults the token pool for its CCVs',
     )
-    assert.deepEqual(policy, {
+    assert.deepEqual(verifications.verificationPolicy, {
       requiredCCVs: [SOLANA_V2_REQUIRED_CCV],
       optionalCCVs: [],
       optionalThreshold: 0,

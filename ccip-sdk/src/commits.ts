@@ -264,7 +264,7 @@ export async function fetchVerifications(
     lastErr = new CCIPMessageNotVerifiedYetError(messageId, {
       cause: managedErr,
       context: {
-        ...(policy && { policy, missingCCVs: missingRequired() }),
+        ...(policy && { missingCCVs: missingRequired() }),
         ...(policy?.optionalThreshold && {
           optionalCovered: `${optionalCovered()}/${policy.optionalThreshold}`,
         }),
