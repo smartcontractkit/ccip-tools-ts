@@ -10,7 +10,6 @@ import {
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
 } from '@solana/web3.js'
-import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -72,6 +71,7 @@ import {
   EVMExtraArgsV2Tag,
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
+  encodeFinality,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
@@ -131,6 +131,7 @@ import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { getTransactionsForAddress } from './logs.ts'
+import { getCcvsForMsgV2 } from './resolution.ts'
 import {
   type SolanaSendLane,
   generateUnsignedCcipSendV2,
@@ -1681,7 +1682,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * Solana specialization: for v2 lanes, resolve the verification policy from the offRamp's
-   * `getCcvsForMsg` view and fetch CCV results from the indexers (no onchain commit exists);
+   * `get_ccvs_for_msg` view and fetch CCV results from the indexers (no onchain commit exists);
    * for v1.x, use getProgramAccounts to fetch commit reports from PDAs
    */
   override async getVerifications(
@@ -1690,130 +1691,47 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
       // For v2 messages, there is no onchain commit — the verification policy (required/optional
-      // CCVs) comes from the OffRamp's `getCcvsForMsg` view, and the actual verifier results
+      // CCVs) comes from the OffRamp's `get_ccvs_for_msg` view, and the actual verifier results
       // come from the CCIP v2 indexer.
       //
-      // The view resolves CCVs from three sources (see chainlink-ccip-solana
-      // `get_ccvs_for_msg/processor.rs`):
-      //   1. Lane defaults + mandated CCVs (always, from SourceChain config)
-      //   2. Receiver CCVs (for arbitrary/data messages, via CPI to the receiver program)
-      //   3. Pool CCVs (for token transfers, via CPI to the token pool)
-      //
-      // We resolve receiver CCVs by deriving the `receiver_registry` PDA from the router
-      // (read from ReferenceAddresses) and the receiver address. If the registry is owned by
-      // the router, the receiver is v2 and we also pass [receiver_program, source_chain_ccv_config]
-      // as remaining_accounts for the CPI. If the registry doesn't exist or is system-owned, the
-      // receiver is v1 and only the registry is passed.
-      //
-      // Token transfer CCVs are not yet resolved (TODO: needs 5 pool remaining_accounts).
-      const offRampPk = new PublicKey(offRamp)
-      const program = newProgram(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
-      const pda = (seed: string, ...extra: Uint8Array[]) =>
-        PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
-
-      // Read ReferenceAddresses to get the router (receiver_registry derivation) and the
-      // RMN Remote program (required by the `get_ccvs_for_msg` view since the latest redeploy).
-      const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
-      const router = refAddresses.router
-
-      // Resolve the receiver and its remaining_accounts. The view consults the receiver only for
-      // an arbitrary (data) message: a message with no data AND no receive-gas is token-only —
-      // driven by the pool — so it must get NO receiver accounts (`is_offramp_token_only_transfer`;
-      // passing them anyway fails with InvalidAccountListLengths).
-      const message = request.message as CCIPMessage
-      const dataLen = getDataBytes(message.data).length
-      const receiveGasLimit = Number(
-        (message as { ccipReceiveGasLimit?: number | bigint }).ccipReceiveGasLimit ??
-          (message as { gasLimit?: number | bigint }).gasLimit ??
-          0,
-      )
+      // The view combines the lane's default and mandated CCVs with the receiver's (for arbitrary
+      // messages, via CPI to a v2 receiver) and the token pool's (for token transfers, via CPI to a
+      // v2 pool), each read from its own remaining accounts; the offRamp's account resolution
+      // derives them all. Its inputs come from the MessageV1 encoding `execute_v2` parses, so the
+      // predicted policy is the one execution enforces.
+      const message = decodeMessageV1(await this.resolveEncodedMessage(request))
+      const [tokenTransfer] = message.tokenTransfer
       let messageReceiver = PublicKey.default
-      const remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = []
-      if (message.receiver && message.receiver !== '0x') {
-        try {
-          messageReceiver = new PublicKey(message.receiver)
-        } catch {
-          // non-svm or zero receiver — leave default, skip receiver consultation
-        }
+      try {
+        messageReceiver = new PublicKey(message.receiver)
+      } catch {
+        // not an SVM address: no receiver to consult
       }
-      const isArbitrary =
-        !messageReceiver.equals(PublicKey.default) && (dataLen > 0 || receiveGasLimit > 0)
-      if (isArbitrary) {
-        // receiver_registry PDA: [RECEIVER_REGISTRY, receiver] under router
-        const [registryPda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('receiver_registry'), messageReceiver.toBuffer()],
-          router,
-        )
-        const registryAcc = await this.connection.getAccountInfo(registryPda)
-        const isV2 =
-          registryAcc != null && registryAcc.owner.equals(router) && registryAcc.data.length >= 8
-        remainingAccounts.push({
-          pubkey: registryPda,
-          isSigner: false,
-          isWritable: false,
-        })
-        if (isV2) {
-          // v2 receiver: also pass [receiver_program, source_chain_ccv_config]
-          // source_chain_ccv_config PDA: [ccv_config, sourceChainSelectorLE] under receiver
-          const [ccvConfigPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('ccv_config'), toLeArray(request.lane.sourceChainSelector, 8)],
-            messageReceiver,
-          )
-          remainingAccounts.push({
-            pubkey: messageReceiver,
-            isSigner: false,
-            isWritable: false,
-          })
-          remainingAccounts.push({
-            pubkey: ccvConfigPda,
-            isSigner: false,
-            isWritable: false,
-          })
-        }
-      }
-
-      // RMN Remote CPI accounts (required by the latest offramp). The `rmn_remote` program is
-      // read from ReferenceAddresses; its two config/curse PDAs are derived under it.
-      const [rmnRemoteCurses] = PublicKey.findProgramAddressSync(
-        [Buffer.from('curses')],
-        refAddresses.rmnRemote,
-      )
-      const [rmnRemoteConfig] = PublicKey.findProgramAddressSync(
-        [Buffer.from('config')],
-        refAddresses.rmnRemote,
-      )
-
-      const ccvs = (await program.methods
-        .getCcvsForMsg({
-          // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
-          tokenTransfer: null,
+      const requestedFinality = encodeFinality(message.finality)
+      const verificationPolicy = await getCcvsForMsgV2(this, {
+        offramp: new PublicKey(offRamp),
+        inputs: {
+          tokenTransfer: tokenTransfer
+            ? {
+                amount: tokenTransfer.amount,
+                sourcePoolAddress: getAddressBytes(tokenTransfer.sourcePoolAddress),
+                sourceTokenAddress: getAddressBytes(tokenTransfer.sourceTokenAddress),
+                destTokenAddress: getAddressBytes(tokenTransfer.destTokenAddress),
+                tokenReceiver: getAddressBytes(tokenTransfer.tokenReceiver),
+                extraData: tokenTransfer.extraData,
+              }
+            : null,
           messageReceiver,
-          dataLen,
-          ccipReceiveGasLimit: receiveGasLimit,
-          sender: Buffer.from(getAddressBytes(message.sender)),
-          resolutionMetadata: Buffer.alloc(0),
-          remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
-          requestedFinality: { flags: 0, blockDepth: 0 },
-        })
-        .accounts({
-          config: pda('config'),
-          referenceAddresses: pda('reference_addresses'),
-          sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
-          rmnRemote: refAddresses.rmnRemote,
-          rmnRemoteCurses,
-          rmnRemoteConfig,
-        })
-        .remainingAccounts(remainingAccounts)
-        .view()) as {
-        requiredCcvs: PublicKey[]
-        optionalCcvs: PublicKey[]
-        optionalThreshold: number
-      }
-      const verificationPolicy = {
-        requiredCCVs: ccvs.requiredCcvs.map((c) => c.toBase58()),
-        optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
-        optionalThreshold: ccvs.optionalThreshold,
-      }
+          dataLen: getDataBytes(message.data).length,
+          ccipReceiveGasLimit: message.ccipReceiveGasLimit,
+          sender: getAddressBytes(message.sender),
+          remoteChainSelector: message.sourceChainSelector,
+          requestedFinality: {
+            flags: requestedFinality >>> 16,
+            blockDepth: requestedFinality & 0xffff,
+          },
+        },
+      })
       const verifications = await this.fetchCCVResults(
         request.message.messageId,
         verificationPolicy,

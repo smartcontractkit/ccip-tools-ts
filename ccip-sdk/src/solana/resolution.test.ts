@@ -21,14 +21,17 @@ import {
   type ResolveAccountsResponse,
   CCIP_SEND_V2_DISCRIMINATOR,
   EXECUTE_V2_DISCRIMINATOR,
+  GET_CCVS_FOR_MSG_DISCRIMINATOR,
   GET_FEE_V2_DISCRIMINATOR,
   RESOLVE_ACCOUNTS_START_DISCRIMINATOR,
   decodeResolveAccountsResponse,
   encodeResolveAccountsIx,
   fetchLookupTables,
+  getCcvsForMsgV2,
   resolutionStageName,
   resolveAccounts,
   resolveExecuteV2,
+  resolveGetCcvsForMsg,
   resolveGetFeeV2,
 } from './resolution.ts'
 
@@ -120,6 +123,7 @@ describe('account resolution codec', () => {
     assert.deepEqual([...GET_FEE_V2_DISCRIMINATOR], [178, 49, 15, 7, 35, 31, 31, 250])
     assert.deepEqual([...CCIP_SEND_V2_DISCRIMINATOR], [175, 63, 145, 145, 211, 111, 21, 183])
     assert.deepEqual([...EXECUTE_V2_DISCRIMINATOR], [110, 12, 255, 88, 93, 207, 223, 214])
+    assert.deepEqual([...GET_CCVS_FOR_MSG_DISCRIMINATOR], [86, 132, 32, 127, 168, 122, 87, 66])
   })
 
   it('names known stages and falls back to hex', () => {
@@ -460,6 +464,145 @@ describe('typed resolvers', () => {
         vec([bytes(Buffer.from([1])), bytes(Buffer.alloc(0))]),
         u32(0),
       ]),
+    )
+  })
+})
+
+describe('get_ccvs_for_msg', () => {
+  const receiver = randomKey()
+  const inputs = {
+    tokenTransfer: {
+      amount: 0x0102n,
+      sourcePoolAddress: '0xaa',
+      sourceTokenAddress: '0xbbbb',
+      destTokenAddress: Buffer.alloc(32, 7),
+      tokenReceiver: Buffer.alloc(32, 8),
+      extraData: '0x12',
+    },
+    messageReceiver: receiver,
+    dataLen: 3,
+    ccipReceiveGasLimit: 200_000,
+    sender: '0xcc',
+    remoteChainSelector: 16015286601757825753n,
+    requestedFinality: { flags: 1, blockDepth: 0 },
+  }
+  const u16 = (n: number) => Buffer.from([n & 0xff, n >> 8])
+  const u64 = (n: bigint) => {
+    const buf = Buffer.alloc(8)
+    buf.writeBigUInt64LE(n)
+    return buf
+  }
+  // GetCcvsForMsgParams, laid out like the Rust struct, with the given resolution metadata
+  const encodedParams = (resolutionMetadata: Buffer) =>
+    Buffer.concat([
+      Buffer.from([1]), // Some(TokenTransferV1)
+      Buffer.from([1]), // version
+      Buffer.concat([Buffer.alloc(30), Buffer.from([1, 2])]), // amount, 32-byte big-endian
+      bytes(Buffer.from([0xaa])),
+      bytes(Buffer.from([0xbb, 0xbb])),
+      bytes(Buffer.alloc(32, 7)),
+      bytes(Buffer.alloc(32, 8)),
+      bytes(Buffer.from([0x12])),
+      receiver.toBuffer(),
+      u32(3),
+      u32(200_000),
+      bytes(Buffer.from([0xcc])),
+      bytes(resolutionMetadata),
+      u64(16015286601757825753n),
+      u16(1),
+      u16(0),
+    ])
+
+  it('encodes the token transfer and message inputs like the Rust struct', async () => {
+    const offramp = randomKey()
+    const saved = [meta(randomKey()), meta(randomKey())]
+    const metadata = Buffer.from([9])
+    const { connection, simulateTransaction } = scriptedConnection(offramp, [
+      response({ accountsToSave: saved, metadata }),
+    ])
+
+    const { instruction } = await resolveGetCcvsForMsg(
+      { connection, logger: silent },
+      { offramp, inputs },
+    )
+
+    // resolution runs on the final data with empty metadata
+    const start = lastInstruction(simulateTransaction.mock.calls[0]!.arguments[0]).data
+    const ixData = start.subarray(44, 44 + start.readUInt32LE(40))
+    assert.deepEqual(
+      ixData,
+      Buffer.concat([GET_CCVS_FOR_MSG_DISCRIMINATOR, encodedParams(Buffer.alloc(0))]),
+    )
+    assert.ok(instruction.programId.equals(offramp))
+    assert.deepEqual(instruction.keys, saved)
+    assert.deepEqual(
+      instruction.data,
+      Buffer.concat([GET_CCVS_FOR_MSG_DISCRIMINATOR, encodedParams(metadata)]),
+    )
+  })
+
+  it('encodes a message without token transfer as None', async () => {
+    const offramp = randomKey()
+    const { connection } = scriptedConnection(offramp, [response({})])
+
+    const { instruction } = await resolveGetCcvsForMsg(
+      { connection, logger: silent },
+      { offramp, inputs: { ...inputs, tokenTransfer: null } },
+    )
+
+    assert.deepEqual(instruction.data.subarray(8, 9), Buffer.from([0]))
+    assert.deepEqual(instruction.data.subarray(9, 41), receiver.toBuffer())
+  })
+
+  it('simulates the resolved view and decodes its policy', async () => {
+    const offramp = randomKey()
+    const [required, optional] = [randomKey(), randomKey()]
+    const saved = [meta(randomKey()), meta(randomKey())]
+    const { connection, simulateTransaction } = scriptedConnection(offramp, [
+      response({ accountsToSave: saved }),
+      // GetCcvsForMsgResponse
+      Buffer.concat([vec([required.toBuffer()]), vec([optional.toBuffer()]), Buffer.from([1])]),
+    ])
+
+    const policy = await getCcvsForMsgV2({ connection, logger: silent }, { offramp, inputs })
+
+    assert.deepEqual(policy, {
+      requiredCCVs: [required.toBase58()],
+      optionalCCVs: [optional.toBase58()],
+      optionalThreshold: 1,
+    })
+    // the view runs with a heap frame and the resolved accounts
+    const view = lastInstruction(simulateTransaction.mock.calls[1]!.arguments[0])
+    assert.ok(view.programIds.includes(ComputeBudgetProgram.programId.toBase58()))
+    assert.deepEqual(view.keys, saved)
+    assert.deepEqual(view.data.subarray(0, 8), GET_CCVS_FOR_MSG_DISCRIMINATOR)
+  })
+
+  it('rejects view return data from another program', async () => {
+    const offramp = randomKey()
+    let call = 0
+    const simulateTransaction = mock.fn(async () => {
+      const [programId, data] =
+        call++ === 0
+          ? [offramp, encodeResponse(response({}))]
+          : [randomKey(), Buffer.concat([vec([]), vec([]), Buffer.from([0])])]
+      return {
+        value: {
+          err: null,
+          logs: [],
+          unitsConsumed: 1000,
+          returnData: {
+            programId: programId.toBase58(),
+            data: [data.toString('base64'), 'base64'],
+          },
+        },
+      }
+    })
+    const connection = { simulateTransaction } as unknown as Connection
+
+    await assert.rejects(
+      getCcvsForMsgV2({ connection, logger: silent }, { offramp, inputs }),
+      (err: unknown) => err instanceof CCIPError && /get_ccvs_for_msg/.test(err.message),
     )
   })
 })

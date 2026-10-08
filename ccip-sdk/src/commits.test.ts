@@ -960,6 +960,22 @@ describe('fetchVerifications against a CCV policy', () => {
     )
   })
 
+  it('carries the policy in the error context', async () => {
+    // the policy is resolved before any source is queried; surfacing it lets callers see which
+    // CCVs a not-yet-verified message is waiting on
+    const policy = { requiredCCVs: [A], optionalCCVs: [B], optionalThreshold: 1 }
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, { indexer: [], apiClient: null, policy }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        assert.deepEqual(err.context.policy, policy)
+        assert.deepEqual(err.context.missingCCVs, [A])
+        assert.equal(err.context.optionalCovered, '0/1')
+        return true
+      },
+    )
+  })
+
   it('names each failed verifier in the error context', async () => {
     await assert.rejects(
       fetchVerifications(MESSAGE_ID, {

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { Console } from 'node:console'
-import { after, before, describe, it } from 'node:test'
+import { after, before, describe, it, mock } from 'node:test'
 
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
+import { CCIPMessageNotVerifiedYetError } from '../../errors/index.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
@@ -33,6 +34,8 @@ const SOLANA_V2_EXEC_TX =
 // Latest v2.0.0-dev offramp (has `bump` in ReferenceAddresses, `on_ramps` Vec in
 // SourceChainConfig, and RMN Remote accounts in get_ccvs_for_msg).
 const SOLANA_V2_OFFRAMP = 'offzdKY3MVHcs8c639Atwqr7KGbZrxmNDC27s2DJeEr'
+// The CCV the v2 offRamp requires for EVM_TO_SOLANA_V2_TX (lane defaults + receiver CCVs)
+const SOLANA_V2_REQUIRED_CCV = 'CVMVgsQYG7NHp7NY2XWCNkXjxAw5E14dnFHNu8e2Gt3M'
 const SOLANA_V2_SEND_MESSAGE_ID =
   '0x706918e7a9b62d8592733f7f790c520285661a7ddd0fbeaa6301660c8d32a722'
 const EVM_TO_SOLANA_V2_MESSAGE_ID =
@@ -93,6 +96,17 @@ const SEPOLIA_TO_SOLANA_V2_MESSAGE_ID =
   '0x329238fa05b478d834d73163ac36ffe8d0c1daf3af4b3c0c272c6995473a1bad'
 const SEPOLIA_TO_SOLANA_V2_EXEC_TX =
   '2mDZqfQPSwHBd5Mif2MJciweR6ybPCaAiFhaZrzRWGKZEKmXApEtjXhsHX6hw6vFV5L5uHWXhGLPr4Uz5uAnsSht'
+// Token-only v2 transfer (Fuji -> Solana), sent with gasLimit 0 and no data, of a token whose
+// Solana LockRelease 2.0.0 pool requires the `default` CCV.
+const FUJI_TO_SOLANA_V2_TOKEN_TX =
+  '0xab16c1eeff4dbb37650027e27c38f6ee9deff3242f978d03ac95c44186be3ff6'
+const FUJI_TO_SOLANA_V2_TOKEN_MESSAGE_ID =
+  '0xb89785a8b180dccc7ad16ed35484a33696f5e763e008b05a3f385014a308848f'
+const FUJI_TO_SOLANA_V2_TOKEN_EXEC_TX =
+  'gLvy7QUnhGDBNJQYVdwKXAV98aZNfReQAGDzsXJ4FSCE7J6t33PW3brodHeXZPmU6Vk6d9nc3J9Tv4FMNK41G28'
+const FUJI_V2_TOKEN = '0xdFab5A4A444060E53A700DC13379860C7c204bf4'
+const SOLANA_V2_TOKEN_MINT = 'CGPwrKwdzX3Yhk6Dpm4Bnqagwp1H9mxcpNv4FLLZVtrC'
+const SOLANA_V2_LOCK_RELEASE_POOL_PROGRAM = 'J4vfxdGmEeLvtY3tuuNcugLP5qkdiCmXeRHKEEbXWQCd'
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
@@ -458,10 +472,20 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
 
     // The v2 indexer has no verifier results for this message yet, so this must surface a
     // CCIPMessageNotVerifiedYetError — NOT an Anchor simulation failure. Reaching that error proves
-    // the `get_ccvs_for_msg` view (with its RMN Remote accounts) simulated cleanly.
+    // the `get_ccvs_for_msg` view (with its RMN Remote accounts) simulated cleanly, and its context
+    // carries the policy the view resolved: the receiver is a v2 receiver, consulted via CPI.
     await assert.rejects(
       solanaChain.getVerifications({ offRamp: SOLANA_V2_OFFRAMP, request }),
-      (err: unknown) => (err as { name?: string }).name === 'CCIPMessageNotVerifiedYetError',
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        assert.deepEqual(err.context.policy, {
+          requiredCCVs: [SOLANA_V2_REQUIRED_CCV],
+          optionalCCVs: [],
+          optionalThreshold: 0,
+        })
+        assert.deepEqual(err.context.missingCCVs, [SOLANA_V2_REQUIRED_CCV])
+        return true
+      },
     )
   })
 
@@ -542,6 +566,108 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
     assert.equal(executions[0]!.receipt.sequenceNumber, 9425n)
     assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
     assert.equal(executions[0]!.log.transactionHash, SEPOLIA_TO_SOLANA_V2_EXEC_TX)
+  })
+})
+
+describe('Solana Devnet CCIP v2 token transfer', { skip, timeout: 300_000 }, () => {
+  // The token-only fixture is fuji -> solana devnet
+  useResourceForDescribe(['solana-devnet', 'fuji'])
+  let solanaChain: SolanaChain
+
+  before(async () => {
+    solanaChain = await SolanaChain.fromUrl(
+      await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
+      { apiClient: null, logger: testLogger },
+    )
+  })
+
+  it('should decode, verify and fetch the execution of a Fuji -> Solana v2 token transfer', async () => {
+    await using disposer = new AsyncDisposableStack()
+    const source = disposer.adopt(
+      await EVMChain.fromUrl(FUJI_RPC, { apiClient: null, logger: testLogger }),
+      (source) => source.provider.destroy(),
+    )
+
+    // the calls `show` makes: getMessagesInTx on source, getVerifications and
+    // getExecutionReceipts on dest
+    const requests = await source.getMessagesInTx(
+      await source.getTransaction(FUJI_TO_SOLANA_V2_TOKEN_TX),
+    )
+    assert.equal(requests.length, 1)
+    const request = requests[0]!
+    assert.equal(request.lane.version, '2.0.0')
+    assert.equal(request.message.messageId, FUJI_TO_SOLANA_V2_TOKEN_MESSAGE_ID)
+    assert.equal(request.message.sequenceNumber, 1902n)
+    assert.equal(request.message.sender, '0x4aA1B21843b42bA0aB356707a84876DB0B671206')
+    // token-only: no program receiver, no data
+    assert.equal(request.message.receiver, '11111111111111111111111111111111')
+    assert.equal(request.message.data, '0x')
+    assert.equal(request.message.tokenAmounts.length, 1)
+    const { sourceTokenAddress, destTokenAddress, tokenReceiver, amount } = request.message
+      .tokenAmounts[0] as Record<string, unknown>
+    assert.deepEqual(
+      { sourceTokenAddress, destTokenAddress, tokenReceiver, amount },
+      {
+        sourceTokenAddress: FUJI_V2_TOKEN,
+        destTokenAddress: SOLANA_V2_TOKEN_MINT,
+        tokenReceiver: 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx',
+        amount: 10_000_000_000_000_000n,
+      },
+    )
+
+    const simulate = mock.method(solanaChain.connection, 'simulateTransaction')
+    let policy
+    try {
+      policy = await solanaChain.getVerifications({ offRamp: SOLANA_V2_OFFRAMP, request }).then(
+        (verifications) => {
+          assert.ok('verificationPolicy' in verifications)
+          return verifications.verificationPolicy
+        },
+        (err: unknown) => {
+          // the indexer had no verifier results for this message when it was recorded
+          assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+          return err.context.policy
+        },
+      )
+    } finally {
+      simulate.mock.restore()
+    }
+    // the view's own simulation, as opposed to the account resolution stages before it
+    const viewLogs = (
+      await Promise.all(simulate.mock.calls.map((call) => Promise.resolve(call.result)))
+    )
+      .map((res) => res?.value.logs ?? [])
+      .find((logs) => logs.includes('Program log: Instruction: GetCcvsForMsg'))
+    assert.ok(viewLogs, 'get_ccvs_for_msg was simulated')
+
+    // A token-only transfer: the view skips the receiver and consults the token pool, whose
+    // `default` CCV joins the lane's (the same CCV on this deployment, so the set is unchanged).
+    assert.ok(
+      viewLogs.some((log) =>
+        log.startsWith(`Program ${SOLANA_V2_LOCK_RELEASE_POOL_PROGRAM} invoke`),
+      ),
+      'the view consults the token pool for its CCVs',
+    )
+    assert.deepEqual(policy, {
+      requiredCCVs: [SOLANA_V2_REQUIRED_CCV],
+      optionalCCVs: [],
+      optionalThreshold: 0,
+    })
+
+    const executions = []
+    for await (const execution of solanaChain.getExecutionReceipts({
+      offRamp: SOLANA_V2_OFFRAMP,
+      messageId: request.message.messageId,
+      sourceChainSelector: request.lane.sourceChainSelector,
+      sequenceNumber: request.message.sequenceNumber,
+      startTime: request.log.blockTimestamp,
+    })) {
+      executions.push(execution)
+    }
+    assert.equal(executions.length, 1)
+    assert.equal(executions[0]!.receipt.messageId, FUJI_TO_SOLANA_V2_TOKEN_MESSAGE_ID)
+    assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
+    assert.equal(executions[0]!.log.transactionHash, FUJI_TO_SOLANA_V2_TOKEN_EXEC_TX)
   })
 })
 
