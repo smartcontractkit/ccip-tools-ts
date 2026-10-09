@@ -370,7 +370,7 @@ describe('resolveAccounts', () => {
 describe('typed resolvers', () => {
   it('resolves get_fee_v2 with the final metadata in the instruction data', async () => {
     const router = randomKey()
-    const sender = randomKey()
+    const payer = randomKey()
     const saved = [meta(randomKey()), meta(randomKey(), false, true)]
     const lut = randomKey()
     const metadata = Buffer.from([4, 0, 1, 1, 0, 0, 0, 2])
@@ -387,12 +387,12 @@ describe('typed resolvers', () => {
       {
         router,
         destChainSelector: 16015286601757825753n,
-        sender,
         message: {
           receiver: '0x0000000000000000000000000000000000000001',
           data: '0x1234',
           extraArgs: { gasLimit: 0n },
         },
+        payer,
       },
     )
 
@@ -402,12 +402,16 @@ describe('typed resolvers', () => {
     assert.equal(getAddressLookupTable.mock.calls.length, 1)
     assert.equal(lookupTables.length, 1)
 
-    // the resolution ix_data is the final data with empty metadata, and the caller is the sender
+    // the resolution ix_data is the final data with empty metadata, and the caller is the payer
     const start = lastInstruction(simulateTransaction.mock.calls[0]!.arguments[0]).data
-    assert.deepEqual(start.subarray(8, 40), sender.toBuffer())
+    assert.deepEqual(start.subarray(8, 40), payer.toBuffer())
     const ixDataLen = start.readUInt32LE(40)
     const ixData = start.subarray(44, 44 + ixDataLen)
     assert.deepEqual(ixData.subarray(0, 8), GET_FEE_V2_DISCRIMINATOR)
+    // GetFeeParams has no sender: the message (receiver, then data) follows the selector
+    const receiverLen = ixData.readUInt32LE(16)
+    assert.equal(ixData.readUInt32LE(20 + receiverLen), 2)
+    assert.equal(ixData.subarray(24 + receiverLen, 26 + receiverLen).toString('hex'), '1234')
     assert.deepEqual(ixData.subarray(-4), u32(0))
     assert.deepEqual(instruction.data, Buffer.concat([ixData.subarray(0, -4), bytes(metadata)]))
   })
