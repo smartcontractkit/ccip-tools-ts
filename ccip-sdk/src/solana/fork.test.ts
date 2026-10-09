@@ -16,13 +16,14 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  SendTransactionError,
 } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
-import { CCIPArgumentInvalidError, CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
+import { CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
 import {
@@ -464,7 +465,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     const airdropSig = await connection.requestAirdrop(wallet.publicKey, 10 * LAMPORTS_PER_SOL)
     await connection.confirmTransaction(airdropSig)
 
-    // token transfers need the sender's token account to exist, even just to quote a fee
+    // token transfers need the sender's token account to exist to send (quotes don't)
     await (
       connection as unknown as { _rpcRequest(m: string, a: unknown[]): Promise<unknown> }
     )._rpcRequest('surfnet_setTokenAccount', [
@@ -486,8 +487,8 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     const { instruction, lookupTables, metadata } = await resolveGetFeeV2(ctx(), {
       router,
       destChainSelector: STAGING.sepoliaSelector,
-      sender: wallet!.publicKey,
       message,
+      payer: wallet!.publicKey,
     })
     // the fixed deployment lookup table isn't part of resolution; token transfers need it to fit v0
     const [sendLookupTable] = await fetchLookupTables(connection!, [
@@ -751,6 +752,24 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       assert.equal(fee, amount)
     })
 
+    it('quotes a token transfer over 2.0 without a sender, at what the send charges', async () => {
+      const message = {
+        receiver,
+        data: '0x',
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount: 1n }],
+        extraArgs: legacyArgs,
+      }
+      const fee = await solanaChain!.getFee({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message,
+      })
+      const request = await solanaChain!.sendMessage(sendOpts(message))
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      assert.equal(sent.feeTokenAmount, fee, 'the send should charge the sender-less quote')
+    })
+
     it('sends legacy extraArgs over 2.0', async () => {
       const request = await solanaChain!.sendMessage(
         sendOpts({ receiver, data: '0x1337', extraArgs: legacyArgs }),
@@ -847,47 +866,56 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       })
 
       const v3 = { receiver, data: '0x1337', extraArgs: { finality: 'finalized' as const } }
-      const feeOpts = (message: MessageInput, sender?: PublicKey) => ({
+      const feeOpts = (message: MessageInput) => ({
         router: STAGING.router,
         destChainSelector: STAGING.sepoliaSelector,
         message,
-        ...(sender && { sender: sender.toBase58() }),
       })
 
-      it('rejects a sender off the allowlist, and a quote without the sender', async () => {
-        await setAllowlist([])
+      it("doesn't quote or send over 2.0, even for an allowlisted sender", async () => {
+        await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
 
-        await assert.rejects(
-          solanaChain!.sendMessage(sendOpts(v3)),
-          (err: unknown) =>
-            err instanceof CCIPSolanaV2LaneUnavailableError &&
-            err.context.reason === 'sender-not-allowed' &&
-            err.context.sender === wallet!.publicKey.toBase58(),
-        )
+        const allowlistEnabled = (err: unknown) =>
+          err instanceof CCIPSolanaV2LaneUnavailableError &&
+          err.context.reason === 'allowlist-enabled'
+        await assert.rejects(solanaChain!.getFee(feeOpts(v3)), allowlistEnabled)
+        await assert.rejects(solanaChain!.sendMessage(sendOpts(v3)), allowlistEnabled)
         // legacy args fall back to 1.6 instead, which this 2.0-only deployment doesn't have
+        const legacy = { ...v3, extraArgs: legacyArgs }
         await assert.rejects(
-          solanaChain!.sendMessage(sendOpts({ ...v3, extraArgs: legacyArgs })),
+          solanaChain!.getFee(feeOpts(legacy)),
           (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
         )
-        // the allowlist decides the entrypoint, so a quote needs the sender
         await assert.rejects(
-          solanaChain!.getFee(feeOpts(v3)),
-          (err: unknown) =>
-            err instanceof CCIPArgumentInvalidError && err.context.argument === 'sender',
-        )
-        await assert.rejects(
-          solanaChain!.getFee(feeOpts(v3, wallet!.publicKey)),
-          CCIPSolanaV2LaneUnavailableError,
+          solanaChain!.sendMessage(sendOpts(legacy)),
+          (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
         )
       })
 
-      it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
-        await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-        const fee = await solanaChain!.getFee(feeOpts(v3, wallet!.publicKey))
-        const request = await solanaChain!.sendMessage(sendOpts({ ...v3, fee }))
-        assert.equal(request.lane.version, CCIPVersion.V2_0)
-        const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
-        assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+      describe('with sendV2OnAllowlistedLanes', () => {
+        const optedIn = { sendV2OnAllowlistedLanes: true }
+
+        it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
+          await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
+          const fee = await solanaChain!.getFee({ ...feeOpts(v3), ...optedIn })
+          const request = await solanaChain!.sendMessage({
+            ...sendOpts({ ...v3, fee }),
+            ...optedIn,
+          })
+          assert.equal(request.lane.version, CCIPVersion.V2_0)
+          const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+          assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+        })
+
+        it('leaves rejecting a sender off the allowlist to the router', async () => {
+          await setAllowlist([Keypair.generate().publicKey])
+          await assert.rejects(
+            solanaChain!.sendMessage({ ...sendOpts(v3), ...optedIn }),
+            (err: unknown) =>
+              err instanceof SendTransactionError &&
+              !!err.logs?.some((log) => log.includes('SenderNotAllowed')),
+          )
+        })
       })
     })
   })

@@ -3478,12 +3478,13 @@ export class CCIPSolanaAccountResolutionError extends CCIPError {
 export type SolanaV2LaneUnavailableReason =
   | 'lane-not-configured'
   | 'router-without-v2-support'
-  | 'sender-not-allowed'
+  | 'allowlist-enabled'
 
 /**
  * Thrown when a Solana message requires a CCIP 2.0 lane (its extraArgs are GenericExtraArgsV3),
  * but the router can't send it over one: the lane isn't configured for 2.0, the router doesn't
- * have 2.0 support yet, or the lane's allowlist doesn't include the sender.
+ * have 2.0 support yet, or the lane has its sender allowlist enabled, which the SDK doesn't send
+ * 2.0 messages over.
  *
  * @example
  * ```typescript
@@ -3501,13 +3502,13 @@ export class CCIPSolanaV2LaneUnavailableError extends CCIPError {
   /** Creates a Solana CCIP 2.0 lane unavailable error. */
   constructor(
     reason: SolanaV2LaneUnavailableReason,
-    context: { router: string; destChainSelector: bigint; sender?: string },
+    context: { router: string; destChainSelector: bigint },
     options?: CCIPErrorOptions,
   ) {
     const why = {
       'lane-not-configured': 'the lane is not configured for CCIP 2.0',
       'router-without-v2-support': "the router doesn't have CCIP 2.0 support yet",
-      'sender-not-allowed': `sender ${context.sender} is not in the lane's allowlist`,
+      'allowlist-enabled': 'the lane has its sender allowlist enabled',
     }[reason]
     super(
       CCIPErrorCode.SOLANA_V2_LANE_UNAVAILABLE,
