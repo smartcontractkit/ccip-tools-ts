@@ -77,13 +77,12 @@ export type DeployLockReleaseTokenPoolParams = DeployTokenPoolBaseParams & {
  * Params for a `SiloedLockReleaseTokenPool`: the `TokenPool` base constructor, with no `lockbox`.
  *
  * @remarks Lock/release, but escrows per remote chain: lockboxes are bound after deploy, per lane,
- * by the pool owner's `configureLockBoxes([{ remoteChainSelector, lockBox }])`, each an
- * `ERC20LockBox` for the *same* `token` (it calls `lockBox.isTokenSupported(token)`). Lanes may
- * share a lockbox (shared liquidity) or each get their own (siloed). Sequence: deployToken →
- * deployTokenPool (this) → deployLockbox (one per silo) → updateLockboxAuthorizedCallers on each
- * (`addedCallers: [pool]`, plus whoever funds it) → `configureLockBoxes` (no SDK op yet) →
- * setPool → configure lanes → depositToLockbox per lockbox. A lane with no lockbox reverts
- * `LockBoxNotConfigured` on every transfer.
+ * by the pool owner's `configureSiloedLockboxes`, each an `ERC20LockBox` for the *same* `token`
+ * (it calls `lockBox.isTokenSupported(token)`). Lanes may share a lockbox (shared liquidity) or
+ * each get their own (siloed). Sequence: deployToken → deployTokenPool (this) → deployLockbox
+ * (one per silo) → updateLockboxAuthorizedCallers on each (`addedCallers: [pool]`, plus whoever
+ * funds it) → configureSiloedLockboxes → setPool → configure lanes → depositToLockbox per
+ * lockbox. A lane with no lockbox reverts `LockBoxNotConfigured` on every transfer.
  */
 export type DeploySiloedLockReleaseTokenPoolParams = DeployTokenPoolBaseParams & {
   type: 'SiloedLockReleaseTokenPool'

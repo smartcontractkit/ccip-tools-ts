@@ -10,9 +10,11 @@
  * with ({@link assertLockReleasePool}, {@link assertPoolRebalancer},
  * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}), and the siloed pool's per-lane
  * layer on top of it: the v1.6.x silo reads and guards ({@link assertSiloedLockReleasePool},
- * {@link assertSiloedChain}, {@link assertSiloRebalancer}, {@link assertSiloLiquidity}), with
- * {@link isTokenPoolRevert} to tell a named pool revert from any other failure. The write-side
- * rate-limit shape lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
+ * {@link assertSiloedChain}, {@link assertSiloRebalancer}, {@link assertSiloLiquidity}) and the
+ * v2.0.0 lane → lockbox reads ({@link readTokenPoolLockboxConfigs},
+ * {@link readTokenPoolSiloedLockbox}), with {@link isTokenPoolRevert} to tell a named pool revert
+ * from any other failure. The write-side rate-limit shape lane-config ops share lives in
+ * `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
@@ -312,7 +314,7 @@ export function assertNonSiloedLockReleasePool(
     poolAddress,
     'LockReleaseTokenPool',
     type,
-    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's escrow against the pool directly",
+    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's lockbox with getSiloedLockbox, or all of them with getAllSiloedLockboxConfigs",
     { context: { operation } },
   )
 }
@@ -1128,6 +1130,57 @@ export type DeployableTokenPoolType = (typeof DEPLOYABLE_TOKEN_POOL_TYPES)[numbe
 /** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
 export function isDeployableTokenPoolType(value: string): value is DeployableTokenPoolType {
   return (DEPLOYABLE_TOKEN_POOL_TYPES as readonly string[]).includes(value)
+}
+
+/**
+ * One lane → lockbox binding of a v2.0.0 `SiloedLockReleaseTokenPool`: the contract's
+ * `LockBoxConfig` struct, with the SDK's `lockbox` casing.
+ */
+export type LockboxConfig = {
+  /** The remote chain whose transfers escrow through {@link lockbox}. */
+  remoteChainSelector: bigint
+  /** The `ERC20LockBox` for that lane, checksummed when read; lanes may share one. */
+  lockbox: string
+}
+
+/**
+ * Reads a v2.0.0 siloed pool's `getAllLockBoxConfigs()` in one `eth_call`.
+ * @remarks Callers must resolve the pool first ({@link assertSiloedLockReleasePool}, plus a
+ * v2.0.0 check): the getter exists only there.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 `SiloedLockReleaseTokenPool` to read.
+ * @returns Every bound lane in the contract's enumeration order, lockboxes checksummed; `[]` when
+ * none is bound.
+ */
+export async function readTokenPoolLockboxConfigs(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<LockboxConfig[]> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const configs = resultToObject(await pool.getAllLockBoxConfigs())
+  return configs.map((config) => ({
+    remoteChainSelector: config.remoteChainSelector,
+    lockbox: getAddress(config.lockBox),
+  }))
+}
+
+/**
+ * Reads a v2.0.0 siloed pool's `getLockBox(remoteChainSelector)` in one `eth_call`: the lockbox
+ * that lane's transfers escrow through.
+ * @remarks Same gating as {@link readTokenPoolLockboxConfigs}. The raw call: it reverts
+ * `LockBoxNotConfigured` for an unbound lane; test for that with {@link isTokenPoolRevert}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 `SiloedLockReleaseTokenPool` to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns The lane's lockbox, checksummed.
+ */
+export async function readTokenPoolSiloedLockbox(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getLockBox(remoteChainSelector)))
 }
 
 /**

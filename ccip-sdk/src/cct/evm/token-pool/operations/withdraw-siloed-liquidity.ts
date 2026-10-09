@@ -10,7 +10,7 @@
  * the shared unsiloed bucket, which {@link WithdrawLiquidity} draws on instead.
  *
  * @remarks **Removed in v2.0.0**, where a siloed pool escrows through a per-lane `ERC20LockBox`
- * instead (see `configureLockBoxes`).
+ * instead (see {@link ConfigureSiloedLockboxes}).
  *
  * @packageDocumentation
  */

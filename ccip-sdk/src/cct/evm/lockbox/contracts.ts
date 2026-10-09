@@ -71,6 +71,7 @@ const LOCKBOX_VERSIONS: string[] = ['2.0.0']
  * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param lockbox - The caller-supplied lockbox address, already validated as non-zero.
+ * @param param - Param the address came from, for the error's `param` field.
  * @throws {@link CCTParamsInvalidError} if the `typeAndVersion` read fails, i.e. there is no
  * contract at `lockbox`, or it does not answer the call
  * @throws {@link CCTContractTypeInvalidError} if the contract is not an `ERC20LockBox`
@@ -82,6 +83,7 @@ export async function assertLockbox(
   operation: string,
   chain: EVMChain,
   lockbox: string,
+  param = 'lockbox',
 ): Promise<void> {
   let contractType: string, version: string
   try {
@@ -90,7 +92,7 @@ export async function assertLockbox(
     if (!isMissingFunction(err)) throw err
     throw new CCTParamsInvalidError(
       operation,
-      'lockbox',
+      param,
       `nothing at ${lockbox} answers typeAndVersion() — it holds no contract code, holds code that is not a lockbox, or was deployed so recently that this RPC node has not caught up; check the address, or deploy a lockbox with deployLockbox`,
       { cause: err instanceof Error ? err : undefined },
     )
