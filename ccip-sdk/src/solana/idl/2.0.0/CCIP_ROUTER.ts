@@ -178,7 +178,6 @@ export type CcipRouterV2 = {
         kind: 'struct'
         fields: [
           { name: 'destChainSelector'; type: 'u64' },
-          { name: 'sender'; type: 'publicKey' },
           { name: 'message'; type: { defined: 'SVM2AnyMessage' } },
           { name: 'resolutionMetadata'; type: 'bytes' },
         ]
@@ -390,7 +389,6 @@ export const IDL: CcipRouterV2 = {
         kind: 'struct',
         fields: [
           { name: 'destChainSelector', type: 'u64' },
-          { name: 'sender', type: 'publicKey' },
           { name: 'message', type: { defined: 'SVM2AnyMessage' } },
           { name: 'resolutionMetadata', type: 'bytes' },
         ],

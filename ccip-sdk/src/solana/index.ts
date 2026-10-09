@@ -10,7 +10,6 @@ import {
   PublicKey,
   SYSVAR_CLOCK_PUBKEY,
 } from '@solana/web3.js'
-import BN from 'bn.js'
 import bs58 from 'bs58'
 import {
   type BytesLike,
@@ -33,6 +32,7 @@ import {
   type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
+  type TokenPoolConfig,
   type TokenPoolRemote,
   type TokenPrice,
   type TokenTransferFeeOpts,
@@ -60,12 +60,12 @@ import {
   CCIPTokenPoolStateNotFoundError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFoundError,
-  CCIPTransactionTooLargeError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type FinalityAllowed,
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
@@ -114,17 +114,21 @@ import {
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
 import { newProgram, sizedCoder } from './coder.ts'
+import {
+  executeV2,
+  generateUnsignedExecuteBufferV2,
+  generateUnsignedExecuteV2,
+  getVerificationPolicyV2,
+} from './exec-v2.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
   decodeSolanaGenericExtraArgsV3,
   decodeSolanaSuiExtraArgsV1,
+  encodeSVMExecutorArgsV1,
   encodeSolanaExtraArgs,
 } from './extra-args.ts'
 import { estimateExecComputeUnits } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
-import { IDL as BASE_TOKEN_POOL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
-import { IDL as BURN_MINT_TOKEN_POOL } from './idl/1.6.0/BURN_MINT_TOKEN_POOL.ts'
-import { IDL as CCIP_CCTP_TOKEN_POOL } from './idl/1.6.0/CCIP_CCTP_TOKEN_POOL.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
@@ -135,6 +139,7 @@ import {
   type SolanaSendLane,
   generateUnsignedCcipSendV2,
   getFeeV2,
+  observeDestChainV2,
   selectSendLane,
 } from './send-v2.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
@@ -143,39 +148,39 @@ import {
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
-import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
+import {
+  decodeTokenPoolChainConfig,
+  decodeTokenPoolChainConfigOverride,
+  decodeTokenPoolChainConfigV2,
+  decodeTokenPoolFinality,
+  decodeTokenPoolStateConfig,
+  deriveTokenPoolChainConfigOverridePda,
+  deriveTokenPoolChainConfigV2Pda,
+} from './token-pool.ts'
+import {
+  type CCIPMessage_V1_6_Solana,
+  type SolanaSendMessageOpts,
+  type UnsignedSolanaTx,
+  isWallet,
+} from './types.ts'
 import {
   type SolanaSentSlice,
   type SolanaSplitMode,
   convertRateLimiter,
   getErrorFromLogs,
   hexDiscriminator,
+  isTransactionTooLargeError,
   parseSolanaLogs,
   resolveATA,
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
+export type { SolanaSendMessageOpts, SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
 
 const routerCoder = sizedCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
 const offrampCoder = sizedCoder(CCIP_OFFRAMP_IDL)
 const offrampV2Coder = sizedCoder(CCIP_OFFRAMP_V2_IDL)
-const TOKEN_POOL_IDL = {
-  ...BURN_MINT_TOKEN_POOL,
-  types: BASE_TOKEN_POOL.types,
-  events: BASE_TOKEN_POOL.events,
-  errors: [...BASE_TOKEN_POOL.errors, ...BURN_MINT_TOKEN_POOL.errors],
-}
-
-const tokenPoolCoder = sizedCoder(TOKEN_POOL_IDL)
-const CCTP_TOKEN_POOL_IDL = {
-  ...CCIP_CCTP_TOKEN_POOL,
-  types: [...BASE_TOKEN_POOL.types, ...CCIP_CCTP_TOKEN_POOL.types],
-  events: [...BASE_TOKEN_POOL.events, ...CCIP_CCTP_TOKEN_POOL.events],
-  errors: [...BASE_TOKEN_POOL.errors, ...CCIP_CCTP_TOKEN_POOL.errors],
-}
-const cctpTokenPoolCoder = sizedCoder(CCTP_TOKEN_POOL_IDL)
 // const commonCoder = sizedCoder(CCIP_COMMON_IDL)
 
 interface ParsedTokenInfo {
@@ -1383,27 +1388,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getFee}
    *
    * Solana routers expose separate CCIP 1.6 and 2.0 entrypoints, chosen per message: 2.0 whenever
-   * the lane supports it (and allowlists the sender, if its allowlist is enabled) and the extraArgs
-   * are (or convert to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
-   * {@link SolanaChain.sendMessage}, so pass the `sender` it'll use: it's required on 2.0 lanes
-   * with an allowlist enabled.
+   * the lane supports it (without its sender allowlist enabled) and the extraArgs are (or convert
+   * to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
+   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}.
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
-   *   the lane doesn't support CCIP 2.0, or its allowlist excludes the sender
-   * @throws {@link CCIPArgumentInvalidError} if `sender` is missing on a 2.0 lane with an
-   *   allowlist enabled
+   *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
-  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0] & SolanaSendMessageOpts): Promise<bigint> {
     await this.checkSendMessage(opts)
     const { router, destChainSelector, message } = opts
-    const sender = opts.sender ? new PublicKey(opts.sender) : undefined
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
     const lane = await selectSendLane(this, {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sender,
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
     })
-    return this.quoteSendLane(router, destChainSelector, lane, sender)
+    return this.quoteSendLane(router, destChainSelector, lane)
   }
 
   // Quotes a message on the entrypoint `selectSendLane` chose for it
@@ -1411,14 +1412,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     router: string,
     destChainSelector: bigint,
     lane: SolanaSendLane,
-    sender?: PublicKey,
   ): Promise<bigint> {
     if (lane.version === CCIPVersion.V2_0) {
       return getFeeV2(this, {
         router: new PublicKey(router),
         destChainSelector,
         message: lane.message,
-        sender,
       })
     }
     return getFee(this, router, destChainSelector, lane.message)
@@ -1428,17 +1427,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.generateUnsignedSendMessage}
    *
    * Sends through the router's CCIP 2.0 entrypoint (`ccip_send_v2`) when possible, and its 1.6 one
-   * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane whose allowlist excludes
-   * the sender counts as unsupported.
+   * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane with its sender allowlist
+   * enabled counts as unsupported, whether or not it includes the sender.
    * @returns instructions - array of instructions; the send instruction is last, after any
    *   approval (and, for 2.0, a heap frame request, which must share its transaction)
    *   lookupTables - array of lookup tables for the send instruction
    *   mainIndex - instructions.length - 1
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
-   *   the lane doesn't support CCIP 2.0, or its allowlist excludes the sender
+   *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
   async generateUnsignedSendMessage(
-    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0] & SolanaSendMessageOpts,
   ): Promise<UnsignedSolanaTx> {
     const { router, destChainSelector } = opts
     const sender = new PublicKey(opts.sender)
@@ -1450,12 +1449,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sender,
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
     })
     let fee = opts.message.fee
     if (fee == null) {
       await this.checkSendMessage({ ...opts, message: populatedMessage })
-      fee = await this.quoteSendLane(router, destChainSelector, lane, sender)
+      fee = await this.quoteSendLane(router, destChainSelector, lane)
     }
     const message = { ...lane.message, fee }
     const generate =
@@ -1473,7 +1472,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPPartialTransactionSubmissionError} if `ccipSend` fails after the approvals
    *   were split into (and confirmed in) an earlier transaction
    */
-  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+  async sendMessage(
+    opts: Parameters<Chain['sendMessage']>[0] & SolanaSendMessageOpts,
+  ): Promise<CCIPRequest> {
     if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
     const unsigned = await this.generateUnsignedSendMessage({
       ...opts,
@@ -1489,28 +1490,111 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   /**
    * {@inheritDoc Chain.generateUnsignedExecute}
+   *
+   * CCIP 2.0 messages are executed through `execute_v2`, which reads its execution inputs from the
+   * payer's execution inputs buffer for the message when that buffer is complete, and takes them
+   * inline otherwise. `execute_v2`'s accounts are resolved on-chain from the buffer, so a buffered
+   * execution can't be generated in one go. Instead, first sign and send the instructions from
+   * {@link SolanaChain.generateUnsignedExecuteBuffer}, then generate the execution (with
+   * `forceBuffer`, to require the buffer). {@link SolanaChain.execute} does both.
    * @returns instructions - array of instructions to execute the report
-   *   lookupTables - array of lookup tables for `manuallyExecute` call
-   *   mainIndex - index of the `manuallyExecute` instruction in the array; last unless
-   *   forceLookupTable is set, in which case last is ALT deactivation tx, and manuallyExecute is
-   *   second to last
+   *   lookupTables - array of lookup tables for `manuallyExecute` (or `execute_v2`) call
+   *   mainIndex - index of the `manuallyExecute` (or `execute_v2`) instruction in the array; last
+   *   unless forceLookupTable is set, in which case last is ALT deactivation tx, and
+   *   manuallyExecute is second to last
    * @throws {@link CCIPExecutionReportChainMismatchError} if message is not a Solana message
+   * @throws {@link CCIPSolanaExecutionBufferIncompleteError} if `forceBuffer` is set for a CCIP 2.0
+   *   message whose execution inputs buffer isn't complete yet
+   * @throws {@link CCIPTransactionTooLargeError} if a CCIP 2.0 message's execution inputs are too
+   *   large to resolve `execute_v2` with them inline, and aren't buffered
+   *
+   * @example Execute a CCIP 2.0 message too large to go inline, with an external signer
+   * ```typescript
+   * const buffering = await solana.generateUnsignedExecuteBuffer({ messageId, payer })
+   * // sign and send each of buffering.instructions in its own transaction, then:
+   * const unsigned = await solana.generateUnsignedExecute({ messageId, payer, forceBuffer: true })
+   * ```
    */
   async generateUnsignedExecute({
     payer,
     ...opts
   }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
-    const resolved = await this.resolveExecuteOpts(opts)
-    if (!('message' in resolved.input) || !('computeUnits' in resolved.input.message))
+    const { offRamp, input } = await this.resolveExecuteOpts(opts)
+    return this.generateUnsignedExecuteResolved(new PublicKey(payer), { ...opts, offRamp, input })
+  }
+
+  // generateUnsignedExecute for resolved inputs, which `execute` retries with other options
+  private generateUnsignedExecuteResolved(
+    payer: PublicKey,
+    {
+      offRamp,
+      input,
+      ...opts
+    }: {
+      offRamp: string
+      input: ExecutionInput
+      forceBuffer?: boolean
+      forceLookupTable?: boolean
+      clearLeftoverAccounts?: boolean
+    },
+  ): Promise<UnsignedSolanaTx> {
+    if ('verifications' in input)
+      return generateUnsignedExecuteV2(this, payer, new PublicKey(offRamp), input, opts)
+    if (!('computeUnits' in input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
-    const { offRamp, input } = resolved
-    const execReport_ = input as ExecutionInput<CCIPMessage_V1_6_Solana>
     return generateUnsignedExecuteReport(
+      this,
+      payer,
+      new PublicKey(offRamp),
+      input as ExecutionInput<CCIPMessage_V1_6_Solana>,
+      opts,
+    )
+  }
+
+  /**
+   * Generates the unsigned instructions writing a CCIP 2.0 message's execution inputs to `payer`'s
+   * execution inputs buffer for it. Once they land, {@link SolanaChain.generateUnsignedExecute}
+   * executes the message from the buffer, whose accounts can't be resolved before it's complete.
+   * This splits a buffered execution across external signers that can't sign transactions large
+   * enough for the inputs inline (e.g. hardware wallets without v1 transaction support).
+   *
+   * Picks up where an earlier attempt left the buffer: chunks it already holds are skipped, and a
+   * buffer holding other inputs is closed first. Each instruction carries a chunk of up to 800
+   * bytes, so needs its own v0 transaction; they may land in any order.
+   * @param opts - {@link ExecuteOpts} with the payer address, which will sign the buffering and
+   *   the execution
+   * @returns instructions - the buffering instructions; none if the buffer already holds the inputs
+   * @throws {@link CCIPArgumentInvalidError} if the message isn't a CCIP 2.0 one; 1.6 executions
+   *   include their buffering, with `forceBuffer`
+   * @throws {@link CCIPTransactionTooLargeError} if the inputs exceed the buffer's capacity
+   *
+   * @example
+   * ```typescript
+   * const buffering = await solana.generateUnsignedExecuteBuffer({ messageId, payer })
+   * // sign and send each of buffering.instructions in its own transaction, then:
+   * const unsigned = await solana.generateUnsignedExecute({ messageId, payer, forceBuffer: true })
+   * ```
+   */
+  async generateUnsignedExecuteBuffer({
+    payer,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
+    // the gas limit only matters to the execution: skip its estimation
+    const { offRamp, input } = await this.resolveExecuteOpts({
+      ...opts,
+      gasLimit: opts.gasLimit ?? 0,
+    })
+    if (!('verifications' in input)) {
+      throw new CCIPArgumentInvalidError(
+        'input',
+        'only CCIP 2.0 execution inputs are buffered ahead of execution; generateUnsignedExecute with forceBuffer includes the buffering of 1.6 reports',
+      )
+    }
+    return generateUnsignedExecuteBufferV2(
       this,
       new PublicKey(payer),
       new PublicKey(offRamp),
-      execReport_,
-      opts,
+      input,
     )
   }
 
@@ -1520,6 +1604,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Not atomic: buffering and lookup-table instructions are split across as many transactions as
    * needed, on any simulation failure, each confirmed before the next one is simulated; a failure
    * in a later transaction leaves the earlier ones (e.g. buffered report chunks) committed.
+   *
+   * CCIP 2.0 messages are executed through `execute_v2`, which is permissionless: the wallet only
+   * signs and pays for it. Execution inputs too large for a transaction are written to an
+   * execution inputs buffer first, which a retry picks up from if the execution fails.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
    * @throws {@link CCIPPartialTransactionSubmissionError} if a transaction fails after earlier
    *   ones (e.g. buffering) confirmed, and no retry strategy is left
@@ -1534,12 +1622,23 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     const wallet = opts.wallet
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(util.inspect(wallet))
 
+    const { offRamp, input } = await this.resolveExecuteOpts(opts)
     let hash
-    do {
+    if ('verifications' in input) {
+      hash = await executeV2(this, wallet, {
+        offramp: new PublicKey(offRamp),
+        input,
+        forceBuffer: opts.forceBuffer,
+        forceLookupTable: opts.forceLookupTable,
+        computeUnits: opts.txGasLimit ?? opts.gasLimit,
+      })
+    }
+    while (!hash) {
       try {
-        const unsigned = await this.generateUnsignedExecute({
+        const unsigned = await this.generateUnsignedExecuteResolved(wallet.publicKey, {
           ...opts,
-          payer: wallet.publicKey.toBase58(),
+          offRamp,
+          input,
         })
         ;({ hash } = await simulateAndSendTxs(this, wallet, unsigned, {
           computeUnits: opts.txGasLimit ?? opts.gasLimit,
@@ -1556,10 +1655,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           if (!opts.clearLeftoverAccounts) {
             opts = { ...opts, clearLeftoverAccounts: true }
           } else throw err
-        } else if (
-          cause instanceof CCIPTransactionTooLargeError ||
-          ['encoding overruns Uint8Array', 'too large'].some((e) => cause.message.includes(e))
-        ) {
+        } else if (isTransactionTooLargeError(cause)) {
           // in case of failure to serialize a report, first try buffering (because it gets
           // auto-closed upon successful execution), then ALTs (need a grace period ~3min after
           // deactivation before they can be closed/recycled)
@@ -1568,7 +1664,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           else throw err
         } else throw err
       }
-    } while (!hash)
+    }
 
     try {
       await this.cleanUpBuffers(opts)
@@ -1680,8 +1776,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Solana specialization: for v2 lanes, resolve the verification policy from the offRamp's
-   * `getCcvsForMsg` view and fetch CCV results from the indexers (no onchain commit exists);
+   * Solana specialization: for v2 lanes, read the verification policy from the offRamp's
+   * `get_ccvs_for_msg` view, and fetch the CCV results covering it (no onchain commit exists);
    * for v1.x, use getProgramAccounts to fetch commit reports from PDAs
    */
   override async getVerifications(
@@ -1689,131 +1785,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   ): Promise<CCIPVerifications> {
     const { offRamp, request } = opts
     if (request.lane.version >= CCIPVersion.V2_0) {
-      // For v2 messages, there is no onchain commit — the verification policy (required/optional
-      // CCVs) comes from the OffRamp's `getCcvsForMsg` view, and the actual verifier results
-      // come from the CCIP v2 indexer.
-      //
-      // The view resolves CCVs from three sources (see chainlink-ccip-solana
-      // `get_ccvs_for_msg/processor.rs`):
-      //   1. Lane defaults + mandated CCVs (always, from SourceChain config)
-      //   2. Receiver CCVs (for arbitrary/data messages, via CPI to the receiver program)
-      //   3. Pool CCVs (for token transfers, via CPI to the token pool)
-      //
-      // We resolve receiver CCVs by deriving the `receiver_registry` PDA from the router
-      // (read from ReferenceAddresses) and the receiver address. If the registry is owned by
-      // the router, the receiver is v2 and we also pass [receiver_program, source_chain_ccv_config]
-      // as remaining_accounts for the CPI. If the registry doesn't exist or is system-owned, the
-      // receiver is v1 and only the registry is passed.
-      //
-      // Token transfer CCVs are not yet resolved (TODO: needs 5 pool remaining_accounts).
-      const offRampPk = new PublicKey(offRamp)
-      const program = newProgram(CCIP_OFFRAMP_V2_IDL, offRampPk, simulationProvider(this))
-      const pda = (seed: string, ...extra: Uint8Array[]) =>
-        PublicKey.findProgramAddressSync([Buffer.from(seed), ...extra], offRampPk)[0]
-
-      // Read ReferenceAddresses to get the router (receiver_registry derivation) and the
-      // RMN Remote program (required by the `get_ccvs_for_msg` view since the latest redeploy).
-      const refAddresses = await this._getOffRampReferenceAddresses(offRamp)
-      const router = refAddresses.router
-
-      // Resolve the receiver and its remaining_accounts. The view consults the receiver only for
-      // an arbitrary (data) message: a message with no data AND no receive-gas is token-only —
-      // driven by the pool — so it must get NO receiver accounts (`is_offramp_token_only_transfer`;
-      // passing them anyway fails with InvalidAccountListLengths).
-      const message = request.message as CCIPMessage
-      const dataLen = getDataBytes(message.data).length
-      const receiveGasLimit = Number(
-        (message as { ccipReceiveGasLimit?: number | bigint }).ccipReceiveGasLimit ??
-          (message as { gasLimit?: number | bigint }).gasLimit ??
-          0,
+      // the policy is computed from the message exactly as emitted (receiver, token transfer,
+      // finality), the way `execute_v2` computes the one it enforces
+      const encodedMessage = await this.resolveEncodedMessage(request)
+      const verificationPolicy = await getVerificationPolicyV2(
+        this,
+        new PublicKey(offRamp),
+        encodedMessage,
       )
-      let messageReceiver = PublicKey.default
-      const remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = []
-      if (message.receiver && message.receiver !== '0x') {
-        try {
-          messageReceiver = new PublicKey(message.receiver)
-        } catch {
-          // non-svm or zero receiver — leave default, skip receiver consultation
-        }
-      }
-      const isArbitrary =
-        !messageReceiver.equals(PublicKey.default) && (dataLen > 0 || receiveGasLimit > 0)
-      if (isArbitrary) {
-        // receiver_registry PDA: [RECEIVER_REGISTRY, receiver] under router
-        const [registryPda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('receiver_registry'), messageReceiver.toBuffer()],
-          router,
-        )
-        const registryAcc = await this.connection.getAccountInfo(registryPda)
-        const isV2 =
-          registryAcc != null && registryAcc.owner.equals(router) && registryAcc.data.length >= 8
-        remainingAccounts.push({
-          pubkey: registryPda,
-          isSigner: false,
-          isWritable: false,
-        })
-        if (isV2) {
-          // v2 receiver: also pass [receiver_program, source_chain_ccv_config]
-          // source_chain_ccv_config PDA: [ccv_config, sourceChainSelectorLE] under receiver
-          const [ccvConfigPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('ccv_config'), toLeArray(request.lane.sourceChainSelector, 8)],
-            messageReceiver,
-          )
-          remainingAccounts.push({
-            pubkey: messageReceiver,
-            isSigner: false,
-            isWritable: false,
-          })
-          remainingAccounts.push({
-            pubkey: ccvConfigPda,
-            isSigner: false,
-            isWritable: false,
-          })
-        }
-      }
-
-      // RMN Remote CPI accounts (required by the latest offramp). The `rmn_remote` program is
-      // read from ReferenceAddresses; its two config/curse PDAs are derived under it.
-      const [rmnRemoteCurses] = PublicKey.findProgramAddressSync(
-        [Buffer.from('curses')],
-        refAddresses.rmnRemote,
-      )
-      const [rmnRemoteConfig] = PublicKey.findProgramAddressSync(
-        [Buffer.from('config')],
-        refAddresses.rmnRemote,
-      )
-
-      const ccvs = (await program.methods
-        .getCcvsForMsg({
-          // TODO: token transfers require 5 pool remaining_accounts for pool CCV resolution
-          tokenTransfer: null,
-          messageReceiver,
-          dataLen,
-          ccipReceiveGasLimit: receiveGasLimit,
-          sender: Buffer.from(getAddressBytes(message.sender)),
-          resolutionMetadata: Buffer.alloc(0),
-          remoteChainSelector: new BN(request.lane.sourceChainSelector.toString()),
-          requestedFinality: { flags: 0, blockDepth: 0 },
-        })
-        .accounts({
-          config: pda('config'),
-          referenceAddresses: pda('reference_addresses'),
-          sourceChain: pda('source_chain_state', toLeArray(request.lane.sourceChainSelector, 8)),
-          rmnRemote: refAddresses.rmnRemote,
-          rmnRemoteCurses,
-          rmnRemoteConfig,
-        })
-        .remainingAccounts(remainingAccounts)
-        .view()) as {
-        requiredCcvs: PublicKey[]
-        optionalCcvs: PublicKey[]
-        optionalThreshold: number
-      }
-      const verificationPolicy = {
-        requiredCCVs: ccvs.requiredCcvs.map((c) => c.toBase58()),
-        optionalCCVs: ccvs.optionalCcvs.map((c) => c.toBase58()),
-        optionalThreshold: ccvs.optionalThreshold,
-      }
       const verifications = await this.fetchCCVResults(
         request.message.messageId,
         verificationPolicy,
@@ -2014,59 +1993,128 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
+   *
+   * @remarks
+   * 2.0 pools configure their allowed finality per remote chain (EVM pools, pool-wide), so
+   * `finalityDepth`/`finalitySafe` are only returned with `feeOpts`, for its `destChainSelector`,
+   * along with `tokenTransferFeeConfig`. A lane without a 2.0 config allows only finalized
+   * transfers, without fees (`finalityDepth: 0`, `tokenTransferFeeConfig.isEnabled: false`).
    */
   async getTokenPoolConfig(
     tokenPool: string,
-    _feeOpts?: TokenTransferFeeOpts,
-  ): Promise<{
-    token: string
-    router: string
-    tokenPoolProgram: string
-    typeAndVersion?: string
-  }> {
-    // `tokenPool` is actually a State PDA in the tokenPoolProgram
-    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState || tokenPoolState.data.length < 266 + 32)
-      throw new CCIPTokenPoolStateNotFoundError(tokenPool)
-    const tokenPoolProgram = tokenPoolState.owner.toBase58()
+    feeOpts?: TokenTransferFeeOpts,
+  ): Promise<TokenPoolConfig & { tokenPoolProgram: string }> {
+    const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
-    let typeAndVersion
+    let version, typeAndVersion
     try {
-      ;[, , typeAndVersion] = await this.typeAndVersion(tokenPoolProgram)
+      ;[, version, typeAndVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
     } catch (_) {
       // TokenPool may not have a typeAndVersion
     }
 
-    // const { config }: { config: IdlTypes<typeof BASE_TOKEN_POOL>['BaseConfig'] } =
-    //   tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
-    const mint = new PublicKey(tokenPoolState.data.subarray(41, 41 + 32))
-    const router = new PublicKey(tokenPoolState.data.subarray(266, 266 + 32))
-
-    return {
-      token: mint.toBase58(),
-      router: router.toBase58(),
-      tokenPoolProgram,
+    const poolConfig = {
+      token: config.mint.toBase58(),
+      router: config.router.toBase58(),
+      tokenPoolProgram: tokenPoolProgram.toBase58(),
       typeAndVersion,
     }
+    // 2.0 configs only exist on 2.0 pools; probe them on pools of unknown version too
+    if (!feeOpts || (version != null && version < CCIPVersion.V2_0)) return poolConfig
+
+    const chainConfigV2 = await this.connection.getAccountInfo(
+      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, feeOpts.destChainSelector, config.mint),
+    )
+    // a pool of unknown version without a 2.0 config may not be a 2.0 pool
+    if (!chainConfigV2 && version == null) return poolConfig
+    let allowedFinalityConfig = { flags: 0, blockDepth: 0 }
+    let tokenTransferFeeConfig = {
+      destGasOverhead: 0,
+      destBytesOverhead: 0,
+      finalityFee: 0,
+      fastFinalityFee: 0,
+      finalityBpsFee: 0,
+      fastFinalityBpsFee: 0,
+      isEnabled: false,
+    }
+    if (chainConfigV2) {
+      try {
+        ;({ allowedFinalityConfig, tokenTransferFeeConfig } = decodeTokenPoolChainConfigV2(
+          chainConfigV2.data,
+        ))
+      } catch (err) {
+        this.logger.warn('Failed to decode ChainConfigV2 account:', err)
+        return poolConfig
+      }
+    }
+    return {
+      ...poolConfig,
+      ...decodeTokenPoolFinality(allowedFinalityConfig),
+      tokenTransferFeeConfig: {
+        destGasOverhead: tokenTransferFeeConfig.destGasOverhead,
+        destBytesOverhead: tokenTransferFeeConfig.destBytesOverhead,
+        finalityFeeUSDCents: tokenTransferFeeConfig.finalityFee,
+        fastFinalityFeeUSDCents: tokenTransferFeeConfig.fastFinalityFee,
+        finalityTransferFeeBps: tokenTransferFeeConfig.finalityBpsFee,
+        fastFinalityTransferFeeBps: tokenTransferFeeConfig.fastFinalityBpsFee,
+        isEnabled: tokenTransferFeeConfig.isEnabled,
+      },
+    }
+  }
+
+  /**
+   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if the router
+   * has a 2.0 path to it (it may still allowlist senders).
+   */
+  protected override async laneSupportsFastFinality(
+    router: string,
+    destChainSelector: bigint,
+  ): Promise<boolean> {
+    if (!(await super.laneSupportsFastFinality(router, destChainSelector))) return false
+    const lane = await observeDestChainV2(this, {
+      router: new PublicKey(router),
+      destChainSelector,
+    })
+    return 'observation' in lane
+  }
+
+  /** Solana token pools configure their allowed finality per remote chain. */
+  protected override async getTokenPoolFinality(
+    tokenPool: string,
+    destChainSelector: bigint,
+  ): Promise<Partial<FinalityAllowed>> {
+    const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool, {
+      destChainSelector,
+      finality: 'finalized',
+      tokenArgs: '0x',
+    })
+    return { finalityDepth, finalitySafe }
   }
 
   /**
    * {@inheritDoc Chain.getTokenPoolRemotes}
    * @throws {@link CCIPTokenPoolStateNotFoundError} if token pool state not found
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if chain config not found for specified selector
+   *
+   * @remarks
+   * 2.0 pools also return their faster-than-finality rate limits
+   * (`fastOutboundRateLimiterState` / `fastInboundRateLimiterState`), from their per-chain FTF
+   * override; `null` when it's unset or disabled, as FTF transfers then use the standard limits.
+   * They also return each remote's allowed `finalityDepth`/`finalitySafe`, as
+   * {@link SolanaChain.getTokenPoolConfig} does for one lane.
    */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>> {
-    // `tokenPool` is actually a State PDA in the tokenPoolProgram
-    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
-    if (!tokenPoolState) throw new CCIPTokenPoolStateNotFoundError(tokenPool)
+    const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
-    const tokenPoolProgram = tokenPoolState.owner
-
-    const { config }: { config: { mint: PublicKey; router: PublicKey } } =
-      tokenPoolCoder.accounts.decode('state', tokenPoolState.data)
+    let poolType: string | undefined, poolVersion: string | undefined
+    try {
+      ;[poolType, poolVersion] = await this.typeAndVersion(tokenPoolProgram.toBase58())
+    } catch (_) {
+      // Custom pool programs may not implement `typeVersion`
+    }
 
     // Get all supported chains by fetching ChainConfig PDAs
     // We need to scan for all ChainConfig accounts owned by this token pool program
@@ -2112,12 +2160,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     for (const acc of accounts) {
       try {
-        let base: IdlTypes<typeof BASE_TOKEN_POOL>['BaseChain']
-        try {
-          ;({ base } = tokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
-        } catch (_) {
-          ;({ base } = cctpTokenPoolCoder.accounts.decode('chainConfig', acc.account.data))
-        }
+        const base = decodeTokenPoolChainConfig(acc.account.data, poolType)
 
         let remoteChainSelector
         // test all selectors, to find the correct seed
@@ -2159,7 +2202,65 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
 
+    // FTF overrides and ChainConfigV2s only exist on 2.0 pools; probe pools of unknown version too
+    if (poolVersion != null && poolVersion < CCIPVersion.V2_0) return remotes
+    const names = Object.keys(remotes)
+    const pdas = names.flatMap((name) => {
+      const { chainSelector } = networkInfo(name)
+      return [
+        deriveTokenPoolChainConfigOverridePda(tokenPoolProgram, chainSelector, config.mint),
+        deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, chainSelector, config.mint),
+      ]
+    })
+    const pdaAccounts = []
+    for (let i = 0; i < pdas.length; i += 100) {
+      pdaAccounts.push(...(await this.connection.getMultipleAccountsInfo(pdas.slice(i, i + 100))))
+    }
+    for (const [i, name] of names.entries()) {
+      const [override, chainConfigV2] = pdaAccounts.slice(2 * i, 2 * i + 2)
+      // a pool of unknown version without 2.0 accounts may not be a 2.0 pool
+      if (!override && !chainConfigV2 && poolVersion == null) continue
+      let fast, finality
+      try {
+        fast = override && decodeTokenPoolChainConfigOverride(override.data)
+        // a lane without a ChainConfigV2 allows only finalized transfers
+        finality = chainConfigV2
+          ? decodeTokenPoolChainConfigV2(chainConfigV2.data).allowedFinalityConfig
+          : { flags: 0, blockDepth: 0 }
+      } catch (err) {
+        this.logger.warn('Failed to decode 2.0 token pool config accounts:', err)
+        continue
+      }
+      remotes[name] = {
+        ...remotes[name]!,
+        fastOutboundRateLimiterState: fast ? convertRateLimiter(fast.outboundRateLimit) : null,
+        fastInboundRateLimiterState: fast ? convertRateLimiter(fast.inboundRateLimit) : null,
+        ...decodeTokenPoolFinality(finality),
+      }
+    }
+
     return remotes
+  }
+
+  /**
+   * Fetches and decodes a token pool's State account.
+   * @param tokenPool - Token pool State PDA.
+   * @returns The program owning the pool, and its config.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} if `tokenPool` isn't a token pool State account
+   */
+  private async _getTokenPoolState(tokenPool: string) {
+    // `tokenPool` is actually a State PDA in the tokenPoolProgram
+    const tokenPoolState = await this.connection.getAccountInfo(new PublicKey(tokenPool))
+    if (!tokenPoolState) throw new CCIPTokenPoolStateNotFoundError(tokenPool)
+    let config
+    try {
+      config = decodeTokenPoolStateConfig(tokenPoolState.data)
+    } catch (err) {
+      throw new CCIPTokenPoolStateNotFoundError(tokenPool, {
+        ...(err instanceof Error && { cause: err }),
+      })
+    }
+    return { tokenPoolProgram: tokenPoolState.owner, config }
   }
 
   /** {@inheritDoc Chain.getSupportedTokens} */
@@ -2282,14 +2383,21 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * Accepts `gasLimit` as an alias for `computeUnits` in extraArgs.
    *
+   * GenericExtraArgsV3 (for CCIP 2.0 lanes) is built instead when any of its fields SVMExtraArgsV1
+   * lacks is present (`finality`, `ccvs`, `ccvArgs`, `executor`, `executorArgs`, `tokenArgs`), with
+   * the same receiver/tokenReceiver handling. Its `executorArgs` default to an `SVMExecutorArgsV1`
+   * with the receiver's `accounts`, delivering tokens to the token receiver's associated token
+   * account, created if missing.
+   *
    * @param message - AnyMessage (from source), containing at least `receiver`
    * @returns A message suitable for `sendMessage` to this destination chain family
    * @throws {@link CCIPArgumentInvalidError} if tokenReceiver missing when sending tokens with data
-   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for SVMExtraArgsV1
+   * @throws {@link CCIPArgumentInvalidError} if extraArgs contains unknown fields for SVMExtraArgsV1,
+   *   or GenericExtraArgsV3
    */
   static override buildMessageForDest(
     message: Parameters<ChainStatic['buildMessageForDest']>[0],
-  ): AnyMessage & { extraArgs: SVMExtraArgsV1 } {
+  ): AnyMessage & { extraArgs: SVMExtraArgsV1 | GenericExtraArgsV3 } {
     /** Valid field names for SVMExtraArgsV1, including recognised aliases. */
     const SVM_EXTRA_ARGS_FIELDS = new Set([
       'computeUnits',
@@ -2299,14 +2407,30 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       'accounts',
       'accountIsWritableBitmap',
     ])
+    /** GenericExtraArgsV3 fields SVMExtraArgsV1 lacks, which make extraArgs GenericExtraArgsV3. */
+    const V3_ONLY_FIELDS = new Set([
+      'finality',
+      'ccvs',
+      'ccvArgs',
+      'executor',
+      'executorArgs',
+      'tokenArgs',
+    ])
+    const isV3 =
+      !!message.extraArgs && Object.keys(message.extraArgs).some((k) => V3_ONLY_FIELDS.has(k))
     if (message.extraArgs) {
       const unknown = Object.keys(message.extraArgs).filter(
-        (k) => k !== '_tag' && !SVM_EXTRA_ARGS_FIELDS.has(k),
+        (k) =>
+          k !== '_tag' &&
+          !(isV3
+            ? V3_ONLY_FIELDS.has(k) ||
+              (SVM_EXTRA_ARGS_FIELDS.has(k) && k !== 'allowOutOfOrderExecution')
+            : SVM_EXTRA_ARGS_FIELDS.has(k)),
       )
       if (unknown.length)
         throw new CCIPArgumentInvalidError(
           'extraArgs',
-          `unknown field(s) for SVMExtraArgsV1: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
+          `unknown field(s) for ${isV3 ? 'GenericExtraArgsV3' : 'SVMExtraArgsV1'}: ${unknown.map((k) => JSON.stringify(k)).join(', ')}`,
         )
     }
     if (
@@ -2356,6 +2480,24 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       message.extraArgs.accountIsWritableBitmap != null
         ? message.extraArgs.accountIsWritableBitmap
         : 0n
+
+    if (isV3) {
+      const v3Args = Object.fromEntries(
+        Object.entries(message.extraArgs!).filter(([k, v]) => V3_ONLY_FIELDS.has(k) && v != null),
+      ) as Partial<GenericExtraArgsV3>
+      // the base class fills in and validates the fields common to every family
+      return super.buildMessageForDest({
+        ...message,
+        receiver,
+        extraArgs: {
+          ...v3Args,
+          gasLimit: computeUnits,
+          tokenReceiver: tokenReceiver === PublicKey.default.toBase58() ? '' : tokenReceiver,
+          executorArgs:
+            v3Args.executorArgs ?? encodeSVMExecutorArgsV1({ accounts, accountIsWritableBitmap }),
+        },
+      }) as AnyMessage & { extraArgs: GenericExtraArgsV3 }
+    }
 
     const extraArgs: SVMExtraArgsV1 = {
       computeUnits,

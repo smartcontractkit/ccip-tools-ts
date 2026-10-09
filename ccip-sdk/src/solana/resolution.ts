@@ -10,7 +10,7 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js'
 import BN from 'bn.js'
-import type { BytesLike } from 'ethers'
+import { type BytesLike, dataSlice, toBeArray, toNumber } from 'ethers'
 
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
@@ -18,16 +18,18 @@ import {
   CCIPSolanaAccountResolutionError,
   CCIPSolanaLookupTableNotFoundError,
 } from '../errors/index.ts'
+import { decodeMessageV1Raw } from '../messages.ts'
 import type { AnyMessage, WithLogger } from '../types.ts'
-import { bytesToBuffer } from '../utils.ts'
+import { bytesToBuffer, getDataBytes } from '../utils.ts'
 import { sighash, sizedCoder } from './coder.ts'
 import { IDL as CCIP_COMMON_IDL } from './idl/2.0.0/CCIP_COMMON.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { anyToSvmMessage } from './send.ts'
 import {
+  SIMULATION_PAYER,
   customInstructionErrorCode,
-  getExecutionReportBufferPda,
+  getExecutionInputsBufferPda,
   simulateTransaction,
 } from './utils.ts'
 
@@ -54,6 +56,8 @@ export const GET_FEE_V2_DISCRIMINATOR = sighash('global', 'get_fee_v2')
 export const CCIP_SEND_V2_DISCRIMINATOR = sighash('global', 'ccip_send_v2')
 /** Discriminator of the offramp's `execute_v2`. */
 export const EXECUTE_V2_DISCRIMINATOR = sighash('global', 'execute_v2')
+/** Discriminator of the offramp's `get_ccvs_for_msg`. */
+export const GET_CCVS_FOR_MSG_DISCRIMINATOR = sighash('global', 'get_ccvs_for_msg')
 
 /** Matches the Go reference client; real flows take well under 20 rounds. */
 const DEFAULT_MAX_ROUNDS = 64
@@ -369,10 +373,11 @@ async function resolveInstruction(
 
 /**
  * Resolves the router's `get_fee_v2` instruction for a message. The instruction returns a
- * `GetFeeResultV2` when simulated.
+ * `GetFeeResultV2` when simulated. Quotes don't depend on the sender: the router resolves and
+ * validates token accounts against a fixed placeholder sender, without requiring them to exist.
  * @param ctx - Context with the Solana connection and logger.
- * @param opts - Router, destination selector, message sender and message; `payer` overrides
- *   the simulation fee payer when `sender` isn't funded.
+ * @param opts - Router, destination selector and message; `payer` is the simulation fee payer,
+ *   and the resolution caller, which quotes ignore.
  * @returns The resolved `get_fee_v2` instruction and its lookup tables.
  */
 export function resolveGetFeeV2(
@@ -380,27 +385,23 @@ export function resolveGetFeeV2(
   {
     router,
     destChainSelector,
-    sender,
     message,
     payer,
   }: {
     router: PublicKey
     destChainSelector: bigint
-    sender: PublicKey
     message: AnyMessage
-    payer?: PublicKey
+    payer: PublicKey
   },
 ): Promise<ResolvedInstruction> {
   const svmMessage = anyToSvmMessage(message)
   return resolveInstruction(ctx, {
     programId: router,
-    caller: sender,
-    payer,
+    caller: payer,
     discriminator: GET_FEE_V2_DISCRIMINATOR,
     encodeArgs: (resolutionMetadata) =>
       routerV2Coder.types.encode('GetFeeParams', {
         destChainSelector: new BN(destChainSelector.toString()),
-        sender,
         message: svmMessage,
         resolutionMetadata,
       }),
@@ -483,7 +484,7 @@ export function resolveExecuteV2(
         {
           execInputs: null,
           extraAccounts: [
-            getExecutionReportBufferPda(offramp, bytesToBuffer(inputs.bufferId), caller),
+            getExecutionInputsBufferPda(offramp, bytesToBuffer(inputs.bufferId), caller),
           ],
         }
   return resolveInstruction(ctx, {
@@ -493,5 +494,67 @@ export function resolveExecuteV2(
     discriminator: EXECUTE_V2_DISCRIMINATOR,
     encodeArgs: (resolutionMetadata) =>
       offrampV2Coder.types.encode('ExecuteParams', { execInputs, resolutionMetadata }),
+  })
+}
+
+/**
+ * The `get_ccvs_for_msg` arguments for a CCIP 2.0 message, with every field `execute_v2` reads off
+ * the message taken from it byte for byte, so that the predicted CCVs are the ones it enforces.
+ * @param encodedMessage - MessageV1-encoded message.
+ * @param resolutionMetadata - Account resolution metadata.
+ * @returns The `GetCcvsForMsgParams`.
+ */
+export function getCcvsForMsgParams(encodedMessage: BytesLike, resolutionMetadata: Buffer) {
+  const message = decodeMessageV1Raw(encodedMessage)
+  const receiver = getDataBytes(message.receiver)
+  // the finality word as encoded (flags << 16 | block depth), as decoding it drops unknown flags
+  const finality = toNumber(dataSlice(getDataBytes(encodedMessage), 33, 37))
+  const [tokenTransfer] = message.tokenTransfer
+  return {
+    tokenTransfer: tokenTransfer
+      ? {
+          version: 1,
+          amount: { beBytes: Array.from(toBeArray(tokenTransfer.amount, 32)) },
+          sourcePoolAddress: bytesToBuffer(tokenTransfer.sourcePoolAddress),
+          sourceTokenAddress: bytesToBuffer(tokenTransfer.sourceTokenAddress),
+          destTokenAddress: bytesToBuffer(tokenTransfer.destTokenAddress),
+          tokenReceiver: bytesToBuffer(tokenTransfer.tokenReceiver),
+          extraData: bytesToBuffer(tokenTransfer.extraData),
+        }
+      : null,
+    // no receiver makes a token-only transfer, as does the default pubkey; the program also makes
+    // one of a message with neither data nor callback gas
+    messageReceiver: receiver.length ? new PublicKey(receiver) : PublicKey.default,
+    dataLen: getDataBytes(message.data).length,
+    ccipReceiveGasLimit: message.ccipReceiveGasLimit,
+    sender: bytesToBuffer(message.sender),
+    resolutionMetadata,
+    remoteChainSelector: new BN(message.sourceChainSelector.toString()),
+    requestedFinality: { flags: finality >>> 16, blockDepth: finality & 0xffff },
+  }
+}
+
+/**
+ * Resolves the offramp's `get_ccvs_for_msg` view for a message, which consults the lane config,
+ * and the message's receiver and token pool, if any. The instruction returns a
+ * `GetCcvsForMsgResponse` when simulated.
+ * @param ctx - Context with the Solana connection and logger.
+ * @param opts - Offramp, and the MessageV1-encoded message.
+ * @returns The resolved `get_ccvs_for_msg` instruction and its lookup tables.
+ */
+export function resolveGetCcvsForMsg(
+  ctx: { connection: Connection } & WithLogger,
+  { offramp, encodedMessage }: { offramp: PublicKey; encodedMessage: BytesLike },
+): Promise<ResolvedInstruction> {
+  return resolveInstruction(ctx, {
+    programId: offramp,
+    // a read-only view: no signer
+    caller: SIMULATION_PAYER,
+    discriminator: GET_CCVS_FOR_MSG_DISCRIMINATOR,
+    encodeArgs: (resolutionMetadata) =>
+      offrampV2Coder.types.encode(
+        'GetCcvsForMsgParams',
+        getCcvsForMsgParams(encodedMessage, resolutionMetadata),
+      ),
   })
 }

@@ -30,7 +30,8 @@ export type EVMEndBlockTag = FinalityRequested | 'latest'
  * Floor for adaptive page shrinking: never request fewer than this many blocks
  * per `eth_getLogs` call. Fast-block chains can mint over 100 blocks between
  * watch ticks; shrinking under this just multiplies round-trips without helping, and
- * an endpoint that can't serve 100 blocks is surfaced as an error instead.
+ * an endpoint that can't serve 100 blocks is surfaced as an error instead — unless
+ * it states a `maxRange` (Alchemy's free plan allows 10 blocks), which is honored as is.
  */
 const MIN_LOG_RANGE = 100
 
@@ -80,14 +81,16 @@ function getProviderUrl(provider: JsonRpcApiProvider): string | undefined {
 /**
  * Computes the next (smaller) page size from a range-too-large error and the
  * span that triggered it, floored at {@link MIN_LOG_RANGE}. Prefers the limit
- * the RPC reported (`maxRange`/`suggestedRange`); otherwise halves the span.
+ * the RPC reported as `maxRange`, which bypasses the floor (at least 1); otherwise
+ * uses the `suggestedRange` width, else halves the span. A suggested range can be
+ * sized to the log density of the failing window rather than an endpoint-wide
+ * limit, and a learned page never grows back, so it stays floored.
  */
 function shrinkPage(info: LogRangeErrorInfo, span: number): number {
-  const page =
-    info.maxRange ??
-    (info.suggestedRange
-      ? info.suggestedRange[1] - info.suggestedRange[0] + 1
-      : Math.floor(span / 2))
+  if (info.maxRange !== undefined) return Math.max(1, info.maxRange)
+  const page = info.suggestedRange
+    ? info.suggestedRange[1] - info.suggestedRange[0] + 1
+    : Math.floor(span / 2)
   return Math.max(MIN_LOG_RANGE, page)
 }
 
@@ -166,10 +169,10 @@ async function getLogsWithinTopicLimit(
 
 /**
  * Streams raw logs over `[fromBlock, toBlock]`, paginating by `pageBox.value`
- * and adaptively shrinking the page (down to {@link MIN_LOG_RANGE}) whenever the
- * RPC rejects a chunk as too wide. The learned page is propagated through
- * `pageBox` (and the endpoint registry) so subsequent chunks — and the watch
- * loop — start at the smaller size without re-failing. Throws
+ * and adaptively shrinking the page (down to {@link MIN_LOG_RANGE}, or to a smaller
+ * `maxRange` the RPC states) whenever the RPC rejects a chunk as too wide. The learned
+ * page is propagated through `pageBox` (and the endpoint registry) so subsequent
+ * chunks — and the watch loop — start at the smaller size without re-failing. Throws
  * {@link CCIPLogRangeTooLargeError} when a single chunk can't be subdivided.
  *
  * When `endTag` (a dynamic end tag like 'latest'/'safe', whose numeric value is
@@ -238,7 +241,7 @@ async function* streamLogs(
       const span = chunkTo - cursor + 1
       const newPage = shrinkPage(rangeInfo, span)
       if (newPage >= span) {
-        // Already at the floor and still too large — cannot subdivide further.
+        // At the stated limit or the floor and still too large — cannot subdivide further.
         throw new CCIPLogRangeTooLargeError(
           { requestedRange: span, ...rangeInfo },
           { cause: err instanceof Error ? err : undefined },
