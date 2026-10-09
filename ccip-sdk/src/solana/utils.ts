@@ -1,4 +1,4 @@
-import { type IdlTypes, eventDiscriminator } from '@coral-xyz/anchor'
+import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -36,7 +36,7 @@ import {
 } from '../errors/index.ts'
 import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
-import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
+import type { TokenPoolChainConfig } from './token-pool.ts'
 import { type UnsignedSolanaTx, type Wallet, canSignV1Transactions } from './types.ts'
 import {
   MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
@@ -962,7 +962,7 @@ export async function simulateAndSendTxs(
  * @returns RateLimiterState with capacity, rate, and current tokens, or null if disabled.
  */
 export function convertRateLimiter(
-  input: IdlTypes<typeof BASE_TOKEN_POOL_IDL>['BaseChain']['inboundRateLimit'],
+  input: TokenPoolChainConfig['inboundRateLimit'],
 ): RateLimiterState {
   if (!input.cfg.enabled) return null
   const tokens = BigInt(input.tokens.toString())

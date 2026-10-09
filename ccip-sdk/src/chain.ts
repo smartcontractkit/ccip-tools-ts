@@ -2092,14 +2092,11 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     token?: string
   }): Promise<Partial<LaneFeatures>> {
     const onRamp = await this.getOnRampForRouter(opts.router, opts.destChainSelector)
-    const [, version] = await this.typeAndVersion(onRamp)
 
-    // Fast finality (FINALITY_FAST/SAFE) requires an OnRamp that can carry
-    // GenericExtraArgsV3 extra args, i.e. OnRamp version >= 2.0. A v2.0 token pool
-    // may report a finalityDepth/finalitySafe even on a lane whose OnRamp is still
-    // <2.0 (partial upgrade) — surfacing it there advertises a capability getFee
-    // can't fulfil and reverts with InvalidExtraArgsTag. Decide once, up front.
-    const supportsFastFinality = version >= CCIPVersion.V2_0
+    // A v2.0 token pool may report a finalityDepth/finalitySafe even on a lane that
+    // can't carry it (partial upgrade) — surfacing it there advertises a capability
+    // getFee can't fulfil. Decide once, up front.
+    const supportsFastFinality = await this.laneSupportsFastFinality(onRamp, opts.destChainSelector)
 
     const result: Partial<LaneFeatures> = {}
 
@@ -2119,7 +2116,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         // lanes FINALITY_FAST stays undefined ("pre-v2.0 / not supported").
         let fastRateLimitsApply = false
         if (supportsFastFinality) {
-          const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+          const { finalityDepth, finalitySafe } = await this.getTokenPoolFinality(
+            tokenPool,
+            opts.destChainSelector,
+          )
           if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
           else delete result[LaneFeature.FINALITY_FAST]
           if (finalitySafe) result[LaneFeature.FINALITY_SAFE] = true
@@ -2136,6 +2136,38 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     }
 
     return result
+  }
+
+  /**
+   * Whether a lane can carry fast finality (FINALITY_FAST/SAFE), for {@link Chain.getLaneFeatures}.
+   *
+   * @param onRamp - OnRamp of the lane.
+   * @param _destChainSelector - Destination chain selector of the lane.
+   * @returns Whether the OnRamp can carry GenericExtraArgsV3 extra args, i.e. is \>= v2.0;
+   *   families whose OnRamp serves lanes of several versions narrow it to the lane's.
+   */
+  protected async laneSupportsFastFinality(
+    onRamp: string,
+    _destChainSelector: bigint,
+  ): Promise<boolean> {
+    const [, version] = await this.typeAndVersion(onRamp)
+    return version >= CCIPVersion.V2_0
+  }
+
+  /**
+   * Finality a token pool allows for transfers on a lane, for {@link Chain.getLaneFeatures}.
+   *
+   * @param tokenPool - Token pool address.
+   * @param _destChainSelector - Destination chain selector of the lane.
+   * @returns The pool's `finalityDepth`/`finalitySafe` from {@link Chain.getTokenPoolConfig},
+   *   pool-wide by default; families configuring finality per remote chain read the lane's.
+   */
+  protected async getTokenPoolFinality(
+    tokenPool: string,
+    _destChainSelector: bigint,
+  ): Promise<Partial<FinalityAllowed>> {
+    const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+    return { finalityDepth, finalitySafe }
   }
 
   /**
