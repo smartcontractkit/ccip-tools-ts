@@ -13,8 +13,7 @@ import { ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
@@ -99,21 +98,5 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
       p.tokenAddress,
     ])
     return callTx(to, data)
-  }
-
-  /**
-   * Signs and submits as the pending administrator, defaulting `sender` to the signing wallet —
-   * the only address that can satisfy {@link buildUnsigned}'s pending-administrator check for a
-   * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
-   * rejected rather than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<AcceptAdminParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

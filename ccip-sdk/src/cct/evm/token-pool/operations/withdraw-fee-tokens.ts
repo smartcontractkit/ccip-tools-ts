@@ -14,8 +14,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -83,25 +82,5 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
     if (params.sender !== undefined)
       await assertPoolOwnerOrFeeAdmin(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
-  }
-
-  /**
-   * Signs and submits as the pool owner or delegated `feeAdmin`, defaulting `sender` to the
-   * signing wallet.
-   *
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if any parameter is invalid, `sender` differs from the
-   * wallet, or the wallet is neither the owner nor its configured `feeAdmin`
-   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
-   * @throws {@link CCTTxFailedError} if submission fails before broadcast
-   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<WithdrawFeeTokensParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

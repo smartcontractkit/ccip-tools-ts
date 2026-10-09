@@ -50,7 +50,10 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
     { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
   ): Promise<UnsignedEVMTx> {
     if (getAddress(newOwner) === ZeroAddress)
-      return buildCancelDefaultAdminTransfer(this.name, chain, { tokenAddress, sender })
+      return buildCancelDefaultAdminTransfer(this.name, chain, {
+        tokenAddress,
+        sender,
+      })
     return buildBeginDefaultAdminTransfer(
       this.name,
       chain,

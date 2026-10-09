@@ -25,8 +25,7 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -127,25 +126,5 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
       )
     }
     return unsigned
-  }
-
-  /**
-   * Signs and submits as the rebalancer, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
-   * than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or the wallet is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the pool is
-   * below `amount`
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ProvideLiquidityParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

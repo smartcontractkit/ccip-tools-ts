@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK: `getFee` no longer takes the optional `sender` added in 1.15.0, restoring its previous signature; the CLI's `send` no longer loads its wallet before quoting
 - Solana: CCIP 2.0 executions too large to go inline can be generated unsigned, for signers without v1 transaction support (e.g. Ledger). New `SolanaChain.generateUnsignedExecuteBuffer` returns the instructions writing a message's execution inputs to the payer's buffer, skipping chunks already written. Once they land, `generateUnsignedExecute` resolves `execute_v2` from the complete buffer, and accepts `forceBuffer` for 2.0 messages, which used to throw `CCIPArgumentInvalidError`. A complete buffer is used even without `forceBuffer`, by `execute` too. The buffer has to be complete before the execution can be generated, since `execute_v2`'s accounts are resolved from it: with `forceBuffer`, an incomplete buffer throws the new `CCIPSolanaExecutionBufferIncompleteError`
 - CCT SDK (EVM): add v1.6.x per-silo liquidity ops for `SiloedLockReleaseTokenPool`: `provideSiloedLiquidity`, `withdrawSiloedLiquidity`, `setSiloRebalancer`, `updateSiloDesignations`, `getAvailableTokens`, `getChainRebalancer`, `isSiloed`
+- CCT SDK: typed CCT errors can now be imported from `@chainlink/ccip-sdk`.
 
 ## [1.15.0] - 2026-09-30
 

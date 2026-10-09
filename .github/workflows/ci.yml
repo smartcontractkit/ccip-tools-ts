@@ -22,6 +22,13 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    env:
+      # Single source for the Node major the cache key binds to: native modules
+      # in the cached node_modules (node-hid, keccak, bigint-buffer) are built
+      # for one NODE_MODULE_VERSION, so a Node major change must invalidate the
+      # cache or restored builds crash on ABI mismatch.
+      NODE_VERSION: '24'
+
     outputs:
       # Whether the test step produced output (false when the build failed
       # before tests ran, e.g. on lint) — gates the coverage-comment job's
@@ -38,7 +45,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7.0.0
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       # node-hid (pulled transitively by the Ledger deps) ships no prebuilt
@@ -75,8 +82,20 @@ jobs:
           # Caching the installed tree keyed on the lockfile skips that entirely
           # on hit; a lockfile change or cache eviction falls back to a full
           # npm ci below (which then repopulates the cache).
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # EVERY node_modules is cached — not just the root one: npm nests
+          # per-workspace copies there (e.g. ethers@6 in ccip-sdk/node_modules
+          # vs the peer-installed ethers@5 hoisted to the root), and on a cache
+          # hit npm ci is skipped, so an unrestored workspace node_modules
+          # silently downgrades that workspace's type resolution to the root
+          # copy's version and the build fails (TS2305 on ethers' v6 exports).
+          # The v2 key prefix discards caches saved before the paths were
+          # widened — restoring one would still miss the workspace dirs.
+          path: |
+            node_modules
+            ccip-sdk/node_modules
+            ccip-cli/node_modules
+            ccip-api-ref/node_modules
+          key: node-modules-v2-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies and build
         run: |
