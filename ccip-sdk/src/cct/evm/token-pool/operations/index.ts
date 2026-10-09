@@ -11,6 +11,10 @@ export {
   ApplyTokenTransferFeeConfigUpdates,
 } from './apply-token-transfer-fee-config-updates.ts'
 export {
+  type ConfigureSiloedLockboxesParams,
+  ConfigureSiloedLockboxes,
+} from './configure-siloed-lockboxes.ts'
+export {
   type DeployTokenPoolParams,
   type DeployableTokenPoolType,
   DeployTokenPool,
@@ -20,6 +24,11 @@ export {
   type GetAdvancedPoolHooksResult,
   GetAdvancedPoolHooks,
 } from './get-advanced-pool-hooks.ts'
+export {
+  type GetAllSiloedLockboxConfigsParams,
+  type GetAllSiloedLockboxConfigsResult,
+  GetAllSiloedLockboxConfigs,
+} from './get-all-siloed-lockbox-configs.ts'
 export {
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
@@ -53,6 +62,11 @@ export {
   type GetRebalancerResult,
   GetRebalancer,
 } from './get-rebalancer.ts'
+export {
+  type GetSiloedLockboxParams,
+  type GetSiloedLockboxResult,
+  GetSiloedLockbox,
+} from './get-siloed-lockbox.ts'
 export {
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,

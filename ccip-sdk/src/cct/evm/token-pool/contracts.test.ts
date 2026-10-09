@@ -518,7 +518,7 @@ describe('assertSiloedLockReleasePool', () => {
 
   it('points a non-siloed LockRelease pool at its single-bucket ops', () => {
     assert.throws(
-      () => assertSiloedLockReleasePool('getAvailableTokens', ADDR, 'LockReleaseTokenPool'),
+      () => assertSiloedLockReleasePool('getSiloedLockbox', ADDR, 'LockReleaseTokenPool'),
       (err: unknown) =>
         err instanceof CCTContractTypeInvalidError &&
         /getLockbox/.test(err.message) &&
@@ -579,6 +579,28 @@ describe('SiloedLockRelease per-lane surface', () => {
     const v161 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V1_6_1]
     for (const fn of SILO_FUNCTIONS)
       assert.equal(v161.getFunction(fn)!.format('full'), v160.getFunction(fn)!.format('full'), fn)
+  })
+
+  it('declares the per-lane lockbox functions at v2.0.0 and drops the 1.6.x silo functions', () => {
+    const v200 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0]
+    for (const fn of ['configureLockBoxes', 'getAllLockBoxConfigs', 'getLockBox'])
+      assert.equal(v200.hasFunction(fn), true, fn)
+    assert.equal(
+      v200.getFunction('getLockBox')!.format('sighash'),
+      'getLockBox(uint64)',
+      'per-lane, not the no-arg LockRelease getter',
+    )
+    for (const fn of SILO_FUNCTIONS) assert.equal(v200.hasFunction(fn), false, fn)
+  })
+
+  it('declares neither per-lane lockbox function at v1.6.x', () => {
+    for (const version of [TokenPoolVersion.V1_6_0, TokenPoolVersion.V1_6_1])
+      for (const fn of ['configureLockBoxes', 'getAllLockBoxConfigs', 'getLockBox'])
+        assert.equal(
+          TOKEN_POOL_INTERFACES.SiloedLockRelease[version].hasFunction(fn),
+          false,
+          `${fn} @ ${version}`,
+        )
   })
 })
 

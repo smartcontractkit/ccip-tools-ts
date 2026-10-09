@@ -53,7 +53,7 @@ export class IsSiloed extends EVMQuery<IsSiloedParams, IsSiloedResult> {
    * of the two reasons applies rather than a bare call failure.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which isolates lanes by binding
-   * them to separate lockboxes instead (see `getAllLockBoxConfigs`)
+   * them to separate lockboxes instead (see `getAllSiloedLockboxConfigs`)
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async read(

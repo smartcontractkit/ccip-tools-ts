@@ -87,9 +87,12 @@ import {
   type ApplyAllowlistUpdatesParams,
   type ApplyChainUpdatesParams,
   type ApplyTokenTransferFeeConfigUpdatesParams,
+  type ConfigureSiloedLockboxesParams,
   type DeployTokenPoolParams,
   type GetAdvancedPoolHooksParams,
   type GetAdvancedPoolHooksResult,
+  type GetAllSiloedLockboxConfigsParams,
+  type GetAllSiloedLockboxConfigsResult,
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
   type GetAllowlistEnabledParams,
@@ -108,6 +111,8 @@ import {
   type GetLockboxResult,
   type GetRebalancerParams,
   type GetRebalancerResult,
+  type GetSiloedLockboxParams,
+  type GetSiloedLockboxResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
@@ -138,8 +143,10 @@ import {
   ApplyAllowlistUpdates,
   ApplyChainUpdates,
   ApplyTokenTransferFeeConfigUpdates,
+  ConfigureSiloedLockboxes,
   DeployTokenPool,
   GetAdvancedPoolHooks,
+  GetAllSiloedLockboxConfigs,
   GetAllowedFinalityConfig,
   GetAllowlist,
   GetAllowlistEnabled,
@@ -149,6 +156,7 @@ import {
   GetFee,
   GetLockbox,
   GetRebalancer,
+  GetSiloedLockbox,
   GetTokenPoolRemotes,
   GetTokenPoolState,
   GetTokenTransferFeeConfig,
@@ -295,6 +303,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getAvailableTokens = new GetAvailableTokens()
   readonly #getChainRebalancer = new GetChainRebalancer()
   readonly #isSiloed = new IsSiloed()
+  readonly #configureSiloedLockboxes = new ConfigureSiloedLockboxes()
+  readonly #getAllSiloedLockboxConfigs = new GetAllSiloedLockboxConfigs()
+  readonly #getSiloedLockbox = new GetSiloedLockbox()
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
@@ -2441,7 +2452,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @returns The lockbox, checksummed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
    * `SiloedLockReleaseTokenPool` — a siloed pool escrows per remote chain and declares
-   * `getLockBox(uint64)` instead, so it has no single lockbox
+   * `getLockBox(uint64)` instead, so it has no single lockbox; see {@link getSiloedLockbox}
    * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a LockRelease pool holds
    * its liquidity itself — see {@link getRebalancer} and {@link provideLiquidity}
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
@@ -2471,7 +2482,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
    * `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through a
-   * lockbox per lane instead (see `configureLockBoxes`)
+   * lockbox per lane instead (see {@link configureSiloedLockboxes})
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
    * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
    * rebalancer
@@ -2673,7 +2684,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
    * `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which binds a lockbox per
-   * lane instead (see `configureLockBoxes`)
+   * lane instead (see {@link configureSiloedLockboxes})
    * @throws {@link CCTParamsInvalidError} if any param is invalid, both arrays are empty, a lane is
    * duplicated, zero (in `adds`) or in both arrays, a rebalancer is zero, a lane fails one of the
    * state checks above, or `sender` is given and is not the pool owner
@@ -2733,7 +2744,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
    * `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, whose lanes escrow through
-   * lockboxes (see `getLockBox(uint64)`)
+   * lockboxes (see {@link getSiloedLockbox})
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the pool does not support
    * the lane
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
@@ -2782,7 +2793,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
    * `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which isolates lanes with
-   * separate lockboxes instead (see `getAllLockBoxConfigs`)
+   * separate lockboxes instead (see {@link getAllSiloedLockboxConfigs})
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
@@ -2795,6 +2806,114 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   isSiloed(opts: IsSiloedParams): Promise<IsSiloedResult> {
     return this.#isSiloed.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `configureLockBoxes` tx (for multisig / offline signing): binds lanes
+   * of a **SiloedLockReleaseTokenPool** (v2.0.0) to the `ERC20LockBox`es their transfers escrow
+   * through. Lanes may share a lockbox or each get their own.
+   * @remarks Owner-only. A lane can be re-bound but never unbound, and a lane with no lockbox
+   * reverts `LockBoxNotConfigured` on every transfer. Each lockbox is read before any calldata is
+   * built: it must be an `ERC20LockBox` escrowing the pool's token. A binding already in place is
+   * rejected as a no-op.
+   * @remarks Not checked, by the pool or here: that the pool is an authorized caller of each
+   * lockbox. Until it is, every transfer on the lane reverts `UnauthorizedCaller`; add it with
+   * {@link updateLockboxAuthorizedCallers}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`, or a lockbox address is some other contract
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a siloed pool holds its
+   * silos itself (see {@link updateSiloDesignations})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane is zero or listed twice,
+   * a lockbox is zero, not a contract, escrows another token or is already bound to that lane,
+   * or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool or a lockbox reports an unknown
+   * version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedConfigureSiloedLockboxes({
+   *   poolAddress: '0xPool...',
+   *   lockboxConfigs: [{ remoteChainSelector: 16015286601757825753n, lockbox: '0xLockbox...' }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedConfigureSiloedLockboxes(
+    opts: ConfigureSiloedLockboxesParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#configureSiloedLockboxes.generate(this.chain, opts)
+  }
+
+  /**
+   * Binds lanes of a v2.0.0 siloed pool to their lockboxes, signing + submitting with
+   * `opts.wallet`. `sender` defaults to the wallet's address and must equal it: the wallet must
+   * be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} below v2.0.0
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lockbox fails its checks,
+   * `sender` is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.configureSiloedLockboxes({
+   *   poolAddress: '0xPool...',
+   *   lockboxConfigs: [{ remoteChainSelector: 16015286601757825753n, lockbox: '0xLockbox...' }],
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  configureSiloedLockboxes(
+    opts: EVMExecuteParams<ConfigureSiloedLockboxesParams>,
+  ): Promise<TransactionResult> {
+    return this.#configureSiloedLockboxes.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads every lane → lockbox binding of a **SiloedLockReleaseTokenPool** (v2.0.0): which lanes
+   * are bound, and which share a lockbox (and so share liquidity).
+   * @returns Every binding in the contract's enumeration order, lockboxes checksummed; `[]` when
+   * none is bound.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool` (a non-siloed pool's single lockbox is {@link getLockbox})
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0** (see {@link isSiloed})
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const bindings = await cct.getAllSiloedLockboxConfigs({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getAllSiloedLockboxConfigs(
+    opts: GetAllSiloedLockboxConfigsParams,
+  ): Promise<GetAllSiloedLockboxConfigsResult> {
+    return this.#getAllSiloedLockboxConfigs.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the `ERC20LockBox` one lane of a **SiloedLockReleaseTokenPool** (v2.0.0) escrows
+   * through: the pool's `getLockBox(remoteChainSelector)`.
+   * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need to fund or
+   * drain that lane. {@link getAllSiloedLockboxConfigs} lists every lane without throwing.
+   * @returns The lane's lockbox, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool` (a non-siloed pool's single lockbox is {@link getLockbox})
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or no lockbox is bound to the
+   * lane; bind one with {@link configureSiloedLockboxes}
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const lockbox = await cct.getSiloedLockbox({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getSiloedLockbox(opts: GetSiloedLockboxParams): Promise<GetSiloedLockboxResult> {
+    return this.#getSiloedLockbox.query(this.chain, opts)
   }
 
   /**
@@ -3375,7 +3494,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity. `SiloedLockReleaseTokenPool` takes no `lockbox`; its lockboxes
-   * are bound per lane after deploy (see {@link DeploySiloedLockReleaseTokenPoolParams}).
+   * are bound per lane after deploy with {@link configureSiloedLockboxes} (see
+   * {@link DeploySiloedLockReleaseTokenPoolParams}).
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -3406,8 +3526,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * lockbox) → {@link updateLockboxAuthorizedCallers} (`addedCallers: [pool]`, plus whoever funds it) →
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity. `SiloedLockReleaseTokenPool`
-   * takes no `lockbox`; its lockboxes are bound per lane after deploy (see
-   * {@link DeploySiloedLockReleaseTokenPoolParams}).
+   * takes no `lockbox`; its lockboxes are bound per lane after deploy with
+   * {@link configureSiloedLockboxes} (see {@link DeploySiloedLockReleaseTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -3740,10 +3860,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
-   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0
-   * `*AndProxy` pool's `previousPool` (it reads here as its base `type`), use
-   * `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool version exposes a
-   * pending-owner getter, so a proposed owner is not readable here.
+   * remote chain (read those with {@link getAllSiloedLockboxConfigs}). For a legacy pool's
+   * `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0 `*AndProxy` pool's `previousPool`
+   * (it reads here as its base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant
+   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is not
+   * readable here.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its

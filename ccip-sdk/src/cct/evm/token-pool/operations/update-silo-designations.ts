@@ -13,7 +13,7 @@
  * the pool before any calldata is built, as each would revert the whole batch.
  *
  * @remarks **Removed in v2.0.0**, where a siloed pool binds a lockbox per lane instead (see
- * `configureLockBoxes`).
+ * {@link ConfigureSiloedLockboxes}).
  *
  * @packageDocumentation
  */
