@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type TransferLiquidityParams, TransferLiquidity } from './transfer-liquidity.ts'
@@ -185,13 +185,14 @@ describe('TransferLiquidity (cct/evm)', () => {
     it('reads the rebalancer from the source pool and the owner from the destination', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
-      assert.deepEqual(seen.calls, [
-        'typeAndVersion@pool',
-        'typeAndVersion@from',
-        'getToken@pool',
-        'getToken@from',
-        'getRebalancer@from',
+      // the source-pool checks and the owner check are issued together, so only the set is
+      // asserted — the two type resolutions still come first, before anything they gate
+      assert.deepEqual(seen.calls.slice(0, 2), ['typeAndVersion@pool', 'typeAndVersion@from'])
+      assert.deepEqual(seen.calls.slice(2).sort(), [
         'balanceOf@from',
+        'getRebalancer@from',
+        'getToken@from',
+        'getToken@pool',
         'owner@pool',
       ])
     })
@@ -340,8 +341,9 @@ describe('TransferLiquidity (cct/evm)', () => {
             err.context.param === 'from' &&
             /v2\.0\.0.*ERC20LockBox/.test(err.message),
         )
-        // rejected on the source's version alone, before any liquidity or rebalancer read
-        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from'])
+        // rejected on the source's version alone, before any liquidity or rebalancer read; the
+        // destination owner read runs alongside the source checks in preconditions
+        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from', 'owner@pool'])
       })
     }
 
@@ -360,7 +362,7 @@ describe('TransferLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ sourceLiquidity: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'transferLiquidity' &&
           /holds 999999999999999999 of/.test(err.message),
       )
@@ -386,7 +388,7 @@ describe('TransferLiquidity (cct/evm)', () => {
         await assert.rejects(
           () => generate(stubChain({ ...siloed, sourceUnsiloedLiquidity: AMOUNT - 1n })),
           (err: unknown) =>
-            err instanceof CCTTxFailedError &&
+            err instanceof CCTPreconditionError &&
             err.context.operation === 'transferLiquidity' &&
             /has 999999999999999999 of .* in unsiloed liquidity/.test(err.message),
         )
@@ -409,8 +411,9 @@ describe('TransferLiquidity (cct/evm)', () => {
             err.context.param === 'amount' &&
             /getUnsiloedLiquidity/.test(err.message),
         )
-        // rejected on the source's type alone, before any liquidity read
-        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from'])
+        // rejected on the source's type alone, before any liquidity read; the destination owner
+        // read runs alongside the source checks in preconditions
+        assert.deepEqual(seen.calls, ['typeAndVersion@pool', 'typeAndVersion@from', 'owner@pool'])
       })
     }
 

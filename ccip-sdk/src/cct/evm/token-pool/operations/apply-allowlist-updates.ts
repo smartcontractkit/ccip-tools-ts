@@ -20,17 +20,21 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import {
+  type PreconditionError,
+  CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   ADVANCED_POOL_HOOKS_INTERFACE,
-  assertAdvancedPoolHooksOwner,
+  checkAdvancedPoolHooksOwner,
 } from '../../advanced-pool-hooks/contracts.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolAllowlist,
   resolveAllowlistHolder,
@@ -165,11 +169,44 @@ export class ApplyAllowlistUpdates extends EVMOperation<
   }
 
   /**
-   * Resolves which contract holds the pool's allowlist (the pool, or its bound hooks on v2.0.0),
-   * confirms `sender` owns that holder when it is known, then pre-flights the update against the
-   * current allowlist so nothing that would revert or mine as a no-op is ever built.
+   * Resolves which contract holds the pool's allowlist (the pool, or its bound hooks on v2.0.0)
+   * and encodes the update against it. Whether that holder will accept it is
+   * {@link ApplyAllowlistUpdates.preconditions}' concern.
+   * @throws {@link CCTOperationUnsupportedError} if the pool is v2.0.0 with no hooks bound
+   * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   */
+  protected async buildUnsigned(
+    chain: EVMChain,
+    params: ParsedApplyAllowlistUpdatesParams,
+  ): Promise<UnsignedEVMTx> {
+    const { type, version, holder } = await resolveAllowlistHolder(chain, params.poolAddress)
+    if (holder === ZeroAddress)
+      throw new CCTOperationUnsupportedError(this.name, version, {
+        context: { poolAddress: params.poolAddress, advancedPoolHooks: ZeroAddress },
+        recovery:
+          'A v2.0.0 pool holds no allowlist itself; it enforces the one on its bound AdvancedPoolHooks, and this pool has none bound. ' +
+          'Deploy hooks with a non-empty allowlist and the pool in authorizedCallers (deployAdvancedPoolHooks), then bind them with updateAdvancedPoolHooks.',
+      })
+    // `removes` FIRST, then `adds`: the ABI's own order. A swapped pair still encodes (both are
+    // `address[]`) and would allowlist the addresses meant to be revoked; byte-parity tests pin it.
+    const iface =
+      version === TokenPoolVersion.V2_0_0
+        ? ADVANCED_POOL_HOOKS_INTERFACE
+        : getTokenPoolInterface(type, version)
+    return callTx(
+      holder,
+      iface.encodeFunctionData('applyAllowListUpdates', [params.removes, params.adds]),
+    )
+  }
+
+  /**
+   * Confirms `sender` (when given) owns the allowlist holder — the call is owner-gated on-chain,
+   * and on v2.0.0 the hooks are owned separately from the pools bound to them — then checks the
+   * update against the holder's current allowlist so nothing that would revert or mine as a
+   * no-op goes unreported.
    *
-   * Three state preconditions:
+   * Three state requirements:
    * - **the allowlist must be enabled** — `applyAllowListUpdates` opens with
    *   `if (!i_allowlistEnabled) revert AllowListNotEnabled()`. The flag is `immutable`, set to
    *   `allowlist.length > 0` in the constructor, so a holder deployed without one can never gain
@@ -180,41 +217,31 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    * - **no `adds` entry may already be allowlisted** — the symmetric case: `EnumerableSet.add`
    *   returns false and the entry is silently skipped.
    *
+   * @remarks A holder with no allowlist at all stays fatal: no step of any plan can give it a list
+   * to update. The owner and membership checks are reported, because an ownership transfer or a
+   * sibling `applyAllowlistUpdates` earlier in the same plan is exactly what would make them hold.
    * @remarks The owner check is skipped entirely when `sender` is omitted — there is nothing to
    * compare against, and `generateUnsignedApplyAllowlistUpdates` is expected to be usable before
-   * the eventual signer is known. {@link execute} always supplies one. The allowlist pre-flight,
-   * by contrast, does not depend on the signer and always runs.
-   * @throws {@link CCTOperationUnsupportedError} if the pool is v2.0.0 with no hooks bound
-   * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
-   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the holder's owner, if
-   * the holder has no allowlist enabled, if a `removes` entry is not currently allowlisted, or if
-   * an `adds` entry already is
+   * the eventual signer is known. {@link execute} always supplies one. The allowlist check, by
+   * contrast, does not depend on the signer and always runs.
+   * @throws {@link CCTParamsInvalidError} if the holder has no allowlist enabled
    */
-  protected async buildUnsigned(
+  protected override async preconditions(
     chain: EVMChain,
     params: ParsedApplyAllowlistUpdatesParams,
-  ): Promise<UnsignedEVMTx> {
-    const { type, version, holder } = await resolveAllowlistHolder(chain, params.poolAddress)
-    const viaHooks = version === TokenPoolVersion.V2_0_0
-    if (holder === ZeroAddress)
-      throw new CCTOperationUnsupportedError(this.name, version, {
-        context: { poolAddress: params.poolAddress, advancedPoolHooks: ZeroAddress },
-        recovery:
-          'A v2.0.0 pool holds no allowlist itself; it enforces the one on its bound AdvancedPoolHooks, and this pool has none bound. ' +
-          'Deploy hooks with a non-empty allowlist and the pool in authorizedCallers (deployAdvancedPoolHooks), then bind them with updateAdvancedPoolHooks.',
-      })
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert. The
-    // hooks are owned separately from the pools bound to them.
-    if (params.sender !== undefined)
-      await (viaHooks ? assertAdvancedPoolHooksOwner : assertPoolOwner)(
-        this.name,
-        chain,
-        holder,
-        params.sender,
-      )
-
-    const { enabled, entries } = await readTokenPoolAllowlist(chain, holder)
+    tx: UnsignedEVMTx,
+  ): Promise<PreconditionError[]> {
+    // The holder buildUnsigned resolved (and already rejected if zero) is the tx's target; it is
+    // the bound hooks exactly when it is not the pool itself. Taken from the tx rather than
+    // re-resolved, which on v2.0.0 would repeat the uncached `getAdvancedPoolHooks()` read.
+    const holder = getAddress(tx.transactions[0]!.to as string)
+    const viaHooks = holder !== getAddress(params.poolAddress)
+    const [owner, { enabled, entries }] = await Promise.all([
+      params.sender === undefined
+        ? undefined
+        : (viaHooks ? checkAdvancedPoolHooksOwner : checkPoolOwner)(chain, holder, params.sender),
+      readTokenPoolAllowlist(chain, holder),
+    ])
     if (!enabled)
       throw new CCTParamsInvalidError(
         this.name,
@@ -226,35 +253,31 @@ export class ApplyAllowlistUpdates extends EVMOperation<
 
     const allowlisted = new Set(entries)
     const absent = params.removes.find((address) => !allowlisted.has(address))
-    if (absent !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'removes',
-        `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); it would be ignored and the tx would change nothing`,
-      )
     const present = params.adds.find((address) => allowlisted.has(address))
-    if (present !== undefined)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'adds',
-        `${present} is already allowlisted; it would be ignored and the tx would change nothing`,
-      )
 
     chain.logger.debug(
       `${this.name}: pool = ${params.poolAddress}, holder = ${holder}, allowlisted = ${entries.length}, removes = ${params.removes.length}, adds = ${params.adds.length}`,
     )
-    // `removes` FIRST, then `adds`: the ABI's own order. A swapped pair still encodes (both are
-    // `address[]`) and would allowlist the addresses meant to be revoked; byte-parity tests pin it.
-    const iface = viaHooks ? ADVANCED_POOL_HOOKS_INTERFACE : getTokenPoolInterface(type, version)
-    return callTx(
-      holder,
-      iface.encodeFunctionData('applyAllowListUpdates', [params.removes, params.adds]),
+    return unmet(
+      owner,
+      absent === undefined
+        ? undefined
+        : {
+            param: 'removes',
+            reason: `${absent} is not allowlisted (allowlisted: ${entries.join(', ') || 'none'}); it would be ignored and the tx would change nothing`,
+          },
+      present === undefined
+        ? undefined
+        : {
+            param: 'adds',
+            reason: `${present} is already allowlisted; it would be ignored and the tx would change nothing`,
+          },
     )
   }
 
   /**
    * Signs and submits as the holder's owner, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

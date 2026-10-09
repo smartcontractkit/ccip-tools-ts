@@ -9,11 +9,11 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
-import { resolveTokenRoleHandler } from '../roles.ts'
+import { type TokenRole, resolveTokenRoleHandler } from '../roles.ts'
 
 /** Parameters for {@link GrantMintAndBurnRoles}. */
 export type GrantMintAndBurnRolesParams = {
@@ -59,36 +59,55 @@ export class GrantMintAndBurnRoles extends EVMOperation<GrantMintAndBurnRolesPar
    * nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
    * version
-   * @throws {@link CCTParamsInvalidError} if `burnAndMinter` already holds both roles, or `sender`
-   * lacks the version's role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: GrantMintAndBurnRolesParams,
   ): Promise<UnsignedEVMTx> {
-    const { tokenAddress, burnAndMinter, sender } = params
-    const version = await resolveToken(chain, tokenAddress)
-    const roleHandler = resolveTokenRoleHandler(version, this.name)
-    const [isMinter, isBurner] = await Promise.all([
-      roleHandler.hasRole(chain, tokenAddress, 'mint', burnAndMinter),
-      roleHandler.hasRole(chain, tokenAddress, 'burn', burnAndMinter),
-    ])
-    if (isMinter && isBurner)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'burnAndMinter',
-        `already holds the mint and burn roles on ${tokenAddress}; granting them again changes nothing`,
-      )
-    if (sender !== undefined)
-      await Promise.all([
-        roleHandler.assertAdmin(this.name, chain, tokenAddress, 'mint', sender),
-        roleHandler.assertAdmin(this.name, chain, tokenAddress, 'burn', sender),
-      ])
-
+    const version = await resolveToken(chain, params.tokenAddress)
     return resolveTokenEncoder(
       this.encoders,
       version,
       this.name,
     )(getTokenInterface(version), params)
+  }
+
+  /**
+   * Reports a grant that would change nothing, and checks `sender` against the role admin of
+   * *both* roles — they can differ under AccessControl, so both are read and both reported.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * makes `sender` the role admin.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, burnAndMinter, sender }: GrantMintAndBurnRolesParams,
+  ): Promise<PreconditionError[]> {
+    const version = await resolveToken(chain, tokenAddress)
+    const roleHandler = resolveTokenRoleHandler(version, this.name)
+    // v1 gates both roles on the token `owner`, so one check covers them and asking twice would
+    // just read `owner()` twice. v2's AccessControl can give each role a different admin.
+    const adminRoles: TokenRole[] = version === TokenVersion.V2_0_0 ? ['mint', 'burn'] : ['mint']
+    // Role reads first: on v1 it doubles as the family check, so an EOA or a non-BurnMintERC677
+    // contract surfaces as CCTContractTypeInvalidError rather than as whichever raw `owner()`
+    // decode failure won a race against it. Costs a round trip only when `sender` is given.
+    const [isMinter, isBurner] = await Promise.all([
+      roleHandler.hasRole(chain, tokenAddress, 'mint', burnAndMinter),
+      roleHandler.hasRole(chain, tokenAddress, 'burn', burnAndMinter),
+    ])
+    const admins =
+      sender === undefined
+        ? []
+        : await Promise.all(
+            adminRoles.map((role) => roleHandler.checkAdmin(chain, tokenAddress, role, sender)),
+          )
+    return unmet(
+      isMinter && isBurner
+        ? {
+            param: 'burnAndMinter',
+            reason: `already holds the mint and burn roles on ${tokenAddress}; granting them again changes nothing`,
+          }
+        : undefined,
+      ...admins,
+    )
   }
 }

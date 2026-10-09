@@ -8,8 +8,8 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress } from '../../validate.ts'
 import { TokenVersion, getTokenInterface, resolveToken, resolveTokenEncoder } from '../contracts.ts'
 import { CrossChainTokenRole, resolveTokenRoleHandler } from '../roles.ts'
@@ -60,29 +60,45 @@ export class GrantBurnRole extends EVMOperation<GrantBurnRoleParams> {
    * nor a supported CrossChainToken
    * @throws {@link CCTContractVersionUnsupportedError} if CrossChainToken reports an unsupported
    * version
-   * @throws {@link CCTParamsInvalidError} if `burner` already holds the burn role, or `sender`
-   * lacks the version's role-admin permission
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: GrantBurnRoleParams,
   ): Promise<UnsignedEVMTx> {
-    const { tokenAddress, burner, sender } = params
-    const version = await resolveToken(chain, tokenAddress)
-    const roleHandler = resolveTokenRoleHandler(version, this.name)
-    if (await roleHandler.hasRole(chain, tokenAddress, 'burn', burner))
-      throw new CCTParamsInvalidError(
-        this.name,
-        'burner',
-        `already holds the burn role on ${tokenAddress}; granting it again changes nothing`,
-      )
-    if (sender !== undefined)
-      await roleHandler.assertAdmin(this.name, chain, tokenAddress, 'burn', sender)
-
+    const version = await resolveToken(chain, params.tokenAddress)
     return resolveTokenEncoder(
       this.encoders,
       version,
       this.name,
     )(getTokenInterface(version), params)
+  }
+
+  /**
+   * Reports a redundant grant and checks `sender` against the version's role admin.
+   * @remarks Reported rather than thrown outright so this can be planned behind the step that
+   * makes `sender` the role admin.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { tokenAddress, burner, sender }: GrantBurnRoleParams,
+  ): Promise<PreconditionError[]> {
+    const roleHandler = resolveTokenRoleHandler(await resolveToken(chain, tokenAddress), this.name)
+    // Role read first: on v1 it doubles as the family check, so an EOA or a non-BurnMintERC677
+    // contract surfaces as CCTContractTypeInvalidError rather than as whichever raw `owner()`
+    // decode failure won a race against it. Costs a round trip only when `sender` is given.
+    const holdsRole = await roleHandler.hasRole(chain, tokenAddress, 'burn', burner)
+    const admin =
+      sender === undefined
+        ? undefined
+        : await roleHandler.checkAdmin(chain, tokenAddress, 'burn', sender)
+    return unmet(
+      holdsRole
+        ? {
+            param: 'burner',
+            reason: `already holds the burn role on ${tokenAddress}; granting it again changes nothing`,
+          }
+        : undefined,
+      admin,
+    )
   }
 }

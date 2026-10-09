@@ -3,8 +3,8 @@
  * ({@link ADVANCED_POOL_HOOKS_INTERFACE}), the deploy artifact
  * ({@link getAdvancedPoolHooksArtifact}), the bind-target guard
  * ({@link assertAdvancedPoolHooksContract}), the op target resolver
- * ({@link resolveAdvancedPoolHooksTarget}), and the owner guard its owner-gated writes pre-flight
- * `sender` against ({@link assertAdvancedPoolHooksOwner}). Only one version is deployable, so
+ * ({@link resolveAdvancedPoolHooksTarget}), and the owner check its owner-gated writes report
+ * `sender` against ({@link checkAdvancedPoolHooksOwner}). Only one version is deployable, so
  * there is no version framework here. Mirrors `lockbox/contracts.ts`.
  *
  * @remarks A v2.0.0 `TokenPool` has no allowlist or CCV configuration of its own: both live on an
@@ -17,7 +17,11 @@ import { Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
+import {
+  type PreconditionError,
+  CCTContractTypeInvalidError,
+  CCTParamsInvalidError,
+} from '../../errors.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_ABI from '../artifacts/abi/V2_0_0/advanced-pool-hooks.ts'
 import ADVANCED_POOL_HOOKS_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/advanced-pool-hooks.ts'
 import type { DeployArtifact } from '../operation.ts'
@@ -188,32 +192,28 @@ export async function assertPolicyEngineContract(
 }
 
 /**
- * Pre-flights a known sender against the `AdvancedPoolHooks` owner, so an unauthorized caller fails
- * here instead of as an `OnlyCallableByOwner` revert after a multisig has signed.
+ * Pre-flights a known sender against the `AdvancedPoolHooks` owner.
  *
  * @remarks The hooks are a separately owned `Ownable2Step` contract, not part of the pool: the
  * deployer becomes their owner, and binding them to a pool transfers nothing. A pool owner who did
  * not deploy the hooks cannot write through them, so checking the *pool* owner instead would pass
  * a sender the hooks then revert.
- * @param operation - Operation name for error context.
  * @param chain - Chain hosting the hooks contract.
  * @param advancedPoolHooks - Hooks contract to read.
  * @param sender - Proposed transaction sender.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the current hooks owner.
+ * @returns The unmet requirement, or `undefined` if `sender` already owns the hooks contract.
  */
-export async function assertAdvancedPoolHooksOwner(
-  operation: string,
+export async function checkAdvancedPoolHooksOwner(
   chain: EVMChain,
   advancedPoolHooks: string,
   sender: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const owner = await readAdvancedPoolHooksOwner(chain, advancedPoolHooks)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${advancedPoolHooks} are owned separately from the pools bound to them`,
-  )
+  if (getAddress(sender) === owner) return undefined
+  return {
+    param: 'sender',
+    reason: `must be the current AdvancedPoolHooks owner (${owner}); the hooks at ${advancedPoolHooks} are owned separately from the pools bound to them`,
+  }
 }
 
 /**

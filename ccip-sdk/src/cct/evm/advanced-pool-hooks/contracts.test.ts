@@ -14,7 +14,7 @@ import {
   ADVANCED_POOL_HOOKS_BYTECODE,
   ADVANCED_POOL_HOOKS_INTERFACE,
   assertAdvancedPoolHooksContract,
-  assertAdvancedPoolHooksOwner,
+  checkAdvancedPoolHooksOwner,
   getAdvancedPoolHooksArtifact,
   resolveAdvancedPoolHooks,
 } from './contracts.ts'
@@ -80,7 +80,7 @@ describe('advanced-pool-hooks/contracts', () => {
     })
   })
 
-  describe('assertAdvancedPoolHooksOwner', () => {
+  describe('checkAdvancedPoolHooksOwner', () => {
     const OWNER = '0x' + 'ab'.repeat(20) // lower-case: the comparison must checksum it
 
     /** Answers only the hooks' `owner()`, recording where the call went. */
@@ -101,19 +101,14 @@ describe('advanced-pool-hooks/contracts', () => {
 
     it('accepts the hooks owner, compared checksummed, reading owner() on the hooks', async () => {
       const seen: string[] = []
-      await assertAdvancedPoolHooksOwner('op', ownerChain(seen), HOOKS, OWNER)
+      assert.equal(await checkAdvancedPoolHooksOwner(ownerChain(seen), HOOKS, OWNER), undefined)
       assert.deepEqual(seen, [HOOKS])
     })
 
-    it('rejects any other sender as a sender param error', async () => {
-      await assert.rejects(
-        () => assertAdvancedPoolHooksOwner('op', ownerChain(), HOOKS, '0x' + '99'.repeat(20)),
-        (err: unknown) =>
-          err instanceof CCTParamsInvalidError &&
-          err.context.operation === 'op' &&
-          err.context.param === 'sender' &&
-          err.message.includes('AdvancedPoolHooks owner'),
-      )
+    it('reports any other sender as an unmet sender requirement', async () => {
+      const found = await checkAdvancedPoolHooksOwner(ownerChain(), HOOKS, '0x' + '99'.repeat(20))
+      assert.equal(found?.param, 'sender')
+      assert.ok(found.reason.includes('AdvancedPoolHooks owner'))
     })
   })
 

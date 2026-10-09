@@ -8,7 +8,7 @@
  * the migration is two steps: {@link SetRebalancer} on the old pool to point at the new one,
  * then this op on the new one. Both are checked before any calldata is built.
  *
- * @remarks Everything the source pool decides is read up front ({@link assertSourcePool}): its
+ * @remarks Everything the source pool decides is read up front ({@link checkSourcePool}): its
  * rebalancer, its liquidity, and that it escrows the same token as the destination. That last one
  * has no on-chain guard, and a mismatch moves an asset the destination pool does not manage.
  *
@@ -28,17 +28,17 @@ import { type Interface, MaxUint256, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import {
+  type PreconditionError,
   CCTContractTypeInvalidError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
 } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolOwner,
+  checkPoolOwner,
   describeLiquidity,
   getTokenPoolInterface,
   readTokenPoolLiquidity,
@@ -103,17 +103,18 @@ const encodeTransferLiquidity: Encoder = (iface, { poolAddress, from, amount }) 
  * @param amount - Transfer amount, or `undefined` for the transfer-all sentinel, where the pool
  * substitutes the source's own balance and there is nothing to compare.
  * @throws {@link CCTContractTypeInvalidError} if `from` is not a LockRelease pool
- * @throws {@link CCTParamsInvalidError} if `from` is a v2.0.0 pool, escrows a different token or
- * does not have `destination` as its rebalancer, or `amount` is the sentinel and `from` is siloed
- * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
+ * @throws {@link CCTParamsInvalidError} if `from` is a v2.0.0 pool, escrows a different token from
+ * `destination`, or `amount` is the sentinel and `from` is siloed
+ * @returns The rebalancer and liquidity requirements that are unmet, if any — both are plan-
+ * fixable, so they are reported rather than thrown.
  */
-async function assertSourcePool(
+async function checkSourcePool(
   operation: string,
   chain: EVMChain,
   destination: string,
   from: string,
   amount: bigint | undefined,
-): Promise<void> {
+): Promise<PreconditionError[]> {
   const { type, version } = await resolveTokenPool(chain, from)
   assertLockReleasePool(operation, from, type)
   if (version === TokenPoolVersion.V2_0_0)
@@ -134,23 +135,28 @@ async function assertSourcePool(
     readTokenPoolLiquidity(chain, from, type),
     readTokenPoolRebalancer(chain, from),
   ])
+  // Fatal, unlike the two below: a pool's escrowed token is set in its constructor, so no step of
+  // any plan can make these two pools agree on one.
   if (source.token !== destinationToken)
     throw new CCTParamsInvalidError(
       operation,
       'from',
       `${from} escrows ${source.token} but ${destination} escrows ${destinationToken}; transferring between them would move a token the destination pool does not manage`,
     )
-  if (rebalancer !== getAddress(destination))
-    throw new CCTParamsInvalidError(
-      operation,
-      'from',
-      `pool ${destination} must be the rebalancer of ${from} to withdraw from it, but its rebalancer is ${rebalancer}; call setRebalancer on ${from} first`,
-    )
-  if (amount !== undefined && source.liquidity < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `source pool ${from} ${describeLiquidity(type, source.liquidity, source.token)}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
-    )
+  return unmet(
+    rebalancer === getAddress(destination)
+      ? undefined
+      : {
+          param: 'from',
+          reason: `pool ${destination} must be the rebalancer of ${from} to withdraw from it, but its rebalancer is ${rebalancer}; call setRebalancer on ${from} first`,
+        },
+    amount !== undefined && source.liquidity < amount
+      ? {
+          param: 'amount',
+          reason: `source pool ${from} ${describeLiquidity(type, source.liquidity, source.token)}, but ${amount} is required; the withdrawal it makes would revert InsufficientLiquidity`,
+        }
+      : undefined,
+  )
 }
 
 /** Migrates liquidity from an older LockRelease pool into this one (v1.5.0–v1.6.1). Owner-only. */
@@ -184,21 +190,13 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
   }
 
   /**
-   * Resolves the destination pool's type/version, floor-matches the encoder, then pre-flights
-   * what the two pools decide: {@link assertSourcePool} for everything about `from`, and
-   * `sender` (when given) owning the destination pool.
-   * @remarks Both live here, not in {@link execute}, so the offline / multisig path gets them
-   * too. Getting the rebalancer wiring wrong is this op's most likely failure, and would
-   * otherwise surface as an `Unauthorized` revert from a nested call.
+   * Resolves the destination pool's type/version, floor-matches the encoder, and encodes. What
+   * the two pools decide is reported by {@link TransferLiquidity.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if either pool is a BurnMint pool, or the
    * destination is siloed
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 destination pool, which escrows
    * through an `ERC20LockBox` instead
-   * @throws {@link CCTParamsInvalidError} if `amount` is `MaxUint256` on a v1.5.x pool or from a
-   * siloed source, `from` is a v2.0.0 pool, the pools escrow different tokens, `from` does not
-   * have the destination pool as its rebalancer, or `sender` is given and does not own the
-   * destination pool
-   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
+   * @throws {@link CCTParamsInvalidError} if `amount` is `MaxUint256` on a v1.5.x pool
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
@@ -222,23 +220,41 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
         'amount',
         `MaxUint256 means "transfer everything" only from v1.6.1; a ${version} pool would try to withdraw that amount and revert with InsufficientLiquidity`,
       )
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    return encode(getTokenPoolInterface(type, version), params)
+  }
 
-    await assertSourcePool(
-      this.name,
-      chain,
-      params.poolAddress,
-      params.from,
-      params.amount === MaxUint256 ? undefined : params.amount,
-    )
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+  /**
+   * Confirms the source pool is set up to be drained by this one — same escrowed token, this pool
+   * as its rebalancer, enough liquidity — and that `sender` owns the destination pool.
+   * @remarks The rebalancer and liquidity requirements are reported rather than thrown outright,
+   * because `setRebalancer` and `provideLiquidity` on the source pool are exactly the earlier
+   * steps a plan would use to create them. A token mismatch stays fatal — see
+   * {@link checkSourcePool}. Reported from here rather than {@link execute} so the offline /
+   * multisig path is covered too: getting the rebalancer wiring wrong is this op's most likely
+   * failure, and would otherwise surface as an `Unauthorized` revert from a nested call.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: TransferLiquidityParams,
+  ): Promise<PreconditionError[]> {
+    const [source, owner] = await Promise.all([
+      checkSourcePool(
+        this.name,
+        chain,
+        params.poolAddress,
+        params.from,
+        params.amount === MaxUint256 ? undefined : params.amount,
+      ),
+      params.sender === undefined
+        ? undefined
+        : checkPoolOwner(chain, params.poolAddress, params.sender),
+    ])
+    return unmet(source, owner)
   }
 
   /**
    * Signs and submits as the destination pool's owner, defaulting `sender` to the signing wallet
-   * — the only address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx.
+   * — the only address that can satisfy {@link preconditions}' owner check for a broadcast tx.
    * See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

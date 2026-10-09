@@ -7,7 +7,7 @@ import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../err
 import { interfaces } from '../../../../evm/const.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type CCTPreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import { AcceptAdmin } from './accept-admin.ts'
 
 // SENDER and OTHER carry hex letters so their checksummed and lowercase spellings differ. That
@@ -246,6 +246,33 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
           err.context.param === 'sender' &&
           /must be the pending token administrator/.test(err.message),
       )
+    })
+
+    it('hands back the calldata anyway, so registerAdmin → acceptAdmin can be batched', async () => {
+      // The motivating case: `registerAdmin` proposes the very `pendingAdministrator` this op
+      // checks for, so while that step is still unsigned there is nothing on-chain to match —
+      // and yet this transaction is fully formed and belongs in the same batch.
+      const err = await new AcceptAdmin()
+        .generate(
+          // pendingAdministrator omitted -> zero, as it would be before registerAdmin lands
+          stubChain({ provider: stubProvider({ administrator: ZeroAddress }) as never }),
+          { tokenAddress: TOKEN, address: ADDRESS, sender: SENDER },
+        )
+        .then(
+          () => assert.fail('expected a rejection'),
+          (err: unknown) => err as CCTPreconditionError,
+        )
+
+      assert.deepEqual(err.errors, [
+        {
+          param: 'sender',
+          reason: `no administrator is pending for this token (current administrator: ${ZeroAddress}) — nothing to accept`,
+        },
+      ])
+      // byte-for-byte what the happy path returns, `from` included
+      assert.equal(err.unsigned.transactions[0]!.to, TAR)
+      assert.equal(err.unsigned.transactions[0]!.data, SELECTOR + word(TOKEN))
+      assert.equal(err.unsigned.transactions[0]!.from, SENDER)
     })
   })
 

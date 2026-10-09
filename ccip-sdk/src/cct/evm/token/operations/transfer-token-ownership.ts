@@ -10,10 +10,17 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import { EVMOperation } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
-import { buildBeginDefaultAdminTransfer } from './begin-default-admin-transfer.ts'
-import { buildCancelDefaultAdminTransfer } from './cancel-default-admin-transfer.ts'
+import {
+  buildBeginDefaultAdminTransfer,
+  checkBeginDefaultAdminTransfer,
+} from './begin-default-admin-transfer.ts'
+import {
+  buildCancelDefaultAdminTransfer,
+  checkCancelDefaultAdminTransfer,
+} from './cancel-default-admin-transfer.ts'
 
 /**
  * Parameters for {@link TransferTokenOwnership}.
@@ -43,7 +50,7 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
 
   /**
    * Routes a zero `newOwner` to {@link CancelDefaultAdminTransfer}'s builder and any other to
-   * {@link BeginDefaultAdminTransfer}'s, with that op's pre-flights.
+   * {@link BeginDefaultAdminTransfer}'s.
    */
   protected buildUnsigned(
     chain: EVMChain,
@@ -52,6 +59,21 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
     if (getAddress(newOwner) === ZeroAddress)
       return buildCancelDefaultAdminTransfer(this.name, chain, { tokenAddress, sender })
     return buildBeginDefaultAdminTransfer(
+      this.name,
+      chain,
+      { tokenAddress, newAdmin: newOwner, sender },
+      'newOwner',
+    )
+  }
+
+  /** Routes like {@link buildUnsigned}, reporting that op's unmet requirements. */
+  protected override preconditions(
+    chain: EVMChain,
+    { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
+  ): Promise<PreconditionError[]> {
+    if (getAddress(newOwner) === ZeroAddress)
+      return checkCancelDefaultAdminTransfer(this.name, chain, { tokenAddress, sender })
+    return checkBeginDefaultAdminTransfer(
       this.name,
       chain,
       { tokenAddress, newAdmin: newOwner, sender },

@@ -3,12 +3,13 @@
  * ({@link LOCKBOX_INTERFACE}) for calldata encoding, its deploy artifact
  * ({@link getLockboxArtifact}), and the pre-tx reads every lockbox write runs before building
  * calldata — the on-chain identity check ({@link assertLockbox}), ownership
- * ({@link assertLockboxOwner}), the escrowed token ({@link assertLockboxToken}), the
- * authorized-caller set ({@link assertLockboxCaller}) and the ERC-20 position behind the
- * transfer ({@link assertLockboxFunding} / {@link assertLockboxLiquidity}).
+ * ({@link checkLockboxOwner}), the escrowed token ({@link assertLockboxToken}), the
+ * authorized-caller set ({@link checkLockboxCaller}) and the ERC-20 position behind the
+ * transfer ({@link checkLockboxFunding} / {@link checkLockboxLiquidity}).
  *
  * Mirrors `token/contracts.ts` in shape, and `token-pool/contracts.ts` in the split between
- * `read*` helpers and the `assert*` guards the ops call.
+ * `read*` helpers, the `assert*` guards that reject outright, and the `check*` probes whose
+ * finding an op reports through {@link CCTPreconditionError}.
  *
  * @packageDocumentation
  */
@@ -19,10 +20,10 @@ import type { TypedContract } from 'ethers-abitype'
 import type { EVMChain } from '../../../evm/index.ts'
 import { resultToObject } from '../../../evm/types.ts'
 import {
+  type PreconditionError,
   CCTContractTypeInvalidError,
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
 } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import ERC20_LOCKBOX_V2_0_0_ABI from '../artifacts/abi/V2_0_0/erc20-lockbox.ts'
@@ -188,27 +189,25 @@ export async function readAllLockboxAuthorizedCallers(
  * which grants exactly this.
  * @remarks Owner-gated ops use `owner()`; this set is separate and wider — being the lockbox
  * owner does not make an account an authorized caller.
- * @param operation - Operation name, for the error's `operation` field.
  * @param chain - Chain to read from.
  * @param lockbox - Lockbox being written to.
  * @param account - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `account` is not an authorized caller
+ * @returns The unmet requirement, or `undefined` if `account` is already authorized.
  */
-export async function assertLockboxCaller(
-  operation: string,
+export async function checkLockboxCaller(
   chain: EVMChain,
   lockbox: string,
   account: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const callers = await readAllLockboxAuthorizedCallers(chain, lockbox)
-  if (callers.includes(getAddress(account))) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    callers.length === 0
-      ? `lockbox ${lockbox} has no authorized callers, so it accepts deposits and withdrawals from nobody; its owner must add ${getAddress(account)} with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`
-      : `${getAddress(account)} is not an authorized caller of lockbox ${lockbox} (currently ${callers.join(', ')}), so it would revert UnauthorizedCaller; its owner must add it with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`,
-  )
+  if (callers.includes(getAddress(account))) return undefined
+  return {
+    param: 'sender',
+    reason:
+      callers.length === 0
+        ? `lockbox ${lockbox} has no authorized callers, so it accepts deposits and withdrawals from nobody; its owner must add ${getAddress(account)} with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`
+        : `${getAddress(account)} is not an authorized caller of lockbox ${lockbox} (currently ${callers.join(', ')}), so it would revert UnauthorizedCaller; its owner must add it with updateLockboxAuthorizedCallers({ lockbox: '${lockbox}', addedCallers: ['${getAddress(account)}'] })`,
+  }
 }
 
 /**
@@ -217,70 +216,68 @@ export async function assertLockboxCaller(
  * `safeTransferFrom`.
  *
  * @remarks The lockbox, not the pool, is the spender — the one difference from
- * `token-pool/contracts.ts`'s `assertLiquidityFunding`, and an easy thing to get wrong when
- * migrating a v1.5.x runbook to v2.0.0, so the error spells out the `approveToken` call.
+ * `token-pool/contracts.ts`'s {@link checkLiquidityFunding}, and an easy thing to get wrong when
+ * migrating a v1.5.x runbook to v2.0.0, so the reason spells out the `approveToken` call.
  * @remarks Advisory: an allowance can be spent or revoked between building and signing. It moves
  * only on an explicit `approve` though, so it is stable enough to be worth the round trip.
- * @param operation - Operation name, for the error's `operation` field.
  * @param erc20 - Handle to the escrowed token, from {@link assertLockboxToken}.
  * @param lockbox - Lockbox being deposited into; the spender of the allowance.
- * @param token - The escrowed token, for the error message.
+ * @param token - The escrowed token, for the reason message.
  * @param account - The depositing account.
  * @param amount - Deposit amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if `account` holds less than `amount`, or has approved the
- * lockbox for less than `amount`
+ * @returns Every unmet requirement — a fresh depositor is typically short of both the tokens and
+ * the allowance, and reporting only the balance would hide the `approveToken` step.
  */
-export async function assertLockboxFunding(
-  operation: string,
+export async function checkLockboxFunding(
   erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
   lockbox: string,
   token: string,
   account: string,
   amount: bigint,
-): Promise<void> {
+): Promise<PreconditionError[]> {
   const [balance, allowance] = await Promise.all([
     erc20.balanceOf(account),
     erc20.allowance(account, lockbox),
   ])
+  const unmet: PreconditionError[] = []
   if (balance < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `${account} holds ${balance} of ${token}, but ${amount} is required; mint or transfer tokens first`,
-    )
+    unmet.push({
+      param: 'sender',
+      reason: `${account} holds ${balance} of ${token}, but ${amount} is required; mint or transfer tokens first`,
+    })
   if (allowance < amount)
-    throw new CCTTxFailedError(
-      operation,
-      `${account} has approved ${allowance} of ${token} to lockbox ${lockbox}, but ${amount} is required; the deposit is a transferFrom, so grant the allowance first with approveToken({ tokenAddress: '${token}', spender: '${lockbox}', amount: ${amount}n })`,
-    )
+    unmet.push({
+      param: 'sender',
+      reason: `${account} has approved ${allowance} of ${token} to lockbox ${lockbox}, but ${amount} is required; the deposit is a transferFrom, so grant the allowance first with approveToken({ tokenAddress: '${token}', spender: '${lockbox}', amount: ${amount}n })`,
+    })
+  return unmet
 }
 
 /**
  * Pre-flights a withdrawal against the lockbox's own balance of the escrowed token, which is what
  * it pays out of.
  *
- * @remarks Weaker than {@link assertLockboxFunding}, exactly as `assertPoolLiquidity` is: the
+ * @remarks Weaker than {@link checkLockboxFunding}, exactly as {@link checkPoolLiquidity} is: the
  * balance moves with every CCIP transfer through the pool, so this catches "withdraw more than
  * was ever deposited" rather than proving the amount will still fit when the tx mines.
- * @param operation - Operation name, for the error's `operation` field.
  * @param erc20 - Handle to the escrowed token, from {@link assertLockboxToken}.
  * @param lockbox - Lockbox being withdrawn from.
- * @param token - The escrowed token, for the error message.
+ * @param token - The escrowed token, for the reason message.
  * @param amount - Withdrawal amount, in the token's smallest unit.
- * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+ * @returns The unmet requirement, or `undefined` if the lockbox already holds `amount`.
  */
-export async function assertLockboxLiquidity(
-  operation: string,
+export async function checkLockboxLiquidity(
   erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>,
   lockbox: string,
   token: string,
   amount: bigint,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const balance = await erc20.balanceOf(lockbox)
-  if (balance >= amount) return
-  throw new CCTTxFailedError(
-    operation,
-    `lockbox ${lockbox} holds ${balance} of ${token}, but ${amount} is required; it would revert InsufficientBalance`,
-  )
+  if (balance >= amount) return undefined
+  return {
+    param: 'amount',
+    reason: `lockbox ${lockbox} holds ${balance} of ${token}, but ${amount} is required; it would revert InsufficientBalance`,
+  }
 }
 
 /** The one `ERC20LockBox` getter {@link readLockboxOwner} calls. */
@@ -301,26 +298,20 @@ export async function readLockboxOwner(chain: EVMChain, lockbox: string): Promis
 
 /**
  * Pre-flights `sender` against the lockbox's on-chain `owner()` for an owner-gated write, so an
- * unauthorized caller fails as a {@link CCTParamsInvalidError} here instead of as an
- * `OnlyCallableByOwner` revert after a multisig has already reviewed and signed. The lockbox-side
- * counterpart of `assertPoolOwner` and `assertTokenOwner`.
- * @param operation - Operation name, for the error's `operation` field.
+ * unauthorized caller is reported here instead of reverting `OnlyCallableByOwner` after a
+ * multisig has already reviewed and signed. The lockbox-side counterpart of
+ * {@link checkPoolOwner} and {@link checkTokenOwner}.
  * @param chain - Chain to read the owner from.
  * @param lockbox - Lockbox being written to.
  * @param sender - The address the tx will be sent from; compared checksummed.
- * @throws {@link CCTParamsInvalidError} if `sender` is not the lockbox owner
+ * @returns The unmet requirement, or `undefined` if `sender` already owns the lockbox.
  */
-export async function assertLockboxOwner(
-  operation: string,
+export async function checkLockboxOwner(
   chain: EVMChain,
   lockbox: string,
   sender: string,
-): Promise<void> {
+): Promise<PreconditionError | undefined> {
   const owner = await readLockboxOwner(chain, lockbox)
-  if (getAddress(sender) === owner) return
-  throw new CCTParamsInvalidError(
-    operation,
-    'sender',
-    `must be the current lockbox owner (${owner})`,
-  )
+  if (getAddress(sender) === owner) return undefined
+  return { param: 'sender', reason: `must be the current lockbox owner (${owner})` }
 }

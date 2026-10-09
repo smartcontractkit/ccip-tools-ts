@@ -12,7 +12,7 @@ import { ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { PreconditionError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
@@ -64,36 +64,12 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
     return { ...p, sender: getAddress(p.sender) }
   }
 
-  /**
-   * Confirms `sender` is the pending administrator, then builds `acceptAdminRole` calldata
-   * against the TokenAdminRegistry resolved from `address`.
-   */
+  /** Builds `acceptAdminRole` calldata against the TokenAdminRegistry resolved from `address`. */
   protected async buildUnsigned(
     chain: EVMChain,
     p: ParsedAcceptAdminParams,
   ): Promise<UnsignedEVMTx> {
     const to = await chain.getTokenAdminRegistryFor(p.address)
-    const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
-      chain,
-      to,
-      p.tokenAddress,
-    )
-
-    if (pendingAdministrator === ZeroAddress) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
-      )
-    }
-    if (pendingAdministrator !== p.sender) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'sender',
-        `must be the pending token administrator (${pendingAdministrator})`,
-      )
-    }
-
     // TAR.acceptAdminRole encoding is version-stable across v1.5–v2.0; no version dispatch needed.
     const data = getTokenAdminRegistryInterface().encodeFunctionData('acceptAdminRole', [
       p.tokenAddress,
@@ -102,8 +78,44 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
   }
 
   /**
+   * Confirms an administrator is pending for this token and that `sender` is it.
+   * @remarks Reported rather than thrown outright, which is the case this whole mechanism exists
+   * for: `registerAdmin` proposes the very `pendingAdministrator` this operation accepts, so
+   * while that first step is still unsigned there is nothing here to match — and yet the
+   * `acceptAdmin` transaction is perfectly well-formed and needs to go into the same batch.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    p: ParsedAcceptAdminParams,
+  ): Promise<PreconditionError[]> {
+    // `chain.getTokenAdminRegistryFor` is memoized, so this re-uses what `buildUnsigned` resolved
+    // rather than reading `tx.transactions[0].to`, which is typed as a loose `AddressLike`.
+    const registry = await chain.getTokenAdminRegistryFor(p.address)
+    const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
+      chain,
+      registry,
+      p.tokenAddress,
+    )
+    if (pendingAdministrator === ZeroAddress)
+      return [
+        {
+          param: 'sender',
+          reason: `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
+        },
+      ]
+    if (pendingAdministrator !== p.sender)
+      return [
+        {
+          param: 'sender',
+          reason: `must be the pending token administrator (${pendingAdministrator})`,
+        },
+      ]
+    return []
+  }
+
+  /**
    * Signs and submits as the pending administrator, defaulting `sender` to the signing wallet —
-   * the only address that can satisfy {@link buildUnsigned}'s pending-administrator check for a
+   * the only address that can satisfy {@link preconditions}' pending-administrator check for a
    * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
    * rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

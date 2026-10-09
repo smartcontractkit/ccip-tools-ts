@@ -4,14 +4,14 @@ import { getAddress, id } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { EVMChain } from '../../../evm/index.ts'
-import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../errors.ts'
+import { type PreconditionError, CCTContractTypeInvalidError } from '../../errors.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import CROSS_CHAIN_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-token.ts'
 import { getTypedContract, isMissingFunction } from '../query.ts'
 import {
   type TokenVersion as TokenVersionType,
   TokenVersion,
-  assertTokenOwner,
+  checkTokenOwner,
   resolveTokenEncoder,
 } from './contracts.ts'
 
@@ -99,20 +99,23 @@ const V1_TOKEN_ROLE_READERS: Record<TokenRole, 'isMinter' | 'isBurner'> = {
 
 export type TokenRoleHandler = {
   hasRole(chain: EVMChain, tokenAddress: string, role: TokenRole, account: string): Promise<boolean>
-  assertAdmin(
-    operation: string,
+  /**
+   * Checks `sender` against whatever governs this role on this token version — the token `owner`
+   * at v1, the role's AccessControl admin at v2.
+   * @returns The unmet requirement, or `undefined` if `sender` may already grant or revoke it.
+   */
+  checkAdmin(
     chain: EVMChain,
     tokenAddress: string,
     role: TokenRole,
     sender: string,
-  ): Promise<void>
+  ): Promise<PreconditionError | undefined>
 }
 
 const V1_TOKEN_ROLE_HANDLER: TokenRoleHandler = {
   hasRole: (chain, tokenAddress, role, account) =>
     readV1TokenRole(chain, tokenAddress, V1_TOKEN_ROLE_READERS[role], account),
-  assertAdmin: (operation, chain, tokenAddress, _role, sender) =>
-    assertTokenOwner(operation, chain, tokenAddress, sender),
+  checkAdmin: (chain, tokenAddress, _role, sender) => checkTokenOwner(chain, tokenAddress, sender),
 }
 
 const V2_TOKEN_ROLE_HANDLER: TokenRoleHandler = {
@@ -124,7 +127,7 @@ const V2_TOKEN_ROLE_HANDLER: TokenRoleHandler = {
     )
     return token.hasRole(CROSS_CHAIN_TOKEN_ROLES[role], account)
   },
-  async assertAdmin(operation, chain, tokenAddress, role, sender) {
+  async checkAdmin(chain, tokenAddress, role, sender) {
     const token: CrossChainTokenRoleReader = getTypedContract(
       chain,
       tokenAddress,
@@ -132,12 +135,11 @@ const V2_TOKEN_ROLE_HANDLER: TokenRoleHandler = {
     )
     const roleId = CROSS_CHAIN_TOKEN_ROLES[role]
     const adminRole = await token.getRoleAdmin(roleId)
-    if (await token.hasRole(adminRole, sender)) return
-    throw new CCTParamsInvalidError(
-      operation,
-      'sender',
-      `must hold the ${role}-role admin (role ${adminRole}) on ${tokenAddress}`,
-    )
+    if (await token.hasRole(adminRole, sender)) return undefined
+    return {
+      param: 'sender',
+      reason: `must hold the ${role}-role admin (role ${adminRole}) on ${tokenAddress}`,
+    }
   },
 }
 

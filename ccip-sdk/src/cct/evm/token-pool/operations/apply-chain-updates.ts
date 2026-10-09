@@ -17,10 +17,10 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { encodeAddressToAny } from '../../../../utils.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../../remote-address.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -29,7 +29,7 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -372,8 +372,8 @@ export class ApplyChainUpdates extends EVMOperation<
   /**
    * Resolves the pool's type and version, applies the checks that needed it, then encodes for that
    * version's signature — adapting the params to v1.5.0's `chains` array on a legacy pool.
-   * @throws {@link CCTParamsInvalidError} if a rate limit breaks its enabled-bucket bound, a lane
-   * lists several remote pools for a v1.5.0 pool, or `sender` is not the pool owner
+   * @throws {@link CCTParamsInvalidError} if a rate limit breaks its enabled-bucket bound, or a lane
+   * lists several remote pools for a v1.5.0 pool
    * @throws {@link CCTContractTypeInvalidError} if the address is not a supported pool type
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
@@ -388,10 +388,20 @@ export class ApplyChainUpdates extends EVMOperation<
     // encoded before the owner probe, so a lane the v1.5.0 adapter cannot express fails first
     const tx = encode(getTokenPoolInterface(type, version), params, this.name)
 
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-
     return tx
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedApplyChainUpdatesParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 
   /**
