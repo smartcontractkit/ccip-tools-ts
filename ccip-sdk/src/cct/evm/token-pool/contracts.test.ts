@@ -61,6 +61,7 @@ describe('pool types', () => {
       'BurnFromMintTokenPool',
       'BurnWithFromMintTokenPool',
       'LockReleaseTokenPool',
+      'SiloedLockReleaseTokenPool',
     ])
     for (const type of DEPLOYABLE_TOKEN_POOL_TYPES) {
       assert.equal(isDeployableTokenPoolType(type), true)
