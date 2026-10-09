@@ -38,12 +38,12 @@
     "yaml": "2.9.1"
   },
   "overrides": {
+    "braces": "npm:@dieub/braces-depth-guard@3.0.3-pn.0",
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
     "image-size": "npm:@localnerve/image-size@^2.1.4",
     "postman-collection": {
       "@faker-js/faker": "file:../../scripts/vendor/faker-postman-stub"
     },
-    "axios": "^1.20.0",
     "tar": "^7.5.22",
     "protobufjs": "^7.6.6",
     "postcss": "^8.5.28",
@@ -59,7 +59,12 @@
       "ws": "8.21.0"
     },
     "tmp": "^0.2.6",
-    "jayson": "^5.0.0"
+    "jayson": "^5.0.0",
+    "tinypool": "^2.2.0",
+    "http-cache-semantics": "^4.3.0",
+    "postcss-selector-parser": "^7.1.6",
+    "katex": "^0.18.9",
+    "@changesets/cli": "^3.0.3"
   },
   "allowScripts": {
     "@trufflesuite/bigint-buffer@1.1.10": true,

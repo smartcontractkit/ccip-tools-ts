@@ -43,15 +43,30 @@ that — an entry whose package already resolves to a patched release on its own
 the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in three kinds:
 
 - **Version pins** — the dependents' ranges allow (or resolve to) a release inside an
-  advisory, and the patched release is outside what they ask for (`axios`, `tar`,
-  `protobufjs`, `postcss`, `uuid`, `yaml@1`, `serialize-javascript`, `toml`,
-  `lodash-es`, and `js-yaml` for `openapi-to-postmanv2`: that one pins `4.3.0` exactly
-  while the 4.x line is patched only from `4.3.2`). Prefer a range over an exact pin so
-  later patches flow in by themselves, and bump them when `npm audit` reports a newer fix.
+  advisory, and the patched release is outside what they ask for (`tar`, `protobufjs`,
+  `postcss`, `uuid`, `yaml@1`, `serialize-javascript`, `toml`, `lodash-es`,
+  `http-cache-semantics`, `postcss-selector-parser`, and `js-yaml` for
+  `openapi-to-postmanv2`: that one pins the 4.x line from `4.3.2`, the first patched
+  release). Prefer a range over an exact pin so later patches flow in by themselves, and
+  bump them when `npm audit` reports a newer fix (`katex` was briefly pinned exact at
+  `0.18.9` for this reason; it is a range again now that the later 0.18.x releases aged
+  past the 7-day supply-chain hold).
+- **Line swaps** — two entries do not pin a vulnerable package to a patched release but
+  swap a whole dependency line, because no patched release exists on the old line:
+  `@changesets/cli` moves the release tooling of `@chainlink/contracts` to the 3.x line,
+  which dropped the old `@manypkg/get-packages` → `read-yaml-file` → `js-yaml@3` →
+  `argparse@1` → `sprintf-js` chain; `sprintf-js` has no patched release, so removing the
+  only path to it is the fix. `tinypool` forces the 2.x line over `@docusaurus/core`'s
+  `^1` (the advisory covers all of 1.x; the fix landed in `2.1.2`); the docs build
+  exercises the swap.
 - **Fork swaps** — advisories with no version to pin to, where the fix lives in a
   maintained fork of the same code: `bigint-buffer` → `@trufflesuite/bigint-buffer`
-  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles) and
-  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS).
+  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles),
+  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS), and `braces` →
+  `@dieub/braces-depth-guard@3.0.3-pn.0` (GHSA-vfj7-8cjw-p6xm, stack exhaustion). The
+  braces swap is pinned exactly: its tarball diff against pristine `3.0.3` is only a
+  `MAX_DEPTH: 100` nesting guard in `parse`/`compile`/`expand`, and upstream's own mocha
+  suite passes at the same 852/42 as pristine on current Node.
 - **The faker stub** — `postman-collection` (the docs toolchain's OpenAPI→Postman
   converter, via `docusaurus-plugin-openapi-docs`) is the last release of its line: it
   pins `@faker-js/faker@5.5.3` exactly and reads the pre-v8 API off it at import time,
@@ -63,12 +78,18 @@ the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in 
   evaluates a Postman dynamic variable (`{{$randomCity}}`, the only consumer of those
   generators), so the stub is inert there.
 
-Two findings cannot be pinned away and are accepted (both were re-checked against the
+Three findings cannot be pinned away and are accepted (each was re-checked against the
 advisory ranges, not just `npm audit` output):
 
 - `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no patched
   version to pin. It reaches the CLI through `ethers` v5
   (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
+- `@openzeppelin/contracts` / `@openzeppelin/contracts-upgradeable` (GHSA-93hq-5wgc-jc82
+  and friends) — no fix is available inside the version-named OpenZeppelin packages
+  (`@openzeppelin/contracts-4.7.3`, `-4.8.3`, `-5.3.0`) that `@chainlink/contracts-ccip`
+  → `@chainlink/contracts` depend on, and those version-named packages are not bumped.
+  This repo consumes only vendored ABIs from them; it never compiles or deploys the
+  affected Solidity code.
 - `@solana/web3.js` → `jayson` → `stream-json` — `stream-json` is fixed in `3.6.0`,
   a pure-ESM rewrite that CJS `jayson` cannot load (and would need `require(esm)` support
   from every consumer's Node), and `1.99.0` is the last `web3.js` 1.x — the v1-transaction
@@ -76,16 +97,23 @@ advisory ranges, not just `npm audit` output):
   that support. The vulnerable API (`pick`/`ignore`/`filter`/`replace`) is not used by
   jayson, which only takes `StreamValues` and `Verifier`.
 
+To retire the `braces` fork swap once upstream patches GHSA-vfj7-8cjw-p6xm: check the
+advisory page for a fixed range, confirm with `npm view braces version time --json` that
+a stable release at least 7 days old exists and carries the depth cap (pack the tarball
+and look for the guard in `lib/parse.js`), then re-point the override at that upstream
+release — or delete it outright if `micromatch`/`chokidar` resolve the fixed release on
+their own — and confirm `npm audit` and `npm ls` stay clean.
+
 ## Test Suite Layout
 
 Test files are classified by filename suffix:
 
-| Suffix | Category | Included in `test:unit` |
-| --- | --- | --- |
-| `*.test.ts` | Unit — mocked, no network access | ✅ |
-| `*.integration.test.ts` | Integration — live RPCs / staging API | ❌ |
-| `*.e2e.test.ts` | End-to-end — CLI spawned against live networks | ❌ |
-| `*.fork.test.ts` | Fork — anvil/surfpool forking live state | ❌ |
+| Suffix                  | Category                                       | Included in `test:unit` |
+| ----------------------- | ---------------------------------------------- | ----------------------- |
+| `*.test.ts`             | Unit — mocked, no network access               | ✅                      |
+| `*.integration.test.ts` | Integration — live RPCs / staging API          | ❌                      |
+| `*.e2e.test.ts`         | End-to-end — CLI spawned against live networks | ❌                      |
+| `*.fork.test.ts`        | Fork — anvil/surfpool forking live state       | ❌                      |
 
 A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized as integration exactly like `logs.integration.test.ts` — the suffix is what matters, and `fork.test.data.ts` is a data helper, not a test.
 
@@ -94,22 +122,22 @@ A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized 
 `node --test` runs every test file concurrently, so networked suites that share public RPC endpoints would trip their rate limiters. Each networked suite instead declares the networks it talks to with an OS-level lock:
 
 ```ts
-import { useResource } from '../../../scripts/useResource.ts'
+import { useResource } from "../../../scripts/useResource.ts";
 
 // Module top-level: the suite's tests do not start before every lock is held.
 // Right for suites that use the same networks throughout.
-await useResource(['sepolia', 'fuji'])
+await useResource(["sepolia", "fuji"]);
 ```
 
 Suites whose describe blocks touch DIFFERENT networks hold each network only for the block that needs it, so unrelated blocks don't queue other suites on networks they aren't even using:
 
 ```ts
-import { useResourceForDescribe } from '../../../scripts/useResource.ts'
+import { useResourceForDescribe } from "../../../scripts/useResource.ts";
 
-describe('EVM to Solana', () => {
-  useResourceForDescribe(['base-sepolia', 'solana-devnet'])
+describe("EVM to Solana", () => {
+  useResourceForDescribe(["base-sepolia", "solana-devnet"]);
   // tests...
-})
+});
 ```
 
 Keep the two rules of the lock system in mind when moving fixtures or adding suites:
@@ -121,10 +149,10 @@ Each network tag is a directory in a well-known lock root (`<tmpdir>/ccip-tools-
 
 Locks are per-machine, so all networked suites must run inside a single CI job/runner. The whole tree runs from one root-level `node --test` invocation over both workspaces' globs (see the `test` script in the root `package.json`) — the locks arbitrate across workspaces exactly as they do within one. That script also raises `--test-concurrency` above the default (`availableParallelism - 1`): on CI's 4-vCPU runners the default would be 3 file slots for the entire tree, and a suite waiting on a lock occupies its slot while it waits, so the extra slots are what let lock-queued suites overlap. Configure via env:
 
-| Variable | Effect |
-| --- | --- |
-| `NETWORK_LOCK_DIR` | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
-| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min) |
+| Variable                  | Effect                                                                     |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `NETWORK_LOCK_DIR`        | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
+| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min)                    |
 
 ### RPC endpoint env vars
 
@@ -132,14 +160,14 @@ Every networked suite resolves its endpoints from one env var per network, named
 
 Suites that would otherwise bind a single endpoint race their candidates with a health probe instead (`raceRpcEndpoint`), and that race always keeps the network's public defaults as a fallback tier behind whatever the env var configures: a secret that has gone dead (rotated key, exhausted quota) then costs the race nothing instead of failing the suite outright.
 
-| Variable | Network |
-| --- | --- |
-| `RPC_SEPOLIA` | Ethereum Sepolia |
-| `RPC_BASE_SEPOLIA` / `RPC_ARBITRUM_SEPOLIA` / `RPC_OPTIMISM_SEPOLIA` | L2 Sepolia testnets |
-| `RPC_FUJI` | Avalanche Fuji |
-| `RPC_BSC_TESTNET` | BNB Smart Chain testnet |
-| `RPC_APTOS_TESTNET` / `RPC_SOLANA_DEVNET` / `RPC_SUI_TESTNET` / `RPC_TON_TESTNET` / `RPC_HEDERA_TESTNET` / `RPC_ROBINHOOD_TESTNET` | Non-EVM testnets |
-| `RPC_ETHEREUM_MAINNET` / `RPC_BASE_MAINNET` / `RPC_POLYGON_MAINNET` / `RPC_GNOSIS_MAINNET` / `RPC_MONAD_MAINNET` / `RPC_ARBITRUM_MAINNET` | Mainnets |
+| Variable                                                                                                                                  | Network                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `RPC_SEPOLIA`                                                                                                                             | Ethereum Sepolia        |
+| `RPC_BASE_SEPOLIA` / `RPC_ARBITRUM_SEPOLIA` / `RPC_OPTIMISM_SEPOLIA`                                                                      | L2 Sepolia testnets     |
+| `RPC_FUJI`                                                                                                                                | Avalanche Fuji          |
+| `RPC_BSC_TESTNET`                                                                                                                         | BNB Smart Chain testnet |
+| `RPC_APTOS_TESTNET` / `RPC_SOLANA_DEVNET` / `RPC_SUI_TESTNET` / `RPC_TON_TESTNET` / `RPC_HEDERA_TESTNET` / `RPC_ROBINHOOD_TESTNET`        | Non-EVM testnets        |
+| `RPC_ETHEREUM_MAINNET` / `RPC_BASE_MAINNET` / `RPC_POLYGON_MAINNET` / `RPC_GNOSIS_MAINNET` / `RPC_MONAD_MAINNET` / `RPC_ARBITRUM_MAINNET` | Mainnets                |
 
 In CI these are wired to GitHub secrets of the same names (see the `Run tests with coverage` step in `.github/workflows/ci.yml`). Unset secrets fall back to the public defaults — set one when a keyed or faster endpoint is wanted: CI runners share an egress IP whose keyless per-IP budgets (toncenter, BlockVision) are exhausted quickly, and the suites’ retry ladders turn that throttling into wall time.
 
@@ -157,13 +185,13 @@ Fork tests exercise the SDK against real chain state. They use [Anvil](https://b
 
 Fork tests run as part of `npm test`. You can control their behaviour with environment variables:
 
-| Variable | Effect |
-| --- | --- |
-| `SKIP_INTEGRATION_TESTS=1` | Skip fork tests entirely |
-| `RPC_SEPOLIA=<url>` | Custom Sepolia RPC (default: public node) |
-| `RPC_FUJI=<url>` | Custom Fuji RPC (default: public node) |
+| Variable                    | Effect                                                                            |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `SKIP_INTEGRATION_TESTS=1`  | Skip fork tests entirely                                                          |
+| `RPC_SEPOLIA=<url>`         | Custom Sepolia RPC (default: public node)                                         |
+| `RPC_FUJI=<url>`            | Custom Fuji RPC (default: public node)                                            |
 | `RUN_HIGH_RPC_LOAD_TESTS=1` | Enable tests that scan wide block ranges (slow, may hit rate limits on free RPCs) |
-| `VERBOSE=1` | Enable debug logging |
+| `VERBOSE=1`                 | Enable debug logging                                                              |
 
 ```bash
 # Run everything including fork tests
@@ -196,15 +224,15 @@ CCIPError (base)
 └── recovery?: string           # Actionable fix
 ```
 
-| Scenario             | Error Class                      |
-| -------------------- | -------------------------------- |
-| Chain not found      | `CCIPChainNotFoundError`         |
-| Invalid input        | `CCIPArgumentInvalidError`       |
-| Transaction pending  | `CCIPTransactionNotFoundError`   |
-| Message not in batch | `CCIPMessageNotInBatchError`     |
-| HTTP/RPC failure     | `CCIPHttpError`                  |
-| Not implemented      | `CCIPNotImplementedError`        |
-| Interactive required | `CCIPInteractiveRequiredError`   |
+| Scenario             | Error Class                    |
+| -------------------- | ------------------------------ |
+| Chain not found      | `CCIPChainNotFoundError`       |
+| Invalid input        | `CCIPArgumentInvalidError`     |
+| Transaction pending  | `CCIPTransactionNotFoundError` |
+| Message not in batch | `CCIPMessageNotInBatchError`   |
+| HTTP/RPC failure     | `CCIPHttpError`                |
+| Not implemented      | `CCIPNotImplementedError`      |
+| Interactive required | `CCIPInteractiveRequiredError` |
 
 To add a new error type:
 
@@ -233,31 +261,31 @@ The SDK runs in **Node.js** (CLI, scripts) and **browsers** (frontend apps). All
 1. **Always import `Buffer`** - Node.js has `Buffer` as a global; browsers don't. Always use explicit import:
 
    ```typescript
-   import { Buffer } from 'buffer'
+   import { Buffer } from "buffer";
 
    // Now safe to use in browser and Node.js
-   const bytes = Buffer.from(data, 'hex')
+   const bytes = Buffer.from(data, "hex");
    ```
 
 2. **Use `globalThis.fetch`** - Available in Node.js 18+ and all browsers. Never use `node-fetch` or `http`/`https` modules:
 
    ```typescript
    // ✅ Cross-platform
-   const response = await globalThis.fetch(url)
+   const response = await globalThis.fetch(url);
 
    // ❌ Node.js only
-   import fetch from 'node-fetch'
+   import fetch from "node-fetch";
    ```
 
 3. **No `node:*` imports in production code** - Node.js built-in modules (`node:fs`, `node:crypto`, `node:path`) are not available in browsers. Use them only in test files (`.test.ts`):
 
    ```typescript
    // ✅ OK in test files
-   import assert from 'node:assert/strict'
-   import { describe, it } from 'node:test'
+   import assert from "node:assert/strict";
+   import { describe, it } from "node:test";
 
    // ❌ Never in production code (src/*.ts excluding tests)
-   import { readFileSync } from 'node:fs'
+   import { readFileSync } from "node:fs";
    ```
 
 ### Tree-Shaking
@@ -266,10 +294,10 @@ The SDK runs in **Node.js** (CLI, scripts) and **browsers** (frontend apps). All
 
 ```typescript
 // Only EVMChain is bundled and registered (Solana, Sui, TON, Aptos, Canton excluded)
-import { EVMChain } from '@chainlink/ccip-sdk'
+import { EVMChain } from "@chainlink/ccip-sdk";
 
 // Registers every family, also as a side-effect-only import
-import '@chainlink/ccip-sdk/all'
+import "@chainlink/ccip-sdk/all";
 ```
 
 Family-generic helpers (`decodeAddress`, `decodeExtraArgs`, `decodeMessage`, `getLeafHasher`, ...) dispatch through `supportedChains`, which only holds the classes that got bundled (an unused import is dropped; `supportedChains.SVM ??= SolanaChain` keeps and registers one); they throw `CCIPChainFamilyUnsupportedError`, with a `recovery` hint, for a family that isn't registered. Chain classes register themselves with the static block pattern documented in [Chain Registration](#chain-registration). `src/bundling.test.ts` bundles small apps with esbuild to check this behavior.
@@ -341,14 +369,14 @@ constructor(network: NetworkInfo, ctx?: ChainContext) {
 
 ```typescript
 // Default: API enabled with production endpoint
-const chain = await EVMChain.fromUrl(rpcUrl)
+const chain = await EVMChain.fromUrl(rpcUrl);
 
 // Custom API endpoint
-const api = CCIPAPIClient.fromUrl('https://staging.example.com')
-const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: api })
+const api = CCIPAPIClient.fromUrl("https://staging.example.com");
+const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: api });
 
 // Decentralized mode: no external API calls (100% on-chain)
-const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: null })
+const chain = await EVMChain.fromUrl(rpcUrl, { apiClient: null });
 ```
 
 ### TSDoc Guidelines
@@ -385,14 +413,14 @@ async getLaneLatency(destChainSelector: bigint): Promise<LaneLatencyResponse>
 ```typescript
 // ✅ Good: Runtime values + type safety, tree-shakeable, no enum overhead
 export const ChainFamily = {
-  EVM: 'EVM',
-  Solana: 'SVM',
-  Aptos: 'APTOS',
-  Sui: 'SUI',
-  TON: 'TON',
-  Unknown: 'UNKNOWN',
-} as const
-export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
+  EVM: "EVM",
+  Solana: "SVM",
+  Aptos: "APTOS",
+  Sui: "SUI",
+  TON: "TON",
+  Unknown: "UNKNOWN",
+} as const;
+export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily];
 
 // Runtime: ChainFamily.EVM → 'EVM'
 // Type: ChainFamily is 'EVM' | 'SVM' | 'APTOS' | 'SUI' | 'TON' | 'UNKNOWN'
@@ -405,14 +433,14 @@ export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily]
 function decodeExtraArgs(
   data: BytesLike,
 ):
-  | (EVMExtraArgsV1 & { _tag: 'EVMExtraArgsV1' })
-  | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
-  | undefined
+  | (EVMExtraArgsV1 & { _tag: "EVMExtraArgsV1" })
+  | (EVMExtraArgsV2 & { _tag: "EVMExtraArgsV2" })
+  | undefined;
 
 // Usage: narrow type based on _tag
-const args = decodeExtraArgs(data)
-if (args?._tag === 'EVMExtraArgsV2') {
-  console.log(args.allowOutOfOrderExecution) // TypeScript knows this exists
+const args = decodeExtraArgs(data);
+if (args?._tag === "EVMExtraArgsV2") {
+  console.log(args.allowOutOfOrderExecution); // TypeScript knows this exists
 }
 ```
 
@@ -433,10 +461,10 @@ if (args?._tag === 'EVMExtraArgsV2') {
 
 ```typescript
 // Named exports only, no default exports
-export type { ChainContext, LogFilter } from './chain.ts'
-export { EVMChain } from './evm/index.ts'
-export { encodeExtraArgs } from './extra-args.ts'
-export * from './errors/index.ts' // Star export acceptable for errors
+export type { ChainContext, LogFilter } from "./chain.ts";
+export { EVMChain } from "./evm/index.ts";
+export { encodeExtraArgs } from "./extra-args.ts";
+export * from "./errors/index.ts"; // Star export acceptable for errors
 ```
 
 ### Async Patterns
@@ -459,15 +487,17 @@ export type LogFilter = {
   // false/undefined: fetch once and return
   // true: poll continuously for new logs
   // Promise: poll until the promise resolves (cancellation)
-  watch?: boolean | Promise<unknown>
-}
+  watch?: boolean | Promise<unknown>;
+};
 
 // Continuous polling until cancelled
-const controller = new AbortController()
-const cancel$ = new Promise((resolve) => controller.signal.addEventListener('abort', resolve))
+const controller = new AbortController();
+const cancel$ = new Promise((resolve) =>
+  controller.signal.addEventListener("abort", resolve),
+);
 
 for await (const log of chain.getLogs({ watch: cancel$ })) {
-  if (shouldStop) controller.abort() // Stops iteration
+  if (shouldStop) controller.abort(); // Stops iteration
 }
 ```
 
@@ -478,19 +508,30 @@ Use `static async` factory methods instead of async constructors (which TypeScri
 ```typescript
 export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   // Private constructor - use factory methods
-  constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
-    super(network, ctx)
-    this.provider = provider
+  constructor(
+    provider: JsonRpcApiProvider,
+    network: NetworkInfo,
+    ctx?: ChainContext,
+  ) {
+    super(network, ctx);
+    this.provider = provider;
   }
 
   // Primary factory: from RPC URL
   static async fromUrl(url: string, ctx?: ChainContext): Promise<EVMChain> {
-    return this.fromProvider(await this._getProvider(url), ctx)
+    return this.fromProvider(await this._getProvider(url), ctx);
   }
 
   // Secondary factory: from existing provider
-  static async fromProvider(provider: JsonRpcApiProvider, ctx?: ChainContext): Promise<EVMChain> {
-    return new EVMChain(provider, networkInfo(Number((await provider.getNetwork()).chainId)), ctx)
+  static async fromProvider(
+    provider: JsonRpcApiProvider,
+    ctx?: ChainContext,
+  ): Promise<EVMChain> {
+    return new EVMChain(
+      provider,
+      networkInfo(Number((await provider.getNetwork()).chainId)),
+      ctx,
+    );
   }
 }
 ```
@@ -528,18 +569,18 @@ constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainConte
 New chain classes must self-register using a static initialization block:
 
 ```typescript
-import { Chain } from '../chain.ts'
-import { ChainFamily } from '../networks.ts'
-import { supportedChains } from '../supported-chains.ts'
+import { Chain } from "../chain.ts";
+import { ChainFamily } from "../networks.ts";
+import { supportedChains } from "../supported-chains.ts";
 
 export class MyChain extends Chain<typeof ChainFamily.MyChain> {
   // Auto-register when the module is evaluated; `??=` keeps a class registered before
   static {
-    supportedChains[ChainFamily.MyChain] ??= MyChain
+    supportedChains[ChainFamily.MyChain] ??= MyChain;
   }
 
-  static readonly family = ChainFamily.MyChain
-  static readonly decimals = 18 // Native token decimals
+  static readonly family = ChainFamily.MyChain;
+  static readonly decimals = 18; // Native token decimals
 
   // ... implementation
 }
@@ -558,14 +599,14 @@ This is unconditional. No format-dependent behavior. The type system enforces it
 
 ### Channel Reference
 
-| Method | Destination | Use for |
-|--------|------------|---------|
-| `ctx.output.write(...)` | always stdout | Data: JSON envelopes, log-format output, pretty section headers |
-| `ctx.output.table(...)` | always stdout | Pretty-printed key-value tables |
-| `ctx.logger.info(...)` | always stderr | Status/progress ("Waiting for...", "Fee:", "Sending...") |
-| `ctx.logger.warn(...)` | always stderr | Warnings |
-| `ctx.logger.error(...)` | always stderr | Errors |
-| `ctx.logger.debug(...)` | always stderr (when `--verbose`) | Debug diagnostics |
+| Method                  | Destination                      | Use for                                                         |
+| ----------------------- | -------------------------------- | --------------------------------------------------------------- |
+| `ctx.output.write(...)` | always stdout                    | Data: JSON envelopes, log-format output, pretty section headers |
+| `ctx.output.table(...)` | always stdout                    | Pretty-printed key-value tables                                 |
+| `ctx.logger.info(...)`  | always stderr                    | Status/progress ("Waiting for...", "Fee:", "Sending...")        |
+| `ctx.logger.warn(...)`  | always stderr                    | Warnings                                                        |
+| `ctx.logger.error(...)` | always stderr                    | Errors                                                          |
+| `ctx.logger.debug(...)` | always stderr (when `--verbose`) | Debug diagnostics                                               |
 
 ### Output Rules
 
@@ -581,36 +622,36 @@ This is unconditional. No format-dependent behavior. The type system enforces it
 
 `--format json` must emit exactly one JSON object to stdout via `ctx.output.write(JSON.stringify(...))`. `JSON.parse(stdout)` must work.
 
-| Command | Envelope shape |
-|---------|---------------|
-| `show` | `{ request, attestations?, verifications?, receipts? }` |
-| `manual-exec` | `{ request, receipt }` |
-| `get-supported-tokens` (list) | `{ feeTokens?, tokens }` |
-| `get-supported-tokens` (detail) | `{ feeTokens?, ...tokenInfo, tokenPool, ...poolConfig }` |
-| `get-supported-tokens --only-fee-tokens` | `{ feeTokens }` |
-| `parse`, `token`, `lane-latency` | Single object (no envelope needed) |
-| `search messages` | JSON array of results |
+| Command                                  | Envelope shape                                           |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `show`                                   | `{ request, attestations?, verifications?, receipts? }`  |
+| `manual-exec`                            | `{ request, receipt }`                                   |
+| `get-supported-tokens` (list)            | `{ feeTokens?, tokens }`                                 |
+| `get-supported-tokens` (detail)          | `{ feeTokens?, ...tokenInfo, tokenPool, ...poolConfig }` |
+| `get-supported-tokens --only-fee-tokens` | `{ feeTokens }`                                          |
+| `parse`, `token`, `lane-latency`         | Single object (no envelope needed)                       |
+| `search messages`                        | JSON array of results                                    |
 
 All JSONs should be stringified with `jsonStringify`, to handle bigints and circular references.
 
 ### Format Switch Pattern
 
 ```typescript
-const { output, logger } = ctx
+const { output, logger } = ctx;
 
 switch (argv.format) {
   case Format.log:
-    output.write('result =', data)         // stdout
-    break
+    output.write("result =", data); // stdout
+    break;
   case Format.pretty:
-    prettyTable.call(ctx, data)            // stdout (via output.table)
-    break
+    prettyTable.call(ctx, data); // stdout (via output.table)
+    break;
   case Format.json:
-    output.write(jsonStringify(data, 2))   // stdout
-    break
+    output.write(jsonStringify(data, 2)); // stdout
+    break;
 }
 
-logger.info('Status message')                                   // stderr (all formats)
+logger.info("Status message"); // stderr (all formats)
 ```
 
 ### Provider Logger Threading
@@ -630,7 +671,7 @@ export async function loadEvmWallet(
 Command handlers pass `ctx.logger` when calling `loadChainWallet`:
 
 ```typescript
-const [walletAddr, wallet] = await loadChainWallet(dest, argv, logger)
+const [walletAddr, wallet] = await loadChainWallet(dest, argv, logger);
 ```
 
 ## CLI Argument Guidelines
@@ -641,12 +682,12 @@ The CLI follows established patterns from industry-standard CLIs (AWS, GCP, kube
 
 Use this decision rule when adding or modifying CLI commands:
 
-| Condition | Argument Type | Rationale |
-|-----------|---------------|-----------|
-| **>2 arguments** | Named (`--option`) | Too many positionals are hard to remember |
-| **Same data type** (two addresses, two paths) | Named (`--option`) | Prevents accidental swapping |
-| **Single obvious identifier** | Positional | Natural and concise (e.g., `show <tx-hash>`) |
-| **Different types, ≤2 args** | Positional | Visually distinct, intuitive order |
+| Condition                                     | Argument Type      | Rationale                                    |
+| --------------------------------------------- | ------------------ | -------------------------------------------- |
+| **>2 arguments**                              | Named (`--option`) | Too many positionals are hard to remember    |
+| **Same data type** (two addresses, two paths) | Named (`--option`) | Prevents accidental swapping                 |
+| **Single obvious identifier**                 | Positional         | Natural and concise (e.g., `show <tx-hash>`) |
+| **Different types, ≤2 args**                  | Positional         | Visually distinct, intuitive order           |
 
 **The "Swap Test":** If swapping two adjacent positional arguments produces valid syntax but incorrect behavior, use named arguments instead.
 
@@ -682,12 +723,12 @@ yargs supports required named arguments via `demandOption: true`. This is standa
 
 ### Alias Conventions
 
-| Pattern | Rule | Example |
-|---------|------|---------|
-| Short aliases | Single lowercase letter for common options | `-s` for `--source`, `-r` for `--router` |
-| Word aliases | Intuitive words for frequently-used options | `--to` for `--receiver` |
-| No alias | For rarely-typed options (addresses, paths) | `--fee-token` with no short form |
-| Avoid conflicts | Check global options before adding aliases | Global `--rpc` exists, so don't use `-r` globally |
+| Pattern         | Rule                                        | Example                                           |
+| --------------- | ------------------------------------------- | ------------------------------------------------- |
+| Short aliases   | Single lowercase letter for common options  | `-s` for `--source`, `-r` for `--router`          |
+| Word aliases    | Intuitive words for frequently-used options | `--to` for `--receiver`                           |
+| No alias        | For rarely-typed options (addresses, paths) | `--fee-token` with no short form                  |
+| Avoid conflicts | Check global options before adding aliases  | Global `--rpc` exists, so don't use `-r` globally |
 
 **Important:** Always check global options before adding aliases to command-specific options.
 
@@ -700,13 +741,13 @@ yargs supports required named arguments via `demandOption: true`. This is standa
 
 ```typescript
 // ✅ Good
-describe: 'Source chain: chainId, selector, or name'
-describe: 'Gas limit for receiver callback; defaults to ramp config'
-describe: 'Router contract address on source'
+describe: "Source chain: chainId, selector, or name";
+describe: "Gas limit for receiver callback; defaults to ramp config";
+describe: "Router contract address on source";
 
 // ❌ Avoid
-describe: 'Specify the source chain'  // Starts with verb, less scannable
-describe: 'Gas limit'  // Too terse, no context
+describe: "Specify the source chain"; // Starts with verb, less scannable
+describe: "Gas limit"; // Too terse, no context
 ```
 
 ### Adding Examples
@@ -729,35 +770,33 @@ Use yargs `.example()` to show common usage patterns:
 ### Command Structure Template
 
 ```typescript
-export const command = 'mycommand'  // No positionals for >2 args or same-type args
-export const describe = 'Brief description of what the command does'
+export const command = "mycommand"; // No positionals for >2 args or same-type args
+export const describe = "Brief description of what the command does";
 
 export const builder = (yargs: Argv) =>
   yargs
     // Required options first
-    .option('required-option', {
-      alias: 'x',
-      type: 'string',
+    .option("required-option", {
+      alias: "x",
+      type: "string",
       demandOption: true,
-      describe: 'What this option represents',
+      describe: "What this option represents",
     })
     // Optional options grouped by category
     .options({
-      'optional-option': {
-        alias: 'o',
-        type: 'string',
-        describe: 'What this option represents (default: xyz)',
+      "optional-option": {
+        alias: "o",
+        type: "string",
+        describe: "What this option represents (default: xyz)",
       },
     })
     // Validation
     .check((argv) => {
       // Custom validation logic
-      return true
+      return true;
     })
     // Examples
-    .example([
-      ['ccip-cli mycommand -x value', 'Description of example'],
-    ])
+    .example([["ccip-cli mycommand -x value", "Description of example"]]);
 ```
 
 ### Validation
@@ -778,13 +817,13 @@ Use `.check()` for custom validation with helpful error messages:
 
 ### Reference: Current Command Patterns
 
-| Command | Pattern | Rationale |
-|---------|---------|-----------|
-| `show <tx-hash>` | Single positional | One obvious identifier |
-| `parse <data>` | Single positional | One obvious identifier |
-| `manualExec <tx-hash>` | Single positional | One obvious identifier |
-| `send -s <source> -d <dest> -r <router>` | All named | >2 args, source/dest are same type |
-| `laneLatency <source> <dest>` | Two positionals | Both are network names (human-readable, distinct from hex) |
+| Command                                  | Pattern           | Rationale                                                  |
+| ---------------------------------------- | ----------------- | ---------------------------------------------------------- |
+| `show <tx-hash>`                         | Single positional | One obvious identifier                                     |
+| `parse <data>`                           | Single positional | One obvious identifier                                     |
+| `manualExec <tx-hash>`                   | Single positional | One obvious identifier                                     |
+| `send -s <source> -d <dest> -r <router>` | All named         | >2 args, source/dest are same type                         |
+| `laneLatency <source> <dest>`            | Two positionals   | Both are network names (human-readable, distinct from hex) |
 
 ## Pull Requests
 
