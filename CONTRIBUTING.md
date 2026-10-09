@@ -61,12 +61,19 @@ the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in 
   exercises the swap.
 - **Fork swaps** — advisories with no version to pin to, where the fix lives in a
   maintained fork of the same code: `bigint-buffer` → `@trufflesuite/bigint-buffer`
-  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles),
-  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS), and `braces` →
-  `@dieub/braces-depth-guard@3.0.3-pn.0` (GHSA-vfj7-8cjw-p6xm, stack exhaustion). The
-  braces swap is pinned exactly: its tarball diff against pristine `3.0.3` is only a
-  `MAX_DEPTH: 100` nesting guard in `parse`/`compile`/`expand`, and upstream's own mocha
-  suite passes at the same 852/42 as pristine on current Node.
+  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles) and
+  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS). `braces`
+  (GHSA-vfj7-8cjw-p6xm, stack exhaustion) has no fixed release at all, so it is vendored
+  instead: [`scripts/vendor/braces-depth-guard`](scripts/vendor/braces-depth-guard) is
+  pristine `3.0.3` plus a `MAX_DEPTH: 100` guard in `parse`/`compile`/`expand`, packaged
+  as `3.0.4` — a synthetic version on purpose, because the CI Dependency Review workflow
+  compares versions naively and rejected the prerelease-versioned
+  `@dieub/braces-depth-guard` fork that inspired the patch (`npm audit` itself accepts
+  prereleases; the vendored copy clears both scanners). The root `fill-range`
+  devDependency exists for the vendored copy: npm does not install the dependencies of
+  `file:` forks. Its README documents the provenance, the verification, and how to
+  retire the override once upstream ships the fix — docusaurus 4 also drops the whole
+  braces chain natively.
 - **The faker stub** — `postman-collection` (the docs toolchain's OpenAPI→Postman
   converter, via `docusaurus-plugin-openapi-docs`) is the last release of its line: it
   pins `@faker-js/faker@5.5.3` exactly and reads the pre-v8 API off it at import time,

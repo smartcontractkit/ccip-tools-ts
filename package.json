@@ -31,6 +31,7 @@
     "@typescript/native": "npm:typescript@7.0.2",
     "brace-expansion": "5.0.12",
     "c8": "^12.0.0",
+    "fill-range": "^7.1.1",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
     "oxlint-tsgolint": "7.0.2003",
@@ -38,7 +39,7 @@
     "yaml": "2.9.1"
   },
   "overrides": {
-    "braces": "npm:@dieub/braces-depth-guard@3.0.3-pn.0",
+    "braces": "file:scripts/vendor/braces-depth-guard",
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
     "image-size": "npm:@localnerve/image-size@^2.1.4",
     "postman-collection": {
