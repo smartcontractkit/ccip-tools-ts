@@ -89,11 +89,8 @@ export class SetSiloRebalancer extends EVMOperation<SetSiloRebalancerParams> {
    * Validates the pool, lane and rebalancer before any RPC. A zero `rebalancer` passes here: only
    * the pool's version decides whether it is allowed.
    */
-  protected override validate({
-    poolAddress,
-    remoteChainSelector,
-    rebalancer,
-  }: SetSiloRebalancerParams): void {
+  protected override prepare(params: SetSiloRebalancerParams): SetSiloRebalancerParams {
+    const { poolAddress, remoteChainSelector, rebalancer } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateUint64(this.name, 'remoteChainSelector', remoteChainSelector)
     if (remoteChainSelector === 0n)
@@ -103,6 +100,7 @@ export class SetSiloRebalancer extends EVMOperation<SetSiloRebalancerParams> {
         '0 designates the unsiloed bucket, which the pool rejects here with ChainNotSiloed; use setRebalancer',
       )
     validateAddress(this.name, 'rebalancer', rebalancer)
+    return params
   }
 
   /**
