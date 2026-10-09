@@ -9,7 +9,14 @@ import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import { ADVANCED_POOL_HOOKS_INTERFACE } from '../../advanced-pool-hooks/contracts.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_FAMILIES,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type ApplyAllowlistUpdatesParams,
   ApplyAllowlistUpdates,
@@ -31,9 +38,10 @@ const REFERENCE = new Interface([
 const DATA = REFERENCE.encodeFunctionData('applyAllowListUpdates', [REMOVES, ADDS])
 
 /** Pool types reporting each ABI family, for the `typeAndVersion` the stub answers with. */
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 const LEGACY_VERSIONS = [
@@ -42,10 +50,6 @@ const LEGACY_VERSIONS = [
   TokenPoolVersion.V1_6_0,
   TokenPoolVersion.V1_6_1,
 ] as const
-
-/** 1.6.0 shipped only the siloed pool, so a 1.6.0 stub reports that (LockRelease-family) type. */
-const typeAt = (version: TokenPoolVersion) =>
-  version === TokenPoolVersion.V1_6_0 ? 'SiloedLockReleaseTokenPool' : undefined
 
 /**
  * EVMChain stub: reports `type version` from `typeAndVersion`. The allowlist holder answers
@@ -79,7 +83,7 @@ function stubChain({
   allowlist?: string[]
   onCall?: () => void
 } = {}): EVMChain {
-  const pool = TOKEN_POOL_INTERFACES[family][version]
+  const pool = getTokenPoolInterface(POOL_TYPE[family], version)
   const v2 = version === TokenPoolVersion.V2_0_0
   const holder = v2
     ? {
@@ -159,10 +163,10 @@ function generate(chain: EVMChain, overrides: Partial<ApplyAllowlistUpdatesParam
 describe('ApplyAllowlistUpdates (cct/evm)', () => {
   describe('generate', () => {
     for (const version of LEGACY_VERSIONS) {
-      for (const family of ['BurnMint', 'LockRelease'] as const) {
-        if (version === TokenPoolVersion.V1_6_0 && family === 'BurnMint') continue
+      // every family that shipped at this version: 1.6.0 shipped only the siloed pool
+      for (const family of TOKEN_POOL_FAMILIES.filter((f) => version in TOKEN_POOL_INTERFACES[f])) {
         it(`encodes applyAllowListUpdates(removes, adds) for a ${family} ${version} pool`, async () => {
-          const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
+          const unsigned = await generate(stubChain({ family, version }))
           const tx = unsigned.transactions[0]!
 
           assert.equal(unsigned.family, ChainFamily.EVM)
@@ -499,8 +503,8 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
   describe('version dispatch', () => {
     for (const version of LEGACY_VERSIONS) {
       it(`supports ${version}`, async () => {
-        const family = version === TokenPoolVersion.V1_6_0 ? 'LockRelease' : 'BurnMint'
-        const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
+        const family = version === TokenPoolVersion.V1_6_0 ? 'SiloedLockRelease' : 'BurnMint'
+        const unsigned = await generate(stubChain({ family, version }))
         assert.equal(unsigned.transactions[0]!.data, DATA)
       })
     }

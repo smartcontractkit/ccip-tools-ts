@@ -12,6 +12,7 @@ import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type DeployArtifact, EVMDeployOperation } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress, validateUint8 } from '../../validate.ts'
 import {
+  type BurnMintTokenPoolType,
   type DeployableTokenPoolType,
   type TokenPoolFamily,
   getTokenPoolArtifact,
@@ -22,11 +23,14 @@ import {
 /** Deployable pool types + their creation bytecode/artifact live in `../contracts.ts`. */
 export type { DeployableTokenPoolType }
 
-/** Fields shared by every deployable token pool. */
-interface DeployTokenPoolBaseParams {
+/** Fields shared by every deployable token pool: the `TokenPool` base constructor plus `sender`. */
+type DeployTokenPoolBaseParams = {
   /** Non-zero address of the token the pool manages. */
   token: string
-  /** The token's `decimals` (uint8). */
+  /**
+   * The token's `decimals` (uint8). Must equal the token's on-chain `decimals()`: the constructor
+   * checks it and reverts `InvalidDecimalArgs` on a mismatch.
+   */
   localTokenDecimals: number
   /** Non-zero RMN proxy address. */
   rmnProxy: string
@@ -43,20 +47,20 @@ interface DeployTokenPoolBaseParams {
   sender?: string
 }
 
-/** Params for a burn-* mint pool — the burn family shares one constructor shape. */
-export interface DeployBurnMintTokenPoolParams extends DeployTokenPoolBaseParams {
-  type: Exclude<DeployableTokenPoolType, 'LockReleaseTokenPool'>
+/** Params for a burn-* mint pool: the `TokenPool` base constructor, unchanged. */
+export type DeployBurnMintTokenPoolParams = DeployTokenPoolBaseParams & {
+  type: Extract<DeployableTokenPoolType, BurnMintTokenPoolType>
 }
 
 /**
- * Params for a `LockReleaseTokenPool` — the burn constructor plus `lockbox`.
+ * Params for a `LockReleaseTokenPool`: the `TokenPool` base constructor plus `lockbox`.
  *
  * @remarks `lockbox` must be a pre-deployed `ERC20LockBox` for the *same* `token` (the constructor
  * calls `lockbox.isTokenSupported(token)`). Sequence: deployToken → deployLockbox → deployTokenPool
  * (this) → updateLockboxAuthorizedCallers (`addedCallers: [pool]`, plus whoever funds it) → setPool →
  * configure lanes → depositToLockbox, which a v2.0.0 pool cannot release without.
  */
-export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBaseParams {
+export type DeployLockReleaseTokenPoolParams = DeployTokenPoolBaseParams & {
   type: 'LockReleaseTokenPool'
   /**
    * Lockbox address; required and must be non-zero — the v2.0.0 constructor reverts on the zero
@@ -70,16 +74,39 @@ export interface DeployLockReleaseTokenPoolParams extends DeployTokenPoolBasePar
 }
 
 /**
- * Parameters for {@link DeployTokenPool}, discriminated on `type`: the burn-* variants share one
- * constructor; `LockReleaseTokenPool` additionally requires `lockbox` (a compile-time guarantee).
+ * Params for a `SiloedLockReleaseTokenPool`: the `TokenPool` base constructor, with no `lockbox`.
+ *
+ * @remarks Lock/release, but escrows per remote chain: lockboxes are bound after deploy, per lane,
+ * by the pool owner's `configureLockBoxes([{ remoteChainSelector, lockBox }])`, each an
+ * `ERC20LockBox` for the *same* `token` (it calls `lockBox.isTokenSupported(token)`). Lanes may
+ * share a lockbox (shared liquidity) or each get their own (siloed). Sequence: deployToken →
+ * deployTokenPool (this) → deployLockbox (one per silo) → updateLockboxAuthorizedCallers on each
+ * (`addedCallers: [pool]`, plus whoever funds it) → `configureLockBoxes` (no SDK op yet) →
+ * setPool → configure lanes → depositToLockbox per lockbox. A lane with no lockbox reverts
+ * `LockBoxNotConfigured` on every transfer.
  */
-export type DeployTokenPoolParams = DeployBurnMintTokenPoolParams | DeployLockReleaseTokenPoolParams
+export type DeploySiloedLockReleaseTokenPoolParams = DeployTokenPoolBaseParams & {
+  type: 'SiloedLockReleaseTokenPool'
+}
+
+/**
+ * Parameters for {@link DeployTokenPool}, discriminated on `type`: the burn-* variants and
+ * `SiloedLockReleaseTokenPool` take the `TokenPool` base constructor; only `LockReleaseTokenPool`
+ * takes (and requires) `lockbox`, a compile-time guarantee.
+ */
+export type DeployTokenPoolParams =
+  | DeployBurnMintTokenPoolParams
+  | DeployLockReleaseTokenPoolParams
+  | DeploySiloedLockReleaseTokenPoolParams
 
 /** Encodes a v2.0.0 pool constructor into init-code args for a given ABI family. */
 type TokenPoolConstructorEncoder = (iface: Interface, p: DeployTokenPoolParams) => string
 
-/** Burn-* family constructor: `(token, localTokenDecimals, advancedPoolHooks, rmnProxy, router)`. */
-const encodeBurnMintTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
+/**
+ * The `TokenPool` base constructor, taken as is by the burn-* and siloed pools:
+ * `(token, localTokenDecimals, advancedPoolHooks, rmnProxy, router)`.
+ */
+const encodeBaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
   iface.encodeDeploy([
     p.token,
     p.localTokenDecimals,
@@ -88,7 +115,7 @@ const encodeBurnMintTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.router,
   ])
 
-/** LockRelease constructor: the burn-* args plus `lockbox` (only that variant carries it). */
+/** LockRelease constructor: the base args plus `lockbox` (only that variant carries it). */
 const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
   iface.encodeDeploy([
     p.token,
@@ -103,10 +130,14 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
 export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   readonly name = 'deployTokenPool'
 
-  /** Constructor encoder per ABI {@link TokenPoolFamily}; `type` narrows to its family. */
+  /**
+   * Constructor encoder per ABI {@link TokenPoolFamily}; `type` narrows to its family.
+   * `SiloedLockRelease` takes the base constructor (no `lockbox`), as BurnMint does.
+   */
   private readonly encoders: Record<TokenPoolFamily, TokenPoolConstructorEncoder> = {
-    BurnMint: encodeBurnMintTokenPool,
+    BurnMint: encodeBaseTokenPool,
     LockRelease: encodeLockReleaseTokenPool,
+    SiloedLockRelease: encodeBaseTokenPool,
   }
 
   /** Validates the constructor params before building init-code. */

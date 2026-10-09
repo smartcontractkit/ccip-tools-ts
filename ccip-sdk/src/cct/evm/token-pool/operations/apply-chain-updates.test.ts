@@ -10,7 +10,12 @@ import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import '../../../../solana/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 
 const { V1_5_0, V1_5_1, V1_6_0, V1_6_1, V2_0_0 } = TokenPoolVersion
@@ -113,10 +118,11 @@ function validParams(overrides: Record<string, unknown> = {}): ApplyChainUpdates
   }
 }
 
-/** Pool contract type reported per ABI family, both of which exist at every supported version. */
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+/** Pool contract type reported per ABI family. */
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -126,7 +132,7 @@ const POOL_TYPE: Record<TokenPoolFamily, string> = {
  */
 function poolStateReads(version: TokenPoolVersion, family: TokenPoolFamily): Map<string, string> {
   const responses = new Map<string, string>()
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   const add = (fn: string, values: unknown[]) =>
     responses.set(iface.getFunction(fn)!.selector, iface.encodeFunctionResult(fn, values))
 
@@ -165,7 +171,7 @@ function stubChain(
   let probes = 0
   const responses = poolStateReads(version, family)
   if (owner !== OWNER) {
-    const iface = TOKEN_POOL_INTERFACES[family][version]
+    const iface = getTokenPoolInterface(POOL_TYPE[family], version)
     responses.set(
       iface.getFunction('owner')!.selector,
       iface.encodeFunctionResult('owner', [owner]),
@@ -823,8 +829,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         await assert.rejects(
           () =>
             op.generate(
-              stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
-                .chain,
+              stubChain(TokenPoolVersion.V1_6_0, 'SiloedLockRelease').chain,
               validParams({
                 chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: limit }],
               }),
@@ -871,8 +876,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
     it('floor-matches a siloed v1.6.0 pool to the v1.5.1 shape', async () => {
       const valid = { enabled: true, capacity: 10n, rate: 9n } as const
       const unsigned = await op.generate(
-        stubChain(TokenPoolVersion.V1_6_0, 'LockRelease', OWNER, 'SiloedLockReleaseTokenPool')
-          .chain,
+        stubChain(TokenPoolVersion.V1_6_0, 'SiloedLockRelease').chain,
         validParams({
           remoteChainSelectorsToRemove: [],
           chainsToAdd: [{ ...addEntry(), inboundRateLimiterConfig: valid }],
@@ -965,7 +969,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       },
       {
         type: 'SiloedLockReleaseTokenPool',
-        family: 'LockRelease',
+        family: 'SiloedLockRelease',
         versions: [V1_6_0, V1_6_1, V2_0_0],
       },
     ] as const satisfies ReadonlyArray<{

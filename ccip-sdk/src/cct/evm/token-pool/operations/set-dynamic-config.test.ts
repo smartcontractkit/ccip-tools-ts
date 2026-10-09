@@ -8,7 +8,13 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { type SetDynamicConfigParams, SetDynamicConfig } from './set-dynamic-config.ts'
 
 const POOL = '0x' + '11'.repeat(20)
@@ -32,9 +38,10 @@ const dataFor = (router: string, rateLimitAdmin: string, feeAdmin: string) =>
 const DATA = dataFor(ROUTER, RATE_LIMIT_ADMIN, FEE_ADMIN)
 
 /** Pool type reported by `typeAndVersion` for each ABI family. */
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -53,7 +60,7 @@ function stubChain({
   owner?: string
   onCall?: (selector?: string) => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

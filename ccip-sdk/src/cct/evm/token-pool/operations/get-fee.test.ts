@@ -7,16 +7,23 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { encodeFinality } from '../../../../extra-args.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { type GetFeeParams, GetFee } from './get-fee.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const SELECTOR = 16015286601757825753n
 const IFACE = TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0]
 const FEE = [10n, 100_000n, 32n, 25n, true]
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 function stubChain({
@@ -28,7 +35,7 @@ function stubChain({
   version?: TokenPoolVersion
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

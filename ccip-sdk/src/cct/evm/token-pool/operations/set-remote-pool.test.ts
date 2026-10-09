@@ -15,6 +15,7 @@ import {
   TOKEN_POOL_INTERFACES,
   TokenPoolVersion,
   getTokenPoolFamily,
+  getTokenPoolInterface,
 } from '../contracts.ts'
 import { type SetRemotePoolParams, SetRemotePool } from './set-remote-pool.ts'
 
@@ -90,7 +91,7 @@ function stubChain({
   owner?: string
   seen?: Calls
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
+  const iface = getTokenPoolInterface(type, version)
   const responses = new Map(
     Object.entries(poolReads(version, type, owner)).map(([fn, values]) => [
       iface.getFunction(fn)!.selector,
@@ -293,15 +294,10 @@ describe('SetRemotePool (cct/evm)', () => {
     })
 
     it('has no setRemotePool in any post-1.5.0 vendored ABI', () => {
-      for (const version of UNSUPPORTED) {
-        for (const family of ['BurnMint', 'LockRelease'] as const) {
-          assert.equal(
-            TOKEN_POOL_INTERFACES[family][version].getFunction('setRemotePool'),
-            null,
-            `${family} ${version}`,
-          )
-        }
-      }
+      for (const [family, versions] of Object.entries(TOKEN_POOL_INTERFACES))
+        for (const [version, iface] of Object.entries(versions))
+          if (version !== TokenPoolVersion.V1_5_0)
+            assert.equal(iface.getFunction('setRemotePool'), null, `${family} ${version}`)
     })
   })
 

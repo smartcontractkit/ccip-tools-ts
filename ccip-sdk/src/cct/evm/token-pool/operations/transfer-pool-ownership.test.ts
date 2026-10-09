@@ -8,7 +8,14 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_FAMILIES,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type TransferPoolOwnershipParams,
   TransferPoolOwnership,
@@ -28,9 +35,10 @@ const IFACE = new Interface(['function transferOwnership(address to)'])
 const dataFor = (to: string) => IFACE.encodeFunctionData('transferOwnership', [to])
 
 /** Pool type reported by `typeAndVersion` for each ABI family. */
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -52,7 +60,7 @@ function stubChain({
   type?: string
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
@@ -107,17 +115,13 @@ function generate(chain: EVMChain, overrides: Partial<TransferPoolOwnershipParam
 /** Every pool version: `transferOwnership(address)` survived unchanged into 2.0.0. */
 const VERSIONS = Object.values(TokenPoolVersion)
 
-/** 1.6.0 shipped only the siloed pool, so a 1.6.0 stub reports that (LockRelease-family) type. */
-const typeAt = (version: TokenPoolVersion) =>
-  version === TokenPoolVersion.V1_6_0 ? 'SiloedLockReleaseTokenPool' : undefined
-
 describe('TransferPoolOwnership (cct/evm)', () => {
   describe('generate', () => {
     for (const version of VERSIONS) {
-      for (const family of ['BurnMint', 'LockRelease'] as const) {
-        if (version === TokenPoolVersion.V1_6_0 && family === 'BurnMint') continue
+      // every family that shipped at this version: 1.6.0 shipped only the siloed pool
+      for (const family of TOKEN_POOL_FAMILIES.filter((f) => version in TOKEN_POOL_INTERFACES[f])) {
         it(`encodes transferOwnership(newOwner) for a ${family} ${version} pool`, async () => {
-          const unsigned = await generate(stubChain({ family, version, type: typeAt(version) }))
+          const unsigned = await generate(stubChain({ family, version }))
           const tx = unsigned.transactions[0]!
 
           assert.equal(unsigned.family, ChainFamily.EVM)

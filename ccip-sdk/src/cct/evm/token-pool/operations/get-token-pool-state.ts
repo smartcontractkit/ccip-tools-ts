@@ -108,14 +108,14 @@ export type TokenPoolStateV2_0_0 =
  */
 export type GetTokenPoolStateResult = LegacyTokenPoolState | TokenPoolStateV2_0_0
 
-/** The pre-v2.0.0 getters every legacy version declares in both families. */
+/** The pre-v2.0.0 getters every legacy version declares in every family. */
 type LegacyTokenPoolGetters = Pick<
   TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
   'getToken' | 'owner' | 'getRouter' | 'getRmnProxy' | 'getRateLimitAdmin' | 'getSupportedChains'
 >
 
 /**
- * The v2.0.0 getters both families declare identically: a lock/release handle satisfies this too,
+ * The v2.0.0 getters every family declares identically: a lock/release handle satisfies this too,
  * while `getLockBox` stays out of reach of {@link readTokenPoolV2_0_0}.
  */
 type TokenPoolGettersV2_0_0 = Pick<
@@ -170,7 +170,7 @@ async function readLegacyTokenPool(
   }
 }
 
-/** Reads the v2.0.0 getters both families share, leaving each caller to add its own type field. */
+/** Reads the v2.0.0 getters every family shares, leaving each caller to add its own type field. */
 async function readTokenPoolV2_0_0(
   pool: TokenPoolGettersV2_0_0,
   poolAddress: string,

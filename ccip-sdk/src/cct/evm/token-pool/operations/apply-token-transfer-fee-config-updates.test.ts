@@ -8,7 +8,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type ApplyTokenTransferFeeConfigUpdatesParams,
   ApplyTokenTransferFeeConfigUpdates,
@@ -34,9 +39,10 @@ const REFERENCE = new Interface([
   'function applyTokenTransferFeeConfigUpdates((uint64 remoteChainSelector, (uint32 destGasOverhead, uint32 destBytesOverhead, uint32 finalityFeeUSDCents, uint32 fastFinalityFeeUSDCents, uint16 finalityTransferFeeBps, uint16 fastFinalityTransferFeeBps, bool isEnabled) tokenTransferFeeConfig)[] updates, uint64[] disables)',
 ])
 const DATA = REFERENCE.encodeFunctionData('applyTokenTransferFeeConfigUpdates', [UPDATES, DISABLES])
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 function stubChain({
@@ -50,7 +56,7 @@ function stubChain({
   owner?: string
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {

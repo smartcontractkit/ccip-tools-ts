@@ -8,7 +8,12 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { type SetRateLimitAdminParams, SetRateLimitAdmin } from './set-rate-limit-admin.ts'
 
 const POOL = '0x' + '11'.repeat(20)
@@ -25,9 +30,10 @@ const IFACE = new Interface(['function setRateLimitAdmin(address rateLimitAdmin)
 const dataFor = (admin: string) => IFACE.encodeFunctionData('setRateLimitAdmin', [admin])
 
 /** Pool type reported by `typeAndVersion` for each ABI family. */
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -46,7 +52,7 @@ function stubChain({
   owner?: string
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

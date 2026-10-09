@@ -6,16 +6,22 @@ import { toBeHex } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type GetAllowedFinalityConfigParams,
   GetAllowedFinalityConfig,
 } from './get-allowed-finality-config.ts'
 
 const POOL = '0x' + '11'.repeat(20)
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 function stubChain({
@@ -29,7 +35,7 @@ function stubChain({
   allowedFinality?: string
   onCall?: () => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], TokenPoolVersion.V2_0_0)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {
