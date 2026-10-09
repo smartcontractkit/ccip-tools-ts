@@ -2,6 +2,9 @@
  * getRebalancer — reads the account a LockRelease pool accepts liquidity calls from
  * (v1.5.0–v1.6.1).
  *
+ * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer; a lane's own is
+ * read with {@link GetChainRebalancer}.
+ *
  * @packageDocumentation
  */
 

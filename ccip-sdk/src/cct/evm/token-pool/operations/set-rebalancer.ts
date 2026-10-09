@@ -8,6 +8,9 @@
  * @remarks **Removed in v2.0.0**, which authorizes liquidity on the pool's external
  * `ERC20LockBox` rather than through a pool-level role.
  *
+ * @remarks On a `SiloedLockReleaseTokenPool` this sets the *unsiloed* rebalancer; a silo's own is
+ * set with {@link SetSiloRebalancer}, and silos are created with {@link UpdateSiloDesignations}.
+ *
  * @packageDocumentation
  */
 
