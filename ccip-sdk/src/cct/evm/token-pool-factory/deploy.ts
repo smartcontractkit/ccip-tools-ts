@@ -28,11 +28,7 @@ import { ChainFamily } from '../../../networks.ts'
 import { encodeAddressToAny } from '../../../utils.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
 import { parseRemoteAddress } from '../../remote-address.ts'
-import {
-  type DeployableTokenPoolType,
-  getTokenPoolArtifact,
-  getTokenPoolFamily,
-} from '../token-pool/contracts.ts'
+import { type DeployableTokenPoolType, getTokenPoolArtifact } from '../token-pool/contracts.ts'
 import { TokenVersion, getTokenArtifact } from '../token/contracts.ts'
 import {
   validateAddress,
@@ -63,6 +59,32 @@ export type FactoryTokenPoolType = Extract<
   DeployableTokenPoolType,
   'BurnMintTokenPool' | 'LockReleaseTokenPool'
 >
+
+/**
+ * The factory {@link FactoryPoolFamily} per supported pool type. Exhaustive over
+ * {@link FactoryTokenPoolType}, so the factory never sees the `SiloedLockRelease` family it has no
+ * `PoolType` for.
+ */
+const FACTORY_POOL_FAMILY = {
+  BurnMintTokenPool: 'BurnMint',
+  LockReleaseTokenPool: 'LockRelease',
+} as const satisfies Record<FactoryTokenPoolType, FactoryPoolFamily>
+
+/**
+ * The {@link FactoryPoolFamily} for `type`, guarded at runtime for untyped callers.
+ * @param operation - Operation name, for the error.
+ * @param type - Pool type to deploy through the factory.
+ * @throws {@link CCTParamsInvalidError} if `type` is not a {@link FactoryTokenPoolType}
+ */
+function getFactoryPoolFamily(operation: string, type: FactoryTokenPoolType): FactoryPoolFamily {
+  if (!Object.hasOwn(FACTORY_POOL_FAMILY, type))
+    throw new CCTParamsInvalidError(
+      operation,
+      'type',
+      `the factory deploys only ${Object.keys(FACTORY_POOL_FAMILY).join(' or ')}, got ${String(type)}`,
+    )
+  return FACTORY_POOL_FAMILY[type]
+}
 
 /** Per-remote-chain addressing the factory needs to configure or predict the remote pool. */
 export type FactoryRemoteChainConfig = {
@@ -313,7 +335,7 @@ export function deployTokenAndTokenPoolViaFactoryUnchecked(
   if (params.token.preMintRecipient !== undefined)
     validateAddress(NAME_DEPLOY_BOTH, 'token.preMintRecipient', params.token.preMintRecipient)
 
-  const family = getTokenPoolFamily(params.type)
+  const family = getFactoryPoolFamily(NAME_DEPLOY_BOTH, params.type)
   const owner = params.token.owner ?? params.futureOwner ?? params.sender
   const tokenInitCode = buildFactoryTokenInitCode(params.factory, owner, params.token)
   const tokenPoolInitCode = getTokenPoolArtifact(params.type).bytecode
@@ -371,7 +393,7 @@ export function deployTokenPoolWithExistingTokenViaFactoryUnchecked(
     validateAddress(NAME_DEPLOY_POOL, 'futureOwner', params.futureOwner)
   if (params.lockBox !== undefined) validateAddress(NAME_DEPLOY_POOL, 'lockBox', params.lockBox)
 
-  const family = getTokenPoolFamily(params.type)
+  const family = getFactoryPoolFamily(NAME_DEPLOY_POOL, params.type)
   const tokenPoolInitCode = getTokenPoolArtifact(params.type).bytecode
   assertNonEmptyInitCode(NAME_DEPLOY_POOL, 'tokenPoolInitCode', tokenPoolInitCode)
 

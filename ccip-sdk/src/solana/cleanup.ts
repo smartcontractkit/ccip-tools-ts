@@ -13,9 +13,14 @@ import { memoize } from 'micro-memoize'
 import type { WithLogger } from '../types.ts'
 import { sleep } from '../utils.ts'
 import { newProgram } from './coder.ts'
+import { BUFFER_EXECUTION_INPUTS_DISCRIMINATOR, closeExecutionInputsBufferIx } from './exec-v2.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import type { Wallet } from './types.ts'
-import { getExecutionReportBufferPda, simulateAndSendTxs } from './utils.ts'
+import {
+  getExecutionInputsBufferPda,
+  getExecutionReportBufferPda,
+  simulateAndSendTxs,
+} from './utils.ts'
 import type { SolanaChain } from './index.ts'
 
 /**
@@ -101,12 +106,37 @@ export async function cleanUpBuffers(
     }
   }
 
+  // closes a buffer through `close`, unless it was seen before or is already closed
+  const closeBuffer = async (bufferId: Buffer, buffer: PublicKey, close: () => Promise<string>) => {
+    if (seenAccs.has(buffer.toBase58())) return
+    seenAccs.add(buffer.toBase58())
+
+    const accInfo = await connection.getAccountInfo(buffer)
+    if (!accInfo) {
+      logger.debug(
+        'Buffer with bufferId',
+        hexlify(bufferId),
+        'at',
+        buffer.toBase58(),
+        'already closed',
+      )
+      return
+    }
+    try {
+      const sig = await close()
+      logger.info('🗑️  Closed bufferId', hexlify(bufferId), 'at', buffer.toBase58(), ': tx =>', sig)
+    } catch (err) {
+      logger.warn('Failed to close bufferId', hexlify(bufferId), 'at', buffer.toBase58(), err)
+    }
+  }
+
   let alreadyClosed = 0
   for await (const log of ctx.getLogs({
     address: wallet.publicKey.toBase58(),
     startBlock: 0,
     topics: [
       'Instruction: BufferExecutionReport',
+      'Instruction: BufferExecutionInputs',
       'Instruction: CreateLookupTable',
       'Instruction: DeactivateLookupTable',
     ],
@@ -134,51 +164,43 @@ export async function cleanUpBuffers(
             bufferId,
             wallet.publicKey,
           )
-          if (seenAccs.has(executionReportBuffer.toBase58())) continue
-          seenAccs.add(executionReportBuffer.toBase58())
-
-          const accInfo = await connection.getAccountInfo(executionReportBuffer)
-          if (!accInfo) {
-            logger.debug(
-              'Buffer with bufferId',
-              hexlify(bufferId),
-              'at',
-              executionReportBuffer.toBase58(),
-              'already closed',
-            )
-            continue
-          }
-          const bufferingAccounts = {
-            executionReportBuffer,
-            config: PublicKey.findProgramAddressSync(
-              [Buffer.from('config')],
-              offrampProgram.programId,
-            )[0],
-            authority: wallet.publicKey,
-            systemProgram: SystemProgram.programId,
-          }
-          try {
-            const sig = await offrampProgram.methods
+          await closeBuffer(bufferId, executionReportBuffer, () =>
+            offrampProgram.methods
               .closeExecutionReportBuffer(bufferId)
-              .accounts(bufferingAccounts)
-              .rpc()
-            logger.info(
-              '🗑️  Closed bufferId',
-              hexlify(bufferId),
-              'at',
-              executionReportBuffer.toBase58(),
-              ': tx =>',
-              sig,
-            )
-          } catch (err) {
-            logger.warn(
-              'Failed to close bufferId',
-              hexlify(bufferId),
-              'at',
-              executionReportBuffer.toBase58(),
-              err,
-            )
-          }
+              .accounts({
+                executionReportBuffer,
+                config: PublicKey.findProgramAddressSync(
+                  [Buffer.from('config')],
+                  offrampProgram.programId,
+                )[0],
+                authority: wallet.publicKey,
+                systemProgram: SystemProgram.programId,
+              })
+              .rpc(),
+          )
+        }
+        break
+      }
+      case 'Instruction: BufferExecutionInputs': {
+        // CCIP 2.0 buffers: the bufferId is the first param, a fixed 32B array
+        const offramp = new PublicKey(log.address)
+        const bufferIds = tx!.tx.transaction.message.compiledInstructions
+          .filter(({ data }) =>
+            BUFFER_EXECUTION_INPUTS_DISCRIMINATOR.equals(Buffer.from(data.subarray(0, 8))),
+          )
+          .map(({ data }) => Buffer.from(data.subarray(8, 8 + 32)))
+
+        for (const bufferId of bufferIds) {
+          await closeBuffer(
+            bufferId,
+            getExecutionInputsBufferPda(offramp, bufferId, wallet.publicKey),
+            async () =>
+              (
+                await simulateAndSendTxs(ctx, wallet, {
+                  instructions: [closeExecutionInputsBufferIx(offramp, wallet.publicKey, bufferId)],
+                })
+              ).hash,
+          )
         }
         break
       }
@@ -203,10 +225,11 @@ export async function cleanUpBuffers(
           // non-deactivated have deactivationSlot=MAX_UINT64
           pendingPromises.push(closeAlt(lookupTable, Number(info.value.state.deactivationSlot)))
         } else if (
-          info.value.state.addresses.length >= 18 &&
-          info.value.state.addresses[6]!.equals(wallet.publicKey)
+          (info.value.state.addresses.length >= 18 &&
+            info.value.state.addresses[6]!.equals(wallet.publicKey)) ||
+          isExecuteV2LookupTable(info.value.state.addresses, wallet.publicKey)
         ) {
-          // the conditions above match for ALTs created for ccip manualExec
+          // the conditions above match for ALTs created for ccip manualExec (or execute_v2)
           const deactivateIx = AddressLookupTableProgram.deactivateLookupTable({
             authority: wallet.publicKey,
             lookupTable: lookupTable,
@@ -229,4 +252,12 @@ export async function cleanUpBuffers(
   }
 
   await Promise.allSettled(pendingPromises)
+}
+
+// Whether an ALT holds the accounts of an `execute_v2` signed by `authority`: its offramp's config
+// PDA first, then the offramp, and the authority right after
+function isExecuteV2LookupTable(addresses: readonly PublicKey[], authority: PublicKey): boolean {
+  if (addresses.length < 13 || !addresses[5]!.equals(authority)) return false
+  const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], addresses[4]!)
+  return config.equals(addresses[0]!)
 }

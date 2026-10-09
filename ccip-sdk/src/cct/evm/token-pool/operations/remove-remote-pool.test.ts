@@ -17,9 +17,9 @@ import { parseTypeAndVersion } from '../../../../utils.ts'
 import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type TokenPoolType,
-  TOKEN_POOL_INTERFACES,
   TokenPoolVersion,
   getTokenPoolFamily,
+  getTokenPoolInterface,
 } from '../contracts.ts'
 import { type RemoveRemotePoolParams, RemoveRemotePool } from './remove-remote-pool.ts'
 
@@ -97,7 +97,7 @@ function stubChain({
   remotesError?: Error
   seen?: Calls
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[getTokenPoolFamily(type)][version]
+  const iface = getTokenPoolInterface(type, version)
   const responses = new Map(
     Object.entries(poolReads(version, type, owner)).map(([fn, values]) => [
       iface.getFunction(fn)!.selector,

@@ -27,6 +27,7 @@ const EXPECTED = IFACE.encodeFunctionData('acceptOwnership', [])
 const POOL_TYPE: Record<TokenPoolFamily, string> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**

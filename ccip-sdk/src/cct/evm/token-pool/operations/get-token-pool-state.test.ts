@@ -10,7 +10,13 @@ import {
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import { GetTokenPoolState } from './get-token-pool-state.ts'
 
 const POOL = '0x' + '11'.repeat(20)
@@ -30,6 +36,13 @@ type Reads = Record<string, unknown[]>
 /** `getAllowedFinalityConfig` packs the FCR flag above the 16-bit FTF depth, as bytes4. */
 const FINALITY_SAFE_FLAG = 1 << 16
 const finalityConfig = (allowed: number) => toBeHex(allowed, 4)
+
+/** Pool type per ABI family, for resolving the Interface the stub encodes results with. */
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
+  BurnMint: 'BurnMintTokenPool',
+  LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
+}
 
 /**
  * EVMChain stub: `typeAndVersion` reports `typeAndVersion` (parsed the way the real chain does),
@@ -51,7 +64,7 @@ function stubChain({
   /** Decimals `getTokenInfo` reports, which pre-v2.0.0 pools read instead of a pool getter. */
   tokenDecimals?: number
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   const responses = new Map(
     Object.entries(reads).map(([fn, values]) => [
       iface.getFunction(fn)!.selector,
@@ -141,7 +154,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     // no no-arg getter in `reads`: a siloed pool declares getLockBox(uint64) instead
     const chain = stubChain({
       typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
-      family: 'LockRelease',
+      family: 'SiloedLockRelease',
       reads: READS,
     })
 
@@ -174,7 +187,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     const seen: string[] = []
     const chain = stubChain({
       typeAndVersion: 'SiloedLockReleaseTokenPool 2.0.0',
-      family: 'LockRelease',
+      family: 'SiloedLockRelease',
       reads: READS,
     })
     const provider = chain.provider as unknown as {
@@ -269,7 +282,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       // The legacy reader only calls getters TokenPool itself declares, so it serves any type.
       const chain = stubChain({
         typeAndVersion: 'SiloedLockReleaseTokenPool 1.6.1',
-        family: 'LockRelease',
+        family: 'SiloedLockRelease',
         version: TokenPoolVersion.V1_6_1,
         reads: LEGACY_READS,
       })
@@ -283,7 +296,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     it('reads a v1.6.0 siloed pool through the legacy reader', async () => {
       const chain = stubChain({
         typeAndVersion: 'SiloedLockReleaseTokenPool 1.6.0',
-        family: 'LockRelease',
+        family: 'SiloedLockRelease',
         version: TokenPoolVersion.V1_6_0,
         reads: LEGACY_READS,
       })

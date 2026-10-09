@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { ZeroAddress, getCreateAddress, makeError } from 'ethers'
+import { Interface, ZeroAddress, getCreateAddress, makeError } from 'ethers'
 
 import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import SILOED_LOCK_RELEASE_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
 import BURN_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import SILOED_LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
 import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
 
 const SENDER = '0x' + '11'.repeat(20)
@@ -36,7 +38,7 @@ const W_LOCKBOX = '0000000000000000000000006666666666666666666666666666666666666
 // Golden vectors: pinned 2.0.0 constructor-arg encodings for the fixed inputs above. Independent
 // of the SDK encoder — they guard each pool's init-code against drift. The burn-* variants share
 // the `BurnMint` constructor (token, decimals, advancedPoolHooks, rmnProxy, router); LockRelease
-// adds `lockbox`.
+// adds `lockbox`. `SiloedLockReleaseTokenPool` takes the burn-* constructor unchanged (no `lockbox`).
 const BURN_MINT_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER
 const LOCK_RELEASE_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER + W_LOCKBOX
 
@@ -74,6 +76,12 @@ const CASES: {
     },
     bytecode: LOCK_RELEASE_V2_0_0,
     ctorArgs: LOCK_RELEASE_ARGS,
+  },
+  {
+    label: 'SiloedLockReleaseTokenPool',
+    params: { ...COMMON, type: 'SiloedLockReleaseTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: SILOED_LOCK_RELEASE_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
   },
 ]
 
@@ -139,6 +147,30 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       })
       const zeroHooks = W_TOKEN + W_DECIMALS + '0'.repeat(64) + W_RMN + W_ROUTER
       assert.equal(unsigned.transactions[0]!.data, BURN_MINT_V2_0_0 + zeroHooks)
+    })
+
+    it('defaults advancedPoolHooks to the zero address for a SiloedLockReleaseTokenPool', async () => {
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+      })
+      const zeroHooks = W_TOKEN + W_DECIMALS + '0'.repeat(64) + W_RMN + W_ROUTER
+      assert.equal(unsigned.transactions[0]!.data, SILOED_LOCK_RELEASE_V2_0_0 + zeroHooks)
+    })
+
+    it('matches ethers encodeDeploy against the vendored Siloed v2.0.0 ABI (no lockbox arg)', async () => {
+      const iface = new Interface(SILOED_LOCK_RELEASE_V2_0_0_ABI)
+      assert.equal(iface.deploy.inputs.length, 5)
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+        advancedPoolHooks: HOOKS,
+      })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        SILOED_LOCK_RELEASE_V2_0_0 +
+          iface.encodeDeploy([TOKEN, 18, HOOKS, RMN_PROXY, ROUTER]).slice(2),
+      )
     })
 
     it('omits `from` when no sender is given', async () => {
@@ -246,8 +278,41 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
       )
     })
-    // `lockbox` on a burn pool is a compile-time error (the DeployTokenPoolParams union), so
-    // there's no runtime case to test.
+
+    it('runs the shared validation for a SiloedLockReleaseTokenPool', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'SiloedLockReleaseTokenPool',
+            token: ZeroAddress,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'token',
+      )
+    })
+
+    // `lockbox` on a burn pool or a `SiloedLockReleaseTokenPool` is a compile-time error (the
+    // DeployTokenPoolParams union). `npm run typecheck` enforces it: each `@ts-expect-error`
+    // fails the build if the union ever starts accepting `lockbox` for that type.
+    it('rejects `lockbox` at compile time on burn pools and SiloedLockReleaseTokenPool', () => {
+      const _burn: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+        advancedPoolHooks: HOOKS,
+        // @ts-expect-error -- burn pools take no lockbox
+        lockbox: LOCKBOX,
+      }
+      const _siloed: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+        advancedPoolHooks: HOOKS,
+        // @ts-expect-error -- Siloed lockboxes are bound per lane after deploy
+        lockbox: LOCKBOX,
+      }
+    })
   })
 
   describe('execute', () => {

@@ -12,7 +12,13 @@ import {
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
-import { type TokenPoolFamily, TOKEN_POOL_INTERFACES, TokenPoolVersion } from '../contracts.ts'
+import {
+  type TokenPoolFamily,
+  type TokenPoolType,
+  TOKEN_POOL_INTERFACES,
+  TokenPoolVersion,
+  getTokenPoolInterface,
+} from '../contracts.ts'
 import {
   type UpdateAdvancedPoolHooksParams,
   UpdateAdvancedPoolHooks,
@@ -29,9 +35,10 @@ const HASH = '0x' + 'ab'.repeat(32)
 const IFACE = new Interface(['function updateAdvancedPoolHooks(address newHook)'])
 const dataFor = (hooks: string) => IFACE.encodeFunctionData('updateAdvancedPoolHooks', [hooks])
 
-const POOL_TYPE: Record<TokenPoolFamily, string> = {
+const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',
   LockRelease: 'LockReleaseTokenPool',
+  SiloedLockRelease: 'SiloedLockReleaseTokenPool',
 }
 
 /**
@@ -54,8 +61,8 @@ function stubChain({
   hooksTypeAndVersion?: string | null
   onCall?: (selector?: string) => void
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES[family][version]
-  const v2 = TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0]
+  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
+  const v2 = getTokenPoolInterface(POOL_TYPE[family], TokenPoolVersion.V2_0_0)
   return {
     provider: {
       call: async ({ data }: { data: string }) => {

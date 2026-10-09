@@ -394,6 +394,37 @@ describe('token-pool-factory deploy — security hardening', () => {
     )
   })
 
+  it('rejects a pool type the factory has no PoolType for, for untyped callers', () => {
+    // the factory deploys only BurnMint and LockRelease; a JS caller can still pass anything
+    for (const type of ['SiloedLockReleaseTokenPool', 'BurnFromMintTokenPool']) {
+      assert.throws(
+        () =>
+          deployTokenAndTokenPoolViaFactoryUnchecked(
+            { factory: FACTORY, sender: SENDER, salt: SALT, type: type as never, token: TOKEN },
+            { rmnProxy: RMN, router: ROUTER },
+          ),
+        (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'type',
+        type,
+      )
+      assert.throws(
+        () =>
+          deployTokenPoolWithExistingTokenViaFactoryUnchecked(
+            {
+              factory: FACTORY,
+              sender: SENDER,
+              salt: SALT,
+              type: type as never,
+              token: EXISTING_TOKEN,
+              localTokenDecimals: 18,
+            },
+            { rmnProxy: RMN, router: ROUTER },
+          ),
+        (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'type',
+        type,
+      )
+    }
+  })
+
   it('futureOwner zero is allowed (factory uses msg.sender) — encoded as zero, builds fine', () => {
     const r = deployTokenAndTokenPoolViaFactoryUnchecked(
       {

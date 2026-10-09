@@ -8,6 +8,7 @@ import {
   NATIVE_MINT,
   createApproveInstruction,
   getAssociatedTokenAddressSync,
+  getMint,
 } from '@solana/spl-token'
 import {
   type AccountMeta,
@@ -16,13 +17,17 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  SendTransactionError,
 } from '@solana/web3.js'
 import { hexlify } from 'ethers'
 
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
-import { CCIPArgumentInvalidError, CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
+import {
+  CCIPSolanaExecutionBufferIncompleteError,
+  CCIPSolanaV2LaneUnavailableError,
+} from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
 import {
@@ -32,7 +37,12 @@ import {
   ExecutionState,
   MessageStatus,
 } from '../types.ts'
-import { ETHEREUM_TO_SOLANA, SOLANA_DEVNET_V2_STAGING as STAGING } from './fork.test.data.ts'
+import { executeV2 } from './exec-v2.ts'
+import {
+  ETHEREUM_TO_SOLANA,
+  SEPOLIA_TO_SOLANA_DEVNET_V2_NOEXEC as NOEXEC,
+  SOLANA_DEVNET_V2_STAGING as STAGING,
+} from './fork.test.data.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import {
@@ -42,7 +52,7 @@ import {
   resolveExecuteV2,
   resolveGetFeeV2,
 } from './resolution.ts'
-import { simulateAndSendTxs, simulateTransaction } from './utils.ts'
+import { getExecutionInputsBufferPda, simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
 // Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
@@ -464,7 +474,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     const airdropSig = await connection.requestAirdrop(wallet.publicKey, 10 * LAMPORTS_PER_SOL)
     await connection.confirmTransaction(airdropSig)
 
-    // token transfers need the sender's token account to exist, even just to quote a fee
+    // token transfers need the sender's token account to exist to send (quotes don't)
     await (
       connection as unknown as { _rpcRequest(m: string, a: unknown[]): Promise<unknown> }
     )._rpcRequest('surfnet_setTokenAccount', [
@@ -486,8 +496,8 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     const { instruction, lookupTables, metadata } = await resolveGetFeeV2(ctx(), {
       router,
       destChainSelector: STAGING.sepoliaSelector,
-      sender: wallet!.publicKey,
       message,
+      payer: wallet!.publicKey,
     })
     // the fixed deployment lookup table isn't part of resolution; token transfers need it to fit v0
     const [sendLookupTable] = await fetchLookupTables(connection!, [
@@ -722,6 +732,201 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       )
       assert.equal(hexlify(metadata.subarray(-32)), STAGING.executeMessageId)
     })
+
+    /** The landed execution's inputs, as an `ExecutionInput`. */
+    async function landedInput() {
+      const tx = await connection!.getTransaction(STAGING.executeTx, {
+        maxSupportedTransactionVersion: 0,
+      })
+      const msg = tx!.transaction.message
+      const keys = msg.getAccountKeys({ accountKeysFromLookups: tx!.meta!.loadedAddresses })
+      const landed = msg.compiledInstructions.find((ix) =>
+        keys.get(ix.programIdIndex)?.equals(offRamp),
+      )!
+      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 }>(
+        'ExecuteParams',
+        Buffer.from(landed.data).subarray(8),
+      )
+      return {
+        encodedMessage: hexlify(execInputs.encodedMessage),
+        verifications: execInputs.ccvs.map((ccv, i) => ({
+          destAddress: ccv.toBase58(),
+          ccvData: hexlify(execInputs.verifierResults[i]!),
+        })),
+      }
+    }
+
+    // The policy of a message its landed verifier results satisfied: those cover it, without any
+    // indexer or API to fetch them from
+    it('reads the verification policy of a landed execution', async () => {
+      const input = await landedInput()
+      const request = {
+        lane: {
+          sourceChainSelector: STAGING.sepoliaSelector,
+          destChainSelector: networkInfo('solana-devnet').chainSelector,
+          onRamp: '',
+          version: CCIPVersion.V2_0,
+        },
+        message: { messageId: STAGING.executeMessageId, encodedMessage: input.encodedMessage },
+        log: { blockTimestamp: 0 },
+      } as unknown as Parameters<SolanaChain['getVerifications']>[0]['request']
+
+      const result = await solanaChain!.getVerifications({
+        offRamp: STAGING.offRamp,
+        request,
+        indexer: [],
+        ccvData: Object.fromEntries(input.verifications.map((v) => [v.destAddress, v.ccvData])),
+      })
+
+      assert.ok('verificationPolicy' in result)
+      const landedCcvs = input.verifications.map(({ destAddress }) => destAddress)
+      assert.ok(result.verificationPolicy.requiredCCVs.length, 'lanes require some CCV')
+      for (const ccv of result.verificationPolicy.requiredCCVs) assert.ok(landedCcvs.includes(ccv))
+      assert.deepEqual(
+        result.verifications.map(({ destAddress }) => destAddress).sort(),
+        [...landedCcvs].sort(),
+      )
+    })
+
+    // execute_v2 skips an already executed message after resolving and checking it, closing the
+    // buffer it came from, if any: this runs every path up to the CCV verification
+    it('executes a landed message again, inline and from a buffer', async () => {
+      const input = await landedInput()
+      const ctx_ = ctx()
+
+      const inline = await executeV2(ctx_, wallet!, { offramp: offRamp, input })
+      const inlineTx = await connection!.getTransaction(inline, {
+        maxSupportedTransactionVersion: 1,
+      })
+      assert.equal(inlineTx?.meta?.err, null, 'inline execution should succeed')
+
+      const buffered = await executeV2(ctx_, wallet!, {
+        offramp: offRamp,
+        input,
+        forceBuffer: true,
+      })
+      const bufferedTx = await connection!.getTransaction(buffered, {
+        maxSupportedTransactionVersion: 1,
+      })
+      assert.equal(bufferedTx?.meta?.err, null, 'buffered execution should succeed')
+      const buffer = getExecutionInputsBufferPda(
+        offRamp,
+        Buffer.from(STAGING.executeMessageId.slice(2), 'hex'),
+        wallet!.publicKey,
+      )
+      assert.ok(
+        bufferedTx.transaction.message
+          .getAccountKeys({ accountKeysFromLookups: bufferedTx.meta!.loadedAddresses })
+          .keySegments()
+          .flat()
+          .some((key) => key.equals(buffer)),
+        'buffered execution should read the buffer',
+      )
+      assert.equal(await connection!.getAccountInfo(buffer), null, 'the buffer should be closed')
+    })
+
+    // An external signer's buffered execution, in unsigned steps: the buffering ahead, one chunk
+    // per transaction, then the execution resolved from the complete buffer
+    it('executes a landed message again from a buffer written ahead', async () => {
+      const input = await landedInput()
+      const opts = { offRamp: STAGING.offRamp, input, payer: wallet!.publicKey.toBase58() }
+      const buffer = getExecutionInputsBufferPda(
+        offRamp,
+        Buffer.from(STAGING.executeMessageId.slice(2), 'hex'),
+        wallet!.publicKey,
+      )
+
+      await assert.rejects(
+        solanaChain!.generateUnsignedExecute({ ...opts, forceBuffer: true }),
+        CCIPSolanaExecutionBufferIncompleteError,
+      )
+      const buffering = await solanaChain!.generateUnsignedExecuteBuffer(opts)
+      assert.ok(buffering.instructions.length, 'the inputs should need buffering')
+      for (const ix of buffering.instructions)
+        await simulateAndSendTxs(ctx(), wallet!, { instructions: [ix] })
+      assert.deepEqual(
+        (await solanaChain!.generateUnsignedExecuteBuffer(opts)).instructions,
+        [],
+        'the buffer should be complete',
+      )
+
+      const unsigned = await solanaChain!.generateUnsignedExecute({ ...opts, forceBuffer: true })
+      const { hash } = await simulateAndSendTxs(ctx(), wallet!, unsigned)
+      const tx = await connection!.getTransaction(hash, { maxSupportedTransactionVersion: 1 })
+      assert.equal(tx?.meta?.err, null, 'buffered execution should succeed')
+      assert.ok(
+        tx.transaction.message
+          .getAccountKeys({ accountKeysFromLookups: tx.meta!.loadedAddresses })
+          .keySegments()
+          .flat()
+          .some((key) => key.equals(buffer)),
+        'buffered execution should read the buffer',
+      )
+      assert.equal(await connection!.getAccountInfo(buffer), null, 'the buffer should be closed')
+    })
+
+    // A message sent with NO_EXECUTION_ADDRESS stays unexecuted on devnet, so the fork executes it
+    // for real: a token-only transfer, which the pool mints to the token receiver's ATA
+    describe('an unexecuted message', () => {
+      const input = { encodedMessage: NOEXEC.encodedMessage, verifications: NOEXEC.verifications }
+
+      it('reads its verification policy', async () => {
+        const request = {
+          lane: {
+            sourceChainSelector: STAGING.sepoliaSelector,
+            destChainSelector: networkInfo('solana-devnet').chainSelector,
+            onRamp: NOEXEC.onRamp,
+            version: CCIPVersion.V2_0,
+          },
+          message: { messageId: NOEXEC.messageId, encodedMessage: NOEXEC.encodedMessage },
+          log: { blockTimestamp: 0 },
+        } as unknown as Parameters<SolanaChain['getVerifications']>[0]['request']
+
+        const result = await solanaChain!.getVerifications({
+          offRamp: STAGING.offRamp,
+          request,
+          indexer: [],
+          ccvData: Object.fromEntries(NOEXEC.verifications.map((v) => [v.destAddress, v.ccvData])),
+        })
+
+        assert.ok('verificationPolicy' in result)
+        assert.ok(result.verificationPolicy.requiredCCVs.includes(STAGING.committeeVerifier))
+        assert.deepEqual(
+          result.verifications.map(({ destAddress }) => destAddress),
+          [STAGING.committeeVerifier],
+        )
+      })
+
+      it('executes it', async () => {
+        const mint = new PublicKey(NOEXEC.destToken)
+        const ata = getAssociatedTokenAddressSync(mint, new PublicKey(NOEXEC.tokenReceiver))
+        // the ATA may not exist yet: execute_v2 creates it
+        const balance = async () =>
+          BigInt(
+            (await connection!.getTokenAccountBalance(ata).catch(() => null))?.value.amount ?? 0,
+          )
+        const before = await balance()
+        // the pool converts the amount from the source token's 18 decimals
+        const { decimals } = await getMint(connection!, mint)
+
+        // Surfpool 1.5.0 ignores the compute-unit limit of v1 transactions, capping this ~270k CU
+        // execution at the 200k default; a lookup table keeps it in a v0 transaction instead
+        const execution = await solanaChain!.execute({
+          offRamp: STAGING.offRamp,
+          input,
+          wallet: wallet!,
+          forceLookupTable: true,
+        })
+
+        assert.equal(execution.receipt.messageId, NOEXEC.messageId)
+        assert.equal(execution.receipt.state, ExecutionState.Success, 'execution should succeed')
+        assert.equal(
+          (await balance()) - before,
+          (NOEXEC.amount * 10n ** BigInt(decimals)) / 10n ** 18n,
+          'tokens should reach the token receiver',
+        )
+      })
+    })
   })
 
   // SolanaChain picks the router entrypoint per message: 2.0 whenever the lane supports it
@@ -749,6 +954,24 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       })
       const { amount } = await quote({ receiver, data: '0x1337', extraArgs })
       assert.equal(fee, amount)
+    })
+
+    it('quotes a token transfer over 2.0 without a sender, at what the send charges', async () => {
+      const message = {
+        receiver,
+        data: '0x',
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount: 1n }],
+        extraArgs: legacyArgs,
+      }
+      const fee = await solanaChain!.getFee({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message,
+      })
+      const request = await solanaChain!.sendMessage(sendOpts(message))
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      assert.equal(sent.feeTokenAmount, fee, 'the send should charge the sender-less quote')
     })
 
     it('sends legacy extraArgs over 2.0', async () => {
@@ -847,47 +1070,56 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       })
 
       const v3 = { receiver, data: '0x1337', extraArgs: { finality: 'finalized' as const } }
-      const feeOpts = (message: MessageInput, sender?: PublicKey) => ({
+      const feeOpts = (message: MessageInput) => ({
         router: STAGING.router,
         destChainSelector: STAGING.sepoliaSelector,
         message,
-        ...(sender && { sender: sender.toBase58() }),
       })
 
-      it('rejects a sender off the allowlist, and a quote without the sender', async () => {
-        await setAllowlist([])
+      it("doesn't quote or send over 2.0, even for an allowlisted sender", async () => {
+        await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
 
-        await assert.rejects(
-          solanaChain!.sendMessage(sendOpts(v3)),
-          (err: unknown) =>
-            err instanceof CCIPSolanaV2LaneUnavailableError &&
-            err.context.reason === 'sender-not-allowed' &&
-            err.context.sender === wallet!.publicKey.toBase58(),
-        )
+        const allowlistEnabled = (err: unknown) =>
+          err instanceof CCIPSolanaV2LaneUnavailableError &&
+          err.context.reason === 'allowlist-enabled'
+        await assert.rejects(solanaChain!.getFee(feeOpts(v3)), allowlistEnabled)
+        await assert.rejects(solanaChain!.sendMessage(sendOpts(v3)), allowlistEnabled)
         // legacy args fall back to 1.6 instead, which this 2.0-only deployment doesn't have
+        const legacy = { ...v3, extraArgs: legacyArgs }
         await assert.rejects(
-          solanaChain!.sendMessage(sendOpts({ ...v3, extraArgs: legacyArgs })),
+          solanaChain!.getFee(feeOpts(legacy)),
           (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
         )
-        // the allowlist decides the entrypoint, so a quote needs the sender
         await assert.rejects(
-          solanaChain!.getFee(feeOpts(v3)),
-          (err: unknown) =>
-            err instanceof CCIPArgumentInvalidError && err.context.argument === 'sender',
-        )
-        await assert.rejects(
-          solanaChain!.getFee(feeOpts(v3, wallet!.publicKey)),
-          CCIPSolanaV2LaneUnavailableError,
+          solanaChain!.sendMessage(sendOpts(legacy)),
+          (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
         )
       })
 
-      it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
-        await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-        const fee = await solanaChain!.getFee(feeOpts(v3, wallet!.publicKey))
-        const request = await solanaChain!.sendMessage(sendOpts({ ...v3, fee }))
-        assert.equal(request.lane.version, CCIPVersion.V2_0)
-        const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
-        assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+      describe('with sendV2OnAllowlistedLanes', () => {
+        const optedIn = { sendV2OnAllowlistedLanes: true }
+
+        it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
+          await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
+          const fee = await solanaChain!.getFee({ ...feeOpts(v3), ...optedIn })
+          const request = await solanaChain!.sendMessage({
+            ...sendOpts({ ...v3, fee }),
+            ...optedIn,
+          })
+          assert.equal(request.lane.version, CCIPVersion.V2_0)
+          const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+          assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+        })
+
+        it('leaves rejecting a sender off the allowlist to the router', async () => {
+          await setAllowlist([Keypair.generate().publicKey])
+          await assert.rejects(
+            solanaChain!.sendMessage({ ...sendOpts(v3), ...optedIn }),
+            (err: unknown) =>
+              err instanceof SendTransactionError &&
+              !!err.logs?.some((log) => log.includes('SenderNotAllowed')),
+          )
+        })
       })
     })
   })
