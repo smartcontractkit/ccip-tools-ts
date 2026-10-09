@@ -4,15 +4,7 @@ export {
   type ApplyAllowlistUpdatesParams,
   ApplyAllowlistUpdates,
 } from './apply-allowlist-updates.ts'
-export {
-  type ApplyChainUpdatesParamVersion,
-  type ApplyChainUpdatesParams,
-  type ApplyChainUpdatesParamsV1_5_0,
-  type ApplyChainUpdatesParamsV1_5_1,
-  type ChainUpdateV1_5_0,
-  type ChainUpdateV1_5_1,
-  ApplyChainUpdates,
-} from './apply-chain-updates.ts'
+export { type ApplyChainUpdatesParams, ApplyChainUpdates } from './apply-chain-updates.ts'
 export {
   type ApplyTokenTransferFeeConfigUpdatesParams,
   type TokenTransferFeeConfigUpdate,
