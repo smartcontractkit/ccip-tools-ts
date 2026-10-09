@@ -5,6 +5,7 @@
 export {
   type CantonClient,
   type CantonClientConfig,
+  type CantonHttpVersion,
   type Command,
   type ConnectedSynchronizer,
   type CreatedEvent,

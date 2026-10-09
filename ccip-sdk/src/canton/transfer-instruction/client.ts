@@ -1,4 +1,4 @@
-import { post } from '../client/client.ts'
+import { type CantonHttpVersion, post } from '../client/client.ts'
 import type { DisclosedContract } from '../explicit-disclosures/index.ts'
 
 /**
@@ -89,6 +89,16 @@ export interface TransferInstructionClientConfig {
    * CCIP LINK on EDS uses `false` — same OpenAPI paths without scan-proxy.
    */
   useScanProxy?: boolean
+  /**
+   * HTTP protocol selection (default: `'auto'`).
+   *
+   * The hosted validator front-end requires HTTP/2, but user-hosted
+   * instances (and EDS-hosted transfer-instruction APIs) may serve
+   * HTTP/1.1 only. `'auto'` tries HTTP/2 first and falls back to HTTP/1.1
+   * on a protocol-level failure, memoized per origin. Pin `2` or `1` to
+   * skip negotiation for a known endpoint.
+   */
+  httpVersion?: CantonHttpVersion
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +114,7 @@ export function createTransferInstructionClient(config: TransferInstructionClien
   const baseUrl = config.baseUrl.replace(/\/$/, '')
   const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
+  const httpVersion: CantonHttpVersion = config.httpVersion ?? 'auto'
 
   /** Resolve request headers, awaiting `jwt` when it is a function. */
   async function resolveHeaders(): Promise<Record<string, string>> {
@@ -128,6 +139,10 @@ export function createTransferInstructionClient(config: TransferInstructionClien
         headers,
         timeoutMs,
         request,
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
 
@@ -149,6 +164,10 @@ export function createTransferInstructionClient(config: TransferInstructionClien
         headers,
         timeoutMs,
         request ?? {},
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
 
@@ -170,6 +189,10 @@ export function createTransferInstructionClient(config: TransferInstructionClien
         headers,
         timeoutMs,
         request ?? {},
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
 
@@ -191,6 +214,10 @@ export function createTransferInstructionClient(config: TransferInstructionClien
         headers,
         timeoutMs,
         request ?? {},
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
   }

@@ -6,10 +6,86 @@ import { createAxiosFetchAdapter } from '../../fetch.ts'
 import { normalizeCantonUpdateId } from '../update-id.ts'
 import type { components } from './generated/ledger-api.ts'
 
-// Canton JSON Ledger API requires HTTP/2.
-// On Node.js, axios uses its http adapter with native http2.connect().
+// Canton service transports.
+//
+// The hosted validator front-ends (e.g. testnet.cv1.bcy-v.metalhosts.com) sit
+// behind an AWS ELB whose target group REQUIRES client HTTP/2 (HTTP/1.1 is
+// rejected with 464 at the load balancer, never reaching Canton). Canton's own
+// JSON Ledger API, however, is documented as HTTP/1.1 + JSON
+// (docs.canton.network/sdks-tools/api-reference/json-api), and user-hosted EDS
+// instances commonly serve HTTP/1.1 only. axios' `httpVersion: 2` uses
+// `http2.connect()` in PRIOR-KNOWLEDGE mode (no ALPN negotiation), so it can
+// never talk to an HTTP/1.1-only server.
+//
+// Therefore: try HTTP/2 first (required by the hosted validator ELBs), and on
+// a protocol-level failure (`ERR_HTTP2_ERROR` over cleartext, or
+// `ERR_HTTP2_STREAM_CANCEL` from a TLS peer that does not offer h2 via ALPN)
+// immediately retry the SAME request over HTTP/1.1. The working protocol is
+// memoized per origin so subsequent requests use it directly.
+//
 // In browsers, HTTP/2 is negotiated automatically by the runtime.
-const cantonHttp = axios.create({ httpVersion: 2 })
+const cantonHttp2 = axios.create({ httpVersion: 2 })
+const cantonHttp1 = axios.create({ httpVersion: 1 })
+
+/**
+ * Per-origin memo of the transport that is known to work.
+ *
+ * `undefined` means "not yet probed" (auto mode starts with HTTP/2).
+ */
+const originTransports = new Map<string, 'h2' | 'h1'>()
+
+/** Extract the origin (protocol + host + port) from a base URL. */
+function originOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).origin
+  } catch {
+    return baseUrl
+  }
+}
+
+/**
+ * Whether an error is a protocol-level HTTP/2 failure that warrants an
+ * immediate HTTP/1.1 fallback for the same request.
+ *
+ * - `ERR_HTTP2_ERROR` ("Protocol error"): the peer answered the h2
+ *   prior-knowledge preface with HTTP/1.1 bytes (cleartext h2c against a
+ *   1.1-only server).
+ * - `ERR_HTTP2_STREAM_CANCEL`: the TLS peer sent `no_application_protocol`
+ *   because its ALPN does not offer h2.
+ */
+function isHttp2ProtocolError(err: unknown): boolean {
+  const code = getErrorCode(err)
+  return code === 'ERR_HTTP2_ERROR' || code === 'ERR_HTTP2_STREAM_CANCEL'
+}
+
+/**
+ * Resolve the transport for a request.
+ *
+ * - pinned `1`/`2`: always the corresponding axios instance.
+ * - `'auto'` (default): the memoized transport for the origin, or HTTP/2 when
+ *   the origin has not been probed yet.
+ */
+function transportFor(
+  baseUrl: string,
+  httpVersion: CantonHttpVersion,
+): { instance: typeof cantonHttp2; transport: 'h2' | 'h1' } {
+  if (httpVersion === 1) return { instance: cantonHttp1, transport: 'h1' }
+  if (httpVersion === 2) return { instance: cantonHttp2, transport: 'h2' }
+  const memo = originTransports.get(originOf(baseUrl))
+  return memo === 'h1'
+    ? { instance: cantonHttp1, transport: 'h1' }
+    : { instance: cantonHttp2, transport: 'h2' }
+}
+
+/**
+ * HTTP protocol selection for Canton service requests.
+ *
+ * - `2` (default): HTTP/2 only — required by the hosted validator front-ends.
+ * - `1`: HTTP/1.1 only — for endpoints known to serve 1.1 exclusively.
+ * - `'auto'`: try HTTP/2, fall back to HTTP/1.1 on protocol-level failure,
+ *   memoized per origin.
+ */
+export type CantonHttpVersion = 1 | 2 | 'auto'
 
 /** Commands to submit to the ledger */
 export type JsCommands = components['schemas']['JsCommands']
@@ -115,6 +191,16 @@ export interface CantonClientConfig {
    * Omit to preserve the default HTTP/2 behaviour.
    */
   fetch?: typeof fetch
+  /**
+   * HTTP protocol selection (default: `2`).
+   *
+   * The hosted validator front-ends require HTTP/2. Use `'auto'` when the
+   * endpoint may serve HTTP/1.1 only (e.g. a user-hosted EDS): HTTP/2 is
+   * tried first and an h2 protocol-level failure triggers an immediate
+   * same-request retry over HTTP/1.1, memoized per origin. Use `1` to pin
+   * HTTP/1.1 for endpoints known to serve it exclusively.
+   */
+  httpVersion?: CantonHttpVersion
 }
 
 /**
@@ -130,6 +216,7 @@ export function createCantonClient(config: CantonClientConfig) {
   const fetchAdapter: AxiosAdapter | undefined = config.fetch
     ? createAxiosFetchAdapter(config.fetch, signal)
     : undefined
+  const httpVersion: CantonHttpVersion = config.httpVersion ?? 2
 
   /**
    * Resolve the request headers. When `jwt` is a function, await it per request
@@ -159,6 +246,7 @@ export function createCantonClient(config: CantonClientConfig) {
       undefined,
       signal,
       fetchAdapter,
+      httpVersion,
     )
   }
 
@@ -181,6 +269,7 @@ export function createCantonClient(config: CantonClientConfig) {
       undefined,
       signal,
       fetchAdapter,
+      httpVersion,
     )
   }
 
@@ -598,7 +687,8 @@ function isNetworkError(err: unknown): boolean {
  * the normal retry path instead.
  */
 async function safeHttp2Request(
-  config: Parameters<typeof cantonHttp.request>[0],
+  instance: typeof cantonHttp2,
+  config: Parameters<typeof cantonHttp2.request>[0],
 ): Promise<{ status: number; data: unknown; headers: Record<string, unknown> }> {
   let captured: Error | undefined
   const guard = (err: Error) => {
@@ -610,7 +700,7 @@ async function safeHttp2Request(
   }
   process.on('uncaughtException', guard)
   try {
-    return await cantonHttp.request(config)
+    return await instance.request(config)
   } catch (err) {
     throw captured ?? err
   } finally {
@@ -637,8 +727,13 @@ function isCancelledError(err: unknown): boolean {
 }
 
 /**
- * Perform an HTTP/2 request with retry logic and orphaned-session error suppression.
- * All Canton services (Ledger API, validator scan-proxy, EDS) require HTTP/2.
+ * Perform a Canton service request with retry logic, orphaned-session error
+ * suppression, and automatic HTTP/2 → HTTP/1.1 protocol fallback.
+ *
+ * The hosted validator front-ends require HTTP/2; Canton's own JSON Ledger
+ * API and user-hosted EDS instances may serve HTTP/1.1 only. In `'auto'` mode
+ * a protocol-level h2 failure triggers an immediate same-request retry over
+ * HTTP/1.1, memoized per origin. Pinned `1`/`2` modes never fall back.
  */
 async function request<T>(
   method: 'GET' | 'POST',
@@ -651,6 +746,7 @@ async function request<T>(
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   signal?: AbortSignal,
   fetchAdapter?: AxiosAdapter,
+  httpVersion: CantonHttpVersion = 2,
 ): Promise<T> {
   // Check if signal is already aborted before attempting any requests
   if (signal?.aborted) {
@@ -673,10 +769,25 @@ async function request<T>(
         // Prevent axios from throwing on non-2xx so we can handle retries ourselves
         validateStatus: () => true,
         // Route through the caller-supplied fetch adapter when present; otherwise
-        // cantonHttp's HTTP/2 transport is used (the safeHttp2Request path below).
+        // the selected cantonHttp transport is used (the safeHttp2Request path below).
         ...(fetchAdapter ? { adapter: fetchAdapter } : {}),
-      } as Parameters<typeof cantonHttp.request>[0]
-      response = await safeHttp2Request(requestConfig)
+      } as Parameters<typeof cantonHttp2.request>[0]
+      const { instance, transport } = transportFor(baseUrl, httpVersion)
+      try {
+        response = await safeHttp2Request(instance, requestConfig)
+      } catch (err) {
+        // Protocol-level h2 failure in auto mode → retry the SAME request over
+        // HTTP/1.1 immediately (no retry-loop delay) and memoize per origin.
+        if (transport === 'h2' && httpVersion === 'auto' && isHttp2ProtocolError(err)) {
+          originTransports.set(originOf(baseUrl), 'h1')
+          console.log(
+            `[canton/client] ${method} ${path}: HTTP/2 protocol error, retrying over HTTP/1.1`,
+          )
+          response = await safeHttp2Request(cantonHttp1, requestConfig)
+        } else {
+          throw err
+        }
+      }
     } catch (err) {
       // Don't retry if the request was cancelled via AbortSignal
       if (isCancelledError(err)) {
@@ -741,6 +852,7 @@ export async function get<T>(
   queryParams?: Record<string, string>,
   retries = DEFAULT_RETRY_COUNT,
   signal?: AbortSignal,
+  httpVersion: CantonHttpVersion = 2,
 ): Promise<T> {
   return request<T>(
     'GET',
@@ -752,6 +864,8 @@ export async function get<T>(
     retries,
     undefined,
     signal,
+    undefined,
+    httpVersion,
   )
 }
 
@@ -776,6 +890,7 @@ export async function post<T>(
   queryParams?: Record<string, string>,
   retries = DEFAULT_RETRY_COUNT,
   signal?: AbortSignal,
+  httpVersion: CantonHttpVersion = 2,
 ): Promise<T> {
   return request<T>(
     'POST',
@@ -787,5 +902,7 @@ export async function post<T>(
     retries,
     undefined,
     signal,
+    undefined,
+    httpVersion,
   )
 }

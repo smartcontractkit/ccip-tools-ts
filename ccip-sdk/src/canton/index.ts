@@ -116,6 +116,7 @@ import { isCantonUpdateId } from './update-id.ts'
 export type {
   CantonClient,
   CantonClientConfig,
+  CantonHttpVersion,
   HashingSchemeVersion,
   PartySignatures,
   Signature,

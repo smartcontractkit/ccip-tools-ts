@@ -1,4 +1,4 @@
-import { get } from '../client/client.ts'
+import { type CantonHttpVersion, get } from '../client/client.ts'
 
 /**
  * Map from token standard API name to the minor version of the API supported.
@@ -96,6 +96,15 @@ export interface TokenMetadataClientConfig {
   jwt?: string | (() => Promise<string>)
   /** Request timeout in milliseconds (default: 30 000) */
   timeout?: number
+  /**
+   * HTTP protocol selection (default: `'auto'`).
+   *
+   * The hosted validator front-end requires HTTP/2, but user-hosted
+   * instances may serve HTTP/1.1 only. `'auto'` tries HTTP/2 first and
+   * falls back to HTTP/1.1 on a protocol-level failure, memoized per
+   * origin. Pin `2` or `1` to skip negotiation for a known endpoint.
+   */
+  httpVersion?: CantonHttpVersion
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +120,7 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
   const baseUrl = config.baseUrl.replace(/\/$/, '')
   const jwt = config.jwt
   const timeoutMs = config.timeout ?? 30_000
+  const httpVersion: CantonHttpVersion = config.httpVersion ?? 'auto'
 
   /** Resolve request headers, awaiting `jwt` when it is a function. */
   async function resolveHeaders(): Promise<Record<string, string>> {
@@ -132,6 +142,10 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
         appendScanProxyPath('/registry/metadata/v1/info'),
         headers,
         timeoutMs,
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
 
@@ -155,6 +169,9 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
         headers,
         timeoutMs,
         Object.keys(queryParams).length > 0 ? queryParams : undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
 
@@ -172,6 +189,10 @@ export function createTokenMetadataClient(config: TokenMetadataClientConfig) {
         ),
         headers,
         timeoutMs,
+        undefined,
+        undefined,
+        undefined,
+        httpVersion,
       )
     },
   }
