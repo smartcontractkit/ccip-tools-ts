@@ -162,7 +162,10 @@ describe('e2e command lane EVM v2.0', () => {
   )
 })
 
-describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
+// TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
+// testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
+// has onramp/offramp modules, so every live Aptos fixture below 404s.
+describe.skip('e2e command lane EVM <-> Aptos (v1.6)', () => {
   useResourceForDescribe(['bsc-testnet', 'aptos-testnet', 'sepolia'])
   const LANE_RPCS = [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS]
   // EVM -> Aptos rides the same bsc-testnet lane as the show fixture; the

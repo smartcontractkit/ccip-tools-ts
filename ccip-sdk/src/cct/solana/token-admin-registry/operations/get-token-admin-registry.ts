@@ -2,7 +2,10 @@ import { PublicKey } from '@solana/web3.js'
 
 import type { RegistryTokenConfig } from '../../../../chain.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { getTokenAdminRegistryConfig } from '../../../../solana/token-admin-registry.ts'
+import {
+  type TokenAccountResolution,
+  getTokenAdminRegistryConfig,
+} from '../../../../solana/token-admin-registry.ts'
 import { SolanaQuery } from '../../query.ts'
 import { parsePublicKey, validatePublicKey } from '../../validate.ts'
 
@@ -23,6 +26,10 @@ export type GetTokenAdminRegistryResult = RegistryTokenConfig & {
   lookupTable?: string
   writableIndexes: number[]
   supportsAutoDerivation: boolean
+  /** How the Router resolves the pool's accounts beyond its lookup table. */
+  accountResolution: TokenAccountResolution
+  /** Pool interface the token's pool implements: 1 (CCIP 1.6-compatible) or 2 (CCIP 2.0). */
+  interfaceVersion: number
 }
 
 /** {@link GetTokenAdminRegistryParams} with its mint resolved to a public key. */
@@ -62,6 +69,8 @@ export class GetTokenAdminRegistry extends SolanaQuery<
       ...(config.lookupTable && { lookupTable: config.lookupTable.toBase58() }),
       writableIndexes: config.writableIndexes,
       supportsAutoDerivation: config.supportsAutoDerivation,
+      accountResolution: config.accountResolution,
+      interfaceVersion: config.interfaceVersion,
     }
   }
 }

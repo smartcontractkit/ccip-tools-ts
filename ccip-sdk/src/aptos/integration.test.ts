@@ -16,7 +16,10 @@ const APTOS_RPC = rpcEndpoint('RPC_APTOS_TESTNET')
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
-describe('Aptos failed execution detection integration (aptos-testnet)', { skip }, () => {
+// TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
+// testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
+// has onramp/offramp modules, so every live Aptos fixture below 404s.
+describe.skip('Aptos failed execution detection integration (aptos-testnet)', { skip }, () => {
   // A live FAILED execution (ethereum-testnet-sepolia → aptos-testnet, seq 138):
   // the OffRamp ran out of gas (vmStatus EXECUTION_LIMIT_REACHED), so the tx
   // carries no ExecutionStateChanged event — the receipt is reconstructed from
