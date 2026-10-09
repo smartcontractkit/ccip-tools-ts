@@ -24,7 +24,10 @@ import { hexlify } from 'ethers'
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
-import { CCIPSolanaV2LaneUnavailableError } from '../errors/index.ts'
+import {
+  CCIPSolanaExecutionBufferIncompleteError,
+  CCIPSolanaV2LaneUnavailableError,
+} from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
 import { networkInfo } from '../index.ts'
 import {
@@ -814,6 +817,46 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       assert.ok(
         bufferedTx.transaction.message
           .getAccountKeys({ accountKeysFromLookups: bufferedTx.meta!.loadedAddresses })
+          .keySegments()
+          .flat()
+          .some((key) => key.equals(buffer)),
+        'buffered execution should read the buffer',
+      )
+      assert.equal(await connection!.getAccountInfo(buffer), null, 'the buffer should be closed')
+    })
+
+    // An external signer's buffered execution, in unsigned steps: the buffering ahead, one chunk
+    // per transaction, then the execution resolved from the complete buffer
+    it('executes a landed message again from a buffer written ahead', async () => {
+      const input = await landedInput()
+      const opts = { offRamp: STAGING.offRamp, input, payer: wallet!.publicKey.toBase58() }
+      const buffer = getExecutionInputsBufferPda(
+        offRamp,
+        Buffer.from(STAGING.executeMessageId.slice(2), 'hex'),
+        wallet!.publicKey,
+      )
+
+      await assert.rejects(
+        solanaChain!.generateUnsignedExecute({ ...opts, forceBuffer: true }),
+        CCIPSolanaExecutionBufferIncompleteError,
+      )
+      const buffering = await solanaChain!.generateUnsignedExecuteBuffer(opts)
+      assert.ok(buffering.instructions.length, 'the inputs should need buffering')
+      for (const ix of buffering.instructions)
+        await simulateAndSendTxs(ctx(), wallet!, { instructions: [ix] })
+      assert.deepEqual(
+        (await solanaChain!.generateUnsignedExecuteBuffer(opts)).instructions,
+        [],
+        'the buffer should be complete',
+      )
+
+      const unsigned = await solanaChain!.generateUnsignedExecute({ ...opts, forceBuffer: true })
+      const { hash } = await simulateAndSendTxs(ctx(), wallet!, unsigned)
+      const tx = await connection!.getTransaction(hash, { maxSupportedTransactionVersion: 1 })
+      assert.equal(tx?.meta?.err, null, 'buffered execution should succeed')
+      assert.ok(
+        tx.transaction.message
+          .getAccountKeys({ accountKeysFromLookups: tx.meta!.loadedAddresses })
           .keySegments()
           .flat()
           .some((key) => key.equals(buffer)),

@@ -10,17 +10,18 @@ import {
   PublicKey,
   SystemProgram,
 } from '@solana/web3.js'
-import { hexlify, keccak256, randomBytes } from 'ethers'
+import { getBytes, hexlify, keccak256, randomBytes } from 'ethers'
 
 import '../index.ts' // registers the chain families MessageV1 decoding needs
 import {
   CCIPArgumentInvalidError,
   CCIPMessageNotVerifiedYetError,
+  CCIPSolanaExecutionBufferIncompleteError,
   CCIPTransactionTooLargeError,
 } from '../errors/index.ts'
 import { encodeMessageV1 } from '../evm/messageCodec.ts'
 import { networkInfo } from '../networks.ts'
-import { type CCIPMessage, type CCIPRequest, CCIPVersion } from '../types.ts'
+import { type CCIPMessage, type CCIPRequest, type ExecutionInput, CCIPVersion } from '../types.ts'
 import { sizedCoder } from './coder.ts'
 import {
   type ExecutionInputV2,
@@ -120,6 +121,27 @@ function bufferAccount(
   }
 }
 
+/** An execution input's `ExecutionInputsV2`, independently serialized. */
+function serializedInputs({ encodedMessage, verifications }: ExecutionInputV2) {
+  return serializeInputs(
+    Buffer.from(getBytes(encodedMessage)),
+    verifications.map(({ destAddress }) => new PublicKey(destAddress)),
+    verifications.map(({ ccvData }) => Buffer.from(getBytes(ccvData))),
+  )
+}
+
+/** A `Buffer` account holding all of an execution input's chunks. */
+function completeBuffer(caller: PublicKey, execInput: ExecutionInputV2) {
+  const data = serializedInputs(execInput)
+  const numChunks = Math.ceil(data.length / 800)
+  return bufferAccount(caller, {
+    bitmap: (1n << BigInt(numChunks)) - 1n,
+    numChunks,
+    chunkLength: Math.min(data.length, 800),
+    data,
+  })
+}
+
 function encodeResponse(accountsToSave: AccountMeta[], metadata: Buffer): Buffer {
   return commonCoder.types.encode('ResolveAccountsResponse', {
     askAgainWith: [],
@@ -200,6 +222,10 @@ function fakeOfframp(
     // v1 transactions (the fallback for oversized v0 ones) are rejected
     _rpcRequest: mock.fn(async () => ({ error: { code: -32602, message: 'invalid params' } })),
     getAccountInfo: mock.fn(async (key: PublicKey) => accounts[key.toBase58()] ?? null),
+    getAccountInfoAndContext: mock.fn(async (key: PublicKey) => ({
+      context: { slot: 1 },
+      value: accounts[key.toBase58()] ?? null,
+    })),
     getSignaturesForAddress: mock.fn(async () => []),
     getAddressLookupTable: mock.fn(async () => ({ value: null })),
     getLatestBlockhash: mock.fn(async () => ({
@@ -492,11 +518,122 @@ describe('executeV2', () => {
     )
   })
 
-  it('only buffers through execute: generateUnsignedExecuteV2 throws for large inputs', async () => {
+  it('executes from a complete buffer an earlier attempt left, without rewriting it', async () => {
+    const execInput = input(1200)
+    const bufferId = Buffer.from(keccak256(execInput.encodedMessage).slice(2), 'hex')
+    const { connection, sent } = fakeOfframp(offramp, {
+      resolved,
+      accounts: {
+        [inputsBufferPda(offramp, bufferId, caller).toBase58()]: completeBuffer(caller, execInput),
+      },
+    })
+
+    await executeV2({ connection, logger: silent }, walletFor(caller), {
+      offramp,
+      input: execInput,
+    })
+
+    assert.equal(sent.length, 1)
+    assert.deepEqual(
+      sent[0]!.at(-1)!.data.subarray(0, 9),
+      Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([0])]),
+    )
+  })
+})
+
+describe('generateUnsignedExecuteV2', () => {
+  const offramp = randomKey()
+  const caller = randomKey()
+  const ccv = randomKey()
+  const resolved = [{ pubkey: caller, isSigner: true, isWritable: true }]
+  const metadata = Buffer.from([4, 5, 6])
+  const input = (size: number): ExecutionInputV2 => ({
+    encodedMessage: hexlify(randomBytes(size)),
+    verifications: [{ destAddress: ccv.toBase58(), ccvData: '0x' + 'cc'.repeat(100) }],
+  })
+  const bufferOf = (execInput: ExecutionInputV2) =>
+    inputsBufferPda(
+      offramp,
+      Buffer.from(keccak256(execInput.encodedMessage).slice(2), 'hex'),
+      caller,
+    )
+  const generate = (connection: Connection, execInput: ExecutionInputV2, forceBuffer?: boolean) =>
+    generateUnsignedExecuteV2({ connection, logger: silent }, caller, offramp, execInput, {
+      forceBuffer,
+    })
+
+  for (const forceBuffer of [true, false]) {
+    it(`executes from a complete buffer${forceBuffer ? ', with forceBuffer' : ', over inline'}`, async () => {
+      // inputs that'd fit inline, which a complete buffer is preferred over
+      const execInput = input(forceBuffer ? 1200 : 100)
+      const buffer = bufferOf(execInput)
+      const { connection, simulated } = fakeOfframp(offramp, {
+        resolved,
+        metadata,
+        accounts: { [buffer.toBase58()]: completeBuffer(caller, execInput) },
+      })
+
+      const unsigned = await generate(connection, execInput, forceBuffer)
+
+      // ExecuteParams { exec_inputs: None, resolution_metadata }, resolved from the buffer
+      const exec = unsigned.instructions[unsigned.mainIndex!]!
+      assert.deepEqual(
+        exec.data,
+        Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([0]), bytes(metadata)]),
+      )
+      assert.deepEqual(exec.keys, resolved)
+      const start = simulated.find(({ data }) =>
+        data.subarray(0, 8).equals(RESOLVE_ACCOUNTS_START_DISCRIMINATOR),
+      )!
+      assert.ok(start.keys.some(({ pubkey }) => pubkey.equals(buffer)))
+    })
+  }
+
+  it('refuses forceBuffer until the buffer is complete', async () => {
+    const execInput = input(1200) // two chunks
+    const buffer = bufferOf(execInput)
+    const serialized = serializedInputs(execInput)
+    const partial = Buffer.alloc(serialized.length)
+    serialized.copy(partial, 0, 0, 800)
+    const other = Buffer.from(serialized)
+    other[0]! ^= 0xff
+
+    for (const [account, missingChunks, stale] of [
+      [undefined, 2, false],
+      [
+        bufferAccount(caller, { bitmap: 0b1n, numChunks: 2, chunkLength: 800, data: partial }),
+        1,
+        false,
+      ],
+      [
+        bufferAccount(caller, { bitmap: 0b11n, numChunks: 2, chunkLength: 800, data: other }),
+        2,
+        true,
+      ],
+    ] as const) {
+      const { connection, simulated } = fakeOfframp(offramp, {
+        resolved,
+        accounts: account ? { [buffer.toBase58()]: account } : {},
+      })
+      await assert.rejects(
+        generate(connection, execInput, true),
+        (err: unknown) =>
+          err instanceof CCIPSolanaExecutionBufferIncompleteError &&
+          err.context.buffer === buffer.toBase58() &&
+          err.context.missingChunks === missingChunks &&
+          err.context.stale === stale,
+      )
+      assert.equal(simulated.length, 0, 'nothing to resolve against an incomplete buffer')
+    }
+  })
+
+  it('throws for inputs too large to go inline, pointing at their buffering', async () => {
     const { connection } = fakeOfframp(offramp, { resolved })
     await assert.rejects(
-      generateUnsignedExecuteV2({ connection, logger: silent }, caller, offramp, input(1500)),
-      CCIPTransactionTooLargeError,
+      generate(connection, input(1500)),
+      (err: unknown) =>
+        err instanceof CCIPTransactionTooLargeError &&
+        err.message.includes('generateUnsignedExecuteBuffer'),
     )
   })
 })
@@ -569,35 +706,66 @@ describe('SolanaChain CCIP 2.0 execution', () => {
     )
   })
 
-  it('generates an inline execute_v2 for a CCIP 2.0 input, but refuses to buffer it', async () => {
+  it('generates an inline execute_v2 for a CCIP 2.0 input, or a buffered one once buffered', async () => {
     const payer = randomKey()
     const resolved = [{ pubkey: payer, isSigner: true, isWritable: true }]
-    const { connection } = fakeOfframp(offRamp, { resolved })
-    const solana = chain(connection)
     const input = {
       encodedMessage,
       verifications: [{ destAddress: required.toBase58(), ccvData: '0x01' }],
     }
+    const buffer = inputsBufferPda(offRamp, Buffer.from(messageId.slice(2), 'hex'), payer)
+    const opts = { offRamp: offRamp.toBase58(), input, payer: payer.toBase58() }
 
-    const unsigned = await solana.generateUnsignedExecute({
-      offRamp: offRamp.toBase58(),
-      input,
-      payer: payer.toBase58(),
-    })
+    const accounts: Record<string, { data: Buffer }> = {}
+    const { connection } = fakeOfframp(offRamp, { resolved, accounts })
+    const solana = chain(connection)
+    const unsigned = await solana.generateUnsignedExecute(opts)
     const exec = unsigned.instructions[unsigned.mainIndex!]!
     assert.ok(exec.programId.equals(offRamp))
-    assert.deepEqual(exec.data.subarray(0, 8), EXECUTE_V2_DISCRIMINATOR)
+    assert.deepEqual(
+      exec.data.subarray(0, 9),
+      Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([1])]),
+    )
     assert.deepEqual(exec.keys, resolved)
 
+    // forceBuffer needs the buffering to land first
     await assert.rejects(
-      solana.generateUnsignedExecute({
-        offRamp: offRamp.toBase58(),
-        input,
-        payer: payer.toBase58(),
-        forceBuffer: true,
-      }),
+      solana.generateUnsignedExecute({ ...opts, forceBuffer: true }),
       (err: unknown) =>
-        err instanceof CCIPArgumentInvalidError && err.context.argument === 'forceBuffer',
+        err instanceof CCIPSolanaExecutionBufferIncompleteError &&
+        err.context.buffer === buffer.toBase58(),
+    )
+    const buffering = await solana.generateUnsignedExecuteBuffer(opts)
+    assert.equal(buffering.mainIndex, undefined)
+    assert.deepEqual(
+      Buffer.concat(buffering.instructions.map(({ data }) => parseChunk(data).chunk)),
+      serializedInputs(input),
+    )
+
+    // which, once landed, the execution is resolved from; right away, despite SolanaChain caching
+    // account reads that saw no buffer
+    accounts[buffer.toBase58()] = completeBuffer(payer, input)
+    assert.deepEqual((await solana.generateUnsignedExecuteBuffer(opts)).instructions, [])
+    const fromBuffer = await solana.generateUnsignedExecute({ ...opts, forceBuffer: true })
+    assert.deepEqual(
+      fromBuffer.instructions[fromBuffer.mainIndex!]!.data.subarray(0, 9),
+      Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([0])]),
+    )
+  })
+
+  it('only buffers CCIP 2.0 execution inputs ahead of execution', async () => {
+    const { connection } = fakeOfframp(offRamp)
+    await assert.rejects(
+      chain(connection).generateUnsignedExecuteBuffer({
+        offRamp: offRamp.toBase58(),
+        // a CCIP 1.6 report: its buffering is part of generateUnsignedExecute's output
+        input: {
+          message: { messageId, feeValueJuels: 0n },
+          proofs: [],
+        } as unknown as ExecutionInput,
+        payer: randomKey().toBase58(),
+      }),
+      (err: unknown) => err instanceof CCIPArgumentInvalidError && err.context.argument === 'input',
     )
   })
 })

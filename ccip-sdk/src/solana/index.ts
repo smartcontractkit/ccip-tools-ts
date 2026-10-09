@@ -114,7 +114,12 @@ import {
 } from '../utils.ts'
 import { cleanUpBuffers } from './cleanup.ts'
 import { newProgram, sizedCoder } from './coder.ts'
-import { executeV2, generateUnsignedExecuteV2, getVerificationPolicyV2 } from './exec-v2.ts'
+import {
+  executeV2,
+  generateUnsignedExecuteBufferV2,
+  generateUnsignedExecuteV2,
+  getVerificationPolicyV2,
+} from './exec-v2.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
   decodeSolanaGenericExtraArgsV3,
@@ -1486,18 +1491,29 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   /**
    * {@inheritDoc Chain.generateUnsignedExecute}
    *
-   * CCIP 2.0 messages are executed through `execute_v2`, with their execution inputs inline: those
-   * too large for a transaction can only be executed by {@link SolanaChain.execute}, which buffers
-   * them first.
+   * CCIP 2.0 messages are executed through `execute_v2`, which reads its execution inputs from the
+   * payer's execution inputs buffer for the message when that buffer is complete, and takes them
+   * inline otherwise. `execute_v2`'s accounts are resolved on-chain from the buffer, so a buffered
+   * execution can't be generated in one go. Instead, first sign and send the instructions from
+   * {@link SolanaChain.generateUnsignedExecuteBuffer}, then generate the execution (with
+   * `forceBuffer`, to require the buffer). {@link SolanaChain.execute} does both.
    * @returns instructions - array of instructions to execute the report
    *   lookupTables - array of lookup tables for `manuallyExecute` (or `execute_v2`) call
    *   mainIndex - index of the `manuallyExecute` (or `execute_v2`) instruction in the array; last
    *   unless forceLookupTable is set, in which case last is ALT deactivation tx, and
    *   manuallyExecute is second to last
    * @throws {@link CCIPExecutionReportChainMismatchError} if message is not a Solana message
-   * @throws {@link CCIPArgumentInvalidError} if `forceBuffer` is set for a CCIP 2.0 message
+   * @throws {@link CCIPSolanaExecutionBufferIncompleteError} if `forceBuffer` is set for a CCIP 2.0
+   *   message whose execution inputs buffer isn't complete yet
    * @throws {@link CCIPTransactionTooLargeError} if a CCIP 2.0 message's execution inputs are too
-   *   large to resolve `execute_v2` with them inline
+   *   large to resolve `execute_v2` with them inline, and aren't buffered
+   *
+   * @example Execute a CCIP 2.0 message too large to go inline, with an external signer
+   * ```typescript
+   * const buffering = await solana.generateUnsignedExecuteBuffer({ messageId, payer })
+   * // sign and send each of buffering.instructions in its own transaction, then:
+   * const unsigned = await solana.generateUnsignedExecute({ messageId, payer, forceBuffer: true })
+   * ```
    */
   async generateUnsignedExecute({
     payer,
@@ -1522,15 +1538,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       clearLeftoverAccounts?: boolean
     },
   ): Promise<UnsignedSolanaTx> {
-    if ('verifications' in input) {
-      if (opts.forceBuffer) {
-        throw new CCIPArgumentInvalidError(
-          'forceBuffer',
-          'buffered CCIP 2.0 execution is only supported by execute(): execute_v2 accounts are resolved from the buffer, so its chunks must land before the transaction can be built',
-        )
-      }
+    if ('verifications' in input)
       return generateUnsignedExecuteV2(this, payer, new PublicKey(offRamp), input, opts)
-    }
     if (!('computeUnits' in input.message))
       throw new CCIPExecutionReportChainMismatchError('Solana')
     return generateUnsignedExecuteReport(
@@ -1539,6 +1548,53 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       new PublicKey(offRamp),
       input as ExecutionInput<CCIPMessage_V1_6_Solana>,
       opts,
+    )
+  }
+
+  /**
+   * Generates the unsigned instructions writing a CCIP 2.0 message's execution inputs to `payer`'s
+   * execution inputs buffer for it. Once they land, {@link SolanaChain.generateUnsignedExecute}
+   * executes the message from the buffer, whose accounts can't be resolved before it's complete.
+   * This splits a buffered execution across external signers that can't sign transactions large
+   * enough for the inputs inline (e.g. hardware wallets without v1 transaction support).
+   *
+   * Picks up where an earlier attempt left the buffer: chunks it already holds are skipped, and a
+   * buffer holding other inputs is closed first. Each instruction carries a chunk of up to 800
+   * bytes, so needs its own v0 transaction; they may land in any order.
+   * @param opts - {@link ExecuteOpts} with the payer address, which will sign the buffering and
+   *   the execution
+   * @returns instructions - the buffering instructions; none if the buffer already holds the inputs
+   * @throws {@link CCIPArgumentInvalidError} if the message isn't a CCIP 2.0 one; 1.6 executions
+   *   include their buffering, with `forceBuffer`
+   * @throws {@link CCIPTransactionTooLargeError} if the inputs exceed the buffer's capacity
+   *
+   * @example
+   * ```typescript
+   * const buffering = await solana.generateUnsignedExecuteBuffer({ messageId, payer })
+   * // sign and send each of buffering.instructions in its own transaction, then:
+   * const unsigned = await solana.generateUnsignedExecute({ messageId, payer, forceBuffer: true })
+   * ```
+   */
+  async generateUnsignedExecuteBuffer({
+    payer,
+    ...opts
+  }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedSolanaTx> {
+    // the gas limit only matters to the execution: skip its estimation
+    const { offRamp, input } = await this.resolveExecuteOpts({
+      ...opts,
+      gasLimit: opts.gasLimit ?? 0,
+    })
+    if (!('verifications' in input)) {
+      throw new CCIPArgumentInvalidError(
+        'input',
+        'only CCIP 2.0 execution inputs are buffered ahead of execution; generateUnsignedExecute with forceBuffer includes the buffering of 1.6 reports',
+      )
+    }
+    return generateUnsignedExecuteBufferV2(
+      this,
+      new PublicKey(payer),
+      new PublicKey(offRamp),
+      input,
     )
   }
 
