@@ -96,6 +96,10 @@ import {
   type GetAllowlistEnabledResult,
   type GetAllowlistParams,
   type GetAllowlistResult,
+  type GetAvailableTokensParams,
+  type GetAvailableTokensResult,
+  type GetChainRebalancerParams,
+  type GetChainRebalancerResult,
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
   type GetFeeParams,
@@ -110,7 +114,10 @@ import {
   type GetTokenPoolStateResult,
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
+  type IsSiloedParams,
+  type IsSiloedResult,
   type ProvideLiquidityParams,
+  type ProvideSiloedLiquidityParams,
   type RemoveRemotePoolParams,
   type SetAllowedFinalityConfigParams,
   type SetChainRateLimiterConfigsParams,
@@ -118,11 +125,14 @@ import {
   type SetRateLimitAdminParams,
   type SetRebalancerParams,
   type SetRemotePoolParams,
+  type SetSiloRebalancerParams,
   type TransferLiquidityParams,
   type TransferPoolOwnershipParams,
   type UpdateAdvancedPoolHooksParams,
+  type UpdateSiloDesignationsParams,
   type WithdrawFeeTokensParams,
   type WithdrawLiquidityParams,
+  type WithdrawSiloedLiquidityParams,
   AcceptPoolOwnership,
   AddRemotePool,
   ApplyAllowlistUpdates,
@@ -133,6 +143,8 @@ import {
   GetAllowedFinalityConfig,
   GetAllowlist,
   GetAllowlistEnabled,
+  GetAvailableTokens,
+  GetChainRebalancer,
   GetDynamicConfig,
   GetFee,
   GetLockbox,
@@ -140,7 +152,9 @@ import {
   GetTokenPoolRemotes,
   GetTokenPoolState,
   GetTokenTransferFeeConfig,
+  IsSiloed,
   ProvideLiquidity,
+  ProvideSiloedLiquidity,
   RemoveRemotePool,
   SetAllowedFinalityConfig,
   SetChainRateLimiterConfigs,
@@ -148,11 +162,14 @@ import {
   SetRateLimitAdmin,
   SetRebalancer,
   SetRemotePool,
+  SetSiloRebalancer,
   TransferLiquidity,
   TransferPoolOwnership,
   UpdateAdvancedPoolHooks,
+  UpdateSiloDesignations,
   WithdrawFeeTokens,
   WithdrawLiquidity,
+  WithdrawSiloedLiquidity,
 } from './token-pool/operations/index.ts'
 import {
   type AcceptDefaultAdminTransferParams,
@@ -271,6 +288,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
   readonly #getLockbox = new GetLockbox()
+  readonly #provideSiloedLiquidity = new ProvideSiloedLiquidity()
+  readonly #withdrawSiloedLiquidity = new WithdrawSiloedLiquidity()
+  readonly #setSiloRebalancer = new SetSiloRebalancer()
+  readonly #updateSiloDesignations = new UpdateSiloDesignations()
+  readonly #getAvailableTokens = new GetAvailableTokens()
+  readonly #getChainRebalancer = new GetChainRebalancer()
+  readonly #isSiloed = new IsSiloed()
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
@@ -2137,7 +2161,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * deployed with it `false` can never take deposits, so that is reported before signing rather
    * than as a `LiquidityNotAccepted` revert. v1.6.x pools have no flag.
    * @remarks On a `SiloedLockReleaseTokenPool` this funds the *unsiloed* bucket, gated on the
-   * unsiloed rebalancer; the per-lane `provideSiloedLiquidity` is not exposed.
+   * unsiloed rebalancer; a silo is funded with {@link generateUnsignedProvideSiloedLiquidity}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, which has no
    * liquidity to manage
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
@@ -2200,7 +2224,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * before signing. Advisory only: every CCIP transfer moves it, so a later shortfall still
    * reverts `InsufficientLiquidity`.
    * @remarks On a `SiloedLockReleaseTokenPool` this draws on the *unsiloed* bucket only, gated on
-   * the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
+   * the unsiloed rebalancer; a silo is drawn on with
+   * {@link generateUnsignedWithdrawSiloedLiquidity}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
@@ -2336,8 +2361,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * A zero `rebalancer` is accepted and revokes the role, which stops liquidity movement
    * entirely: the pool then accepts those calls from nobody.
    * @remarks On a `SiloedLockReleaseTokenPool` this sets the *unsiloed* rebalancer, which is what
-   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; the per-lane
-   * `setSiloRebalancer` is not exposed.
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; a silo's own is set with
+   * {@link generateUnsignedSetSiloRebalancer}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
    * on its `ERC20LockBox` instead — see {@link updateLockboxAuthorizedCallers}
@@ -2389,7 +2414,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Informational, for audit and UX: the liquidity write ops make this same check
    * themselves, so there is no need to call this first.
    * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer, which is what
-   * its plain `provideLiquidity` / `withdrawLiquidity` gate on.
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; a silo's own is read with
+   * {@link getChainRebalancer}.
    * @returns The rebalancer, checksummed. The zero address when none is configured, meaning the
    * pool accepts liquidity calls from nobody.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
@@ -2427,6 +2453,348 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getLockbox(opts: GetLockboxParams): Promise<GetLockboxResult> {
     return this.#getLockbox.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `provideSiloedLiquidity` tx (for multisig / offline signing):
+   * deposits `amount` of the pool's token into one lane's silo of a
+   * **SiloedLockReleaseTokenPool** (v1.6.0–v1.6.1).
+   * @remarks Gated on the **silo's** rebalancer (`getChainRebalancer(remoteChainSelector)`), not
+   * the owner, and not the unsiloed rebalancer {@link generateUnsignedProvideLiquidity} takes. The
+   * owner appoints it with {@link generateUnsignedUpdateSiloDesignations} or
+   * {@link generateUnsignedSetSiloRebalancer}. The lane must be siloed; that is read whether or not
+   * `sender` is given, and a given `sender` is checked against the silo rebalancer.
+   * @remarks The rebalancer must hold `amount` **and** have approved the pool for it, since the
+   * deposit is a `transferFrom`. Set that allowance with {@link approveToken}, `spender` being the
+   * pool; both are read before the calldata is returned, as for
+   * {@link generateUnsignedProvideLiquidity}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through a
+   * lockbox per lane instead (see `configureLockBoxes`)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
+   * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
+   * rebalancer
+   * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
+   * has approved the pool for less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the silo rebalancer.
+   * const unsigned = await cct.generateUnsignedProvideSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xSiloRebalancer...',
+   * })
+   * ```
+   */
+  generateUnsignedProvideSiloedLiquidity(
+    opts: ProvideSiloedLiquidityParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#provideSiloedLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits liquidity into one lane's silo of a siloed pool, signing + submitting with
+   * `opts.wallet`. `sender` defaults to the wallet's address and must equal it: the wallet must
+   * be the silo's rebalancer, and must have approved `amount` to the pool with
+   * {@link approveToken}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
+   * @throws {@link CCTTxFailedError} if the wallet's token balance or its approval to the pool is
+   * below `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * // the deposit is a transferFrom: approve the pool first
+   * await cct.approveToken({
+   *   tokenAddress: '0xToken...',
+   *   spender: '0xPool...',
+   *   amount: 1_000000000000000000n,
+   *   wallet,
+   * })
+   * const { hash } = await cct.provideSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   wallet, // the silo rebalancer
+   * })
+   * ```
+   */
+  provideSiloedLiquidity(
+    opts: EVMExecuteParams<ProvideSiloedLiquidityParams>,
+  ): Promise<TransactionResult> {
+    return this.#provideSiloedLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `withdrawSiloedLiquidity` tx (for multisig / offline signing): pulls
+   * `amount` of the pool's token out of one lane's silo of a **SiloedLockReleaseTokenPool**
+   * (v1.6.0–v1.6.1).
+   * @remarks Gated on the **silo's** rebalancer, and the tokens are sent to `msg.sender`, so they
+   * land with that rebalancer, whoever signs. The lane must be siloed; a given `sender` is checked
+   * against the silo rebalancer.
+   * @remarks Pays out of the silo's own balance (`getAvailableTokens(remoteChainSelector)`), which
+   * is read first so withdrawing more than it holds is reported before signing. Advisory only:
+   * every CCIP transfer on the lane moves it. The shared unsiloed bucket is drawn on with
+   * {@link generateUnsignedWithdrawLiquidity} instead.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through a
+   * lockbox per lane instead (see {@link withdrawFromLockbox})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
+   * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
+   * rebalancer
+   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the silo rebalancer.
+   * const unsigned = await cct.generateUnsignedWithdrawSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xSiloRebalancer...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawSiloedLiquidity(
+    opts: WithdrawSiloedLiquidityParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#withdrawSiloedLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws liquidity from one lane's silo to the signing wallet, which must be the silo's
+   * rebalancer. `sender` defaults to the wallet's address and must equal it.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
+   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
+   * `InsufficientLiquidity`
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.withdrawSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   wallet, // the silo rebalancer, which also receives the tokens
+   * })
+   * ```
+   */
+  withdrawSiloedLiquidity(
+    opts: EVMExecuteParams<WithdrawSiloedLiquidityParams>,
+  ): Promise<TransactionResult> {
+    return this.#withdrawSiloedLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setSiloRebalancer` tx (for multisig / offline signing): appoints the
+   * account allowed to move one lane's silo liquidity on a **SiloedLockReleaseTokenPool**
+   * (v1.6.0–v1.6.1).
+   * @remarks Owner-only, and the lane must already be siloed; silos are created, with a first
+   * rebalancer, by {@link generateUnsignedUpdateSiloDesignations}. The appointee is who
+   * {@link generateUnsignedProvideSiloedLiquidity} and
+   * {@link generateUnsignedWithdrawSiloedLiquidity} then accept for that lane. A given `sender` is
+   * checked against the pool's `owner()`.
+   * @remarks A zero `rebalancer` is accepted only by a **v1.6.1** pool, where it revokes the role
+   * and freezes the silo's liquidity until a new one is appointed; a v1.6.0 pool reverts
+   * `ZeroAddressNotAllowed`, so it is rejected there before any calldata is built.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, whose lanes escrow through
+   * lockboxes that authorize their own callers (see {@link updateLockboxAuthorizedCallers})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` is zero,
+   * `rebalancer` is zero on a v1.6.0 pool, the lane is not siloed, or `sender` is given and is
+   * not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedSetSiloRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   rebalancer: '0xSiloRebalancer...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetSiloRebalancer(opts: SetSiloRebalancerParams): Promise<UnsignedEVMTx> {
+    return this.#setSiloRebalancer.generate(this.chain, opts)
+  }
+
+  /**
+   * Appoints one lane's silo rebalancer, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it: the wallet must be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setSiloRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   rebalancer: '0xSiloRebalancer...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  setSiloRebalancer(opts: EVMExecuteParams<SetSiloRebalancerParams>): Promise<TransactionResult> {
+    return this.#setSiloRebalancer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `updateSiloDesignations` tx (for multisig / offline signing): turns
+   * lanes of a **SiloedLockReleaseTokenPool** (v1.6.0–v1.6.1) into silos (`adds`), or back into
+   * shared-bucket lanes (`removes`). Removes are applied first.
+   * @remarks Owner-only. **A remove moves the silo's whole balance into the shared unsiloed
+   * bucket** and revokes its silo rebalancer. **An add starts the silo at 0**, under the given
+   * rebalancer, who funds it with {@link generateUnsignedProvideSiloedLiquidity}.
+   * @remarks Every lane is read before any calldata is built: a removed lane must be siloed, an
+   * added one must be a supported chain (see {@link applyChainUpdates}) and not yet siloed. A lane
+   * in both arrays is rejected; to change a silo's rebalancer without moving its liquidity, use
+   * {@link generateUnsignedSetSiloRebalancer}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which binds a lockbox per
+   * lane instead (see `configureLockBoxes`)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, both arrays are empty, a lane is
+   * duplicated, zero (in `adds`) or in both arrays, a rebalancer is zero, a lane fails one of the
+   * state checks above, or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedUpdateSiloDesignations({
+   *   poolAddress: '0xPool...',
+   *   removes: [],
+   *   adds: [{ remoteChainSelector: 16015286601757825753n, rebalancer: '0xSiloRebalancer...' }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedUpdateSiloDesignations(
+    opts: UpdateSiloDesignationsParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#updateSiloDesignations.generate(this.chain, opts)
+  }
+
+  /**
+   * Designates and un-designates silos, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it: the wallet must be the pool owner.
+   * @remarks A remove moves the silo's balance into the shared unsiloed bucket; an add starts at 0.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane fails a state check,
+   * `sender` is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.updateSiloDesignations({
+   *   poolAddress: '0xPool...',
+   *   removes: [16015286601757825753n],
+   *   adds: [],
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  updateSiloDesignations(
+    opts: EVMExecuteParams<UpdateSiloDesignationsParams>,
+  ): Promise<TransactionResult> {
+    return this.#updateSiloDesignations.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the liquidity one lane of a **SiloedLockReleaseTokenPool** can release
+   * (v1.6.0–v1.6.1): the silo's own balance on a siloed lane, and on any other the shared
+   * unsiloed bucket (the same value as `getUnsiloedLiquidity()`).
+   * @remarks Informational, for audit and UX: {@link withdrawSiloedLiquidity} makes this same
+   * check itself.
+   * @returns The lane's liquidity, in the token's smallest unit.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, whose lanes escrow through
+   * lockboxes (see `getLockBox(uint64)`)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the pool does not support
+   * the lane
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const available = await cct.getAvailableTokens({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getAvailableTokens(opts: GetAvailableTokensParams): Promise<GetAvailableTokensResult> {
+    return this.#getAvailableTokens.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the account one lane of a **SiloedLockReleaseTokenPool** accepts liquidity calls from
+   * (v1.6.0–v1.6.1): the silo's rebalancer on a siloed lane, and on any other the unsiloed one
+   * ({@link getRebalancer}).
+   * @remarks Informational, for audit and UX: the per-lane liquidity ops make this same check
+   * themselves.
+   * @returns The rebalancer, checksummed. The zero address when none is set, meaning the lane
+   * accepts liquidity calls from nobody.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no rebalancer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const rebalancer = await cct.getChainRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getChainRebalancer(opts: GetChainRebalancerParams): Promise<GetChainRebalancerResult> {
+    return this.#getChainRebalancer.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether one lane of a **SiloedLockReleaseTokenPool** has its own silo (v1.6.0–v1.6.1).
+   * A siloed lane is funded with {@link provideSiloedLiquidity}; any other shares the unsiloed
+   * bucket ({@link provideLiquidity}). Silos are set with {@link updateSiloDesignations}.
+   * @returns `true` if the lane is siloed; `false` for lane 0 and for any unknown lane.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which isolates lanes with
+   * separate lockboxes instead (see `getAllLockBoxConfigs`)
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const siloed = await cct.isSiloed({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  isSiloed(opts: IsSiloedParams): Promise<IsSiloedResult> {
+    return this.#isSiloed.query(this.chain, opts)
   }
 
   /**

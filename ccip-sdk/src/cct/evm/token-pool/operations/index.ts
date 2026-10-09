@@ -32,6 +32,16 @@ export {
 } from './get-allowlist-enabled.ts'
 export { type GetAllowlistParams, type GetAllowlistResult, GetAllowlist } from './get-allowlist.ts'
 export {
+  type GetAvailableTokensParams,
+  type GetAvailableTokensResult,
+  GetAvailableTokens,
+} from './get-available-tokens.ts'
+export {
+  type GetChainRebalancerParams,
+  type GetChainRebalancerResult,
+  GetChainRebalancer,
+} from './get-chain-rebalancer.ts'
+export {
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
   GetDynamicConfig,
@@ -62,7 +72,12 @@ export {
   type GetTokenTransferFeeConfigResult,
   GetTokenTransferFeeConfig,
 } from './get-token-transfer-fee-config.ts'
+export { type IsSiloedParams, type IsSiloedResult, IsSiloed } from './is-siloed.ts'
 export { type ProvideLiquidityParams, ProvideLiquidity } from './provide-liquidity.ts'
+export {
+  type ProvideSiloedLiquidityParams,
+  ProvideSiloedLiquidity,
+} from './provide-siloed-liquidity.ts'
 export { type RemoveRemotePoolParams, RemoveRemotePool } from './remove-remote-pool.ts'
 export {
   type SetAllowedFinalityConfigParams,
@@ -77,6 +92,7 @@ export { type SetDynamicConfigParams, SetDynamicConfig } from './set-dynamic-con
 export { type SetRateLimitAdminParams, SetRateLimitAdmin } from './set-rate-limit-admin.ts'
 export { type SetRebalancerParams, SetRebalancer } from './set-rebalancer.ts'
 export { type SetRemotePoolParams, SetRemotePool } from './set-remote-pool.ts'
+export { type SetSiloRebalancerParams, SetSiloRebalancer } from './set-silo-rebalancer.ts'
 export { type TransferLiquidityParams, TransferLiquidity } from './transfer-liquidity.ts'
 export {
   type TransferPoolOwnershipParams,
@@ -86,5 +102,14 @@ export {
   type UpdateAdvancedPoolHooksParams,
   UpdateAdvancedPoolHooks,
 } from './update-advanced-pool-hooks.ts'
+export {
+  type SiloConfigUpdate,
+  type UpdateSiloDesignationsParams,
+  UpdateSiloDesignations,
+} from './update-silo-designations.ts'
 export { type WithdrawFeeTokensParams, WithdrawFeeTokens } from './withdraw-fee-tokens.ts'
 export { type WithdrawLiquidityParams, WithdrawLiquidity } from './withdraw-liquidity.ts'
+export {
+  type WithdrawSiloedLiquidityParams,
+  WithdrawSiloedLiquidity,
+} from './withdraw-siloed-liquidity.ts'

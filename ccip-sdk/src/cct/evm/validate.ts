@@ -40,7 +40,11 @@ export function validateAddress(
  * spelling, and a tx to `0x0` hits no code, so it mines as a successful no-op.
  * @throws {@link CCTParamsInvalidError} if `value` is not a valid address, or is the zero address
  */
-export function validateNonZeroAddress(operation: string, param: string, value: unknown): void {
+export function validateNonZeroAddress(
+  operation: string,
+  param: string,
+  value: unknown,
+): asserts value is string {
   validateAddress(operation, param, value)
   if (getAddress(value) === ZeroAddress)
     throw new CCTParamsInvalidError(operation, param, 'must not be the zero address')

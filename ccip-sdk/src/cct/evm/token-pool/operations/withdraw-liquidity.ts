@@ -10,7 +10,8 @@
  * `ERC20LockBox` instead of holding liquidity itself.
  *
  * @remarks On a `SiloedLockReleaseTokenPool` this withdraws from the *unsiloed* bucket only, and
- * is gated on the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
+ * is gated on the unsiloed rebalancer; a siloed lane's own bucket is withdrawn with
+ * {@link WithdrawSiloedLiquidity} (`withdraw-siloed-liquidity.ts`).
  *
  * @packageDocumentation
  */
