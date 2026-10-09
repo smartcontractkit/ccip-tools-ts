@@ -12,7 +12,6 @@ import {
   SendTransactionError,
 } from '@solana/web3.js'
 
-import type { ChainContext } from '../chain.ts'
 import {
   CCIPSolanaRouterConfigNotFoundError,
   CCIPSolanaV2LaneUnavailableError,
@@ -458,12 +457,8 @@ describe('getFeeV2', () => {
 })
 
 describe('SolanaChain send lane routing', () => {
-  const chain = (connection: Connection, ctx?: ChainContext) =>
-    new SolanaChain(connection, networkInfo('solana-devnet'), {
-      apiClient: null,
-      logger: silent,
-      ...ctx,
-    })
+  const chain = (connection: Connection) =>
+    new SolanaChain(connection, networkInfo('solana-devnet'), { apiClient: null, logger: silent })
   const sender = randomKey()
   const opts = (extraArgs: Record<string, unknown>, fee?: bigint) => ({
     router: STAGING_ROUTER.toBase58(),
@@ -574,15 +569,18 @@ describe('SolanaChain send lane routing', () => {
       )
     })
 
-    it('quotes and sends over 2.0 with solanaSendV2OnAllowlistedLanes', async () => {
+    it('quotes and sends over 2.0 with sendV2OnAllowlistedLanes', async () => {
       const { connection } = routerConnection(STAGING_ROUTER, {
         observation: allowlistedObservation(),
         fee: 99n,
       })
-      const optedIn = chain(connection, { solanaSendV2OnAllowlistedLanes: true })
+      const optedIn = { sendV2OnAllowlistedLanes: true }
       const { sender: _, ...feeOpts } = opts({ gasLimit: 0n })
-      assert.equal(await optedIn.getFee(feeOpts), 99n)
-      const unsigned = await optedIn.generateUnsignedSendMessage(opts({ finality: 'safe' }))
+      assert.equal(await chain(connection).getFee({ ...feeOpts, ...optedIn }), 99n)
+      const unsigned = await chain(connection).generateUnsignedSendMessage({
+        ...opts({ finality: 'safe' }),
+        ...optedIn,
+      })
       assert.deepEqual(
         unsigned.instructions.at(-1)!.data.subarray(0, 8),
         CCIP_SEND_V2_DISCRIMINATOR,

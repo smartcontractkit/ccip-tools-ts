@@ -892,19 +892,16 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         )
       })
 
-      describe('with solanaSendV2OnAllowlistedLanes', () => {
-        const optedIn = () =>
-          new SolanaChain(connection!, networkInfo('solana-devnet'), {
-            apiClient: null,
-            logger: testLogger,
-            solanaSendV2OnAllowlistedLanes: true,
-          })
+      describe('with sendV2OnAllowlistedLanes', () => {
+        const optedIn = { sendV2OnAllowlistedLanes: true }
 
         it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
           await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-          const chain = optedIn()
-          const fee = await chain.getFee(feeOpts(v3))
-          const request = await chain.sendMessage(sendOpts({ ...v3, fee }))
+          const fee = await solanaChain!.getFee({ ...feeOpts(v3), ...optedIn })
+          const request = await solanaChain!.sendMessage({
+            ...sendOpts({ ...v3, fee }),
+            ...optedIn,
+          })
           assert.equal(request.lane.version, CCIPVersion.V2_0)
           const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
           assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
@@ -913,7 +910,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         it('leaves rejecting a sender off the allowlist to the router', async () => {
           await setAllowlist([Keypair.generate().publicKey])
           await assert.rejects(
-            optedIn().sendMessage(sendOpts(v3)),
+            solanaChain!.sendMessage({ ...sendOpts(v3), ...optedIn }),
             (err: unknown) =>
               err instanceof SendTransactionError &&
               !!err.logs?.some((log) => log.includes('SenderNotAllowed')),

@@ -199,7 +199,7 @@ export async function observeDestChainV2(
  * @param ctx - Context with the Solana connection and logger.
  * @param opts - Router, destination selector, message (as populated by `buildMessageForDest`), and
  *   whether lanes with their allowlist enabled can go over 2.0 (see
- *   `ChainContext.solanaSendV2OnAllowlistedLanes`).
+ *   `SolanaSendMessageOpts.sendV2OnAllowlistedLanes`).
  * @returns The entrypoint version, and the message to send through it (with V3 extraArgs for 2.0).
  * @throws {@link CCIPSolanaV2LaneUnavailableError} if the message requires 2.0 and it isn't possible
  */

@@ -187,17 +187,6 @@ export type ChainContext = WithLogger & {
    * When the signal fires, the provider is destroyed and all active getLogs watch loops exit.
    */
   abort?: AbortSignal
-
-  /**
-   * Solana: also send over CCIP 2.0 lanes with their sender allowlist enabled, which are otherwise
-   * treated as not supporting 2.0, so quotes and sends never depend on the sender. When enabled,
-   * every sender goes over 2.0 on those lanes, and the router rejects senders off the allowlist on
-   * send. Meant for testing allowlisted lanes.
-   *
-   * Default: `false`
-   * @internal
-   */
-  solanaSendV2OnAllowlistedLanes?: boolean
 } & WithCantonConfig
 
 /**

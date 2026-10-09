@@ -143,7 +143,12 @@ import {
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
-import { type CCIPMessage_V1_6_Solana, type UnsignedSolanaTx, isWallet } from './types.ts'
+import {
+  type CCIPMessage_V1_6_Solana,
+  type SolanaSendMessageOpts,
+  type UnsignedSolanaTx,
+  isWallet,
+} from './types.ts'
 import {
   type SolanaSentSlice,
   type SolanaSplitMode,
@@ -155,7 +160,7 @@ import {
   simulateAndSendTxs,
   simulationProvider,
 } from './utils.ts'
-export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
+export type { SolanaSendMessageOpts, SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx }
 
 const routerCoder = sizedCoder(CCIP_ROUTER_IDL)
 const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
@@ -244,8 +249,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
   connection: Connection
   commitment: Commitment = 'confirmed'
-  // see ChainContext.solanaSendV2OnAllowlistedLanes
-  private readonly sendV2OnAllowlistedLanes: boolean
 
   /**
    * Creates a new SolanaChain instance.
@@ -256,7 +259,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     super(network, ctx)
 
     this.connection = connection
-    this.sendV2OnAllowlistedLanes = ctx?.solanaSendV2OnAllowlistedLanes ?? false
 
     // Memoize expensive operations
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
@@ -1388,11 +1390,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * Solana routers expose separate CCIP 1.6 and 2.0 entrypoints, chosen per message: 2.0 whenever
    * the lane supports it (without its sender allowlist enabled) and the extraArgs are (or convert
    * to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
-   * {@link SolanaChain.sendMessage}.
+   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}.
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
    *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
-  async getFee(opts: Parameters<Chain['getFee']>[0]): Promise<bigint> {
+  async getFee(opts: Parameters<Chain['getFee']>[0] & SolanaSendMessageOpts): Promise<bigint> {
     await this.checkSendMessage(opts)
     const { router, destChainSelector, message } = opts
     const populatedMessage = buildMessageForDest(message, networkInfo(destChainSelector).family)
@@ -1400,7 +1402,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sendV2OnAllowlistedLanes: this.sendV2OnAllowlistedLanes,
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
     })
     return this.quoteSendLane(router, destChainSelector, lane)
   }
@@ -1435,7 +1437,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
   async generateUnsignedSendMessage(
-    opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
+    opts: Parameters<Chain['generateUnsignedSendMessage']>[0] & SolanaSendMessageOpts,
   ): Promise<UnsignedSolanaTx> {
     const { router, destChainSelector } = opts
     const sender = new PublicKey(opts.sender)
@@ -1447,7 +1449,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       router: new PublicKey(router),
       destChainSelector,
       message: populatedMessage,
-      sendV2OnAllowlistedLanes: this.sendV2OnAllowlistedLanes,
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
     })
     let fee = opts.message.fee
     if (fee == null) {
@@ -1470,7 +1472,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * @throws {@link CCIPPartialTransactionSubmissionError} if `ccipSend` fails after the approvals
    *   were split into (and confirmed in) an earlier transaction
    */
-  async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
+  async sendMessage(
+    opts: Parameters<Chain['sendMessage']>[0] & SolanaSendMessageOpts,
+  ): Promise<CCIPRequest> {
     if (!isWallet(opts.wallet)) throw new CCIPWalletInvalidError(util.inspect(opts.wallet))
     const unsigned = await this.generateUnsignedSendMessage({
       ...opts,
