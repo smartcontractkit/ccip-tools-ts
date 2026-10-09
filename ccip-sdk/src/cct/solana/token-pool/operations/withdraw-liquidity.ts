@@ -67,7 +67,9 @@ export class WithdrawLiquidity extends SolanaOperation<
   readonly name = 'withdrawLiquidity'
 
   /** Parses public keys, validates amount, and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateWithdrawLiquidityParams): ParsedWithdrawLiquidityParams {
+  protected override prepare(
+    params: GenerateWithdrawLiquidityParams,
+  ): ParsedWithdrawLiquidityParams {
     validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
 
     const payer = parsePublicKey(this.name, 'payer', params.payer)

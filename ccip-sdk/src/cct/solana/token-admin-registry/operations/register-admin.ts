@@ -137,7 +137,7 @@ export class RegisterAdmin extends SolanaOperation<
   readonly name = 'registerAdmin'
 
   /** Parses all caller-supplied parameters before RPC. */
-  protected override parse(params: GenerateRegisterAdminParams): ParsedRegisterAdminParams {
+  protected override prepare(params: GenerateRegisterAdminParams): ParsedRegisterAdminParams {
     if (
       params.registrationMethod !== undefined &&
       !Object.values(REGISTRATION_METHODS).includes(params.registrationMethod)

@@ -48,7 +48,9 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
   readonly name = 'updateAdvancedPoolHooksAuthorizedCallers'
 
   /** Validates addresses and requires at least one addition or removal before any RPC. */
-  protected override validate(params: UpdateAdvancedPoolHooksAuthorizedCallersParams): void {
+  protected override prepare(
+    params: UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  ): UpdateAdvancedPoolHooksAuthorizedCallersParams {
     validateAdvancedPoolHooksTarget(this.name, params)
     const { addedCallers = [], removedCallers = [] } = params
     validateCallers(this.name, 'addedCallers', addedCallers)
@@ -59,6 +61,7 @@ export class UpdateAdvancedPoolHooksAuthorizedCallers extends EVMOperation<Updat
         'addedCallers',
         'at least one caller must be added or removed',
       )
+    return params
   }
 
   /**

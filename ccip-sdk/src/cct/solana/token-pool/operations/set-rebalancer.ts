@@ -61,7 +61,7 @@ export class SetRebalancer extends SolanaOperation<
   readonly name = 'setRebalancer'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateSetRebalancerParams): ParsedSetRebalancerParams {
+  protected override prepare(params: GenerateSetRebalancerParams): ParsedSetRebalancerParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
 
     return {

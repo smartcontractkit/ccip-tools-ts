@@ -80,9 +80,11 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   }
 
   /** Validates both addresses before any RPC; a zero `newRateLimitAdmin` clears the role. */
-  protected override validate({ poolAddress, newRateLimitAdmin }: SetRateLimitAdminParams): void {
+  protected override prepare(params: SetRateLimitAdminParams): SetRateLimitAdminParams {
+    const { poolAddress, newRateLimitAdmin } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateAddress(this.name, 'newRateLimitAdmin', newRateLimitAdmin)
+    return params
   }
 
   /**

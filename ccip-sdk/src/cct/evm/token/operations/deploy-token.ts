@@ -45,7 +45,7 @@ function encodeCrossChainToken(iface: Interface, p: DeployTokenParams): string {
       p.symbol,
       p.maxSupply,
       p.preMint ?? 0n,
-      // preMintRecipient is set iff preMint > 0 (enforced in validate); zero address otherwise.
+      // preMintRecipient is set iff preMint > 0 (enforced in prepare); zero address otherwise.
       p.preMintRecipient ?? ZeroAddress,
       p.decimals,
       p.ccipAdmin ?? p.owner,
@@ -60,7 +60,7 @@ export class DeployToken extends EVMDeployOperation<DeployTokenParams> {
   readonly name = 'deployToken'
 
   /** Validates the constructor params before building init-code. */
-  protected override validate(params: DeployTokenParams): void {
+  protected override prepare(params: DeployTokenParams): DeployTokenParams {
     validateNonEmptyString(this.name, 'name', params.name)
     validateNonEmptyString(this.name, 'symbol', params.symbol)
     validateUint8(this.name, 'decimals', params.decimals)
@@ -99,6 +99,7 @@ export class DeployToken extends EVMDeployOperation<DeployTokenParams> {
     if (params.ccipAdmin !== undefined) validateAddress(this.name, 'ccipAdmin', params.ccipAdmin)
     if (params.burnMintRoleAdmin !== undefined)
       validateAddress(this.name, 'burnMintRoleAdmin', params.burnMintRoleAdmin)
+    return params
   }
 
   /** Deploy artifact for `CrossChainToken` (v2.0.0). */

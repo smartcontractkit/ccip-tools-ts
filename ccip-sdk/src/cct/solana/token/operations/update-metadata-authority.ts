@@ -129,7 +129,7 @@ export class UpdateMetadataAuthority extends SolanaOperation<
   readonly name = 'updateMetadataAuthority'
 
   /** Parses the mint and current and new metadata update authorities. */
-  protected override parse(
+  protected override prepare(
     params: GenerateUpdateMetadataAuthorityParams,
   ): ParsedUpdateMetadataAuthorityParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)

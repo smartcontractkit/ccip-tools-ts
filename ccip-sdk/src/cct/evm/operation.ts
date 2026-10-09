@@ -1,5 +1,5 @@
 /**
- * EVM {@link Operation} lifecycle: prepare (validate → parse) → encode → submit, plus the shared
+ * EVM {@link Operation} lifecycle: prepare → encode → submit, plus the shared
  * wallet-sender pre-flight ({@link EVMOperation.resolveWalletSender}). Deployment ops extend
  * {@link EVMDeployOperation}, which also resolves the deployed address.
  *
@@ -83,7 +83,7 @@ export type DeployResult = TransactionResult & {
 }
 
 /**
- * EVM CCT write base. Subclasses supply {@link parse} (or {@link validate}) and
+ * EVM CCT write base. Subclasses supply {@link prepare} and
  * {@link buildUnsigned}; {@link execute} signs and submits, returning the confirmed tx hash. Ops
  * that resolve to more (e.g. a deployed address) extend {@link EVMDeployOperation}.
  */
@@ -132,7 +132,7 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     const walletAddress = await wallet.getAddress()
     if (sender === undefined) return walletAddress
     // Validated before `getAddress`, which throws a raw ethers TypeError on a malformed string.
-    // This runs ahead of `generate`'s own validate(), so without it the documented
+    // This runs ahead of `generate`'s own validation, so without it the documented
     // CCTParamsInvalidError contract would leak an ethers error for a bad `sender`.
     validateAddress(this.name, 'sender', sender)
     if (getAddress(sender) !== getAddress(walletAddress))
@@ -160,7 +160,7 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
 }
 
 /**
- * EVM contract-deployment base. Subclasses supply {@link validate}, {@link artifact} (name +
+ * EVM contract-deployment base. Subclasses supply {@link prepare}, {@link artifact} (name +
  * ctor {@link Interface} + creation bytecode), and {@link encode}; the base wires
  * {@link buildUnsigned} (init-code = bytecode + encoded ctor args) and {@link execute} (submit,
  * then read the deployed address and pair it with an {@link ExplorerVerificationInput}).

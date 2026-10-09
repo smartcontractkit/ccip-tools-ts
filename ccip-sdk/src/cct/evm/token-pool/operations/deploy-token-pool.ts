@@ -141,7 +141,7 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   }
 
   /** Validates the constructor params before building init-code. */
-  protected override validate(params: DeployTokenPoolParams): void {
+  protected override prepare(params: DeployTokenPoolParams): DeployTokenPoolParams {
     if (!isDeployableTokenPoolType(params.type))
       throw new CCTParamsInvalidError(
         this.name,
@@ -156,6 +156,7 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     if (params.type === 'LockReleaseTokenPool')
       validateNonZeroAddress(this.name, 'lockbox', params.lockbox)
+    return params
   }
 
   /** Deploy artifact for the selected pool `type` (v2.0.0): name + ctor interface + bytecode. */

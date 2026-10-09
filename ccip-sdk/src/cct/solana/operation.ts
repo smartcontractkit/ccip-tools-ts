@@ -1,5 +1,5 @@
 /**
- * Solana {@link Operation} lifecycle: prepare (validate → parse) → build unsigned tx → submit.
+ * Solana {@link Operation} lifecycle: prepare → build unsigned tx → submit.
  * Default execution uses wallet.publicKey as payer; use generateUnsigned* for a custom payer.
  *
  * @packageDocumentation
@@ -22,9 +22,9 @@ export type SolanaExecuteParams<P extends object> = P & {
 }
 
 /**
- * Solana CCT write base. Subclasses supply {@link parse} and {@link buildUnsigned}.
+ * Solana CCT write base. Subclasses supply {@link prepare} and {@link buildUnsigned}.
  *
- * Override {@link parse} for validation, defaults, or conversion; it must be overridden whenever
+ * Override {@link prepare} for validation, defaults, or conversion; it must be overridden whenever
  * `Parsed` differs from `SolanaGenerateParams<P>`.
  */
 export abstract class SolanaOperation<

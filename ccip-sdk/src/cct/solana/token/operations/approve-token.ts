@@ -68,7 +68,7 @@ export class ApproveToken extends SolanaOperation<
   readonly name = 'approveToken'
 
   /** Parses public keys, allowance, and optional SPL Token multisig signers. */
-  protected override parse(params: GenerateApproveTokenParams): ParsedApproveTokenParams {
+  protected override prepare(params: GenerateApproveTokenParams): ParsedApproveTokenParams {
     validateBigInt(this.name, 'amount', params.amount, 0n, U64_MAX)
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')

@@ -85,11 +85,8 @@ export class WithdrawSiloedLiquidity extends EVMOperation<WithdrawSiloedLiquidit
    * Validates the pool, lane and amount before any RPC. Lane 0 and a zero `amount` both revert
    * on-chain (`ChainNotSiloed`, `LiquidityAmountCannotBeZero`).
    */
-  protected override validate({
-    poolAddress,
-    remoteChainSelector,
-    amount,
-  }: WithdrawSiloedLiquidityParams): void {
+  protected override prepare(params: WithdrawSiloedLiquidityParams): WithdrawSiloedLiquidityParams {
+    const { poolAddress, remoteChainSelector, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateUint64(this.name, 'remoteChainSelector', remoteChainSelector)
     if (remoteChainSelector === 0n)
@@ -99,6 +96,7 @@ export class WithdrawSiloedLiquidity extends EVMOperation<WithdrawSiloedLiquidit
         '0 designates the unsiloed bucket, which the pool rejects here with ChainNotSiloed; use withdrawLiquidity',
       )
     validatePositiveUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

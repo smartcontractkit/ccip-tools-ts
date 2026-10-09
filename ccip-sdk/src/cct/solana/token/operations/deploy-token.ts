@@ -301,7 +301,7 @@ export class DeployToken extends SolanaOperation<
   protected override readonly splitMode = 'resource'
 
   /** Parses mint and metadata params before any RPC. */
-  protected override parse(params: GenerateDeployTokenParams): ParsedDeployTokenParams {
+  protected override prepare(params: GenerateDeployTokenParams): ParsedDeployTokenParams {
     validateBaseParams(this.name, params)
     validatePreMintParams(this.name, params)
     validateMetaplexParams(this.name, params)

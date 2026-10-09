@@ -44,9 +44,11 @@ export class RevokeBurnRole extends EVMOperation<RevokeBurnRoleParams> {
    * Validates both addresses before any RPC. Neither may be zero: a tx to `0x0` hits no code, and
    * revoking a role from `0x0` mines as a no-op.
    */
-  protected override validate({ tokenAddress, burner }: RevokeBurnRoleParams): void {
+  protected override prepare(params: RevokeBurnRoleParams): RevokeBurnRoleParams {
+    const { tokenAddress, burner } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'burner', burner)
+    return params
   }
 
   /**

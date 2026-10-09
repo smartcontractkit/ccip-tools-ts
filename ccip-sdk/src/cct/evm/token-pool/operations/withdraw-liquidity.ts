@@ -68,9 +68,11 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
   }
 
   /** Validates the pool address and amount before any RPC; a zero `amount` moves nothing. */
-  protected override validate({ poolAddress, amount }: WithdrawLiquidityParams): void {
+  protected override prepare(params: WithdrawLiquidityParams): WithdrawLiquidityParams {
+    const { poolAddress, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validatePositiveUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

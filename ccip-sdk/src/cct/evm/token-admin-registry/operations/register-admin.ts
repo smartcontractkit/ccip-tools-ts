@@ -103,7 +103,7 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
   readonly name = 'registerAdmin'
 
   /** Validates addresses and, if given, `registrationMethod`; no RPC. */
-  protected override validate(p: RegisterAdminParams): void {
+  protected override prepare(p: RegisterAdminParams): RegisterAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'registryModule', p.registryModule)
     validateAddress(this.name, 'address', p.address)
@@ -117,6 +117,7 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
         `must be one of ${Object.values(REGISTRATION_METHODS).join(', ')}`,
       )
     }
+    return p
   }
 
   /**

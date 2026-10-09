@@ -109,13 +109,14 @@ export class ApplyCCVConfigUpdates extends EVMOperation<ApplyCCVConfigUpdatesPar
   readonly name = 'applyCCVConfigUpdates'
 
   /** Validates the hooks target and contract CCV constraints before any RPC. */
-  protected override validate(params: ApplyCCVConfigUpdatesParams): void {
+  protected override prepare(params: ApplyCCVConfigUpdatesParams): ApplyCCVConfigUpdatesParams {
     validateAdvancedPoolHooksTarget(this.name, params)
     const { ccvConfigArgs } = params
     validateArray(this.name, 'ccvConfigArgs', ccvConfigArgs)
     ccvConfigArgs.forEach((config, i) =>
       validateCCVConfig(this.name, `ccvConfigArgs[${i}]`, config),
     )
+    return params
   }
 
   /**

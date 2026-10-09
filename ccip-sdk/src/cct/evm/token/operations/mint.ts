@@ -42,10 +42,12 @@ export class Mint extends EVMOperation<MintParams> {
    * as a `Transfer` of nothing, and accepting it keeps this op's contract the token's own.
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    */
-  protected override validate({ tokenAddress, account, amount }: MintParams): void {
+  protected override prepare(params: MintParams): MintParams {
+    const { tokenAddress, account, amount } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'account', account)
     validateUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

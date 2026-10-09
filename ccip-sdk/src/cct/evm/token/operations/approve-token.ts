@@ -52,10 +52,12 @@ export class ApproveToken extends EVMOperation<ApproveTokenParams> {
   readonly name = 'approveToken'
 
   /** Validates both addresses and the amount before any RPC; a zero `amount` revokes. */
-  protected override validate({ tokenAddress, spender, amount }: ApproveTokenParams): void {
+  protected override prepare(params: ApproveTokenParams): ApproveTokenParams {
+    const { tokenAddress, spender, amount } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'spender', spender)
     validateUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

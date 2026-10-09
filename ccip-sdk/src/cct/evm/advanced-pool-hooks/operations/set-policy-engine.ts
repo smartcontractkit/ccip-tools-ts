@@ -48,9 +48,10 @@ export class SetPolicyEngine extends EVMOperation<SetPolicyEngineParams> {
   readonly name = 'setPolicyEngine'
 
   /** Validates addresses before any RPC; zero `newPolicyEngine` deliberately disables checks. */
-  protected override validate(params: SetPolicyEngineParams): void {
+  protected override prepare(params: SetPolicyEngineParams): SetPolicyEngineParams {
     validateAdvancedPoolHooksTarget(this.name, params)
     validateAddress(this.name, 'newPolicyEngine', params.newPolicyEngine)
+    return params
   }
 
   /**

@@ -794,7 +794,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
 
   /**
    * The enabled-bucket rate bound is version-dependent, so it is applied in the encoder (the first
-   * place the pool version is known) rather than in `validate()`:
+   * place the pool version is known) rather than in `prepare()`:
    *
    * - v1.5.0/v1.5.1 revert `InvalidRateLimitRate` unless `0 < rate < capacity`.
    * - v1.6.1/v2.0.0 only revert on `rate > capacity`, so `rate === capacity` and `rate === 0n` are

@@ -78,8 +78,12 @@ export class AcceptDefaultAdminTransfer extends EVMOperation<AcceptDefaultAdminT
   readonly name: string = 'acceptDefaultAdminTransfer'
 
   /** Validates the token address before any RPC. */
-  protected override validate({ tokenAddress }: AcceptDefaultAdminTransferParams): void {
+  protected override prepare(
+    params: AcceptDefaultAdminTransferParams,
+  ): AcceptDefaultAdminTransferParams {
+    const { tokenAddress } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
+    return params
   }
 
   /**

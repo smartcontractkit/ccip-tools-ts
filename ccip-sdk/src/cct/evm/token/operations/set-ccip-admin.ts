@@ -37,9 +37,11 @@ export class SetCCIPAdmin extends EVMOperation<SetCCIPAdminParams> {
   }
 
   /** Validates addresses before any RPC; v2 CrossChainToken deliberately allows zero `newAdmin`. */
-  protected override validate({ tokenAddress, newAdmin }: SetCCIPAdminParams): void {
+  protected override prepare(params: SetCCIPAdminParams): SetCCIPAdminParams {
+    const { tokenAddress, newAdmin } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateAddress(this.name, 'newAdmin', newAdmin)
+    return params
   }
 
   /**

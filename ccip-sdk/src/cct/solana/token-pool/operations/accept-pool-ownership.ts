@@ -55,7 +55,7 @@ export class AcceptPoolOwnership extends SolanaOperation<
   readonly name = 'acceptPoolOwnership'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(
+  protected override prepare(
     params: GenerateAcceptPoolOwnershipParams,
   ): ParsedAcceptPoolOwnershipParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)

@@ -170,7 +170,8 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
    * Validates both pool addresses and the amount before any RPC. `from` must differ from
    * `poolAddress`: a pool is never its own rebalancer, so a self-transfer can only revert.
    */
-  protected override validate({ poolAddress, from, amount }: TransferLiquidityParams): void {
+  protected override prepare(params: TransferLiquidityParams): TransferLiquidityParams {
+    const { poolAddress, from, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateNonZeroAddress(this.name, 'from', from)
     validatePositiveUint256(this.name, 'amount', amount)
@@ -180,6 +181,7 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
         'from',
         'must be a different pool than poolAddress; a pool cannot withdraw its own liquidity',
       )
+    return params
   }
 
   /**

@@ -132,7 +132,7 @@ export class ApplyAllowlistUpdates extends EVMOperation<
    * (reported as `adds[i]` / `removes[i]`), an array holds duplicates, or an address appears in
    * both arrays
    */
-  protected override parse({
+  protected override prepare({
     poolAddress,
     removes: rawRemoves = [],
     adds: rawAdds = [],

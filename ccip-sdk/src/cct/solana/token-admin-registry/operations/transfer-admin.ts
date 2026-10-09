@@ -61,7 +61,7 @@ export class TransferAdmin extends SolanaOperation<
   readonly name = 'transferAdmin'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(params: GenerateTransferAdminParams): ParsedTransferAdminParams {
+  protected override prepare(params: GenerateTransferAdminParams): ParsedTransferAdminParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),

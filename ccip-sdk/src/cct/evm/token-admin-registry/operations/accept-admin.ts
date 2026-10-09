@@ -22,7 +22,7 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
  * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
  * for {@link AcceptAdmin.generate}: the pre-tx check below has nothing to compare
  * `pendingAdministrator` against without it, so an omitted `sender` is rejected in
- * {@link AcceptAdmin.parse}. {@link AcceptAdmin.execute} relaxes this — it defaults `sender`
+ * {@link AcceptAdmin.prepare}. {@link AcceptAdmin.execute} relaxes this — it defaults `sender`
  * to the signing wallet's own address, since that is the only address that can ever satisfy
  * the pending-administrator check for a signed submission (see {@link AcceptAdmin.execute}).
  */
@@ -43,7 +43,7 @@ export type AcceptAdminParams = {
   sender?: string
 }
 
-/** {@link AcceptAdminParams} as {@link AcceptAdmin.parse} leaves it: `sender` present and checksummed. */
+/** {@link AcceptAdminParams} as {@link AcceptAdmin.prepare} leaves it: `sender` present and checksummed. */
 type ParsedAcceptAdminParams = AcceptAdminParams & { sender: string }
 
 /** Accepts a pending TokenAdminRegistry administrator role for a token. */
@@ -56,7 +56,7 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
    * {@link buildUnsigned} can compare it against the registry's own checksummed
    * `pendingAdministrator` without re-asserting it.
    */
-  protected override parse(p: AcceptAdminParams): ParsedAcceptAdminParams {
+  protected override prepare(p: AcceptAdminParams): ParsedAcceptAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'address', p.address)
     validateAddress(this.name, 'sender', p.sender)

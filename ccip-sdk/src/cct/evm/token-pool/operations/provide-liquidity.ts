@@ -75,9 +75,11 @@ export class ProvideLiquidity extends EVMOperation<ProvideLiquidityParams> {
   }
 
   /** Validates the pool address and amount before any RPC; a zero `amount` moves nothing. */
-  protected override validate({ poolAddress, amount }: ProvideLiquidityParams): void {
+  protected override prepare(params: ProvideLiquidityParams): ProvideLiquidityParams {
+    const { poolAddress, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validatePositiveUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

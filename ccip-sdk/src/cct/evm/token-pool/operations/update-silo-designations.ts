@@ -133,7 +133,7 @@ export class UpdateSiloDesignations extends EVMOperation<
    * array, both are empty, an entry is malformed (reported as `removes[i]`,
    * `adds[i].remoteChainSelector` or `adds[i].rebalancer`), or a lane is duplicated or in both
    */
-  protected override parse({
+  protected override prepare({
     poolAddress,
     removes: rawRemoves,
     adds: rawAdds,

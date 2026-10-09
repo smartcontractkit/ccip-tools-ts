@@ -61,7 +61,7 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
   readonly name = 'ownerOverridePendingAdministrator'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(
+  protected override prepare(
     params: GenerateOwnerOverridePendingAdministratorParams,
   ): ParsedOwnerOverridePendingAdministratorParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)

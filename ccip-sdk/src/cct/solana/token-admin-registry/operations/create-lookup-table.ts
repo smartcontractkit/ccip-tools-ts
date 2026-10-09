@@ -88,7 +88,9 @@ export class CreateLookupTable extends SolanaOperation<
   protected override readonly splitMode = 'resource'
 
   /** Parses params before `buildUnsigned()` performs any RPC. */
-  protected override parse(params: GenerateCreateLookupTableParams): ParsedCreateLookupTableParams {
+  protected override prepare(
+    params: GenerateCreateLookupTableParams,
+  ): ParsedCreateLookupTableParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     const authority =
       params.authority === undefined

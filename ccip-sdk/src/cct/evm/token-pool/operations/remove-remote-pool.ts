@@ -37,7 +37,7 @@ import {
  */
 export type RemoveRemotePoolParams = RemotePoolParams
 
-/** {@link RemoveRemotePoolParams} as {@link RemoveRemotePool.parse} leaves it. */
+/** {@link RemoveRemotePoolParams} as {@link RemoveRemotePool.prepare} leaves it. */
 type ParsedRemoveRemotePoolParams = ParsedRemotePoolParams
 
 /** Encodes `removeRemotePool` calldata against the resolved pool {@link Interface}. */
@@ -76,7 +76,7 @@ export class RemoveRemotePool extends EVMOperation<
    * Validates the pool address, lane selector and remote pool address before any RPC, keeping the
    * parsed `remotePoolAddress` so {@link buildUnsigned} checks and encodes it without re-parsing.
    */
-  protected override parse(params: RemoveRemotePoolParams): ParsedRemoveRemotePoolParams {
+  protected override prepare(params: RemoveRemotePoolParams): ParsedRemoveRemotePoolParams {
     return parseRemotePoolParams(this.name, params)
   }
 
