@@ -15,7 +15,6 @@ import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import {
   type SolanaV2LaneUnavailableReason,
-  CCIPArgumentInvalidError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaV2LaneUnavailableError,
 } from '../errors/index.ts'
@@ -23,7 +22,7 @@ import type { ExtraArgs, GenericExtraArgsV3 } from '../extra-args.ts'
 import { ChainFamily } from '../networks.ts'
 import { type AnyMessage, type WithLogger, CCIPVersion } from '../types.ts'
 import { bytesToBuffer, toLeArray } from '../utils.ts'
-import { newProgram, sighash, sizedCoder } from './coder.ts'
+import { sighash, sizedCoder } from './coder.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import {
   MAX_HEAP_FRAME_BYTES,
@@ -41,7 +40,8 @@ import { SIMULATION_PAYER, customInstructionErrorCode, simulateTransaction } fro
  * Solana is the only family whose router exposes both a 1.6 (`ccip_send`) and a 2.0
  * (`ccip_send_v2`) entrypoint, side by side and per lane, so the SDK picks one off-chain. 2.0 is
  * preferred whenever it's possible; legacy extraArgs fall back to 1.6 when it isn't, while
- * GenericExtraArgsV3 (which only 2.0 lanes accept) can't.
+ * GenericExtraArgsV3 (which only 2.0 lanes accept) can't. Neither the choice nor the 2.0 quote
+ * depends on the sender, so `getFee`, which doesn't know it, quotes what `sendMessage` charges.
  */
 
 const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
@@ -188,42 +188,19 @@ export async function observeDestChainV2(
   }
 }
 
-// The observation only counts the allowed senders, so the list is read from the lane's PDA
-async function isSenderAllowlisted(
-  connection: Connection,
-  {
-    router,
-    destChainSelector,
-    sender,
-  }: {
-    router: PublicKey
-    destChainSelector: bigint
-    sender: PublicKey
-  },
-): Promise<boolean> {
-  const program = newProgram(CCIP_ROUTER_V2_IDL, router, { connection })
-  const { config } = await program.account.destChainCcipV2.fetch(
-    destChainStateV2Pda(router, destChainSelector),
-  )
-  return config.allowedSenders.some((allowed) => allowed.equals(sender))
-}
-
 /**
  * Chooses the router entrypoint for a message:
  * - 2.0 whenever it's possible: the extraArgs are, or convert to, GenericExtraArgsV3 (see
- *   {@link toGenericExtraArgsV3}), the lane is configured for 2.0, and, if the lane's allowlist is
- *   enabled, the sender is allowlisted;
+ *   {@link toGenericExtraArgsV3}), and the lane is configured for 2.0, without its sender allowlist
+ *   enabled (unless `sendV2OnAllowlistedLanes`);
  * - otherwise 1.6, for legacy extraArgs;
  * - GenericExtraArgsV3 has no 1.6 fallback, and throws instead.
- *
- * On a lane with its allowlist enabled the choice depends on the sender, so it's required there:
- * a quote without it could come from another entrypoint than the send, and differ from its fee.
  * @param ctx - Context with the Solana connection and logger.
- * @param opts - Router, destination selector, message (as populated by `buildMessageForDest`),
- *   and its sender, if known.
+ * @param opts - Router, destination selector, message (as populated by `buildMessageForDest`), and
+ *   whether lanes with their allowlist enabled can go over 2.0 (see
+ *   `SolanaSendMessageOpts.sendV2OnAllowlistedLanes`).
  * @returns The entrypoint version, and the message to send through it (with V3 extraArgs for 2.0).
  * @throws {@link CCIPSolanaV2LaneUnavailableError} if the message requires 2.0 and it isn't possible
- * @throws {@link CCIPArgumentInvalidError} if the lane's allowlist is enabled and `sender` is missing
  */
 export async function selectSendLane(
   ctx: { connection: Connection } & WithLogger,
@@ -231,8 +208,13 @@ export async function selectSendLane(
     router,
     destChainSelector,
     message,
-    sender,
-  }: { router: PublicKey; destChainSelector: bigint; message: AnyMessage; sender?: PublicKey },
+    sendV2OnAllowlistedLanes = false,
+  }: {
+    router: PublicKey
+    destChainSelector: bigint
+    message: AnyMessage
+    sendV2OnAllowlistedLanes?: boolean
+  },
 ): Promise<SolanaSendLane> {
   const { logger = console } = ctx
   const extraArgs = toGenericExtraArgsV3(message.extraArgs)
@@ -244,25 +226,14 @@ export async function selectSendLane(
   const lane = await observeDestChainV2(ctx, { router, destChainSelector })
   let reason: SolanaV2LaneUnavailableReason | undefined
   if ('reason' in lane) reason = lane.reason
-  else if (lane.observation.allowListEnabled) {
-    // the allowlist decides the entrypoint, so without the sender a quote could miss the send's fee
-    if (!sender) {
-      throw new CCIPArgumentInvalidError(
-        'sender',
-        `required for the CCIP 2.0 lane from router ${router.toBase58()} to ${destChainSelector}: its sender allowlist decides whether the message goes over 2.0 or 1.6, at different fees`,
-        { context: { router: router.toBase58(), destChainSelector } },
-      )
-    }
-    if (!(await isSenderAllowlisted(ctx.connection, { router, destChainSelector, sender })))
-      reason = 'sender-not-allowed'
-  }
+  else if (lane.observation.allowListEnabled && !sendV2OnAllowlistedLanes)
+    reason = 'allowlist-enabled'
   if (!reason) return { version: CCIPVersion.V2_0, message: { ...message, extraArgs } }
 
   if (isGenericExtraArgsV3(message.extraArgs)) {
     throw new CCIPSolanaV2LaneUnavailableError(reason, {
       router: router.toBase58(),
       destChainSelector,
-      ...(sender && { sender: sender.toBase58() }),
     })
   }
   logger.debug('No CCIP 2.0 lane', { reason }, 'falling back to CCIP 1.6')
@@ -283,7 +254,7 @@ async function withSendLookupTables(
 /**
  * Quotes a message over a CCIP 2.0 lane, simulating the router's resolved `get_fee_v2`.
  * @param ctx - Context with the Solana connection and logger.
- * @param opts - Router, destination selector, message with V3 extraArgs, and its sender, if known.
+ * @param opts - Router, destination selector, and message with V3 extraArgs.
  * @returns Fee amount, in the message's fee token (native if omitted).
  * @throws {@link CCIPSolanaFeeResultInvalidError} if the simulation returns no fee
  */
@@ -293,18 +264,16 @@ export async function getFeeV2(
     router,
     destChainSelector,
     message,
-    // quotes without a sender are only allowed on lanes without an allowlist, see `selectSendLane`
-    sender = SIMULATION_PAYER,
-  }: { router: PublicKey; destChainSelector: bigint; message: AnyMessage; sender?: PublicKey },
+  }: { router: PublicKey; destChainSelector: bigint; message: AnyMessage },
 ): Promise<bigint> {
   const { instruction, lookupTables } = await resolveGetFeeV2(ctx, {
     router,
     destChainSelector,
-    sender,
     message,
+    payer: SIMULATION_PAYER,
   })
   const simResult = await simulateTransaction(ctx, {
-    payerKey: sender,
+    payerKey: SIMULATION_PAYER,
     instructions: [requestHeapFrameIx(), instruction],
     addressLookupTableAccounts: await withSendLookupTables(ctx.connection, router, lookupTables),
   })

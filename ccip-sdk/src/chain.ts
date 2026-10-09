@@ -1647,7 +1647,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Fetch the current fee for a given intended message.
    *
-   * @param opts - {@link SendMessageOpts} without approveMax, plus the optional `sender`
+   * @param opts - {@link SendMessageOpts} without approveMax
    * @returns Fee amount in the feeToken's smallest units
    *
    * @example Calculate message fee
@@ -1660,15 +1660,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * console.log(`Fee: ${fee} wei`)
    * ```
    */
-  abstract getFee(
-    opts: Omit<SendMessageOpts, 'approveMax'> & {
-      /**
-       * Address of the wallet which will send the message. Families whose route or fee depends on
-       * it use it to quote what `sendMessage` will charge; others ignore it.
-       */
-      sender?: string
-    },
-  ): Promise<bigint>
+  abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
   /**
    * Generate unsigned txs for ccipSend'ing a message.
    *
