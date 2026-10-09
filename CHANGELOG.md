@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-09
+
 - EVM: `getLogs` honors a block-range limit the RPC states below 100 blocks (e.g. Alchemy's free plan allows 10) instead of throwing `LOG_RANGE_TOO_LARGE`; fixes `ccip-cli show --wait` on such endpoints
 - CCT SDK (EVM): `applyChainUpdates` takes one parameter shape for every pool version, `chainsToAdd` + `remoteChainSelectorsToRemove`, with no `version`. A v1.5.0 pool is detected from its on-chain `typeAndVersion` and the params adapted to its legacy `chains` signature (removals as `allowed: false` lanes, one remote pool per lane). Breaking: the `version` field, the v1.5.0 `chains` shape and the `ApplyChainUpdatesParamVersion`, `ApplyChainUpdatesParamsV1_5_0`, `ApplyChainUpdatesParamsV1_5_1` and `ChainUpdateV1_5_0` types are removed; `ChainUpdateV1_5_1` is renamed `ChainUpdate`
 - CCT SDK (EVM): `registerAdmin` takes one params shape for every RegistryModuleOwnerCustom version; the module's on-chain version only gates `access-control-default-admin` (v1.6.0+). Breaking: `registryModuleVersion` and the `RegisterAdminParamsV1_5_0`/`RegisterAdminParamsV1_6_0`/`RegisterAdminMethodV1_5_0` types are removed
