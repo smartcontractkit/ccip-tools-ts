@@ -222,6 +222,10 @@ function fakeOfframp(
     // v1 transactions (the fallback for oversized v0 ones) are rejected
     _rpcRequest: mock.fn(async () => ({ error: { code: -32602, message: 'invalid params' } })),
     getAccountInfo: mock.fn(async (key: PublicKey) => accounts[key.toBase58()] ?? null),
+    getAccountInfoAndContext: mock.fn(async (key: PublicKey) => ({
+      context: { slot: 1 },
+      value: accounts[key.toBase58()] ?? null,
+    })),
     getSignaturesForAddress: mock.fn(async () => []),
     getAddressLookupTable: mock.fn(async () => ({ value: null })),
     getLatestBlockhash: mock.fn(async () => ({
@@ -712,7 +716,8 @@ describe('SolanaChain CCIP 2.0 execution', () => {
     const buffer = inputsBufferPda(offRamp, Buffer.from(messageId.slice(2), 'hex'), payer)
     const opts = { offRamp: offRamp.toBase58(), input, payer: payer.toBase58() }
 
-    const { connection } = fakeOfframp(offRamp, { resolved })
+    const accounts: Record<string, { data: Buffer }> = {}
+    const { connection } = fakeOfframp(offRamp, { resolved, accounts })
     const solana = chain(connection)
     const unsigned = await solana.generateUnsignedExecute(opts)
     const exec = unsigned.instructions[unsigned.mainIndex!]!
@@ -737,14 +742,11 @@ describe('SolanaChain CCIP 2.0 execution', () => {
       serializedInputs(input),
     )
 
-    // which, once landed, the execution is resolved from
-    const landed = fakeOfframp(offRamp, {
-      resolved,
-      accounts: { [buffer.toBase58()]: completeBuffer(payer, input) },
-    })
-    const buffered = chain(landed.connection)
-    assert.deepEqual((await buffered.generateUnsignedExecuteBuffer(opts)).instructions, [])
-    const fromBuffer = await buffered.generateUnsignedExecute({ ...opts, forceBuffer: true })
+    // which, once landed, the execution is resolved from; right away, despite SolanaChain caching
+    // account reads that saw no buffer
+    accounts[buffer.toBase58()] = completeBuffer(payer, input)
+    assert.deepEqual((await solana.generateUnsignedExecuteBuffer(opts)).instructions, [])
+    const fromBuffer = await solana.generateUnsignedExecute({ ...opts, forceBuffer: true })
     assert.deepEqual(
       fromBuffer.instructions[fromBuffer.mainIndex!]!.data.subarray(0, 9),
       Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([0])]),

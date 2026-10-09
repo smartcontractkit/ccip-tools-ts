@@ -255,7 +255,8 @@ export async function bufferExecutionInputsIxs(
 
   const instructions: TransactionInstruction[] = []
   let filled = 0n // bitmap of the chunks already in the buffer
-  const account = await ctx.connection.getAccountInfo(buffer)
+  // uncached: SolanaChain memoizes getAccountInfo, but the buffer may have just been written to
+  const { value: account } = await ctx.connection.getAccountInfoAndContext(buffer)
   if (account) {
     const existing = offrampV2Coder.accounts.decode<ExecutionInputsBuffer>('buffer', account.data)
     const bitmap = BigInt(existing.chunkBitmap.toString())
