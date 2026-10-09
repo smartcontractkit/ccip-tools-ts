@@ -235,6 +235,17 @@ describe('observe_dest_chain_v2', () => {
     )
   })
 
+  it('reads a prefunded, system-owned dest_chain_state_v2 as a lane not configured for 2.0', async () => {
+    const { connection } = routerConnection(STAGING_ROUTER, { observation: simulationError(3007) })
+    assert.deepEqual(
+      await observeDestChainV2(
+        { connection, logger: silent },
+        { router: STAGING_ROUTER, destChainSelector: SEPOLIA },
+      ),
+      { reason: 'lane-not-configured' },
+    )
+  })
+
   it('reads an unknown instruction as a router without 2.0 support yet', async () => {
     const { connection } = routerConnection(STAGING_ROUTER, { observation: simulationError(101) })
     assert.deepEqual(
@@ -365,12 +376,13 @@ describe('selectSendLane', () => {
   })
 
   // an enabled allowlist counts as no 2.0, whoever the sender: the choice can't depend on it
-  for (const [observation, reason] of [
-    [simulationError(3012), 'lane-not-configured'],
-    [simulationError(101), 'router-without-v2-support'],
-    [allowlistedObservation(), 'allowlist-enabled'],
+  for (const [observation, reason, cause] of [
+    [simulationError(3012), 'lane-not-configured', 'no lane state'],
+    [simulationError(3007), 'lane-not-configured', 'prefunded lane state'],
+    [simulationError(101), 'router-without-v2-support', 'no 2.0 router support'],
+    [allowlistedObservation(), 'allowlist-enabled', 'allowlist enabled'],
   ] as const) {
-    it(`falls back to 1.6 for legacy args when ${reason}`, async () => {
+    it(`falls back to 1.6 for legacy args when ${reason} (${cause})`, async () => {
       const { connection } = routerConnection(STAGING_ROUTER, { observation })
       const legacy = { gasLimit: 5n, allowOutOfOrderExecution: true }
       const lane = await select(connection, legacy)
@@ -378,7 +390,7 @@ describe('selectSendLane', () => {
       assert.equal(lane.message.extraArgs, legacy, 'the legacy args should be kept')
     })
 
-    it(`throws for GenericExtraArgsV3 when ${reason}`, async () => {
+    it(`throws for GenericExtraArgsV3 when ${reason} (${cause})`, async () => {
       const { connection } = routerConnection(STAGING_ROUTER, { observation })
       await assert.rejects(
         select(connection, LANE_DEFAULTS_V3),

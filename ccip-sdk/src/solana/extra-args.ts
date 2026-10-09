@@ -1,6 +1,10 @@
-import { concat, getBytes, hexlify } from 'ethers'
+import { type BytesLike, concat, getBytes, hexlify, toBeArray } from 'ethers'
 
-import { CCIPExtraArgsEncodingUnsupportedError, CCIPExtraArgsParseError } from '../errors/index.ts'
+import {
+  CCIPArgumentInvalidError,
+  CCIPExtraArgsEncodingUnsupportedError,
+  CCIPExtraArgsParseError,
+} from '../errors/index.ts'
 import {
   type ExtraArgs,
   type GenericExtraArgsV3,
@@ -236,3 +240,49 @@ export function decodeSolanaSuiExtraArgsV1(
 // offsets. GenericExtraArgsV3 is an SDK-side construct with no IDL definition,
 // so it keeps its manual decoder.
 const FEE_QUOTER_CODER = sizedCoder(FEE_QUOTER_IDL)
+
+/**
+ * How a CCIP 2.0 message to Solana delivers its tokens: to the associated token account of its
+ * token receiver (created if missing, or not), or to the token receiver itself, as a token account.
+ */
+export const SVMTokenReceiverUsage = {
+  DeriveAtaAndCreate: 0,
+  DeriveAtaDontCreate: 1,
+  UseAsIs: 2,
+} as const
+/** Value of {@link SVMTokenReceiverUsage}. */
+export type SVMTokenReceiverUsage =
+  (typeof SVMTokenReceiverUsage)[keyof typeof SVMTokenReceiverUsage]
+
+/** Tag of `SVMExecutorArgsV1`. */
+const SVMExecutorArgsV1Tag = '0x1a2b3c4d'
+
+/**
+ * Encodes `SVMExecutorArgsV1`, the `GenericExtraArgsV3.executorArgs` of a message to Solana, which
+ * the offramp reads as the message's destination blob: the receiver's accounts, and how to deliver
+ * its tokens. Packed like the EVM `ExtraArgsCodec` does: tag, `useATA` (u8),
+ * `accountIsWritableBitmap` (u64 BE), accounts count (u8), then the accounts.
+ * @param args - Receiver accounts and their writable bitmap, and how to deliver the tokens
+ *   (default: to the token receiver's associated token account, created if missing).
+ * @returns The 0x-hex `executorArgs`.
+ * @throws {@link CCIPArgumentInvalidError} if there are more than 255 accounts
+ */
+export function encodeSVMExecutorArgsV1({
+  useAta = SVMTokenReceiverUsage.DeriveAtaAndCreate,
+  accountIsWritableBitmap = 0n,
+  accounts = [],
+}: {
+  useAta?: SVMTokenReceiverUsage
+  accountIsWritableBitmap?: bigint
+  accounts?: readonly BytesLike[]
+}): string {
+  if (accounts.length > 0xff)
+    throw new CCIPArgumentInvalidError('accounts', `at most 255, got ${accounts.length}`)
+  return concat([
+    SVMExecutorArgsV1Tag,
+    new Uint8Array([useAta]),
+    toBeArray(accountIsWritableBitmap, 8),
+    new Uint8Array([accounts.length]),
+    ...accounts.map((account) => getAddressBytes(account)),
+  ])
+}
