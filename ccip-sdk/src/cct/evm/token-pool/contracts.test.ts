@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Interface } from 'ethers'
+import { Interface, makeError } from 'ethers'
 
 import {
   CCTContractTypeInvalidError,
@@ -17,10 +17,12 @@ import {
   TokenPoolVersion,
   assertLockReleasePool,
   assertNonSiloedLockReleasePool,
+  assertSiloedLockReleasePool,
   getTokenPoolArtifact,
   getTokenPoolFamily,
   getTokenPoolInterface,
   isLockReleaseTokenPoolType,
+  isTokenPoolRevert,
   isTokenPoolType,
   isTokenPoolVersion,
   parseTokenPoolVersion,
@@ -466,6 +468,94 @@ describe('assertNonSiloedLockReleasePool', () => {
           err.context.actual === type &&
           err.context.expected === 'LockRelease token pool',
       )
+  })
+})
+
+describe('assertSiloedLockReleasePool', () => {
+  it('passes the siloed type', () => {
+    assert.doesNotThrow(() =>
+      assertSiloedLockReleasePool('isSiloed', ADDR, 'SiloedLockReleaseTokenPool'),
+    )
+  })
+
+  it('rejects every other type, naming the operation', () => {
+    const others = TOKEN_POOL_TYPES.filter((t) => t !== 'SiloedLockReleaseTokenPool')
+    assert.equal(others.length, 6)
+    for (const type of others)
+      assert.throws(
+        () => assertSiloedLockReleasePool('isSiloed', ADDR, type),
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError &&
+          err.context.address === ADDR &&
+          err.context.expected === 'SiloedLockReleaseTokenPool' &&
+          err.context.actual === type &&
+          err.context.operation === 'isSiloed',
+      )
+  })
+
+  it('points a non-siloed LockRelease pool at its single-bucket ops', () => {
+    assert.throws(
+      () => assertSiloedLockReleasePool('getAvailableTokens', ADDR, 'LockReleaseTokenPool'),
+      (err: unknown) =>
+        err instanceof CCTContractTypeInvalidError &&
+        /getLockbox/.test(err.message) &&
+        /provideLiquidity/.test(err.message),
+    )
+  })
+})
+
+describe('isTokenPoolRevert', () => {
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0]
+  /** A decoded custom-error revert, as ethers' Contract rethrows it. */
+  const reverted = (name: string) =>
+    iface.makeError(iface.encodeErrorResult(name, [1n]), { to: ADDR, data: '0x' })
+
+  it('matches a decoded revert by error name', () => {
+    assert.equal(isTokenPoolRevert(reverted('LockBoxNotConfigured'), 'LockBoxNotConfigured'), true)
+  })
+
+  it('rejects a revert of a different error', () => {
+    assert.equal(isTokenPoolRevert(reverted('LockBoxNotConfigured'), 'ChainNotAllowed'), false)
+  })
+
+  it('rejects a bare revert, BAD_DATA, and non-ethers errors', () => {
+    const bare = makeError('execution reverted', 'CALL_EXCEPTION', {
+      action: 'call',
+      data: '0x',
+      reason: null,
+      transaction: { to: ADDR, data: '0x' },
+      invocation: null,
+      revert: null,
+    })
+    assert.equal(isTokenPoolRevert(bare, 'LockBoxNotConfigured'), false)
+    const badData = makeError('could not decode result data', 'BAD_DATA', { value: '0x' })
+    assert.equal(isTokenPoolRevert(badData, 'LockBoxNotConfigured'), false)
+    assert.equal(
+      isTokenPoolRevert(new Error('LockBoxNotConfigured'), 'LockBoxNotConfigured'),
+      false,
+    )
+    assert.equal(isTokenPoolRevert(undefined, 'LockBoxNotConfigured'), false)
+  })
+})
+
+describe('SiloedLockRelease per-lane surface', () => {
+  /** The 1.6.x silo writes the per-lane ops encode, plus the per-lane reads. */
+  const SILO_FUNCTIONS = [
+    'provideSiloedLiquidity',
+    'withdrawSiloedLiquidity',
+    'setSiloRebalancer',
+    'updateSiloDesignations',
+    'getAvailableTokens',
+    'getChainRebalancer',
+    'isSiloed',
+  ] as const
+
+  it('declares every silo function identically at v1.6.0 and v1.6.1', () => {
+    // this parity is what licenses one 1.6.0 encoder entry, and one 1.6.0 ABI for the reads
+    const v160 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V1_6_0]
+    const v161 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V1_6_1]
+    for (const fn of SILO_FUNCTIONS)
+      assert.equal(v161.getFunction(fn)!.format('full'), v160.getFunction(fn)!.format('full'), fn)
   })
 })
 

@@ -13,6 +13,10 @@
  * @remarks **Removed in v2.0.0**, where a LockRelease pool escrows through an external
  * `ERC20LockBox` instead of holding liquidity itself.
  *
+ * @remarks On a `SiloedLockReleaseTokenPool` this funds the *unsiloed* bucket only, and is gated
+ * on the unsiloed rebalancer; a siloed lane's own bucket is funded with
+ * {@link ProvideSiloedLiquidity} (`provide-siloed-liquidity.ts`).
+ *
  * @packageDocumentation
  */
 
