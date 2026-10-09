@@ -3474,6 +3474,43 @@ export class CCIPSolanaAccountResolutionError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when a buffered CCIP 2.0 execution is generated before its execution inputs buffer is
+ * complete: `execute_v2`'s accounts are resolved on-chain from the buffer, which needs all of its
+ * chunks. `context.missingChunks` is how many are left to write; `context.stale` is set when the
+ * buffer holds other inputs, and must be closed and rewritten first.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.generateUnsignedExecute({ messageId, payer, forceBuffer: true })
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaExecutionBufferIncompleteError) {
+ *     const buffering = await solanaChain.generateUnsignedExecuteBuffer({ messageId, payer })
+ *     // sign and send buffering.instructions, then retry
+ *   }
+ * }
+ * ```
+ */
+export class CCIPSolanaExecutionBufferIncompleteError extends CCIPError {
+  override readonly name = 'CCIPSolanaExecutionBufferIncompleteError'
+  /** Creates a Solana execution inputs buffer incomplete error. */
+  constructor(
+    context: { buffer: string; bufferId: string; missingChunks: number; stale: boolean },
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.SOLANA_EXECUTION_BUFFER_INCOMPLETE,
+      `Execution inputs buffer ${context.buffer} is ${context.stale ? 'holding other inputs' : 'incomplete'}: ${context.missingChunks} chunk(s) left to write before execute_v2 can be resolved from it`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, ...context },
+      },
+    )
+  }
+}
+
 /** Why a lane can't take a Solana CCIP 2.0 message; see {@link CCIPSolanaV2LaneUnavailableError}. */
 export type SolanaV2LaneUnavailableReason =
   | 'lane-not-configured'

@@ -14,7 +14,10 @@ import { hexlify, keccak256 } from 'ethers'
 
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
-import { CCIPTransactionTooLargeError } from '../errors/index.ts'
+import {
+  CCIPSolanaExecutionBufferIncompleteError,
+  CCIPTransactionTooLargeError,
+} from '../errors/index.ts'
 import { ChainFamily } from '../networks.ts'
 import type {
   CCIPMessage,
@@ -98,6 +101,11 @@ export function toExecutionInputsV2(input: ExecutionInputV2): ExecutionInputsV2 
   }
 }
 
+// The message ID makes an arbitrary but easy to track buffer ID
+function executionInputsBufferId(input: ExecutionInputV2): Buffer {
+  return bytesToBuffer(keccak256(getDataBytes(input.encodedMessage)))
+}
+
 /**
  * Reads a message's CCV policy from the offramp, simulating its resolved `get_ccvs_for_msg` view.
  * @param ctx - Context with the Solana connection and logger.
@@ -163,33 +171,6 @@ async function wrapExecuteV2Ix(
     lookupTables = [...lookupTables, alt.lookupTable]
   }
   return { family: ChainFamily.Solana, instructions, lookupTables, mainIndex }
-}
-
-/**
- * Generates unsigned instructions to execute a CCIP 2.0 message with its execution inputs inline:
- * a heap frame request and the resolved `execute_v2`, which must share a transaction.
- * @param ctx - Context with the Solana connection and logger.
- * @param caller - Account that will sign and pay for `execute_v2`.
- * @param offramp - Offramp program.
- * @param input - Encoded message and verifications.
- * @param opts - `forceLookupTable` creates (before) and deactivates (after) a lookup table with
- *   `execute_v2`'s accounts.
- * @returns Solana unsigned txs; `mainIndex` points at `execute_v2`
- * @throws {@link CCIPTransactionTooLargeError} if the inputs are too large to resolve inline
- */
-export async function generateUnsignedExecuteV2(
-  ctx: { connection: Connection } & WithLogger,
-  caller: PublicKey,
-  offramp: PublicKey,
-  input: ExecutionInputV2,
-  opts?: { forceLookupTable?: boolean },
-): Promise<UnsignedSolanaTx> {
-  const { instruction, lookupTables } = await resolveExecuteV2(ctx, {
-    offramp,
-    caller,
-    execInputs: toExecutionInputsV2(input),
-  })
-  return wrapExecuteV2Ix(ctx, caller, instruction, lookupTables, opts)
 }
 
 // Accounts of `buffer_execution_inputs` and `close_execution_inputs_buffer`, the last two for
@@ -316,6 +297,111 @@ export async function bufferExecutionInputsIxs(
 }
 
 /**
+ * Generates the unsigned instructions writing a CCIP 2.0 message's execution inputs to their
+ * buffer, under the message ID, for an external signer to send ahead of
+ * {@link generateUnsignedExecuteV2}, which resolves `execute_v2` from the complete buffer. Each
+ * instruction carries a chunk of up to 800 bytes, so needs its own v0 transaction.
+ * @param ctx - Context with the Solana connection, to read the buffer's current state, and logger.
+ * @param caller - Account that will sign and pay for the buffering and `execute_v2`.
+ * @param offramp - Offramp program.
+ * @param input - Encoded message and verifications.
+ * @returns Solana unsigned txs, without `mainIndex`; no instructions if the buffer already holds
+ *   the inputs
+ * @throws {@link CCIPTransactionTooLargeError} if the inputs exceed the buffer's capacity
+ */
+export async function generateUnsignedExecuteBufferV2(
+  ctx: { connection: Connection } & WithLogger,
+  caller: PublicKey,
+  offramp: PublicKey,
+  input: ExecutionInputV2,
+): Promise<UnsignedSolanaTx> {
+  const instructions = await bufferExecutionInputsIxs(ctx, {
+    offramp,
+    caller,
+    bufferId: executionInputsBufferId(input),
+    inputs: toExecutionInputsV2(input),
+  })
+  return { family: ChainFamily.Solana, instructions }
+}
+
+// `execute_v2` resolved from a complete execution inputs buffer
+async function resolveBufferedExecuteV2(
+  ctx: { connection: Connection } & WithLogger,
+  caller: PublicKey,
+  offramp: PublicKey,
+  bufferId: Buffer,
+  opts?: { forceLookupTable?: boolean },
+): Promise<UnsignedSolanaTx> {
+  const { instruction, lookupTables } = await resolveExecuteV2(ctx, { offramp, caller, bufferId })
+  return wrapExecuteV2Ix(ctx, caller, instruction, lookupTables, opts)
+}
+
+/**
+ * Generates unsigned instructions to execute a CCIP 2.0 message: a heap frame request and the
+ * resolved `execute_v2`, which must share a transaction. If `caller`'s execution inputs buffer for
+ * the message is complete (see {@link generateUnsignedExecuteBufferV2}), `execute_v2` reads the
+ * inputs from it, and closes it; otherwise, they go inline.
+ * @param ctx - Context with the Solana connection and logger.
+ * @param caller - Account that will sign and pay for `execute_v2`.
+ * @param offramp - Offramp program.
+ * @param input - Encoded message and verifications.
+ * @param opts - `forceBuffer` requires the inputs to come from the buffer; `forceLookupTable`
+ *   creates (before) and deactivates (after) a lookup table with `execute_v2`'s accounts.
+ * @returns Solana unsigned txs; `mainIndex` points at `execute_v2`
+ * @throws {@link CCIPSolanaExecutionBufferIncompleteError} with `forceBuffer`, if the buffer isn't
+ *   complete: `execute_v2`'s accounts can only be resolved from a complete buffer
+ * @throws {@link CCIPTransactionTooLargeError} if the inputs are too large to resolve inline
+ */
+export async function generateUnsignedExecuteV2(
+  ctx: { connection: Connection } & WithLogger,
+  caller: PublicKey,
+  offramp: PublicKey,
+  input: ExecutionInputV2,
+  { forceBuffer, forceLookupTable }: { forceBuffer?: boolean; forceLookupTable?: boolean } = {},
+): Promise<UnsignedSolanaTx> {
+  const bufferId = executionInputsBufferId(input)
+  const inputs = toExecutionInputsV2(input)
+  let pending
+  try {
+    pending = await bufferExecutionInputsIxs(ctx, { offramp, caller, bufferId, inputs })
+  } catch (err) {
+    // inputs beyond the buffer's capacity can only go inline
+    if (forceBuffer || !(err instanceof CCIPTransactionTooLargeError)) throw err
+  }
+  if (pending && !pending.length) {
+    return resolveBufferedExecuteV2(ctx, caller, offramp, bufferId, { forceLookupTable })
+  }
+  if (pending && forceBuffer) {
+    const stale = !!pending[0]?.data
+      .subarray(0, CLOSE_EXECUTION_INPUTS_BUFFER_DISCRIMINATOR.length)
+      .equals(CLOSE_EXECUTION_INPUTS_BUFFER_DISCRIMINATOR)
+    throw new CCIPSolanaExecutionBufferIncompleteError({
+      buffer: getExecutionInputsBufferPda(offramp, bufferId, caller).toBase58(),
+      bufferId: hexlify(bufferId),
+      missingChunks: pending.length - (stale ? 1 : 0),
+      stale,
+    })
+  }
+
+  let resolved
+  try {
+    resolved = await resolveExecuteV2(ctx, { offramp, caller, execInputs: inputs })
+  } catch (err) {
+    if (!isTransactionTooLargeError(err)) throw err
+    throw new CCIPTransactionTooLargeError(
+      'Execution inputs too large to execute inline: buffer them first, with the instructions of SolanaChain.generateUnsignedExecuteBuffer, then generate the execution with forceBuffer',
+      {
+        cause: err instanceof Error ? err : undefined,
+        context: err instanceof CCIPError ? err.context : undefined,
+      },
+    )
+  }
+  return wrapExecuteV2Ix(ctx, caller, resolved.instruction, resolved.lookupTables, {
+    forceLookupTable,
+  })
+}
+
+/**
  * Executes a CCIP 2.0 message, signed and paid for by `wallet`. The execution inputs go inline if
  * they fit a transaction; otherwise they are first written to an execution inputs buffer, under
  * the message ID, which `execute_v2` closes upon success. A lookup table with `execute_v2`'s
@@ -323,7 +409,7 @@ export async function bufferExecutionInputsIxs(
  *
  * Not atomic: the buffering transactions are confirmed before `execute_v2` is resolved against
  * the buffer, so a failed execution leaves the buffer behind, for a retry to reuse it (or
- * `SolanaChain.cleanUpBuffers` to recover its rent).
+ * `SolanaChain.cleanUpBuffers` to recover its rent). A complete buffer is executed from directly.
  * @param ctx - Context with the Solana connection and logger.
  * @param wallet - Wallet signing and paying for the transactions.
  * @param opts - Offramp, encoded message and verifications, and options:
@@ -355,30 +441,21 @@ export async function executeV2(
     try {
       let unsigned
       if (!forceBuffer) {
+        // picks up a complete buffer left by an earlier attempt, if any
         unsigned = await generateUnsignedExecuteV2(ctx, caller, offramp, input, {
           forceLookupTable,
         })
       } else {
-        // the message ID makes an arbitrary but easy to track buffer ID
-        const bufferId = bytesToBuffer(keccak256(getDataBytes(input.encodedMessage)))
-        const bufferingIxs = await bufferExecutionInputsIxs(ctx, {
-          offramp,
-          caller,
-          bufferId,
-          inputs: toExecutionInputsV2(input),
-        })
-        if (bufferingIxs.length) {
+        const bufferId = executionInputsBufferId(input)
+        const buffering = await generateUnsignedExecuteBufferV2(ctx, caller, offramp, input)
+        if (buffering.instructions.length) {
           logger.info(
             `Execution inputs will be pre-buffered through the offramp, under bufferId ${hexlify(bufferId)} at ${getExecutionInputsBufferPda(offramp, bufferId, caller).toBase58()}. This may take some time; if aborted, cleanUpBuffers recovers the rent it locks.`,
           )
-          await simulateAndSendTxs(ctx, wallet, { instructions: bufferingIxs })
+          await simulateAndSendTxs(ctx, wallet, buffering)
         }
-        const { instruction, lookupTables } = await resolveExecuteV2(ctx, {
-          offramp,
-          caller,
-          bufferId,
-        })
-        unsigned = await wrapExecuteV2Ix(ctx, caller, instruction, lookupTables, {
+        // resolved straight from the buffer just written, without reading it back
+        unsigned = await resolveBufferedExecuteV2(ctx, caller, offramp, bufferId, {
           forceLookupTable,
         })
       }
