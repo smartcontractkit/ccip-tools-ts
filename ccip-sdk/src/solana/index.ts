@@ -72,7 +72,6 @@ import {
   EVMExtraArgsV2Tag,
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
-  decodeFinalityAllowed,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
@@ -148,6 +147,7 @@ import {
   decodeTokenPoolChainConfig,
   decodeTokenPoolChainConfigOverride,
   decodeTokenPoolChainConfigV2,
+  decodeTokenPoolFinality,
   decodeTokenPoolStateConfig,
   deriveTokenPoolChainConfigOverridePda,
   deriveTokenPoolChainConfigV2Pda,
@@ -1993,10 +1993,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
     return {
       ...poolConfig,
-      // same encoding as EVM's allowed finality: flags in the high 16 bits, block depth in the low
-      ...decodeFinalityAllowed(
-        allowedFinalityConfig.flags * 2 ** 16 + allowedFinalityConfig.blockDepth,
-      ),
+      ...decodeTokenPoolFinality(allowedFinalityConfig),
       tokenTransferFeeConfig: {
         destGasOverhead: tokenTransferFeeConfig.destGasOverhead,
         destBytesOverhead: tokenTransferFeeConfig.destBytesOverhead,
@@ -2047,6 +2044,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * 2.0 pools also return their faster-than-finality rate limits
    * (`fastOutboundRateLimiterState` / `fastInboundRateLimiterState`), from their per-chain FTF
    * override; `null` when it's unset or disabled, as FTF transfers then use the standard limits.
+   * They also return each remote's allowed `finalityDepth`/`finalitySafe`, as
+   * {@link SolanaChain.getTokenPoolConfig} does for one lane.
    */
   async getTokenPoolRemotes(
     tokenPool: string,
@@ -2103,7 +2102,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         ],
       })
 
-    const remoteSelectors = new Map<string, bigint>()
     for (const acc of accounts) {
       try {
         const base = decodeTokenPoolChainConfig(acc.account.data, poolType)
@@ -2143,43 +2141,45 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           inboundRateLimiterState,
           outboundRateLimiterState,
         }
-        remoteSelectors.set(remoteNetwork.name, remoteChainSelector)
       } catch (err) {
         this.logger.warn('Failed to decode ChainConfig account:', err)
       }
     }
 
-    // FTF overrides only exist on 2.0 pools; probe them on pools of unknown version too
+    // FTF overrides and ChainConfigV2s only exist on 2.0 pools; probe pools of unknown version too
     if (poolVersion != null && poolVersion < CCIPVersion.V2_0) return remotes
-    const names = [...remoteSelectors.keys()]
-    const overridePdas = names.map((name) =>
-      deriveTokenPoolChainConfigOverridePda(
-        tokenPoolProgram,
-        remoteSelectors.get(name)!,
-        config.mint,
-      ),
-    )
-    const overrides = []
-    for (let i = 0; i < overridePdas.length; i += 100) {
-      overrides.push(
-        ...(await this.connection.getMultipleAccountsInfo(overridePdas.slice(i, i + 100))),
-      )
+    const names = Object.keys(remotes)
+    const pdas = names.flatMap((name) => {
+      const { chainSelector } = networkInfo(name)
+      return [
+        deriveTokenPoolChainConfigOverridePda(tokenPoolProgram, chainSelector, config.mint),
+        deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, chainSelector, config.mint),
+      ]
+    })
+    const pdaAccounts = []
+    for (let i = 0; i < pdas.length; i += 100) {
+      pdaAccounts.push(...(await this.connection.getMultipleAccountsInfo(pdas.slice(i, i + 100))))
     }
     for (const [i, name] of names.entries()) {
-      const override = overrides[i]
-      // a pool of unknown version without overrides may not be a 2.0 pool
-      if (!override && poolVersion == null) continue
-      let fast
+      const [override, chainConfigV2] = pdaAccounts.slice(2 * i, 2 * i + 2)
+      // a pool of unknown version without 2.0 accounts may not be a 2.0 pool
+      if (!override && !chainConfigV2 && poolVersion == null) continue
+      let fast, finality
       try {
         fast = override && decodeTokenPoolChainConfigOverride(override.data)
+        // a lane without a ChainConfigV2 allows only finalized transfers
+        finality = chainConfigV2
+          ? decodeTokenPoolChainConfigV2(chainConfigV2.data).allowedFinalityConfig
+          : { flags: 0, blockDepth: 0 }
       } catch (err) {
-        this.logger.warn('Failed to decode ChainConfigOverride account:', err)
+        this.logger.warn('Failed to decode 2.0 token pool config accounts:', err)
         continue
       }
       remotes[name] = {
         ...remotes[name]!,
         fastOutboundRateLimiterState: fast ? convertRateLimiter(fast.outboundRateLimit) : null,
         fastInboundRateLimiterState: fast ? convertRateLimiter(fast.inboundRateLimit) : null,
+        ...decodeTokenPoolFinality(finality),
       }
     }
 

@@ -3,6 +3,7 @@ import { Buffer } from 'buffer'
 import type { IdlTypes } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
+import { type FinalityAllowed, decodeFinalityAllowed } from '../extra-args.ts'
 import { toLeArray } from '../utils.ts'
 import { sizedCoder } from './coder.ts'
 import { IDL as BASE_TOKEN_POOL } from './idl/2.0.0/BASE_TOKEN_POOL.ts'
@@ -88,6 +89,20 @@ export function decodeTokenPoolChainConfig(data: Buffer, poolType?: string): Tok
  */
 export function decodeTokenPoolChainConfigV2(data: Buffer): TokenPoolChainConfigV2 {
   return tokenPoolCoder.accounts.decode<TokenPoolChainConfigV2>('chainConfigV2', data)
+}
+
+/**
+ * Decodes a 2.0 token pool's allowed finality for a remote chain.
+ *
+ * @param config - The `allowedFinalityConfig` of a `ChainConfigV2`.
+ * @returns The allowed `finalityDepth`, and `finalitySafe` if set.
+ */
+export function decodeTokenPoolFinality({
+  flags,
+  blockDepth,
+}: TokenPoolChainConfigV2['allowedFinalityConfig']): FinalityAllowed {
+  // same encoding as EVM's allowed finality: flags in the high 16 bits, block depth in the low
+  return decodeFinalityAllowed(flags * 2 ** 16 + blockDepth)
 }
 
 /**

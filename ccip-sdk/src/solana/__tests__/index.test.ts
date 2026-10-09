@@ -959,6 +959,25 @@ describe('SolanaChain token pool readers', () => {
     assert.equal(remote.fastInboundRateLimiterState?.capacity, 10n)
   })
 
+  it("returns each remote's finality on 2.0 pools", async () => {
+    let { chain } = await poolChain({ poolTypeAndVersion: v2Pool, chainConfigV2: v2ChainConfig })
+    let remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok('finalityDepth' in remote && !('finalitySafe' in remote))
+    assert.equal(remote.finalityDepth, 5)
+    ;({ chain } = await poolChain({
+      poolTypeAndVersion: v2Pool,
+      chainConfigV2: { flags: 1, blockDepth: 0 },
+    }))
+    remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok('finalitySafe' in remote)
+    assert.equal(remote.finalitySafe, true)
+    // a lane without a ChainConfigV2 is finalized-only
+    ;({ chain } = await poolChain({ poolTypeAndVersion: v2Pool }))
+    remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok('finalityDepth' in remote)
+    assert.equal(remote.finalityDepth, 0)
+  })
+
   it('returns null FTF rate limits for 2.0 pools without an enabled override', async () => {
     for (const override of [undefined, { enabled: false }]) {
       const { chain } = await poolChain({ poolTypeAndVersion: v2Pool, override })
@@ -977,14 +996,20 @@ describe('SolanaChain token pool readers', () => {
     assert.equal(getMultipleAccountsInfo.mock.callCount(), 0)
   })
 
-  it('returns FTF rate limits of pools of unknown version only if they have an override', async () => {
+  it('returns 2.0 configs of pools of unknown version only if they have 2.0 accounts', async () => {
     let { chain } = await poolChain({ poolTypeAndVersion: null })
     let remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
-    assert.ok(!('fastOutboundRateLimiterState' in remote))
+    assert.ok(!('fastOutboundRateLimiterState' in remote) && !('finalityDepth' in remote))
     ;({ chain } = await poolChain({ poolTypeAndVersion: null, override: { enabled: true } }))
     remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
     assert.ok('fastOutboundRateLimiterState' in remote)
     assert.equal(remote.fastOutboundRateLimiterState?.capacity, 20n)
+    ;({ chain } = await poolChain({ poolTypeAndVersion: null, chainConfigV2: v2ChainConfig }))
+    remote = await chain.getTokenPoolRemote(tokenPool.toBase58(), remoteSelector)
+    assert.ok('fastOutboundRateLimiterState' in remote)
+    assert.equal(remote.fastOutboundRateLimiterState, null)
+    assert.ok('finalityDepth' in remote)
+    assert.equal(remote.finalityDepth, 5)
   })
 
   describe('getLaneFeatures', () => {
