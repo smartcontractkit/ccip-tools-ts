@@ -22,10 +22,13 @@ import { METADATA_PROGRAM_ID } from './token/constants.ts'
 import {
   type RegisterAdminMethod,
   type TokenAuthorityType,
+  type TokenPoolType,
   DEFAULT_WRITABLE_INDEXES,
   REGISTRATION_METHODS,
+  SOLANA_TOKEN_POOL_TYPES,
   SolanaTokenManager,
   TOKEN_AUTHORITY_TYPES,
+  isSolanaTokenPoolType,
 } from './index.ts'
 
 function stubChain(): SolanaChain {
@@ -37,9 +40,14 @@ function stubChain(): SolanaChain {
 
 describe('SolanaTokenManager (cct/solana)', () => {
   it('exports public CCT constants', () => {
+    const poolType: TokenPoolType = 'burn-mint'
     const authorityType: TokenAuthorityType = TOKEN_AUTHORITY_TYPES.MINT
     const method: RegisterAdminMethod = REGISTRATION_METHODS.OWNER
 
+    assert.equal(poolType, 'burn-mint')
+    assert.deepEqual(SOLANA_TOKEN_POOL_TYPES, ['burn-mint', 'lock-release'])
+    assert.equal(isSolanaTokenPoolType('lock-release'), true)
+    assert.equal(isSolanaTokenPoolType('custom'), false)
     assert.equal(authorityType, 'mint')
     assert.equal(TOKEN_AUTHORITY_TYPES.FREEZE, 'freeze')
     assert.equal(method, 'owner')

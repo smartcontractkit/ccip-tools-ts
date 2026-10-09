@@ -14,7 +14,12 @@ import {
   CCTTokenAccountMintMismatchError,
   CCTTxFailedError,
 } from '../errors.ts'
-import { TOKEN_POOL_PROGRAMS, deriveTokenPoolConfigPda } from './programs/token-pool.ts'
+import {
+  SOLANA_TOKEN_POOL_TYPES,
+  TOKEN_POOL_PROGRAMS,
+  deriveTokenPoolConfigPda,
+  isSolanaTokenPoolType,
+} from './programs/token-pool.ts'
 import {
   parseOptionalPublicKey,
   parsePublicKey,
@@ -135,6 +140,12 @@ describe('Validate (cct/solana)', () => {
         ),
       (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'authority',
     )
+  })
+
+  it('lists and guards canonical pool types', () => {
+    assert.deepEqual(SOLANA_TOKEN_POOL_TYPES, ['burn-mint', 'lock-release'])
+    for (const type of SOLANA_TOKEN_POOL_TYPES) assert.equal(isSolanaTokenPoolType(type), true)
+    assert.equal(isSolanaTokenPoolType('custom'), false)
   })
 
   it('validates pool types', () => {

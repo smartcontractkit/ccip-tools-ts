@@ -9,8 +9,10 @@ import {
   CCTOperationUnsupportedError,
 } from '../../errors.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
+import * as cctEvm from '../index.ts'
 import {
   type TokenPoolFamily,
+  DEPLOYABLE_TOKEN_POOL_TYPES,
   TOKEN_POOL_FAMILIES,
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
@@ -21,6 +23,7 @@ import {
   getTokenPoolArtifact,
   getTokenPoolFamily,
   getTokenPoolInterface,
+  isDeployableTokenPoolType,
   isLockReleaseTokenPoolType,
   isTokenPoolRevert,
   isTokenPoolType,
@@ -32,6 +35,11 @@ import {
 const ADDR = '0x' + '11'.repeat(20)
 
 describe('pool types', () => {
+  it('exports deployable types and guards from the public EVM entry point', () => {
+    assert.deepEqual(cctEvm.DEPLOYABLE_TOKEN_POOL_TYPES, DEPLOYABLE_TOKEN_POOL_TYPES)
+    assert.equal(cctEvm.isDeployableTokenPoolType, isDeployableTokenPoolType)
+  })
+
   it('lists known EVM pool types (burn family + lock release)', () => {
     assert.deepEqual(
       [...TOKEN_POOL_TYPES].sort(),
@@ -45,6 +53,21 @@ describe('pool types', () => {
         'SiloedLockReleaseTokenPool',
       ].sort(),
     )
+  })
+
+  it('lists deployable pool types, guards them, and has bytecode for each', () => {
+    assert.deepEqual(DEPLOYABLE_TOKEN_POOL_TYPES, [
+      'BurnMintTokenPool',
+      'BurnFromMintTokenPool',
+      'BurnWithFromMintTokenPool',
+      'LockReleaseTokenPool',
+      'SiloedLockReleaseTokenPool',
+    ])
+    for (const type of DEPLOYABLE_TOKEN_POOL_TYPES) {
+      assert.equal(isDeployableTokenPoolType(type), true)
+      assert.match(getTokenPoolArtifact(type).bytecode, /^0x/)
+    }
+    assert.equal(isDeployableTokenPoolType('BurnToAddressTokenPool'), false)
   })
 
   it('isTokenPoolType accepts burn-family + lock-release, rejects others', () => {
