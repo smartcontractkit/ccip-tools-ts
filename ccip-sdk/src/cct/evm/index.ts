@@ -2179,7 +2179,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * external `ERC20LockBox` instead — see {@link deployLockbox} / {@link updateLockboxAuthorizedCallers}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `amount` is zero, the pool
    * cannot accept liquidity, or `sender` is given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
+   * @throws {@link CCTPreconditionError} if `sender` holds less than `amount` of the pool's token, or
    * has approved the pool for less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
@@ -2206,7 +2206,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the wallet's token balance or its approval to the pool is
+   * @throws {@link CCTPreconditionError} if the wallet's token balance or its approval to the pool is
    * below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -2242,7 +2242,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * external `ERC20LockBox` instead
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `amount` is zero, or `sender`
    * is given and is not the pool's rebalancer
-   * @throws {@link CCTTxFailedError} if the pool's withdrawable liquidity is below `amount`
+   * @throws {@link CCTPreconditionError} if the pool's withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -2308,7 +2308,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `amount` is zero or is `MaxUint256` from a siloed `from`, `from` is a v2.0.0 pool, `from`
    * escrows a different token or does not have `poolAddress` as its rebalancer, or `sender` is
    * given and does not own `poolAddress`
-   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
+   * @throws {@link CCTPreconditionError} if `from`'s withdrawable liquidity is below `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -2342,7 +2342,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, the source pool is not wired to `poolAddress`, `amount` is `MaxUint256`
    * from a siloed `from`, or the wallet does not own `poolAddress`
-   * @throws {@link CCTTxFailedError} if `from`'s withdrawable liquidity is below `amount`
+   * @throws {@link CCTPreconditionError} if `from`'s withdrawable liquidity is below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
    * `InsufficientLiquidity` when the source pool holds less than `amount`
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -2486,7 +2486,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
    * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
    * rebalancer
-   * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
+   * @throws {@link CCTPreconditionError} if `sender` holds less than `amount` of the pool's token, or
    * has approved the pool for less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
@@ -2516,7 +2516,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
    * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if the wallet's token balance or its approval to the pool is
+   * @throws {@link CCTPreconditionError} if the wallet's token balance or its approval to the pool is
    * below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -2562,7 +2562,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
    * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
    * rebalancer
-   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCTPreconditionError} if the silo holds less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @example
    * ```typescript
@@ -2589,7 +2589,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
    * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
    * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCTPreconditionError} if the silo holds less than `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
    * `InsufficientLiquidity`
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -3753,7 +3753,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * an authorized caller
    * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
    * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
-   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the lockbox for, less
+   * @throws {@link CCTPreconditionError} if `sender` holds, or has approved the lockbox for, less
    * than `amount`
    * @example
    * ```typescript
@@ -3777,7 +3777,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
-   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the lockbox is
+   * @throws {@link CCTPreconditionError} if the wallet's balance or its allowance to the lockbox is
    * below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
@@ -3808,7 +3808,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * an authorized caller
    * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
    * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
-   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @throws {@link CCTPreconditionError} if the lockbox holds less than `amount`
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedWithdrawFromLockbox({
@@ -3832,7 +3832,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid, or the wallet is not an
    * authorized caller of the lockbox
-   * @throws {@link CCTTxFailedError} if the lockbox holds less than `amount`
+   * @throws {@link CCTPreconditionError} if the lockbox holds less than `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    * @throws {@link CCTTxFailedError} if submission fails before broadcast
    * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time

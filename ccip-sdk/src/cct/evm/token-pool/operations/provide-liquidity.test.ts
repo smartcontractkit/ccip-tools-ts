@@ -327,6 +327,7 @@ describe('ProvideLiquidity (cct/evm)', () => {
       assert.match(err.errors[1]!.reason, /mint or transfer tokens first/)
       assert.match(err.errors[2]!.reason, /grant the allowance first/)
       // and the calldata still comes back, which is what lets the batch be assembled
+      assert.ok(err.unsigned.family === ChainFamily.EVM)
       assert.equal(err.unsigned.transactions[0]!.data, dataFor(AMOUNT))
     })
 

@@ -5,8 +5,8 @@
  * @packageDocumentation
  */
 
+import type { UnsignedTx } from '../chain.ts'
 import { type CCIPErrorOptions, CCIPError, CCIPErrorCode } from '../errors/index.ts'
-import type { UnsignedEVMTx } from '../evm/types.ts'
 
 // Parameter validation
 
@@ -102,6 +102,9 @@ export type PreconditionError = {
  * carries the first entry's `param` and the reasons joined, and the full list is on
  * {@link CCTPreconditionError.errors}.
  *
+ * {@link CCTPreconditionError.unsigned} is typed as any family's unsigned tx, since one error class
+ * serves every family; narrow on `unsigned.family` to reach the family-specific shape.
+ *
  * @example Building a plan step whose prerequisites an earlier step will create
  * ```typescript
  * let unsigned
@@ -115,25 +118,28 @@ export type PreconditionError = {
  * }
  * ```
  */
-export class CCTPreconditionError<Tx = UnsignedEVMTx> extends CCTParamsInvalidError {
+export class CCTPreconditionError extends CCTParamsInvalidError {
   override readonly name: string = 'CCTPreconditionError'
   /** Every unmet requirement found, in check order. Never empty. */
   readonly errors: PreconditionError[]
-  /** The transaction the operation built, prerequisites aside — the calldata to plan with. */
-  readonly unsigned: Tx
+  /**
+   * The transaction the operation built, prerequisites aside — the calldata to plan with. Narrow
+   * on `family` for the family-specific shape, e.g. `UnsignedEVMTx` for `ChainFamily.EVM`.
+   */
+  readonly unsigned: UnsignedTx[keyof UnsignedTx]
 
   /**
    * Creates a precondition error.
-   * @param errors - every unmet requirement found, in check order; must not be empty
+   * @param errors - every unmet requirement found, in check order
    * @param unsigned - the transaction the operation built, prerequisites aside
    */
   constructor(
     operation: string,
-    errors: PreconditionError[],
-    unsigned: Tx,
+    errors: [PreconditionError, ...PreconditionError[]],
+    unsigned: UnsignedTx[keyof UnsignedTx],
     options?: CCIPErrorOptions,
   ) {
-    super(operation, errors[0]!.param, errors.map(({ reason }) => reason).join('; '), options)
+    super(operation, errors[0].param, errors.map(({ reason }) => reason).join('; '), options)
     this.errors = errors
     this.unsigned = unsigned
   }

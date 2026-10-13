@@ -270,6 +270,7 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
         },
       ])
       // byte-for-byte what the happy path returns, `from` included
+      assert.ok(err.unsigned.family === ChainFamily.EVM)
       assert.equal(err.unsigned.transactions[0]!.to, TAR)
       assert.equal(err.unsigned.transactions[0]!.data, SELECTOR + word(TOKEN))
       assert.equal(err.unsigned.transactions[0]!.from, SENDER)

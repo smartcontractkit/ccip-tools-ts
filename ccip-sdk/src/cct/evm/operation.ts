@@ -172,8 +172,8 @@ export abstract class EVMOperation<P extends { sender?: string }, Parsed = P> ex
     const unsigned = await this.buildUnsigned(chain, parsed)
     if (params.sender && unsigned.transactions[0]) unsigned.transactions[0].from = params.sender
     for (const tx of unsigned.transactions) tx.chainId ??= chain.network.chainId
-    const found = await this.preconditions(chain, parsed, unsigned)
-    if (found.length) throw new CCTPreconditionError(this.name, found, unsigned)
+    const [first, ...rest] = await this.preconditions(chain, parsed, unsigned)
+    if (first) throw new CCTPreconditionError(this.name, [first, ...rest], unsigned)
     return unsigned
   }
 

@@ -292,6 +292,7 @@ describe('ProvideSiloedLiquidity (cct/evm)', () => {
           err instanceof CCTPreconditionError &&
           err.errors.length === 1 &&
           err.errors[0]!.param === 'remoteChainSelector' &&
+          err.unsigned.family === ChainFamily.EVM &&
           err.unsigned.transactions[0]!.to === POOL,
       )
       assert.ok(!seen.calls.includes('getChainRebalancer'))

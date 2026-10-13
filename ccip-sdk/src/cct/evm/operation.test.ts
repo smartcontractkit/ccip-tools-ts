@@ -207,6 +207,7 @@ describe('EVMOperation preconditions (cct/evm)', () => {
         () => assert.fail('expected a rejection'),
         (err: unknown) => err as CCTPreconditionError,
       )
+      assert.ok(err.unsigned.family === ChainFamily.EVM)
       assert.equal(err.unsigned.transactions[0]!.to, TO)
       assert.equal(err.unsigned.transactions[0]!.data, DATA)
       // `sender` is applied before the checks run, so the tx is ready to sign as-is

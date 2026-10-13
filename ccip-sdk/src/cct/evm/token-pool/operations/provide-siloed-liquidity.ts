@@ -156,7 +156,7 @@ export class ProvideSiloedLiquidity extends EVMOperation<ProvideSiloedLiquidityP
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
    * or the wallet is not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the pool is
+   * @throws {@link CCTPreconditionError} if the wallet's balance or its allowance to the pool is
    * below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    */
