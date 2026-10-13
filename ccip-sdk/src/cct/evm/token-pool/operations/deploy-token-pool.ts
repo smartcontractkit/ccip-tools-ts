@@ -14,9 +14,7 @@ import { validateAddress, validateNonZeroAddress, validateUint8 } from '../../va
 import {
   type BurnMintTokenPoolType,
   type DeployableTokenPoolType,
-  type TokenPoolFamily,
   getTokenPoolArtifact,
-  getTokenPoolFamily,
   isDeployableTokenPoolType,
 } from '../contracts.ts'
 
@@ -49,7 +47,26 @@ type DeployTokenPoolBaseParams = {
 
 /** Params for a burn-* mint pool: the `TokenPool` base constructor, unchanged. */
 export type DeployBurnMintTokenPoolParams = DeployTokenPoolBaseParams & {
-  type: Extract<DeployableTokenPoolType, BurnMintTokenPoolType>
+  type: Exclude<Extract<DeployableTokenPoolType, BurnMintTokenPoolType>, 'BurnToAddressTokenPool'>
+}
+
+/**
+ * Params for a `BurnToAddressTokenPool`: the `TokenPool` base constructor plus `burnAddress`.
+ *
+ * @remarks Burns by transferring to `burnAddress` instead of calling `burn`, so total supply
+ * does not drop. The pool needs no burn role on the token, only the mint role for inbound.
+ */
+export type DeployBurnToAddressTokenPoolParams = DeployTokenPoolBaseParams & {
+  type: 'BurnToAddressTokenPool'
+  /**
+   * Address that receives every outbound amount, e.g. `0x000000000000000000000000000000000000dEaD`.
+   * Must hold no key or code that can move tokens out.
+   *
+   * @remarks **Permanent.** Stored in `i_burnAddress`, `immutable` with no setter. The zero
+   * address is rejected: the contract accepts it, but OpenZeppelin ERC20s revert
+   * `ERC20InvalidReceiver` on a transfer to it, so every `lockOrBurn` would revert.
+   */
+  burnAddress: string
 }
 
 /**
@@ -92,14 +109,16 @@ export type DeploySiloedLockReleaseTokenPoolParams = DeployTokenPoolBaseParams &
 /**
  * Parameters for {@link DeployTokenPool}, discriminated on `type`: the burn-* variants and
  * `SiloedLockReleaseTokenPool` take the `TokenPool` base constructor; only `LockReleaseTokenPool`
- * takes (and requires) `lockbox`, a compile-time guarantee.
+ * takes (and requires) `lockbox`, and only `BurnToAddressTokenPool` takes (and requires)
+ * `burnAddress`, both compile-time guarantees.
  */
 export type DeployTokenPoolParams =
   | DeployBurnMintTokenPoolParams
+  | DeployBurnToAddressTokenPoolParams
   | DeployLockReleaseTokenPoolParams
   | DeploySiloedLockReleaseTokenPoolParams
 
-/** Encodes a v2.0.0 pool constructor into init-code args for a given ABI family. */
+/** Encodes a v2.0.0 pool constructor into init-code args. */
 type TokenPoolConstructorEncoder = (iface: Interface, p: DeployTokenPoolParams) => string
 
 /**
@@ -126,19 +145,33 @@ const encodeLockReleaseTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
     p.type === 'LockReleaseTokenPool' ? p.lockbox : ZeroAddress,
   ])
 
+/** BurnToAddress constructor: the base args plus `burnAddress` (only that variant carries it). */
+const encodeBurnToAddressTokenPool: TokenPoolConstructorEncoder = (iface, p) =>
+  iface.encodeDeploy([
+    p.token,
+    p.localTokenDecimals,
+    p.advancedPoolHooks ?? ZeroAddress,
+    p.rmnProxy,
+    p.router,
+    p.type === 'BurnToAddressTokenPool' ? p.burnAddress : ZeroAddress,
+  ])
+
 /** Deploys a token pool; `execute` resolves to `{ hash, contractAddress, verification }`. */
 export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
   readonly name = 'deployTokenPool'
 
   /**
-   * Constructor encoder per ABI {@link TokenPoolFamily}; `type` narrows to its family.
-   * `SiloedLockRelease` takes the base constructor (no `lockbox`), as BurnMint does.
+   * Constructor encoder per deployable type, not per ABI family: `BurnToAddressTokenPool` shares the
+   * `BurnMint` family but adds `burnAddress`. Exhaustive, so a new deployable type must pick one.
    */
-  private readonly encoders: Record<TokenPoolFamily, TokenPoolConstructorEncoder> = {
-    BurnMint: encodeBaseTokenPool,
-    LockRelease: encodeLockReleaseTokenPool,
-    SiloedLockRelease: encodeBaseTokenPool,
-  }
+  private readonly encoders = {
+    BurnMintTokenPool: encodeBaseTokenPool,
+    BurnFromMintTokenPool: encodeBaseTokenPool,
+    BurnWithFromMintTokenPool: encodeBaseTokenPool,
+    BurnToAddressTokenPool: encodeBurnToAddressTokenPool,
+    LockReleaseTokenPool: encodeLockReleaseTokenPool,
+    SiloedLockReleaseTokenPool: encodeBaseTokenPool,
+  } satisfies Record<DeployableTokenPoolType, TokenPoolConstructorEncoder>
 
   /** Validates the constructor params before building init-code. */
   protected override validate(params: DeployTokenPoolParams): void {
@@ -156,6 +189,8 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
       validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     if (params.type === 'LockReleaseTokenPool')
       validateNonZeroAddress(this.name, 'lockbox', params.lockbox)
+    if (params.type === 'BurnToAddressTokenPool')
+      validateNonZeroAddress(this.name, 'burnAddress', params.burnAddress)
   }
 
   /** Deploy artifact for the selected pool `type` (v2.0.0): name + ctor interface + bytecode. */
@@ -163,8 +198,8 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
     return getTokenPoolArtifact(p.type)
   }
 
-  /** ABI-encodes the pool constructor args via the encoder for the type's ABI family. */
+  /** ABI-encodes the pool constructor args via the encoder for the type. */
   protected encode(iface: Interface, p: DeployTokenPoolParams): string {
-    return this.encoders[getTokenPoolFamily(p.type)](iface, p)
+    return this.encoders[p.type](iface, p)
   }
 }

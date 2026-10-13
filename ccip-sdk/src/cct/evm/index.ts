@@ -152,6 +152,11 @@ import {
   GetAllowlist,
 } from './token-pool/operations/get-allowlist.ts'
 import {
+  type GetBurnAddressParams,
+  type GetBurnAddressResult,
+  GetBurnAddress,
+} from './token-pool/operations/get-burn-address.ts'
+import {
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
   GetDynamicConfig,
@@ -352,6 +357,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
+  readonly #getBurnAddress = new GetBurnAddress()
   readonly #getLockbox = new GetLockbox()
 
   // Advanced pool hooks operations
@@ -2489,6 +2495,25 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the `i_burnAddress` a `BurnToAddressTokenPool` (v1.5.1, v1.6.1, v2.0.0) sends every
+   * outbound amount to.
+   * @remarks Informational, for audit and UX: it is set in the constructor with no setter, so this
+   * confirms a deployed pool burns to the address intended.
+   * @returns The burn address, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a `BurnToAddressTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a version BurnToAddress never shipped at (1.5.0)
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const burnAddress = await cct.getBurnAddress({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getBurnAddress(opts: GetBurnAddressParams): Promise<GetBurnAddressResult> {
+    return this.#getBurnAddress.query(this.chain, opts)
+  }
+
+  /**
    * Reads the `ERC20LockBox` a v2.0.0 LockRelease pool escrows through — fixed in its constructor
    * and immutable thereafter.
    * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need: those ops
@@ -3078,8 +3103,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
-   * `BurnWithFromMintTokenPool`, `LockReleaseTokenPool`, or `SiloedLockReleaseTokenPool`; all
-   * v2.0.0). The deployed address is only known once mined, so it is NOT returned here — use
+   * `BurnWithFromMintTokenPool`, `BurnToAddressTokenPool`, `LockReleaseTokenPool`, or
+   * `SiloedLockReleaseTokenPool`; all v2.0.0). `BurnToAddressTokenPool` additionally requires
+   * `burnAddress` ({@link DeployBurnToAddressTokenPoolParams}).
+   * The deployed address is only known once mined, so it is NOT returned here; use
    * {@link deployTokenPool} to receive `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
@@ -3121,7 +3148,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity. `SiloedLockReleaseTokenPool`
    * takes no `lockbox`; its lockboxes are bound per lane after deploy (see
-   * {@link DeploySiloedLockReleaseTokenPoolParams}).
+   * {@link DeploySiloedLockReleaseTokenPoolParams}). `BurnToAddressTokenPool` requires an
+   * immutable, non-zero `burnAddress` and burns by transferring to it, so it only needs the mint
+   * role ({@link DeployBurnToAddressTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -3964,6 +3993,7 @@ export type { TransferPoolOwnershipParams } from './token-pool/operations/transf
 export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
 export type {
   DeployBurnMintTokenPoolParams,
+  DeployBurnToAddressTokenPoolParams,
   DeployLockReleaseTokenPoolParams,
   DeploySiloedLockReleaseTokenPoolParams,
   DeployTokenPoolParams,
@@ -4031,6 +4061,10 @@ export type {
   GetRebalancerParams,
   GetRebalancerResult,
 } from './token-pool/operations/get-rebalancer.ts'
+export type {
+  GetBurnAddressParams,
+  GetBurnAddressResult,
+} from './token-pool/operations/get-burn-address.ts'
 export type { GetLockboxParams, GetLockboxResult } from './token-pool/operations/get-lockbox.ts'
 export type {
   GetAllowedFinalityConfigParams,

@@ -8,7 +8,8 @@
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
  * liquidity layer: the rebalancer and liquidity reads plus the guards the liquidity ops pre-flight
  * with ({@link assertLockReleasePool}, {@link assertPoolRebalancer},
- * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}). The write-side rate-limit shape
+ * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}), and the BurnToAddress burn-address
+ * read ({@link readTokenPoolBurnAddress}). The write-side rate-limit shape
  * lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
@@ -37,10 +38,12 @@ import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-t
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/siloed-lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-to-address-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
 import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-to-address-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
@@ -700,6 +703,18 @@ export async function assertPoolRebalancer(
 }
 
 /**
+ * Reads a BurnToAddress pool's `getBurnAddress()` (its immutable `i_burnAddress`), checksummed.
+ * The v2.0.0 ABI serves every version: the view is unchanged since 1.5.1.
+ */
+export async function readTokenPoolBurnAddress(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getBurnAddress()))
+}
+
+/**
  * Reads a non-siloed v2.0.0 LockRelease pool's `getLockBox()` — the `ERC20LockBox` it escrows
  * through — in one `eth_call`.
  *
@@ -879,36 +894,60 @@ export function describeLiquidity(type: TokenPoolType, liquidity: bigint, token:
 }
 
 /**
- * Creation bytecode per deployable pool type (2.0.0 only — pre-2.0.0 bytecode is not vendored).
- * The keys define the deployable set ({@link DeployableTokenPoolType}). The burn-* variants share
- * the `BurnMint` constructor ABI but are distinct contracts with distinct bytecode.
+ * Deploy artifact per deployable pool type (2.0.0 only; pre-2.0.0 bytecode is not vendored). The
+ * keys define the deployable set ({@link DeployableTokenPoolType}).
+ * - `contract` is the compiled name verification needs: `BurnToAddressTokenPool` compiles as
+ *   `BurnToAddressMintTokenPool`.
+ * - `iface` is the constructor ABI: the burn-* variants share the `BurnMint` one, except
+ *   BurnToAddress, whose constructor appends `burnAddress`.
  */
-const TOKEN_POOL_BYTECODE = {
-  BurnMintTokenPool: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-  SiloedLockReleaseTokenPool: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-} satisfies Partial<Record<TokenPoolType, `0x${string}`>>
+const TOKEN_POOL_DEPLOY_ARTIFACTS = {
+  BurnMintTokenPool: {
+    contract: 'BurnMintTokenPool',
+    iface: TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0],
+    bytecode: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnFromMintTokenPool: {
+    contract: 'BurnFromMintTokenPool',
+    iface: TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0],
+    bytecode: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnWithFromMintTokenPool: {
+    contract: 'BurnWithFromMintTokenPool',
+    iface: TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0],
+    bytecode: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnToAddressTokenPool: {
+    contract: 'BurnToAddressMintTokenPool',
+    iface: new Interface(BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI),
+    bytecode: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  LockReleaseTokenPool: {
+    contract: 'LockReleaseTokenPool',
+    iface: TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0],
+    bytecode: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  SiloedLockReleaseTokenPool: {
+    contract: 'SiloedLockReleaseTokenPool',
+    iface: TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0],
+    bytecode: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+} satisfies Partial<Record<TokenPoolType, DeployArtifact>>
 
 /** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
-export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_BYTECODE
+export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_DEPLOY_ARTIFACTS
 
 /** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
 export function isDeployableTokenPoolType(type: string): type is DeployableTokenPoolType {
-  return Object.hasOwn(TOKEN_POOL_BYTECODE, type)
+  return Object.hasOwn(TOKEN_POOL_DEPLOY_ARTIFACTS, type)
 }
 
 /**
- * Deploy artifact for a deployable pool `type` (v2.0.0): contract name (= `type`), the cached
+ * Deploy artifact for a deployable pool `type` (v2.0.0): the compiled contract name, the cached
  * constructor {@link Interface}, and the creation bytecode.
  */
 export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtifact {
-  return {
-    contract: type,
-    iface: getTokenPoolInterface(type, TokenPoolVersion.V2_0_0),
-    bytecode: TOKEN_POOL_BYTECODE[type],
-  }
+  return TOKEN_POOL_DEPLOY_ARTIFACTS[type]
 }
 
 /**
