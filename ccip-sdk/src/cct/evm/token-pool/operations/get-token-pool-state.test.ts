@@ -181,7 +181,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
 
   it('never calls getLockBox() on a siloed pool, whose escrow is keyed per remote chain', async () => {
     const noArgLockBox =
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0].getFunction(
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V2_0_0].getFunction(
         'getLockBox()',
       )!.selector
     const seen: string[] = []

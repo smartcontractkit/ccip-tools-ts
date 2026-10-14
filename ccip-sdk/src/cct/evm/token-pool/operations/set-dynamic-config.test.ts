@@ -165,7 +165,7 @@ describe('SetDynamicConfig (cct/evm)', () => {
     // the TOCTOU guard: all three fields come from the caller, so nothing is read back and
     // baked into the calldata between build time and (possibly much later) signing.
     it('never reads getDynamicConfig — the only call made is owner()', async () => {
-      const iface = TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0]
+      const iface = TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0]
       const selectors: (string | undefined)[] = []
       await generate(stubChain({ onCall: (selector) => selectors.push(selector) }))
       assert.deepEqual(selectors, [undefined, iface.getFunction('owner')!.selector])

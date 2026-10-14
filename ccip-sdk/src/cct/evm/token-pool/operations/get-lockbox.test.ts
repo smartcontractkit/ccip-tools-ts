@@ -32,7 +32,7 @@ function stubChain({
   lockBox?: string
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.LockRelease['2.0.0']
+  const iface = TOKEN_POOL_INTERFACES.LockReleaseTokenPool['2.0.0']
   return {
     provider: {
       call: ({ data }: { data: string }) => {
