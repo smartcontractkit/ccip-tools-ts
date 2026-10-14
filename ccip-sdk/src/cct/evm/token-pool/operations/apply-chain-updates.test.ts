@@ -965,7 +965,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       {
         type: 'BurnMintWithLockReleaseFlagTokenPool',
         family: 'BurnMint',
-        versions: [V1_5_1, V1_6_1, V2_0_0],
+        versions: [V2_0_0],
       },
       {
         type: 'SiloedLockReleaseTokenPool',
