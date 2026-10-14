@@ -32,7 +32,7 @@ function stubChain({
   rebalancer?: string
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.LockRelease['1.5.1']
+  const iface = TOKEN_POOL_INTERFACES.LockReleaseTokenPool['1.5.1']
   return {
     provider: {
       call: ({ data }: { data: string }) => {
