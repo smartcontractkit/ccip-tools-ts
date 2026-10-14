@@ -157,7 +157,6 @@ import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type {
   CantonInstrumentId,
-  CantonWallet,
   SinglePartySignatures,
   TransactionSigner,
   UnsignedCantonTx,

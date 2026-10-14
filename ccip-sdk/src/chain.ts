@@ -3,7 +3,7 @@ import type { PickDeep } from 'type-fest'
 
 import { type LaneLatencyResponse, CCIPAPIClient } from './api/index.ts'
 import type { UnsignedAptosTx } from './aptos/types.ts'
-import type { UnsignedCantonTx } from './canton/types.ts'
+import type { CantonRpcProvider, UnsignedCantonTx } from './canton/types.ts'
 import { fetchVerifications, getOnchainCommitReport } from './commits.ts'
 import {
   CCIPApiClientNotAvailableError,
@@ -228,6 +228,11 @@ export type WithCantonConfig = {
  * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
  */
 export type CantonConfig = {
+  provider: CantonRpcProvider
+
+  apiType: string // TODO, either `json` or `gateway`
+  apiUrl: string
+
   /** User ledger party for actAs, ACS queries, and transaction visibility. */
   party: string
 
@@ -266,11 +271,9 @@ export type CantonConfig = {
   indexerUrl?: string
 
   /**
-   * Optional CCIP Canton chain ID (e.g. `canton:TestNet`). When set, skips
-   * synchronizer-alias detection — required when the ledger reports a generic
-   * alias such as `global`.
+   * CAIP-2 chain ID in the format of `namespace:reference`, e.g. `canton:testnet`, `canton:mainnet`
    */
-  chainId?: string
+  chainId: string
 
   /**
    * Optional DAR package names for ACS template filters. Prod testnet bundles

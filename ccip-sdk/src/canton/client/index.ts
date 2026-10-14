@@ -4,11 +4,15 @@
 
 export {
   type CantonClient,
-  type CantonClientConfig,
   type Command,
   type ConnectedSynchronizer,
   type CreatedEvent,
   type EventFormat,
+  type GetLedgerEndResponse,
+  type GetUpdateByIdRequest,
+  type JsGetUpdateResponse,
+  type UpdateFormat,
+  type Update,
   type GetActiveContractsRequest,
   type GetConnectedSynchronizersResponse,
   type HashingSchemeVersion,
@@ -27,7 +31,7 @@ export {
   type SinglePartySignatures,
   type SubmitAndWaitResponse,
   type TemplateFilter,
-  type TransactionFilter,
   type WildcardFilter,
-  createCantonClient,
 } from './client.ts'
+
+export type { paths } from './generated/ledger-api.generated.ts'

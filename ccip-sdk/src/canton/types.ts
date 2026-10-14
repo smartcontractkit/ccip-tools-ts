@@ -1,7 +1,12 @@
+import type { Provider } from '@canton-network/core-splice-provider'
+import type { RpcTypes as DappRpcTypes } from '@canton-network/core-wallet-dapp-rpc-client'
+
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
 import { type PartyId, parsePartyId } from './addressCodec.ts'
 import type { JsCommands, SinglePartySignatures } from './client/index.ts'
+
+export type CantonRpcProvider = Provider<DappRpcTypes>
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.
@@ -29,34 +34,6 @@ import type { JsCommands, SinglePartySignatures } from './client/index.ts'
  */
 export interface TransactionSigner {
   signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
-}
-
-/**
- * A Canton "wallet" identifies the acting party and optionally carries a
- * {@link TransactionSigner} for external signing.
- *
- * When `signer` is present, {@link CantonChain.sendMessage} and
- * {@link CantonChain.execute} use the external signing flow
- * (prepare → sign → execute) instead of direct submission.
- */
-export interface CantonWallet {
-  /** Daml party ID used for `actAs` in command submissions. */
-  party: string
-  /** Optional external signer. When provided, transactions go through the interactive submission API. */
-  signer?: TransactionSigner
-}
-
-/**
- * Type-guard for {@link CantonWallet}.
- */
-export function isCantonWallet(v: unknown): v is CantonWallet {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    'party' in v &&
-    typeof (v as CantonWallet).party === 'string' &&
-    (v as CantonWallet).party.length > 0
-  )
 }
 
 /**

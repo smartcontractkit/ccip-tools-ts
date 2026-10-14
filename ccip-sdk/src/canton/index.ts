@@ -1,3 +1,4 @@
+import type { AccountsChangedEvent } from '@canton-network/core-wallet-dapp-rpc-client'
 import { type BytesLike, dataLength, hexlify, id as keccak256Utf8 } from 'ethers'
 
 import {
@@ -18,7 +19,6 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPNotImplementedError,
-  CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { ExtraArgs } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
@@ -46,7 +46,7 @@ import {
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
-import { getDataBytes, sleep } from '../utils.ts'
+import { sleep } from '../utils.ts'
 import {
   type CantonAddress,
   type PartyId,
@@ -62,13 +62,14 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
-import {
-  type CantonClient,
-  type JsCommands,
-  type JsPrepareSubmissionRequest,
-  type JsSubmitAndWaitForTransactionResponse,
-  type JsTransaction,
-  createCantonClient,
+import { createCantonClientFromProvider } from './client/client.ts'
+import type {
+  CantonClient,
+  JsCommands,
+  JsSubmitAndWaitForTransactionResponse,
+  JsTransaction,
+  Update,
+  UpdateFormat,
 } from './client/index.ts'
 import {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
@@ -103,16 +104,14 @@ import {
 import {
   type CantonExtraArgsV1,
   type CantonInstrumentId,
-  type TransactionSigner,
+  type CantonRpcProvider,
   type UnsignedCantonTx,
-  isCantonWallet,
   parseCantonInstrumentId,
 } from './types.ts'
 import { isCantonUpdateId } from './update-id.ts'
 
 export type {
   CantonClient,
-  CantonClientConfig,
   HashingSchemeVersion,
   PartySignatures,
   Signature,
@@ -124,11 +123,10 @@ export type {
   CantonInstrumentId,
   CantonTokenExtraArgs,
   CantonTokenInput,
-  CantonWallet,
   TransactionSigner,
   UnsignedCantonTx,
 } from './types.ts'
-export { isCantonWallet, parseCantonInstrumentId } from './types.ts'
+export { parseCantonInstrumentId } from './types.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,
   InstanceAddress,
@@ -206,7 +204,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   static readonly decimals = CANTON_DECIMALS
 
   override readonly network: NetworkInfo<typeof ChainFamily.Canton>
-  readonly provider: CantonClient
+
+  // The Canton provider instance to use.
+  // Used for all connectivity to the Canton validator.
+  readonly provider: CantonRpcProvider
+  readonly cantonClient: CantonClient
+  activeParty: PartyId
+
+  // readonly cantonClientOld: CantonClient2
   readonly acsDisclosureProvider: AcsDisclosureProvider
   readonly edsDisclosureProvider: EdsDisclosureProvider
   readonly transferInstructionClient: TransferInstructionClient
@@ -215,8 +220,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   readonly tokenMetadataClient: TokenMetadataClient
   readonly indexerUrl: string
   readonly ccipParty: PartyId
-  /** Ledger party used for actAs / ACS queries. */
-  readonly ledgerParty: PartyId
   /** Custom fetch function supplied via ctx, used for indexer requests. Falls back to globalThis.fetch. */
   private readonly fetchFn: typeof fetch
 
@@ -238,6 +241,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Creates a new CantonChain instance.
+   * @param provider - Canton provider instance, provides all connectivity
    * @param client - Canton Ledger API client.
    * @param acsDisclosureProvider - ACS-based disclosure provider.
    * @param edsDisclosureProvider - EDS-based disclosure provider.
@@ -247,11 +251,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @param ccipParty - The party ID to use for CCIP operations
    * @param indexerUrl - Base URL of the CCV indexer service.
    * @param network - Network information for this chain.
-   * @param ledgerParty - User ledger party for actAs and transaction lookups (`canton-config.party`)
    * @param ctx - Context containing logger.
    */
   constructor(
-    client: CantonClient,
+    provider: CantonRpcProvider,
+    cantonClient: CantonClient,
+    partyId: string,
     acsDisclosureProvider: AcsDisclosureProvider,
     edsDisclosureProvider: EdsDisclosureProvider,
     transferInstructionClient: TransferInstructionClient,
@@ -260,11 +265,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ccipParty: string,
     indexerUrl: string,
     network: NetworkInfo<typeof ChainFamily.Canton>,
-    ledgerParty: string,
     ctx?: ChainContext,
   ) {
     super(network, ctx)
-    this.provider = client
+    this.provider = provider
+    this.cantonClient = cantonClient
+    this.activeParty = parsePartyId(partyId)
     this.network = network
     this.acsDisclosureProvider = acsDisclosureProvider
     this.edsDisclosureProvider = edsDisclosureProvider
@@ -272,7 +278,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.linkTransferInstructionClient = linkTransferInstructionClient
     this.tokenMetadataClient = tokenMetadataClient
     this.ccipParty = parsePartyId(ccipParty)
-    this.ledgerParty = parsePartyId(ledgerParty)
     this.indexerUrl = indexerUrl
     this.fetchFn = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
     this.ccvs = ctx?.cantonConfig?.ccvs?.map((ccv) => parseInstanceAddress(ccv)) ?? []
@@ -286,29 +291,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Mapping from lower-cased synchronizer alias variants to their canonical Canton chain ID
+   * Mapping from lower-cased CAIP-2 chain ID variants to their canonical Canton chain ID
    * as it appears in selectors.ts (e.g. `canton:MainNet`).
    */
-  private static readonly SYNCHRONIZER_ALIAS_TO_CHAIN_ID: ReadonlyMap<string, string> = new Map([
-    ['localnet', 'canton:LocalNet'],
-    ['local', 'canton:LocalNet'],
-    ['canton-localnet', 'canton:LocalNet'],
-    ['devnet', 'canton:DevNet'],
-    ['dev', 'canton:DevNet'],
-    ['canton-devnet', 'canton:DevNet'],
-    ['testnet', 'canton:TestNet'],
-    ['test', 'canton:TestNet'],
-    ['canton-testnet', 'canton:TestNet'],
-    ['mainnet', 'canton:MainNet'],
-    ['main', 'canton:MainNet'],
-    ['canton-mainnet', 'canton:MainNet'],
+  private static readonly CAIP2_TO_CHAIN_ID: ReadonlyMap<string, string> = new Map([
+    ['canton:localnet', 'canton:LocalNet'],
+    ['canton:devnet', 'canton:DevNet'],
+    ['canton:testnet', 'canton:TestNet'],
+    ['canton:mainnet', 'canton:MainNet'],
   ])
-
-  /**
-   * Default Canton chain ID to use when the synchronizer alias is ambiguous
-   * (e.g. the generic "global" alias used across all Canton environments).
-   */
-  private static readonly DEFAULT_CANTON_CHAIN_ID = 'canton:DevNet'
 
   /**
    * Detect the Canton network and instantiate a CantonChain.
@@ -320,7 +311,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @throws {@link CCIPChainNotFoundError} if no connected synchronizer alias maps to a known Canton chain
    */
   static async fromClient(
-    client: CantonClient,
+    provider: CantonRpcProvider,
+    cantonClient: CantonClient,
+    partyId: string,
     acsDisclosureProvider: AcsDisclosureProvider,
     edsDisclosureProvider: EdsDisclosureProvider,
     transferInstructionClient: TransferInstructionClient,
@@ -328,83 +321,101 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     tokenMetadataClient: TokenMetadataClient,
     ccipParty: string,
     indexerUrl: string,
-    ledgerParty: string,
     ctx?: ChainContext,
   ): Promise<CantonChain> {
-    const synchronizers = await client.getConnectedSynchronizers()
+    const activeNetwork = await provider.request({ method: 'getActiveNetwork' })
 
-    if (!synchronizers.length) {
-      throw new CCIPChainNotFoundError('no connected synchronizers')
+    const canonicalChainId = this.CAIP2_TO_CHAIN_ID.get(activeNetwork.networkId.toLowerCase())
+    if (!canonicalChainId) {
+      throw new CCIPChainNotFoundError(activeNetwork.networkId)
     }
 
-    const configChainId = ctx?.cantonConfig?.chainId?.trim()
-    if (configChainId) {
-      ctx?.logger?.debug(
-        'Canton: using chainId from canton config (skipping synchronizer alias detection):',
-        configChainId,
-      )
-      return new this(
-        client,
-        acsDisclosureProvider,
-        edsDisclosureProvider,
-        transferInstructionClient,
-        linkTransferInstructionClient,
-        tokenMetadataClient,
-        ccipParty,
-        indexerUrl,
-        networkInfo(configChainId) as NetworkInfo<typeof ChainFamily.Canton>,
-        ledgerParty,
-        ctx,
-      )
-    }
+    return new this(
+      provider,
+      cantonClient,
+      partyId,
+      acsDisclosureProvider,
+      edsDisclosureProvider,
+      transferInstructionClient,
+      linkTransferInstructionClient,
+      tokenMetadataClient,
+      ccipParty,
+      indexerUrl,
+      networkInfo(canonicalChainId) as NetworkInfo<typeof ChainFamily.Canton>,
+      ctx,
+    )
+  }
 
-    // TODO: Check synchronizer returned aliases against known Canton chain names to determine the network.
-    for (const { synchronizerAlias } of synchronizers) {
-      const chainId = CantonChain.SYNCHRONIZER_ALIAS_TO_CHAIN_ID.get(
-        synchronizerAlias.toLowerCase(),
-      )
-      if (chainId) {
-        return new this(
-          client,
-          acsDisclosureProvider,
-          edsDisclosureProvider,
-          transferInstructionClient,
-          linkTransferInstructionClient,
-          tokenMetadataClient,
-          ccipParty,
-          indexerUrl,
-          networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Canton>,
-          ledgerParty,
-          ctx,
-        )
-      }
-    }
-
-    // fall back to the default Canton chain if there are synchronizers but none of their aliases are recognised
-    if (synchronizers.length) {
-      ctx?.logger?.debug(
-        'Canton: no specific alias matched for synchronizers',
-        synchronizers.map((s) => s.synchronizerAlias),
-        '— falling back to',
-        CantonChain.DEFAULT_CANTON_CHAIN_ID,
-      )
-      return new this(
-        client,
-        acsDisclosureProvider,
-        edsDisclosureProvider,
-        transferInstructionClient,
-        linkTransferInstructionClient,
-        tokenMetadataClient,
-        ccipParty,
-        indexerUrl,
-        networkInfo(CantonChain.DEFAULT_CANTON_CHAIN_ID) as NetworkInfo<typeof ChainFamily.Canton>,
-        ledgerParty,
-        ctx,
+  static async fromProvider(provider: CantonRpcProvider, ctx?: ChainContext): Promise<CantonChain> {
+    // Check that ctx has the necessary cantonConfig
+    if (!ctx || !ctx.cantonConfig) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.fromUrl: ctx.cantonConfig is required',
       )
     }
 
-    throw new CCIPChainNotFoundError(
-      `canton:${synchronizers.map((s) => s.synchronizerAlias).join(', ')}`,
+    const primaryAccount = await provider.request({
+      method: 'getPrimaryAccount',
+    })
+    const partyId = primaryAccount.partyId
+    ctx.logger?.info(`Using primary party ${partyId} from provider`)
+
+    // Listen for account changes and update activeParty if required
+    provider.on<AccountsChangedEvent>('accountsChanged', (wallets) => {
+      const primaryParty = wallets.find((w) => w.primary)
+      ctx.logger?.info(`Primary party changed to ${primaryParty?.partyId}`)
+    })
+
+    const cantonClient = createCantonClientFromProvider(provider)
+
+    // Authentication: `jwt` is either a static string or a `() => Promise<string>`
+    // getter for refreshable tokens. The SDK never orchestrates an OAuth flow —
+    // the caller (CLI / embedder) resolves auth upfront and hands the result to
+    // `cantonConfig.jwt`. Thread it through to every client so each request
+    // carries a fresh JWT when a getter is supplied.
+    const jwt = ctx.cantonConfig.jwt
+    if (!jwt) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_AUTH_ERROR,
+        'CantonChain.fromUrl: cantonConfig.jwt is required for authentication',
+      )
+    }
+
+    const acsDisclosureProvider = new AcsDisclosureProvider(cantonClient, {
+      party: partyId, // TODO use this.activeParty instead, as primary party can change
+      packages: ctx.cantonConfig.packages,
+      logger: ctx.logger,
+    })
+    const edsDisclosureProvider = new EdsDisclosureProvider({
+      edsBaseUrl: ctx.cantonConfig.edsUrl,
+      externalEdsUrlsByOwner: ctx.cantonConfig.externalEdsUrlsByOwner,
+    })
+    const transferInstructionClient = createTransferInstructionClient({
+      baseUrl: ctx.cantonConfig.transferInstructionUrl,
+      jwt,
+    })
+    const linkTransferInstructionClient = createTransferInstructionClient({
+      baseUrl: ctx.cantonConfig.edsUrl,
+      jwt,
+      useScanProxy: false,
+    })
+    const tokenMetadataClient = createTokenMetadataClient({
+      baseUrl: ctx.cantonConfig.transferInstructionUrl,
+      jwt,
+    })
+    return this.fromClient(
+      provider,
+      cantonClient,
+      partyId,
+      acsDisclosureProvider,
+      edsDisclosureProvider,
+      transferInstructionClient,
+      linkTransferInstructionClient,
+      tokenMetadataClient,
+      ctx.cantonConfig.ccipParty,
+      ctx.cantonConfig.indexerUrl ?? MAINNET_INDEXER_URLS[0]!,
+      ctx,
     )
   }
 
@@ -427,77 +438,14 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    if (!ctx.cantonConfig.party.trim()) {
+    if (!ctx.cantonConfig.provider) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.fromUrl: ctx.cantonConfig.party is required (ledger actAs party; distinct from ccipParty)',
+        'CantonChain.fromUrl: ctx.cantonConfig.provider is required',
       )
     }
 
-    // Authentication: `jwt` is either a static string or a `() => Promise<string>`
-    // getter for refreshable tokens. The SDK never orchestrates an OAuth flow —
-    // the caller (CLI / embedder) resolves auth upfront and hands the result to
-    // `cantonConfig.jwt`. Thread it through to every client so each request
-    // carries a fresh JWT when a getter is supplied.
-    const jwt = ctx.cantonConfig.jwt
-    if (!jwt) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_AUTH_ERROR,
-        'CantonChain.fromUrl: cantonConfig.jwt is required for authentication',
-      )
-    }
-
-    const fetchFn = ctx.fetch
-    const client = createCantonClient({
-      baseUrl: url,
-      jwt,
-      signal: ctx.abort,
-      fetch: fetchFn,
-    })
-    try {
-      const alive = await client.isAlive()
-      if (!alive) throw new CCIPNotImplementedError('Canton Ledger JSON API is not alive')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `Failed to connect to Canton Ledger API ${url}: ${message}`,
-      )
-    }
-    const acsDisclosureProvider = new AcsDisclosureProvider(client, {
-      party: ctx.cantonConfig.party,
-      packages: ctx.cantonConfig.packages,
-      logger: ctx.logger,
-    })
-    const edsDisclosureProvider = new EdsDisclosureProvider({
-      edsBaseUrl: ctx.cantonConfig.edsUrl,
-      externalEdsUrlsByOwner: ctx.cantonConfig.externalEdsUrlsByOwner,
-    })
-    const transferInstructionClient = createTransferInstructionClient({
-      baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt,
-    })
-    const linkTransferInstructionClient = createTransferInstructionClient({
-      baseUrl: ctx.cantonConfig.edsUrl,
-      jwt,
-      useScanProxy: false,
-    })
-    const tokenMetadataClient = createTokenMetadataClient({
-      baseUrl: ctx.cantonConfig.transferInstructionUrl,
-      jwt,
-    })
-    return this.fromClient(
-      client,
-      acsDisclosureProvider,
-      edsDisclosureProvider,
-      transferInstructionClient,
-      linkTransferInstructionClient,
-      tokenMetadataClient,
-      ctx.cantonConfig.ccipParty,
-      ctx.cantonConfig.indexerUrl ?? MAINNET_INDEXER_URLS[0]!,
-      ctx.cantonConfig.party.trim(),
-      ctx,
-    )
+    return this.fromProvider(ctx.cantonConfig.provider, ctx)
   }
 
   /**
@@ -514,7 +462,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Fetches a Canton transaction (update) by its update ID.
    *
    * The ledger is queried via `/v2/updates/transaction-by-id` scoped to
-   * {@link ledgerParty} so restricted participant nodes allow the lookup.
+   * the provider's party so restricted participant nodes allow the lookup.
    *
    * Canton concepts are mapped to {@link ChainTransaction} fields as follows:
    * - `hash`        — the Canton `updateId`
@@ -526,8 +474,53 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * @param hash - The Canton update ID (transaction hash) to look up.
    * @returns A {@link ChainTransaction} with events mapped to logs.
    */
+  /**
+   * UpdateFormat for `/v2/updates/update-by-id` that returns the full
+   * transaction (all events visible to the party, with create arguments but
+   * without raw created-event blobs).
+   */
+  private transactionUpdateFormat(): UpdateFormat {
+    return {
+      includeTransactions: {
+        eventFormat: {
+          filtersByParty: {
+            [this.activeParty]: {
+              cumulative: [
+                {
+                  identifierFilter: {
+                    WildcardFilter: {
+                      value: {
+                        includeCreatedEventBlob: false,
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          verbose: true,
+        },
+        transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+      },
+    } as UpdateFormat
+  }
+
   async getTransaction(hash: string): Promise<ChainTransaction> {
-    const tx: JsTransaction = await this.provider.getTransactionById(hash, this.ledgerParty)
+    const response = await this.cantonClient.getUpdateById(hash, this.transactionUpdateFormat())
+    if (!response.update) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton update response did not include an update for hash ${hash}`,
+      )
+    }
+    const update: Update = response.update
+    if (!('Transaction' in update)) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton update for hash ${hash} is not a Transaction update`,
+      )
+    }
+    const tx: JsTransaction = update.Transaction.value
 
     const timestamp = tx.effectiveAt
       ? Math.floor(new Date(tx.effectiveAt).getTime() / 1000)
@@ -995,26 +988,24 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * {@inheritDoc Chain.sendMessage}
    */
   async sendMessage(opts: Parameters<Chain['sendMessage']>[0]): Promise<CCIPRequest> {
-    const { wallet } = opts
-    if (!isCantonWallet(wallet)) {
-      throw new CCIPWalletInvalidError(wallet)
-    }
-    const senderPartyId = parsePartyId(wallet.party)
+    // The provider takes care of signing/submission — the wallet opt is unused
+    // on Canton; the acting party is the chain's active party.
+    const senderPartyId = this.activeParty
 
-    const message = await this.fillCantonSendDefaults(opts.message, wallet.party)
+    const message = await this.fillCantonSendDefaults(opts.message, senderPartyId)
 
-    await this.ensureSendDisclosures(senderPartyId, wallet.signer)
+    await this.ensureSendDisclosures(senderPartyId)
 
     const unsigned = await this.generateUnsignedSendMessage({
       ...opts,
       message,
-      sender: wallet.party,
+      sender: senderPartyId,
     })
 
     this.logger.debug(`CantonChain.sendMessage: submitting command`)
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer, 'Send Message')
+    const response = await this.submitCommands(unsigned.commands, 'Send Message')
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1048,7 +1039,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       hash: updateId,
       blockNumber: 0,
       timestamp,
-      from: wallet.party,
+      from: senderPartyId,
     }
 
     const ccipMessage = {
@@ -1058,7 +1049,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       destChainSelector: opts.destChainSelector,
       sequenceNumber: sendResult.sequenceNumber,
       nonce: sendResult.nonce ?? 0n,
-      sender: wallet.party,
+      sender: senderPartyId,
       receiver:
         typeof opts.message.receiver === 'string'
           ? opts.message.receiver
@@ -1241,20 +1232,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * Executes a CCIP message on Canton by:
-   * 1. Validating the wallet as a {@link CantonWallet}.
-   * 2. Building the unsigned command via {@link generateUnsignedExecute}.
-   * 3. Submitting the command to the Canton Ledger API.
-   * 4. Parsing the resulting transaction into a {@link CCIPExecution}.
+   * 1. Building the unsigned command via {@link generateUnsignedExecute}.
+   * 2. Submitting the command to the Canton Ledger API.
+   * 3. Parsing the resulting transaction into a {@link CCIPExecution}.
    *
-   * @throws {@link CCIPWalletInvalidError} if wallet is not a valid {@link CantonWallet}
-   * @throws {@link CCIPError} if the Ledger API submission or result parsing fails
+   * The wallet opt is unused on Canton (the provider takes care of
+   * signing/submission); @throws {@link CCIPError} if the Ledger API
+   * submission or result parsing fails.
    */
   async execute(opts: Parameters<Chain['execute']>[0]): Promise<CCIPExecution> {
-    const { wallet, ...executeOpts } = opts
-    if (!isCantonWallet(wallet)) {
-      throw new CCIPWalletInvalidError(wallet)
-    }
-    const partyId = parsePartyId(wallet.party)
+    const { wallet: _wallet, ...executeOpts } = opts
+    void _wallet
+    const partyId = this.activeParty
 
     const resolved = await this.resolveExecuteOpts(executeOpts)
     if (!('encodedMessage' in resolved.input) || !('verifications' in resolved.input)) {
@@ -1320,7 +1309,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       partyId,
       finality,
       verifierAddresses,
-      wallet.signer,
       receiverHint || undefined,
     )
     this.logger.debug(`CantonChain.execute: using CCIPReceiver contractId=${receiverCid}`)
@@ -1330,12 +1318,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       offRamp: resolved.offRamp,
       input: resolved.input,
       receiver: opts.receiver,
-      payer: wallet.party,
+      payer: partyId,
       _cantonReceiverCid: receiverCid,
     } as unknown as Parameters<Chain['generateUnsignedExecute']>[0])
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, wallet.signer, 'Execute Message')
+    const response = await this.submitCommands(unsigned.commands, 'Execute Message')
     const txRecord = response.transaction as Record<string, unknown>
     const updateId: string =
       (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
@@ -1363,91 +1351,52 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   // ─── Internal submission helper ─────────────────────────────────────────
 
   /**
-   * Submit a command to the ledger, using external signing when a
-   * {@link TransactionSigner} is provided.
+   * Submit a command to the ledger via the provider.
    *
-   * - **No signer**: delegates to `submitAndWaitForTransaction` (direct submit).
-   * - **With signer**: uses the interactive submission API:
-   *   1. Prepare the transaction (`/v2/interactive-submission/prepare`).
-   *   2. Decode the hash and call `signer.signTxHash(hashBytes)`.
-   *   3. Execute the signed transaction (`/v2/interactive-submission/executeAndWaitForTransaction`).
+   * The provider takes care of signing and submitting: the browser dApp
+   * wallet signs with the user's key, while the CLI provider submits
+   * JWT-authenticated via the participant.
    */
   private async submitCommands(
     commands: JsCommands,
-    signer?: TransactionSigner,
     reason: string = 'submit command',
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
-    // If no signer is passed, default to direct submission.
-    if (!signer) {
-      return this.provider.submitAndWaitForTransaction(commands)
-    }
+    const { tx } = await this.provider.request({
+      method: 'prepareExecuteAndWait',
+      params: {
+        commandId: commands.commandId,
+        commands: commands.commands,
+        actAs: commands.actAs,
+        readAs: commands.readAs,
+        disclosedContracts: commands.disclosedContracts,
+        synchronizerId: commands.synchronizerId,
+      },
+    })
+    this.logger.debug(`Canton: submitted command (${reason}), update ${tx.payload.updateId}`)
 
-    // Step 1 — Prepare the transaction
-    const prepareRequest: JsPrepareSubmissionRequest = {
-      commandId: commands.commandId,
-      commands: commands.commands,
-      actAs: commands.actAs,
-      readAs: commands.readAs,
-      disclosedContracts: commands.disclosedContracts,
-      synchronizerId: commands.synchronizerId ? commands.synchronizerId : '', // must be provided, even if empty
-      hashingSchemeVersion: 'HASHING_SCHEME_VERSION_V3',
-      packageIdSelectionPreference: [], // must be provided, even if empty
-    }
-
-    const prepareResponse = await this.provider.prepareSubmission(prepareRequest)
-
-    if (!prepareResponse.preparedTransaction || !prepareResponse.preparedTransactionHash) {
+    // The executed event only reports the update ID — fetch the full
+    // committed transaction so callers can parse receipts and events.
+    const { update } = await this.cantonClient.getUpdateById(
+      tx.payload.updateId,
+      this.transactionUpdateFormat(),
+    )
+    if (!update || !('Transaction' in update)) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        'prepareSubmission returned an incomplete response (missing preparedTransaction or hash)',
+        `Canton update ${tx.payload.updateId} is not a Transaction update`,
       )
     }
-
-    /*
-     * TODO: this currently trusts the preparing participant node to act honestly.
-     *  While this level of trust is expected on Canton, it is not ideal - we could
-     *  decode the prepared transaction, present it to the user, and compute the
-     *  signing hash ourselves.
-     * */
-
-    // Step 2 — Sign the hash
-    const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
-    this.logger.info(
-      `Canton: prepared transaction (${reason}), signing transaction with hash ${Buffer.from(hashBytes).toString('hex').toUpperCase()}`,
-    )
-    const partySignatures = await signer.signTxHash(hashBytes)
-
-    // Step 3 — Execute the signed transaction
-    const hashingSchemeVersion =
-      prepareResponse.hashingSchemeVersion &&
-      prepareResponse.hashingSchemeVersion !== 'HASHING_SCHEME_VERSION_UNSPECIFIED'
-        ? prepareResponse.hashingSchemeVersion
-        : 'HASHING_SCHEME_VERSION_V3'
-
-    return await this.provider.executeSubmissionAndWaitForTransaction({
-      preparedTransaction: prepareResponse.preparedTransaction,
-      partySignatures: {
-        signatures: [partySignatures],
-      },
-      deduplicationPeriod: { Empty: {} },
-      hashingSchemeVersion,
-      submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    })
+    return { transaction: update.Transaction.value }
   }
 
   /**
    * Find or create a `CCIPReceiver` for execute, setting `requiredCCVs` from the
    * indexer attestation's verifierAddresses.
-   *
-   * When a {@link TransactionSigner} is supplied, contract creation/update uses
-   * the interactive submission path; otherwise it falls back to direct
-   * `submitAndWaitForTransaction` (JWT-authenticated).
    */
   private async ensureReceiverForExecute(
     partyId: PartyId,
     finality: number,
     verifierAddresses: RawInstanceAddress[],
-    signer?: TransactionSigner,
     hint?: string,
   ): Promise<string> {
     const existingReceiver = await this.acsDisclosureProvider.findReceiverMatchForExecute(
@@ -1472,7 +1421,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         existingReceiver.contractId,
         verifierAddresses,
         partyId,
-        signer,
       )
     }
 
@@ -1480,20 +1428,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       `CantonChain.ensureReceiverForExecute: no CCIPReceiver with finality=${finality} — creating one`,
       `verifierAddresses=${verifierAddresses.map((addr) => addr.toString()).join(', ')}`,
     )
-    return this.createReceiverForFinality(partyId, finality, verifierAddresses, signer)
+    return this.createReceiverForFinality(partyId, finality, verifierAddresses)
   }
 
   /**
    * Exercise `UpdateRequiredCCVs` on an existing `CCIPReceiver` contract.
-   *
-   * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async updateReceiverRequiredCCVs(
     receiverCid: string,
     requiredCCVs: RawInstanceAddress[],
     partyId: PartyId,
-    signer?: TransactionSigner,
   ): Promise<string> {
     const updateCmd: JsCommands = {
       commands: [
@@ -1515,11 +1459,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(
       `CantonChain.updateReceiverRequiredCCVs: receiver=${receiverCid} ccvs=${requiredCCVs.map((addr) => addr.toString()).join(', ')}`,
     )
-    const response = await this.submitCommands(
-      updateCmd,
-      signer,
-      'Update CCIPReceiver requiredCCVs',
-    )
+    const response = await this.submitCommands(updateCmd, 'Update CCIPReceiver requiredCCVs')
     const newCid = extractCreatedContractId(response.transaction, 'CCIPReceiver')
     if (!newCid) {
       throw new CCIPError(
@@ -1537,15 +1477,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * match the receiver's `minBlockConfirmations`, so each distinct finality value needs its own
    * receiver instance.  This method first searches the ACS; if no match is found it creates a
    * fresh contract.
-   *
-   * The optional {@link TransactionSigner} selects the submission path
-   * (interactive vs. direct); see {@link submitCommands}.
    */
   private async createReceiverForFinality(
     partyId: PartyId,
     finality: number,
     requiredCCVs: RawInstanceAddress[],
-    signer?: TransactionSigner,
   ): Promise<string> {
     const attempts = 4
     let lastError: unknown
@@ -1576,7 +1512,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.debug(
           `CantonChain.createReceiverForFinality: creating CCIPReceiver finality=${finality} instanceId=${instanceId} attempt=${attempt}/${attempts}`,
         )
-        const response = await this.submitCommands(createCmd, signer, 'Create CCIPReceiver')
+        const response = await this.submitCommands(createCmd, 'Create CCIPReceiver')
         const tx = response.transaction as { events?: unknown[] }
         for (const event of tx.events ?? []) {
           const ev = event as Record<string, unknown>
@@ -1809,7 +1745,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     feeTokenHoldingCids: readonly string[]
     requiredAmount: bigint
   }): Promise<TokenHoldingDetails[]> {
-    const holdings = await fetchTokenHoldings(this.provider, party, instrumentId)
+    const holdings = await fetchTokenHoldings(this.cantonClient, party, instrumentId)
     const byCid = new Map(holdings.map((holding) => [holding.contractId, holding]))
 
     if (explicitHoldingCids?.length) {
@@ -1854,15 +1790,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Ensure PerPartyRouter + CCIPSender disclosures exist for send.
    *
    * Creates missing contracts on demand. Canton authenticates via the ledger
-   * JWT (OIDC / static / client-credentials), so an external
-   * {@link TransactionSigner} is *not* required — when omitted, contract
-   * creation uses the direct `submitAndWaitForTransaction` path. When a
-   * signer is supplied, the interactive (prepare → sign → execute) path is
-   * used instead.
+   * JWT (OIDC / static / client-credentials), so no external signer is
+   * required.
    */
   private async ensureSendDisclosures(
     partyId: PartyId,
-    signer?: TransactionSigner,
   ): Promise<{ perPartyRouter: DisclosedContract; ccipSender: DisclosedContract }> {
     let found = await this.acsDisclosureProvider.findSendDisclosures()
 
@@ -1870,7 +1802,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       this.logger.debug(
         `CantonChain.ensureSendDisclosures: creating PerPartyRouter for party ${partyId}`,
       )
-      await this.createPerPartyRouter(partyId, signer)
+      await this.createPerPartyRouter(partyId)
       found = {
         ...found,
         perPartyRouter: await this.pollSendDisclosure('perPartyRouter', partyId),
@@ -1881,7 +1813,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       this.logger.debug(
         `CantonChain.ensureSendDisclosures: creating CCIPSender for party ${partyId}`,
       )
-      await this.createCcipSender(partyId, signer)
+      await this.createCcipSender(partyId)
       found = {
         ...found,
         ccipSender: await this.pollSendDisclosure('ccipSender', partyId),
@@ -1900,7 +1832,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * The optional {@link TransactionSigner} selects the submission path
    * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createPerPartyRouter(partyId: PartyId, signer?: TransactionSigner): Promise<void> {
+  private async createPerPartyRouter(partyId: PartyId): Promise<void> {
     const factory = await this.edsDisclosureProvider.fetchPerPartyRouterFactoryDisclosures(partyId)
     const factoryTemplateId = `#${this.ccipPackages.perPartyRouter}:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouterFactory`
     const createCmd: JsCommands = {
@@ -1926,7 +1858,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         synchronizerId: dc.synchronizerId,
       })),
     }
-    await this.submitCommands(createCmd, signer, 'Create PerPartyRouter')
+    await this.submitCommands(createCmd, 'Create PerPartyRouter')
   }
 
   /**
@@ -1935,7 +1867,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * The optional {@link TransactionSigner} selects the submission path
    * (interactive vs. direct); see {@link submitCommands}.
    */
-  private async createCcipSender(partyId: PartyId, signer?: TransactionSigner): Promise<void> {
+  private async createCcipSender(partyId: PartyId): Promise<void> {
     const instanceId = `sender-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const createCmd: JsCommands = {
       commands: [
@@ -1952,7 +1884,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       commandId: `ccip-create-sender-${Date.now()}`,
       actAs: [partyId],
     }
-    await this.submitCommands(createCmd, signer, 'Create CCIPSender')
+    await this.submitCommands(createCmd, 'Create CCIPSender')
   }
 
   /**
@@ -2006,7 +1938,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     const holdings = await fetchTokenHoldings(
-      this.provider,
+      this.cantonClient,
       party,
       parseCantonInstrumentId(feeToken),
     )
@@ -2282,7 +2214,7 @@ async function fetchTokenHoldings(
   party: string,
   instrumentId: CantonInstrumentId,
 ): Promise<TokenHoldingDetails[]> {
-  const { offset } = await client.getLedgerEnd()
+  const { offset = 0 } = await client.getLedgerEnd()
 
   const responses = await client.getActiveContracts({
     activeAtOffset: offset,

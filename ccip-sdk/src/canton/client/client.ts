@@ -3,8 +3,9 @@ import axios, { type AxiosAdapter } from 'axios'
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
 import { createAxiosFetchAdapter } from '../../fetch.ts'
+import type { CantonRpcProvider } from '../types.ts'
 import { normalizeCantonUpdateId } from '../update-id.ts'
-import type { components } from './generated/ledger-api.ts'
+import type { components } from './generated/ledger-api.generated.ts'
 
 // Canton JSON Ledger API requires HTTP/2.
 // On Node.js, axios uses its http adapter with native http2.connect().
@@ -42,6 +43,12 @@ export function extractJsTransactionFromUpdate(response: unknown): JsTransaction
   }
   return transaction as JsTransaction
 }
+
+export type GetLedgerEndResponse = components['schemas']['GetLedgerEndResponse']
+export type GetUpdateByIdRequest = components['schemas']['GetUpdateByIdRequest']
+export type UpdateFormat = components['schemas']['UpdateFormat']
+export type JsGetUpdateResponse = components['schemas']['JsGetUpdateResponse']
+export type Update = components['schemas']['Update']
 /** Request to get active contracts */
 export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
 /** Response containing active contracts */
@@ -52,8 +59,6 @@ export type JsActiveContract = components['schemas']['JsActiveContract']
 export type CreatedEvent = components['schemas']['CreatedEvent']
 /** Error returned by Canton API */
 export type JsCantonError = components['schemas']['JsCantonError']
-/** Filter for transactions */
-export type TransactionFilter = components['schemas']['TransactionFilter']
 /** Format for events in responses */
 export type EventFormat = components['schemas']['EventFormat']
 /** Filter for templates */
@@ -89,418 +94,57 @@ export type Signature = components['schemas']['Signature']
 /** Hashing scheme version for interactive submissions */
 export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashingSchemeVersion']>
 
-/**
- * Configuration for the Canton Ledger API client
- */
-export interface CantonClientConfig {
-  /** Base URL of the Canton JSON Ledger API (e.g., http://localhost:7575) */
-  baseUrl: string
-  /**
-   * JWT for authentication.
-   *
-   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
-   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
-   * getter is supplied, each request awaits it and uses the returned JWT in the
-   * `Authorization` header, enabling automatic refresh without re-creating the
-   * client.
-   */
-  jwt?: string | (() => Promise<string>)
-  /** Request timeout in milliseconds */
-  timeout?: number
-  /** Abort signal for cancelling in-flight requests (e.g., from Chain.abort) */
-  signal?: AbortSignal
-  /**
-   * Custom fetch implementation. When provided, routes all HTTP traffic through
-   * the fetch adapter instead of the default axios HTTP/2 transport.
-   * Omit to preserve the default HTTP/2 behaviour.
-   */
-  fetch?: typeof fetch
-}
+export type CantonClient = ReturnType<typeof createCantonClientFromProvider>
 
-/**
- * Create a typed Canton Ledger API client
- */
-export function createCantonClient(config: CantonClientConfig) {
-  const baseUrl = config.baseUrl.replace(/\/$/, '')
-  const jwt = config.jwt
-  const timeoutMs = config.timeout ?? 30_000
-  const signal = config.signal
-  // Build a fetch adapter only when the caller explicitly supplies a fetch function.
-  // When absent, the default HTTP/2 transport (cantonHttp) is used unchanged.
-  const fetchAdapter: AxiosAdapter | undefined = config.fetch
-    ? createAxiosFetchAdapter(config.fetch, signal)
-    : undefined
-
-  /**
-   * Resolve the request headers. When `jwt` is a function, await it per request
-   * so each call carries a fresh token (enabling automatic refresh).
-   */
-  async function resolveHeaders(): Promise<Record<string, string>> {
-    const token = typeof jwt === 'function' ? await jwt() : jwt
-    return buildHeaders(token)
-  }
-
-  // Internal helpers that capture baseUrl/timeoutMs/signal for
-  // cleaner call sites inside createCantonClient.
-  const get2 = async <T>(
-    path: string,
-    queryParams?: Record<string, string>,
-    retries?: number,
-  ): Promise<T> => {
-    const headers = await resolveHeaders()
-    return request<T>(
-      'GET',
-      baseUrl,
-      path,
-      headers,
-      timeoutMs,
-      { queryParams },
-      retries,
-      undefined,
-      signal,
-      fetchAdapter,
-    )
-  }
-
-  const post2 = async <T>(
-    path: string,
-    body: unknown,
-    queryParams?: Record<string, string>,
-    retries?: number,
-    overrideTimeoutMs?: number,
-  ): Promise<T> => {
-    const headers = await resolveHeaders()
-    return request<T>(
-      'POST',
-      baseUrl,
-      path,
-      headers,
-      overrideTimeoutMs ?? timeoutMs,
-      { body, queryParams },
-      retries,
-      undefined,
-      signal,
-      fetchAdapter,
-    )
-  }
-
+export function createCantonClientFromProvider(provider: CantonRpcProvider) {
   return {
-    /**
-     * Submit a command and wait for completion
-     * @returns The update ID and completion offset
-     */
-    async submitAndWait(commands: JsCommands): Promise<SubmitAndWaitResponse> {
-      return post2<SubmitAndWaitResponse>('/v2/commands/submit-and-wait', commands)
-    },
-
-    /**
-     * Submit a command and wait for the full transaction response
-     * @returns The transaction with all created/archived events
-     */
-    async submitAndWaitForTransaction(
-      commands: JsCommands,
-      eventFormat?: EventFormat,
-    ): Promise<JsSubmitAndWaitForTransactionResponse> {
-      // Use a long timeout and no HTTP-level retry: submit-and-wait is not idempotent
-      // across retries when the contract data (e.g. fee holding CID) may be consumed
-      // or swept between attempts. Application-level retry with fresh data is done in
-      // CantonChain.sendMessage / execute instead.
-      const SUBMIT_TIMEOUT_MS = 120_000
-      return post2<JsSubmitAndWaitForTransactionResponse>(
-        '/v2/commands/submit-and-wait-for-transaction',
-        { commands, eventFormat },
-        undefined,
-        1, // no HTTP-level retry
-        SUBMIT_TIMEOUT_MS,
-      )
-    },
-
-    /**
-     * Query active contracts on the ledger
-     * @returns Array of active contracts matching the filter
-     */
-    async getActiveContracts(
-      request: GetActiveContractsRequest,
-      options?: { limit?: number },
-    ): Promise<JsGetActiveContractsResponse[]> {
-      const queryParams =
-        options?.limit !== undefined ? { limit: String(options.limit) } : undefined
-      return post2<JsGetActiveContractsResponse[]>(
-        '/v2/state/active-contracts',
-        request,
-        queryParams,
-      )
-    },
-
-    /**
-     * Get the current ledger end offset
-     */
-    async getLedgerEnd(): Promise<{ offset: number }> {
-      const data = await get2<{ offset?: number }>('/v2/state/ledger-end')
-      return { offset: data.offset ?? 0 }
-    },
-
-    /**
-     * List known parties on the participant
-     */
-    async listParties(options?: { filterParty?: string }) {
-      const queryParams = options?.filterParty ? { 'filter-party': options.filterParty } : undefined
-      const data = await get2<{ partyDetails?: unknown[] }>('/v2/parties', queryParams)
-      return data.partyDetails
-    },
-
-    /**
-     * Get the participant ID
-     */
-    async getParticipantId(): Promise<string> {
-      const data = await get2<{ participantId?: string }>('/v2/parties/participant-id')
-      return data.participantId ?? ''
-    },
-
-    /**
-     * Get the list of synchronizers the participant is currently connected to
-     */
-    async getConnectedSynchronizers(): Promise<ConnectedSynchronizer[]> {
-      const data = await get2<{ connectedSynchronizers?: ConnectedSynchronizer[] }>(
-        '/v2/state/connected-synchronizers',
-      )
-      return data.connectedSynchronizers ?? []
-    },
-
-    /** List package IDs supported by this participant (for prepare submission). */
-    async listPackageIds(): Promise<string[]> {
-      const data = await get2<{ packageIds?: string[] }>('/v2/packages')
-      return data.packageIds ?? []
-    },
-
-    /** List vetted packages for a synchronizer (maps package IDs to names). */
-    async listVettedPackages(
-      synchronizerId: string,
-    ): Promise<Array<{ packageId: string; packageName: string; packageVersion: string }>> {
-      const packages: Array<{ packageId: string; packageName: string; packageVersion: string }> = []
-      let pageToken = ''
-      do {
-        const data = await post2<{
-          vettedPackages?: Array<{
-            packages?: Array<{
-              packageId?: string
-              packageName?: string
-              packageVersion?: string
-            }>
-          }>
-          nextPageToken?: string
-        }>(
-          '/v2/package-vetting',
-          {
-            topologyStateFilter: { synchronizerIds: [synchronizerId] },
-            pageToken,
-            pageSize: 500,
-          },
-          undefined,
-          1,
-        )
-        for (const group of data.vettedPackages ?? []) {
-          for (const pkg of group.packages ?? []) {
-            if (pkg.packageId && pkg.packageName) {
-              packages.push({
-                packageId: pkg.packageId,
-                packageName: pkg.packageName,
-                packageVersion: pkg.packageVersion ?? '',
-              })
-            }
-          }
-        }
-        pageToken = data.nextPageToken ?? ''
-      } while (pageToken)
-      return packages
-    },
-
-    /** Resolve one vetted package ID per package name for interactive submission. */
-    async getPreferredPackageIds(
-      actAs: string[],
-      packageNames: string[],
-      synchronizerId: string,
-    ): Promise<string[]> {
-      if (packageNames.length === 0) return []
-      const data = await post2<{
-        packageReferences?: Array<{ packageId?: string }>
-      }>(
-        '/v2/interactive-submission/preferred-packages',
-        {
-          packageVettingRequirements: packageNames.map((packageName) => ({
-            parties: actAs,
-            packageName,
-          })),
-          synchronizerId,
-        },
-        undefined,
-        1,
-      )
-      return (data.packageReferences ?? [])
-        .map((ref) => ref.packageId)
-        .filter((id): id is string => typeof id === 'string' && id.length > 0)
-    },
-
-    /**
-     * Check if the ledger API is alive
-     */
-    async isAlive(): Promise<boolean> {
-      try {
-        await get2<unknown>('/livez')
-        return true
-      } catch (e) {
-        console.log(`Ledger API is not alive at ${baseUrl}/livez:`, e)
-        throw new CantonApiError('Ledger API is not alive', e)
-        // return false
-      }
-    },
-
-    /**
-     * Check if the ledger API is ready
-     */
-    async isReady(): Promise<boolean> {
-      try {
-        await get2<unknown>('/readyz')
-        return true
-      } catch {
-        return false
-      }
-    },
-
-    /**
-     * Fetch a transaction by its update ID.
-     *
-     * Uses `/v2/updates/update-by-id` (same as the Go CLI `GetUpdateById`) when a
-     * party is provided. Falls back to the deprecated `transaction-by-id` endpoint
-     * only when no party is available.
-     *
-     * @param updateId - The update ID (Canton transaction hash)
-     * @param party - Optional party ID to scope visible events
-     * @returns The full `JsTransaction` including all events
-     */
-    async getTransactionById(updateId: string, party?: string): Promise<JsTransaction> {
-      const normalizedId = normalizeCantonUpdateId(updateId)
-      if (party) {
-        const response = await this.getUpdateById(normalizedId, party)
-        return extractJsTransactionFromUpdate(response)
-      }
-
-      const response = await post2<{ transaction: JsTransaction }>(
-        '/v2/updates/transaction-by-id',
-        {
-          updateId: normalizedId,
-          transactionFormat: {
-            eventFormat: {
-              filtersByParty: {},
-              filtersForAnyParty: {
-                cumulative: [
-                  {
-                    identifierFilter: {
-                      WildcardFilter: {
-                        value: { includeCreatedEventBlob: false },
-                      },
-                    },
-                  },
-                ],
-              },
-              verbose: true,
-            },
-            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
-          },
-        },
-      )
-      return response.transaction
-    },
-
-    /**
-     * Get update by ID
-     * @param updateId - The update ID returned from submit-and-wait
-     * @param party - The party ID to filter events for
-     * @returns The full update with all events
-     */
-    async getUpdateById(updateId: string, party: string): Promise<unknown> {
-      return post2<unknown>('/v2/updates/update-by-id', {
-        updateId: normalizeCantonUpdateId(updateId),
-        updateFormat: {
-          includeTransactions: {
-            eventFormat: {
-              filtersByParty: {
-                [party]: {
-                  cumulative: [
-                    {
-                      identifierFilter: {
-                        WildcardFilter: {
-                          value: {
-                            includeCreatedEventBlob: false,
-                          },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-              verbose: true,
-            },
-            transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
-          },
+    async getLedgerEnd(): Promise<GetLedgerEndResponse> {
+      const response = await provider.request({
+        method: 'ledgerApi',
+        params: {
+          requestMethod: 'get',
+          resource: '/v2/state/ledger-end',
         },
       })
+
+      return response as GetLedgerEndResponse
     },
 
-    // -----------------------------------------------------------------------
-    // Interactive submission (external signing)
-    // -----------------------------------------------------------------------
+    async getUpdateById(
+      updateId: string,
+      updateFormat?: UpdateFormat,
+    ): Promise<JsGetUpdateResponse> {
+      const response = await provider.request({
+        method: 'ledgerApi',
+        params: {
+          requestMethod: 'post',
+          resource: '/v2/updates/update-by-id',
+          body: {
+            updateId,
+            updateFormat,
+          } as GetUpdateByIdRequest,
+        },
+      })
 
-    /**
-     * Prepare a transaction for external signing.
-     *
-     * Calls the Preparing Participant Node (PPN) to convert ledger commands
-     * into a Daml transaction. The response contains the prepared transaction
-     * blob and a hash that must be signed by the external party.
-     *
-     * @returns The prepared transaction, its hash, and the hashing scheme version.
-     */
-    async prepareSubmission(
-      request: JsPrepareSubmissionRequest,
-    ): Promise<JsPrepareSubmissionResponse> {
-      const PREPARE_TIMEOUT_MS = 120_000
-      return post2<JsPrepareSubmissionResponse>(
-        '/v2/interactive-submission/prepare',
-        request,
-        undefined,
-        1, // no HTTP-level retry — caller handles retry with fresh ACS data
-        PREPARE_TIMEOUT_MS,
-      )
+      return response as JsGetUpdateResponse
     },
 
-    /**
-     * Execute a previously prepared and externally-signed transaction,
-     * waiting for the full transaction response.
-     *
-     * Calls the Executing Participant Node (EPN) with the prepared transaction
-     * and the party's signature(s), returning the committed transaction.
-     *
-     * @returns The committed transaction with all created/archived events.
-     */
-    async executeSubmissionAndWaitForTransaction(
-      request: JsExecuteSubmissionAndWaitForTransactionRequest,
-    ): Promise<JsExecuteSubmissionAndWaitForTransactionResponse> {
-      const EXECUTE_TIMEOUT_MS = 120_000
-      return post2<JsExecuteSubmissionAndWaitForTransactionResponse>(
-        '/v2/interactive-submission/executeAndWaitForTransaction',
-        request,
-        undefined,
-        1, // no HTTP-level retry
-        EXECUTE_TIMEOUT_MS,
-      )
+    async getActiveContracts(
+      request: GetActiveContractsRequest,
+    ): Promise<JsGetActiveContractsResponse[]> {
+      const response = await provider.request({
+        method: 'ledgerApi',
+        params: {
+          requestMethod: 'post',
+          resource: '/v2/state/active-contracts',
+          body: request,
+        },
+      })
+
+      return response as JsGetActiveContractsResponse[]
     },
   }
 }
-
-/**
- * Type alias for the Canton client instance
- */
-export type CantonClient = ReturnType<typeof createCantonClient>
 
 // ---------------------------------------------------------------------------
 // Error class

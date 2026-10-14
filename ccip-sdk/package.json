@@ -72,6 +72,7 @@
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^7.3.0",
+    "@canton-network/dapp-sdk": "^1.7.1",
     "@coral-xyz/anchor": "^0.29.0",
     "@mysten/bcs": "^2.1.1",
     "@mysten/sui": "^2.31.0",

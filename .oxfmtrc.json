@@ -11,7 +11,8 @@
     "ccip-api-ref/build/**",
     "ccip-api-ref/docs-sdk/**",
     "ccip-api-ref/docs-api/**",
-    "ccip-api-ref/test-results/**"
+    "ccip-api-ref/test-results/**",
+    "*.generated.*"
   ],
   "sortPackageJson": false,
   "sortImports": {

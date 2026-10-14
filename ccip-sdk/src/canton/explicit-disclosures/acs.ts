@@ -6,7 +6,6 @@ import {
   type CantonClient,
   type EventFormat,
   type GetActiveContractsRequest,
-  createCantonClient,
 } from '../client/index.ts'
 import type { DisclosedContract } from './types.ts'
 
@@ -441,18 +440,6 @@ export class AcsDisclosureProvider {
   }
 
   /**
-   * Convenience factory: create a provider directly from a Ledger API URL.
-   */
-  static fromUrl(
-    ledgerApiUrl: string,
-    jwt: string,
-    config: AcsDisclosureConfig,
-  ): AcsDisclosureProvider {
-    const client = createCantonClient({ baseUrl: ledgerApiUrl, jwt })
-    return new AcsDisclosureProvider(client, config)
-  }
-
-  /**
    * Query the ACS once with targeted template filters and build a lookup map keyed by
    * `"ModuleName:EntityName"`, preserving all fields needed for instance-address
    * matching.
@@ -463,10 +450,15 @@ export class AcsDisclosureProvider {
    */
   private async fetchRichSnapshot(): Promise<Map<string, RichContractMatch[]>> {
     const { offset } = await this.client.getLedgerEnd()
+    if (!offset) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'failed to get ledger end offset'
+      )
+    }
 
     const request: GetActiveContractsRequest = {
       eventFormat: buildTargetedEventFormat(this.config.party, this.packages),
-      verbose: false,
       activeAtOffset: offset,
     }
 

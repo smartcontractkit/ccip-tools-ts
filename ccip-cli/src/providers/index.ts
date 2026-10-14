@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
 import {
+  CantonChain,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -25,6 +26,8 @@ import type { GlobalOpts } from '../index.ts'
 import { loadAptosWallet } from './aptos.ts'
 import {
   type CantonCliConfig,
+  type CantonWalletWithSigner,
+  JsonRpcProvider,
   loadCantonConfig,
   loadCantonWallet,
   resolveCantonTokenGetter,
@@ -34,34 +37,25 @@ import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
 import { loadTonWallet } from './ton.ts'
+import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
 
 /**
- * True for Canton JSON Ledger API base URLs (not EVM/JSON-RPC endpoints).
- * Used to avoid racing every `--rpc` against every chain family.
+ * Memoized per-process Canton wallet load.
+ *
+ * A Ledger device can only be claimed by a single HID transport, and chain
+ * initialization may run several times per process (each `fetchChainsFromRpcs`
+ * call — e.g. `send` re-initializing chains in `showRequests` — builds its own
+ * config resolution), so the wallet — and its Ledger transport — is loaded
+ * exactly once and shared.
  */
-export function isCantonLedgerUrl(url: string): boolean {
-  try {
-    const { pathname, port } = new URL(url)
-    if (/\/api\/json\/?$/i.test(pathname)) return true
-    if (/\/api\/ledger\/?$/i.test(pathname)) return true
-    if (port === '7575') return true
-  } catch {
-    return false
-  }
-  return false
-}
-
-/** Keep only endpoints that plausibly belong to the requested chain family. */
-export function filterEndpointsForFamily(endpoints: Set<string>, family: ChainFamily): Set<string> {
-  const urls = [...endpoints]
-  if (family === ChainFamily.Canton) {
-    return new Set(urls.filter(isCantonLedgerUrl))
-  }
-  return new Set(urls.filter((url) => !isCantonLedgerUrl(url)))
-}
+let cantonWallet$: Promise<CantonWalletWithSigner> | undefined
+const loadCantonWalletOnce = (
+  argv: { cantonConfig?: string; wallet?: unknown; interactive?: boolean },
+  logger?: Logger,
+): Promise<CantonWalletWithSigner> => (cantonWallet$ ??= loadCantonWallet(argv, logger))
 
 type CantonCliArgs = Partial<Pick<GlobalOpts, 'cantonConfig'>>
 
@@ -183,27 +177,52 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   }
 
   /**
-   * Resolve the Canton config's `auth` block (if present) into a `jwt` (string
-   * or getter) upfront, so the SDK never orchestrates an OAuth flow. The
-   * resolution is lazy (only awaited when the Canton family is loaded) and
-   * memoized so repeated family loads reuse the same resolved config.
-   *
-   * When no `auth` block is present, the raw config (with its static `jwt`)
-   * is used as-is.
+   * Resolve the Canton config into a `jwt` (string or getter) and a
+   * {@link JsonRpcProvider} upfront, so the SDK never orchestrates an OAuth
+   * flow. The resolution is lazy (only awaited when the Canton family is
+   * loaded) and memoized so repeated family loads reuse the same resolved
+   * config — and the wallet (and its Ledger device, if any) is loaded exactly
+   * once here: its signer, if any, is handed to the provider, which then
+   * takes care of signing/submission.
    */
   type ResolvedCantonConfig = Omit<CantonCliConfig, 'auth'> | undefined
   let resolvedCantonConfig$: Promise<ResolvedCantonConfig> | undefined
   const getResolvedCantonConfig = (): Promise<ResolvedCantonConfig> => {
     if (!rawCantonConfig) return Promise.resolve(undefined)
-    if (!rawCantonConfig.auth) return Promise.resolve(rawCantonConfig as ResolvedCantonConfig)
-    return (resolvedCantonConfig$ ??= resolveCantonTokenGetter(rawCantonConfig.auth, {
-      signal: ctx.abort,
-    }).then((jwt) => {
+    return (resolvedCantonConfig$ ??= (async () => {
       // `auth` is consumed here; the SDK receives only `jwt`.
-      const { auth: _auth, ...rest } = rawCantonConfig
-      void _auth
-      return { ...rest, jwt }
-    }))
+      const { auth, ...rest } = rawCantonConfig
+      const jwt = auth ? await resolveCantonTokenGetter(auth, { signal: ctx.abort }) : rest.jwt
+      if (!jwt) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_AUTH_ERROR,
+          'Canton config requires a `jwt` or an `auth` block for authentication',
+        )
+      }
+
+      // Create Canton JSON API Provider, handing it the wallet's external
+      // signer (Ledger) if one is configured.
+      const wallet = await loadCantonWalletOnce(argv, ctx.logger)
+      let provider: CantonRpcProvider
+      switch (rawCantonConfig.apiType) {
+        case undefined:
+        case '':
+        case 'json':
+          provider = await JsonRpcProvider.fromUrl(
+            rawCantonConfig.chainId,
+            rawCantonConfig.apiUrl,
+            jwt,
+            undefined,
+            rawCantonConfig.party,
+            wallet.signer,
+          )
+          break
+        default:
+          throw new Error('unknown cantonConfig.apiType')
+      }
+
+      return { ...rest, jwt, provider } as ResolvedCantonConfig
+    })())
   }
 
   const loadChainFamily = (F: ChainFamily, txHash?: string) =>
@@ -212,31 +231,61 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
         const C = supportedChains[F]
         if (!C) throw new CCIPChainFamilyUnsupportedError(F)
         ctx.abort.throwIfAborted()
-        const familyEndpoints = filterEndpointsForFamily(endpoints, F)
-        ctx.logger.debug(
-          'Racing',
-          familyEndpoints.size,
-          'RPC endpoints for',
-          F,
-          familyEndpoints.size < endpoints.size ? `(filtered from ${endpoints.size})` : '',
-        )
+
+        if (F === ChainFamily.Canton) {
+          const cantonConfig = await getResolvedCantonConfig()
+          if (!cantonConfig) {
+            throw new CCIPError(
+              CCIPErrorCode.CANTON_AUTH_ERROR,
+              'Canton config is required for Canton family RPCs',
+            )
+          }
+          const cantonChain = await CantonChain.fromProvider(cantonConfig.provider, {
+            ...ctx,
+            abort: ctx.abort,
+            apiClient:
+              argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
+            ...{
+              cantonConfig: cantonConfig
+            },
+          })
+
+          if (txHash) {
+            cantonChain.getTransaction(txHash).then(
+              (tx) => {
+                txFoundIn = cantonChain.network.name
+                chains[cantonChain.network.name] = Promise.resolve(cantonChain)
+                return [cantonChain, tx] as const
+              },
+              (err) => {
+                if (CCIPError.isCCIPError(err) && err.code === CCIPErrorCode.TRANSACTION_NOT_FOUND) {
+                  throw new CCIPTransactionNotFoundError(txHash, {
+                    context: { chainName: cantonChain.network.name },
+                  })
+                }
+                throw err
+              },
+            )
+          }
+
+          if (cantonChain.network.name in pendingChainsCbs) {
+            // There's a "pending request" by getChain: resolve
+            const [resolve] = pendingChainsCbs[cantonChain.network.name]!
+            resolve(cantonChain)
+          }
+          return [cantonChain] as const
+        }
+
+        ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)
 
         const chains$: Promise<Chain>[] = []
         const txOnlyRacers = new WeakSet<Chain>()
-        // For Canton, await the upfront auth resolution (auth block → jwt)
-        // before spawning racers, so the SDK never orchestrates an OAuth flow.
-        const cantonConfigForFamily =
-          F === ChainFamily.Canton ? await getResolvedCantonConfig() : undefined
-        for (const url of familyEndpoints) {
+        for (const url of endpoints) {
           const chain$ = C.fromUrl(url, {
             ...ctx,
             abort: ctx.abort,
             apiClient:
               argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
-            ...(cantonConfigForFamily &&
-              F === ChainFamily.Canton && {
-                cantonConfig: cantonConfigForFamily,
-              }),
           })
           chains$.push(chain$)
 
@@ -428,8 +477,9 @@ export async function loadChainWallet(
       )
       return [wallet.getAddress(), wallet] as const
     case ChainFamily.Canton: {
-      const cantonWallet = await loadCantonWallet(argv, logger)
-      return [cantonWallet.party, cantonWallet] as const
+      // The provider (created with the wallet's signer at chain init) takes
+      // care of signing/submission — commands don't need the wallet object.
+      return [(chain as CantonChain).activeParty, {}] as const
     }
     default:
       // TypeScript exhaustiveness check - this should never be reached

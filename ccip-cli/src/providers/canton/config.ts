@@ -42,8 +42,8 @@ export function loadCantonConfig(
   // `jwt` is required unless `auth` is present (OAuth2 provider resolves JWT on demand).
   const hasAuth = typeof parsed['auth'] === 'object' && parsed['auth'] !== null
   const required = hasAuth
-    ? (['party', 'ccipParty', 'edsUrl', 'transferInstructionUrl'] as const)
-    : (['party', 'ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const)
+    ? (['ccipParty', 'edsUrl', 'transferInstructionUrl'] as const)
+    : (['ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const)
   for (const field of required) {
     if (typeof parsed[field] !== 'string' || !parsed[field].length) {
       throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)
@@ -56,7 +56,7 @@ export function loadCantonConfig(
     }
   }
 
-  logger?.debug('Loaded Canton config from', configPath, 'for party', parsed['party'])
+  logger?.debug('Loaded Canton config from', configPath)
   return parsed as unknown as CantonCliConfig
 }
 
