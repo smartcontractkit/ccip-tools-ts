@@ -10,7 +10,8 @@
  * `ERC20LockBox` instead of holding liquidity itself.
  *
  * @remarks On a `SiloedLockReleaseTokenPool` this withdraws from the *unsiloed* bucket only, and
- * is gated on the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
+ * is gated on the unsiloed rebalancer; a siloed lane's own bucket is withdrawn with
+ * {@link WithdrawSiloedLiquidity} (`withdraw-siloed-liquidity.ts`).
  *
  * @packageDocumentation
  */
@@ -19,8 +20,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -68,9 +68,11 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
   }
 
   /** Validates the pool address and amount before any RPC; a zero `amount` moves nothing. */
-  protected override validate({ poolAddress, amount }: WithdrawLiquidityParams): void {
+  protected override prepare(params: WithdrawLiquidityParams): WithdrawLiquidityParams {
+    const { poolAddress, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validatePositiveUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**
@@ -100,24 +102,5 @@ export class WithdrawLiquidity extends EVMOperation<WithdrawLiquidityParams> {
       await assertPoolRebalancer(this.name, chain, params.poolAddress, params.sender)
     await assertPoolLiquidity(this.name, chain, params.poolAddress, type, params.amount)
     return unsigned
-  }
-
-  /**
-   * Signs and submits as the rebalancer, defaulting `sender` to the signing wallet — the only
-   * address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx, and the
-   * address the tokens are sent to. See {@link EVMOperation.resolveWalletSender} for why a
-   * divergent `sender` is rejected rather than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or the wallet is not the pool's rebalancer
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
-   * `InsufficientLiquidity`
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<WithdrawLiquidityParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

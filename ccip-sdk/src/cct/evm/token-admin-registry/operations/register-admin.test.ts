@@ -626,7 +626,7 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
 
     it('rejects a malformed sender with CCTParamsInvalidError, not a raw ethers error', async () => {
       // resolveWalletSender validates before getAddress(), which would otherwise throw a raw
-      // ethers TypeError. That guard runs ahead of generate()'s own validate(), so nothing else
+      // ethers TypeError. That guard runs ahead of generate()'s own validation, so nothing else
       // covers it — without this test, deleting it leaves the suite green and silently breaks the
       // documented error taxonomy for every op sharing the helper.
       await assert.rejects(

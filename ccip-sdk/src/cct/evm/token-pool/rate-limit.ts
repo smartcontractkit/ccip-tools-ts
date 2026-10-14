@@ -96,7 +96,7 @@ const STRICT_RATE_BOUND_VERSIONS: readonly TokenPoolVersion[] = [
  * `parseRateLimitConfig` with `uint128` bounds.
  *
  * @remarks `version` is required-and-nullable (not optional) so each call site states explicitly
- * whether the version-specific bound applies: pre-RPC `validate()` passes `null` (version-independent
+ * whether the version-specific bound applies: pre-RPC `prepare()` passes `null` (version-independent
  * checks only, so bad params still fail before the first `eth_call`), while version-specific
  * encoders pass the resolved {@link TokenPoolVersion} and get the tightening. The bound changed
  * between pool generations — see {@link STRICT_RATE_BOUND_VERSIONS}.

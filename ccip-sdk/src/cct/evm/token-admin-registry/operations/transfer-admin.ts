@@ -19,8 +19,7 @@ import { ZeroAddress, getAddress } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
@@ -29,7 +28,7 @@ import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '..
  * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
  * for {@link TransferAdmin.generate}: the pre-tx check below has nothing to compare
  * `administrator` against without it, so an omitted `sender` is rejected in
- * {@link TransferAdmin.parse}. {@link TransferAdmin.execute} relaxes this — it defaults
+ * {@link TransferAdmin.prepare}. {@link TransferAdmin.execute} relaxes this — it defaults
  * `sender` to the signing wallet's own address, the only address that can satisfy the
  * current-administrator check for a signed submission (see {@link TransferAdmin.execute}).
  */
@@ -56,7 +55,7 @@ export type TransferAdminParams = {
   sender?: string
 }
 
-/** {@link TransferAdminParams} as {@link TransferAdmin.parse} leaves it: `sender` present and checksummed. */
+/** {@link TransferAdminParams} as {@link TransferAdmin.prepare} leaves it: `sender` present and checksummed. */
 type ParsedTransferAdminParams = TransferAdminParams & { sender: string }
 
 /**
@@ -72,7 +71,7 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
    * checksums `sender` so {@link buildUnsigned} can compare it against the registry's own
    * checksummed `administrator` without re-asserting it.
    */
-  protected override parse(p: TransferAdminParams): ParsedTransferAdminParams {
+  protected override prepare(p: TransferAdminParams): ParsedTransferAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'newAdmin', p.newAdmin)
     validateAddress(this.name, 'address', p.address)
@@ -125,22 +124,5 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
     ])
     chain.logger.debug(`${this.name}: registry = ${to}, token = ${p.tokenAddress}`)
     return callTx(to, data)
-  }
-
-  /**
-   * Signs and submits as the current administrator, defaulting `sender` to the signing wallet —
-   * the only address that can satisfy {@link buildUnsigned}'s current-administrator check for a
-   * broadcast tx. See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is
-   * rejected rather than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address, or
-   * if any other param is invalid (see {@link buildUnsigned})
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<TransferAdminParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

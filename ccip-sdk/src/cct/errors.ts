@@ -1,5 +1,5 @@
 /**
- * CCT-specific error classes for write operations (validate → encode → submit).
+ * CCT-specific error classes for write operations (prepare → encode → submit).
  * Shared CCIP errors (`CCIPWalletInvalidError`, etc.) live in `../errors/`.
  *
  * @packageDocumentation

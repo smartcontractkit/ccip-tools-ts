@@ -44,9 +44,11 @@ export class GrantMintRole extends EVMOperation<GrantMintRoleParams> {
    * Validates both addresses before any RPC. Neither may be zero: a tx to `0x0` hits no code, and
    * granting a role to `0x0` mines as a no-op nobody can use.
    */
-  protected override validate({ tokenAddress, minter }: GrantMintRoleParams): void {
+  protected override prepare(params: GrantMintRoleParams): GrantMintRoleParams {
+    const { tokenAddress, minter } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'minter', minter)
+    return params
   }
 
   /**

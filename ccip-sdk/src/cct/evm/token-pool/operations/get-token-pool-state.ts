@@ -89,8 +89,8 @@ export type LockReleaseTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
 /**
  * State of a v2.0.0 *siloed* lock/release pool — every field its non-siloed sibling reports
  * **except** `lockBox`: it escrows per remote chain, so it declares `getLockBox(uint64)` and no
- * no-arg `getLockBox()`. Read a lane's escrow with `getLockBox(remoteChainSelector)` against the
- * pool directly; this query does not enumerate them.
+ * no-arg `getLockBox()`. Read a lane's lockbox with `getSiloedLockbox`, or every lane's with
+ * `getAllSiloedLockboxConfigs`; this query does not enumerate them.
  */
 export type SiloedLockReleaseTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
   type: 'SiloedLockReleaseTokenPool'

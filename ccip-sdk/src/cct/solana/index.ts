@@ -2380,11 +2380,12 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 }
 
-export * from '../errors.ts'
 export {
   type TokenPoolType,
+  SOLANA_TOKEN_POOL_TYPES,
   TOKEN_POOL_PROGRAMS,
   deriveTokenPoolSignerPda,
+  isSolanaTokenPoolType,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
 export { TOKEN_AUTHORITY_TYPES } from './token/constants.ts'

@@ -62,7 +62,7 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
   readonly name = 'setCanAcceptLiquidity'
 
   /** Parses public keys, validates `allow`, and defaults authority to payer. */
-  protected override parse(
+  protected override prepare(
     params: GenerateSetCanAcceptLiquidityParams,
   ): ParsedSetCanAcceptLiquidityParams {
     if (typeof params.allow !== 'boolean') {

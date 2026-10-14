@@ -72,6 +72,8 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
         lookupTable: LOOKUP_TABLE.toBase58(),
         writableIndexes: [3, 4, 7, 130],
         supportsAutoDerivation: true,
+        accountResolution: 'Standard',
+        interfaceVersion: 1,
       })
     })
 
@@ -86,6 +88,8 @@ describe('GetTokenAdminRegistry (cct/solana)', () => {
         administrator: ADMINISTRATOR.toBase58(),
         writableIndexes: [3, 4, 7, 130],
         supportsAutoDerivation: false,
+        accountResolution: 'NoResolution',
+        interfaceVersion: 1,
       })
     })
 

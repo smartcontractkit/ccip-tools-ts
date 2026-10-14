@@ -18,9 +18,8 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { encodeAddressToAny } from '../../../../utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
 import { parseRemoteAddress, parseUniqueRemoteAddresses } from '../../../remote-address.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -110,7 +109,7 @@ type ParsedChainUpdate = Omit<
 }
 
 /**
- * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.parse} leaves it. The v1.5.1+
+ * {@link ApplyChainUpdatesParams} as {@link ApplyChainUpdates.prepare} leaves it. The v1.5.1+
  * encoder adds no validation of its own — a parsed lane is already a `ChainUpdate` struct.
  */
 type ParsedApplyChainUpdatesParams = Omit<
@@ -346,7 +345,7 @@ export class ApplyChainUpdates extends EVMOperation<
    * version-conditional checks are left for once the pool's version is known.
    * @throws {@link CCTParamsInvalidError} if any lane field is invalid
    */
-  protected override parse(params: ApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
+  protected override prepare(params: ApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
     validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
     return {
       poolAddress: params.poolAddress,
@@ -392,20 +391,5 @@ export class ApplyChainUpdates extends EVMOperation<
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
 
     return tx
-  }
-
-  /**
-   * Signs and submits as the pool owner, defaulting `sender` to the signing wallet — the only
-   * address the contract's `onlyOwner` check can pass. See
-   * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ApplyChainUpdatesParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

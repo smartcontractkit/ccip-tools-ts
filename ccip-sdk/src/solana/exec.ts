@@ -146,7 +146,16 @@ export async function generateUnsignedExecuteReport(
   }
 }
 
-async function buildLookupTableIxs(
+/**
+ * Builds the instructions creating and extending (then deactivating) an ad-hoc lookup table with
+ * `addresses`, for a transaction too large without it.
+ * @param ctx - Context with the Solana connection and logger.
+ * @param authority - Lookup table authority and payer.
+ * @param addresses - Addresses to put in the lookup table.
+ * @returns The creation and extension instructions, the lookup table, and its deactivation
+ * @throws {@link CCIPSolanaLookupTableNotFoundError} if there are more than 256 addresses
+ */
+export async function buildLookupTableIxs(
   { connection, logger = console }: { connection: Connection } & WithLogger,
   authority: PublicKey,
   addresses: PublicKey[],

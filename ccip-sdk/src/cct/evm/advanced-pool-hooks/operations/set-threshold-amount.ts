@@ -39,9 +39,10 @@ export class SetThresholdAmount extends EVMOperation<SetThresholdAmountParams> {
   readonly name = 'setThresholdAmount'
 
   /** Validates the target and Solidity `uint256` threshold before any RPC. */
-  protected override validate(params: SetThresholdAmountParams): void {
+  protected override prepare(params: SetThresholdAmountParams): SetThresholdAmountParams {
     validateAdvancedPoolHooksTarget(this.name, params)
     validateUint256(this.name, 'thresholdAmount', params.thresholdAmount)
+    return params
   }
 
   /**

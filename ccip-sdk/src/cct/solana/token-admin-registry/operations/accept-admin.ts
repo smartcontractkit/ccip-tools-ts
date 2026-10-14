@@ -58,7 +58,7 @@ export class AcceptAdmin extends SolanaOperation<
   readonly name = 'acceptAdmin'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateAcceptAdminParams): ParsedAcceptAdminParams {
+  protected override prepare(params: GenerateAcceptAdminParams): ParsedAcceptAdminParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenAddress: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),

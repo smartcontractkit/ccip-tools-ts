@@ -86,7 +86,7 @@ export class AppendToLookupTable extends SolanaOperation<
   protected override readonly splitMode = 'resource'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(
+  protected override prepare(
     params: GenerateAppendToLookupTableParams,
   ): ParsedAppendToLookupTableParams {
     const payer = parsePublicKey(this.name, 'payer', params.payer)

@@ -1,5 +1,5 @@
 /**
- * Cross-family CCT write contract: the pre-RPC lifecycle (validate → parse) plus the
+ * Cross-family CCT write contract: the pre-RPC preparation plus the
  * generate/execute surface. Mirrors {@link Query} for reads; families bind `Chain` and supply
  * `buildUnsigned`/`execute`.
  *
@@ -21,33 +21,19 @@ export type ExecuteParams<P extends object> = P & { wallet: unknown }
  * Abstract CCT write operation: build unsigned tx(s) with {@link generate}, or
  * sign and submit with {@link execute}.
  *
- * @remarks {@link parse} is the default pre-RPC hook: use it when the op normalizes, or when a
- * validated value must reach `buildUnsigned` already narrowed. Reach for {@link validate} only
- * when the op purely rejects and `Parsed = P`.
+ * @remarks Override {@link prepare} to validate or normalize params before chain access.
  */
 export abstract class Operation<Chain, Params extends object, Tx, Result, Parsed = Params> {
   /** camelCase id; matches the token-manager facade method and error context. */
   abstract readonly name: string
 
   /**
-   * Reject invalid params before any chain RPC. No-op by default: an op that normalizes as it
-   * checks does that work in {@link parse} instead, and needs no empty stub here.
+   * Validate and normalize params before chain access, without mutating the caller's input.
+   * Returns params unchanged by default.
    */
-  protected validate(_params: Params): void {}
-
-  /**
-   * Normalize validated params for the builder — defaults, conversions, derived values. Identity
-   * by default, so an op that needs no normalization declares nothing.
-   */
-  protected parse(params: Params): Parsed {
+  protected prepare(params: Params): Parsed {
     // `as Parsed` alone does not narrow: `Parsed` is a default, not a constraint.
     return params as unknown as Parsed
-  }
-
-  /** {@link validate} then {@link parse} — the single pre-RPC step, before any chain access. */
-  protected prepare(params: Params): Parsed {
-    this.validate(params)
-    return this.parse(params)
   }
   /** Build unsigned transaction(s); no wallet required. */
   abstract generate(chain: Chain, params: Params): Promise<Tx>

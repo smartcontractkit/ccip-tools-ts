@@ -70,7 +70,7 @@ export class RemoveFromAllowlist extends SolanaOperation<
   readonly name = 'removeFromAllowlist'
 
   /** Parses public keys and defaults authority to payer without mutating caller params. */
-  protected override parse(
+  protected override prepare(
     params: GenerateRemoveFromAllowlistParams,
   ): ParsedRemoveFromAllowlistParams {
     if (!Array.isArray(params.remove) || params.remove.length === 0) {

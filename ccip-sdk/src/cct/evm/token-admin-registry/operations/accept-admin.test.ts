@@ -315,7 +315,7 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
     })
 
     it('rejects a malformed sender with CCTParamsInvalidError, not a raw ethers error', async () => {
-      // The execute override compares addresses before the base generate()'s validate() runs,
+      // The execute override compares addresses before the base generate()'s validation runs,
       // so it must validate first — otherwise getAddress() leaks an ethers TypeError.
       await assert.rejects(
         () =>

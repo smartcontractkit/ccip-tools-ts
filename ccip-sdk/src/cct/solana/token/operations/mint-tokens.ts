@@ -72,7 +72,7 @@ export class MintTokens extends SolanaOperation<
   readonly name = 'mintTokens'
 
   /** Parses public keys, amount, and optional SPL Token multisig signers. */
-  protected override parse(params: GenerateMintTokensParams): ParsedMintTokensParams {
+  protected override prepare(params: GenerateMintTokensParams): ParsedMintTokensParams {
     validateBigInt(this.name, 'amount', params.amount, 1n, U64_MAX)
     if (params.multisigSigners !== undefined && !Array.isArray(params.multisigSigners)) {
       throw new CCTParamsInvalidError(this.name, 'multisigSigners', 'must be an array')

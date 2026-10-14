@@ -16,93 +16,64 @@ import type { TransactionResult } from '../operation.ts'
 import { TokenManager } from '../token-manager.ts'
 import {
   type ApplyCCVConfigUpdatesParams,
-  ApplyCCVConfigUpdates,
-} from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
-import {
   type DeployAdvancedPoolHooksParams,
-  DeployAdvancedPoolHooks,
-} from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
-import {
   type GetAllAdvancedPoolHooksAuthorizedCallersParams,
   type GetAllAdvancedPoolHooksAuthorizedCallersResult,
-  GetAllAdvancedPoolHooksAuthorizedCallers,
-} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
-import {
   type GetAllCCVConfigsParams,
   type GetAllCCVConfigsResult,
-  GetAllCCVConfigs,
-} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
-import {
   type GetCCVConfigParams,
   type GetCCVConfigResult,
-  GetCCVConfig,
-} from './advanced-pool-hooks/operations/get-ccv-config.ts'
-import {
   type GetPolicyEngineParams,
   type GetPolicyEngineResult,
-  GetPolicyEngine,
-} from './advanced-pool-hooks/operations/get-policy-engine.ts'
-import {
   type GetRequiredCCVsParams,
   type GetRequiredCCVsResult,
-  GetRequiredCCVs,
-} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
-import {
   type GetThresholdAmountParams,
   type GetThresholdAmountResult,
-  GetThresholdAmount,
-} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
-import {
   type SetPolicyEngineParams,
-  SetPolicyEngine,
-} from './advanced-pool-hooks/operations/set-policy-engine.ts'
-import {
   type SetThresholdAmountParams,
-  SetThresholdAmount,
-} from './advanced-pool-hooks/operations/set-threshold-amount.ts'
-import {
   type UpdateAdvancedPoolHooksAuthorizedCallersParams,
+  ApplyCCVConfigUpdates,
+  DeployAdvancedPoolHooks,
+  GetAllAdvancedPoolHooksAuthorizedCallers,
+  GetAllCCVConfigs,
+  GetCCVConfig,
+  GetPolicyEngine,
+  GetRequiredCCVs,
+  GetThresholdAmount,
+  SetPolicyEngine,
+  SetThresholdAmount,
   UpdateAdvancedPoolHooksAuthorizedCallers,
-} from './advanced-pool-hooks/operations/update-authorized-callers.ts'
-import { type DeployLockboxParams, DeployLockbox } from './lockbox/operations/deploy-lockbox.ts'
-import { type DepositToLockboxParams, DepositToLockbox } from './lockbox/operations/deposit.ts'
+} from './advanced-pool-hooks/operations/index.ts'
 import {
+  type DeployLockboxParams,
+  type DepositToLockboxParams,
   type GetAllLockboxAuthorizedCallersParams,
   type GetAllLockboxAuthorizedCallersResult,
-  GetAllLockboxAuthorizedCallers,
-} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
-import {
   type UpdateLockboxAuthorizedCallersParams,
-  UpdateLockboxAuthorizedCallers,
-} from './lockbox/operations/update-authorized-callers.ts'
-import {
   type WithdrawFromLockboxParams,
+  DeployLockbox,
+  DepositToLockbox,
+  GetAllLockboxAuthorizedCallers,
+  UpdateLockboxAuthorizedCallers,
   WithdrawFromLockbox,
-} from './lockbox/operations/withdraw.ts'
+} from './lockbox/operations/index.ts'
 import type { DeployResult, EVMExecuteParams } from './operation.ts'
 import {
   type AcceptAdminParams,
-  AcceptAdmin,
-} from './token-admin-registry/operations/accept-admin.ts'
-import {
   type GetSupportedTokensParams,
   type GetSupportedTokensResult,
-  GetSupportedTokens,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
-import {
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
-  GetTokenAdminRegistry,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
-import {
   type RegisterAdminParams,
-  RegisterAdmin,
-} from './token-admin-registry/operations/register-admin.ts'
-import { type SetPoolParams, SetPool } from './token-admin-registry/operations/set-pool.ts'
-import {
+  type SetPoolParams,
   type TransferAdminParams,
+  AcceptAdmin,
+  GetSupportedTokens,
+  GetTokenAdminRegistry,
+  RegisterAdmin,
+  SetPool,
   TransferAdmin,
-} from './token-admin-registry/operations/transfer-admin.ts'
+} from './token-admin-registry/operations/index.ts'
 import {
   type DeployTokenAndTokenPoolViaFactoryParams,
   type DeployTokenPoolWithExistingTokenViaFactoryParams,
@@ -112,186 +83,156 @@ import {
 } from './token-pool-factory/deploy.ts'
 import {
   type AcceptPoolOwnershipParams,
-  AcceptPoolOwnership,
-} from './token-pool/operations/accept-pool-ownership.ts'
-import { type AddRemotePoolParams, AddRemotePool } from './token-pool/operations/add-remote-pool.ts'
-import {
+  type AddRemotePoolParams,
   type ApplyAllowlistUpdatesParams,
-  ApplyAllowlistUpdates,
-} from './token-pool/operations/apply-allowlist-updates.ts'
-import {
   type ApplyChainUpdatesParams,
-  ApplyChainUpdates,
-} from './token-pool/operations/apply-chain-updates.ts'
-import {
   type ApplyTokenTransferFeeConfigUpdatesParams,
-  ApplyTokenTransferFeeConfigUpdates,
-} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
-import {
+  type ConfigureSiloedLockboxesParams,
   type DeployTokenPoolParams,
-  DeployTokenPool,
-} from './token-pool/operations/deploy-token-pool.ts'
-import {
   type GetAdvancedPoolHooksParams,
   type GetAdvancedPoolHooksResult,
-  GetAdvancedPoolHooks,
-} from './token-pool/operations/get-advanced-pool-hooks.ts'
-import {
+  type GetAllSiloedLockboxConfigsParams,
+  type GetAllSiloedLockboxConfigsResult,
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
-  GetAllowedFinalityConfig,
-} from './token-pool/operations/get-allowed-finality-config.ts'
-import {
   type GetAllowlistEnabledParams,
   type GetAllowlistEnabledResult,
-  GetAllowlistEnabled,
-} from './token-pool/operations/get-allowlist-enabled.ts'
-import {
   type GetAllowlistParams,
   type GetAllowlistResult,
-  GetAllowlist,
-} from './token-pool/operations/get-allowlist.ts'
-import {
+  type GetAvailableTokensParams,
+  type GetAvailableTokensResult,
   type GetBurnAddressParams,
   type GetBurnAddressResult,
-  GetBurnAddress,
-} from './token-pool/operations/get-burn-address.ts'
-import {
+  type GetChainRebalancerParams,
+  type GetChainRebalancerResult,
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
-  GetDynamicConfig,
-} from './token-pool/operations/get-dynamic-config.ts'
-import { type GetFeeParams, type GetFeeResult, GetFee } from './token-pool/operations/get-fee.ts'
-import {
+  type GetFeeParams,
+  type GetFeeResult,
   type GetLockboxParams,
   type GetLockboxResult,
-  GetLockbox,
-} from './token-pool/operations/get-lockbox.ts'
-import {
   type GetRebalancerParams,
   type GetRebalancerResult,
-  GetRebalancer,
-} from './token-pool/operations/get-rebalancer.ts'
-import {
+  type GetSiloedLockboxParams,
+  type GetSiloedLockboxResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
-  GetTokenPoolRemotes,
-} from './token-pool/operations/get-token-pool-remotes.ts'
-import {
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
-  GetTokenPoolState,
-} from './token-pool/operations/get-token-pool-state.ts'
-import {
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
-  GetTokenTransferFeeConfig,
-} from './token-pool/operations/get-token-transfer-fee-config.ts'
-import {
+  type IsSiloedParams,
+  type IsSiloedResult,
   type ProvideLiquidityParams,
-  ProvideLiquidity,
-} from './token-pool/operations/provide-liquidity.ts'
-import {
+  type ProvideSiloedLiquidityParams,
   type RemoveRemotePoolParams,
-  RemoveRemotePool,
-} from './token-pool/operations/remove-remote-pool.ts'
-import {
   type SetAllowedFinalityConfigParams,
-  SetAllowedFinalityConfig,
-} from './token-pool/operations/set-allowed-finality-config.ts'
-import {
   type SetChainRateLimiterConfigsParams,
-  SetChainRateLimiterConfigs,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
-import {
   type SetDynamicConfigParams,
-  SetDynamicConfig,
-} from './token-pool/operations/set-dynamic-config.ts'
-import {
   type SetRateLimitAdminParams,
-  SetRateLimitAdmin,
-} from './token-pool/operations/set-rate-limit-admin.ts'
-import { type SetRebalancerParams, SetRebalancer } from './token-pool/operations/set-rebalancer.ts'
-import { type SetRemotePoolParams, SetRemotePool } from './token-pool/operations/set-remote-pool.ts'
-import {
+  type SetRebalancerParams,
+  type SetRemotePoolParams,
+  type SetSiloRebalancerParams,
   type TransferLiquidityParams,
-  TransferLiquidity,
-} from './token-pool/operations/transfer-liquidity.ts'
-import {
   type TransferPoolOwnershipParams,
-  TransferPoolOwnership,
-} from './token-pool/operations/transfer-pool-ownership.ts'
-import {
   type UpdateAdvancedPoolHooksParams,
-  UpdateAdvancedPoolHooks,
-} from './token-pool/operations/update-advanced-pool-hooks.ts'
-import {
+  type UpdateSiloDesignationsParams,
   type WithdrawFeeTokensParams,
-  WithdrawFeeTokens,
-} from './token-pool/operations/withdraw-fee-tokens.ts'
-import {
   type WithdrawLiquidityParams,
+  type WithdrawSiloedLiquidityParams,
+  AcceptPoolOwnership,
+  AddRemotePool,
+  ApplyAllowlistUpdates,
+  ApplyChainUpdates,
+  ApplyTokenTransferFeeConfigUpdates,
+  ConfigureSiloedLockboxes,
+  DeployTokenPool,
+  GetAdvancedPoolHooks,
+  GetAllSiloedLockboxConfigs,
+  GetAllowedFinalityConfig,
+  GetAllowlist,
+  GetAllowlistEnabled,
+  GetAvailableTokens,
+  GetBurnAddress,
+  GetChainRebalancer,
+  GetDynamicConfig,
+  GetFee,
+  GetLockbox,
+  GetRebalancer,
+  GetSiloedLockbox,
+  GetTokenPoolRemotes,
+  GetTokenPoolState,
+  GetTokenTransferFeeConfig,
+  IsSiloed,
+  ProvideLiquidity,
+  ProvideSiloedLiquidity,
+  RemoveRemotePool,
+  SetAllowedFinalityConfig,
+  SetChainRateLimiterConfigs,
+  SetDynamicConfig,
+  SetRateLimitAdmin,
+  SetRebalancer,
+  SetRemotePool,
+  SetSiloRebalancer,
+  TransferLiquidity,
+  TransferPoolOwnership,
+  UpdateAdvancedPoolHooks,
+  UpdateSiloDesignations,
+  WithdrawFeeTokens,
   WithdrawLiquidity,
-} from './token-pool/operations/withdraw-liquidity.ts'
+  WithdrawSiloedLiquidity,
+} from './token-pool/operations/index.ts'
 import {
   type AcceptDefaultAdminTransferParams,
-  AcceptDefaultAdminTransfer,
-} from './token/operations/accept-default-admin-transfer.ts'
-import {
   type AcceptTokenOwnershipParams,
-  AcceptTokenOwnership,
-} from './token/operations/accept-token-ownership.ts'
-import { type ApproveTokenParams, ApproveToken } from './token/operations/approve-token.ts'
-import {
+  type ApproveTokenParams,
   type BeginDefaultAdminTransferParams,
-  BeginDefaultAdminTransfer,
-} from './token/operations/begin-default-admin-transfer.ts'
-import {
   type CancelDefaultAdminTransferParams,
-  CancelDefaultAdminTransfer,
-} from './token/operations/cancel-default-admin-transfer.ts'
-import { type DeployTokenParams, DeployToken } from './token/operations/deploy-token.ts'
-import {
+  type DeployTokenParams,
   type GetBurnersParams,
   type GetBurnersResult,
-  GetBurners,
-} from './token/operations/get-burners.ts'
-import {
   type GetCCIPAdminParams,
   type GetCCIPAdminResult,
-  GetCCIPAdmin,
-} from './token/operations/get-ccip-admin.ts'
-import {
   type GetMintersParams,
   type GetMintersResult,
-  GetMinters,
-} from './token/operations/get-minters.ts'
-import {
   type GetTokenDefaultAdminParams,
   type GetTokenDefaultAdminResult,
-  GetTokenDefaultAdmin,
-} from './token/operations/get-token-default-admin.ts'
-import {
   type GetTokenOwnerParams,
   type GetTokenOwnerResult,
-  GetTokenOwner,
-} from './token/operations/get-token-owner.ts'
-import { type GrantBurnRoleParams, GrantBurnRole } from './token/operations/grant-burn-role.ts'
-import {
+  type GrantBurnRoleParams,
   type GrantMintAndBurnRolesParams,
-  GrantMintAndBurnRoles,
-} from './token/operations/grant-mint-and-burn-roles.ts'
-import { type GrantMintRoleParams, GrantMintRole } from './token/operations/grant-mint-role.ts'
-import { type IsBurnerParams, type IsBurnerResult, IsBurner } from './token/operations/is-burner.ts'
-import { type IsMinterParams, type IsMinterResult, IsMinter } from './token/operations/is-minter.ts'
-import { type MintParams, Mint } from './token/operations/mint.ts'
-import { type RevokeBurnRoleParams, RevokeBurnRole } from './token/operations/revoke-burn-role.ts'
-import { type RevokeMintRoleParams, RevokeMintRole } from './token/operations/revoke-mint-role.ts'
-import { type SetCCIPAdminParams, SetCCIPAdmin } from './token/operations/set-ccip-admin.ts'
-import {
+  type GrantMintRoleParams,
+  type IsBurnerParams,
+  type IsBurnerResult,
+  type IsMinterParams,
+  type IsMinterResult,
+  type MintParams,
+  type RevokeBurnRoleParams,
+  type RevokeMintRoleParams,
+  type SetCCIPAdminParams,
   type TransferTokenOwnershipParams,
+  AcceptDefaultAdminTransfer,
+  AcceptTokenOwnership,
+  ApproveToken,
+  BeginDefaultAdminTransfer,
+  CancelDefaultAdminTransfer,
+  DeployToken,
+  GetBurners,
+  GetCCIPAdmin,
+  GetMinters,
+  GetTokenDefaultAdmin,
+  GetTokenOwner,
+  GrantBurnRole,
+  GrantMintAndBurnRoles,
+  GrantMintRole,
+  IsBurner,
+  IsMinter,
+  Mint,
+  RevokeBurnRole,
+  RevokeMintRole,
+  SetCCIPAdmin,
   TransferTokenOwnership,
-} from './token/operations/transfer-token-ownership.ts'
+} from './token/operations/index.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
@@ -359,6 +300,16 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getRebalancer = new GetRebalancer()
   readonly #getBurnAddress = new GetBurnAddress()
   readonly #getLockbox = new GetLockbox()
+  readonly #provideSiloedLiquidity = new ProvideSiloedLiquidity()
+  readonly #withdrawSiloedLiquidity = new WithdrawSiloedLiquidity()
+  readonly #setSiloRebalancer = new SetSiloRebalancer()
+  readonly #updateSiloDesignations = new UpdateSiloDesignations()
+  readonly #getAvailableTokens = new GetAvailableTokens()
+  readonly #getChainRebalancer = new GetChainRebalancer()
+  readonly #isSiloed = new IsSiloed()
+  readonly #configureSiloedLockboxes = new ConfigureSiloedLockboxes()
+  readonly #getAllSiloedLockboxConfigs = new GetAllSiloedLockboxConfigs()
+  readonly #getSiloedLockbox = new GetSiloedLockbox()
 
   // Advanced pool hooks operations
   readonly #deployAdvancedPoolHooks = new DeployAdvancedPoolHooks()
@@ -2225,7 +2176,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * deployed with it `false` can never take deposits, so that is reported before signing rather
    * than as a `LiquidityNotAccepted` revert. v1.6.x pools have no flag.
    * @remarks On a `SiloedLockReleaseTokenPool` this funds the *unsiloed* bucket, gated on the
-   * unsiloed rebalancer; the per-lane `provideSiloedLiquidity` is not exposed.
+   * unsiloed rebalancer; a silo is funded with {@link generateUnsignedProvideSiloedLiquidity}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, which has no
    * liquidity to manage
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
@@ -2288,7 +2239,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * before signing. Advisory only: every CCIP transfer moves it, so a later shortfall still
    * reverts `InsufficientLiquidity`.
    * @remarks On a `SiloedLockReleaseTokenPool` this draws on the *unsiloed* bucket only, gated on
-   * the unsiloed rebalancer; the per-lane `withdrawSiloedLiquidity` is not exposed.
+   * the unsiloed rebalancer; a silo is drawn on with
+   * {@link generateUnsignedWithdrawSiloedLiquidity}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through an
    * external `ERC20LockBox` instead
@@ -2424,8 +2376,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * A zero `rebalancer` is accepted and revokes the role, which stops liquidity movement
    * entirely: the pool then accepts those calls from nobody.
    * @remarks On a `SiloedLockReleaseTokenPool` this sets the *unsiloed* rebalancer, which is what
-   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; the per-lane
-   * `setSiloRebalancer` is not exposed.
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; a silo's own is set with
+   * {@link generateUnsignedSetSiloRebalancer}.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which authorizes liquidity
    * on its `ERC20LockBox` instead — see {@link updateLockboxAuthorizedCallers}
@@ -2477,7 +2429,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks Informational, for audit and UX: the liquidity write ops make this same check
    * themselves, so there is no need to call this first.
    * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer, which is what
-   * its plain `provideLiquidity` / `withdrawLiquidity` gate on.
+   * its plain `provideLiquidity` / `withdrawLiquidity` gate on; a silo's own is read with
+   * {@link getChainRebalancer}.
    * @returns The rebalancer, checksummed. The zero address when none is configured, meaning the
    * pool accepts liquidity calls from nobody.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
@@ -2522,7 +2475,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @returns The lockbox, checksummed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool, or a
    * `SiloedLockReleaseTokenPool` — a siloed pool escrows per remote chain and declares
-   * `getLockBox(uint64)` instead, so it has no single lockbox
+   * `getLockBox(uint64)` instead, so it has no single lockbox; see {@link getSiloedLockbox}
    * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a LockRelease pool holds
    * its liquidity itself — see {@link getRebalancer} and {@link provideLiquidity}
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
@@ -2534,6 +2487,456 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getLockbox(opts: GetLockboxParams): Promise<GetLockboxResult> {
     return this.#getLockbox.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `provideSiloedLiquidity` tx (for multisig / offline signing):
+   * deposits `amount` of the pool's token into one lane's silo of a
+   * **SiloedLockReleaseTokenPool** (v1.6.0–v1.6.1).
+   * @remarks Gated on the **silo's** rebalancer (`getChainRebalancer(remoteChainSelector)`), not
+   * the owner, and not the unsiloed rebalancer {@link generateUnsignedProvideLiquidity} takes. The
+   * owner appoints it with {@link generateUnsignedUpdateSiloDesignations} or
+   * {@link generateUnsignedSetSiloRebalancer}. The lane must be siloed; that is read whether or not
+   * `sender` is given, and a given `sender` is checked against the silo rebalancer.
+   * @remarks The rebalancer must hold `amount` **and** have approved the pool for it, since the
+   * deposit is a `transferFrom`. Set that allowance with {@link approveToken}, `spender` being the
+   * pool; both are read before the calldata is returned, as for
+   * {@link generateUnsignedProvideLiquidity}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through a
+   * lockbox per lane instead (see {@link configureSiloedLockboxes})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
+   * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
+   * rebalancer
+   * @throws {@link CCTTxFailedError} if `sender` holds less than `amount` of the pool's token, or
+   * has approved the pool for less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the silo rebalancer.
+   * const unsigned = await cct.generateUnsignedProvideSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xSiloRebalancer...',
+   * })
+   * ```
+   */
+  generateUnsignedProvideSiloedLiquidity(
+    opts: ProvideSiloedLiquidityParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#provideSiloedLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Deposits liquidity into one lane's silo of a siloed pool, signing + submitting with
+   * `opts.wallet`. `sender` defaults to the wallet's address and must equal it: the wallet must
+   * be the silo's rebalancer, and must have approved `amount` to the pool with
+   * {@link approveToken}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
+   * @throws {@link CCTTxFailedError} if the wallet's token balance or its approval to the pool is
+   * below `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * // the deposit is a transferFrom: approve the pool first
+   * await cct.approveToken({
+   *   tokenAddress: '0xToken...',
+   *   spender: '0xPool...',
+   *   amount: 1_000000000000000000n,
+   *   wallet,
+   * })
+   * const { hash } = await cct.provideSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   wallet, // the silo rebalancer
+   * })
+   * ```
+   */
+  provideSiloedLiquidity(
+    opts: EVMExecuteParams<ProvideSiloedLiquidityParams>,
+  ): Promise<TransactionResult> {
+    return this.#provideSiloedLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `withdrawSiloedLiquidity` tx (for multisig / offline signing): pulls
+   * `amount` of the pool's token out of one lane's silo of a **SiloedLockReleaseTokenPool**
+   * (v1.6.0–v1.6.1).
+   * @remarks Gated on the **silo's** rebalancer, and the tokens are sent to `msg.sender`, so they
+   * land with that rebalancer, whoever signs. The lane must be siloed; a given `sender` is checked
+   * against the silo rebalancer.
+   * @remarks Pays out of the silo's own balance (`getAvailableTokens(remoteChainSelector)`), which
+   * is read first so withdrawing more than it holds is reported before signing. Advisory only:
+   * every CCIP transfer on the lane moves it. The shared unsiloed bucket is drawn on with
+   * {@link generateUnsignedWithdrawLiquidity} instead.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which escrows through a
+   * lockbox per lane instead (see {@link withdrawFromLockbox})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` or
+   * `amount` is zero, the lane is not siloed, or `sender` is given and is not the silo's
+   * rebalancer
+   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the silo rebalancer.
+   * const unsigned = await cct.generateUnsignedWithdrawSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   sender: '0xSiloRebalancer...',
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawSiloedLiquidity(
+    opts: WithdrawSiloedLiquidityParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#withdrawSiloedLiquidity.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws liquidity from one lane's silo to the signing wallet, which must be the silo's
+   * rebalancer. `sender` defaults to the wallet's address and must equal it.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the silo's rebalancer
+   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
+   * `InsufficientLiquidity`
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.withdrawSiloedLiquidity({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   amount: 1_000000000000000000n,
+   *   wallet, // the silo rebalancer, which also receives the tokens
+   * })
+   * ```
+   */
+  withdrawSiloedLiquidity(
+    opts: EVMExecuteParams<WithdrawSiloedLiquidityParams>,
+  ): Promise<TransactionResult> {
+    return this.#withdrawSiloedLiquidity.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `setSiloRebalancer` tx (for multisig / offline signing): appoints the
+   * account allowed to move one lane's silo liquidity on a **SiloedLockReleaseTokenPool**
+   * (v1.6.0–v1.6.1).
+   * @remarks Owner-only, and the lane must already be siloed; silos are created, with a first
+   * rebalancer, by {@link generateUnsignedUpdateSiloDesignations}. The appointee is who
+   * {@link generateUnsignedProvideSiloedLiquidity} and
+   * {@link generateUnsignedWithdrawSiloedLiquidity} then accept for that lane. A given `sender` is
+   * checked against the pool's `owner()`.
+   * @remarks A zero `rebalancer` is accepted only by a **v1.6.1** pool, where it revokes the role
+   * and freezes the silo's liquidity until a new one is appointed; a v1.6.0 pool reverts
+   * `ZeroAddressNotAllowed`, so it is rejected there before any calldata is built.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, whose lanes escrow through
+   * lockboxes that authorize their own callers (see {@link updateLockboxAuthorizedCallers})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, `remoteChainSelector` is zero,
+   * `rebalancer` is zero on a v1.6.0 pool, the lane is not siloed, or `sender` is given and is
+   * not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedSetSiloRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   rebalancer: '0xSiloRebalancer...',
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedSetSiloRebalancer(opts: SetSiloRebalancerParams): Promise<UnsignedEVMTx> {
+    return this.#setSiloRebalancer.generate(this.chain, opts)
+  }
+
+  /**
+   * Appoints one lane's silo rebalancer, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it: the wallet must be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the lane is not siloed, `sender`
+   * is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.setSiloRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   rebalancer: '0xSiloRebalancer...',
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  setSiloRebalancer(opts: EVMExecuteParams<SetSiloRebalancerParams>): Promise<TransactionResult> {
+    return this.#setSiloRebalancer.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `updateSiloDesignations` tx (for multisig / offline signing): turns
+   * lanes of a **SiloedLockReleaseTokenPool** (v1.6.0–v1.6.1) into silos (`adds`), or back into
+   * shared-bucket lanes (`removes`). Removes are applied first.
+   * @remarks Owner-only. **A remove moves the silo's whole balance into the shared unsiloed
+   * bucket** and revokes its silo rebalancer. **An add starts the silo at 0**, under the given
+   * rebalancer, who funds it with {@link generateUnsignedProvideSiloedLiquidity}.
+   * @remarks Every lane is read before any calldata is built: a removed lane must be siloed, an
+   * added one must be a supported chain (see {@link applyChainUpdates}) and not yet siloed. A lane
+   * in both arrays is rejected; to change a silo's rebalancer without moving its liquidity, use
+   * {@link generateUnsignedSetSiloRebalancer}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which binds a lockbox per
+   * lane instead (see {@link configureSiloedLockboxes})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, both arrays are empty, a lane is
+   * duplicated, zero (in `adds`) or in both arrays, a rebalancer is zero, a lane fails one of the
+   * state checks above, or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedUpdateSiloDesignations({
+   *   poolAddress: '0xPool...',
+   *   removes: [],
+   *   adds: [{ remoteChainSelector: 16015286601757825753n, rebalancer: '0xSiloRebalancer...' }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedUpdateSiloDesignations(
+    opts: UpdateSiloDesignationsParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#updateSiloDesignations.generate(this.chain, opts)
+  }
+
+  /**
+   * Designates and un-designates silos, signing + submitting with `opts.wallet`. `sender`
+   * defaults to the wallet's address and must equal it: the wallet must be the pool owner.
+   * @remarks A remove moves the silo's balance into the shared unsiloed bucket; an add starts at 0.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane fails a state check,
+   * `sender` is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.updateSiloDesignations({
+   *   poolAddress: '0xPool...',
+   *   removes: [16015286601757825753n],
+   *   adds: [],
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  updateSiloDesignations(
+    opts: EVMExecuteParams<UpdateSiloDesignationsParams>,
+  ): Promise<TransactionResult> {
+    return this.#updateSiloDesignations.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the liquidity one lane of a **SiloedLockReleaseTokenPool** can release
+   * (v1.6.0–v1.6.1): the silo's own balance on a siloed lane, and on any other the shared
+   * unsiloed bucket (the same value as `getUnsiloedLiquidity()`).
+   * @remarks Informational, for audit and UX: {@link withdrawSiloedLiquidity} makes this same
+   * check itself.
+   * @returns The lane's liquidity, in the token's smallest unit.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, whose lanes escrow through
+   * lockboxes (see {@link getSiloedLockbox})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or the pool does not support
+   * the lane
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const available = await cct.getAvailableTokens({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getAvailableTokens(opts: GetAvailableTokensParams): Promise<GetAvailableTokensResult> {
+    return this.#getAvailableTokens.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the account one lane of a **SiloedLockReleaseTokenPool** accepts liquidity calls from
+   * (v1.6.0–v1.6.1): the silo's rebalancer on a siloed lane, and on any other the unsiloed one
+   * ({@link getRebalancer}).
+   * @remarks Informational, for audit and UX: the per-lane liquidity ops make this same check
+   * themselves.
+   * @returns The rebalancer, checksummed. The zero address when none is set, meaning the lane
+   * accepts liquidity calls from nobody.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which has no rebalancer
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const rebalancer = await cct.getChainRebalancer({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getChainRebalancer(opts: GetChainRebalancerParams): Promise<GetChainRebalancerResult> {
+    return this.#getChainRebalancer.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether one lane of a **SiloedLockReleaseTokenPool** has its own silo (v1.6.0–v1.6.1).
+   * A siloed lane is funded with {@link provideSiloedLiquidity}; any other shares the unsiloed
+   * bucket ({@link provideLiquidity}). Silos are set with {@link updateSiloDesignations}.
+   * @returns `true` if the lane is siloed; `false` for lane 0 and for any unknown lane.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`
+   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool, which isolates lanes with
+   * separate lockboxes instead (see {@link getAllSiloedLockboxConfigs})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const siloed = await cct.isSiloed({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  isSiloed(opts: IsSiloedParams): Promise<IsSiloedResult> {
+    return this.#isSiloed.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned pool `configureLockBoxes` tx (for multisig / offline signing): binds lanes
+   * of a **SiloedLockReleaseTokenPool** (v2.0.0) to the `ERC20LockBox`es their transfers escrow
+   * through. Lanes may share a lockbox or each get their own.
+   * @remarks Owner-only. A lane can be re-bound but never unbound, and a lane with no lockbox
+   * reverts `LockBoxNotConfigured` on every transfer. Each lockbox is read before any calldata is
+   * built: it must be an `ERC20LockBox` escrowing the pool's token. A binding already in place is
+   * rejected as a no-op.
+   * @remarks Not checked, by the pool or here: that the pool is an authorized caller of each
+   * lockbox. Until it is, every transfer on the lane reverts `UnauthorizedCaller`; add it with
+   * {@link updateLockboxAuthorizedCallers}.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool`, or a lockbox address is some other contract
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**, where a siloed pool holds its
+   * silos itself (see {@link updateSiloDesignations})
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lane is zero or listed twice,
+   * a lockbox is zero, not a contract, escrows another token or is already bound to that lane,
+   * or `sender` is given and is not the pool owner
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool or a lockbox reports an unknown
+   * version
+   * @example
+   * ```typescript
+   * // build only, sign later (multisig / offline). `sender` must be the pool owner.
+   * const unsigned = await cct.generateUnsignedConfigureSiloedLockboxes({
+   *   poolAddress: '0xPool...',
+   *   lockboxConfigs: [{ remoteChainSelector: 16015286601757825753n, lockbox: '0xLockbox...' }],
+   *   sender: '0xOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedConfigureSiloedLockboxes(
+    opts: ConfigureSiloedLockboxesParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#configureSiloedLockboxes.generate(this.chain, opts)
+  }
+
+  /**
+   * Binds lanes of a v2.0.0 siloed pool to their lockboxes, signing + submitting with
+   * `opts.wallet`. `sender` defaults to the wallet's address and must equal it: the wallet must
+   * be the pool owner.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTOperationUnsupportedError} below v2.0.0
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, a lockbox fails its checks,
+   * `sender` is given and is not the wallet's address, or the wallet is not the pool owner
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.configureSiloedLockboxes({
+   *   poolAddress: '0xPool...',
+   *   lockboxConfigs: [{ remoteChainSelector: 16015286601757825753n, lockbox: '0xLockbox...' }],
+   *   wallet, // the pool owner
+   * })
+   * ```
+   */
+  configureSiloedLockboxes(
+    opts: EVMExecuteParams<ConfigureSiloedLockboxesParams>,
+  ): Promise<TransactionResult> {
+    return this.#configureSiloedLockboxes.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads every lane → lockbox binding of a **SiloedLockReleaseTokenPool** (v2.0.0): which lanes
+   * are bound, and which share a lockbox (and so share liquidity).
+   * @returns Every binding in the contract's enumeration order, lockboxes checksummed; `[]` when
+   * none is bound.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool` (a non-siloed pool's single lockbox is {@link getLockbox})
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0** (see {@link isSiloed})
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const bindings = await cct.getAllSiloedLockboxConfigs({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getAllSiloedLockboxConfigs(
+    opts: GetAllSiloedLockboxConfigsParams,
+  ): Promise<GetAllSiloedLockboxConfigsResult> {
+    return this.#getAllSiloedLockboxConfigs.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the `ERC20LockBox` one lane of a **SiloedLockReleaseTokenPool** (v2.0.0) escrows
+   * through: the pool's `getLockBox(remoteChainSelector)`.
+   * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need to fund or
+   * drain that lane. {@link getAllSiloedLockboxConfigs} lists every lane without throwing.
+   * @returns The lane's lockbox, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a
+   * `SiloedLockReleaseTokenPool` (a non-siloed pool's single lockbox is {@link getLockbox})
+   * @throws {@link CCTOperationUnsupportedError} below **v2.0.0**
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, or no lockbox is bound to the
+   * lane; bind one with {@link configureSiloedLockboxes}
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const lockbox = await cct.getSiloedLockbox({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * ```
+   */
+  getSiloedLockbox(opts: GetSiloedLockboxParams): Promise<GetSiloedLockboxResult> {
+    return this.#getSiloedLockbox.query(this.chain, opts)
   }
 
   /**
@@ -3116,7 +3519,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * (`addedCallers: [pool]`, plus whoever funds it) → {@link setPool} → configure lanes →
    * {@link depositToLockbox}. The deposit is not optional: a v2.0.0 pool cannot release until
    * its lockbox holds liquidity. `SiloedLockReleaseTokenPool` takes no `lockbox`; its lockboxes
-   * are bound per lane after deploy (see {@link DeploySiloedLockReleaseTokenPoolParams}).
+   * are bound per lane after deploy with {@link configureSiloedLockboxes} (see
+   * {@link DeploySiloedLockReleaseTokenPoolParams}).
    * @throws {@link CCTParamsInvalidError} if any param is invalid
    * @example
    * ```typescript
@@ -3147,8 +3551,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * lockbox) → {@link updateLockboxAuthorizedCallers} (`addedCallers: [pool]`, plus whoever funds it) →
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity. `SiloedLockReleaseTokenPool`
-   * takes no `lockbox`; its lockboxes are bound per lane after deploy (see
-   * {@link DeploySiloedLockReleaseTokenPoolParams}). `BurnToAddressTokenPool` requires an
+   * takes no `lockbox`; its lockboxes are bound per lane after deploy with
+   * {@link configureSiloedLockboxes} (see {@link DeploySiloedLockReleaseTokenPoolParams}). `BurnToAddressTokenPool` requires an
    * immutable, non-zero `burnAddress` and burns by transferring to it, so it only needs the mint
    * role ({@link DeployBurnToAddressTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
@@ -3483,10 +3887,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * @remarks The result is a union: `state.version === '2.0.0'` gates the roles and finality
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
-   * remote chain. For a legacy pool's `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0
-   * `*AndProxy` pool's `previousPool` (it reads here as its base `type`), use
-   * `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool version exposes a
-   * pending-owner getter, so a proposed owner is not readable here.
+   * remote chain (read those with {@link getAllSiloedLockboxConfigs}). For a legacy pool's
+   * `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0 `*AndProxy` pool's `previousPool`
+   * (it reads here as its base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant
+   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is not
+   * readable here.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its
@@ -3943,179 +4348,22 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 }
 
-export * from '../errors.ts'
-export type { AcceptAdminParams } from './token-admin-registry/operations/accept-admin.ts'
-export type {
-  RegisterAdminMethod,
-  RegisterAdminParams,
-} from './token-admin-registry/operations/register-admin.ts'
-export type {
-  GetTokenAdminRegistryParams,
-  GetTokenAdminRegistryResult,
-} from './token-admin-registry/operations/get-token-admin-registry.ts'
-export type { SetPoolParams } from './token-admin-registry/operations/set-pool.ts'
-export type { TransferAdminParams } from './token-admin-registry/operations/transfer-admin.ts'
-export type {
-  GetSupportedTokensParams,
-  GetSupportedTokensResult,
-} from './token-admin-registry/operations/get-supported-tokens.ts'
+export type * from './token-admin-registry/operations/index.ts'
 export * from './token-admin-registry/contracts.ts'
-export type { DeployTokenParams } from './token/operations/deploy-token.ts'
-export type { BeginDefaultAdminTransferParams } from './token/operations/begin-default-admin-transfer.ts'
-export type { AcceptDefaultAdminTransferParams } from './token/operations/accept-default-admin-transfer.ts'
-export type { CancelDefaultAdminTransferParams } from './token/operations/cancel-default-admin-transfer.ts'
-export type { SetCCIPAdminParams } from './token/operations/set-ccip-admin.ts'
-export type { ApproveTokenParams } from './token/operations/approve-token.ts'
-export type { GrantMintAndBurnRolesParams } from './token/operations/grant-mint-and-burn-roles.ts'
-export type { GrantMintRoleParams } from './token/operations/grant-mint-role.ts'
-export type { GrantBurnRoleParams } from './token/operations/grant-burn-role.ts'
-export type { RevokeMintRoleParams } from './token/operations/revoke-mint-role.ts'
-export type { RevokeBurnRoleParams } from './token/operations/revoke-burn-role.ts'
-export type { MintParams } from './token/operations/mint.ts'
-export type { GetMintersParams, GetMintersResult } from './token/operations/get-minters.ts'
-export type { GetBurnersParams, GetBurnersResult } from './token/operations/get-burners.ts'
-export type {
-  GetTokenOwnerParams,
-  GetTokenOwnerResult,
-} from './token/operations/get-token-owner.ts'
-export type { GetCCIPAdminParams, GetCCIPAdminResult } from './token/operations/get-ccip-admin.ts'
-export type {
-  GetTokenDefaultAdminParams,
-  GetTokenDefaultAdminResult,
-  PendingTokenDefaultAdmin,
-} from './token/operations/get-token-default-admin.ts'
-export type { IsMinterParams, IsMinterResult } from './token/operations/is-minter.ts'
-export type { IsBurnerParams, IsBurnerResult } from './token/operations/is-burner.ts'
-export type { TransferTokenOwnershipParams } from './token/operations/transfer-token-ownership.ts'
-export type { AcceptTokenOwnershipParams } from './token/operations/accept-token-ownership.ts'
+export type * from './token/operations/index.ts'
 export * from './token/contracts.ts'
-export type { TransferPoolOwnershipParams } from './token-pool/operations/transfer-pool-ownership.ts'
-export type { AcceptPoolOwnershipParams } from './token-pool/operations/accept-pool-ownership.ts'
-export type {
-  DeployBurnMintTokenPoolParams,
-  DeployBurnToAddressTokenPoolParams,
-  DeployLockReleaseTokenPoolParams,
-  DeploySiloedLockReleaseTokenPoolParams,
-  DeployTokenPoolParams,
-  DeployableTokenPoolType,
-} from './token-pool/operations/deploy-token-pool.ts'
-export type {
-  BurnMintTokenPoolStateV2_0_0,
-  GetTokenPoolStateParams,
-  GetTokenPoolStateResult,
-  LegacyTokenPoolState,
-  LockReleaseTokenPoolStateV2_0_0,
-  SiloedLockReleaseTokenPoolStateV2_0_0,
-  TokenPoolStateV2_0_0,
-} from './token-pool/operations/get-token-pool-state.ts'
-export type {
-  GetTokenPoolRemotesParams,
-  GetTokenPoolRemotesResult,
-} from './token-pool/operations/get-token-pool-remotes.ts'
-export type { SetRemotePoolParams } from './token-pool/operations/set-remote-pool.ts'
-export type { AddRemotePoolParams } from './token-pool/operations/add-remote-pool.ts'
-export type { RemoveRemotePoolParams } from './token-pool/operations/remove-remote-pool.ts'
-export type {
-  ApplyChainUpdatesParams,
-  ChainUpdate,
-} from './token-pool/operations/apply-chain-updates.ts'
-export type { ApplyAllowlistUpdatesParams } from './token-pool/operations/apply-allowlist-updates.ts'
-export type {
-  GetAllowlistParams,
-  GetAllowlistResult,
-} from './token-pool/operations/get-allowlist.ts'
-export type {
-  GetAllowlistEnabledParams,
-  GetAllowlistEnabledResult,
-} from './token-pool/operations/get-allowlist-enabled.ts'
-export type {
-  GetDynamicConfigParams,
-  GetDynamicConfigResult,
-} from './token-pool/operations/get-dynamic-config.ts'
-export type { GetFeeParams, GetFeeResult } from './token-pool/operations/get-fee.ts'
-export type {
-  GetTokenTransferFeeConfigParams,
-  GetTokenTransferFeeConfigResult,
-} from './token-pool/operations/get-token-transfer-fee-config.ts'
-export type {
-  ApplyTokenTransferFeeConfigUpdatesParams,
-  TokenTransferFeeConfigUpdate,
-} from './token-pool/operations/apply-token-transfer-fee-config-updates.ts'
+export type * from './token-pool/operations/index.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
  * single lane's type without these. Declared in `../../chain.ts` (shared with the core
  * `Chain.getTokenPoolRemotes`), re-exported here so this entry point is self-sufficient.
  */
 export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
-export type {
-  ChainRateLimitUpdate,
-  SetChainRateLimiterConfigsParams,
-} from './token-pool/operations/set-chain-rate-limiter-configs.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
-export type { ProvideLiquidityParams } from './token-pool/operations/provide-liquidity.ts'
-export type { WithdrawFeeTokensParams } from './token-pool/operations/withdraw-fee-tokens.ts'
-export type { WithdrawLiquidityParams } from './token-pool/operations/withdraw-liquidity.ts'
-export type { TransferLiquidityParams } from './token-pool/operations/transfer-liquidity.ts'
-export type { SetRebalancerParams } from './token-pool/operations/set-rebalancer.ts'
-export type {
-  GetRebalancerParams,
-  GetRebalancerResult,
-} from './token-pool/operations/get-rebalancer.ts'
-export type {
-  GetBurnAddressParams,
-  GetBurnAddressResult,
-} from './token-pool/operations/get-burn-address.ts'
-export type { GetLockboxParams, GetLockboxResult } from './token-pool/operations/get-lockbox.ts'
-export type {
-  GetAllowedFinalityConfigParams,
-  GetAllowedFinalityConfigResult,
-} from './token-pool/operations/get-allowed-finality-config.ts'
-export type {
-  GetAdvancedPoolHooksParams,
-  GetAdvancedPoolHooksResult,
-} from './token-pool/operations/get-advanced-pool-hooks.ts'
-export type { SetAllowedFinalityConfigParams } from './token-pool/operations/set-allowed-finality-config.ts'
-export type { UpdateAdvancedPoolHooksParams } from './token-pool/operations/update-advanced-pool-hooks.ts'
 export * from './token-pool/contracts.ts'
-export type { DeployLockboxParams } from './lockbox/operations/deploy-lockbox.ts'
-export type { UpdateLockboxAuthorizedCallersParams } from './lockbox/operations/update-authorized-callers.ts'
-export type {
-  GetAllLockboxAuthorizedCallersParams,
-  GetAllLockboxAuthorizedCallersResult,
-} from './lockbox/operations/get-all-lockbox-authorized-callers.ts'
+export type * from './lockbox/operations/index.ts'
 export * from './lockbox/contracts.ts'
-export type { UpdateAdvancedPoolHooksAuthorizedCallersParams } from './advanced-pool-hooks/operations/update-authorized-callers.ts'
-export type {
-  GetAllAdvancedPoolHooksAuthorizedCallersParams,
-  GetAllAdvancedPoolHooksAuthorizedCallersResult,
-} from './advanced-pool-hooks/operations/get-all-advanced-pool-hooks-authorized-callers.ts'
-export type {
-  GetPolicyEngineParams,
-  GetPolicyEngineResult,
-} from './advanced-pool-hooks/operations/get-policy-engine.ts'
-export type {
-  GetThresholdAmountParams,
-  GetThresholdAmountResult,
-} from './advanced-pool-hooks/operations/get-threshold-amount.ts'
-export type { DepositToLockboxParams } from './lockbox/operations/deposit.ts'
-export type { WithdrawFromLockboxParams } from './lockbox/operations/withdraw.ts'
-export type { ApplyCCVConfigUpdatesParams } from './advanced-pool-hooks/operations/apply-ccv-config-updates.ts'
-export type {
-  GetAllCCVConfigsParams,
-  GetAllCCVConfigsResult,
-} from './advanced-pool-hooks/operations/get-all-ccv-configs.ts'
-export type {
-  GetCCVConfigParams,
-  GetCCVConfigResult,
-} from './advanced-pool-hooks/operations/get-ccv-config.ts'
-export type {
-  CCVMessageDirection,
-  GetRequiredCCVsParams,
-  GetRequiredCCVsResult,
-} from './advanced-pool-hooks/operations/get-required-ccvs.ts'
-export type { DeployAdvancedPoolHooksParams } from './advanced-pool-hooks/operations/deploy-advanced-pool-hooks.ts'
-export type { SetPolicyEngineParams } from './advanced-pool-hooks/operations/set-policy-engine.ts'
-export type { SetThresholdAmountParams } from './advanced-pool-hooks/operations/set-threshold-amount.ts'
+export type * from './advanced-pool-hooks/operations/index.ts'
 export * from './advanced-pool-hooks/contracts.ts'
 export type {
   DeployTokenAndTokenPoolViaFactoryParams,

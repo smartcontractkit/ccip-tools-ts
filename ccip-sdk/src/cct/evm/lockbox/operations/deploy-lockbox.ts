@@ -26,8 +26,9 @@ export class DeployLockbox extends EVMDeployOperation<DeployLockboxParams> {
   readonly name = 'deployLockbox'
 
   /** Validates the constructor params before building init-code. */
-  protected override validate(params: DeployLockboxParams): void {
+  protected override prepare(params: DeployLockboxParams): DeployLockboxParams {
     validateNonZeroAddress(this.name, 'token', params.token)
+    return params
   }
 
   /** Deploy artifact for `ERC20LockBox` (v2.0.0). */

@@ -88,8 +88,8 @@ export type ExecuteApplyChainUpdatesResult = CantonTransactionResult & {
 export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> {
   readonly name = 'applyChainUpdates'
 
-  /** Validates the pool target, that at least one add/remove is specified, and rate limiters. */
-  protected override validate(p: GenerateApplyChainUpdatesParams): void {
+  /** Validates the pool target, updates, and rate limiters, then normalizes lane addresses. */
+  protected override prepare(p: GenerateApplyChainUpdatesParams): GenerateApplyChainUpdatesParams {
     if (!p.poolInstanceAddress) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -165,10 +165,7 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
         )
       }
     }
-  }
 
-  /** Parses each added lane's remote addresses into their canonical spellings. */
-  protected override parse(p: GenerateApplyChainUpdatesParams): GenerateApplyChainUpdatesParams {
     if (!p.chainsToAdd) return p
     return {
       ...p,

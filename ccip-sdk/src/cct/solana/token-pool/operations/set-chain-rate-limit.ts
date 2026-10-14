@@ -148,7 +148,9 @@ export class SetChainRateLimit extends SolanaOperation<
   readonly name = 'setChainRateLimit'
 
   /** Parses rate limits and defaults authority to payer without mutating caller params. */
-  protected override parse(params: GenerateSetChainRateLimitParams): ParsedSetChainRateLimitParams {
+  protected override prepare(
+    params: GenerateSetChainRateLimitParams,
+  ): ParsedSetChainRateLimitParams {
     validateBigInt(this.name, 'remoteChainSelector', params.remoteChainSelector, 0n, U64_MAX)
     const inbound = parseRateLimitConfig(this.name, 'inbound', params.inbound)
     const outbound = parseRateLimitConfig(this.name, 'outbound', params.outbound)

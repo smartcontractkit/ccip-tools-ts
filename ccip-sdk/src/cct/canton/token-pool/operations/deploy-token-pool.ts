@@ -152,8 +152,8 @@ export class DeployTokenPool extends CantonOperation<
 > {
   readonly name = 'deployTokenPool'
 
-  /** Validates party IDs, instrument ID, instance ID, decimals, observers, deps, and lanes. */
-  protected override validate(p: GenerateDeployTokenPoolParams): void {
+  /** Validates params, normalizes lane addresses, and derives the pool owner and default admin. */
+  protected override prepare(p: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (p.poolType !== 'burnMint' && p.poolType !== 'lockRelease') {
       throw new CCTParamsInvalidError(
@@ -165,7 +165,7 @@ export class DeployTokenPool extends CantonOperation<
     if (!p.instanceId) {
       throw new CCTParamsInvalidError(this.name, 'instanceId', 'pool instance ID is required')
     }
-    parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
+    const instrumentId = parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
     if (!Number.isInteger(p.decimals) || p.decimals < 0) {
       throw new CCTParamsInvalidError(
         this.name,
@@ -216,14 +216,7 @@ export class DeployTokenPool extends CantonOperation<
         )
       }
     }
-  }
 
-  /**
-   * Parses the instrument ID (deriving `poolOwner` and the default `admin`) and
-   * lane remote addresses.
-   */
-  protected override parse(p: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
-    const instrumentId = parseInstrumentId(this.name, 'instrumentId', p.instrumentId)
     return {
       ...p,
       instrumentId,

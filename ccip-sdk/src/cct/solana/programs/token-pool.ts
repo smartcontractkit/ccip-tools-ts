@@ -15,14 +15,22 @@ import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
 import { CCTDataDecodeError } from '../../errors.ts'
 
+/** Canonical Solana token pool types accepted by CCT operations. */
+export const SOLANA_TOKEN_POOL_TYPES = ['burn-mint', 'lock-release'] as const
+
+/** Canonical Solana token pool program type. */
+export type TokenPoolType = (typeof SOLANA_TOKEN_POOL_TYPES)[number]
+
+/** Type guard for {@link SOLANA_TOKEN_POOL_TYPES}. */
+export function isSolanaTokenPoolType(value: string): value is TokenPoolType {
+  return (SOLANA_TOKEN_POOL_TYPES as readonly string[]).includes(value)
+}
+
 /** Canonical Solana token pool program addresses. */
 export const TOKEN_POOL_PROGRAMS = {
   'burn-mint': '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB',
   'lock-release': '8eqh8wppT9c5rw4ERqNCffvU6cNFJWff9WmkcYtmGiqC',
-} as const
-
-/** Canonical Solana token pool program type. */
-export type TokenPoolType = keyof typeof TOKEN_POOL_PROGRAMS
+} as const satisfies Record<TokenPoolType, string>
 
 /**
  * Identifies the program of an existing token pool.

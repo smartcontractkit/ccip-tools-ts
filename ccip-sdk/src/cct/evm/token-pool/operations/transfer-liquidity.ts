@@ -32,8 +32,7 @@ import {
   CCTParamsInvalidError,
   CCTTxFailedError,
 } from '../../../errors.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256 } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -171,7 +170,8 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
    * Validates both pool addresses and the amount before any RPC. `from` must differ from
    * `poolAddress`: a pool is never its own rebalancer, so a self-transfer can only revert.
    */
-  protected override validate({ poolAddress, from, amount }: TransferLiquidityParams): void {
+  protected override prepare(params: TransferLiquidityParams): TransferLiquidityParams {
+    const { poolAddress, from, amount } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateNonZeroAddress(this.name, 'from', from)
     validatePositiveUint256(this.name, 'amount', amount)
@@ -181,6 +181,7 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
         'from',
         'must be a different pool than poolAddress; a pool cannot withdraw its own liquidity',
       )
+    return params
   }
 
   /**
@@ -234,24 +235,5 @@ export class TransferLiquidity extends EVMOperation<TransferLiquidityParams> {
     if (params.sender !== undefined)
       await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return unsigned
-  }
-
-  /**
-   * Signs and submits as the destination pool's owner, defaulting `sender` to the signing wallet
-   * — the only address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx.
-   * See {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
-   * than signed.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
-   * or the wallet does not own the destination pool
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, e.g.
-   * `InsufficientLiquidity` when the source pool holds less than `amount`
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<TransferLiquidityParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

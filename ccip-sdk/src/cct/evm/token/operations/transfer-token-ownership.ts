@@ -36,9 +36,11 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
   readonly name = 'transferTokenOwnership'
 
   /** Validates both addresses before any RPC. */
-  protected override validate({ tokenAddress, newOwner }: TransferTokenOwnershipParams): void {
+  protected override prepare(params: TransferTokenOwnershipParams): TransferTokenOwnershipParams {
+    const { tokenAddress, newOwner } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateAddress(this.name, 'newOwner', newOwner)
+    return params
   }
 
   /**
@@ -50,7 +52,10 @@ export class TransferTokenOwnership extends EVMOperation<TransferTokenOwnershipP
     { tokenAddress, newOwner, sender }: TransferTokenOwnershipParams,
   ): Promise<UnsignedEVMTx> {
     if (getAddress(newOwner) === ZeroAddress)
-      return buildCancelDefaultAdminTransfer(this.name, chain, { tokenAddress, sender })
+      return buildCancelDefaultAdminTransfer(this.name, chain, {
+        tokenAddress,
+        sender,
+      })
     return buildBeginDefaultAdminTransfer(
       this.name,
       chain,

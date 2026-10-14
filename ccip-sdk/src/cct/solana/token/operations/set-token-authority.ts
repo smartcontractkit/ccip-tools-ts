@@ -83,7 +83,9 @@ export class SetTokenAuthority extends SolanaOperation<
   readonly name = 'setTokenAuthority'
 
   /** Parses public keys and validates the selected authority roles. */
-  protected override parse(params: GenerateSetTokenAuthorityParams): ParsedSetTokenAuthorityParams {
+  protected override prepare(
+    params: GenerateSetTokenAuthorityParams,
+  ): ParsedSetTokenAuthorityParams {
     const authorityTypes = params.authorityTypes
     if (!Array.isArray(authorityTypes)) {
       throw new CCTParamsInvalidError(this.name, 'authorityTypes', 'must be an array')

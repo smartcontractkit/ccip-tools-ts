@@ -67,7 +67,7 @@ export class UpdateAdvancedPoolHooks extends EVMOperation<UpdateAdvancedPoolHook
   }
 
   /** Validates, and checksums `advancedPoolHooks` so {@link buildUnsigned} can compare it. */
-  protected override parse(params: UpdateAdvancedPoolHooksParams): UpdateAdvancedPoolHooksParams {
+  protected override prepare(params: UpdateAdvancedPoolHooksParams): UpdateAdvancedPoolHooksParams {
     validateNonZeroAddress(this.name, 'poolAddress', params.poolAddress)
     validateAddress(this.name, 'advancedPoolHooks', params.advancedPoolHooks)
     return { ...params, advancedPoolHooks: getAddress(params.advancedPoolHooks) }

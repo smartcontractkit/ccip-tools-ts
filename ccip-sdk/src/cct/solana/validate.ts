@@ -22,6 +22,7 @@ import {
   TOKEN_POOL_PROGRAMS,
   decodeTokenPoolState,
   deriveTokenPoolConfigPda,
+  isSolanaTokenPoolType,
   resolveTokenPoolProgram,
 } from './programs/token-pool.ts'
 
@@ -180,7 +181,7 @@ export function validatePoolType(
   param: string,
   value: unknown,
 ): asserts value is TokenPoolType {
-  if (typeof value !== 'string' || !Object.hasOwn(TOKEN_POOL_PROGRAMS, value)) {
+  if (typeof value !== 'string' || !isSolanaTokenPoolType(value)) {
     throw new CCTParamsInvalidError(operation, param, 'must be burn-mint or lock-release')
   }
 }

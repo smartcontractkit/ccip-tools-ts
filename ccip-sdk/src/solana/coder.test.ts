@@ -32,6 +32,12 @@ describe('sizedCoder', () => {
     assert.deepEqual(coder.instruction.decode(encoded), { name: 'storeBig', data: big })
   })
 
+  it('grows its buffer as needed, e.g. for a full CCIP 2.0 execution inputs buffer', () => {
+    const coder = sizedCoder(idl)
+    const huge = { data: Buffer.alloc(64 * 800, 7) }
+    assert.equal(coder.types.encode('Big', huge).length, 4 + huge.data.length)
+  })
+
   it('throws CCIP errors for unknown types and methods', () => {
     const coder = sizedCoder(idl)
     assert.throws(() => coder.types.encode('Missing', {}), CCIPBorshTypeUnknownError)

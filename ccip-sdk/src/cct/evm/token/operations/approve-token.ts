@@ -16,8 +16,7 @@
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateNonZeroAddress, validateUint256 } from '../../validate.ts'
 import { TokenVersion, getTokenInterface } from '../contracts.ts'
 
@@ -53,10 +52,12 @@ export class ApproveToken extends EVMOperation<ApproveTokenParams> {
   readonly name = 'approveToken'
 
   /** Validates both addresses and the amount before any RPC; a zero `amount` revokes. */
-  protected override validate({ tokenAddress, spender, amount }: ApproveTokenParams): void {
+  protected override prepare(params: ApproveTokenParams): ApproveTokenParams {
+    const { tokenAddress, spender, amount } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
     validateNonZeroAddress(this.name, 'spender', spender)
     validateUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**
@@ -69,22 +70,5 @@ export class ApproveToken extends EVMOperation<ApproveTokenParams> {
   ): UnsignedEVMTx {
     const iface = getTokenInterface(TokenVersion.V1_5_1)
     return callTx(tokenAddress, iface.encodeFunctionData('approve', [spender, amount]))
-  }
-
-  /**
-   * Signs and submits, defaulting `sender` to the signing wallet.
-   * @remarks The allowance is granted from `msg.sender`'s balance, so a `sender` that differs from
-   * the wallet would approve a *different* account's tokens than the one reviewed — rejected here
-   * rather than signed. See {@link EVMOperation.resolveWalletSender}.
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address
-   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<ApproveTokenParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

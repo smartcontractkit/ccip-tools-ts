@@ -181,7 +181,9 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   SOLANA_ACCOUNT_RESOLUTION_FAILED:
     'Account resolution did not complete. Check that the program is a CCIP 2.0 router/offramp and that the instruction data is valid for it.',
   SOLANA_V2_LANE_UNAVAILABLE:
-    'GenericExtraArgsV3 (finality, ccvs, executor, tokenReceiver, ...) can only be sent over a CCIP 2.0 lane. Use legacy extraArgs (gasLimit, allowOutOfOrderExecution) to send over the 1.6 lane, or have the lane configured for 2.0 (and the sender allowlisted, if its allowlist is enabled).',
+    'GenericExtraArgsV3 (finality, ccvs, executor, tokenReceiver, ...) can only be sent over a CCIP 2.0 lane. Use legacy extraArgs (gasLimit, allowOutOfOrderExecution) to send over the 1.6 lane, or have the lane configured for 2.0, with its sender allowlist disabled.',
+  SOLANA_EXECUTION_BUFFER_INCOMPLETE:
+    'Sign and send the instructions from generateUnsignedExecuteBuffer (one buffering instruction per transaction) to fill the execution inputs buffer, then generate the execution again.',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
@@ -198,7 +200,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Invalid Aptos event topic. Ensure the topic matches a known CCIP event type.',
 
   LOG_RANGE_TOO_LARGE:
-    'The RPC endpoint limits getLogs block range. The SDK auto-paginates by halving the range; if this persists, the range cannot be subdivided further.',
+    'The RPC endpoint rejected the getLogs block range, and the SDK could not find a smaller range it accepts. Use an RPC endpoint or plan that allows wider getLogs ranges.',
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
   TIMEOUT:

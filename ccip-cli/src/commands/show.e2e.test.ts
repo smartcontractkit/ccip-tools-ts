@@ -48,14 +48,15 @@ describe('e2e command show EVM', () => {
 
   // Quiet lane for the format variants below: they re-run the SAME scan-heavy
   // `show` flow as the pretty-format test above and only assert on output
-  // shape. bsc-testnet -> base-sepolia is v1.5 like the fixture above (the
-  // generation stays covered either way), sees a steady ~17 messages/day (a
+  // shape. bsc-testnet -> base-sepolia has since moved to v2.0 (v1.5 stays
+  // covered by the pretty-format fixture above, and older v1.5 sends here fall
+  // outside the bsc-testnet RPC's pruned history), sees a steady ~17 messages/day (a
   // fixture refreshed within days keeps the dest scan tiny), and both sides
   // ride CI-reachable keyless endpoints. The previous soneium -> astar lane
   // answered fine from a residential IP but hung outright from CI's egress,
   // wedging every test that had to hear from it.
-  const QUIET_TX_HASH = '0xc2c2979edde59b8e6d01502450fdf1400add0282da986a6c6001ba192e724ff9'
-  const QUIET_MESSAGE_ID = '0x6aa3968ed2a4500dc9dab2c72efb6a32c3f3f85ad2b37b5aa712d235ff8a9544'
+  const QUIET_TX_HASH = '0x79b050383bf849e01c7a028b6555c66ada640803556a4874fb216024db467620'
+  const QUIET_MESSAGE_ID = '0x7f5e5f87b70408b745f19794c505da484d70b46cfcd5703f4aa90a2a4e8fe5cc'
   const QUIET_SENDER = '0x22D2E5b0324C6360f8934b891FF811Da32EAAcEB'
   const QUIET_RECEIVER = '0xda7975Ff570fAc84Af328aa34Aa8AB6F049bcC77'
 
@@ -173,11 +174,11 @@ describe('e2e command show EVM', () => {
           'message should have sequenceNumber',
         )
 
-        // Verifications (commit report) — the fixture is a v1.5 lane, and tx-hash
+        // Verifications (CCV attestations) — the fixture is a v2.0 lane, and tx-hash
         // inputs always resolve through the RPC scan (the API's /v2/messages/{id}
         // only accepts message ids), which computes them
         assert.ok(envelope.verifications, 'envelope should contain verifications')
-        assert.match(JSON.stringify(envelope.verifications), /"merkleRoot"/)
+        assert.match(JSON.stringify(envelope.verifications), /"ccvData"/)
 
         // Receipts
         assert.ok(Array.isArray(envelope.receipts), 'envelope.receipts should be an array')
@@ -258,7 +259,10 @@ describe('e2e command show EVM', () => {
     })
   })
 
-  describe('EVM to Aptos', () => {
+  // TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
+  // testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
+  // has onramp/offramp modules, so every live Aptos fixture below 404s.
+  describe.skip('EVM to Aptos', () => {
     useResourceForDescribe(['bsc-testnet', 'aptos-testnet'])
 
     it(
@@ -507,7 +511,10 @@ describe('e2e command show Solana', () => {
   )
 })
 
-describe('e2e command show Aptos', () => {
+// TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
+// testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
+// has onramp/offramp modules, so every live Aptos fixture below 404s.
+describe.skip('e2e command show Aptos', () => {
   useResourceForDescribe(['aptos-testnet', 'sepolia'])
 
   // Fixture seeded periodically from CCIP API v2 messages

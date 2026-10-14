@@ -102,7 +102,7 @@ export class DeployTokenPool extends SolanaOperation<
   readonly name = 'deployTokenPool'
 
   /** Parses all public keys before any RPC. */
-  protected override parse(params: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
+  protected override prepare(params: GenerateDeployTokenPoolParams): ParsedDeployTokenPoolParams {
     validatePoolType(this.name, 'poolType', params.poolType)
     if (params.allowlist !== undefined && !Array.isArray(params.allowlist)) {
       throw new CCTParamsInvalidError(this.name, 'allowlist', 'must be an array')

@@ -82,8 +82,12 @@ export class CancelDefaultAdminTransfer extends EVMOperation<CancelDefaultAdminT
   readonly name = 'cancelDefaultAdminTransfer'
 
   /** Validates the token address before any RPC. */
-  protected override validate({ tokenAddress }: CancelDefaultAdminTransferParams): void {
+  protected override prepare(
+    params: CancelDefaultAdminTransferParams,
+  ): CancelDefaultAdminTransferParams {
+    const { tokenAddress } = params
     validateNonZeroAddress(this.name, 'tokenAddress', tokenAddress)
+    return params
   }
 
   /**

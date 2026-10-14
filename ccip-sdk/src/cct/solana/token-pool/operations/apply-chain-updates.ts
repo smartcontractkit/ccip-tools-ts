@@ -221,7 +221,9 @@ export class ApplyChainUpdates extends SolanaOperation<
   readonly name = 'applyChainUpdates'
 
   /** Validates the batch envelope; component operations validate each chain update. */
-  protected override parse(params: GenerateApplyChainUpdatesParams): ParsedApplyChainUpdatesParams {
+  protected override prepare(
+    params: GenerateApplyChainUpdatesParams,
+  ): ParsedApplyChainUpdatesParams {
     parsePublicKey(this.name, 'tokenAddress', params.tokenAddress)
     parsePublicKey(this.name, 'payer', params.payer)
     validateOptionalPublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress)

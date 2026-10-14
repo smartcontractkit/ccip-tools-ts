@@ -74,17 +74,17 @@ export class DeployAdvancedPoolHooks extends EVMDeployOperation<DeployAdvancedPo
   readonly name = 'deployAdvancedPoolHooks'
 
   /**
-   * Validates the constructor params before building init-code. Not `parse`: a normalizing
-   * deploy op would publish `verification` args that differ from the deployed ones, because
-   * `EVMDeployOperation.execute` re-derives them from the raw params.
+   * Validates the constructor params without normalization: deployment verification reuses
+   * the original params.
    * @remarks A zero in `allowlist` is the nastier of the two zero cases — the constructor skips
    * it but still counts it, permanently enabling an allowlist containing nobody.
    */
-  protected override validate(params: DeployAdvancedPoolHooksParams): void {
+  protected override prepare(params: DeployAdvancedPoolHooksParams): DeployAdvancedPoolHooksParams {
     validateAddressList(this.name, 'allowlist', params.allowlist ?? [])
     validateUint256(this.name, 'thresholdAmount', params.thresholdAmount ?? 0n)
     validateAddress(this.name, 'policyEngine', params.policyEngine ?? ZeroAddress)
     validateAddressList(this.name, 'authorizedCallers', params.authorizedCallers ?? [])
+    return params
   }
 
   /** Deploy artifact for `AdvancedPoolHooks` (v2.0.0). */

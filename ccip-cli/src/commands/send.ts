@@ -459,24 +459,12 @@ async function sendMessage(
     tokenAmounts,
   }
 
-  // the sender can decide the fee (e.g. Solana CCIP 2.0 lanes with a sender allowlist), so load the
-  // wallet first; it's optional when only quoting
-  if (!wallet) {
-    try {
-      ;[walletAddress, wallet] = await loadChainWallet(source, argv, logger)
-    } catch (err) {
-      if (!argv.onlyGetFee) throw err
-    }
-  }
-
   // calculate fee
   const fee = await source.getFee({
     ...argv,
     router,
     destChainSelector: destNetwork.chainSelector,
     message,
-    // without a loaded wallet, walletAddress may be a random receiver on the dest family
-    ...(wallet && { sender: walletAddress }),
   })
 
   const displaySymbol =

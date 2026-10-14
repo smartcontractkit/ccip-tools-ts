@@ -6,7 +6,7 @@ import {
   RawInstanceAddress,
   parseInstanceAddress,
 } from '../addressCodec.ts'
-import { get, post } from '../client/client.ts'
+import { type CantonHttpVersion, get, post } from '../client/client.ts'
 import type { DisclosedContract } from './types.ts'
 
 /**
@@ -22,6 +22,15 @@ export interface EdsDisclosureConfig {
   externalEdsUrlsByOwner?: Record<string, string>
   /** Optional request timeout in milliseconds (default: 10_000). */
   timeoutMs?: number
+  /**
+   * HTTP protocol selection (default: `'auto'`).
+   *
+   * The hosted global EDS serves HTTP/2, but user-hosted EDS instances
+   * commonly serve HTTP/1.1 only. `'auto'` tries HTTP/2 first and falls back
+   * to HTTP/1.1 on a protocol-level failure, memoized per origin. Pin `2` or
+   * `1` to skip negotiation for a known endpoint.
+   */
+  httpVersion?: CantonHttpVersion
 }
 
 /** Canton instrument as represented in the EDS API. */
@@ -188,6 +197,7 @@ export class EdsDisclosureProvider {
   private readonly edsBaseUrl: string
   private readonly externalEdsUrlsByOwner: Record<string, string>
   private readonly timeoutMs: number
+  private readonly httpVersion: CantonHttpVersion
 
   /**
    * Create an EDS disclosure provider for global and external split APIs.
@@ -201,6 +211,7 @@ export class EdsDisclosureProvider {
       ]),
     )
     this.timeoutMs = config.timeoutMs ?? 10_000
+    this.httpVersion = config.httpVersion ?? 'auto'
   }
 
   /**
@@ -224,6 +235,10 @@ export class EdsDisclosureProvider {
       `/ccip/v1/global/TokenAdminRegistry/token/${encodeURIComponent(instrumentIdHash)}`,
       EDS_HEADERS,
       this.timeoutMs,
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return resp.rawInstanceAddress
       ? RawInstanceAddress.fromString(resp.rawInstanceAddress)
@@ -256,6 +271,10 @@ export class EdsDisclosureProvider {
         EDS_HEADERS,
         this.timeoutMs,
         { addresses: [instanceAddress] },
+        undefined,
+        undefined,
+        undefined,
+        this.httpVersion,
       )
       const contract = resp.disclosures?.[0]
       if (!contract?.contractId || !contract.createdEventBlob) return null
@@ -284,6 +303,10 @@ export class EdsDisclosureProvider {
         senderRequiredCCVs: senderRequiredCCVs.map((addr) => addr.instanceAddress().hex()),
         tokenPoolRequiredCCVs: tokenPoolRequiredCCVs.map((addr) => addr.instanceAddress().hex()),
       },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return {
       contextData: contextDataOrEmpty(resp.contextData),
@@ -305,6 +328,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { message },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return this.rawTokenPoolResult(resp)
   }
@@ -320,6 +347,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { message },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return this.rawExternalResult(resp)
   }
@@ -336,6 +367,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { message, ccvs: [...ccvs] },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return this.rawExternalResult(resp)
   }
@@ -351,6 +386,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { encodedMessage, receiver },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return {
       contextData: contextDataOrEmpty(resp.contextData),
@@ -371,6 +410,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { encodedMessage, receiver },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return this.rawTokenPoolResult(resp)
   }
@@ -387,6 +430,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { encodedMessage, receiver },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return this.rawExternalResult(resp)
   }
@@ -404,6 +451,10 @@ export class EdsDisclosureProvider {
       EDS_HEADERS,
       this.timeoutMs,
       { partyID },
+      undefined,
+      undefined,
+      undefined,
+      this.httpVersion,
     )
     return {
       contractId: resp.contractId,

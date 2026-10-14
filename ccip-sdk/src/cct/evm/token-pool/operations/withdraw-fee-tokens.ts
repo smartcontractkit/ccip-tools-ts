@@ -14,8 +14,7 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { EVMOperation, callTx } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
@@ -51,17 +50,15 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
   }
 
   /** Validates every ABI address before any RPC; an empty token list would mine as a no-op. */
-  protected override validate({
-    poolAddress,
-    feeTokens,
-    recipient,
-  }: WithdrawFeeTokensParams): void {
+  protected override prepare(params: WithdrawFeeTokensParams): WithdrawFeeTokensParams {
+    const { poolAddress, feeTokens, recipient } = params
     validateNonZeroAddress(this.name, 'poolAddress', poolAddress)
     validateArray(this.name, 'feeTokens', feeTokens, 1)
     feeTokens.forEach((feeToken, i) =>
       validateNonZeroAddress(this.name, `feeTokens[${i}]`, feeToken),
     )
     validateNonZeroAddress(this.name, 'recipient', recipient)
+    return params
   }
 
   /**
@@ -83,25 +80,5 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
     if (params.sender !== undefined)
       await assertPoolOwnerOrFeeAdmin(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
-  }
-
-  /**
-   * Signs and submits as the pool owner or delegated `feeAdmin`, defaulting `sender` to the
-   * signing wallet.
-   *
-   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
-   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if any parameter is invalid, `sender` differs from the
-   * wallet, or the wallet is neither the owner nor its configured `feeAdmin`
-   * @throws {@link CCIPExecTxRevertedError} if the transaction reverts on-chain
-   * @throws {@link CCTTxFailedError} if submission fails before broadcast
-   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
-   */
-  override async execute(
-    chain: EVMChain,
-    params: EVMExecuteParams<WithdrawFeeTokensParams>,
-  ): Promise<TransactionResult> {
-    const sender = await this.resolveWalletSender(params.wallet, params.sender)
-    return super.execute(chain, { ...params, sender })
   }
 }

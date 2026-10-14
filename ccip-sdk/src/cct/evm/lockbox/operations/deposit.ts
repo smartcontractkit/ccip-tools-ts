@@ -66,10 +66,12 @@ export class DepositToLockbox extends EVMOperation<DepositToLockboxParams> {
   readonly name = 'depositToLockbox'
 
   /** Validates every param before any RPC; a zero `amount` reverts `TokenAmountCannotBeZero`. */
-  protected override validate({ lockbox, token, amount }: DepositToLockboxParams): void {
+  protected override prepare(params: DepositToLockboxParams): DepositToLockboxParams {
+    const { lockbox, token, amount } = params
     validateNonZeroAddress(this.name, 'lockbox', lockbox)
     validateNonZeroAddress(this.name, 'token', token)
     validatePositiveUint256(this.name, 'amount', amount)
+    return params
   }
 
   /**

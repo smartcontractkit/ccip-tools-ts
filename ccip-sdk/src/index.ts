@@ -133,6 +133,7 @@ export {
 
 // errors
 export * from './errors/index.ts'
+export * from './cct/errors.ts'
 
 // chains
 import { AptosChain } from './aptos/index.ts'

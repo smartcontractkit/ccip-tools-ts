@@ -8,14 +8,19 @@
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
  * liquidity layer: the rebalancer and liquidity reads plus the guards the liquidity ops pre-flight
  * with ({@link assertLockReleasePool}, {@link assertPoolRebalancer},
- * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}), and the BurnToAddress burn-address
- * read ({@link readTokenPoolBurnAddress}). The write-side rate-limit shape
- * lane-config ops share lives in `rate-limit.ts`. Mirrors `token/contracts.ts`.
+ * {@link assertLiquidityFunding}, {@link assertPoolLiquidity}), and the siloed pool's per-lane
+ * layer on top of it: the v1.6.x silo reads and guards ({@link assertSiloedLockReleasePool},
+ * {@link assertSiloedChain}, {@link assertSiloRebalancer}, {@link assertSiloLiquidity}) and the
+ * v2.0.0 lane → lockbox reads ({@link readTokenPoolLockboxConfigs},
+ * {@link readTokenPoolSiloedLockbox}), with {@link isTokenPoolRevert} to tell a named pool revert
+ * from any other failure, and the BurnToAddress burn-address read
+ * ({@link readTokenPoolBurnAddress}). The write-side rate-limit shape lane-config ops share lives
+ * in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
 
-import { Interface, ZeroAddress, getAddress } from 'ethers'
+import { Interface, ZeroAddress, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { TokenTransferFeeConfig } from '../../../chain.ts'
@@ -314,7 +319,38 @@ export function assertNonSiloedLockReleasePool(
     poolAddress,
     'LockReleaseTokenPool',
     type,
-    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's escrow against the pool directly",
+    "a siloed pool escrows per remote chain and declares getLockBox(uint64) instead, so it has no single lockbox; read a lane's lockbox with getSiloedLockbox, or all of them with getAllSiloedLockboxConfigs",
+    { context: { operation } },
+  )
+}
+
+/**
+ * Guards a per-lane siloed op: the silo functions (v1.6.x) and the lane → lockbox functions
+ * (v2.0.0) are declared only by `SiloedLockReleaseTokenPool`, so without this the op would hand
+ * another family's {@link Interface} an unknown function name and fail as an opaque ethers error.
+ *
+ * @remarks The siloed counterpart of {@link assertNonSiloedLockReleasePool}. A non-siloed
+ * `LockReleaseTokenPool` gets a pointer to its single-bucket equivalents, since that is the
+ * likeliest mix-up.
+ * @param operation - Operation name, for the error's context.
+ * @param poolAddress - Token pool being acted on.
+ * @param type - Pool type, as resolved by {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if `type` is not `SiloedLockReleaseTokenPool`
+ */
+export function assertSiloedLockReleasePool(
+  operation: string,
+  poolAddress: string,
+  type: TokenPoolType,
+): void {
+  if (type === 'SiloedLockReleaseTokenPool') return
+  throw new CCTContractTypeInvalidError(
+    poolAddress,
+    'SiloedLockReleaseTokenPool',
+    type,
+    `${operation} is a per-lane siloed function, which only SiloedLockReleaseTokenPool declares` +
+      (type === 'LockReleaseTokenPool'
+        ? '; a LockReleaseTokenPool has one bucket for every lane: use getLockbox (v2.0.0) or provideLiquidity / withdrawLiquidity / getRebalancer (v1.5.0–v1.6.1)'
+        : ''),
     { context: { operation } },
   )
 }
@@ -675,7 +711,7 @@ export async function assertPoolOwnerOrFeeAdmin(
  * v2.0.0, so those cases should report the type or version rather than a bare call failure.
  * @remarks On a `SiloedLockReleaseTokenPool` this is the *unsiloed* rebalancer, which is what its
  * plain liquidity entry points gate on; the per-lane `getChainRebalancer(uint64)` governs the
- * siloed ones, which this SDK does not expose.
+ * siloed ones (see {@link readTokenPoolChainRebalancer} and the `getChainRebalancer` op).
  * @param chain - Chain to read from.
  * @param poolAddress - LockRelease pool to read `getRebalancer()` from.
  * @returns The current rebalancer, checksummed; the zero address when none is configured, which
@@ -862,7 +898,11 @@ export async function assertPoolLiquidity(
   if (liquidity >= amount) return
   throw new CCTTxFailedError(
     operation,
-    `pool ${poolAddress} ${describeLiquidity(type, liquidity, token)}, but ${amount} is required; it would revert InsufficientLiquidity`,
+    `pool ${poolAddress} ${describeLiquidity(
+      type,
+      liquidity,
+      token,
+    )}, but ${amount} is required; it would revert InsufficientLiquidity`,
   )
 }
 
@@ -912,6 +952,272 @@ export function describeLiquidity(type: TokenPoolType, liquidity: bigint, token:
 }
 
 /**
+ * Reads a v1.6.x siloed pool's `isSiloed(remoteChainSelector)` in one `eth_call`.
+ *
+ * @remarks Callers must resolve the pool first ({@link assertSiloedLockReleasePool}, plus a
+ * v1.6.x check): the getter is absent from every other family and from v2.0.0. Read against the
+ * v1.6.0 siloed ABI at v1.6.1 too, as {@link readTokenPoolLiquidity} does: the function is
+ * identical there.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns Whether the lane has its own silo; `false` for selector 0 and for unknown lanes.
+ */
+export async function readTokenPoolIsSiloed(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<boolean> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  return resultToObject(await pool.isSiloed(remoteChainSelector))
+}
+
+/**
+ * Reads a pool's `isSupportedChain(remoteChainSelector)` in one `eth_call`.
+ * @remarks Declared on the `TokenPool` base, so any family has it; typed here through the v1.6.0
+ * siloed ABI because its one caller, `updateSiloDesignations`, needs it there.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns Whether the lane is in the pool's supported-chain set (added by `applyChainUpdates`).
+ */
+export async function readTokenPoolIsSupportedChain(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<boolean> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  return resultToObject(await pool.isSupportedChain(remoteChainSelector))
+}
+
+/**
+ * Reads a v1.6.x siloed pool's `getChainRebalancer(remoteChainSelector)` in one `eth_call`: the
+ * account `provideSiloedLiquidity` / `withdrawSiloedLiquidity` accept for that lane.
+ * @remarks Same gating as {@link readTokenPoolIsSiloed}. On an unsiloed lane the pool answers with
+ * its unsiloed rebalancer ({@link readTokenPoolRebalancer}).
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns The rebalancer, checksummed; the zero address when none is set, which means the lane
+ * accepts liquidity calls from nobody.
+ */
+export async function readTokenPoolChainRebalancer(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  return getAddress(resultToObject(await pool.getChainRebalancer(remoteChainSelector)))
+}
+
+/**
+ * Reads a v1.6.x siloed pool's `getAvailableTokens(remoteChainSelector)` in one `eth_call`: the
+ * silo's balance on a siloed lane, the shared unsiloed bucket on any other.
+ * @remarks Same gating as {@link readTokenPoolIsSiloed}. The raw call: it reverts
+ * `InvalidChainSelector` for a lane the pool does not support; test for that with
+ * {@link isTokenPoolRevert}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns The liquidity available to that lane, in the token's smallest unit.
+ */
+export async function readTokenPoolAvailableTokens(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<bigint> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  return resultToObject(await pool.getAvailableTokens(remoteChainSelector))
+}
+
+/**
+ * True when `err` is a pool call that reverted with the custom error `errorName`, as decoded by
+ * the typed contract's ABI.
+ *
+ * @remarks For reads whose revert *is* the answer (`getAvailableTokens` on an unsupported lane,
+ * `getLockBox(uint64)` on an unbound one), so the caller can turn that one case into a typed
+ * error while a transport failure, rate limit or any other revert propagates untouched. Narrower
+ * than `isMissingFunction`, which matches every revert.
+ * @param err - The caught error.
+ * @param errorName - The custom error's name, e.g. `'LockBoxNotConfigured'`.
+ */
+export function isTokenPoolRevert(err: unknown, errorName: string): boolean {
+  // not `isError(...) && ...`: `isError` answers a nullish `err` with that falsy value, not `false`
+  if (!isError(err, 'CALL_EXCEPTION')) return false
+  return err.revert?.name === errorName
+}
+
+/**
+ * Pre-flights that a lane is siloed on a v1.6.x siloed pool, since the per-lane liquidity and
+ * rebalancer writes revert `ChainNotSiloed` otherwise.
+ *
+ * @remarks A property of the pool, not of the caller, so the ops run it with or without a
+ * `sender`. The error names both cures: designate the lane, or use the unsiloed-bucket ops.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` being written to.
+ * @param remoteChainSelector - Lane being acted on.
+ * @throws {@link CCTParamsInvalidError} if the lane is not siloed
+ */
+export async function assertSiloedChain(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<void> {
+  if (await readTokenPoolIsSiloed(chain, poolAddress, remoteChainSelector)) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'remoteChainSelector',
+    `lane ${remoteChainSelector} is not siloed on ${poolAddress}, so it would revert ChainNotSiloed; designate it with updateSiloDesignations, or use provideLiquidity / withdrawLiquidity for the shared unsiloed bucket`,
+  )
+}
+
+/**
+ * Pre-flights `sender` against a lane's `getChainRebalancer(remoteChainSelector)` for a per-lane
+ * liquidity write: the per-lane counterpart of {@link assertPoolRebalancer}.
+ *
+ * @remarks Run after {@link assertSiloedChain}, so the rebalancer read is the silo's own rather
+ * than the unsiloed one the pool falls back to. Neither the owner nor the unsiloed rebalancer may
+ * move a silo's liquidity; the pool reverts `Unauthorized` for both.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` being written to.
+ * @param remoteChainSelector - The siloed lane.
+ * @param sender - The address the tx will be sent from; compared checksummed.
+ * @throws {@link CCTParamsInvalidError} if `sender` is not the silo's rebalancer, or the silo has
+ * none
+ */
+export async function assertSiloRebalancer(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+  sender: string,
+): Promise<void> {
+  const rebalancer = await readTokenPoolChainRebalancer(chain, poolAddress, remoteChainSelector)
+  if (rebalancer !== ZeroAddress && getAddress(sender) === rebalancer) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'sender',
+    rebalancer === ZeroAddress
+      ? `no rebalancer is set for silo ${remoteChainSelector} on ${poolAddress} (revoked via setSiloRebalancer), so it accepts liquidity calls from nobody; the pool owner must appoint one with setSiloRebalancer`
+      : `must be the rebalancer of silo ${remoteChainSelector} (${rebalancer})`,
+  )
+}
+
+/**
+ * Pre-flights a `withdrawSiloedLiquidity` against the silo's own balance
+ * (`getAvailableTokens(remoteChainSelector)`), which is all it can pay out of.
+ *
+ * @remarks Advisory, like {@link assertPoolLiquidity}: every CCIP transfer on the lane moves the
+ * balance, so this catches "withdraw more than the silo was ever given" rather than proving the
+ * amount will still fit when the tx mines.
+ * @remarks Skipped, not failed, when the read reverts `InvalidChainSelector`: the siloed pool does
+ * not override `applyChainUpdates`, so a lane removed from the supported chains stays siloed. Its
+ * balance is then unreadable, yet `withdrawSiloedLiquidity` still pays out of it; draining such a
+ * lane is exactly when this op is needed.
+ * @param operation - Operation name, for the error's `operation` field.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.6.x `SiloedLockReleaseTokenPool` being withdrawn from.
+ * @param remoteChainSelector - The siloed lane.
+ * @param amount - Withdrawal amount, in the token's smallest unit.
+ * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
+ */
+export async function assertSiloLiquidity(
+  operation: string,
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+  amount: bigint,
+): Promise<void> {
+  let token: string, available: bigint
+  try {
+    ;[{ token }, available] = await Promise.all([
+      readTokenPoolToken(chain, poolAddress),
+      readTokenPoolAvailableTokens(chain, poolAddress, remoteChainSelector),
+    ])
+  } catch (err) {
+    if (isTokenPoolRevert(err, 'InvalidChainSelector')) return
+    throw err
+  }
+  if (available >= amount) return
+  throw new CCTTxFailedError(
+    operation,
+    `silo ${remoteChainSelector} on ${poolAddress} holds ${available} of ${token}, but ${amount} is required; it would revert InsufficientLiquidity`,
+  )
+}
+
+/** EVM deployable pool contract types with vendored 2.0.0 creation bytecode. */
+export const DEPLOYABLE_TOKEN_POOL_TYPES = [
+  'BurnMintTokenPool',
+  'BurnFromMintTokenPool',
+  'BurnWithFromMintTokenPool',
+  'BurnToAddressTokenPool',
+  'LockReleaseTokenPool',
+  'SiloedLockReleaseTokenPool',
+] as const satisfies readonly TokenPoolType[]
+
+/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
+export type DeployableTokenPoolType = (typeof DEPLOYABLE_TOKEN_POOL_TYPES)[number]
+
+/** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
+export function isDeployableTokenPoolType(value: string): value is DeployableTokenPoolType {
+  return (DEPLOYABLE_TOKEN_POOL_TYPES as readonly string[]).includes(value)
+}
+
+/**
+ * One lane → lockbox binding of a v2.0.0 `SiloedLockReleaseTokenPool`: the contract's
+ * `LockBoxConfig` struct, with the SDK's `lockbox` casing.
+ */
+export type LockboxConfig = {
+  /** The remote chain whose transfers escrow through {@link lockbox}. */
+  remoteChainSelector: bigint
+  /** The `ERC20LockBox` for that lane, checksummed when read; lanes may share one. */
+  lockbox: string
+}
+
+/**
+ * Reads a v2.0.0 siloed pool's `getAllLockBoxConfigs()` in one `eth_call`.
+ * @remarks Callers must resolve the pool first ({@link assertSiloedLockReleasePool}, plus a
+ * v2.0.0 check): the getter exists only there.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 `SiloedLockReleaseTokenPool` to read.
+ * @returns Every bound lane in the contract's enumeration order, lockboxes checksummed; `[]` when
+ * none is bound.
+ */
+export async function readTokenPoolLockboxConfigs(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<LockboxConfig[]> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const configs = resultToObject(await pool.getAllLockBoxConfigs())
+  return configs.map((config) => ({
+    remoteChainSelector: config.remoteChainSelector,
+    lockbox: getAddress(config.lockBox),
+  }))
+}
+
+/**
+ * Reads a v2.0.0 siloed pool's `getLockBox(remoteChainSelector)` in one `eth_call`: the lockbox
+ * that lane's transfers escrow through.
+ * @remarks Same gating as {@link readTokenPoolLockboxConfigs}. The raw call: it reverts
+ * `LockBoxNotConfigured` for an unbound lane; test for that with {@link isTokenPoolRevert}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 `SiloedLockReleaseTokenPool` to read.
+ * @param remoteChainSelector - Lane to ask about.
+ * @returns The lane's lockbox, checksummed.
+ */
+export async function readTokenPoolSiloedLockbox(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<string> {
+  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  return getAddress(resultToObject(await pool.getLockBox(remoteChainSelector)))
+}
+
+/**
  * Deploy artifact per deployable pool type (2.0.0 only; pre-2.0.0 bytecode is not vendored). The
  * keys define the deployable set ({@link DeployableTokenPoolType}).
  * - `contract` is the compiled name verification needs: `BurnToAddressTokenPool` compiles as
@@ -950,15 +1256,7 @@ const TOKEN_POOL_DEPLOY_ARTIFACTS = {
     iface: getTokenPoolInterface('SiloedLockReleaseTokenPool', TokenPoolVersion.V2_0_0),
     bytecode: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
   },
-} satisfies Partial<Record<TokenPoolType, DeployArtifact>>
-
-/** A pool contract type that can be deployed (has vendored 2.0.0 creation bytecode). */
-export type DeployableTokenPoolType = keyof typeof TOKEN_POOL_DEPLOY_ARTIFACTS
-
-/** Type guard for {@link DeployableTokenPoolType} (has vendored 2.0.0 creation bytecode). */
-export function isDeployableTokenPoolType(type: string): type is DeployableTokenPoolType {
-  return Object.hasOwn(TOKEN_POOL_DEPLOY_ARTIFACTS, type)
-}
+} satisfies Record<DeployableTokenPoolType, DeployArtifact>
 
 /**
  * Deploy artifact for a deployable pool `type` (v2.0.0): the compiled contract name, the cached
