@@ -7,23 +7,16 @@
  */
 
 import type { EVMChain } from '../../../../evm/index.ts'
-import { CCTContractTypeInvalidError, CCTOperationUnsupportedError } from '../../../errors.ts'
+import { CCTContractTypeInvalidError } from '../../../errors.ts'
 import { EVMQuery } from '../../query.ts'
 import { validateAddress } from '../../validate.ts'
-import { TokenPoolVersion, readTokenPoolBurnAddress, resolveTokenPool } from '../contracts.ts'
+import { readTokenPoolBurnAddress, resolveTokenPool } from '../contracts.ts'
 
 /** Parameters for {@link GetBurnAddress}. */
 export type GetBurnAddressParams = {
   /** BurnToAddress pool to read. */
   poolAddress: string
 }
-
-/** Versions BurnToAddress shipped at; `getBurnAddress()` is the same view on each. */
-const BURN_TO_ADDRESS_VERSIONS: readonly TokenPoolVersion[] = [
-  TokenPoolVersion.V1_5_1,
-  TokenPoolVersion.V1_6_1,
-  TokenPoolVersion.V2_0_0,
-]
 
 /** Result of {@link GetBurnAddress}: the burn address, checksummed. */
 export type GetBurnAddressResult = string
@@ -48,14 +41,14 @@ export class GetBurnAddress extends EVMQuery<GetBurnAddressParams, GetBurnAddres
    * Resolves the pool's type/version before the read, so any other pool reports why instead of a
    * bare call failure on a getter it does not declare.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `BurnToAddressTokenPool`
-   * @throws {@link CCTOperationUnsupportedError} on a version BurnToAddress never shipped at (1.5.0)
-   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports a version BurnToAddress
+   * never shipped at (1.5.0, or an unknown one)
    */
   protected async read(
     chain: EVMChain,
     { poolAddress }: GetBurnAddressParams,
   ): Promise<GetBurnAddressResult> {
-    const { type, version } = await resolveTokenPool(chain, poolAddress)
+    const { type } = await resolveTokenPool(chain, poolAddress)
     if (type !== 'BurnToAddressTokenPool')
       throw new CCTContractTypeInvalidError(
         poolAddress,
@@ -64,8 +57,6 @@ export class GetBurnAddress extends EVMQuery<GetBurnAddressParams, GetBurnAddres
         `${this.name} reads getBurnAddress(), which only BurnToAddress pools declare`,
         { context: { operation: this.name } },
       )
-    if (!BURN_TO_ADDRESS_VERSIONS.includes(version))
-      throw new CCTOperationUnsupportedError(this.name, version)
     return readTokenPoolBurnAddress(chain, poolAddress)
   }
 }

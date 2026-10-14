@@ -2501,9 +2501,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * confirms a deployed pool burns to the address intended.
    * @returns The burn address, checksummed.
    * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a `BurnToAddressTokenPool`
-   * @throws {@link CCTOperationUnsupportedError} on a version BurnToAddress never shipped at (1.5.0)
    * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
-   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports a version BurnToAddress
+   * never shipped at (1.5.0, or an unknown one)
    * @example
    * ```typescript
    * const burnAddress = await cct.getBurnAddress({ poolAddress: '0xPool...' })

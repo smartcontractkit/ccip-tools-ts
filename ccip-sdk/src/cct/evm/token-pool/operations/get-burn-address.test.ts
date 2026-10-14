@@ -7,7 +7,7 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
 import {
   CCTContractTypeInvalidError,
-  CCTOperationUnsupportedError,
+  CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
 import { GetBurnAddress } from './get-burn-address.ts'
@@ -108,9 +108,7 @@ describe('GetBurnAddress (cct/evm)', () => {
     await assert.rejects(
       () => op.query(stubChain({ version: '1.5.0', seen }), { poolAddress: POOL }),
       (err: unknown) =>
-        err instanceof CCTOperationUnsupportedError &&
-        err.context.operation === 'getBurnAddress' &&
-        err.context.version === '1.5.0',
+        err instanceof CCTContractVersionUnsupportedError && err.context.version === '1.5.0',
     )
     assert.deepEqual(seen.calls, ['typeAndVersion'])
   })
