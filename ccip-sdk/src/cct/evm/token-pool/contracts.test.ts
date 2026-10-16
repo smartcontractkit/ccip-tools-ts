@@ -60,6 +60,7 @@ describe('pool types', () => {
       'BurnFromMintTokenPool',
       'BurnWithFromMintTokenPool',
       'BurnToAddressTokenPool',
+      'BurnMintWithLockReleaseFlagTokenPool',
       'LockReleaseTokenPool',
       'SiloedLockReleaseTokenPool',
     ])
@@ -67,7 +68,8 @@ describe('pool types', () => {
       assert.equal(isDeployableTokenPoolType(type), true)
       assert.match(getTokenPoolArtifact(type).bytecode, /^0x/)
     }
-    assert.equal(isDeployableTokenPoolType('BurnMintWithLockReleaseFlagTokenPool'), false)
+    assert.equal(isDeployableTokenPoolType('BurnMintWithLockReleaseFlagTokenPool'), true)
+    assert.equal(isDeployableTokenPoolType('UpgradeableLockReleaseTokenPool'), false)
   })
 
   it('isTokenPoolType accepts burn-family + lock-release, rejects others', () => {
@@ -285,6 +287,29 @@ describe('parseTokenPoolVersion', () => {
     )
   })
 
+  it('gates BurnMintWithLockReleaseFlagTokenPool on 2.0.0, the only version that ships it by name', () => {
+    assert.deepEqual(
+      parseTokenPoolVersion({
+        address: ADDR,
+        contractType: 'BurnMintWithLockReleaseFlagTokenPool',
+        version: '2.0.0',
+      }),
+      { type: 'BurnMintWithLockReleaseFlagTokenPool', version: TokenPoolVersion.V2_0_0 },
+    )
+    for (const version of ['1.5.1', '1.6.1'])
+      assert.throws(
+        () =>
+          parseTokenPoolVersion({
+            address: ADDR,
+            contractType: 'BurnMintWithLockReleaseFlagTokenPool',
+            version,
+          }),
+        (error: unknown) =>
+          error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
+        version,
+      )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
@@ -308,12 +333,13 @@ describe('TOKEN_POOL_INTERFACES', () => {
     for (const type of [
       'BurnMintTokenPool',
       'BurnWithFromMintTokenPool',
-      'BurnMintWithLockReleaseFlagTokenPool',
       'LockReleaseTokenPool',
     ] as const)
       assert.deepEqual(versions(type), ['1.5.0', '1.5.1', '1.6.1', '2.0.0'], type)
     assert.deepEqual(versions('BurnFromMintTokenPool'), ['1.5.1', '1.6.1', '2.0.0'])
     assert.deepEqual(versions('BurnToAddressTokenPool'), ['1.5.1', '1.6.1', '2.0.0'])
+    // only 2.0.0 ships it under its own name; its 1.6.1 bytecode reports BurnMintTokenPool 1.6.1
+    assert.deepEqual(versions('BurnMintWithLockReleaseFlagTokenPool'), ['2.0.0'])
     assert.deepEqual(versions('SiloedLockReleaseTokenPool'), ['1.6.0', '1.6.1', '2.0.0'])
   })
 
@@ -326,9 +352,12 @@ describe('TOKEN_POOL_INTERFACES', () => {
       const burnMint = TOKEN_POOL_INTERFACES.BurnMintTokenPool[version]
       assert.equal(TOKEN_POOL_INTERFACES.BurnFromMintTokenPool[version], burnMint, version)
       assert.equal(TOKEN_POOL_INTERFACES.BurnWithFromMintTokenPool[version], burnMint, version)
-      assert.equal(TOKEN_POOL_INTERFACES.BurnMintWithLockReleaseFlagTokenPool[version], burnMint)
       assert.notEqual(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool[version], burnMint, version)
     }
+    assert.equal(
+      TOKEN_POOL_INTERFACES.BurnMintWithLockReleaseFlagTokenPool[TokenPoolVersion.V2_0_0],
+      TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+    )
   })
 
   it('resolves distinct Interfaces per family at the same version', () => {
