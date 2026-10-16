@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnToAddressTokenPool` v2.0.0 and `getBurnAddress` reads its burn address
-- CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0; versions below 2.0.0 are rejected with `CCTContractVersionUnsupportedError`
+- CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0
 
 ## [1.16.0] - 2026-10-09
 
