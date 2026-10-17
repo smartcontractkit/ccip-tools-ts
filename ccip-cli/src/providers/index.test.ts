@@ -69,8 +69,8 @@ function makeCtx(): [Ctx, AbortController] {
   return [
     {
       abort: ac.signal,
-      output: { write: () => {}, table: () => {} },
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      output: { write: () => { }, table: () => { } },
+      logger: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
     },
     ac,
   ]
@@ -207,8 +207,8 @@ describe('fetchChainsFromRpcs', () => {
     const ac = new AbortController()
     const ctx: Ctx = {
       abort: ac.signal,
-      output: { write: () => {}, table: () => {} },
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      output: { write: () => { }, table: () => { } },
+      logger: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
     }
     const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeEvmChain })
     try {
@@ -656,6 +656,12 @@ describe('isCantonLedgerUrl', () => {
   it('matches Canton JSON Ledger API paths', () => {
     assert.ok(isCantonLedgerUrl('https://testnet.cv1.bcy-v.metalhosts.com/api/json'))
     assert.ok(isCantonLedgerUrl('http://localhost:7575'))
+  })
+
+  it('matches any URL mentioning canton (custom gateways)', () => {
+    assert.ok(isCantonLedgerUrl('https://gateway.example.com/canton-mainnet/gw'))
+    assert.ok(isCantonLedgerUrl('https://CANTON-ledger.example.com'))
+    assert.ok(isCantonLedgerUrl('https://provider.canton.example.com/'))
   })
 
   it('does not match EVM JSON-RPC URLs', () => {
