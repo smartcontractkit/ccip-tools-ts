@@ -95,7 +95,7 @@ const SUI_TESTNET_RPC = await raceRpcEndpoint('RPC_SUI_TESTNET', suiTestnetHealt
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
-describe('SuiChain integration (sui-testnet)', { skip: true }, () => {
+describe('SuiChain integration (sui-testnet)', { skip: skip || true }, () => {
   let chain: SuiChain
   before(async () => {
     chain = await SuiChain.fromUrl(SUI_TESTNET_RPC)
@@ -481,7 +481,7 @@ describe('SuiChain integration (sui-testnet)', { skip: true }, () => {
   })
 })
 
-describe('Sui failed execution detection integration (sui-testnet)', { skip: true }, () => {
+describe('Sui failed execution detection integration (sui-testnet)', { skip: skip || true }, () => {
   // A live message (bsc-testnet → sui, seq 572) whose first attempt SUCCEEDED
   // (tx 8gNPcma…, cp 303_556_303, minted) and whose later duplicate
   // manually_init_execute aborted unwrapping the empty ReceiverParams hot
