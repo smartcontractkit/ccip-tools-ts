@@ -2,7 +2,7 @@
  * Shared internals of the three remote-pool write ops — `setRemotePool` (v1.5.0),
  * `addRemotePool` and `removeRemotePool` (v1.5.1+): the parameter shape they have in common,
  * `remotePoolAddress` parsing and encoding, and the per-lane membership read the add/remove
- * preconditions are checked against. The owner gate itself is `assertPoolOwner` in `../contracts.ts`,
+ * preconditions are checked against. The owner check itself is `checkPoolOwner` in `../contracts.ts`,
  * shared with every other owner-gated pool write.
  *
  * @packageDocumentation

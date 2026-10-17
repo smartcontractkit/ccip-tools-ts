@@ -14,11 +14,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateArray, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwnerOrFeeAdmin,
+  checkPoolOwnerOrFeeAdmin,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -68,8 +69,6 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
    * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `sender` is supplied and is neither the pool owner
-   * nor its configured `feeAdmin`
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -77,8 +76,19 @@ export class WithdrawFeeTokens extends EVMOperation<WithdrawFeeTokensParams> {
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    if (params.sender !== undefined)
-      await assertPoolOwnerOrFeeAdmin(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner or its delegated `feeAdmin`.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this `feeAdmin` with
+   * `setDynamicConfig` in an earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: WithdrawFeeTokensParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwnerOrFeeAdmin(chain, params.poolAddress, params.sender))
   }
 }

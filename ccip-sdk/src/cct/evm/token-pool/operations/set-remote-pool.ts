@@ -16,10 +16,11 @@ import type { Interface } from 'ethers'
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { encodeAddressToAny } from '../../../../utils.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -82,7 +83,6 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
    * pool, then encodes the call. No membership precondition: this call replaces whatever the lane
    * held, so there is nothing to check it against.
    * @throws {@link CCTOperationUnsupportedError} if the pool is v1.5.1 or newer
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -91,9 +91,20 @@ export class SetRemotePool extends EVMOperation<SetRemotePoolParams, ParsedSetRe
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     // resolved before any further RPC, so an unsupported version fails on one call
     const encode = resolveEncoder(this.encoders, version, this.name)
-    // owner-gated on-chain; surface it as a param error here instead of an on-chain revert
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
     return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner — the call is owner-gated on-chain, so
+   * report it here instead of letting it revert once signed.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: ParsedSetRemotePoolParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 }

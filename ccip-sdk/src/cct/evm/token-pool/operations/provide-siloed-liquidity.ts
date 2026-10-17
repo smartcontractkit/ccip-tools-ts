@@ -12,7 +12,7 @@
  *
  * @remarks The deposit is a `transferFrom` on the rebalancer, so the tokens must be **approved to
  * the pool** first, exactly as for {@link ProvideLiquidity}; pre-flighted the same way
- * ({@link assertLiquidityFunding}).
+ * ({@link checkLiquidityFunding}).
  *
  * @remarks **Removed in v2.0.0**, where a siloed pool escrows through a per-lane `ERC20LockBox`
  * instead (see {@link ConfigureSiloedLockboxes}).
@@ -24,16 +24,16 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertLiquidityFunding,
-  assertSiloRebalancer,
-  assertSiloedChain,
   assertSiloedLockReleasePool,
+  checkLiquidityFunding,
+  checkSiloRebalancer,
+  checkSiloedChain,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -105,49 +105,58 @@ export class ProvideSiloedLiquidity extends EVMOperation<ProvideSiloedLiquidityP
   }
 
   /**
-   * Resolves the pool's type/version, floor-matches the encoder, confirms the lane is siloed,
-   * then that `sender` (when given) is the silo's rebalancer and can fund the deposit.
-   * @remarks The lane check is a property of the pool, not of the caller, so it runs with or
-   * without `sender`, and first: on an unsiloed lane `getChainRebalancer` would answer with the
-   * unsiloed rebalancer, and the sender check would pass or fail for the wrong reason.
-   * @remarks The checks live here, not in {@link execute}, so the offline / multisig path gets
-   * them too. The funding check needs a depositor, so it runs only with a `sender`.
+   * Resolves the pool's type/version and floor-matches the encoder.
+   * @remarks The lane, rebalancer and funding requirements are reported by
+   * {@link ProvideSiloedLiquidity.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through per-lane
    * lockboxes instead
-   * @throws {@link CCTParamsInvalidError} if the lane is not siloed, or `sender` is given and is
-   * not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if `sender` holds, or has approved the pool for, less than
-   * `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: ProvideSiloedLiquidityParams,
   ): Promise<UnsignedEVMTx> {
-    const { poolAddress, remoteChainSelector, amount, sender } = params
-    const { type, version } = await resolveTokenPool(chain, poolAddress)
-    assertSiloedLockReleasePool(this.name, poolAddress, type)
+    const { type, version } = await resolveTokenPool(chain, params.poolAddress)
+    assertSiloedLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    return encode(getTokenPoolInterface(type, version), params)
+  }
 
-    await assertSiloedChain(this.name, chain, poolAddress, remoteChainSelector)
-    if (sender !== undefined) {
-      await assertSiloRebalancer(this.name, chain, poolAddress, remoteChainSelector, sender)
-      await assertLiquidityFunding(this.name, chain, poolAddress, sender, amount)
-    }
-    return unsigned
+  /**
+   * Confirms the lane is siloed, then that `sender` (when given) is the silo's rebalancer and
+   * holds, and has approved the pool for, the deposit.
+   * @remarks All reported rather than thrown outright: `updateSiloDesignations →
+   * approveToken → provideSiloedLiquidity` is one plan. The lane check is a property of the pool,
+   * so it runs with or without `sender`; the rebalancer is read only once it passes, since on an
+   * unsiloed lane `getChainRebalancer` answers with the unsiloed rebalancer and the check would
+   * pass or fail for the wrong reason. The funding check needs a depositor, so it runs only with a
+   * `sender`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { poolAddress, remoteChainSelector, amount, sender }: ProvideSiloedLiquidityParams,
+  ): Promise<PreconditionError[]> {
+    const [siloed, funding] = await Promise.all([
+      checkSiloedChain(chain, poolAddress, remoteChainSelector),
+      sender === undefined ? undefined : checkLiquidityFunding(chain, poolAddress, sender, amount),
+    ])
+    const rebalancer =
+      siloed || sender === undefined
+        ? undefined
+        : await checkSiloRebalancer(chain, poolAddress, remoteChainSelector, sender)
+    return unmet(siloed, rebalancer, funding)
   }
 
   /**
    * Signs and submits as the silo's rebalancer, defaulting `sender` to the signing wallet: the
-   * only address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx. See
+   * only address that can satisfy {@link preconditions}' rebalancer check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the wallet's address,
    * or the wallet is not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if the wallet's balance or its allowance to the pool is
+   * @throws {@link CCTPreconditionError} if the wallet's balance or its allowance to the pool is
    * below `amount`
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
    */
