@@ -43,6 +43,8 @@ type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'c
  * Used to avoid racing every `--rpc` against every chain family.
  */
 export function isCantonLedgerUrl(url: string): boolean {
+  // custom gateways: any URL mentioning canton is treated as a ledger endpoint
+  if (/canton/i.test(url)) return true
   try {
     const { pathname, port } = new URL(url)
     if (/\/api\/json\/?$/i.test(pathname)) return true
