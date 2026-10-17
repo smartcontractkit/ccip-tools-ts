@@ -658,6 +658,12 @@ describe('isCantonLedgerUrl', () => {
     assert.ok(isCantonLedgerUrl('http://localhost:7575'))
   })
 
+  it('matches any URL mentioning canton (custom gateways)', () => {
+    assert.ok(isCantonLedgerUrl('https://gateway.example.com/canton-mainnet/gw'))
+    assert.ok(isCantonLedgerUrl('https://CANTON-ledger.example.com'))
+    assert.ok(isCantonLedgerUrl('https://provider.canton.example.com/'))
+  })
+
   it('does not match EVM JSON-RPC URLs', () => {
     assert.ok(!isCantonLedgerUrl('https://ethereum-sepolia-rpc.publicnode.com'))
     assert.ok(!isCantonLedgerUrl('https://sepolia.gateway.tenderly.co'))

@@ -10,14 +10,19 @@ import { createPublicClient, http } from 'viem'
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
 import '../solana/index.ts' // register Solana chain family for cross-family message decoding
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
 import { type ExecutionInput, ExecutionState, MessageStatus } from '../types.ts'
 import { interfaces } from './const.ts'
-import { FUJI_TO_SEPOLIA, SOLANA_DEVNET_TO_SEPOLIA, TON_TO_SEPOLIA } from './fork.test.data.ts'
+import {
+  FUJI_TO_SEPOLIA,
+  SEPOLIA_TO_FUJI,
+  SOLANA_DEVNET_TO_SEPOLIA,
+  TON_TO_SEPOLIA,
+} from './fork.test.data.ts'
 import { ViemTransportProvider } from './viem/client-adapter.ts'
 import { EVMChain } from './index.ts'
 
@@ -27,15 +32,12 @@ await useResource(['sepolia', 'fuji', 'arbitrum-sepolia', 'api'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 
-const ARB_SEP_RPC = rpcEndpoint('RPC_ARBITRUM_SEPOLIA')
 const ARB_SEP_CHAIN_ID = 421614
 
 // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
@@ -99,6 +101,50 @@ const EXEC_TEST_MSG = FUJI_TO_SEPOLIA.find(
 )!
 const SOURCE_TX_HASH = EXEC_TEST_MSG.txHash
 const MESSAGE_ID = EXEC_TEST_MSG.messageId
+
+// ── Fork upstreams ──
+
+// Raced per chain (see raceRpcEndpoint): CI's shared egress IP trips public
+// endpoints' keyless quotas run-to-run, and a throttled fork upstream 429s the
+// fork mid-test no matter how patiently anvil retries each request. The probes
+// replay what the tests consume, so a pruned or chain-mismatched endpoint never
+// binds the suite.
+async function jsonRpcProbe(url: string, method: string, params: unknown[]): Promise<unknown> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(20_000),
+  })
+  const { result } = (await res.json()) as { result?: unknown }
+  return result
+}
+
+const receiptProbe =
+  (txHash: string) =>
+  async (url: string): Promise<boolean> =>
+    // A null receipt means the endpoint pruned the fixture's history
+    !!(
+      (await jsonRpcProbe(url, 'eth_getTransactionReceipt', [txHash])) as {
+        transactionHash?: string
+      } | null
+    )?.transactionHash
+
+const SEPOLIA_RPC = await raceRpcEndpoint('RPC_SEPOLIA', receiptProbe(SEPOLIA_TO_FUJI[0]!.txHash))
+// Fuji fork tests replay SOURCE_TX_HASH (a months-old Fuji tx) on the fork, so
+// the upstream must be archival — most public Fuji endpoints prune that.
+const FUJI_RPC = await raceRpcEndpoint('RPC_FUJI', receiptProbe(SOURCE_TX_HASH))
+const ARB_SEP_RPC = await raceRpcEndpoint(
+  'RPC_ARBITRUM_SEPOLIA',
+  async (url) =>
+    // The Arb-Sep fork only serves sends/lane reads at the fork tip, so a live
+    // latest block is all it needs to represent.
+    !!(
+      (await jsonRpcProbe(url, 'eth_getBlockByNumber', ['latest', false])) as {
+        number?: string
+      } | null
+    )?.number,
+)
 // Arb-Sep → Fuji v2.0.0 message that FAILED on-chain due to intentional OOG
 // (ccipReceive gasLimit=100). CCV verification is COMPLETED so the message is
 // readyForManualExecution — re-executing it on a Fuji fork with a higher
@@ -189,14 +235,16 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
 
   before(async () => {
     // Fork-resilience options: anvil fetches historical blocks/state from the upstream
-    // RPC lazily, and public endpoints intermittently return 408/timeout under that load.
-    // Wait longer per request and retry timed-out ones with backoff, so a transient
-    // upstream error doesn't fail a fork mid-test. (Leave anvil's rate limiter on —
-    // disabling it floods the upstream and gets the fork throttled at startup.)
+    // RPC lazily, and the keyless archival upstreams (Cloudflare-fronted) rate-limit
+    // CI's shared egress in windows lasting minutes — longer than the previous budget
+    // (8 retries × 1s backoff, 60s cap) let a single forked request ride out, so the
+    // fork 429'd mid-test. Roughly double the budget: ~16 retries over up to 90s.
+    // (Leave anvil's rate limiter on — disabling it floods the upstream and gets the
+    // fork throttled at startup.)
     const forkOpts = {
-      retries: 8,
-      timeout: 60_000,
-      forkRetryBackoff: 1_000,
+      retries: 16,
+      timeout: 90_000,
+      forkRetryBackoff: 2_000,
     } as const
     // Pass {} as prool options so no startup timer is set on the Instance.
     // Without the second arg, prool extracts timeout from the first arg (Anvil CLI params),
