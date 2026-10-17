@@ -60,11 +60,25 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     // chainId, and drpc's pattern (wins the race, then fails half of every
     // batched eth_call with empty revert data — seen on its bsc endpoint)
     // breaks the show/lane e2e suites the same way (observed 2026-09).
-    'https://rpc.sepolia.ethpandaops.io,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia',
+    // publicnode trails: healthy but pruned (no months-old fixture receipts),
+    // so the fork suite's retention probe skips it in favor of the archival
+    // three.
+    'https://rpc.sepolia.ethpandaops.io,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia,https://ethereum-sepolia-rpc.publicnode.com',
   RPC_BASE_SEPOLIA: 'https://gateway.tenderly.co/public/base-sepolia,https://sepolia.base.org',
-  RPC_ARBITRUM_SEPOLIA: 'https://sepolia-rollup.arbitrum.io/rpc',
+  RPC_ARBITRUM_SEPOLIA:
+    // Official rollup RPC leads; publicnode and tenderly are healthy keyless
+    // fallbacks (the lone endpoint 429'd CI's shared egress for entire runs —
+    // observed 2026-10 in the evm fork suite).
+    'https://sepolia-rollup.arbitrum.io/rpc,https://arbitrum-sepolia-rpc.publicnode.com,https://arbitrum-sepolia.gateway.tenderly.co',
   RPC_OPTIMISM_SEPOLIA: 'https://gateway.tenderly.co/public/optimism-sepolia',
-  RPC_FUJI: 'https://api.avax-test.network/ext/bc/C/rpc',
+  RPC_FUJI:
+    // The official endpoint and thirdweb are the only keyless ARCHIVAL Fuji
+    // RPCs found (the evm fork suite replays months-old fixture receipts on
+    // it; publicnode is pruned, ankr now keys, omniatech is dead — checked
+    // 2026-10). Both throttle CI's shared egress for stretches, so publicnode
+    // trails as a live but pruned fallback for latest-state consumers; the
+    // fork suite's retention probe skips it.
+    'https://api.avax-test.network/ext/bc/C/rpc,https://43113.rpc.thirdweb.com,https://avalanche-fuji-c-chain-rpc.publicnode.com',
   RPC_BSC_TESTNET: [
     // NodeReal's public demo endpoint is the only one found that serves a full
     // ~10k-block eth_getLogs here; BNB Chain's own data seeds answer
