@@ -69,8 +69,8 @@ function makeCtx(): [Ctx, AbortController] {
   return [
     {
       abort: ac.signal,
-      output: { write: () => { }, table: () => { } },
-      logger: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
+      output: { write: () => {}, table: () => {} },
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     },
     ac,
   ]
@@ -207,8 +207,8 @@ describe('fetchChainsFromRpcs', () => {
     const ac = new AbortController()
     const ctx: Ctx = {
       abort: ac.signal,
-      output: { write: () => { }, table: () => { } },
-      logger: { debug: () => { }, info: () => { }, warn: () => { }, error: () => { } },
+      output: { write: () => {}, table: () => {} },
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     }
     const restore = setupSupportedChains({ [ChainFamily.EVM]: FakeEvmChain })
     try {
