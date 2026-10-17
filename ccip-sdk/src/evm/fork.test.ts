@@ -149,6 +149,12 @@ function isAnvilAvailable(): boolean {
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isAnvilAvailable()
 
+// The four execute tests below drive real failed messages on live-forked RPCs
+// and the staging CCIP API; CI's shared egress hits those upstreams as 429s /
+// missing revert data / fork transport failures (run 39058311489). Gate them to
+// local/manual runs, where the same upstreams behave.
+const skipInCi = process.env.CI ? 'CI fork upstream rate-limiting (run 39058311489)' : false
+
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
@@ -430,7 +436,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
   describe('execute', () => {
     it(
       'should manually execute a failed v1.6 message (Fuji -> Sepolia)',
-      { timeout: 120_000 },
+      { timeout: 120_000, skip: skipInCi },
       async () => {
         assert.ok(fujiChain, 'source chain should be initialized')
         assert.ok(sepoliaChain, 'dest chain should be initialized')
@@ -495,53 +501,62 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       },
     )
 
-    it('should execute via getExecutionInput (Fuji -> Sepolia)', { timeout: 120_000 }, async () => {
-      assert.ok(fujiChain, 'source chain should be initialized')
-      assert.ok(sepoliaChain, 'dest chain should be initialized')
+    it(
+      'should execute via getExecutionInput (Fuji -> Sepolia)',
+      { timeout: 120_000, skip: skipInCi },
+      async () => {
+        assert.ok(fujiChain, 'source chain should be initialized')
+        assert.ok(sepoliaChain, 'dest chain should be initialized')
 
-      // 1. Get source transaction and extract CCIPRequest
-      const tx = await fujiChain.getTransaction(EXEC_INPUT_TEST_MSG.txHash)
-      const requests = await fujiChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === EXEC_INPUT_TEST_MSG.messageId)!
-      assert.ok(request, 'should find the expected message')
+        // 1. Get source transaction and extract CCIPRequest
+        const tx = await fujiChain.getTransaction(EXEC_INPUT_TEST_MSG.txHash)
+        const requests = await fujiChain.getMessagesInTx(tx)
+        const request = requests.find((r) => r.message.messageId === EXEC_INPUT_TEST_MSG.messageId)!
+        assert.ok(request, 'should find the expected message')
 
-      // 2. Discover OffRamp on destination chain
-      const offRamp = await discoverOffRamp(fujiChain, sepoliaChain, request.lane.onRamp, fujiChain)
-      assert.ok(offRamp, 'offRamp should be discovered')
+        // 2. Discover OffRamp on destination chain
+        const offRamp = await discoverOffRamp(
+          fujiChain,
+          sepoliaChain,
+          request.lane.onRamp,
+          fujiChain,
+        )
+        assert.ok(offRamp, 'offRamp should be discovered')
 
-      // 3. Get verifications from destination chain
-      const verifications = await sepoliaChain.getVerifications({ offRamp, request })
+        // 3. Get verifications from destination chain
+        const verifications = await sepoliaChain.getVerifications({ offRamp, request })
 
-      // 4. Build execution input via getExecutionInput (replaces manual proof + offchain steps)
-      const input = await fujiChain.getExecutionInput({ request, verifications })
+        // 4. Build execution input via getExecutionInput (replaces manual proof + offchain steps)
+        const input = await fujiChain.getExecutionInput({ request, verifications })
 
-      // 5. Execute on destination
-      const execution = await sepoliaChain.execute({
-        offRamp,
-        input,
-        wallet,
-        gasLimit: 500_000,
-      })
+        // 5. Execute on destination
+        const execution = await sepoliaChain.execute({
+          offRamp,
+          input,
+          wallet,
+          gasLimit: 500_000,
+        })
 
-      console.log(
-        `  executed ${EXEC_INPUT_TEST_MSG.messageId.slice(0, 10)}… → state=${execution.receipt.state}`,
-      )
-      assert.equal(
-        execution.receipt.messageId,
-        EXEC_INPUT_TEST_MSG.messageId,
-        'receipt messageId should match',
-      )
-      assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-      assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-      assert.ok(
-        execution.receipt.state === ExecutionState.Success,
-        'execution state should be Success',
-      )
-    })
+        console.log(
+          `  executed ${EXEC_INPUT_TEST_MSG.messageId.slice(0, 10)}… → state=${execution.receipt.state}`,
+        )
+        assert.equal(
+          execution.receipt.messageId,
+          EXEC_INPUT_TEST_MSG.messageId,
+          'receipt messageId should match',
+        )
+        assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+        assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
+        assert.ok(
+          execution.receipt.state === ExecutionState.Success,
+          'execution state should be Success',
+        )
+      },
+    )
 
     it(
       'should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)',
-      { timeout: 120_000 },
+      { timeout: 120_000, skip: skipInCi },
       async () => {
         assert.ok(fujiInstance, 'fuji anvil should be running')
 
@@ -579,7 +594,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
 
     it(
       'should execute a v1.5 message via API-driven path (Sepolia -> Fuji)',
-      { timeout: 120_000 },
+      { timeout: 120_000, skip: skipInCi },
       async () => {
         assert.ok(fujiInstance, 'fuji anvil should be running')
 
