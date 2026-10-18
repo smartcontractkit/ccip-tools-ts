@@ -41,7 +41,7 @@ The `send` command constructs and submits a CCIP message to transfer data and/or
 | ------------------- | ------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--receiver`        | `--to` | string   | -       | Receiver address on destination. Defaults to sender if same chain family. Required for cross-family transfers.                                                                                                                                                        |
 | `--data`            | -      | string   | -       | Message data payload. Hex byte arrays (`0x...`) and base64 strings are decoded as raw bytes. Prefix with `0x:` to ABI-encode as a Solidity `string` (e.g., `--data "0x:hello"` produces `abi.encode(["string"], ["hello"])`). All other values are raw UTF-8 encoded. |
-| `--transfer-tokens` | `-t`   | string[] | -       | Token transfers as `token=amount`. See [Token Amount Format](#token-amount-format).                                                                                                                                                                                   |
+| `--transfer-tokens` | `-t`   | string[] | -       | Token transfers as `token=amount[:srcDecimals[:destDecimals]]`. See [Token Amount Format](#token-amount-format).                                                                                                                                                      |
 | `--fee-token`       | -      | string   | Native  | Fee token address or symbol (e.g., `LINK`). Omit to pay in native token.                                                                                                                                                                                              |
 
 ### Gas & Execution
@@ -128,6 +128,23 @@ The `--transfer-tokens` / `-t` option accepts `token=amount` pairs. The CLI conv
 # By symbol (if resolvable on source chain)
 -t USDC=100
 ```
+
+### Tokens without `decimals()` {#tokens-without-decimals}
+
+`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. When the token doesn't, the CLI resolves its decimals from the token pool's `getTokenDecimals()` (pool v1.5.1+) — the same value the pool itself uses for its conversion — so a plain `token=amount` usually just works. Only when neither the token nor its pool can declare them (e.g. a v1.5.0 pool) do you pass them explicitly, as `token=amount:srcDecimals[:destDecimals]`:
+
+```bash
+# source token has no decimals() and its pool can't declare them either
+-t 0xTokenAddress=0.001:18
+
+# declare both sides (destination token also lacks decimals())
+-t 0xTokenAddress=0.001:18:6
+
+# empty value = "not given" for that side: source resolves on-chain, dest is 6
+-t 0xTokenAddress=0.001::6
+```
+
+Explicit decimals must be integers in `0..36`. The destination side is only needed when the destination token (and its pool) also cannot declare them.
 
 ## Gas Limit Behavior
 

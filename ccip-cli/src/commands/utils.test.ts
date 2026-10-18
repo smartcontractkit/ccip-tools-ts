@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  type Chain,
+  CCIPArgumentInvalidError,
   CCIPChainNotFoundError,
   CCIPCommitNotFoundError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPUsdcAttestationError,
   ChainFamily,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -12,6 +15,7 @@ import {
   formatCCIPError,
   formatDisplayAddress,
   formatDisplayTxHash,
+  parseTokenAmounts,
   prettyFormat,
   yieldResolved,
 } from './utils.ts'
@@ -183,5 +187,113 @@ describe('yieldResolved', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     await assert.rejects(gen.next(), err)
+  })
+})
+
+describe('parseTokenAmounts', () => {
+  const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
+  const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+  const POOL = '0x8Cd7D9088e82eE838a730f0F29A97ECd211E9E97'
+
+  /** Chain stub whose getTokenInfo reports the given decimals (or throws). */
+  const stubChain = (decimals: number | Error, poolDecimals?: number | Error) =>
+    ({
+      network: { family: ChainFamily.EVM },
+      getTokenInfo: (_token: string) =>
+        decimals instanceof Error
+          ? Promise.reject(decimals)
+          : Promise.resolve({ decimals, symbol: 'TKN', name: 'Token' }),
+      ...(poolDecimals != null && {
+        getTokenPoolDecimals: (_pool: string) =>
+          poolDecimals instanceof Error
+            ? Promise.reject(poolDecimals)
+            : Promise.resolve(poolDecimals),
+        getTokenAdminRegistryFor: (_addr: string) => Promise.resolve('0x' + '11'.repeat(20)),
+        getRegistryTokenConfig: (_registry: string, token: string) =>
+          token === TOKEN
+            ? Promise.resolve({ tokenPool: POOL })
+            : Promise.reject(new Error('not registered')),
+      }),
+    }) as unknown as Chain
+
+  it('reads decimals from the token on-chain without :decimals', async () => {
+    const [ta] = await parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001`])
+    assert.ok(ta)
+    assert.equal(ta.token, TOKEN)
+    assert.equal(ta.amount, 1000000000000000n)
+    assert.equal(ta.extraData, undefined)
+    assert.equal(ta.destDecimals, undefined)
+  })
+
+  it('falls back to the source pool when the token has no decimals()', async () => {
+    // token view missing → pool's declared decimals (18) — no user input needed
+    const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN), 18)
+    const [ta] = await parseTokenAmounts(chain, [`${TOKEN}=0.001`], ROUTER)
+    assert.ok(ta)
+    assert.equal(ta.amount, 1000000000000000n)
+    // pool-resolved decimals ride along too, so downstream preflights never re-read the
+    // missing token view
+    assert.equal(ta.extraData, '0x' + '00'.repeat(31) + '12')
+  })
+
+  it('uses explicit :srcDecimals without reading the token on-chain', async () => {
+    const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN))
+    const [ta] = await parseTokenAmounts(chain, [`${TOKEN}=0.001:18`])
+    assert.ok(ta)
+    assert.equal(ta.amount, 1000000000000000n)
+    // the decimals ride along as the source-decimals declaration (a 32-byte word)
+    assert.equal(ta.extraData, '0x' + '00'.repeat(31) + '12')
+    assert.equal(ta.destDecimals, undefined)
+  })
+
+  it('declares :srcDecimals:destDecimals — both ride along', async () => {
+    const [ta] = await parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001:18:6`])
+    assert.ok(ta)
+    assert.equal(ta.amount, 1000000000000000n)
+    assert.equal(ta.extraData, '0x' + '00'.repeat(31) + '12')
+    assert.equal(ta.destDecimals, 6)
+  })
+
+  it('an empty srcDecimals (::dest) declares only the destination side', async () => {
+    const [ta] = await parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001::6`])
+    assert.ok(ta)
+    assert.equal(ta.amount, 1000000000000000n) // source still resolved on-chain
+    assert.equal(ta.extraData, undefined)
+    assert.equal(ta.destDecimals, 6)
+  })
+
+  it('supports 0-decimal tokens via :0', async () => {
+    const [ta] = await parseTokenAmounts(stubChain(18), [`${TOKEN}=5:0`])
+    assert.ok(ta)
+    assert.equal(ta.amount, 5n)
+    assert.equal(ta.extraData, '0x' + '00'.repeat(32))
+  })
+
+  it('propagates the typed error when neither token, pool, nor suffix can declare', async () => {
+    const err = new CCIPTokenDecimalsUnavailableError(TOKEN)
+    // no router → no pool resolution; no :srcDecimals → nothing left
+    await assert.rejects(parseTokenAmounts(stubChain(err), [`${TOKEN}=0.001`]), err)
+    // pool present but also cannot declare (v1.5.0), no suffix either — the rethrown typed
+    // error carries the token (the pool failure's cause is preserved on `cause`)
+    await assert.rejects(
+      parseTokenAmounts(stubChain(err, err), [`${TOKEN}=0.001`], ROUTER),
+      (rethrown: unknown) =>
+        rethrown instanceof CCIPTokenDecimalsUnavailableError &&
+        rethrown.context.token === TOKEN &&
+        rethrown.cause === err,
+    )
+  })
+
+  it('rejects invalid explicit decimals', async () => {
+    for (const bad of ['-1', '1.5', '37', 'abc']) {
+      await assert.rejects(
+        parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001:${bad}`]),
+        CCIPArgumentInvalidError,
+      )
+      await assert.rejects(
+        parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001:18:${bad}`]),
+        CCIPArgumentInvalidError,
+      )
+    }
   })
 })

@@ -8,9 +8,11 @@ import {
   type Chain,
   type ChainStatic,
   type Lane,
+  CCIPArgumentInvalidError,
   CCIPError,
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
+  CCIPTokenDecimalsUnavailableError,
   ChainFamily,
   ExecutionState,
   getCCIPExplorerUrl,
@@ -20,6 +22,7 @@ import {
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { select } from '@inquirer/prompts'
 import {
+  AbiCoder,
   formatUnits,
   hexlify,
   isBytesLike,
@@ -242,8 +245,16 @@ async function formatToken(
   if ('token' in ta) token = ta.token
   else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
   else token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
-  const { symbol, decimals } = await source.getTokenInfo(token)
-  return `${formatUnits(ta.amount, decimals)} ${symbol}`
+  try {
+    const { symbol, decimals } = await source.getTokenInfo(token)
+    return `${formatUnits(ta.amount, decimals)} ${symbol}`
+  } catch (err) {
+    // tokens without the optional ERC-20 decimals() view (or unreachable metadata) still
+    // display: raw units with the address, so a successful send is never unprintable
+    if (err instanceof CCIPTokenDecimalsUnavailableError)
+      return `${ta.amount} (raw units) ${formatDisplayAddress(token, family ?? ChainFamily.EVM)}`
+    throw err
+  }
 }
 
 /**
@@ -724,17 +735,105 @@ export function logParsedError(this: Ctx, err: unknown): boolean {
 }
 
 /**
- * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
+ * Parse `--transfer-tokens token1=amount1[:srcDecimals1[:destDecimals1]] ...` into
+ * `{ token, amount, extraData?, destDecimals? }[]`.
+ *
+ * Decimals are optional and resolve per side, each with the same fallback chain:
+ * 1. the token's own on-chain `decimals()` view (via `getTokenInfo`),
+ * 2. its pool's declared decimals (`getTokenDecimals()`, pool v1.5.1+ — the authoritative
+ *    source, since the pool uses exactly these decimals for its own conversion),
+ * 3. the explicit `:srcDecimals[:destDecimals]` suffix (for tokens AND pools that cannot
+ *    declare them, e.g. v1.5.0 pools predating `getTokenDecimals`).
+ *
+ * An empty suffix value means "not given" for that side (`token=0.001::6` declares only the
+ * destination decimals; the source still resolves on-chain). Explicit source decimals ride
+ * along as `extraData` (`abi.encode(uint256(decimals))`), the source-decimals declaration CCIP
+ * pools read, so destination preflights don't need the on-chain view either.
  **/
-export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
+export async function parseTokenAmounts(
+  source: Chain,
+  transferTokens: readonly string[],
+  router?: string,
+): Promise<{ token: string; amount: bigint; extraData?: string; destDecimals?: number }[]> {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=') as [string, string]
-      const { decimals } = await source.getTokenInfo(token)
-      const amount = parseUnits(amount_, decimals)
-      return { token, amount }
+      // `token=amount[:srcDecimals[:destDecimals]]` — the optional `:`-suffixes on the amount
+      const [amount, srcDecimals_, destDecimals_] = amount_.split(':') as [string, string?, string?]
+      const parseDecimals = (value: string | undefined, side: 'source' | 'destination') => {
+        if (value == null || value === '') return undefined
+        const decimals = Number(value)
+        if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36)
+          throw new CCIPArgumentInvalidError(
+            'transfer-tokens',
+            `${side} decimals must be an integer in 0..36, got "${value}" (expected token=amount[:srcDecimals[:destDecimals]])`,
+            { context: { token } },
+          )
+        return decimals
+      }
+      const explicitSrcDecimals = parseDecimals(srcDecimals_, 'source')
+      const explicitDestDecimals = parseDecimals(destDecimals_, 'destination')
+
+      // source decimals: token view → source pool's declared decimals → explicit suffix
+      let declareSourceDecimals = explicitSrcDecimals != null
+      const srcDecimals =
+        explicitSrcDecimals ??
+        (await source.getTokenInfo(token).then(
+          ({ decimals }) => decimals,
+          (err: unknown) => {
+            if (!(err instanceof CCIPTokenDecimalsUnavailableError)) throw err
+            declareSourceDecimals = true
+            return getSourcePoolDecimals(source, token, router)
+          },
+        ))
+      return {
+        token,
+        amount: parseUnits(amount, srcDecimals),
+        // declare the source decimals the destination pool reads (see
+        // getSourceDecimalsFromExtraData): a 32-byte word carrying the decimals. Emitted
+        // whenever they didn't come from the token's own view — explicit OR pool-resolved —
+        // so downstream preflights (getDestTokenAmount) never re-read the missing view
+        ...(declareSourceDecimals && {
+          extraData: AbiCoder.defaultAbiCoder().encode(['uint256'], [srcDecimals]),
+        }),
+        ...(explicitDestDecimals != null && { destDecimals: explicitDestDecimals }),
+      }
     }),
   )
+}
+
+/**
+ * Resolve a source token's decimals from its pool's `getTokenDecimals()` (pool v1.5.1+) —
+ * the authoritative fallback for tokens without the optional ERC-20 `decimals()` view, since
+ * the pool uses exactly these decimals for its own conversion. The pool is resolved from the
+ * TokenAdminRegistry behind the `router` (an OnRamp also works).
+ * @throws {@link CCIPTokenDecimalsUnavailableError} when the pool cannot be resolved or
+ *   declares no decimals either (e.g. a v1.5.0 pool)
+ */
+async function getSourcePoolDecimals(
+  source: Chain,
+  token: string,
+  router?: string,
+): Promise<number> {
+  const unavailable = (cause?: unknown) =>
+    new CCIPTokenDecimalsUnavailableError(token, {
+      cause: cause instanceof Error ? cause : undefined,
+      ...(router != null && { context: { router } }),
+    })
+  if (!router || !source.getTokenPoolDecimals) throw unavailable()
+  let pool
+  try {
+    const registry = await source.getTokenAdminRegistryFor(router)
+    ;({ tokenPool: pool } = await source.getRegistryTokenConfig(registry, token))
+  } catch (err) {
+    throw unavailable(err)
+  }
+  if (!pool) throw unavailable()
+  try {
+    return await source.getTokenPoolDecimals(pool)
+  } catch (err) {
+    throw unavailable(err)
+  }
 }
 
 /**

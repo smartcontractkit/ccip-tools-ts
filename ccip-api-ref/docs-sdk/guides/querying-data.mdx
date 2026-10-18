@@ -72,6 +72,10 @@ console.log('Decimals:', tokenInfo.decimals)  // e.g. 18
 console.log('Name:', tokenInfo.name)          // e.g. 'ChainLink Token' (optional)
 ```
 
+:::note Tokens without `decimals()`
+`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. For those, `getTokenInfo` throws `CCIPTokenDecimalsUnavailableError` (code `TOKEN_DECIMALS_UNAVAILABLE`), and the decimals resolve from the token pool's `getTokenDecimals()` (pool v1.5.1+, `chain.getTokenPoolDecimals(pool)`) — the same value the pool itself uses for its conversion. Only when neither can declare them (e.g. a v1.5.0 pool) do you supply them yourself, e.g. via `tokenAmounts[].extraData` (`abi.encode(['uint256'], [decimals])`, see `getSourceDecimalsFromExtraData`) and `tokenAmounts[].destDecimals` on the message.
+:::
+
 Use `getTokenInfo` whenever you need to parse or format token amounts:
 
 ```typescript

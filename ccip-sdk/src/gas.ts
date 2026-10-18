@@ -8,6 +8,7 @@ import {
   CCIPOnRampRequiredError,
   CCIPSourcePoolRevertError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotInRegistryError,
 } from './errors/index.ts'
 import type { CCIPMessage_V2_0 } from './evm/messages.ts'
@@ -42,6 +43,9 @@ export type EstimateMessageInput = Simplify<
       tokenAmounts?: readonly ({
         amount: bigint
         extraData?: string
+        /** explicit destination-token decimals, for dest tokens without the optional ERC-20
+         * `decimals()` view when their pool cannot declare them either (v1.5.0 pools) */
+        destDecimals?: number
       } & (
         | { token: string }
         | {
@@ -155,6 +159,7 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
     sourcePoolAddress: string
     sourceTokenAddress: string
     destTokenAddress: string
+    destPoolAddresses: string[]
   }
 > {
   const tokenAdminRegistry = await source.getTokenAdminRegistryFor(onRamp, destChainSelector)
@@ -166,11 +171,13 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
   if (!sourcePoolAddress)
     throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
   const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+  const remote = remotes[networkInfo(destChainSelector).name]!
   return {
     ...sourceTokenAmount,
     sourcePoolAddress,
     sourceTokenAddress,
-    destTokenAddress: remotes[networkInfo(destChainSelector).name]!.remoteToken,
+    destTokenAddress: remote.remoteToken,
+    destPoolAddresses: remote.remotePools,
   }
 }
 
@@ -186,19 +193,22 @@ export async function getDestTokenAmount({
   source,
   onRamp,
   dest,
+  offRamp,
   tokenAmount,
 }: {
   source?: Chain
   onRamp?: string
   dest: Chain
+  /** dest OffRamp — resolves the dest pool from the dest registry when the source can't */
+  offRamp?: string
   tokenAmount: NonNullable<EstimateMessageInput['tokenAmounts']>[number]
 }): Promise<{ token: string; amount: bigint }> {
-  let sourceTokenAddress, sourcePoolAddress, destTokenAddress
+  let sourceTokenAddress, sourcePoolAddress, destTokenAddress, destPoolAddresses
   if ('destTokenAddress' in tokenAmount) {
     ;({ destTokenAddress, sourcePoolAddress, sourceTokenAddress } = tokenAmount)
   } else if (!source) return tokenAmount // if we don't have a source, assume we were already given a dest `{token, amount}`
   else {
-    ;({ destTokenAddress, sourceTokenAddress, sourcePoolAddress } =
+    ;({ destTokenAddress, sourceTokenAddress, sourcePoolAddress, destPoolAddresses } =
       await sourceToDestTokenAddresses({
         source,
         onRamp: onRamp!,
@@ -207,7 +217,17 @@ export async function getDestTokenAmount({
       }))
   }
 
-  const { decimals: destDecimals } = await dest.getTokenInfo(destTokenAddress)
+  // dest decimals: the token's own (optional) view, else the dest pool's declared decimals —
+  // the authoritative source for tokens without the ERC-20 `decimals()` view, since the pool
+  // uses exactly these decimals for its own release conversion — else the caller-declared
+  // `destDecimals` (e.g. ccip-cli `token=amount:src[:dest]`)
+  const destDecimals = await getDestTokenDecimals({
+    dest,
+    destTokenAddress,
+    destPoolAddresses,
+    offRamp,
+    destDecimals: tokenAmount.destDecimals,
+  })
   const sourceDecimals =
     getSourceDecimalsFromExtraData(tokenAmount.extraData) ??
     (source
@@ -228,6 +248,65 @@ export async function getDestTokenAmount({
     )
 
   return { token: destTokenAddress, amount: destAmount }
+}
+
+/**
+ * Resolve a destination token's decimals: its own (optional) ERC-20 `decimals()` view first,
+ * else the decimals its destination pool declares (`getTokenDecimals()`, pool v1.5.1+) — the
+ * authoritative fallback for tokens that don't implement the optional view, since the pool uses
+ * exactly these decimals for its own release conversion — else the caller-declared
+ * `destDecimals`. The pool is the source-resolved `destPoolAddresses` when available, else
+ * resolved from the dest registry via `offRamp`.
+ * @throws The original {@link CCIPTokenDecimalsUnavailableError} when nothing can declare them
+ */
+async function getDestTokenDecimals({
+  dest,
+  destTokenAddress,
+  destPoolAddresses,
+  offRamp,
+  destDecimals,
+}: {
+  dest: Chain
+  destTokenAddress: string
+  destPoolAddresses?: readonly string[]
+  offRamp?: string
+  destDecimals?: number
+}): Promise<number> {
+  try {
+    return (await dest.getTokenInfo(destTokenAddress)).decimals
+  } catch (err) {
+    if (!(err instanceof CCIPTokenDecimalsUnavailableError)) throw err
+    if (dest.getTokenPoolDecimals) {
+      // source-resolved pools first (pre-send); multiple may be configured — the last is the
+      // active one, so try each until one declares
+      for (const pool of destPoolAddresses ?? []) {
+        try {
+          return await dest.getTokenPoolDecimals(pool)
+        } catch {
+          // try the next pool
+        }
+      }
+      // no source-resolved pools (post-send shape): resolve the pool from the dest registry.
+      // Best-effort — a failure here (unregistered token, transport) must not mask the
+      // caller-declared fallback below
+      if (offRamp) {
+        const pool = await dest
+          .getTokenAdminRegistryFor(offRamp)
+          .then((registry) => dest.getRegistryTokenConfig(registry, destTokenAddress))
+          .then(({ tokenPool }) => tokenPool)
+          .catch(() => undefined)
+        if (pool) {
+          try {
+            return await dest.getTokenPoolDecimals(pool)
+          } catch {
+            // fall through to the caller-declared decimals
+          }
+        }
+      }
+    }
+    if (destDecimals != null) return destDecimals
+    throw err
+  }
 }
 
 /**
@@ -294,7 +373,13 @@ export async function estimateReceiveExecution({
 
   const resolvedTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (tokenAmount) => {
-      const destTokenAmount = await getDestTokenAmount({ source, dest, onRamp, tokenAmount })
+      const destTokenAmount = await getDestTokenAmount({
+        source,
+        dest,
+        onRamp,
+        offRamp,
+        tokenAmount,
+      })
       let forCheck: NonNullable<EstimateMessageInput['tokenAmounts']>[number] = destTokenAmount
       let destForEstimate = destTokenAmount
       if ('sourcePoolAddress' in tokenAmount) {
@@ -430,7 +515,7 @@ export async function getRequiredCCVs({
 
   const destTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (tokenAmount) =>
-      getDestTokenAmount({ source, dest, onRamp, tokenAmount }),
+      getDestTokenAmount({ source, dest, onRamp, offRamp, tokenAmount }),
     ),
   )
 

@@ -117,7 +117,8 @@ export const builder = (yargs: Argv) =>
         alias: 't',
         type: 'array',
         string: true,
-        describe: 'Token amounts to transfer: token=amount',
+        describe:
+          'Token amounts to transfer: token=amount[:srcDecimals[:destDecimals]] (decimals optional — read from the token, else its pool; pass them explicitly for tokens without the optional ERC-20 decimals() view whose pool cannot declare them either)',
       },
       wallet: {
         alias: 'w',
@@ -169,7 +170,7 @@ export const builder = (yargs: Argv) =>
     })
     .check(
       ({ 'transfer-tokens': transferTokens }) =>
-        !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?$/.test(t)),
+        !transferTokens || transferTokens.every((t) => /^[^=]+=\d+(\.\d+)?(:\d*)?(:\d*)?$/.test(t)),
     )
     .check(({ extra }) => !extra || extra.every((e) => /^[^=]+=/.test(e)))
     .example([
@@ -265,8 +266,17 @@ async function sendMessage(
     }
   }
 
-  const tokenAmounts: { token: string; amount: bigint }[] = argv.transferTokens?.length
-    ? await parseTokenAmounts(source, argv.transferTokens)
+  // `extraData`/`destDecimals` (present when the user passed explicit decimals, e.g.
+  // `token=0.001:18:6`) declare the source/dest decimals the destination preflight reads (see
+  // getSourceDecimalsFromExtraData); the on-chain message ignores them (EVMTokenAmount has no
+  // such fields)
+  const tokenAmounts: {
+    token: string
+    amount: bigint
+    extraData?: string
+    destDecimals?: number
+  }[] = argv.transferTokens?.length
+    ? await parseTokenAmounts(source, argv.transferTokens, router)
     : []
 
   let receiver = argv.receiver

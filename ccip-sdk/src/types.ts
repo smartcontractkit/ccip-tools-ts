@@ -418,8 +418,18 @@ export type AnyMessage = {
   extraArgs: ExtraArgs
   /** Arbitrary data payload. */
   data?: BytesLike
-  /** Optional token transfers. */
-  tokenAmounts?: readonly { token: string; amount: bigint }[]
+  /**
+   * Optional token transfers. `extraData` optionally declares the token's source decimals
+   * (`abi.encode(uint256(decimals))`, see `getSourceDecimalsFromExtraData`) and `destDecimals`
+   * the destination token's, for tokens without the optional ERC-20 `decimals()` view; they are
+   * read by destination preflights only — the on-chain message ignores them.
+   */
+  tokenAmounts?: readonly {
+    token: string
+    amount: bigint
+    extraData?: string
+    destDecimals?: number
+  }[]
   /** Optional fee token address (native if omitted). */
   feeToken?: string
 }

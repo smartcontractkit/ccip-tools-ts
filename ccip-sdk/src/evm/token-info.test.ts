@@ -1,0 +1,131 @@
+/**
+ * `getTokenInfo` must read `symbol()`/`decimals()`/`name()` off the token, and a token that does
+ * not implement the OPTIONAL ERC-20 `decimals()` view must surface as the typed
+ * `CCIPTokenDecimalsUnavailableError` (with how to pass decimals explicitly), not a raw provider
+ * error. `name()` is equally optional, so its failure is tolerated.
+ */
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { type JsonRpcApiProvider, makeError } from 'ethers'
+
+import { CCIPTokenDecimalsUnavailableError } from '../errors/index.ts'
+import { networkInfo } from '../networks.ts'
+import { interfaces } from './const.ts'
+import { EVMChain } from './index.ts'
+
+const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
+
+/** `eth_call` responder: answers from `data` by selector, or reverts. */
+function stubProvider(
+  answers: Record<string, string | Error>,
+): JsonRpcApiProvider & { selectors: string[] } {
+  const selectors: string[] = []
+  return {
+    selectors,
+    call: async (tx: { to?: string; data?: string }) => {
+      const selector = (tx.data ?? '').slice(0, 10)
+      selectors.push(selector)
+      const answer = answers[selector]
+      if (answer === undefined)
+        throw makeError('execution reverted', 'CALL_EXCEPTION', {
+          action: 'call',
+          data: '0x',
+          reason: null,
+          transaction: { to: tx.to ?? null, data: tx.data ?? '0x' },
+          invocation: null,
+          revert: null,
+        })
+      if (answer instanceof Error) throw answer
+      return answer
+    },
+  } as unknown as JsonRpcApiProvider & { selectors: string[] }
+}
+
+const token = interfaces.Token
+const SYMBOL_SEL = token.getFunction('symbol')!.selector
+const DECIMALS_SEL = token.getFunction('decimals')!.selector
+const NAME_SEL = token.getFunction('name')!.selector
+
+const symbolResult = token.encodeFunctionResult('symbol', ['NDT'])
+const decimalsResult = token.encodeFunctionResult('decimals', [18n])
+const nameResult = token.encodeFunctionResult('name', ['No Decimals Test Token'])
+
+describe('EVMChain.getTokenInfo', () => {
+  it('reads symbol, decimals and name', async () => {
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+      [NAME_SEL]: nameResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    assert.deepEqual(await chain.getTokenInfo(TOKEN), {
+      symbol: 'NDT',
+      decimals: 18,
+      name: 'No Decimals Test Token',
+    })
+  })
+
+  it('throws the typed error when decimals() is not implemented', async () => {
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [NAME_SEL]: nameResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => {
+      assert.ok(err instanceof CCIPTokenDecimalsUnavailableError)
+      assert.equal(err.context.token, TOKEN)
+      assert.match(err.recovery ?? '', /token=amount:decimals/)
+      return true
+    })
+  })
+
+  it('tolerates a missing name() (also optional in ERC-20)', async () => {
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    assert.deepEqual(await chain.getTokenInfo(TOKEN), {
+      symbol: 'NDT',
+      decimals: 18,
+      name: '',
+    })
+  })
+})
+
+describe('EVMChain.getTokenPoolDecimals', () => {
+  const pool = interfaces.TokenPool_v2_0
+  const legacyPool = interfaces.TokenPool_v1_6
+  const GET_TOKEN_DECIMALS_SEL = pool.getFunction('getTokenDecimals')!.selector
+  const GET_TOKEN_SEL = pool.getFunction('getToken')!.selector
+  const TYPE_AND_VERSION_SEL = pool.getFunction('typeAndVersion')!.selector
+  const GET_ROUTER_SEL = legacyPool.getFunction('getRouter')!.selector
+  const tokenDecimalsResult = pool.encodeFunctionResult('getTokenDecimals', [18n])
+  const poolTokenResult = pool.encodeFunctionResult('getToken', [TOKEN])
+  const typeAndVersionResult = pool.encodeFunctionResult('typeAndVersion', [
+    'BurnMintTokenPool 1.5.0',
+  ])
+  const routerResult = legacyPool.encodeFunctionResult('getRouter', ['0x' + '44'.repeat(20)])
+
+  it("reads the pool's declared decimals", async () => {
+    const provider = stubProvider({
+      [GET_TOKEN_DECIMALS_SEL]: tokenDecimalsResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('avalanche-testnet-fuji'))
+    assert.equal(await chain.getTokenPoolDecimals('0x22812538c457249dedb47bb99c3faffc791e45f7'), 18)
+  })
+
+  it('falls back to the token for v1.5.0 pools (no getTokenDecimals)', async () => {
+    const provider = stubProvider({
+      [TYPE_AND_VERSION_SEL]: typeAndVersionResult,
+      [GET_TOKEN_SEL]: poolTokenResult,
+      [GET_ROUTER_SEL]: routerResult,
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+      [NAME_SEL]: nameResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    assert.equal(await chain.getTokenPoolDecimals('0x' + '33'.repeat(20)), 18)
+  })
+})
