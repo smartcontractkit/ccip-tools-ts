@@ -42,7 +42,7 @@ function stubChain({
   revert?: 'ChainNotAllowed'
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease['1.6.1']
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool['1.6.1']
   const reverting = (data: string, revertData: string) =>
     makeError('execution reverted', 'CALL_EXCEPTION', {
       action: 'call',
