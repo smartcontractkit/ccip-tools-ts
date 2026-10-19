@@ -233,6 +233,22 @@ import {
   SetCCIPAdmin,
   TransferTokenOwnership,
 } from './token/operations/index.ts'
+import {
+  type DeployUSDCTokenPoolProxyParams,
+  type GetLockOrBurnMechanismParams,
+  type GetLockOrBurnMechanismResult,
+  type GetUSDCTokenPoolProxyRemotePoolsParams,
+  type GetUSDCTokenPoolProxyRemotePoolsResult,
+  type GetUSDCTokenPoolProxyRequiredCCVsParams,
+  type GetUSDCTokenPoolProxyRequiredCCVsResult,
+  type GetUSDCTokenPoolProxyStateParams,
+  type GetUSDCTokenPoolProxyStateResult,
+  DeployUSDCTokenPoolProxy,
+  GetLockOrBurnMechanism,
+  GetUSDCTokenPoolProxyRemotePools,
+  GetUSDCTokenPoolProxyRequiredCCVs,
+  GetUSDCTokenPoolProxyState,
+} from './usdc-token-pool-proxy/operations/index.ts'
 
 /** CCT admin operations for EVM chains, delegating each op to an operation class. */
 export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
@@ -332,6 +348,13 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getAllLockboxAuthorizedCallers = new GetAllLockboxAuthorizedCallers()
   readonly #depositToLockbox = new DepositToLockbox()
   readonly #withdrawFromLockbox = new WithdrawFromLockbox()
+
+  // USDC token pool proxy operations
+  readonly #deployUSDCTokenPoolProxy = new DeployUSDCTokenPoolProxy()
+  readonly #getUSDCTokenPoolProxyState = new GetUSDCTokenPoolProxyState()
+  readonly #getLockOrBurnMechanism = new GetLockOrBurnMechanism()
+  readonly #getUSDCTokenPoolProxyRemotePools = new GetUSDCTokenPoolProxyRemotePools()
+  readonly #getUSDCTokenPoolProxyRequiredCCVs = new GetUSDCTokenPoolProxyRequiredCCVs()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -3882,6 +3905,172 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Builds an unsigned `USDCTokenPoolProxy` (v2.0.0) deployment tx (for multisig / offline
+   * signing). The deployed address is only known once mined, so it is NOT returned here; use
+   * {@link deployUSDCTokenPoolProxy} to receive `{ hash, contractAddress, verification }`.
+   * @remarks Same constructor rules as {@link deployUSDCTokenPoolProxy}. No RPC is made: a child
+   * pool that fails the constructor's ERC165 check surfaces as a `TokenPoolUnsupported(pool)`
+   * revert when the tx is estimated or sent.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployUSDCTokenPoolProxy({
+   *   token: '0xUSDC...',
+   *   pools: {
+   *     cctpV1Pool: ZeroAddress, // no CCTP v1 on this chain
+   *     cctpV2Pool: '0xCCTPV2Pool...',
+   *     cctpV2PoolWithCCV: '0xCCTPThroughCCVPool...',
+   *     siloedLockReleasePool: ZeroAddress,
+   *   },
+   *   router: '0xRouter...',
+   *   cctpVerifier: '0xCCTPVerifier...',
+   *   sender: '0xDeployer...',
+   * })
+   * ```
+   */
+  generateUnsignedDeployUSDCTokenPoolProxy(
+    opts: DeployUSDCTokenPoolProxyParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#deployUSDCTokenPoolProxy.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a `USDCTokenPoolProxy` (v2.0.0), signing + submitting with `opts.wallet`; resolves to
+   * the tx hash, the newly deployed proxy address, and a `verification`
+   * ({@link ExplorerVerificationInput}) for verifying the source on a block explorer.
+   * @remarks The proxy is what {@link setPool} registers for USDC on a 2.0.0 chain, not one of its
+   * child pools. It routes each lane to the child pool for that lane's mechanism.
+   * @remarks The deployer becomes the owner (`Ownable2StepMsgSender`). `token`, `router` and
+   * `cctpVerifier` must be non-zero or the constructor reverts `AddressCannotBeZero`; a pool slot
+   * may be `ZeroAddress` for a mechanism the chain does not use. `cctpV1Pool` and `cctpV2Pool`
+   * must support `IPoolV1`, `cctpV2PoolWithCCV` must support `IPoolV2`, and
+   * `siloedLockReleasePool` either, or it reverts `TokenPoolUnsupported(pool)`.
+   * @remarks Every lane starts at `INVALID_MECHANISM`, so nothing routes until the owner sets each
+   * lane's mechanism with `updateLockOrBurnMechanisms`. Each child pool must also authorize the
+   * proxy as a caller before it can lock or release through it.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   * @example
+   * ```typescript
+   * const { hash, contractAddress, verification } = await cct.deployUSDCTokenPoolProxy({
+   *   token: '0xUSDC...',
+   *   pools: {
+   *     cctpV1Pool: ZeroAddress,
+   *     cctpV2Pool: '0xCCTPV2Pool...',
+   *     cctpV2PoolWithCCV: '0xCCTPThroughCCVPool...',
+   *     siloedLockReleasePool: ZeroAddress,
+   *   },
+   *   router: '0xRouter...',
+   *   cctpVerifier: '0xCCTPVerifier...',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployUSDCTokenPoolProxy(
+    opts: EVMExecuteParams<DeployUSDCTokenPoolProxyParams>,
+  ): Promise<DeployResult> {
+    return this.#deployUSDCTokenPoolProxy.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a `USDCTokenPoolProxy`'s (v2.0.0) admin state: its `owner`, the `token`, `router` and
+   * `cctpVerifier` immutables, the child `pools` per mechanism, and the `feeAggregator`.
+   * @remarks On a 2.0.0 chain the TokenAdminRegistry returns this proxy as USDC's pool; read a
+   * child pool from `pools` with {@link getTokenPoolState}. A zero pool slot leaves that mechanism
+   * unroutable, and a zero `feeAggregator` means `withdrawFeeTokens` reverts.
+   * @throws {@link CCTParamsInvalidError} if `usdcTokenPoolProxy` is invalid, or nothing there
+   * answers `typeAndVersion()`
+   * @throws {@link CCTContractTypeInvalidError} if it is not a `USDCTokenPoolProxy`
+   * @throws {@link CCTContractVersionUnsupportedError} if it is not v2.0.0, e.g. a 1.6.4 proxy
+   * @example
+   * ```typescript
+   * const state = await cct.getUSDCTokenPoolProxyState({ usdcTokenPoolProxy: '0xProxy...' })
+   * console.log(state.owner, state.pools.cctpV2PoolWithCCV)
+   * ```
+   */
+  getUSDCTokenPoolProxyState(
+    opts: GetUSDCTokenPoolProxyStateParams,
+  ): Promise<GetUSDCTokenPoolProxyStateResult> {
+    return this.#getUSDCTokenPoolProxyState.query(this.chain, opts)
+  }
+
+  /**
+   * Reads how a `USDCTokenPoolProxy` (v2.0.0) routes one lane: `CCTP_V1`, `CCTP_V2`,
+   * `LOCK_RELEASE` or `CCV`.
+   * @remarks `INVALID_MECHANISM` is an answer, not an error: the lane is not served, and every
+   * outbound transfer on it reverts.
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, or nothing at `usdcTokenPoolProxy`
+   * answers `typeAndVersion()`
+   * @throws {@link CCTContractTypeInvalidError} if it is not a `USDCTokenPoolProxy`
+   * @throws {@link CCTContractVersionUnsupportedError} if it is not v2.0.0
+   * @example
+   * ```typescript
+   * const mechanism = await cct.getLockOrBurnMechanism({
+   *   usdcTokenPoolProxy: '0xProxy...',
+   *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   * })
+   * ```
+   */
+  getLockOrBurnMechanism(
+    opts: GetLockOrBurnMechanismParams,
+  ): Promise<GetLockOrBurnMechanismResult> {
+    return this.#getLockOrBurnMechanism.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the remote pools a `USDCTokenPoolProxy` (v2.0.0) accepts on one lane, from the child
+   * pool serving the lane's current mechanism, in the remote chain's address format.
+   * @remarks Unlike {@link getTokenPoolRemotes}, it is gated to v2.0.0 and reports the proxy's
+   * routing reverts (`InvalidLockOrBurnMechanism`, `MustSetPoolForMechanism`) as
+   * {@link CCTParamsInvalidError}.
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, the selector is not a known CCIP
+   * chain selector or its chain family is not registered, nothing at `usdcTokenPoolProxy` answers
+   * `typeAndVersion()`, or the lane has no mechanism or no pool for it
+   * @throws {@link CCTContractTypeInvalidError} if it is not a `USDCTokenPoolProxy`
+   * @throws {@link CCTContractVersionUnsupportedError} if it is not v2.0.0
+   * @example
+   * ```typescript
+   * const remotePools = await cct.getUSDCTokenPoolProxyRemotePools({
+   *   usdcTokenPoolProxy: '0xProxy...',
+   *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   * })
+   * ```
+   */
+  getUSDCTokenPoolProxyRemotePools(
+    opts: GetUSDCTokenPoolProxyRemotePoolsParams,
+  ): Promise<GetUSDCTokenPoolProxyRemotePoolsResult> {
+    return this.#getUSDCTokenPoolProxyRemotePools.query(this.chain, opts)
+  }
+
+  /**
+   * Resolves the CCVs a `USDCTokenPoolProxy` (v2.0.0) requires for a transfer on one lane;
+   * `[ZeroAddress]` means the default CCVs.
+   * @remarks Outbound follows the lane's mechanism: `CCV` requires the `cctpVerifier`, any other
+   * mechanism the default CCVs, and an unset lane reverts `NoLockOrBurnMechanismSet`. Inbound
+   * follows the arriving message's tag instead, and ignores the lane: pass `inboundMechanism`
+   * `'CCV'` (the `cctpVerifier`) or `'LOCK_RELEASE'` (the default CCVs).
+   * @throws {@link CCTParamsInvalidError} if a param is invalid, nothing at `usdcTokenPoolProxy`
+   * answers `typeAndVersion()`, or an outbound lane has no mechanism set
+   * @throws {@link CCTContractTypeInvalidError} if it is not a `USDCTokenPoolProxy`
+   * @throws {@link CCTContractVersionUnsupportedError} if it is not v2.0.0
+   * @example
+   * ```typescript
+   * const ccvs = await cct.getUSDCTokenPoolProxyRequiredCCVs({
+   *   usdcTokenPoolProxy: '0xProxy...',
+   *   remoteChainSelector: 5009297550715157269n, // ethereum-mainnet
+   *   direction: 'outbound',
+   * })
+   * ```
+   */
+  getUSDCTokenPoolProxyRequiredCCVs(
+    opts: GetUSDCTokenPoolProxyRequiredCCVsParams,
+  ): Promise<GetUSDCTokenPoolProxyRequiredCCVsResult> {
+    return this.#getUSDCTokenPoolProxyRequiredCCVs.query(this.chain, opts)
+  }
+
+  /**
    * Reads a pool's admin state, v1.5.0 through v2.0.0: the `owner` every pool write is gated on,
    * the `rateLimitAdmin` role, its token/router and configured lanes — plus, on v2.0.0 pools, the
    * `feeAdmin` role, the allowed finality window, and a lock/release pool's `lockBox`.
@@ -3894,7 +4083,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * version exposes a pending-owner getter, so a proposed owner is not readable here.
    * @remarks The one op that reads the USDC/CCTP pools (`USDC_TOKEN_POOL_TYPES`, also at v1.6.2
    * and v1.6.5): their base state, with no USDC fields. A `USDCTokenPoolProxy` is not a pool and
-   * throws {@link CCTContractTypeInvalidError}: read one of its `getPools()` instead.
+   * throws {@link CCTContractTypeInvalidError}: read its pools with
+   * {@link getUSDCTokenPoolProxyState}.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its
@@ -4368,6 +4558,8 @@ export type * from './lockbox/operations/index.ts'
 export * from './lockbox/contracts.ts'
 export type * from './advanced-pool-hooks/operations/index.ts'
 export * from './advanced-pool-hooks/contracts.ts'
+export type * from './usdc-token-pool-proxy/operations/index.ts'
+export * from './usdc-token-pool-proxy/contracts.ts'
 export type {
   DeployTokenAndTokenPoolViaFactoryParams,
   DeployTokenPoolWithExistingTokenViaFactoryParams,

@@ -5,10 +5,48 @@
  * @packageDocumentation
  */
 
-import { networkInfo } from '../networks.ts'
+import { type ChainFamily, networkInfo } from '../networks.ts'
 import { notRegisteredRecovery, supportedChains } from '../supported-chains.ts'
 import { decodeAddress, getAddressBytes } from '../utils.ts'
 import { CCTParamsInvalidError } from './errors.ts'
+
+/**
+ * Resolves the chain family of a lane's remote chain, which fixes its address format.
+ * @param operation - Operation name, for the error context.
+ * @param param - Param path to blame.
+ * @param remoteChainSelector - Selector of the lane's remote chain, already validated as a `uint64`.
+ * @returns The remote chain's family, whose chain class is registered in `supportedChains`.
+ * @throws {@link CCTParamsInvalidError} if the selector is not a known CCIP chain selector or its
+ * family is not registered
+ */
+export function resolveRemoteFamily(
+  operation: string,
+  param: string,
+  remoteChainSelector: bigint,
+): ChainFamily {
+  let info
+  try {
+    info = networkInfo(remoteChainSelector)
+  } catch {
+    // unknown selector; reported below
+  }
+  // `networkInfo` also resolves a chain ID, which would configure the lane under the wrong key
+  if (info?.chainSelector !== remoteChainSelector) {
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      `cannot be parsed: remote chain selector ${remoteChainSelector} is not a known chain selector, so its address format is unknown; pass a CCIP chain selector (not a chain ID), or upgrade the SDK`,
+    )
+  }
+  if (!supportedChains[info.family]) {
+    throw new CCTParamsInvalidError(
+      operation,
+      param,
+      `cannot be parsed: the ${info.family} chain family is not registered. ${notRegisteredRecovery(info.family)}`,
+    )
+  }
+  return info.family
+}
 
 /**
  * Parses a remote chain's address into its canonical spelling, validated against the family of
@@ -39,28 +77,7 @@ export function parseRemoteAddress(
   value: unknown,
   remoteChainSelector: bigint,
 ): string {
-  let info
-  try {
-    info = networkInfo(remoteChainSelector)
-  } catch {
-    // unknown selector; reported below
-  }
-  // `networkInfo` also resolves a chain ID, which would configure the lane under the wrong key
-  if (info?.chainSelector !== remoteChainSelector) {
-    throw new CCTParamsInvalidError(
-      operation,
-      param,
-      `cannot be parsed: remote chain selector ${remoteChainSelector} is not a known chain selector, so its address format is unknown; pass a CCIP chain selector (not a chain ID), or upgrade the SDK`,
-    )
-  }
-  const { family } = info
-  if (!supportedChains[family]) {
-    throw new CCTParamsInvalidError(
-      operation,
-      param,
-      `cannot be parsed: the ${family} chain family is not registered. ${notRegisteredRecovery(family)}`,
-    )
-  }
+  const family = resolveRemoteFamily(operation, param, remoteChainSelector)
   if (typeof value !== 'string' || !value) {
     throw new CCTParamsInvalidError(
       operation,

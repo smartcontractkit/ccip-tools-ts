@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnToAddressTokenPool` v2.0.0 and `getBurnAddress` reads its burn address
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0
 - CCT SDK (EVM): `getTokenPoolState` reads the USDC/CCTP token pools; other ops still reject them
+- CCT SDK (EVM): deploy and read `USDCTokenPoolProxy` v2.0.0
 
 ## [1.16.0] - 2026-10-09
 
