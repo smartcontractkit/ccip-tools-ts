@@ -3889,10 +3889,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
    * remote chain (read those with {@link getAllSiloedLockboxConfigs}). For a legacy pool's
-   * `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0 `*AndProxy` pool's `previousPool`
-   * (it reads here as its base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant
-   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is not
-   * readable here.
+   * `allowList` / `rebalancer`, or a v1.5.0 `*AndProxy` pool's `previousPool` (it reads here as its
+   * base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool
+   * version exposes a pending-owner getter, so a proposed owner is not readable here.
+   * @remarks The one op that reads the USDC/CCTP pools (`USDC_TOKEN_POOL_TYPES`, also at v1.6.2
+   * and v1.6.5): their base state, with no USDC fields. A `USDCTokenPoolProxy` is not a pool and
+   * throws {@link CCTContractTypeInvalidError}: read one of its `getPools()` instead.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its

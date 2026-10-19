@@ -16,6 +16,7 @@ import {
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
+  USDC_TOKEN_POOL_TYPES,
   assertLockReleasePool,
   assertNonSiloedLockReleasePool,
   assertSiloedLockReleasePool,
@@ -120,7 +121,10 @@ describe('pool versions', () => {
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_6_0), true)
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V2_0_0), true)
     // exact match: an unlisted patch is unknown, not floor-matched to its neighbour
+    assert.equal(isTokenPoolVersion('1.6.3'), false)
+    // only the legacy USDC pools shipped at 1.6.2 and 1.6.5, so no generic op resolves to them
     assert.equal(isTokenPoolVersion('1.6.2'), false)
+    assert.equal(isTokenPoolVersion('1.6.5'), false)
     assert.equal(isTokenPoolVersion('garbage'), false)
   })
 })
@@ -317,6 +321,38 @@ describe('parseTokenPoolVersion', () => {
           address: ADDR,
           contractType: 'BurnMintTokenPool',
           version: '1.7.0',
+        }),
+      CCTContractVersionUnsupportedError,
+    )
+  })
+
+  it('keeps the USDC/CCTP types out of the TokenPoolTypes, so no family or generic op sees one', () => {
+    for (const type of USDC_TOKEN_POOL_TYPES) assert.equal(isTokenPoolType(type), false, type)
+    const usdcTypes: readonly string[] = USDC_TOKEN_POOL_TYPES
+    for (const type of TOKEN_POOL_TYPES) assert.equal(usdcTypes.includes(type), false, type)
+  })
+
+  it('rejects a USDC type as a type at any version, even one it never shipped at', () => {
+    for (const [contractType, version] of [
+      ['USDCTokenPool', '1.6.2'],
+      ['USDCTokenPool', '1.4.0'],
+      ['CCTPThroughCCVTokenPool', '1.6.5'],
+    ] as const)
+      assert.throws(
+        () => parseTokenPoolVersion({ address: ADDR, contractType, version }),
+        (error: unknown) =>
+          error instanceof CCTContractTypeInvalidError &&
+          error.context.actual === contractType &&
+          /getTokenPoolState/.test(error.message),
+        `${contractType} ${version}`,
+      )
+    // 1.6.2 and 1.6.5 shipped only USDC pools
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'BurnMintTokenPool',
+          version: '1.6.2',
         }),
       CCTContractVersionUnsupportedError,
     )
