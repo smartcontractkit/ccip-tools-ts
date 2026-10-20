@@ -1140,9 +1140,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * A zero `newRateLimitAdmin` is accepted and clears the delegation, leaving the owner as the
    * only account that can change rate limits.
-   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool — 2.0.0 removed the
-   * standalone `setRateLimitAdmin(address)` selector and folded the role into a three-field
-   * dynamic config; use {@link generateUnsignedSetDynamicConfig} / {@link setDynamicConfig} there
+   *
+   * A **v2.0.0** pool has no standalone `setRateLimitAdmin(address)`, so this reads
+   * `getDynamicConfig()` and encodes `setDynamicConfig(router, newRateLimitAdmin, feeAdmin)`,
+   * writing `router` and `feeAdmin` back as read. That calldata depends on chain state at build
+   * time: if `router` or `feeAdmin` changes before a multisig signs, the tx writes the old value
+   * back. Use {@link generateUnsignedSetDynamicConfig} for exact control over all three fields.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
    * address, or `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
@@ -1163,9 +1166,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Assigns the pool's rate-limit admin role, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks On a v2.0.0 pool this writes `setDynamicConfig`, keeping the on-chain `router` and
+   * `feeAdmin`; see {@link generateUnsignedSetRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — use {@link setDynamicConfig}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -1196,8 +1200,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * silently reverting an unrelated config change made in the interim.
    *
    * Read the current triple with {@link getTokenPoolState} and pass it back explicitly, so what
-   * is signed is exactly what was reviewed. This is also the migration path off
-   * {@link setRateLimitAdmin} for a 2.0.0 pool.
+   * is signed is exactly what was reviewed. To change only `rateLimitAdmin` and accept that
+   * trade-off, {@link generateUnsignedSetRateLimitAdmin} does the read for you at build time.
    *
    * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin}.
    * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
@@ -1230,7 +1234,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * current triple with {@link getTokenPoolState} and pass back whatever you are not changing, as
    * below. A missing field is a validation error, never "leave that one alone" — nothing is
    * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
-   * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
+   * To change only `rateLimitAdmin`, {@link setRateLimitAdmin} does that read for you at build
+   * time.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
