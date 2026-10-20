@@ -1044,7 +1044,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * `fastFinality` is **v2.0.0-only** — the flag does not exist in the earlier ABIs, so setting it
    * (to either value) on an older pool is rejected rather than silently dropped. It defaults to
-   * `false` on v2.0.0.
+   * `false` on v2.0.0. A v2.0.0 lane holds a finalized and a fast-finality bucket, so it may
+   * appear twice in `updates`, once per `fastFinality` value.
    *
    * This op *updates* limits on lanes that already exist; it does not add one. An unconfigured
    * selector reverts on-chain (`NonExistentChain`).
@@ -1056,10 +1057,11 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * `sender` holding neither fails at build time rather than reverting at signing. Omit `sender`
    * to build the calldata without any role read, when the eventual signer is not yet known.
    * @throws {@link CCTParamsInvalidError} if any param is invalid: `updates` empty, a repeated
-   * `remoteChainSelector`, a non-`uint64` selector, a rate above its capacity while enabled, a
-   * non-zero amount while disabled, `fastFinality` set on a pre-2.0.0 pool, or `sender` given and
-   * being neither the pool `owner` nor its (set) `rateLimitAdmin`. On a **v1.5.1 or v1.6.0** pool
-   * the enabled-bucket bound is stricter still (`0 < rate < capacity`), so a `rate` of `0n` or a
+   * (`remoteChainSelector`, `fastFinality`) pair, a non-`uint64` selector, a rate above its
+   * capacity while enabled, a non-zero amount while disabled, `fastFinality` set on a pre-2.0.0
+   * pool, or `sender` given and being neither the pool `owner` nor its (set) `rateLimitAdmin`.
+   * On a **v1.5.1 or v1.6.0** pool the enabled-bucket bound is stricter still
+   * (`0 < rate < capacity`), so a `rate` of `0n` or a
    * `rate` equal to `capacity` is also rejected there — v1.6.1 and v2.0.0 allow both. A
    * **v1.5.0** pool accepts only a single-element `updates`.
    * @example
