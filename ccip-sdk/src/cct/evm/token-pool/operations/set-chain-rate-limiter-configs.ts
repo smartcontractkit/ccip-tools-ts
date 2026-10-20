@@ -66,9 +66,9 @@ export type SetChainRateLimiterConfigsParams = {
   /** Token pool contract whose lane limits are being set. */
   poolAddress: string
   /**
-   * Lanes to re-limit; at least one, with no repeated (`remoteChainSelector`, `fastFinality`) pair.
-   * An omitted `fastFinality` counts as `false`, so on v2.0.0 a lane may appear twice: once per
-   * bucket.
+   * Lanes to re-limit, at least one. No (`remoteChainSelector`, `fastFinality`) pair may repeat,
+   * and an omitted `fastFinality` counts as `false`, so on v2.0.0 a lane may appear twice: once
+   * per bucket.
    */
   updates: ChainRateLimitUpdate[]
   /**
@@ -88,8 +88,8 @@ type ParsedChainRateLimitUpdate = {
 }
 
 /**
- * Validates `updates` and resolves every entry: non-empty, selectors `uint64`s distinct per
- * `fastFinality` value, both directions through {@link parseRateLimitConfig}.
+ * Validates `updates` and resolves every entry: non-empty, `uint64` selectors, no repeated
+ * (selector, `fastFinality`) pair, both directions through {@link parseRateLimitConfig}.
  * @param operation - Operation name, for the error context.
  * @param updates - The caller-supplied value, unvalidated.
  * @param allowFastFinality - Whether the resolved pool version has the per-entry `fastFinality`
@@ -134,15 +134,18 @@ function parseUpdates(
         throw new CCTParamsInvalidError(operation, `${path}.fastFinality`, 'must be a boolean')
     }
 
-    // keyed on the bucket, not the lane: v2.0.0 holds a finalized and a fast-finality bucket per
-    // lane, and setting both in one batch is how a caller configures the whole lane
+    // keyed on the bucket, not the lane: a v2.0.0 lane has a finalized and a fast-finality bucket,
+    // and a caller sets both in one batch. The error names fastFinality only when the caller set
+    // it, since pre-2.0.0 pools lack it and prepare can't tell the version yet
     const isFastFinality = fastFinality ?? false
     const key = `${remoteChainSelector}:${isFastFinality}`
     if (seen.has(key))
       throw new CCTParamsInvalidError(
         operation,
         `${path}.remoteChainSelector`,
-        `is a duplicate of an earlier update (${remoteChainSelector}, fastFinality: ${isFastFinality}); each lane may appear only once per fastFinality value`,
+        fastFinality === undefined
+          ? `is a duplicate of an earlier update (${remoteChainSelector})`
+          : `is a duplicate of an earlier update (${remoteChainSelector}, fastFinality: ${fastFinality}); each lane may appear only once per fastFinality value`,
       )
     seen.add(key)
 
