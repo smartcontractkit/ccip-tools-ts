@@ -216,24 +216,13 @@ export async function getDestTokenAmount({
   }
 
   // dest decimals: the token's own (optional) view, else the dest pool's declared decimals
-  // (the source-resolved remote pools first; else the dest registry's pool via the offRamp),
+  // (the pool resolved from the destination TokenAdminRegistry via the offRamp, exactly as
+  // checkExecute resolves it — the registered pool is the one that will actually convert),
   // else the family default — see resolveTokenDecimals
   const destDecimals = await resolveTokenDecimals(dest, destTokenAddress, async () => {
-    // pre-send: the source pool's remote pools for this lane, multiple may be configured —
-    // the last is the active one, so try each until one declares
-    if (source && sourcePoolAddress) {
-      const remotes = await source
-        .getTokenPoolRemotes(sourcePoolAddress, dest.network.chainSelector)
-        .catch(() => undefined)
-      const pools = remotes?.[dest.network.name]?.remotePools
-      if (pools?.length) return pools[pools.length - 1]
-    }
-    // post-send shape (no source pool): resolve the pool from the dest registry
-    if (offRamp) {
-      const registry = await dest.getTokenAdminRegistryFor(offRamp).catch(() => undefined)
-      if (registry) return (await dest.getRegistryTokenConfig(registry, destTokenAddress)).tokenPool
-    }
-    return undefined
+    if (!offRamp) return undefined
+    const registry = await dest.getTokenAdminRegistryFor(offRamp)
+    return (await dest.getRegistryTokenConfig(registry, destTokenAddress)).tokenPool
   })
   // source decimals: the extraData declaration (the source pool's destPoolData) first; else
   // the same internal chain as the dest side — the source token's own (optional) view, else

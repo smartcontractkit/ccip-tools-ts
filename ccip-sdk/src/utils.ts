@@ -326,13 +326,16 @@ export function getSourceDecimalsFromExtraData(extraData?: string): number | und
  * (`ChainStatic.decimals`, e.g. 18 on EVM) — its native token's, which the vast majority of
  * the family's tokens share.
  *
- * The pool is resolved lazily, best-effort — only when the token view is missing, and a pool
- * that cannot be resolved (e.g. an unregistered token) just falls through to the family
- * default.
+ * The pool is resolved lazily — only when the token view is missing. A resolver returning
+ * `undefined` (no pool to resolve, e.g. no router/offRamp to resolve it from) falls through
+ * to the family default; a resolver that throws propagates, so transport failures (e.g. a
+ * registry TIMEOUT) surface instead of silently triggering the fallback.
  * @param chain - Chain to resolve the decimals on.
  * @param token - Token address.
  * @param tokenPool - The token's pool address, or a lazy resolver for it (called only when the
  *   token view is missing).
+ * @param opts.familyDefault - Whether the chain family's static default may serve as the
+ *   final fallback (default `true`; preflights only).
  * @returns The resolved decimals.
  * @throws The token view's {@link CCIPTokenDecimalsUnavailableError} when neither the pool nor
  *   the family default can declare them (e.g. an unregistered family).
@@ -341,6 +344,7 @@ export async function resolveTokenDecimals(
   chain: Chain,
   token: string,
   tokenPool?: string | (() => Promise<string | undefined>),
+  { familyDefault = true }: { familyDefault?: boolean } = {},
 ): Promise<number> {
   try {
     return (await chain.getTokenInfo(token)).decimals
@@ -348,15 +352,17 @@ export async function resolveTokenDecimals(
     if (!(err instanceof CCIPTokenDecimalsUnavailableError)) throw err
     // the pool's declared decimals — the authoritative fallback: the pool converts with
     // exactly these
-    const pool =
-      typeof tokenPool === 'function' ? await tokenPool().catch(() => undefined) : tokenPool
+    const pool = typeof tokenPool === 'function' ? await tokenPool() : tokenPool
     if (pool) {
       const { decimals } = await chain.getTokenPoolConfig(pool)
       if (decimals != null) return decimals
     }
-    // the family's static default (e.g. 18 on EVM) — its native token's, which most tokens share
-    const familyDecimals = supportedChains[chain.network.family]?.decimals
-    if (familyDecimals != null) return familyDecimals
+    // the family's static default (e.g. 18 on EVM) — its native token's, which most tokens
+    // share; preflight conversions only, never the actual transfer amount
+    if (familyDefault) {
+      const familyDecimals = supportedChains[chain.network.family]?.decimals
+      if (familyDecimals != null) return familyDecimals
+    }
     throw err
   }
 }

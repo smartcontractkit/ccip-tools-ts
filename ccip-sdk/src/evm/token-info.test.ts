@@ -81,6 +81,33 @@ describe('EVMChain.getTokenInfo', () => {
     })
   })
 
+  it('propagates a transport failure instead of reporting missing decimals', async () => {
+    // a TIMEOUT (or any non-CALL_EXCEPTION failure) must surface as-is — converting it to
+    // TOKEN_DECIMALS_UNAVAILABLE (isTransient: false) would break retry handling
+    const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: timeout,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => err === timeout)
+  })
+
+  it('throws the typed error on an unusable decimals() return (BAD_DATA)', async () => {
+    // the call succeeds but the returned data can't decode as the expected return (e.g. an
+    // EOA answering 0x) — a recognized unavailable case, not a transport failure
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: '0x',
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => {
+      assert.ok(err instanceof CCIPTokenDecimalsUnavailableError)
+      assert.equal(err.context.token, TOKEN)
+      return true
+    })
+  })
+
   it('tolerates a missing name() (also optional in ERC-20)', async () => {
     const provider = stubProvider({
       [SYMBOL_SEL]: symbolResult,
@@ -144,5 +171,22 @@ describe('EVMChain.getTokenPoolConfig decimals', () => {
     const { token, decimals } = await chain.getTokenPoolConfig('0x' + '33'.repeat(20))
     assert.equal(token, TOKEN)
     assert.equal(decimals, undefined)
+  })
+
+  it('propagates a transport failure on getTokenDecimals instead of swallowing it', async () => {
+    // a TIMEOUT on the pool's getTokenDecimals must surface — swallowing it would yield
+    // `decimals: undefined` and silently trigger the family-default fallback downstream
+    const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
+    const provider = stubProvider({
+      [TYPE_AND_VERSION_SEL]: typeAndVersionResult,
+      [GET_TOKEN_SEL]: poolTokenResult,
+      [GET_ROUTER_SEL]: routerResult,
+      [GET_TOKEN_DECIMALS_SEL]: timeout,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    await assert.rejects(
+      chain.getTokenPoolConfig('0x' + '33'.repeat(20)),
+      (err: unknown) => err === timeout,
+    )
   })
 })

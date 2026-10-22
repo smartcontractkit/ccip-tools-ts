@@ -739,7 +739,9 @@ export function logParsedError(this: Ctx, err: unknown): boolean {
  * Decimals resolve internally, with the standard fallback chain (see `resolveTokenDecimals`):
  * the token's own on-chain `decimals()` view, else its pool's declared decimals
  * (`TokenPoolConfig.decimals`, pool v1.5.1+ — the authoritative source, since the pool uses
- * exactly these decimals for its own conversion), else the chain family's static default.
+ * exactly these decimals for its own conversion). The family default does NOT apply here:
+ * these decimals determine the actual transfer amount, so a lookup failure must surface
+ * rather than silently parse the amount at a guessed precision.
  **/
 export async function parseTokenAmounts(
   source: Chain,
@@ -750,13 +752,17 @@ export async function parseTokenAmounts(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=') as [string, string]
       // the pool is resolved from the TokenAdminRegistry behind the `router` (an OnRamp also
-      // works); best-effort — an unresolvable pool falls through to the family default
-      const decimals = await resolveTokenDecimals(source, token, async () => {
-        if (!router) return undefined
-        const registry = await source.getTokenAdminRegistryFor(router).catch(() => undefined)
-        if (!registry) return undefined
-        return (await source.getRegistryTokenConfig(registry, token)).tokenPool
-      })
+      // works); a lookup failure propagates — it must not fall through to a guessed default
+      const decimals = await resolveTokenDecimals(
+        source,
+        token,
+        async () => {
+          if (!router) return undefined
+          const registry = await source.getTokenAdminRegistryFor(router)
+          return (await source.getRegistryTokenConfig(registry, token)).tokenPool
+        },
+        { familyDefault: false },
+      )
       return { token, amount: parseUnits(amount_, decimals) }
     }),
   )

@@ -9,6 +9,7 @@ import {
   CCIPUsdcAttestationError,
   ChainFamily,
 } from '@chainlink/ccip-sdk/src/index.ts'
+import { makeError } from 'ethers'
 
 import {
   formatCCIPError,
@@ -228,19 +229,24 @@ describe('parseTokenAmounts', () => {
     assert.equal(ta.amount, 1000000000000000n)
   })
 
-  it('falls back to the family default when neither token nor pool can declare', async () => {
-    // no router → no pool resolution; the EVM family default (18) is the last resort
-    const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN))
-    const [ta] = await parseTokenAmounts(chain, [`${TOKEN}=0.001`])
-    assert.ok(ta)
-    assert.equal(ta.amount, 1000000000000000n)
+  it('throws when neither token nor pool can declare — no family default for the transfer amount', async () => {
+    // no router → no pool resolution; nothing left to declare — the typed error surfaces
+    // instead of a guessed family default changing the actual transfer amount
+    const err = new CCIPTokenDecimalsUnavailableError(TOKEN)
+    await assert.rejects(parseTokenAmounts(stubChain(err), [`${TOKEN}=0.001`]), err)
   })
 
-  it('falls back to the family default when the pool cannot declare either (v1.5.0)', async () => {
-    // pool present but predates getTokenDecimals — the family default (18) still applies
+  it('propagates a registry lookup failure instead of falling back to a guessed default', async () => {
+    // a transport failure (e.g. a registry TIMEOUT) while resolving the pool must surface,
+    // not silently parse the amount at the family default (18) — that would change the
+    // actual transfer amount by orders of magnitude
+    const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
     const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN))
-    const [ta] = await parseTokenAmounts(chain, [`${TOKEN}=0.001`], ROUTER)
-    assert.ok(ta)
-    assert.equal(ta.amount, 1000000000000000n)
+    ;(chain as { getTokenAdminRegistryFor: unknown }).getTokenAdminRegistryFor = () =>
+      Promise.reject(timeout)
+    await assert.rejects(
+      parseTokenAmounts(chain, [`${TOKEN}=0.001`], ROUTER),
+      (err: unknown) => err === timeout,
+    )
   })
 })
