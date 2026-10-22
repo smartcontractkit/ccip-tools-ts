@@ -414,7 +414,7 @@ ERC-20 decimals() view; its decimals must be resolved from its pool or passed
 explicitly
 ```
 
-`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. The CLI resolves the decimals automatically from the token pool's `getTokenDecimals()` (pool v1.5.1+); preflights additionally fall back to the chain family's default. For the transfer amount itself nothing is guessed — this error means neither the token nor its pool could declare them (e.g. a v1.5.0 pool). To declare them yourself, pass `tokenAmounts[].extraData` with `abi.encode(['uint256'], [decimals])` (the source-decimals declaration CCIP pools read).
+`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. The CLI resolves the decimals automatically from the token pool's `getTokenDecimals()` (pool v1.5.1+); preflights additionally fall back to the chain family's default. For the transfer amount itself nothing is guessed — this error means neither the token nor its pool could declare them (e.g. a v1.5.0 pool), and there is no CLI option to pass them manually. Fix the declaration on-chain: give the token a `decimals()` view, or use a pool v1.5.1+ that declares them via `getTokenDecimals()`.
 
 See [Token Amount Format](/cli/send#tokens-without-decimals).
 

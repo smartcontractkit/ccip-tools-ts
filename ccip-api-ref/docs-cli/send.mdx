@@ -133,7 +133,7 @@ The `--transfer-tokens` / `-t` option accepts `token=amount` pairs. The CLI conv
 
 `decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. When the token doesn't, the CLI resolves its decimals automatically from the token pool's `getTokenDecimals()` (pool v1.5.1+) — the same value the pool itself uses for its conversion. A plain `token=amount` just works; no decimals input is needed. If neither the token nor its pool can declare them, the send fails with `TOKEN_DECIMALS_UNAVAILABLE` rather than guessing — these decimals determine the actual transfer amount.
 
-The source pool also declares its decimals in the message's `extraData` (the `destPoolData` it returns from `lockOrBurn`), so destination preflights never need the token's on-chain view either. The on-chain message itself ignores it.
+The source pool also declares its decimals in the message's `extraData` (the `destPoolData` it returns from `lockOrBurn`). That is protocol data: it travels in the emitted message and reaches the destination pool's `releaseOrMint` as `sourcePoolData`, where the destination pool uses it for its own decimals conversion. It also lets destination preflights skip the source token's on-chain view, though they still resolve the destination token's decimals on their own.
 
 ## Gas Limit Behavior
 
