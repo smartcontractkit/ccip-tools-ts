@@ -410,18 +410,11 @@ The CLI handles approvals automatically. If approval fails:
 
 ```
 error[TOKEN_DECIMALS_UNAVAILABLE]: token=0x... does not implement the optional
-ERC-20 decimals() view; its decimals must be passed explicitly
+ERC-20 decimals() view; its decimals must be resolved from its pool or passed
+explicitly
 ```
 
-`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. The CLI automatically falls back to the token pool's `getTokenDecimals()` (pool v1.5.1+), so this only surfaces when the pool can't declare them either (e.g. a v1.5.0 pool). Pass the decimals explicitly:
-
-```bash
-# source decimals only (destination resolves from its pool)
-ccip-cli send ... -t 0xToken=0.001:18
-
-# both sides, when the destination token/pool can't declare them either
-ccip-cli send ... -t 0xToken=0.001:18:6
-```
+`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. Preflights resolve the decimals automatically — from the token pool's `getTokenDecimals()` (pool v1.5.1+), else the chain family's default — so this surfaces only when neither can declare them (e.g. a v1.5.0 pool on an unregistered family). To declare them yourself, pass `tokenAmounts[].extraData` with `abi.encode(['uint256'], [decimals])` (the source-decimals declaration CCIP pools read).
 
 See [Token Amount Format](/cli/send#tokens-without-decimals).
 

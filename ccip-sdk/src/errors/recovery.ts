@@ -109,7 +109,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
   TOKEN_DECIMALS_UNAVAILABLE:
-    'The token does not implement the optional ERC-20 `decimals()` view. Pass the decimals explicitly: ccip-cli `--transfer-tokens token=amount:decimals` (e.g. `0xToken=0.001:18`), or SDK `tokenAmounts` with `extraData` declaring them (see `getSourceDecimalsFromExtraData`).',
+    'The token does not implement the optional ERC-20 `decimals()` view. Preflights resolve its decimals from its pool (`TokenPoolConfig.decimals`) or the chain family default; to declare them yourself, pass `tokenAmounts[].extraData` (`abi.encode(uint256(decimals))`, see `getSourceDecimalsFromExtraData`).',
   RATE_LIMIT_EXCEEDED:
     'Rate limit amount not enough for token transfer. Check capacity and retry when refilled.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',

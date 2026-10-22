@@ -67,7 +67,7 @@ All transient — wait and retry.
 | `CCIPTokenNotConfiguredError` | `TOKEN_NOT_CONFIGURED` | Token not configured in registry | Check TokenAdminRegistry |
 | `CCIPTokenNotInRegistryError` | `TOKEN_NOT_IN_REGISTRY` | Token not in admin registry | Register token with CCIP |
 | `CCIPTokenDecimalsInsufficientError` | `TOKEN_DECIMALS_INSUFFICIENT` | Token decimals too low for transfer | Use different token or adjust amount |
-| `CCIPTokenDecimalsUnavailableError` | `TOKEN_DECIMALS_UNAVAILABLE` | Token doesn't implement the optional ERC-20 `decimals()` view and no pool or explicit value declares them | Pass decimals explicitly: CLI `token=amount:srcDecimals[:destDecimals]`, or SDK `tokenAmounts[].extraData`/`destDecimals` |
+| `CCIPTokenDecimalsUnavailableError` | `TOKEN_DECIMALS_UNAVAILABLE` | Token doesn't implement the optional ERC-20 `decimals()` view and no pool or family default declares them | Declare them via `tokenAmounts[].extraData` (`abi.encode(['uint256'], [decimals])`) |
 | `CCIPTokenPoolChainConfigNotFoundError` | `TOKEN_REMOTE_NOT_CONFIGURED` | Remote chain not configured for token | Configure remote chain in pool |
 | `CCIPTokenDataParseError` | `TOKEN_DATA_PARSE_FAILED` | Unable to parse token data | Verify token address is valid and contract is deployed |
 

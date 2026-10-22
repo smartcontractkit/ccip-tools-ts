@@ -15,7 +15,6 @@ import {
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
-  CCIPTokenDecimalsUnavailableError,
   CCIPTokenPoolChainConfigNotFoundError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
@@ -71,6 +70,7 @@ import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
   parseTypeAndVersion,
+  resolveTokenDecimals,
   scaleDecimals,
   util,
   withRetry,
@@ -692,6 +692,16 @@ export type TokenPoolConfig = {
    * May be undefined for older pool implementations that don't expose this method.
    */
   typeAndVersion?: string
+  /**
+   * The decimals the pool declares for its token (`getTokenDecimals()`, pool v1.5.1+).
+   *
+   * @remarks
+   * The authoritative source when the token doesn't implement the optional ERC-20
+   * `decimals()` view — the pool uses exactly these decimals for its own conversion. Absent
+   * for pools that predate `getTokenDecimals()` (v1.5.0 and earlier), which stay readable
+   * without it.
+   */
+  decimals?: number
   /**
    * Token transfer fee configuration from the pool contract.
    * Only present when {@link TokenTransferFeeOpts} is provided to
@@ -1550,44 +1560,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
-   * Resolve a destination token's decimals (and best-effort symbol) for
-   * {@link Chain.checkExecute}: the token's own (optional) ERC-20 `decimals()` view first; when
-   * the token doesn't implement it, the decimals its pool declares (`getTokenPoolDecimals`,
-   * pool v1.5.1+) — the authoritative fallback, since the pool uses exactly these decimals for
-   * its own release conversion. The symbol is best-effort: tokens without the `decimals()` view
-   * may equally lack `symbol()`, and a missing symbol must not fail the check.
-   * Only read when a conversion is actually needed (source decimals declared, or LockRelease
-   * liquidity to compare); otherwise `undefined` — never read, never used.
-   * @throws {@link CCIPTokenDecimalsUnavailableError} when neither the token nor its pool can
-   *   declare the decimals
-   * @internal
-   */
-  protected async getDestTokenInfoForCheck(
-    token: string,
-    tokenPool: string,
-    needed: boolean,
-  ): Promise<{ decimals: number; symbol?: string } | undefined> {
-    if (!needed) return undefined
-    let info
-    try {
-      info = await this.getTokenInfo(token)
-    } catch (err) {
-      if (!(err instanceof CCIPTokenDecimalsUnavailableError)) throw err
-      if (!this.getTokenPoolDecimals) throw err
-      // the pool's declared decimals are the authoritative fallback; the symbol stays
-      // best-effort (a token without decimals() may equally lack symbol())
-      try {
-        return { decimals: await this.getTokenPoolDecimals(tokenPool) }
-      } catch (poolErr) {
-        // a typed pool error (v1.5.0 pool) rethrows the token's — anything else (transport)
-        // surfaces as-is, never masked
-        throw poolErr instanceof CCIPTokenDecimalsUnavailableError ? err : poolErr
-      }
-    }
-    return { decimals: info.decimals, symbol: info.symbol }
-  }
-
-  /**
    * Pre-flight check if the token transfers in a message is supported for dest given lane, and have enough rate limit
    * For LockRelease TPs, also check it has enough liquidity
    * @param opts - Execution options
@@ -1627,15 +1599,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       const [poolType, poolVersion] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
       const isLockRelease = Boolean(poolType?.includes('LockRelease'))
       const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
-      // dest decimals: the token's own (optional) view, else the pool's declared ones — the
-      // authoritative fallback for tokens without the ERC-20 `decimals()` view (the pool uses
-      // exactly these decimals for its own release conversion)
-      const tokenInfo = await this.getDestTokenInfoForCheck(
-        token,
-        tokenPool!,
-        sourceDecimals != null || isLockRelease,
-      )
-      const destDecimals = tokenInfo?.decimals
+      // dest decimals, read only when a conversion or liquidity comparison needs them: the
+      // token's own (optional) view, else the pool's declared decimals, else the family
+      // default — see resolveTokenDecimals
+      const destDecimals =
+        sourceDecimals != null || isLockRelease
+          ? await resolveTokenDecimals(this, token, tokenPool!)
+          : undefined
       let localAmount = ta.amount
       let scaled
       if (sourceDecimals != null) {
@@ -1655,10 +1625,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (isLockRelease) {
         const balance = await this.getBalance({ holder: lockBox || tokenPool!, token })
         if (balance < localAmount) {
+          // best-effort symbol for the error report: a token without the `decimals()` view may
+          // equally lack `symbol()`, and a missing symbol must not fail the check
+          const symbol = await this.getTokenInfo(token)
+            .then((info) => info.symbol)
+            .catch(() => undefined)
           throw new CCIPInsufficientBalanceError(
             balance.toString(),
             localAmount.toString(),
-            tokenInfo!.symbol, // best-effort: pool-declared decimals carry no symbol
+            symbol,
             {
               context: { tokenPool, token, typeAndVersion, network: this.network.name, ...scaled },
             },
@@ -2675,19 +2650,6 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   getTokenPrice(_opts: { router: string; token: string; timestamp?: number }): Promise<TokenPrice> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPrice'))
   }
-
-  /**
-   * Read the decimals a token pool declares for its token (`getTokenDecimals()`, pool v1.5.1+).
-   *
-   * Optional; currently implemented for EVM chains. The authoritative source when the token
-   * itself does not implement the optional ERC-20 `decimals()` view — the pool uses exactly
-   * these decimals for its own release conversion, so destination preflights read them here
-   * rather than asking the user.
-   *
-   * @param tokenPool - Token pool address on this chain
-   * @returns The decimals the pool declares for its token
-   */
-  getTokenPoolDecimals?(tokenPool: string): Promise<number>
 
   /**
    * Simulate the source pool's `lockOrBurn` for a prospective token transfer and return the

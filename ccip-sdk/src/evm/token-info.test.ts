@@ -1,8 +1,10 @@
 /**
  * `getTokenInfo` must read `symbol()`/`decimals()`/`name()` off the token, and a token that does
  * not implement the OPTIONAL ERC-20 `decimals()` view must surface as the typed
- * `CCIPTokenDecimalsUnavailableError` (with how to pass decimals explicitly), not a raw provider
- * error. `name()` is equally optional, so its failure is tolerated.
+ * `CCIPTokenDecimalsUnavailableError`, not a raw provider error. `name()` is equally optional,
+ * so its failure is tolerated. `getTokenPoolConfig` must expose the pool's declared decimals
+ * (`getTokenDecimals()`) for v1.5.1+ pools, while v1.5.0 pools (which predate it) fall back to
+ * the token's own (optional) view and stay readable without it.
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
@@ -75,7 +77,6 @@ describe('EVMChain.getTokenInfo', () => {
     await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => {
       assert.ok(err instanceof CCIPTokenDecimalsUnavailableError)
       assert.equal(err.context.token, TOKEN)
-      assert.match(err.recovery ?? '', /token=amount:decimals/)
       return true
     })
   })
@@ -94,38 +95,54 @@ describe('EVMChain.getTokenInfo', () => {
   })
 })
 
-describe('EVMChain.getTokenPoolDecimals', () => {
+describe('EVMChain.getTokenPoolConfig decimals', () => {
   const pool = interfaces.TokenPool_v2_0
   const legacyPool = interfaces.TokenPool_v1_6
   const GET_TOKEN_DECIMALS_SEL = pool.getFunction('getTokenDecimals')!.selector
   const GET_TOKEN_SEL = pool.getFunction('getToken')!.selector
+  const GET_DYNAMIC_CONFIG_SEL = pool.getFunction('getDynamicConfig')!.selector
   const TYPE_AND_VERSION_SEL = pool.getFunction('typeAndVersion')!.selector
   const GET_ROUTER_SEL = legacyPool.getFunction('getRouter')!.selector
   const tokenDecimalsResult = pool.encodeFunctionResult('getTokenDecimals', [18n])
   const poolTokenResult = pool.encodeFunctionResult('getToken', [TOKEN])
+  const dynamicConfigResult = pool.encodeFunctionResult('getDynamicConfig', [
+    '0x' + '44'.repeat(20),
+    '0x' + '55'.repeat(20),
+    '0x' + '66'.repeat(20),
+  ])
   const typeAndVersionResult = pool.encodeFunctionResult('typeAndVersion', [
     'BurnMintTokenPool 1.5.0',
   ])
   const routerResult = legacyPool.encodeFunctionResult('getRouter', ['0x' + '44'.repeat(20)])
 
-  it("reads the pool's declared decimals", async () => {
+  it("exposes the pool's declared decimals (v2.0 pool)", async () => {
     const provider = stubProvider({
+      [TYPE_AND_VERSION_SEL]: pool.encodeFunctionResult('typeAndVersion', [
+        'BurnMintTokenPool 2.0.0',
+      ]),
+      [GET_TOKEN_SEL]: poolTokenResult,
+      [GET_DYNAMIC_CONFIG_SEL]: dynamicConfigResult,
       [GET_TOKEN_DECIMALS_SEL]: tokenDecimalsResult,
     })
     const chain = new EVMChain(provider, networkInfo('avalanche-testnet-fuji'))
-    assert.equal(await chain.getTokenPoolDecimals('0x22812538c457249dedb47bb99c3faffc791e45f7'), 18)
+    const { decimals } = await chain.getTokenPoolConfig(
+      '0x22812538c457249dedb47bb99c3faffc791e45f7',
+    )
+    assert.equal(decimals, 18)
   })
 
-  it('falls back to the token for v1.5.0 pools (no getTokenDecimals)', async () => {
+  it('v1.5.0 pools stay readable without getTokenDecimals (decimals undefined)', async () => {
     const provider = stubProvider({
       [TYPE_AND_VERSION_SEL]: typeAndVersionResult,
       [GET_TOKEN_SEL]: poolTokenResult,
       [GET_ROUTER_SEL]: routerResult,
-      [SYMBOL_SEL]: symbolResult,
-      [DECIMALS_SEL]: decimalsResult,
-      [NAME_SEL]: nameResult,
     })
     const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
-    assert.equal(await chain.getTokenPoolDecimals('0x' + '33'.repeat(20)), 18)
+    // the best-effort getTokenDecimals reverts (v1.5.0 predates it) — the pool config stays
+    // readable, with no decimals declared; the token-view fallback happens in
+    // resolveTokenDecimals, not here
+    const { token, decimals } = await chain.getTokenPoolConfig('0x' + '33'.repeat(20))
+    assert.equal(token, TOKEN)
+    assert.equal(decimals, undefined)
   })
 })

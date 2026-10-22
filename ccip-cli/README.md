@@ -245,7 +245,7 @@ Sends a CCIP message from source to destination chain.
 | Option              | Alias | Description                                             |
 | ------------------- | ----- | ------------------------------------------------------- |
 | `--fee-token`       |       | Pay fee in ERC20 (default: native token)                |
-| `--transfer-tokens` | `-t`  | Token transfers as `token=amount[:srcDecimals[:destDecimals]]` (e.g., `0xToken=0.1`; decimals are read from the token, else its pool — pass them explicitly, e.g. `0xToken=0.001:18:6`, only for tokens without the optional ERC-20 `decimals()` view whose pool cannot declare them either) |
+| `--transfer-tokens` | `-t`  | Token transfers as `token=amount` (e.g., `0xToken=0.1`; decimals are read from the token, else its pool, else the chain family default — no input needed) |
 | `--approve-max`     |       | Approve max allowance instead of exact                  |
 
 **Utility options:**

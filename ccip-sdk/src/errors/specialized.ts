@@ -966,7 +966,9 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
 
 /**
  * Thrown when a token does not implement the optional ERC-20 `decimals()` view, so its decimals
- * cannot be read on-chain.
+ * cannot be read on-chain. Preflights resolve them from the token's pool or the chain family
+ * default instead (see `resolveTokenDecimals`); this surfaces only when neither can declare
+ * them.
  *
  * @example
  * ```typescript
@@ -974,7 +976,7 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
  *   const { decimals } = await chain.getTokenInfo(token)
  * } catch (error) {
  *   if (error instanceof CCIPTokenDecimalsUnavailableError) {
- *     console.log(`Token ${error.context.token} has no decimals(); pass them explicitly`)
+ *     console.log(`Token ${error.context.token} has no decimals(); resolve them from its pool or pass them explicitly`)
  *   }
  * }
  * ```
@@ -985,7 +987,7 @@ export class CCIPTokenDecimalsUnavailableError extends CCIPError {
   constructor(token: string, options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.TOKEN_DECIMALS_UNAVAILABLE,
-      `token=${token} does not implement the optional ERC-20 decimals() view; its decimals must be passed explicitly`,
+      `token=${token} does not implement the optional ERC-20 decimals() view; its decimals must be resolved from its pool or passed explicitly`,
       {
         ...options,
         isTransient: false,
