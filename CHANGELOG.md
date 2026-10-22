@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): add `simulateEVMTx(chain, unsigned, opts?)`, which dry-runs a built CCT tx with `eth_call` from `opts.from` or the tx's `sender` and returns `{ success: true }` or the revert's `errorName` and `errorArgs` (decoded with the SDK's bundled ABIs, `null` when none declares it) and raw `revertData`
+
 ## [1.16.0] - 2026-10-09
 
 - EVM: `getLogs` honors a block-range limit the RPC states below 100 blocks (e.g. Alchemy's free plan allows 10) instead of throwing `LOG_RANGE_TOO_LARGE`; fixes `ccip-cli show --wait` on such endpoints
