@@ -13,9 +13,102 @@ import { describe, it, mock } from 'node:test'
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 
 import { type ChainFamily, type NetworkInfo, networkInfo } from '../networks.ts'
+import type { SuiClientLike } from './client.ts'
+import {
+  getDynamicFieldIds,
+  getLatestPackageId,
+  getObjectRef,
+  getPackageDisassembly,
+} from './objects.ts'
 import { SuiChain } from './index.ts'
 
 const ADDRESS = '0xpkg::module'
+
+describe('Sui object cache isolation', () => {
+  const fakeClient = (parent: string, latest: string) =>
+    ({
+      getOwnedObjects: async () => ({
+        data: [
+          {
+            data: {
+              objectId: parent,
+              content: { dataType: 'moveObject', fields: { parent_object_id: parent } },
+            },
+          },
+        ],
+      }),
+      getObject: async () => ({
+        data: { content: { dataType: 'moveObject', fields: { package_ids: [latest] } } },
+      }),
+      getDynamicFields: async () => ({ data: [{ objectType: 'state', objectId: latest }] }),
+      getPackageDisassembly: async () => ({ module: latest }),
+    }) as unknown as SuiClientLike
+
+  it('keys package and state lookups by client as well as address', async () => {
+    const a = fakeClient('0xa', '0x01')
+    const b = fakeClient('0xb', '0x02')
+    assert.notEqual(await getObjectRef('0x03', a), await getObjectRef('0x03', b))
+    assert.equal(await getLatestPackageId('0x03', a), '0x01')
+    assert.equal(await getLatestPackageId('0x03', b), '0x02')
+    assert.deepEqual(await getDynamicFieldIds('0x04', a), { state: '0x01' })
+    assert.deepEqual(await getDynamicFieldIds('0x04', b), { state: '0x02' })
+    assert.deepEqual(await getPackageDisassembly('0x05', a), { module: '0x01' })
+    assert.deepEqual(await getPackageDisassembly('0x05', b), { module: '0x02' })
+  })
+})
+
+describe('Sui token pool router metadata', () => {
+  const pool = `0x${'11'.repeat(32)}`
+  const ccip = `0x${'22'.repeat(32)}`
+  const tokenType = '0x02::coin::COIN'
+  const makePoolChain = (source: string) => {
+    let inspectCalls = 0
+    const client = {
+      getTransactionBlock: async () => ({}),
+      getPackageDisassembly: async () => ({
+        managed_token_pool: `${source}\nstruct ManagedTokenPoolState\nmanaged_token_pool_object_id: address`,
+      }),
+      getOwnedObjects: async () => ({
+        data: [
+          {
+            data: {
+              content: {
+                dataType: 'moveObject',
+                fields: { managed_token_pool_object_id: '0x01' },
+              },
+            },
+          },
+        ],
+      }),
+      getObject: async () => ({
+        data: {
+          type: `${pool}::managed_token_pool::ManagedTokenPoolState<${tokenType}>`,
+          content: { dataType: 'moveObject', fields: { package_ids: [pool] } },
+        },
+      }),
+      devInspectTransactionBlock: async () => ({
+        effects: { status: { status: 'success' } },
+        results: inspectCalls++ === 0 ? [{ returnValues: [[Array(32).fill(3), 'address']] }] : [],
+      }),
+    } as unknown as SuiClientLike
+    return new SuiChain(client, networkInfo('sui:2') as NetworkInfo<typeof ChainFamily.Sui>, {
+      apiClient: null,
+    })
+  }
+
+  it('accepts imports with and without the 0x prefix', async () => {
+    for (const address of [ccip, ccip.slice(2)]) {
+      const chain = makePoolChain(`use ${address}::state_object;`)
+      const config = await chain.getTokenPoolConfig(pool)
+      assert.equal(config.router, `${ccip}::state_object`)
+    }
+  })
+
+  it('fails clearly when the router cannot be resolved instead of reporting a token type', async () => {
+    const chain = makePoolChain('')
+    await assert.rejects(chain.getTokenPoolConfig(pool), /Cannot resolve the CCIP router/)
+  })
+})
 
 type TxMeta = { checkpoint: number; timestampMs: string }
 
@@ -323,6 +416,36 @@ void describe('SuiChain.getLogs multi-topic', () => {
   })
 })
 
+describe('SuiChain client injection', () => {
+  it('detects the network from an injected client', async () => {
+    const client = makeFakeClient({})
+    client.getChainIdentifier = async () => '4c78adac'
+    const chain = await SuiChain.fromClient(client)
+    assert.equal(chain.client, client)
+    assert.equal(chain.network.name, 'sui-testnet')
+  })
+
+  it('keeps transaction responses with different include options separate', async () => {
+    const client = makeFakeClient({})
+    const getTransactionBlock = mock.fn(
+      async ({ options }: Parameters<SuiJsonRpcClient['getTransactionBlock']>[0]) => ({
+        digest: 'TX',
+        ...(options?.showEvents ? { events: [] } : {}),
+      }),
+    )
+    client.getTransactionBlock = getTransactionBlock
+    const chain = new SuiChain(client, networkInfo('sui:2') as NetworkInfo<typeof ChainFamily.Sui>)
+    const bare = await chain.client.getTransactionBlock({ digest: 'TX' })
+    const events = await chain.client.getTransactionBlock({
+      digest: 'TX',
+      options: { showEvents: true },
+    })
+    assert.equal(bare.events, undefined)
+    assert.deepEqual(events.events, [])
+    assert.equal(getTransactionBlock.mock.callCount(), 2)
+  })
+})
+
 describe('fromUrl', () => {
   /** Answers Sui's cheap tip call; `checkpoint0` also answers `sui_getCheckpoint`. */
   const suiFetch =
@@ -354,9 +477,11 @@ describe('fromUrl', () => {
       fetch: suiFetch(urls, { checkpoint0: false }),
     })
     assert.equal(chain.network.name, 'sui-testnet')
-    // Tip probe + the (failed) chain-identifier derivation, both to the URL
-    // verbatim so the keyed path segment is honored.
+    // The gRPC-Web probe first (rejected), then the JSON-RPC tip probe + the
+    // (failed) chain-identifier derivation, both to the URL verbatim so the
+    // keyed path segment is honored.
     assert.deepEqual(urls, [
+      'https://sui-testnet.blockvision.org/v1/s3cr3t/sui.rpc.v2.LedgerService/GetServiceInfo',
       'https://sui-testnet.blockvision.org/v1/s3cr3t',
       'https://sui-testnet.blockvision.org/v1/s3cr3t',
     ])
@@ -398,7 +523,13 @@ describe('fromUrl', () => {
       fetch: suiFetch(urls),
     })
     assert.equal(chain.network.name, 'sui-testnet')
-    assert.ok(urls.length > 0)
-    assert.ok(urls.every((u) => u === 'https://gw.example.node/v1/s3cr3t'))
+    // after the (rejected) gRPC-Web probe, every JSON-RPC POST hits the URL verbatim
+    const [grpcProbe, ...jsonRpc] = urls
+    assert.equal(
+      grpcProbe,
+      'https://gw.example.node/v1/s3cr3t/sui.rpc.v2.LedgerService/GetServiceInfo',
+    )
+    assert.ok(jsonRpc.length > 0)
+    assert.ok(jsonRpc.every((u) => u === 'https://gw.example.node/v1/s3cr3t'))
   })
 })

@@ -98,19 +98,9 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     'https://api.devnet.solana.com',
   ].join(','),
   RPC_TON_TESTNET: 'https://testnet.toncenter.com/api/v2',
-  RPC_SUI_TESTNET: [
-    // Sui's public fullnodes no longer serve JSON-RPC at all ("JSON-RPC on
-    // public fullnodes has been deprecated"), so the defaults are gateways.
-    // BlockVision leads: it is the only one here whose *retention* covers the
-    // suite's fixtures and the MCMS publish/upgrade history the discovery walks
-    // (it throttles bursts, and the SDK's adaptive limiter paces through that);
-    // the other two are faster, serve `sui_getCheckpoint(0)` (BlockVision
-    // doesn't), and exist so one gateway's throttle or quota can't fail every
-    // Sui suite at once — see the raced-probe note in the suite.
-    'https://sui-testnet-endpoint.blockvision.org',
-    'https://rpc-testnet.suiscan.xyz',
-    'https://sui-testnet-rpc.publicnode.com',
-  ].join(','),
+  // Public fullnodes serve gRPC-Web, not JSON-RPC; SuiChain.fromUrl detects
+  // the transport, so JSON-RPC gateways also work through RPC_SUI_TESTNET.
+  RPC_SUI_TESTNET: 'https://fullnode.testnet.sui.io:443',
   RPC_HEDERA_TESTNET:
     // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official
     // CCIP Router 1.2.0 from the CCIP Directory
