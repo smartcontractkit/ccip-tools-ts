@@ -154,6 +154,8 @@ import { SolanaChain } from './solana/index.ts'
 export type { SolanaSentSlice, SolanaSplitMode, UnsignedSolanaTx } from './solana/index.ts'
 import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
+export type { SuiClientLike } from './sui/client.ts'
+export { type SuiGrpcChainClientOptions, SuiGrpcChainClient } from './sui/grpc.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
 export type {

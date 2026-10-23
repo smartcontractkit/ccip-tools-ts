@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Contract, JsonRpcProvider, Wallet, ZeroAddress } from 'ethers'
+import { Contract, Wallet, ZeroAddress } from 'ethers'
 
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
-import { CCIPAPIClient } from '../api/index.ts'
+import { type MessageSearchResult, CCIPAPIClient } from '../api/index.ts'
 // Register non-EVM chain families for cross-family message building — the v1.6
 // lane cases below send/quote towards Aptos and Solana devnet, whose receivers
 // and extraArgs are family-specific (same pattern as fork.test.ts).
@@ -29,6 +29,10 @@ import { EVMChain } from './index.ts'
 // shared egress gets rate-limited on. Base Sepolia and OP Sepolia still carry all
 // three OnRamp generations between them (see the lane table below), are locked by
 // no other suite, and therefore run fully in parallel with the rest of the matrix.
+// computed before the endpoint probes below: a SKIP_INTEGRATION_TESTS run must
+// not issue a single network call at module load
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
+
 await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 
 // ── Chain constants ──
@@ -37,13 +41,13 @@ await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 // defaults point at endpoints verified to (a) be reachable from CI's egress, (b) serve
 // ~10k-block `eth_getLogs` ranges, and (c) retain logs deep enough for the historical
 // messages asserted below. Override via RPC_* env vars.
-const BASE_SEP_RPC = rpcEndpoint('RPC_BASE_SEPOLIA')
+const BASE_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_BASE_SEPOLIA')
 const BASE_SEP_SELECTOR = 10344971235874465080n
 
-const OP_SEP_RPC = rpcEndpoint('RPC_OPTIMISM_SEPOLIA')
+const OP_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_OPTIMISM_SEPOLIA')
 const OP_SEP_SELECTOR = 5224473277236331295n
 
-const HEDERA_TESTNET_RPC = rpcEndpoint('RPC_HEDERA_TESTNET')
+const HEDERA_TESTNET_RPC = skip ? '' : await reachableRpcEndpoint('RPC_HEDERA_TESTNET')
 const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 // ── Routers ──
@@ -107,8 +111,6 @@ const USDC_TOKEN_OP_SEP = '0x5fd84259d66Cd46123540766Be93DFE6D43130D7'
 
 // ── Tests ──
 
-const skip = !!process.env.SKIP_INTEGRATION_TESTS
-
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
@@ -167,19 +169,12 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   let wallet: Wallet
 
   before(async () => {
-    const baseSepProvider = new JsonRpcProvider(BASE_SEP_RPC)
-    const opSepProvider = new JsonRpcProvider(OP_SEP_RPC)
-    baseSepChain = await EVMChain.fromProvider(baseSepProvider, {
-      apiClient: null,
-      logger: testLogger,
-    })
-    opSepChain = await EVMChain.fromProvider(opSepProvider, {
-      apiClient: null,
-      logger: testLogger,
-    })
+    // fromUrl wraps the SDK's rate-limited fetch (paces keyless public endpoints)
+    baseSepChain = await EVMChain.fromUrl(BASE_SEP_RPC, { apiClient: null, logger: testLogger })
+    opSepChain = await EVMChain.fromUrl(OP_SEP_RPC, { apiClient: null, logger: testLogger })
     wallet = new Wallet(
       '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-      baseSepProvider,
+      baseSepChain.provider,
     )
   })
 
@@ -598,101 +593,90 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getExecutionReceipts', () => {
-    // Both fixtures are on the OP Sepolia → Base Sepolia lane: the source tx is read by
-    // hash (no scan), and only the destination (Base Sepolia) is scanned — that endpoint
-    // is the one verified to serve 10k-block eth_getLogs ranges at this depth.
-    const SUCCESS_MSG = {
-      messageId: '0xaac233a5ece55e930fdc6e0d3c7d503e8675a1cf0fcf7c67b4c840bc1fdbb9b6',
-      txHash: '0xdbb494cfcc39d1403158df7931d68e7146ced980b57066f57512a6a516ea111c',
+    // Fixtures come from the CCIP API at runtime (bounded single-page searches, newest
+    // first), on the Base Sepolia → OP Sepolia lane. The OP Sepolia destination
+    // (sepolia.optimism.io) retains ~113 days of history, so receipts stay scannable
+    // for months — unlike base-sepolia destinations, whose keyless nodes prune to ~5.5
+    // days now that blocks are 0.2s (retention wall at block 46.5M, head ~48.9M,
+    // observed 2026-10), which is what hard-coded OP→Base fixtures kept falling
+    // behind. The scan inputs come from the API's decoded request, so no source-tx
+    // scan is needed — keyless base-sepolia nodes also prune those source transactions.
+    const apiClient = new CCIPAPIClient(undefined, { logger: testLogger })
+
+    /** The lane's newest messages with `status`: at most 2 pages of 100, 5 matches. */
+    async function searchNewest(status: 'success' | 'failed'): Promise<MessageSearchResult[]> {
+      const matches: MessageSearchResult[] = []
+      let cursor: string | undefined
+      for (let page = 0; page < 2 && matches.length === 0; page++) {
+        const result = await apiClient.searchMessages(
+          { sourceChainSelector: BASE_SEP_SELECTOR, destChainSelector: OP_SEP_SELECTOR },
+          { limit: 100, cursor },
+        )
+        matches.push(
+          ...result.data.filter((msg) => String(msg.status).toLowerCase() === status).slice(0, 5),
+        )
+        cursor = result.cursor
+        if (!result.hasNextPage) break
+      }
+      return matches
+    }
+
+    /**
+     * Scans the destination receipts of the newest `status` messages, newest first, up
+     * to the first receipt in `state`. A candidate the scan cannot reach (error, or no
+     * receipt at all: pruned or out of range) moves on to the next one; the test fails
+     * with every candidate's reason when none is reachable. A reachable candidate whose
+     * receipts never reach `state` fails at once: that is an SDK result, not retention.
+     * @returns the matched receipt and the receipt states seen before it
+     */
+    async function findReceipt(status: 'success' | 'failed', state: ExecutionState) {
+      assert.ok(baseSepChain, 'source chain should be initialized')
+      assert.ok(opSepChain, 'dest chain should be initialized')
+      const candidates = await searchNewest(status)
+      assert.ok(candidates.length, `CCIP API has no recent ${status} Base→OP messages`)
+      const errors: string[] = []
+      for (const { messageId } of candidates) {
+        const seen: ExecutionState[] = []
+        try {
+          const request = await apiClient.getMessageById(messageId)
+          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane.onRamp, {
+            logger: testLogger,
+          })
+          for await (const exec of opSepChain.getExecutionReceipts({
+            offRamp,
+            messageId,
+            sourceChainSelector: request.message.sourceChainSelector,
+            startTime: request.log.blockTimestamp,
+          })) {
+            if (exec.receipt.state === state) return { messageId, exec, seen }
+            seen.push(exec.receipt.state)
+          }
+          assert.equal(seen.length, 0, `${messageId}: receipts ${seen.join(',')} but no ${state}`)
+          errors.push(`${messageId}: no receipts found`)
+        } catch (err) {
+          if (err instanceof assert.AssertionError) throw err
+          errors.push(`${messageId}: ${(err as Error).message}`)
+        }
+      }
+      assert.fail(`no ${status} Base→OP candidate has a reachable receipt:\n${errors.join('\n')}`)
     }
 
     it('should find a success receipt for a known successful message', async () => {
-      assert.ok(opSepChain, 'source chain should be initialized')
-      assert.ok(baseSepChain, 'dest chain should be initialized')
-
-      // Discover offRamp from the source transaction
-      const tx = await opSepChain.getTransaction(SUCCESS_MSG.txHash)
-      const requests = await opSepChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === SUCCESS_MSG.messageId)
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(
-        opSepChain,
-        baseSepChain,
-        request.lane.onRamp,
-        opSepChain,
-      )
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundSuccess = false
-      for await (const exec of baseSepChain.getExecutionReceipts({
-        offRamp,
-        messageId: SUCCESS_MSG.messageId,
-        sourceChainSelector: request.message.sourceChainSelector,
-        startTime: request.log.blockTimestamp,
-      })) {
-        if (exec.receipt.state === ExecutionState.Success) {
-          foundSuccess = true
-          console.log(`  receipt: state=Success messageId=${SUCCESS_MSG.messageId.slice(0, 10)}…`)
-          assert.equal(
-            exec.receipt.messageId,
-            SUCCESS_MSG.messageId,
-            'receipt messageId should match',
-          )
-          assert.ok(exec.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-          break
-        }
-      }
-      assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
+      const { messageId, exec } = await findReceipt('success', ExecutionState.Success)
+      console.log(`  receipt: state=Success messageId=${messageId.slice(0, 10)}…`)
+      assert.equal(exec.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(exec.log.blockTimestamp > 0, 'execution should have a positive timestamp')
     })
 
-    const FAILED_MSG = {
-      messageId: '0x5cec46c7ae98f1a474e7af7f6a1241d3b14f5ee39a08e69ab79610d749acd54a',
-      txHash: '0x9d9ac80f5c97b7a23cbc514a5701d2b01b3e2822ca6f11f47c96ae69ec4f454a',
-    }
-
-    // messageId-filtered scan from the message's block forward; breaks on the first
+    // messageId-filtered scan from the message's block forward; stops on the first
     // Failed receipt (emitted shortly after the message), so it returns early.
     it('should find a failed receipt with no preceding success for a known failed message', async () => {
-      assert.ok(opSepChain, 'source chain should be initialized')
-      assert.ok(baseSepChain, 'dest chain should be initialized')
-
-      const tx = await opSepChain.getTransaction(FAILED_MSG.txHash)
-      const requests = await opSepChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === FAILED_MSG.messageId)
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(
-        opSepChain,
-        baseSepChain,
-        request.lane.onRamp,
-        opSepChain,
+      const { messageId, exec, seen } = await findReceipt('failed', ExecutionState.Failed)
+      assert.ok(
+        !seen.includes(ExecutionState.Success),
+        'should not find a success receipt before the failed one',
       )
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundFailed = false
-      for await (const exec of baseSepChain.getExecutionReceipts({
-        offRamp,
-        messageId: FAILED_MSG.messageId,
-        sourceChainSelector: request.message.sourceChainSelector,
-        startTime: request.log.blockTimestamp,
-      })) {
-        assert.notEqual(
-          exec.receipt.state,
-          ExecutionState.Success,
-          'should not find a success receipt before the failed one',
-        )
-        if (exec.receipt.state === ExecutionState.Failed) {
-          foundFailed = true
-          assert.equal(
-            exec.receipt.messageId,
-            FAILED_MSG.messageId,
-            'receipt messageId should match',
-          )
-          break
-        }
-      }
-      assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
+      assert.equal(exec.receipt.messageId, messageId, 'receipt messageId should match')
     })
   })
 

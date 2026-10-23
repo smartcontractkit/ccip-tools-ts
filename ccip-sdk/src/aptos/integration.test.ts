@@ -14,12 +14,14 @@ import { AptosChain } from './index.ts'
 await useResource(['aptos-testnet'])
 const APTOS_RPC = rpcEndpoint('RPC_APTOS_TESTNET')
 
-const skip = !!process.env.SKIP_INTEGRATION_TESTS
+const skip =
+  !!process.env.SKIP_INTEGRATION_TESTS ||
+  'aptos-testnet CCIP not redeployed since the ~2026-10-08 testnet restart'
 
-// TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
-// testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
-// has onramp/offramp modules, so every live Aptos fixture below 404s.
-describe.skip('Aptos failed execution detection integration (aptos-testnet)', { skip }, () => {
+// TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
+// and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
+// list no aptos-testnet ramp created, or message sent, after the restart.
+describe('Aptos failed execution detection integration (aptos-testnet)', { skip }, () => {
   // A live FAILED execution (ethereum-testnet-sepolia → aptos-testnet, seq 138):
   // the OffRamp ran out of gas (vmStatus EXECUTION_LIMIT_REACHED), so the tx
   // carries no ExecutionStateChanged event — the receipt is reconstructed from

@@ -1,4 +1,4 @@
-import type { EventId, SuiEvent, SuiEventFilter, SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import type { EventId, SuiEvent, SuiEventFilter } from '@mysten/sui/jsonRpc'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { memoize } from 'micro-memoize'
 
@@ -10,6 +10,7 @@ import {
 } from '../errors/index.ts'
 import type { Logger, WithLogger } from '../types.ts'
 import { getBlockNumberAtOrAfter, signalToPromise } from '../utils.ts'
+import type { SuiClientLike } from './client.ts'
 import {
   type SuiLogStreamOpts,
   SUI_OFFRAMP_EXECUTE_FUNCTIONS,
@@ -141,11 +142,11 @@ const TX_META_CACHE_MAX = 10_000
 /**
  * Gets the latest checkpoint sequence number from the JSON-RPC endpoint.
  */
-async function getLatestCheckpoint(client: SuiJsonRpcClient): Promise<number> {
+async function getLatestCheckpoint(client: SuiClientLike): Promise<number> {
   return Number(await client.getLatestCheckpointSequenceNumber())
 }
 
-async function getCheckpointTimestamp(client: SuiJsonRpcClient, seq: number): Promise<number> {
+async function getCheckpointTimestamp(client: SuiClientLike, seq: number): Promise<number> {
   const checkpoint = await client.getCheckpoint({ id: String(seq) })
   return Number(checkpoint.timestampMs) / 1000
 }
@@ -159,7 +160,7 @@ async function getCheckpointTimestamp(client: SuiJsonRpcClient, seq: number): Pr
  * bypassing whatever logger the caller configured.
  */
 async function getCheckpointAtOrAfter(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   startTime: number,
   logger?: Logger,
 ): Promise<number> {
@@ -174,7 +175,7 @@ async function getCheckpointAtOrAfter(
  * caching per digest and batching lookups with `multiGetTransactionBlocks`.
  */
 async function resolveTxMetas(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   events: SuiEvent[],
   cache: Map<string, TxMeta>,
   withStatus = false,
@@ -199,7 +200,7 @@ async function resolveTxMetas(
 }
 
 async function collectByCheckpointWalk<T>(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   types: string[],
   fromCheckpoint: number,
   toCheckpoint: number,
@@ -312,7 +313,7 @@ function isExecutionStateEvent(type: string): boolean {
  * the tip are skipped rather than allowed to end the walk.
  */
 async function fetchSuiFailureScanRound(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   offRampAddress: string,
   fromCheckpoint: number,
   toCheckpoint: number,
@@ -393,7 +394,7 @@ async function fetchSuiFailureScanRound(
  * which is then merge-sorted once before yielding for the round.
  */
 async function* fetchEventsForward<T>(
-  ctx: { client: SuiJsonRpcClient } & WithLogger,
+  ctx: { client: SuiClientLike } & WithLogger,
   opts: SuiLogStreamOpts,
   types: string[],
   limit = 50,
@@ -744,7 +745,7 @@ async function* fetchEventsForward<T>(
  * @returns Async generator of log entries.
  */
 export async function* streamSuiLogs<T>(
-  ctx: { client: SuiJsonRpcClient },
+  ctx: { client: SuiClientLike },
   opts: SuiLogStreamOpts,
 ): AsyncGenerator<EventNode<T>> {
   if (!opts.topics?.length) throw new CCIPTopicsInvalidError(opts.topics!)

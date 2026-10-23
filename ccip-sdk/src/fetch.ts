@@ -647,14 +647,58 @@ export function onResponseBodySettled(response: Response, onDone: () => void): R
   // pipeTo resolves on full consumption and rejects on source error or
   // downstream cancel; all three mean the body no longer needs the signals.
   void body.pipeTo(writable).then(onDone, onDone)
-  const wrapped = new Response(readable, response)
-  // Wrapping drops url/redirected/type; copy them back.
-  Object.defineProperties(wrapped, {
+  return rebuildResponse(response, readable)
+}
+
+/** A copy of `response` with a new body; wrapping drops url/redirected/type, so copy them back. */
+function rebuildResponse(
+  response: Response,
+  body: ConstructorParameters<typeof Response>[0],
+): Response {
+  const rebuilt = new Response(body, response)
+  Object.defineProperties(rebuilt, {
     url: { value: response.url },
     redirected: { value: response.redirected },
     type: { value: response.type },
   })
-  return wrapped
+  return rebuilt
+}
+
+/** Largest response body inspected for an in-band JSON-RPC rate-limit error. */
+const MAX_INSPECTED_BODY_BYTES = 16_384
+
+/**
+ * Some keyless RPCs (e.g. sepolia.base.org, rpc.monad.xyz) answer over-budget
+ * calls with HTTP 200 and a JSON-RPC `-32007` error instead of a 429. Reads a
+ * small JSON-RPC response once and reports whether every envelope (single or
+ * batch) carries that code; the returned response replays the read body. A
+ * batch with any other member answered is not retried: resending it would
+ * replay that member, which may be a write (e.g. `eth_sendRawTransaction`).
+ * Bodies without a small `content-length` are not read, so large results
+ * keep streaming.
+ */
+async function readJsonRpcRateLimit(
+  response: Response,
+): Promise<{ response: Response; limited: boolean }> {
+  const length = Number(response.headers.get('content-length'))
+  if (!response.body || !(length > 0 && length <= MAX_INSPECTED_BODY_BYTES))
+    return { response, limited: false }
+  const text = await response.text()
+  let limited = false
+  if (text.includes('-32007')) {
+    try {
+      const parsed: unknown = JSON.parse(text)
+      const members = Array.isArray(parsed) ? parsed : [parsed]
+      limited =
+        members.length > 0 &&
+        members.every(
+          (member) => (member as { error?: { code?: unknown } } | null)?.error?.code === -32007,
+        )
+    } catch {
+      // not JSON: not a rate-limit envelope
+    }
+  }
+  return { response: rebuildResponse(response, text), limited }
 }
 
 /**
@@ -704,6 +748,7 @@ export function createRateLimitedFetch(
 
     let lastError: Error | null = null
     const method = extractMethod(init)
+    const isJsonRpc = !!bodyStr(init?.body)?.includes('"jsonrpc"')
     const ep = getOrCreateEndpoint(
       input,
       opts_.seed,
@@ -746,6 +791,7 @@ export function createRateLimitedFetch(
       // methodScoped may flip after the first response).
       const scope = ep.methodScoped && method ? method : '*'
       const lim = getLimiter(ep, scope)
+      let target = lim
       let response: Response
       let retryDelay = 0
       try {
@@ -773,7 +819,7 @@ export function createRateLimitedFetch(
           // method-scoped, else the per-endpoint '*' limiter).
           const hint = extractRateHint(response, method)
           if (hint.methodScoped) ep.methodScoped = true
-          const target = ep.methodScoped && method ? getLimiter(ep, method) : lim
+          target = ep.methodScoped && method ? getLimiter(ep, method) : lim
           target.learn(hint.limit, hint.windowMs)
           if (response.ok) {
             target.onSuccess()
@@ -820,6 +866,23 @@ export function createRateLimitedFetch(
       }
 
       // Slot released — now handle the response (and back off off-slot if retrying).
+      if (response.ok && isJsonRpc && attempt < opts_.maxRetries) {
+        let limited: boolean
+        try {
+          ;({ response, limited } = await readJsonRpcRateLimit(response))
+        } catch (error) {
+          link?.unlink() // terminal exit: no response body will carry the cleanup
+          throw error
+        }
+        if (limited) {
+          // same treatment as a 429 without rate-limit headers
+          target.onLimited({})
+          ep.sem.decrease()
+          logger.debug('fetch JSON-RPC rate-limit error, retrying', attempt)
+          if (!target.active) await sleep(backoffMs(attempt), abort)
+          continue
+        }
+      }
       if (response.ok) {
         logger.debug(
           'fetched',
