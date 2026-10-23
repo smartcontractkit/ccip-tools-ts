@@ -965,6 +965,39 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
 }
 
 /**
+ * Thrown when a token does not implement the optional ERC-20 `decimals()` view, so its decimals
+ * cannot be read on-chain. Preflights resolve them from the token's pool or the chain family
+ * default instead (see `resolveTokenDecimals`); this surfaces only when neither can declare
+ * them, and there is no input override — the declaration must be fixed on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const { decimals } = await chain.getTokenInfo(token)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDecimalsUnavailableError) {
+ *     console.log(`Token ${error.context.token} has no decimals(); fix the declaration on-chain: a decimals() view, or a pool v1.5.1+ declaring them`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenDecimalsUnavailableError extends CCIPError {
+  override readonly name = 'CCIPTokenDecimalsUnavailableError'
+  /** Creates a token decimals unavailable error. */
+  constructor(token: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_DECIMALS_UNAVAILABLE,
+      `token=${token} does not implement the optional ERC-20 decimals() view; its decimals must be resolved from its pool or fixed on-chain`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when TokenPool's rate limit is not enough for the requested amount.
  * Transient: rate limit may refill after some time, or user can reduce amount and retry immediately.
  * Not transient: amount exceeds total capacity of the pool, so it will never be processable until pool configs change.
@@ -3383,7 +3416,7 @@ export class CCIPTokenNotFoundError extends CCIPError {
 export class CCIPInsufficientBalanceError extends CCIPError {
   override readonly name = 'CCIPInsufficientBalanceError'
   /** Creates an insufficient balance error. */
-  constructor(have: string, need: string, symbol: string, options?: CCIPErrorOptions) {
+  constructor(have: string, need: string, symbol = 'UNKNOWN', options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.INSUFFICIENT_BALANCE,
       `Insufficient balance: have ${have} ${symbol}, need ${need} ${symbol}`,

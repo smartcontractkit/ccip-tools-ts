@@ -120,6 +120,7 @@ export {
   jsonParse,
   jsonStringify,
   linkAbortSignals,
+  resolveTokenDecimals,
   signalToPromise,
   withRetry,
 } from './utils.ts'

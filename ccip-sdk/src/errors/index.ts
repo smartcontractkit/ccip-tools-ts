@@ -87,6 +87,7 @@ export {
   CCIPLegacyTokenPoolsUnsupportedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,

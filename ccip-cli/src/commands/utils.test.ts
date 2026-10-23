@@ -2,16 +2,20 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import {
+  type Chain,
   CCIPChainNotFoundError,
   CCIPCommitNotFoundError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPUsdcAttestationError,
   ChainFamily,
 } from '@chainlink/ccip-sdk/src/index.ts'
+import { makeError } from 'ethers'
 
 import {
   formatCCIPError,
   formatDisplayAddress,
   formatDisplayTxHash,
+  parseTokenAmounts,
   prettyFormat,
   yieldResolved,
 } from './utils.ts'
@@ -183,5 +187,66 @@ describe('yieldResolved', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     await assert.rejects(gen.next(), err)
+  })
+})
+
+describe('parseTokenAmounts', () => {
+  const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
+  const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
+  const POOL = '0x8Cd7D9088e82eE838a730f0F29A97ECd211E9E97'
+
+  /** Chain stub whose getTokenInfo reports the given decimals (or throws), and whose pool
+   * (resolved via the router's registry) declares the given pool decimals (or none). */
+  const stubChain = (decimals: number | Error, poolDecimals?: number) =>
+    ({
+      network: { family: ChainFamily.EVM },
+      getTokenInfo: (_token: string) =>
+        decimals instanceof Error
+          ? Promise.reject(decimals)
+          : Promise.resolve({ decimals, symbol: 'TKN', name: 'Token' }),
+      ...(poolDecimals != null && {
+        getTokenPoolConfig: (_pool: string) => Promise.resolve({ decimals: poolDecimals }),
+        getTokenAdminRegistryFor: (_addr: string) => Promise.resolve('0x' + '11'.repeat(20)),
+        getRegistryTokenConfig: (_registry: string, token: string) =>
+          token === TOKEN
+            ? Promise.resolve({ tokenPool: POOL })
+            : Promise.reject(new Error('not registered')),
+      }),
+    }) as unknown as Chain
+
+  it('reads decimals from the token on-chain', async () => {
+    const [ta] = await parseTokenAmounts(stubChain(18), [`${TOKEN}=0.001`])
+    assert.ok(ta)
+    assert.equal(ta.token, TOKEN)
+    assert.equal(ta.amount, 1000000000000000n)
+  })
+
+  it('falls back to the source pool when the token has no decimals()', async () => {
+    // token view missing → pool's declared decimals (18) — no user input needed
+    const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN), 18)
+    const [ta] = await parseTokenAmounts(chain, [`${TOKEN}=0.001`], ROUTER)
+    assert.ok(ta)
+    assert.equal(ta.amount, 1000000000000000n)
+  })
+
+  it('throws when neither token nor pool can declare — no family default for the transfer amount', async () => {
+    // no router → no pool resolution; nothing left to declare — the typed error surfaces
+    // instead of a guessed family default changing the actual transfer amount
+    const err = new CCIPTokenDecimalsUnavailableError(TOKEN)
+    await assert.rejects(parseTokenAmounts(stubChain(err), [`${TOKEN}=0.001`]), err)
+  })
+
+  it('propagates a registry lookup failure instead of falling back to a guessed default', async () => {
+    // a transport failure (e.g. a registry TIMEOUT) while resolving the pool must surface,
+    // not silently parse the amount at the family default (18) — that would change the
+    // actual transfer amount by orders of magnitude
+    const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
+    const chain = stubChain(new CCIPTokenDecimalsUnavailableError(TOKEN))
+    ;(chain as { getTokenAdminRegistryFor: unknown }).getTokenAdminRegistryFor = () =>
+      Promise.reject(timeout)
+    await assert.rejects(
+      parseTokenAmounts(chain, [`${TOKEN}=0.001`], ROUTER),
+      (err: unknown) => err === timeout,
+    )
   })
 })

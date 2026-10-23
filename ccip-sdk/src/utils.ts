@@ -27,12 +27,13 @@ import type { Chain } from './chain.ts'
 import {
   CCIPDataFormatUnsupportedError,
   CCIPError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTypeVersionInvalidError,
 } from './errors/index.ts'
 import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
 import { util } from './shared/codec.ts'
-import { getChainStatic, getChainStatics } from './supported-chains.ts'
+import { getChainStatic, getChainStatics, supportedChains } from './supported-chains.ts'
 import type { Logger, WithLogger } from './types.ts'
 
 /** How far back the bracketing walk reaches on its first probe. Only a starting
@@ -313,6 +314,56 @@ export function getSourceDecimalsFromExtraData(extraData?: string): number | und
     return 0n <= decimals && decimals <= 36n ? Number(decimals) : undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Resolve a token's decimals with the standard fallback chain every preflight uses when it
+ * must convert or compare amounts: the token's own (optional) ERC-20 `decimals()` view first;
+ * when the token doesn't implement it, the decimals its pool declares
+ * (`TokenPoolConfig.decimals`, pool v1.5.1+) — the authoritative fallback, since the pool uses
+ * exactly these decimals for its own conversion; else the chain family's static default
+ * (`ChainStatic.decimals`, e.g. 18 on EVM) — its native token's, which the vast majority of
+ * the family's tokens share.
+ *
+ * The pool is resolved lazily — only when the token view is missing. A resolver returning
+ * `undefined` (no pool to resolve, e.g. no router/offRamp to resolve it from) falls through
+ * to the family default; a resolver that throws propagates, so transport failures (e.g. a
+ * registry TIMEOUT) surface instead of silently triggering the fallback.
+ * @param chain - Chain to resolve the decimals on.
+ * @param token - Token address.
+ * @param tokenPool - The token's pool address, or a lazy resolver for it (called only when the
+ *   token view is missing).
+ * @param opts.familyDefault - Whether the chain family's static default may serve as the
+ *   final fallback (default `true`; preflights only).
+ * @returns The resolved decimals.
+ * @throws The token view's {@link CCIPTokenDecimalsUnavailableError} when neither the pool nor
+ *   the family default can declare them (e.g. an unregistered family).
+ */
+export async function resolveTokenDecimals(
+  chain: Chain,
+  token: string,
+  tokenPool?: string | (() => Promise<string | undefined>),
+  { familyDefault = true }: { familyDefault?: boolean } = {},
+): Promise<number> {
+  try {
+    return (await chain.getTokenInfo(token)).decimals
+  } catch (err) {
+    if (!(err instanceof CCIPTokenDecimalsUnavailableError)) throw err
+    // the pool's declared decimals — the authoritative fallback: the pool converts with
+    // exactly these
+    const pool = typeof tokenPool === 'function' ? await tokenPool() : tokenPool
+    if (pool) {
+      const { decimals } = await chain.getTokenPoolConfig(pool)
+      if (decimals != null) return decimals
+    }
+    // the family's static default (e.g. 18 on EVM) — its native token's, which most tokens
+    // share; preflight conversions only, never the actual transfer amount
+    if (familyDefault) {
+      const familyDecimals = supportedChains[chain.network.family]?.decimals
+      if (familyDecimals != null) return familyDecimals
+    }
+    throw err
   }
 }
 
