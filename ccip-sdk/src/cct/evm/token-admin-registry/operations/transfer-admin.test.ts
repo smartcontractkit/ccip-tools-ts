@@ -48,6 +48,8 @@ function stubChain(
   opts: {
     pendingAdministrator?: string
     onAddress?: (address: string) => void
+    /** Called on each `getTokenConfig` read. */
+    onRead?: () => void
     /** Token the pre-check is expected to read; defaults to the token under test. */
     expectToken?: string
   } = {},
@@ -69,6 +71,7 @@ function stubChain(
           getAddress(opts.expectToken ?? TOKEN),
           'pre-check must read the config of the token being transferred',
         )
+        opts.onRead?.()
         return encodeTokenConfig(administrator, opts.pendingAdministrator)
       },
     },
@@ -129,6 +132,51 @@ describe('TransferAdmin (cct/evm)', () => {
       await generate(stubChain(CURRENT_ADMIN, { onAddress: (address) => (seen = address) }))
       assert.equal(seen, ADDRESS)
     })
+
+    it('matches a lowercase sender against the checksummed administrator', async () => {
+      // Hex-letter admin so the checksummed and lowercase spellings differ; with an all-digit
+      // fixture, dropping the getAddress() normalisation would still pass.
+      const admin = getAddress('0x' + 'ab'.repeat(20))
+      const unsigned = await generate(stubChain(admin), { sender: admin.toLowerCase() })
+      assert.equal(unsigned.transactions[0]!.data, EXPECTED_DATA)
+    })
+
+    it('builds without a sender for multisig admins, skipping only the administrator check', async () => {
+      // The administrator is OTHER, not the caller: without `sender` there is nobody to compare
+      // it against, but the registry is still read for its registration state.
+      let readRegistry = false
+      const unsigned = await generate(stubChain(OTHER, { onRead: () => (readRegistry = true) }), {
+        sender: undefined,
+      })
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TAR)
+      assert.equal(tx.from, undefined)
+      assert.equal(tx.data, EXPECTED_DATA)
+      assert.equal(readRegistry, true, 'registration state is still read')
+    })
+
+    it('still rejects an unregistered token when sender is omitted', async () => {
+      await assert.rejects(
+        () => generate(stubChain(ZeroAddress), { sender: undefined }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('is not registered'),
+      )
+    })
+
+    it('still rejects a registration pending acceptance when sender is omitted', async () => {
+      await assert.rejects(
+        () =>
+          generate(stubChain(ZeroAddress, { pendingAdministrator: NEW_ADMIN }), {
+            sender: undefined,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('still pending acceptance'),
+      )
+    })
   })
 
   describe('validation', () => {
@@ -159,9 +207,9 @@ describe('TransferAdmin (cct/evm)', () => {
       )
     })
 
-    it('rejects a missing sender', async () => {
+    it('rejects an invalid sender', async () => {
       await assert.rejects(
-        () => generate(stubChain(), { sender: undefined }),
+        () => generate(stubChain(), { sender: 'not-an-address' }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
       )
     })
@@ -248,10 +296,8 @@ describe('TransferAdmin (cct/evm)', () => {
     })
 
     it('defaults sender to the wallet address when omitted', async () => {
-      // Uniform with registerAdmin/acceptAdmin: `sender` is required for generate() (buildUnsigned
-      // must know who to authorize against before encoding), but execute() can always derive it
-      // from the wallet — the only address that can satisfy the current-administrator check for a
-      // signed submission. Omitting it must therefore succeed, not fail validation.
+      // Uniform with registerAdmin/acceptAdmin: execute() derives `sender` from the wallet, so the
+      // current-administrator check always runs for a signed submission.
       const result = await op.execute(stubChain(), {
         tokenAddress: TOKEN,
         newAdmin: NEW_ADMIN,
@@ -259,6 +305,25 @@ describe('TransferAdmin (cct/evm)', () => {
         wallet: fakeSigner(CURRENT_ADMIN),
       })
       assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('checks the defaulted wallet sender against the administrator', async () => {
+      // generate() skips the check without a sender; execute() must not, since it always knows
+      // the signer.
+      await assert.rejects(
+        () =>
+          op.execute(stubChain(CURRENT_ADMIN), {
+            tokenAddress: TOKEN,
+            newAdmin: NEW_ADMIN,
+            address: ADDRESS,
+            wallet: fakeSigner(OTHER),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          typeof err.context.reason === 'string' &&
+          err.context.reason.includes('must be the current token administrator'),
+      )
     })
 
     it('rejects a non-signer wallet', async () => {

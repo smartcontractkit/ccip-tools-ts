@@ -23,15 +23,7 @@ import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
-/**
- * Parameters for {@link TransferAdmin}.
- * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
- * for {@link TransferAdmin.generate}: the pre-tx check below has nothing to compare
- * `administrator` against without it, so an omitted `sender` is rejected in
- * {@link TransferAdmin.prepare}. {@link TransferAdmin.execute} relaxes this — it defaults
- * `sender` to the signing wallet's own address, the only address that can satisfy the
- * current-administrator check for a signed submission (see {@link TransferAdmin.execute}).
- */
+/** Parameters for {@link TransferAdmin}. */
 export type TransferAdminParams = {
   /** Token whose registry admin role is being handed over. */
   tokenAddress: string
@@ -46,47 +38,40 @@ export type TransferAdminParams = {
    */
   address: string
   /**
-   * Current registry administrator. Required for {@link TransferAdmin.generate}
-   * (unsigned/offline flows) — `buildUnsigned` must read the registry and confirm the caller is
-   * the current administrator *before* encoding a tx, so it needs to know who that caller is up
-   * front. Optional for {@link TransferAdmin.execute}, which defaults it to the wallet's address
-   * — see the remarks above.
+   * Current registry administrator. Optional: omitting it skips the administrator check in
+   * {@link TransferAdmin.buildUnsigned}, so a wrong signer only fails on-chain.
+   * {@link TransferAdmin.execute} defaults it to the signing wallet.
    */
   sender?: string
 }
-
-/** {@link TransferAdminParams} as {@link TransferAdmin.prepare} leaves it: `sender` present and checksummed. */
-type ParsedTransferAdminParams = TransferAdminParams & { sender: string }
 
 /**
  * Proposes a new TokenAdminRegistry administrator for a token via `transferAdminRole`.
  * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the handoff —
  * this op alone does not change who can act as administrator.
  */
-export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTransferAdminParams> {
+export class TransferAdmin extends EVMOperation<TransferAdminParams> {
   readonly name = 'transferAdmin'
 
   /**
-   * Validates all addresses before any RPC, including the presence of `sender` (see above), and
-   * checksums `sender` so {@link buildUnsigned} can compare it against the registry's own
-   * checksummed `administrator` without re-asserting it.
+   * Validates all addresses before any RPC and, if given, checksums `sender` so
+   * {@link buildUnsigned} can compare it against the registry's own checksummed `administrator`.
    */
-  protected override prepare(p: TransferAdminParams): ParsedTransferAdminParams {
+  protected override prepare(p: TransferAdminParams): TransferAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'newAdmin', p.newAdmin)
     validateAddress(this.name, 'address', p.address)
+    if (p.sender === undefined) return p
     validateAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
-   * Reads the registry directly, confirms `sender` is the current administrator, then builds
-   * `transferAdminRole` calldata against the TAR resolved from `address`.
+   * Reads the registry directly, confirms the token is registered and, if given, that `sender` is
+   * the current administrator, then builds `transferAdminRole` calldata against the TAR resolved
+   * from `address`.
    */
-  protected async buildUnsigned(
-    chain: EVMChain,
-    p: ParsedTransferAdminParams,
-  ): Promise<UnsignedEVMTx> {
+  protected async buildUnsigned(chain: EVMChain, p: TransferAdminParams): Promise<UnsignedEVMTx> {
     const to = await chain.getTokenAdminRegistryFor(p.address)
     const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
       chain,
@@ -109,7 +94,8 @@ export class TransferAdmin extends EVMOperation<TransferAdminParams, ParsedTrans
           : `token ${p.tokenAddress} is not registered in the TokenAdminRegistry at ${to}; call registerAdmin first`,
       )
     }
-    if (administrator !== p.sender) {
+    // without `sender`, the registration check above is the only pre-flight
+    if (p.sender !== undefined && administrator !== p.sender) {
       throw new CCTParamsInvalidError(
         this.name,
         'sender',
