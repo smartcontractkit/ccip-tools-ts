@@ -827,6 +827,47 @@ describe('transient retry', () => {
     const result = await rateLimitedFetch(url)
     assert.equal(result.ok, true)
   })
+
+  it('retries an HTTP-200 JSON-RPC -32007 rate-limit body and replays the final body', async () => {
+    const url = 'https://jsonrpc-32007.example.com/rpc'
+    const bodies = [
+      '[{"jsonrpc":"2.0","id":1,"result":"0x1"},{"jsonrpc":"2.0","id":2,"error":{"code":-32007,"message":"rate limited"}}]',
+      '[{"jsonrpc":"2.0","id":1,"result":"0x1"},{"jsonrpc":"2.0","id":2,"result":"0x2"}]',
+    ]
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      const body = bodies[calls++]!
+      return Promise.resolve(
+        new Response(body, { headers: { 'content-length': String(body.length) } }),
+      )
+    })
+
+    const request = JSON.stringify([
+      { jsonrpc: '2.0', id: 1, method: 'eth_chainId' },
+      { jsonrpc: '2.0', id: 2, method: 'eth_blockNumber' },
+    ])
+    const result = await createRateLimitedFetch({ maxRetries: 3 })(url, {
+      method: 'POST',
+      body: request,
+    })
+    assert.equal(calls, 2)
+    assert.equal(await result.text(), bodies[1])
+  })
+
+  it('returns a -32007 body untouched for non-JSON-RPC requests', async () => {
+    const url = 'https://jsonrpc-32007-plain.example.com/api'
+    const body = '{"error":{"code":-32007}}'
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      calls++
+      return Promise.resolve(
+        new Response(body, { headers: { 'content-length': String(body.length) } }),
+      )
+    })
+    const result = await createRateLimitedFetch({ maxRetries: 3 })(url)
+    assert.equal(calls, 1)
+    assert.equal(await result.text(), body)
+  })
 })
 
 // ---------------------------------------------------------------------------
