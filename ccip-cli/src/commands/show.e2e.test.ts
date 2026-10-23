@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { CCIPAPIClient, MessageStatus } from '@chainlink/ccip-sdk/src/index.ts'
+
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
   APTOS_TESTNET_RPCS,
@@ -22,9 +24,11 @@ import {
 // (dest of the Solana->EVM and Aptos->EVM fixtures) and fuji (source of the
 // Solana v2 one), which have no live alternative counterpart, but only while
 // those blocks actually run. `show` also resolves 32-byte ids through the
-// default CCIP API; it makes one or two calls per invocation, far below any
-// rate limit, so it does not take the `api` lock that the API-heavy SDK
-// suites contend on. The TON block is describe.skip'd, so it locks nothing.
+// default CCIP API, and the format variants pick their fixture through it at
+// runtime (selectFreshQuietLaneFixture) — one or two calls per invocation plus
+// a handful more, once per file, all far below any rate limit, so it does not
+// take the `api` lock that the API-heavy SDK suites contend on. The TON block
+// is describe.skip'd, so it locks nothing.
 //
 // Per-test spawn timeouts are kept 30s under the test timeout: spawnCLI's
 // rejection carries the child's captured output, so a hung endpoint surfaces
@@ -32,6 +36,49 @@ import {
 
 function buildShowArgs(txHash: string, rpcs: string[], ...additionalArgs: string[]): string[] {
   return ['show', txHash, '--rpc', ...rpcs, '--rpcs-file', '', ...additionalArgs]
+}
+
+// bsc-testnet (chainId 97) and base-sepolia (chainId 84532) CCIP chain selectors.
+const BSC_TESTNET_SELECTOR = 13264668187771770619n
+const BASE_SEPOLIA_SELECTOR = 10344971235874465080n
+
+// The fixture must stay younger than this: the dest-side receipt scan derives its
+// start block from the send timestamp, and for older sends that probe goes past the
+// base-sepolia endpoints' earliest retained block (error 4444, "pruned history
+// unavailable").
+const QUIET_FIXTURE_MAX_AGE_MS = 48 * 3600_000
+
+/**
+ * Picks a recent executed send on the bsc-testnet -> base-sepolia lane through the
+ * same default CCIP API the CLI resolves ids with. Only SUCCESS messages qualify (the
+ * variants need an on-chain receipt), and only single-message transactions (a
+ * multi-message tx takes `show`'s "display all" early return, which never prints the
+ * commit/receipt sections these tests assert on).
+ */
+async function selectFreshQuietLaneFixture() {
+  const api = CCIPAPIClient.fromUrl(undefined, {
+    // keep the test output clean; real problems still surface
+    logger: { debug: () => {}, info: () => {}, warn: console.warn, error: console.error },
+  })
+  const page = await api.searchMessages(
+    { sourceChainSelector: BSC_TESTNET_SELECTOR, destChainSelector: BASE_SEPOLIA_SELECTOR },
+    { limit: 50 },
+  )
+  for (const msg of page.data) {
+    if (msg.status !== MessageStatus.Success) continue
+    if (Date.now() - Date.parse(msg.sendTimestamp) > QUIET_FIXTURE_MAX_AGE_MS) continue
+    const inTx = await api.searchMessages(
+      { sourceTransactionHash: msg.sendTransactionHash },
+      { limit: 2 },
+    )
+    if (inTx.data.length !== 1) continue
+    const { sendTransactionHash: txHash, messageId, sender, receiver } = msg
+    return { txHash, messageId, sender, receiver }
+  }
+  throw new Error(
+    `no single-message SUCCESS send younger than 48h among the CCIP API's ${page.data.length} ` +
+      'newest bsc-testnet -> base-sepolia sends',
+  )
 }
 
 describe('e2e command show EVM', () => {
@@ -47,18 +94,14 @@ describe('e2e command show EVM', () => {
   const ORIGIN = '0xcF57BFBC6e4aCDa88147634148aB17Cbbe875ee4'
 
   // Quiet lane for the format variants below: they re-run the SAME scan-heavy
-  // `show` flow as the pretty-format test above and only assert on output
-  // shape. bsc-testnet -> base-sepolia has since moved to v2.0 (v1.5 stays
-  // covered by the pretty-format fixture above, and older v1.5 sends here fall
-  // outside the bsc-testnet RPC's pruned history), sees a steady ~17 messages/day (a
-  // fixture refreshed within days keeps the dest scan tiny), and both sides
-  // ride CI-reachable keyless endpoints. The previous soneium -> astar lane
-  // answered fine from a residential IP but hung outright from CI's egress,
-  // wedging every test that had to hear from it.
-  const QUIET_TX_HASH = '0x79b050383bf849e01c7a028b6555c66ada640803556a4874fb216024db467620'
-  const QUIET_MESSAGE_ID = '0x7f5e5f87b70408b745f19794c505da484d70b46cfcd5703f4aa90a2a4e8fe5cc'
-  const QUIET_SENDER = '0x22D2E5b0324C6360f8934b891FF811Da32EAAcEB'
-  const QUIET_RECEIVER = '0xda7975Ff570fAc84Af328aa34Aa8AB6F049bcC77'
+  // `show` flow as the pretty-format test above and only assert on output shape.
+  // The fixture is selected at RUNTIME (see selectFreshQuietLaneFixture): a pinned
+  // send ages out of base-sepolia's pruned history within days. bsc-testnet ->
+  // base-sepolia is v2.0 with steady traffic, and both sides ride CI-reachable
+  // keyless endpoints. (The previous soneium -> astar lane answered fine from a
+  // residential IP but hung outright from CI's egress.)
+  let quietFixture$: ReturnType<typeof selectFreshQuietLaneFixture> | undefined
+  const quietFixture = () => (quietFixture$ ??= selectFreshQuietLaneFixture())
 
   describe('pretty format (default)', () => {
     useResourceForDescribe(['base-mainnet', 'polygon-mainnet'])
@@ -155,7 +198,8 @@ describe('e2e command show EVM', () => {
       'should output a single valid JSON envelope with all expected fields',
       { timeout: 120000 },
       async () => {
-        const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'json')
+        const fixture = await quietFixture()
+        const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--format', 'json')
         const result = await spawnCLI(args, 90000)
 
         assert.equal(result.exitCode, 0, result.stderr)
@@ -166,9 +210,9 @@ describe('e2e command show EVM', () => {
         // Request
         assert.ok(envelope.request, 'envelope should contain request')
         assert.ok(envelope.request.message, 'request should have message')
-        assert.match(envelope.request.message.messageId, new RegExp(QUIET_MESSAGE_ID, 'i'))
-        assert.match(envelope.request.message.sender, new RegExp(QUIET_SENDER, 'i'))
-        assert.match(envelope.request.message.receiver, new RegExp(QUIET_RECEIVER, 'i'))
+        assert.match(envelope.request.message.messageId, new RegExp(fixture.messageId, 'i'))
+        assert.match(envelope.request.message.sender, new RegExp(fixture.sender, 'i'))
+        assert.match(envelope.request.message.receiver, new RegExp(fixture.receiver, 'i'))
         assert.ok(
           'sequenceNumber' in envelope.request.message,
           'message should have sequenceNumber',
@@ -191,7 +235,8 @@ describe('e2e command show EVM', () => {
     useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
     it('should output in log format with object assignments', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'log')
+      const fixture = await quietFixture()
+      const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--format', 'log')
       const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
@@ -202,9 +247,9 @@ describe('e2e command show EVM', () => {
       assert.match(result.stdout, /receipt.*=/)
 
       // Should contain expected data
-      assert.match(result.stdout, new RegExp(QUIET_MESSAGE_ID, 'i'))
-      assert.match(result.stdout, new RegExp(QUIET_SENDER, 'i'))
-      assert.match(result.stdout, new RegExp(QUIET_RECEIVER, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.messageId, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.sender, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.receiver, 'i'))
     })
   })
 
@@ -212,7 +257,8 @@ describe('e2e command show EVM', () => {
     useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
     it('should work with verbose flag enabled', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--verbose')
+      const fixture = await quietFixture()
+      const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--verbose')
       const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
@@ -221,7 +267,7 @@ describe('e2e command show EVM', () => {
       // Should still contain main output
       assert.match(result.stdout, /Lane/)
       assert.match(result.stdout, /Request/)
-      assert.match(result.stdout, new RegExp(QUIET_MESSAGE_ID, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.messageId, 'i'))
     })
   })
 
@@ -229,14 +275,17 @@ describe('e2e command show EVM', () => {
     describe('invalid transaction hash', () => {
       useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
-      it('should handle invalid transaction hash gracefully', { timeout: 90000 }, async () => {
+      it('should handle invalid transaction hash gracefully', { timeout: 150000 }, async () => {
         const invalidTxHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
         // Two endpoints are plenty for this path: the CLI must hear "not found"
         // back from EVERY raced endpoint before it can conclude the tx is
         // nowhere, so each extra endpoint is another chance to hang on a
         // dead one (which is exactly how this test used to time out in CI).
         const args = buildShowArgs(invalidTxHash, [BSC_TESTNET_RPCS[0]!, BASE_SEPOLIA_RPCS[1]!])
-        const result = await spawnCLI(args, 60000)
+        // "Not found" needs a final answer from every raced request, and the SDK bounds
+        // one EVM request (all retries included) at 90s: under a 429 burst, a spawn
+        // timeout below that bound kills a CLI that would still exit cleanly.
+        const result = await spawnCLI(args, 120000)
 
         // Should exit with error code
         assert.notEqual(result.exitCode, 0)
