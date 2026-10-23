@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): `setRateLimitAdmin` works on v2.0.0 pools, writing the new admin through `setDynamicConfig` and keeping the pool's current `router` and `feeAdmin`
+
 ## [1.16.0] - 2026-10-09
 
 - EVM: `getLogs` honors a block-range limit the RPC states below 100 blocks (e.g. Alchemy's free plan allows 10) instead of throwing `LOG_RANGE_TOO_LARGE`; fixes `ccip-cli show --wait` on such endpoints
