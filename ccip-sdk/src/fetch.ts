@@ -670,8 +670,10 @@ const MAX_INSPECTED_BODY_BYTES = 16_384
 /**
  * Some keyless RPCs (e.g. sepolia.base.org, rpc.monad.xyz) answer over-budget
  * calls with HTTP 200 and a JSON-RPC `-32007` error instead of a 429. Reads a
- * small JSON-RPC response once and reports whether any envelope (single or
- * batch) carries that code; the returned response replays the read body.
+ * small JSON-RPC response once and reports whether every envelope (single or
+ * batch) carries that code; the returned response replays the read body. A
+ * batch with any other member answered is not retried: resending it would
+ * replay that member, which may be a write (e.g. `eth_sendRawTransaction`).
  * Bodies without a small `content-length` are not read, so large results
  * keep streaming.
  */
@@ -686,9 +688,12 @@ async function readJsonRpcRateLimit(
   if (text.includes('-32007')) {
     try {
       const parsed: unknown = JSON.parse(text)
-      limited = (Array.isArray(parsed) ? parsed : [parsed]).some(
-        (member) => (member as { error?: { code?: unknown } } | null)?.error?.code === -32007,
-      )
+      const members = Array.isArray(parsed) ? parsed : [parsed]
+      limited =
+        members.length > 0 &&
+        members.every(
+          (member) => (member as { error?: { code?: unknown } } | null)?.error?.code === -32007,
+        )
     } catch {
       // not JSON: not a rate-limit envelope
     }

@@ -49,8 +49,8 @@ const OFFRAMP = '0x01a0a22b2abacbd48e9a026c1661189a8ec5ce4942cba07017b63eaad0a20
 const FUJI_ONRAMP = '0xA5D5B0B844c8f11B61F28AC98BBA84dEA9b80953'
 const FUJI_ROUTER = '0xF694E193200268f9a4868e4Aa017A0118C9a8177'
 const ARB_SEP_ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
-// the deployment's CURRENT source lanes (the offramp's source_chain_configs):
-// sepolia, op-sepolia, amoy, bsc-testnet — fuji was removed in 1.6.1
+// sepolia is a current lane in both directions; fuji and arb-sepolia are still
+// enabled offramp sources (checked live 2026-10-23), which the config tests read
 const SEPOLIA_ONRAMP = '0x23a5084fa78104f3df11c63ae59fcac4f6ad9dee'
 const SEPOLIA_OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
 const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
@@ -210,7 +210,8 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
 
   it('getBlockInfo returns real checkpoints for tags, depths and numbers', async () => {
     const latest = await chain.getBlockInfo('latest')
-    assert.ok(latest.number > fixture.range.endBlock, `latest ${latest.number} is a checkpoint`)
+    // the captured send may sit at the tip, so only its checkpoint is known to be past
+    assert.ok(latest.number >= fixture.checkpoint, `latest ${latest.number} includes the send`)
     assert.ok(Math.abs(latest.timestamp - Date.now() / 1e3) < 60, 'latest timestamp is recent')
 
     // Sui checkpoints are finalized once committed
@@ -251,15 +252,22 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
     // the captured send decodes with exactly the captured values (needs EVM
     // family registered for dest addresses; decodeMessage flattens the header
     // into top-level fields)
-    const log = logs.find((log) => log.transactionHash === fixture.digest)
-    assert.ok(log, 'the captured send is in the stream')
-    const message = SuiChain.decodeMessage(log) as unknown as {
-      messageId: string
-      sequenceNumber: bigint
-      destChainSelector: bigint
-      sourceChainSelector: bigint
-    }
-    assert.ok(message)
+    // a tx may carry several sends: match the captured one by message id too
+    const message = logs
+      .filter((log) => log.transactionHash === fixture.digest)
+      .map(
+        (log) =>
+          SuiChain.decodeMessage(log) as unknown as
+            | {
+                messageId: string
+                sequenceNumber: bigint
+                destChainSelector: bigint
+                sourceChainSelector: bigint
+              }
+            | undefined,
+      )
+      .find((message) => message?.messageId === fixture.messageId)
+    assert.ok(message, 'the captured send is in the stream')
     assert.equal(message.messageId, fixture.messageId)
     assert.equal(message.sequenceNumber, fixture.sequenceNumber)
     assert.equal(message.destChainSelector, fixture.destChainSelector)

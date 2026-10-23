@@ -31,17 +31,21 @@ import { simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
 
 // Live RPCs: the CCIP 2.0 lane (Arbitrum -> Ethereum) and the LBTC prod lanes (Ethereum <-> Monad).
+// computed before the endpoint probes below: a SKIP_INTEGRATION_TESTS run must
+// not issue a single network call at module load
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
+
 await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
 
-const ETHEREUM_RPC = await reachableRpcEndpoint('RPC_ETHEREUM_MAINNET')
+const ETHEREUM_RPC = skip ? '' : await reachableRpcEndpoint('RPC_ETHEREUM_MAINNET')
 const ETHEREUM_SELECTOR = 5009297550715157269n
 
 // this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
 // width never bites here.
-const MONAD_RPC = await reachableRpcEndpoint('RPC_MONAD_MAINNET')
+const MONAD_RPC = skip ? '' : await reachableRpcEndpoint('RPC_MONAD_MAINNET')
 const MONAD_SELECTOR = 8481857512324358265n
 
-const ARBITRUM_RPC = await reachableRpcEndpoint('RPC_ARBITRUM_MAINNET')
+const ARBITRUM_RPC = skip ? '' : await reachableRpcEndpoint('RPC_ARBITRUM_MAINNET')
 const ARBITRUM_SELECTOR = 4949039107694359620n
 
 // ── CCIP 2.0 lane (Arbitrum One -> Ethereum) with a v2.0 mint/burn test token and pools ──
@@ -55,8 +59,6 @@ const V2_LANE = {
   destPool: '0x6eC2a0B3E92819A881f30e70478320BCEaAA4FF1', // BurnMintTokenPool 2.0.0
   destOffRamp: '0x408428bca0e24A25ac8baAc1b70f64AF257717c3', // OffRamp 2.0.0
 }
-
-const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}

@@ -29,6 +29,10 @@ import { EVMChain } from './index.ts'
 // shared egress gets rate-limited on. Base Sepolia and OP Sepolia still carry all
 // three OnRamp generations between them (see the lane table below), are locked by
 // no other suite, and therefore run fully in parallel with the rest of the matrix.
+// computed before the endpoint probes below: a SKIP_INTEGRATION_TESTS run must
+// not issue a single network call at module load
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
+
 await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 
 // ── Chain constants ──
@@ -37,13 +41,13 @@ await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 // defaults point at endpoints verified to (a) be reachable from CI's egress, (b) serve
 // ~10k-block `eth_getLogs` ranges, and (c) retain logs deep enough for the historical
 // messages asserted below. Override via RPC_* env vars.
-const BASE_SEP_RPC = await reachableRpcEndpoint('RPC_BASE_SEPOLIA')
+const BASE_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_BASE_SEPOLIA')
 const BASE_SEP_SELECTOR = 10344971235874465080n
 
-const OP_SEP_RPC = await reachableRpcEndpoint('RPC_OPTIMISM_SEPOLIA')
+const OP_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_OPTIMISM_SEPOLIA')
 const OP_SEP_SELECTOR = 5224473277236331295n
 
-const HEDERA_TESTNET_RPC = await reachableRpcEndpoint('RPC_HEDERA_TESTNET')
+const HEDERA_TESTNET_RPC = skip ? '' : await reachableRpcEndpoint('RPC_HEDERA_TESTNET')
 const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 // ── Routers ──
@@ -106,8 +110,6 @@ const NOFTF_TOKEN_BASE_SEP = '0xcB341eAe2171582cb8e112054d9d908EE5a69907'
 const USDC_TOKEN_OP_SEP = '0x5fd84259d66Cd46123540766Be93DFE6D43130D7'
 
 // ── Tests ──
-
-const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
