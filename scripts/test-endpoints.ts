@@ -63,7 +63,13 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     'https://rpc.sepolia.ethpandaops.io,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia',
   RPC_BASE_SEPOLIA: 'https://gateway.tenderly.co/public/base-sepolia,https://sepolia.base.org',
   RPC_ARBITRUM_SEPOLIA: 'https://sepolia-rollup.arbitrum.io/rpc',
-  RPC_OPTIMISM_SEPOLIA: 'https://gateway.tenderly.co/public/optimism-sepolia',
+  RPC_OPTIMISM_SEPOLIA:
+    // tenderly leads (original); OP Labs' official keyless endpoint trails so the raced
+    // suites keep a candidate when the tenderly gateway is unreachable — some
+    // residential security filters answer it with a plaintext block page on :443
+    // (CUJO AI on Charter, observed 2026-10): every TLS client sees EPROTO
+    // "wrong version number". Locally, override via RPC_OPTIMISM_SEPOLIA.
+    'https://gateway.tenderly.co/public/optimism-sepolia,https://sepolia.optimism.io',
   RPC_FUJI: 'https://api.avax-test.network/ext/bc/C/rpc',
   RPC_BSC_TESTNET: [
     // NodeReal's public demo endpoint is the only one found that serves a full
@@ -115,12 +121,18 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     'https://gateway.tenderly.co/public/polygon',
     'https://polygon.rpc.thirdweb.com',
   ].join(','),
-  RPC_ARBITRUM_MAINNET: 'https://gateway.tenderly.co/public/arbitrum',
+  RPC_ARBITRUM_MAINNET:
+    // tenderly leads (original); Arbitrum's official keyless RPC trails for the raced
+    // suites as a fallback when the gateway is unreachable (see RPC_OPTIMISM_SEPOLIA
+    // on local filter blocking).
+    'https://gateway.tenderly.co/public/arbitrum,https://arb1.arbitrum.io/rpc',
   RPC_MONAD_MAINNET:
     // Monad has no wide-eth_getLogs public endpoint (tenderly 500 blocks,
     // rpc.monad.xyz 100); suites issuing eth_getLogs against it must scope
-    // themselves accordingly.
-    'https://gateway.tenderly.co/public/monad',
+    // themselves accordingly. rpc.monad.xyz (50 req/s cap) trails for the raced
+    // suites as a fallback when the gateway is unreachable (see
+    // RPC_OPTIMISM_SEPOLIA on local filter blocking).
+    'https://gateway.tenderly.co/public/monad,https://rpc.monad.xyz',
   RPC_GNOSIS_MAINNET: 'https://rpc.gnosischain.com',
   RPC_ROBINHOOD_TESTNET: 'https://rpc.testnet.chain.robinhood.com',
 }
@@ -164,6 +176,35 @@ export function rpcEndpoint(envName: RpcEnvName): string {
   return rpcEndpoints(envName)[0]!
 }
 
+function rpcCandidates(envName: RpcEnvName): string[] {
+  return [...new Set([...rpcEndpoints(envName), ...parseList(DEFAULT_RPC_ENDPOINTS[envName])])]
+}
+
+/** Probe: `eth_chainId` returns a chain id (not an HTTP error, RPC error or block page). */
+export async function evmChainIdProbe(url: string): Promise<boolean> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',
+    // aborts the request too, not only the race in raceRpcEndpoint
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    await res.body?.cancel()
+    return false
+  }
+  const json = (await res.json()) as { result?: unknown; error?: unknown } | null
+  return json?.error == null && /^0x[\da-f]+$/i.test(String(json?.result))
+}
+
+/**
+ * The first EVM endpoint for `envName` that answers {@link evmChainIdProbe}, tried in
+ * configured order (the preferred, archive-capable entry wins when it is reachable).
+ */
+export function reachableRpcEndpoint(envName: RpcEnvName): Promise<string> {
+  return raceRpcEndpoint(envName, evmChainIdProbe, { ordered: true, timeoutMs: 5_000, attempts: 1 })
+}
+
 /**
  * Races every endpoint configured for `envName` with a probe and returns the
  * first one that passes — for suites that construct a single chain, which
@@ -191,30 +232,52 @@ export function rpcEndpoint(envName: RpcEnvName): string {
  * (BlockVision answers its quota error to request #1). Declaring it dead on a
  * single refusal would bind the suite to whichever endpoint happens to be first
  * — the behavior this exists to avoid.
+ *
+ * With `ordered`, candidates are probed one at a time in configured order instead
+ * of raced, so the first healthy entry wins even when a later one answers faster.
  */
 export async function raceRpcEndpoint(
   envName: RpcEnvName,
   probe: (url: string) => Promise<boolean>,
-  { timeoutMs = 20_000, attempts = 3 }: { timeoutMs?: number; attempts?: number } = {},
+  {
+    timeoutMs = 20_000,
+    attempts = 3,
+    ordered = false,
+  }: { timeoutMs?: number; attempts?: number; ordered?: boolean } = {},
 ): Promise<string> {
-  const candidates = [
-    ...new Set([...rpcEndpoints(envName), ...parseList(DEFAULT_RPC_ENDPOINTS[envName])]),
-  ]
-  const candidates$ = candidates.map(async (url) => {
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const ok = await Promise.race([
-        Promise.resolve(probe(url)).catch(() => false),
-        new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-      ])
+  const candidates = rpcCandidates(envName)
+  let finished = false
+  const tryCandidate = async (url: string) => {
+    for (let attempt = 0; attempt < attempts && !finished; attempt++) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let ok: boolean
+      try {
+        ok = await Promise.race([
+          Promise.resolve()
+            .then(() => probe(url))
+            .catch(() => false),
+          new Promise<false>((resolve) => {
+            timer = setTimeout(() => resolve(false), timeoutMs)
+          }),
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
       if (ok) return url
       // plain timer: AbortSignal-based sleeps are unref'd and would not hold the run open
       if (attempt + 1 < attempts) await new Promise((r) => setTimeout(r, 1_000 * 2 ** attempt))
     }
     throw new Error(`probe failed for ${url}`)
-  })
+  }
   try {
-    return await Promise.any(candidates$)
+    if (!ordered) return await Promise.any(candidates.map(tryCandidate))
+    for (const url of candidates) {
+      if (await tryCandidate(url).catch(() => false)) return url
+    }
+    return rpcEndpoint(envName)
   } catch {
     return rpcEndpoint(envName)
+  } finally {
+    finished = true
   }
 }
