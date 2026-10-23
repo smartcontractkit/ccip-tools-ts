@@ -17,12 +17,12 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { JsonRpcProvider, hexlify, randomBytes, zeroPadValue } from 'ethers'
+import { hexlify, randomBytes, zeroPadValue } from 'ethers'
 
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
 import { estimateReceiveExecution } from '../gas.ts'
@@ -33,15 +33,15 @@ import { EVMChain } from './index.ts'
 // Live RPCs: the CCIP 2.0 lane (Arbitrum -> Ethereum) and the LBTC prod lanes (Ethereum <-> Monad).
 await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
 
-const ETHEREUM_RPC = rpcEndpoint('RPC_ETHEREUM_MAINNET')
+const ETHEREUM_RPC = await reachableRpcEndpoint('RPC_ETHEREUM_MAINNET')
 const ETHEREUM_SELECTOR = 5009297550715157269n
 
 // this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
 // width never bites here.
-const MONAD_RPC = rpcEndpoint('RPC_MONAD_MAINNET')
+const MONAD_RPC = await reachableRpcEndpoint('RPC_MONAD_MAINNET')
 const MONAD_SELECTOR = 8481857512324358265n
 
-const ARBITRUM_RPC = rpcEndpoint('RPC_ARBITRUM_MAINNET')
+const ARBITRUM_RPC = await reachableRpcEndpoint('RPC_ARBITRUM_MAINNET')
 const ARBITRUM_SELECTOR = 4949039107694359620n
 
 // ── CCIP 2.0 lane (Arbitrum One -> Ethereum) with a v2.0 mint/burn test token and pools ──
@@ -70,18 +70,9 @@ describe(
     let arbitrumChain: EVMChain | undefined
 
     before(async () => {
-      ethereumChain = await EVMChain.fromProvider(new JsonRpcProvider(ETHEREUM_RPC), {
-        apiClient: null,
-        logger: testLogger,
-      })
-      monadChain = await EVMChain.fromProvider(new JsonRpcProvider(MONAD_RPC), {
-        apiClient: null,
-        logger: testLogger,
-      })
-      arbitrumChain = await EVMChain.fromProvider(new JsonRpcProvider(ARBITRUM_RPC), {
-        apiClient: null,
-        logger: testLogger,
-      })
+      ethereumChain = await EVMChain.fromUrl(ETHEREUM_RPC, { apiClient: null, logger: testLogger })
+      monadChain = await EVMChain.fromUrl(MONAD_RPC, { apiClient: null, logger: testLogger })
+      arbitrumChain = await EVMChain.fromUrl(ARBITRUM_RPC, { apiClient: null, logger: testLogger })
     })
 
     after(() => {
