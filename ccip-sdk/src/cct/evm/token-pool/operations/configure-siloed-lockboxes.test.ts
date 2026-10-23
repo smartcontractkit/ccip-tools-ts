@@ -156,11 +156,11 @@ describe('ConfigureSiloedLockboxes (cct/evm)', () => {
       assert.equal(tx.data, dataFor([CONFIG_A]))
       assert.deepEqual(seen.calls, [
         'typeAndVersion',
-        'owner',
         'getToken',
-        'getAllLockBoxConfigs',
         `typeAndVersion@${LOCKBOX_A}`,
         `getToken@${LOCKBOX_A}`,
+        'owner',
+        'getAllLockBoxConfigs',
       ])
     })
 

@@ -129,7 +129,7 @@ describe('SetSiloRebalancer (cct/evm)', () => {
         assert.equal(tx.to, POOL)
         assert.equal(tx.from, OWNER)
         assert.equal(tx.data, dataFor(SEL, NEW_REBALANCER))
-        assert.deepEqual(seen.calls, ['typeAndVersion', 'isSiloed', 'owner'])
+        assert.deepEqual(seen.calls, ['typeAndVersion', 'owner', 'isSiloed'])
       })
     }
 

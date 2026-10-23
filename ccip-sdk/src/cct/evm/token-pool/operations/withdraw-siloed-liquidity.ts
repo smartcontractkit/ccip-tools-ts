@@ -19,16 +19,16 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateNonZeroAddress, validatePositiveUint256, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertSiloLiquidity,
-  assertSiloRebalancer,
-  assertSiloedChain,
   assertSiloedLockReleasePool,
+  checkSiloLiquidity,
+  checkSiloRebalancer,
+  checkSiloedChain,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -100,43 +100,54 @@ export class WithdrawSiloedLiquidity extends EVMOperation<WithdrawSiloedLiquidit
   }
 
   /**
-   * Resolves the pool's type/version, floor-matches the encoder, confirms the lane is siloed and
-   * that `sender` (when given) is its rebalancer, then pre-flights the silo's balance.
-   * @remarks The lane check runs with or without `sender`, and first, for the reason given on
-   * `ProvideSiloedLiquidity.buildUnsigned`. The checks live here, not in {@link execute}, so the
-   * offline / multisig path gets them too.
-   * @remarks The silo's balance is pre-flighted ({@link assertSiloLiquidity}). Advisory only:
-   * every CCIP transfer on the lane moves it, so a later shortfall still reverts
-   * `InsufficientLiquidity`. Skipped for a siloed lane the pool no longer supports, whose balance
-   * it will not report but still pays out.
+   * Resolves the pool's type/version and floor-matches the encoder.
+   * @remarks The lane, rebalancer and balance requirements are reported by
+   * {@link WithdrawSiloedLiquidity.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which escrows through per-lane
    * lockboxes instead
-   * @throws {@link CCTParamsInvalidError} if the lane is not siloed, or `sender` is given and is
-   * not the silo's rebalancer
-   * @throws {@link CCTTxFailedError} if the silo holds less than `amount`
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: WithdrawSiloedLiquidityParams,
   ): Promise<UnsignedEVMTx> {
-    const { poolAddress, remoteChainSelector, amount, sender } = params
-    const { type, version } = await resolveTokenPool(chain, poolAddress)
-    assertSiloedLockReleasePool(this.name, poolAddress, type)
+    const { type, version } = await resolveTokenPool(chain, params.poolAddress)
+    assertSiloedLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
+    return encode(getTokenPoolInterface(type, version), params)
+  }
 
-    await assertSiloedChain(this.name, chain, poolAddress, remoteChainSelector)
-    if (sender !== undefined)
-      await assertSiloRebalancer(this.name, chain, poolAddress, remoteChainSelector, sender)
-    await assertSiloLiquidity(this.name, chain, poolAddress, remoteChainSelector, amount)
-    return unsigned
+  /**
+   * Confirms the lane is siloed, then that `sender` (when given) is its rebalancer and that the
+   * silo holds `amount`.
+   * @remarks All reported rather than thrown outright: designating the lane, appointing the
+   * rebalancer and funding the silo are each an earlier plan step. The per-silo reads only run
+   * once the lane check passes, for the reason given on `ProvideSiloedLiquidity.preconditions`.
+   * @remarks The balance check ({@link checkSiloLiquidity}) is advisory only: every CCIP transfer
+   * on the lane moves it, so a later shortfall still reverts `InsufficientLiquidity`. Skipped for
+   * a siloed lane the pool no longer supports, whose balance it will not report but still pays
+   * out.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { poolAddress, remoteChainSelector, amount, sender }: WithdrawSiloedLiquidityParams,
+  ): Promise<PreconditionError[]> {
+    const siloed = await checkSiloedChain(chain, poolAddress, remoteChainSelector)
+    if (siloed) return [siloed]
+    return unmet(
+      ...(await Promise.all([
+        sender === undefined
+          ? undefined
+          : checkSiloRebalancer(chain, poolAddress, remoteChainSelector, sender),
+        checkSiloLiquidity(chain, poolAddress, remoteChainSelector, amount),
+      ])),
+    )
   }
 
   /**
    * Signs and submits as the silo's rebalancer, defaulting `sender` to the signing wallet: the
-   * only address that can satisfy {@link buildUnsigned}'s rebalancer check for a broadcast tx, and
+   * only address that can satisfy {@link preconditions}' rebalancer check for a broadcast tx, and
    * the address the tokens are sent to. See {@link EVMOperation.resolveWalletSender} for why a
    * divergent `sender` is rejected rather than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

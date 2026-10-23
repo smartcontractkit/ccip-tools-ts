@@ -21,15 +21,15 @@ import { type Interface, ZeroAddress, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress, validateUint64 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
-  assertSiloedChain,
   assertSiloedLockReleasePool,
+  checkPoolOwner,
+  checkSiloedChain,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -104,22 +104,21 @@ export class SetSiloRebalancer extends EVMOperation<SetSiloRebalancerParams> {
   }
 
   /**
-   * Resolves the pool's type/version, floor-matches the encoder, rejects a zero `rebalancer` on a
-   * v1.6.0 pool, confirms the lane is siloed, then that `sender` (when given) is the pool owner.
-   * @remarks The zero-address check needs only the version, so it costs no RPC. The lane check is
-   * a property of the pool and runs with or without `sender`. Both live here, not in
-   * {@link execute}, so the offline / multisig path gets them too.
+   * Resolves the pool's type/version, floor-matches the encoder and rejects a zero `rebalancer`
+   * on a v1.6.0 pool.
+   * @remarks The zero-address check needs only the version, so it costs no RPC, and stays fatal:
+   * the pool's version is fixed, so no earlier step makes a v1.6.0 pool accept it. The lane and
+   * owner requirements are reported by {@link SetSiloRebalancer.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `rebalancer` is zero on a v1.6.0 pool, the lane is
-   * not siloed, or `sender` is given and is not the pool owner
+   * @throws {@link CCTParamsInvalidError} if `rebalancer` is zero on a v1.6.0 pool
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: SetSiloRebalancerParams,
   ): Promise<UnsignedEVMTx> {
-    const { poolAddress, remoteChainSelector, rebalancer, sender } = params
+    const { poolAddress, rebalancer } = params
     const { type, version } = await resolveTokenPool(chain, poolAddress)
     assertSiloedLockReleasePool(this.name, poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
@@ -131,14 +130,30 @@ export class SetSiloRebalancer extends EVMOperation<SetSiloRebalancerParams> {
         'rebalancer',
         'a v1.6.0 pool reverts ZeroAddressNotAllowed; only v1.6.1 accepts the zero address, which leaves the silo with no rebalancer',
       )
-    await assertSiloedChain(this.name, chain, poolAddress, remoteChainSelector)
-    if (sender !== undefined) await assertPoolOwner(this.name, chain, poolAddress, sender)
     return unsigned
   }
 
   /**
+   * Confirms the lane is siloed and that `sender` (when given) is the pool owner.
+   * @remarks Both reported rather than thrown outright: `updateSiloDesignations` in an earlier
+   * plan step silos the lane, and an ownership transfer can make `sender` the owner. The lane
+   * check is a property of the pool and runs with or without `sender`.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { poolAddress, remoteChainSelector, sender }: SetSiloRebalancerParams,
+  ): Promise<PreconditionError[]> {
+    return unmet(
+      ...(await Promise.all([
+        checkSiloedChain(chain, poolAddress, remoteChainSelector),
+        sender === undefined ? undefined : checkPoolOwner(chain, poolAddress, sender),
+      ])),
+    )
+  }
+
+  /**
    * Signs and submits as the pool owner, defaulting `sender` to the signing wallet: the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

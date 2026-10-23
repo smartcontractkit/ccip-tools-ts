@@ -18,12 +18,13 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
   assertLockReleasePool,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -81,16 +82,10 @@ export class SetRebalancer extends EVMOperation<SetRebalancerParams> {
   }
 
   /**
-   * Resolves the pool's type/version, floor-matches the encoder, then confirms `sender` (when
-   * given) is the pool owner.
-   * @remarks The owner check lives here, not in {@link execute}, so the offline / multisig path
-   * gets it too rather than being handed a transaction that reverts once signed.
-   * @remarks Ordered *after* the encoder so a 2.0.0 pool reports the real problem (removed
-   * selector) rather than spending a round trip and failing on an authorization detail.
+   * Resolves the pool's type/version and floor-matches the encoder.
    * @throws {@link CCTContractTypeInvalidError} if the pool is a BurnMint pool
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool, which authorizes liquidity on
    * its `ERC20LockBox` instead
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
@@ -100,9 +95,21 @@ export class SetRebalancer extends EVMOperation<SetRebalancerParams> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     assertLockReleasePool(this.name, params.poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction — and reported from here rather than
+   * {@link execute} so the offline / multisig path is checked too, instead of being handed a
+   * transaction that reverts once signed.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: SetRebalancerParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 }
