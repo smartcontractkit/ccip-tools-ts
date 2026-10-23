@@ -33,12 +33,7 @@ import {
 } from '../errors/index.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import type { EVMExtraArgsV2, ExtraArgs, SVMExtraArgsV1, SuiExtraArgsV1 } from '../extra-args.ts'
-import {
-  createAxiosFetchAdapter,
-  createRateLimitedFetch,
-  fetchProfileForUrl,
-  redactEndpointUrl,
-} from '../fetch.ts'
+import { createAxiosFetchAdapter, createRateLimitedFetch, redactEndpointUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
 import { buildMessageForDest } from '../requests.ts'
@@ -85,7 +80,7 @@ import {
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { boundTonClientCaches } from './ton-cache.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
-import { crc32, lookupTxByRawHash, parseJettonContent } from './utils.ts'
+import { crc32, lookupTxByRawHash, parseJettonContent, tonRateLimitProfile } from './utils.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
 /**
@@ -171,9 +166,20 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     this.provider = client
 
     // Use caller-supplied fetch verbatim; fall back to a rate-limited default.
+    // Origin-scoped (see tonRateLimitProfile): the seqno-oracle RPCs below share
+    // the host's per-IP budget with the v2 tx pages and the v3 index calls. The
+    // endpoint may be absent on stub clients (tests); the profile then degrades
+    // to just the caller's opts.
+    const endpoint = (client as { parameters?: { endpoint?: string } }).parameters?.endpoint ?? ''
     this.rateLimitedFetch =
       ctx?.fetch ??
-      createRateLimitedFetch({ seed: { limit: 1, windowMs: 1500 }, maxRetries: 6 }, ctx)
+      createRateLimitedFetch(
+        tonRateLimitProfile(endpoint, {
+          seed: { limit: 1, windowMs: 1500 },
+          maxRetries: 6,
+        }),
+        ctx,
+      )
 
     // The v3 index base URL is resolved lazily (v3UrlFor): an explicit ctx.v3Url wins
     // and is taken on faith; otherwise one is inferred from the provider endpoint (a
@@ -292,7 +298,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
 
       // Resolve the fetch function: user-supplied verbatim, then rate-limited default.
       const fetchFn: typeof fetch =
-        ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+        ctx?.fetch ?? createRateLimitedFetch(tonRateLimitProfile(url), ctx)
 
       // For known public providers, detect network from URL to avoid an API call during init
       // (free-tier endpoints are rate-limited and return transient 5xx errors).
@@ -311,14 +317,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         ctx?.v3Fetch ??
         ctx?.fetch ??
         createRateLimitedFetch(
-          {
-            ...fetchProfileForUrl(
-              ctx?.v3Url ??
-                tonV3BaseUrl(url, isMainnetHint ? NetworkType.Mainnet : NetworkType.Testnet),
-            ),
-            maxRetries: 2,
-            keyBy: 'origin',
-          },
+          tonRateLimitProfile(
+            ctx?.v3Url ??
+              tonV3BaseUrl(url, isMainnetHint ? NetworkType.Mainnet : NetworkType.Testnet),
+            { maxRetries: 2 },
+          ),
           ctx,
         )
 
@@ -590,13 +593,12 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /** The dedicated v3-index fetch (see the note above); lazily created when unset. */
   private v3FetchFor(baseUrl: string): typeof fetch {
     if (this.v3Fetch_) return this.v3Fetch_
-    // keyBy origin: the index's keyless quota (~1 RPS per egress IP) is shared
-    // across /messages, /transactions and /masterchainInfo — per-path limiters
-    // would each pace independently and re-burst the host, tripping 429s.
-    this.v3Fetch_ = createRateLimitedFetch(
-      { ...fetchProfileForUrl(baseUrl), maxRetries: 2, keyBy: 'origin' },
-      { logger: this.logger },
-    )
+    // Fail-fast on retries (the scan's probe must not crawl a retry ladder while
+    // holding the scan), but the SAME origin-scoped pacer as every other TON
+    // fetch — the budget is shared, so the v2 walk's pages cannot starve it.
+    this.v3Fetch_ = createRateLimitedFetch(tonRateLimitProfile(baseUrl, { maxRetries: 2 }), {
+      logger: this.logger,
+    })
     this.v3FetchLazilyBuilt_ = true
     return this.v3Fetch_
   }
