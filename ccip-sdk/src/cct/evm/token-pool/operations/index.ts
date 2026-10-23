@@ -11,6 +11,11 @@ export {
   ApplyTokenTransferFeeConfigUpdates,
 } from './apply-token-transfer-fee-config-updates.ts'
 export {
+  type CanAcceptLiquidityParams,
+  type CanAcceptLiquidityResult,
+  CanAcceptLiquidity,
+} from './can-accept-liquidity.ts'
+export {
   type ConfigureSiloedLockboxesParams,
   ConfigureSiloedLockboxes,
 } from './configure-siloed-lockboxes.ts'
@@ -29,6 +34,11 @@ export {
   type GetAllSiloedLockboxConfigsResult,
   GetAllSiloedLockboxConfigs,
 } from './get-all-siloed-lockbox-configs.ts'
+export {
+  type GetAllTokenTransferFeeConfigsParams,
+  type GetAllTokenTransferFeeConfigsResult,
+  GetAllTokenTransferFeeConfigs,
+} from './get-all-token-transfer-fee-configs.ts'
 export {
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
@@ -51,12 +61,22 @@ export {
   GetChainRebalancer,
 } from './get-chain-rebalancer.ts'
 export {
+  type GetCurrentRateLimiterStateParams,
+  type GetCurrentRateLimiterStateResult,
+  GetCurrentRateLimiterState,
+} from './get-current-rate-limiter-state.ts'
+export {
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
   GetDynamicConfig,
 } from './get-dynamic-config.ts'
 export { type GetFeeParams, type GetFeeResult, GetFee } from './get-fee.ts'
 export { type GetLockboxParams, type GetLockboxResult, GetLockbox } from './get-lockbox.ts'
+export {
+  type GetRateLimitAdminParams,
+  type GetRateLimitAdminResult,
+  GetRateLimitAdmin,
+} from './get-rate-limit-admin.ts'
 export {
   type GetRebalancerParams,
   type GetRebalancerResult,
@@ -67,6 +87,11 @@ export {
   type GetSiloedLockboxResult,
   GetSiloedLockbox,
 } from './get-siloed-lockbox.ts'
+export {
+  type GetTokenPoolOwnerParams,
+  type GetTokenPoolOwnerResult,
+  GetTokenPoolOwner,
+} from './get-token-pool-owner.ts'
 export {
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
@@ -82,11 +107,26 @@ export {
   GetTokenPoolState,
 } from './get-token-pool-state.ts'
 export {
+  type GetTokenPoolTokenDecimalsParams,
+  type GetTokenPoolTokenDecimalsResult,
+  GetTokenPoolTokenDecimals,
+} from './get-token-pool-token-decimals.ts'
+export {
+  type GetTokenPoolTokenParams,
+  type GetTokenPoolTokenResult,
+  GetTokenPoolToken,
+} from './get-token-pool-token.ts'
+export {
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
   GetTokenTransferFeeConfig,
 } from './get-token-transfer-fee-config.ts'
 export { type IsSiloedParams, type IsSiloedResult, IsSiloed } from './is-siloed.ts'
+export {
+  type IsSupportedTokenParams,
+  type IsSupportedTokenResult,
+  IsSupportedToken,
+} from './is-supported-token.ts'
 export { type ProvideLiquidityParams, ProvideLiquidity } from './provide-liquidity.ts'
 export {
   type ProvideSiloedLiquidityParams,
