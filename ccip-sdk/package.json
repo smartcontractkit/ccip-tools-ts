@@ -54,6 +54,7 @@
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
     "clean": "rm -rfv ./dist",
+    "prepack": "node ../scripts/generate.cjs src/api/index.ts",
     "prepare": "npm run build"
   },
   "files": [

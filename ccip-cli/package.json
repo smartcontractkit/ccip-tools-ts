@@ -32,6 +32,7 @@
     "patch-dist": "chmod +x ./dist/index.js && find ./dist -type f -name \"*.js\" -exec sed -i.bkp 's|@chainlink/ccip-sdk/src/.*\\.ts|@chainlink/ccip-sdk|g' {} + && find ./dist -type f -name \"*.bkp\" -delete",
     "start": "./ccip-cli",
     "clean": "rm -rfv ./dist",
+    "prepack": "node ../scripts/generate.cjs src/index.ts",
     "prepare": "npm run build"
   },
   "files": [
