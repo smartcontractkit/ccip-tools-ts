@@ -67,6 +67,7 @@ import {
   CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
   CCIPSourcePoolRevertError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotInRegistryError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -118,6 +119,7 @@ import {
   getDataBytes,
   linkAbortSignals,
   parseTypeAndVersion,
+  resolveTokenDecimals,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
@@ -1370,8 +1372,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
     const symbol = await contract.symbol()
-    const decimals = await contract.decimals()
-    const name = await contract.name()
+    // `decimals()` is OPTIONAL in ERC-20: a CALL_EXCEPTION revert means the token doesn't
+    // implement it, and a BAD_DATA result means it answered something unusable as the
+    // expected return — both are recognized unavailable cases and surface as the typed
+    // error. Anything else (TIMEOUT, NETWORK_ERROR, ... transport) propagates as-is, so
+    // retry/transient handling still sees it. `name()` stays best-effort for the same
+    // optional-view reason.
+    let decimals: bigint
+    try {
+      decimals = await contract.decimals()
+    } catch (err) {
+      if (!isError(err, 'CALL_EXCEPTION') && !isError(err, 'BAD_DATA')) throw err
+      throw new CCIPTokenDecimalsUnavailableError(token, {
+        cause: err,
+        context: { network: this.network.name },
+      })
+    }
+    const name = await contract.name().catch(() => '')
     return { symbol, decimals: Number(decimals), name }
   }
 
@@ -2247,13 +2264,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    *   - `finality` — requested finality ('finalized', 'safe', or block depth number).
    *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
-   *          finalityDepth, finalitySafe, and tokenTransferFeeConfig.
+   *          finalityDepth, finalitySafe, tokenTransferFeeConfig, and `decimals` (v1.5.1+).
    *          LockReleaseV2 TPs also return its `lockBox` address
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `finalityDepth` and `finalitySafe` for
    * Faster-Than-Finality (FTF) and FCR support. Pre-2.0 pools omit these fields.
    * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
+   * v1.5.1+ pools also return `decimals` — the decimals the pool declares for its token
+   * (`getTokenDecimals()`); v1.5.0 pools predate it and fall back to the token's own
+   * (optional) `decimals()` view, so they stay readable without it.
    */
   async getTokenPoolConfig(
     tokenPool: string,
@@ -2265,6 +2285,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       router,
       allowedFinality,
       tokenTransferFeeConfig,
+      decimals: Promise<number | undefined> | undefined,
       previousPool: string | undefined,
       lockBox: string | undefined
     if (version < CCIPVersion.V2_0) {
@@ -2275,6 +2296,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_ABI>
       token = contract.getToken()
       router = contract.getRouter()
+      // v1.5.1+ pools declare their token's decimals; v1.5.0 predates getTokenDecimals and
+      // reverts — swallowed so those pools stay readable without it. Anything else
+      // (transport) propagates, exactly like getAllowedFinalityConfig below
+      decimals = contract
+        .getTokenDecimals()
+        .then(Number)
+        .catch((err) => {
+          if (isError(err, 'CALL_EXCEPTION')) return undefined
+          throw err
+        })
       if (type.endsWith('AndProxy')) {
         const proxy = new Contract(
           tokenPool,
@@ -2304,6 +2335,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
+      // the decimals the pool declares for its token — the authoritative source when the
+      // token doesn't implement the optional ERC-20 `decimals()` view (the pool converts
+      // with exactly these)
+      decimals = contract.getTokenDecimals().then(Number)
       if (type.includes('LockRelease')) {
         const lockBox_ = await resultToObject(contract.getLockBox().catch(() => null))
         if (lockBox_ && !lockBox_.match(/^(0x)?0*$/)) lockBox = lockBox_
@@ -2353,23 +2388,34 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       router,
       allowedFinality,
       tokenTransferFeeConfig,
+      decimals,
       previousTypeAndVersion,
-    ]).then(([token, router, allowedFinality, tokenTransferFeeConfig, previousTypeAndVersion]) => {
-      return {
-        token: token as CleanAddressable<typeof token>,
-        router: router as CleanAddressable<typeof router>,
-        typeAndVersion,
-        ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
-        ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
-        ...(previousPool != null && {
-          previousPool,
-          ...(previousTypeAndVersion != null && {
-            previousTypeAndVersion: previousTypeAndVersion[2],
+    ]).then(
+      ([
+        token,
+        router,
+        allowedFinality,
+        tokenTransferFeeConfig,
+        decimals,
+        previousTypeAndVersion,
+      ]) => {
+        return {
+          token: token as CleanAddressable<typeof token>,
+          router: router as CleanAddressable<typeof router>,
+          typeAndVersion,
+          ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+          ...(decimals != null && { decimals }),
+          ...(previousPool != null && {
+            previousPool,
+            ...(previousTypeAndVersion != null && {
+              previousTypeAndVersion: previousTypeAndVersion[2],
+            }),
           }),
-        }),
-        ...(!!lockBox && { lockBox }),
-      }
-    })
+          ...(!!lockBox && { lockBox }),
+        }
+      },
+    )
   }
 
   /**
@@ -2950,7 +2996,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ? ta.extraData
           : undefined
       if (sourcePoolData === undefined) {
-        const { decimals } = await this.getTokenInfo(token)
+        // the dest token's own (optional) view, else the pool's declared decimals, else the
+        // family default — see resolveTokenDecimals
+        const decimals = await resolveTokenDecimals(this, token, tokenPool!)
         sourcePoolData = defaultAbiCoder.encode(['uint256'], [decimals])
       }
 
@@ -3334,7 +3382,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...message,
           destTokenAmounts: await Promise.all(
             message.tokenAmounts.map((tokenAmount) =>
-              getDestTokenAmount({ dest: this, tokenAmount }),
+              getDestTokenAmount({ dest: this, offRamp, tokenAmount }),
             ),
           ),
         },
@@ -3348,7 +3396,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...opts.message,
           destTokenAmounts: await Promise.all(
             (opts.message.tokenAmounts ?? []).map((tokenAmount) =>
-              getDestTokenAmount({ dest: this, tokenAmount }),
+              getDestTokenAmount({ dest: this, offRamp: opts.offRamp, tokenAmount }),
             ),
           ),
         },

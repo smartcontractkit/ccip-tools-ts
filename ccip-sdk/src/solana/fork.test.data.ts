@@ -107,12 +107,16 @@ export const SOLANA_DEVNET_V2_STAGING = {
   // SPL token with a BurnMint 2.0 pool on the Sepolia lane
   sepoliaToken: '3pGvaqUczmzrxA62F1egTf9wpwJ6WNLoPQ823eCXmipc',
   sepoliaTokenPool: '29VTYP3rprC2vQPUteiR45UTsHWD2L2QXAseJmMeEpWZ',
-  // landed ccip_send_v2 (Solana -> Sepolia) and execute_v2 (Sepolia -> Solana) transactions
+  // Data-only sends and executions recorded after the 2026-10-22 staging upgrade.
+  // These exercise the current deployed account layouts without depending on old RPC history.
   sendTx:
-    '5RrQuDzcwPdVTKTTLVNhz31V5XzNLRZdxaGzLQddqePsu4TYycS6BMKP8V2WtuQ2VS9GdWTZfGt4WjnzKMBZFdM5',
+    '43DL6ZoPxFEEjLzVRiNAufJF5KZKu6WbogvLVKcgmmeSto6GfecBJsF6BJDqKQHHSiGird4EdE9bkGZ9tQgCguFe',
+  // Inline execute_v2 from Fuji, slot 513993952 (2026-10-22T19:44:05Z).
+  // Buffered executions omit execInputs, so they cannot serve this fixture's decode checks.
   executeTx:
-    '4qeWX8ELjDt57JLDuDsSW3jYzP915R7wyXLWMshPZJkiDVxt1HAv2DTqmNow64Nxns8PSgrX1vLTYHWTabjFztDM',
-  executeMessageId: '0x6aada2cd53b51bd5b4f12cbd01b1e43a092d692e3211dd8a8cb062f28c28144f',
+    '4bCRJhkUgjvQfeGCnJEGbT1o4PAzjL2Mnz9qxGSxTGqaDJuiTPdsGxP2UKCtGj8anVvkh2TbBbi8wEXx1qdXUX21',
+  executeMessageId: '0xe17c095b4703b590e9b7d0949a0cb8a34c45e9ed51c95894fe567d9ad8157930',
+  executeSourceSelector: 14767482510784806043n,
 } as const
 
 // A Sepolia -> Solana devnet token-only transfer on the CCIP 2.0 staging lane, from the staging
