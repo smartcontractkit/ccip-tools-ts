@@ -110,6 +110,19 @@ export interface components {
             executor?: components["schemas"]["RawOrHashedAddress"];
             /** @description TokenConfig contract ID for the message fee token. */
             feeTokenConfigCid: string;
+            /**
+             * @description TransferFactory contract ID for the message fee token, resolved by EDS via the fee
+             *     token's configured transfer factory. Empty if no transfer factory is configured for
+             *     the fee token, in which case clients have to fetch it from the TransferFactory API
+             *     themselves.
+             */
+            feeTokenTransferFactoryCid?: string;
+            /**
+             * @description The choice context returned by the fee token's transfer factory, to be passed as the
+             *     context of the fee token's ExtraArgs. Empty if no transfer factory is configured for
+             *     the fee token.
+             */
+            feeTokenTransferFactoryContext?: Record<string, never>;
         };
         CCIPExecuteRequest: {
             /** @description The CCIP message to be executed, encoded as a hex string. */
@@ -185,7 +198,7 @@ export interface components {
             holdingContractIds?: components["schemas"]["ContractId"][];
         };
         /** @description An address which can be either a RawInstanceAddress or an InstanceAddress. */
-        RawOrHashedAddress: components["schemas"]["RawInstanceAddress"] | components["schemas"]["InstanceAddress"];
+        RawOrHashedAddress: components["schemas"]["RawInstanceAddress"]  ;
         /** @description A message to be sent from Canton. */
         Message: {
             /** @description The chain selector of the destination chain. */

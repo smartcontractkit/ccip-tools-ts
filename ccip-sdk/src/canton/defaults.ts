@@ -12,7 +12,7 @@ export const DEFAULT_CANTON_SEND_GAS_LIMIT = 50_000n
 /** Transfer-factory preview amount for fee payments. */
 export const DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT = '1.0'
 
-/** CCIP-owned LINK instrument id on Canton (`ccipParty::link-token`). */
+/** CCIP-owned LINK instrument id on Canton (`link-token@ccipParty`). */
 export const DEFAULT_CANTON_LINK_INSTRUMENT_ID = 'link-token'
 
 /** CLI `profiles` fee-token names returned by {@link CantonChain.getFeeTokens}. */
@@ -21,9 +21,9 @@ export const CANTON_FEE_TOKEN_CLI_SYMBOLS = {
   link: 'LINK',
 } as const
 
-/** Full Canton fee-token string for CCIP LINK (`ccipParty::link-token`). */
+/** Full Canton fee-token string for CCIP LINK (`link-token@ccipParty`). */
 export function formatCantonLinkFeeToken(ccipParty: string): string {
-  return `${ccipParty}::${DEFAULT_CANTON_LINK_INSTRUMENT_ID}`
+  return `${DEFAULT_CANTON_LINK_INSTRUMENT_ID}@${ccipParty}`
 }
 
 /** Canton operational defaults overridable via {@link CantonConfig}. */

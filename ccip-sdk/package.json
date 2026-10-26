@@ -42,7 +42,7 @@
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
     "clean": "rm -rfv ./dist",
-    "prepare": "npm run build"
+    "prepare": ""
   },
   "files": [
     "dist",
@@ -72,7 +72,7 @@
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^7.3.0",
-    "@canton-network/dapp-sdk": "^1.7.1",
+    "@canton-network/dapp-sdk": "^1.8.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@mysten/bcs": "^2.1.1",
     "@mysten/sui": "^2.31.0",
@@ -90,6 +90,7 @@
     "ethers": "6.17.0",
     "micro-memoize": "^5.2.0",
     "oauth4webapi": "^3.8.8",
+    "openapi-fetch": "^0.17.0",
     "type-fest": "^5.10.0",
     "yaml": "2.9.1"
   },

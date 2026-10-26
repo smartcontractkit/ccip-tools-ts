@@ -4,37 +4,9 @@ import type { RpcTypes as DappRpcTypes } from '@canton-network/core-wallet-dapp-
 import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
 import type { ChainFamily } from '../networks.ts'
 import { type PartyId, parsePartyId } from './addressCodec.ts'
-import type { JsCommands, SinglePartySignatures } from './client/index.ts'
+import type { JsCommands } from './client/index.ts'
 
 export type CantonRpcProvider = Provider<DappRpcTypes>
-
-/**
- * Signs a prepared Canton transaction hash on behalf of an external party.
- *
- * Implementations receive the raw hash bytes (decoded from the base64
- * `preparedTransactionHash` returned by the Preparing Participant Node) and
- * must return a fully-assembled {@link SinglePartySignatures} structure.
- *
- * @example
- * ```ts
- * const signer: TransactionSigner = {
- *   async sign(hash) {
- *     const sig = ed25519.sign(hash, privateKey)
- *     return {
- *       signatures: [{
- *         format: 'CRYPTO_KEY_FORMAT_RAW',
- *         signature: Buffer.from(sig).toString('base64'),
- *         signedBy: keyFingerprint,
- *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
- *       }],
- *     }
- *   },
- * }
- * ```
- */
-export interface TransactionSigner {
-  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
-}
 
 /**
  * An unsigned Canton transaction wraps a `JsCommands` object ready to be
@@ -50,12 +22,11 @@ export interface UnsignedCantonTx {
 /**
  * Identifies a token on Canton (maps to `splice_api_token_holding_v1.InstrumentId`).
  *
- * Encoded as `"party::fingerprint::tokenId"` (e.g. `ccipOwner::1220…::link-token`).
- * The ledger stores `admin` as `party::fingerprint` and `id` as the token name.
+ * Encoded as `"tokenId@tokenAdmin"` (e.g. `link-token@ccipOwner::1220…`).
  */
 export interface CantonInstrumentId {
-  admin: PartyId
   id: string
+  admin: PartyId
 }
 
 /**
@@ -119,30 +90,36 @@ export interface CantonExtraArgsV1 {
 }
 
 /**
- * Parse a Canton instrument string `party::fingerprint::tokenId` into
+ * Parse a Canton instrument string `tokenId@tokenAdmin` into
  * {@link CantonInstrumentId} for ledger Holding filters and CCIP fee/token fields.
  *
  * @example
  * ```ts
  * parseCantonInstrumentId(
- *   'ccipOwner::1220e382…::link-token',
+ *   'link-token@ccipOwner::1220e382…',
  * )
- * // => { admin: 'ccipOwner::1220e382…', id: 'link-token' }
+ * // => { id: 'link-token', admin: 'ccipOwner::1220e382…' }
  * ```
  *
- * @throws {@link CCIPArgumentInvalidError} if the string is not three `::`-separated parts.
+ * @throws {@link CCIPArgumentInvalidError} if the string is not two `@`-separated parts.
  */
 export function parseCantonInstrumentId(instrument: string): CantonInstrumentId {
-  const parts = instrument.split('::')
-  if (parts.length !== 3) {
+  const parts = instrument.split('@')
+  if (parts.length !== 2) {
     throw new CCIPArgumentInvalidError(
       'instrument',
-      `invalid Canton instrument ID "${instrument}": expected party::fingerprint::tokenId`,
+      `invalid Canton instrument ID "${instrument}": expected tokenId@tokenAdmin`,
     )
   }
-  const adminPartyId = parsePartyId([parts[0], parts[1]].join('::'))
+
   return {
-    admin: adminPartyId,
-    id: parts[2]!,
+    id: parts[0]!,
+    admin: parsePartyId(parts[1]!),
   }
+}
+
+export type CantonTokenInfo = {
+  instrumentId: string
+  symbol: string
+  decimals: number
 }

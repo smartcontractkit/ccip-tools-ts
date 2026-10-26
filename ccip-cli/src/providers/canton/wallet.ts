@@ -3,7 +3,6 @@ import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto
 import {
   type Logger,
   type SinglePartySignatures,
-  type TransactionSigner,
   CCIPArgumentInvalidError,
   CCIPInteractiveRequiredError,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -25,6 +24,7 @@ import { TransportStatusError } from '@ledgerhq/hw-transport/errors'
 import BIPPath from 'bip32-path'
 
 import { loadCantonConfig } from './config.ts'
+import type { TransactionSigner } from './provider.ts'
 
 // Unexported constants, copied from:
 // https://github.com/LedgerHQ/ledger-live/blob/6651fb6c9687afec979ffc7d8eddb0fcded452a7/libs/ledgerjs/packages/hw-app-canton/src/Canton.ts#L34-L40

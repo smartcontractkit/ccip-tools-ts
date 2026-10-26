@@ -13,103 +13,38 @@ import type {
   JsExecuteSubmissionAndWaitForTransactionRequest,
   JsPrepareSubmissionRequest,
   JsPrepareSubmissionResponse,
+  SinglePartySignatures,
 } from '@chainlink/ccip-sdk/src/canton/client/index.ts'
-import type { CantonRpcProvider, TransactionSigner } from '@chainlink/ccip-sdk/src/canton/types.ts'
+import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 import { CCIPError, CCIPErrorCode, getDataBytes } from '@chainlink/ccip-sdk/src/index.ts'
 import axios from 'axios'
 
-// The Canton JSON Ledger API requires HTTP/2. Default to axios's native HTTP/2
-// transport; an explicitly provided `fetch` overrides it.
-const http2 = axios.create({ httpVersion: 2 })
-
-/** fetch-compatible adapter routing requests through axios's HTTP/2 transport. */
-async function http2Fetch(request: Request): Promise<Response> {
-  try {
-    const response = await http2.request({
-      url: request.url,
-      method: request.method,
-      headers: Object.fromEntries(request.headers),
-      data: request.body ? await request.arrayBuffer() : undefined,
-      signal: request.signal,
-      responseType: 'arraybuffer',
-      // Never throw on non-2xx: errors are classified by response status
-      validateStatus: () => true,
-    })
-    // axios may return AxiosHeaders or a plain object; normalize either into Headers
-    const headers = new Headers()
-    for (const [key, value] of Object.entries(response.headers)) {
-      if (value != null)
-        headers.set(key, Array.isArray(value) ? value.map(String).join(', ') : String(value))
-    }
-    return new Response(response.data, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    })
-  } catch (error) {
-    // Mirror fetch semantics: cancellation surfaces as an AbortError
-    if (axios.isCancel(error)) {
-      throw new DOMException('The operation was aborted.', 'AbortError')
-    }
-    throw error
-  }
-}
-
-interface LedgerJsonRequestOptions {
-  method: string
-  url: string
-  jwt?: string | (() => Promise<string>)
-  body?: unknown
-  fetchFn?: typeof fetch
-}
-
-/** Perform a JSON request against the Canton Ledger API, returning the parsed response body. */
-async function ledgerJsonRequest({
-  method,
-  url,
-  jwt,
-  body,
-  fetchFn,
-}: LedgerJsonRequestOptions): Promise<unknown> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  const token = typeof jwt === 'function' ? await jwt() : jwt
-  if (token) headers.Authorization = `Bearer ${token}`
-  const hasBody = body !== undefined && method !== 'GET' && method !== 'HEAD'
-  if (hasBody) headers['Content-Type'] = 'application/json'
-
-  const request = new Request(url, {
-    method,
-    headers,
-    body: hasBody ? JSON.stringify(body) : undefined,
-  })
-
-  let response: Response
-  try {
-    response = await (fetchFn ?? http2Fetch)(request)
-  } catch (error) {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `Canton Ledger API ${method} ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error instanceof Error ? error : undefined },
-    )
-  }
-
-  const text = await response.text()
-  if (!response.ok) {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `Canton Ledger API ${method} ${url} failed (${response.status}): ${text}`,
-    )
-  }
-  if (text === '') return {}
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `Canton Ledger API ${method} ${url} returned invalid JSON: ${text.slice(0, 200)}`,
-    )
-  }
+/**
+ * Signs a prepared Canton transaction hash on behalf of an external party.
+ *
+ * Implementations receive the raw hash bytes (decoded from the base64
+ * `preparedTransactionHash` returned by the Preparing Participant Node) and
+ * must return a fully-assembled {@link SinglePartySignatures} structure.
+ *
+ * @example
+ * ```ts
+ * const signer: TransactionSigner = {
+ *   async sign(hash) {
+ *     const sig = ed25519.sign(hash, privateKey)
+ *     return {
+ *       signatures: [{
+ *         format: 'CRYPTO_KEY_FORMAT_RAW',
+ *         signature: Buffer.from(sig).toString('base64'),
+ *         signedBy: keyFingerprint,
+ *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
+ *       }],
+ *     }
+ *   },
+ * }
+ * ```
+ */
+export interface TransactionSigner {
+  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
 }
 
 /**
@@ -146,6 +81,39 @@ export class JsonRpcProvider implements CantonRpcProvider {
     this.fetchFn = fetchFn
     this.party = party
     this.signer = signer
+  }
+
+  static async fromUrl(
+    chainId: string,
+    url: string,
+    jwt: string | (() => Promise<string>),
+    fetchFn?: typeof fetch,
+    party?: string,
+    signer?: TransactionSigner,
+  ) {
+    const baseUrl = url.replace(/\/$/, '')
+
+    // If no party is provided, get the primary party of the authenticated user
+    let partyId: PartyId
+    if (party) {
+      partyId = parsePartyId(party)
+    } else {
+      const data = (await ledgerJsonRequest({
+        method: 'GET',
+        url: `${baseUrl}/v2/authenticated-user`,
+        jwt,
+        fetchFn,
+      })) as { user?: { primaryParty?: string } }
+      if (data.user?.primaryParty == undefined || data.user.primaryParty === '') {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `Authenticated user has no primary party set and no party was provided`,
+        )
+      }
+      partyId = parsePartyId(data.user.primaryParty)
+    }
+
+    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, partyId, signer)
   }
 
   async request<M extends keyof RpcTypes>(
@@ -210,39 +178,6 @@ export class JsonRpcProvider implements CantonRpcProvider {
     if (remaining.length === 0) this.listeners.delete(event)
     else this.listeners.set(event, remaining)
     return this
-  }
-
-  static async fromUrl(
-    chainId: string,
-    url: string,
-    jwt: string | (() => Promise<string>),
-    fetchFn?: typeof fetch,
-    party?: string,
-    signer?: TransactionSigner,
-  ) {
-    const baseUrl = url.replace(/\/$/, '')
-
-    // If no party is provided, get the primary party of the authenticated user
-    let partyId: PartyId
-    if (party) {
-      partyId = parsePartyId(party)
-    } else {
-      const data = (await ledgerJsonRequest({
-        method: 'GET',
-        url: `${baseUrl}/v2/authenticated-user`,
-        jwt,
-        fetchFn,
-      })) as { user?: { primaryParty?: string } }
-      if (data.user?.primaryParty == undefined || data.user.primaryParty === '') {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `Authenticated user has no primary party set and no party was provided`,
-        )
-      }
-      partyId = parsePartyId(data.user.primaryParty)
-    }
-
-    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, partyId, signer)
   }
 
   getParty(): PartyId {
@@ -423,5 +358,99 @@ export class JsonRpcProvider implements CantonRpcProvider {
         },
       },
     }
+  }
+}
+
+// The Canton JSON Ledger API requires HTTP/2. Default to axios's native HTTP/2
+// transport; an explicitly provided `fetch` overrides it.
+const http2 = axios.create({ httpVersion: 2 })
+
+/** fetch-compatible adapter routing requests through axios's HTTP/2 transport. */
+async function http2Fetch(request: Request): Promise<Response> {
+  try {
+    const response = await http2.request({
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
+      data: request.body ? await request.arrayBuffer() : undefined,
+      signal: request.signal,
+      responseType: 'arraybuffer',
+      // Never throw on non-2xx: errors are classified by response status
+      validateStatus: () => true,
+    })
+    // axios may return AxiosHeaders or a plain object; normalize either into Headers
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(response.headers)) {
+      if (value != null)
+        headers.set(key, Array.isArray(value) ? value.map(String).join(', ') : String(value))
+    }
+    return new Response(response.data, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  } catch (error) {
+    // Mirror fetch semantics: cancellation surfaces as an AbortError
+    if (axios.isCancel(error)) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
+    throw error
+  }
+}
+
+interface LedgerJsonRequestOptions {
+  method: string
+  url: string
+  jwt?: string | (() => Promise<string>)
+  body?: unknown
+  fetchFn?: typeof fetch
+}
+
+/** Perform a JSON request against the Canton Ledger API, returning the parsed response body. */
+async function ledgerJsonRequest({
+  method,
+  url,
+  jwt,
+  body,
+  fetchFn,
+}: LedgerJsonRequestOptions): Promise<unknown> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = typeof jwt === 'function' ? await jwt() : jwt
+  if (token) headers.Authorization = `Bearer ${token}`
+  const hasBody = body !== undefined && method !== 'GET' && method !== 'HEAD'
+  if (hasBody) headers['Content-Type'] = 'application/json'
+
+  const request = new Request(url, {
+    method,
+    headers,
+    body: hasBody ? JSON.stringify(body) : undefined,
+  })
+
+  let response: Response
+  try {
+    response = await (fetchFn ?? http2Fetch)(request)
+  } catch (error) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `Canton Ledger API ${method} ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error instanceof Error ? error : undefined },
+    )
+  }
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `Canton Ledger API ${method} ${url} failed (${response.status}): ${text}`,
+    )
+  }
+  if (text === '') return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `Canton Ledger API ${method} ${url} returned invalid JSON: ${text.slice(0, 200)}`,
+    )
   }
 }

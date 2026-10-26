@@ -1,0 +1,1 @@
+npx openapi-typescript https://raw.githubusercontent.com/digital-asset/canton/refs/heads/main/community/ledger/ledger-json-api/src/test/resources/json-api-docs/openapi.yaml -o ./src/canton/client/generated/ledger-api.generated.d.ts

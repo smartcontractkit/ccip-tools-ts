@@ -12,7 +12,8 @@
     "ccip-api-ref/docs-sdk/**",
     "ccip-api-ref/docs-api/**",
     "ccip-api-ref/test-results/**",
-    "*.generated.*"
+    "*.generated.*",
+    "ccip-sdk/src/canton/bindings/**"
   ],
   "sortPackageJson": false,
   "sortImports": {

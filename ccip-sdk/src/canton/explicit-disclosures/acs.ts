@@ -2,11 +2,8 @@ import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import type { Logger } from '../../types.ts'
 import { hashedUtf8Hex, isCantonPartyId, normalizeHex } from '../../utils.ts'
 import { RawInstanceAddress } from '../addressCodec.ts'
-import {
-  type CantonClient,
-  type EventFormat,
-  type GetActiveContractsRequest,
-} from '../client/index.ts'
+import type { EventFormat, GetActiveContractsRequest } from '../client/index.ts'
+import type { LedgerApiClient } from '../clients/ledger-api/client.ts'
 import type { DisclosedContract } from './types.ts'
 
 /**
@@ -419,7 +416,7 @@ export type AcsSendDisclosures = {
  * Use this provider to access disclosures available in the same party
  */
 export class AcsDisclosureProvider {
-  private readonly client: CantonClient
+  private readonly ledgerApiClient: LedgerApiClient
   private readonly config: AcsDisclosureConfig
   private readonly packages: CcipPackageNames
   private readonly logger: Logger
@@ -427,11 +424,11 @@ export class AcsDisclosureProvider {
   /**
    * Create an `AcsDisclosureProvider` from a pre-built Canton Ledger API client.
    *
-   * @param client - Authenticated Canton Ledger API client (JWT already embedded).
+   * @param ledgerApiClient - Authenticated Canton Ledger API client (JWT already embedded).
    * @param config - ACS provider configuration: party ID and optional logger
    */
-  constructor(client: CantonClient, config: AcsDisclosureConfig) {
-    this.client = client
+  constructor(ledgerApiClient: LedgerApiClient, config: AcsDisclosureConfig) {
+    this.ledgerApiClient = ledgerApiClient
     this.config = {
       ...config,
     }
@@ -449,12 +446,9 @@ export class AcsDisclosureProvider {
    * contract doesn't break the whole snapshot.
    */
   private async fetchRichSnapshot(): Promise<Map<string, RichContractMatch[]>> {
-    const { offset } = await this.client.getLedgerEnd()
+    const { offset } = await this.ledgerApiClient.getLedgerEnd()
     if (!offset) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'failed to get ledger end offset'
-      )
+      throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'failed to get ledger end offset')
     }
 
     const request: GetActiveContractsRequest = {
@@ -462,7 +456,7 @@ export class AcsDisclosureProvider {
       activeAtOffset: offset,
     }
 
-    const responses = await this.client.getActiveContracts(request)
+    const responses = await this.ledgerApiClient.getActiveContracts(request)
     const byModuleEntity = new Map<string, RichContractMatch[]>()
 
     for (const response of responses) {

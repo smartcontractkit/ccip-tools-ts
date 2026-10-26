@@ -28,4 +28,4 @@ export {
   Ed25519TransactionSigner,
   loadCantonWallet,
 } from './wallet.ts'
-export {JsonRpcProvider} from './provider.ts'
+export { JsonRpcProvider } from './provider.ts'

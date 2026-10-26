@@ -3,18 +3,14 @@
  */
 
 export {
-  type CantonClient,
   type Command,
   type ConnectedSynchronizer,
   type CreatedEvent,
   type EventFormat,
-  type GetLedgerEndResponse,
-  type GetUpdateByIdRequest,
-  type JsGetUpdateResponse,
-  type UpdateFormat,
-  type Update,
   type GetActiveContractsRequest,
   type GetConnectedSynchronizersResponse,
+  type GetLedgerEndResponse,
+  type GetUpdateByIdRequest,
   type HashingSchemeVersion,
   type JsActiveContract,
   type JsCantonError,
@@ -22,6 +18,7 @@ export {
   type JsExecuteSubmissionAndWaitForTransactionRequest,
   type JsExecuteSubmissionAndWaitForTransactionResponse,
   type JsGetActiveContractsResponse,
+  type JsGetUpdateResponse,
   type JsPrepareSubmissionRequest,
   type JsPrepareSubmissionResponse,
   type JsSubmitAndWaitForTransactionResponse,
@@ -31,6 +28,8 @@ export {
   type SinglePartySignatures,
   type SubmitAndWaitResponse,
   type TemplateFilter,
+  type Update,
+  type UpdateFormat,
   type WildcardFilter,
 } from './client.ts'
 

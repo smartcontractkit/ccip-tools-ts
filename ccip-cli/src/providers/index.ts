@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 
+import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 import {
-  CantonChain,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -14,6 +14,7 @@ import {
   CCIPErrorCode,
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
+  CantonChain,
   ChainFamily,
   NetworkType,
   networkInfo,
@@ -37,7 +38,6 @@ import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
 import { loadSuiWallet } from './sui.ts'
 import { loadTonWallet } from './ton.ts'
-import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 
 const RPCS_RE = /\b(?:http|ws)s?:\/\/[\w/\\@&?%~#.,;:=+-]+/
 type FetchGlobalArgs = Partial<Pick<GlobalOpts, 'rpcs' | 'rpcsFile' | 'api' | 'cantonConfig'>>
@@ -205,7 +205,6 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
       const wallet = await loadCantonWalletOnce(argv, ctx.logger)
       let provider: CantonRpcProvider
       switch (rawCantonConfig.apiType) {
-        case undefined:
         case '':
         case 'json':
           provider = await JsonRpcProvider.fromUrl(
@@ -246,34 +245,40 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
             apiClient:
               argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
             ...{
-              cantonConfig: cantonConfig
+              cantonConfig: cantonConfig,
             },
           })
 
-          if (txHash) {
-            cantonChain.getTransaction(txHash).then(
-              (tx) => {
-                txFoundIn = cantonChain.network.name
-                chains[cantonChain.network.name] = Promise.resolve(cantonChain)
-                return [cantonChain, tx] as const
-              },
-              (err) => {
-                if (CCIPError.isCCIPError(err) && err.code === CCIPErrorCode.TRANSACTION_NOT_FOUND) {
-                  throw new CCIPTransactionNotFoundError(txHash, {
-                    context: { chainName: cantonChain.network.name },
-                  })
-                }
-                throw err
-              },
-            )
-          }
+          // Keep the tx-lookup promise in the returned chain so its rejection is
+          // observed by Promise.any (txResult) instead of surfacing as an
+          // unhandled rejection that crashes the process.
+          const tx$ = txHash
+            ? cantonChain.getTransaction(txHash).then(
+                (tx) => {
+                  txFoundIn = cantonChain.network.name
+                  chains[cantonChain.network.name] = Promise.resolve(cantonChain)
+                  return [cantonChain, tx] as const
+                },
+                (err) => {
+                  if (
+                    CCIPError.isCCIPError(err) &&
+                    err.code === CCIPErrorCode.TRANSACTION_NOT_FOUND
+                  ) {
+                    throw new CCIPTransactionNotFoundError(txHash, {
+                      context: { chainName: cantonChain.network.name },
+                    })
+                  }
+                  throw err
+                },
+              )
+            : Promise.resolve([cantonChain] as const)
 
           if (cantonChain.network.name in pendingChainsCbs) {
             // There's a "pending request" by getChain: resolve
             const [resolve] = pendingChainsCbs[cantonChain.network.name]!
             resolve(cantonChain)
           }
-          return [cantonChain] as const
+          return tx$
         }
 
         ctx.logger.debug('Racing', endpoints.size, 'RPC endpoints for', F)

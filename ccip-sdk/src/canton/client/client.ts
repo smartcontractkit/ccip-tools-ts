@@ -2,9 +2,6 @@ import axios, { type AxiosAdapter } from 'axios'
 
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
-import { createAxiosFetchAdapter } from '../../fetch.ts'
-import type { CantonRpcProvider } from '../types.ts'
-import { normalizeCantonUpdateId } from '../update-id.ts'
 import type { components } from './generated/ledger-api.generated.ts'
 
 // Canton JSON Ledger API requires HTTP/2.
@@ -23,27 +20,6 @@ export type JsSubmitAndWaitForTransactionResponse =
   components['schemas']['JsSubmitAndWaitForTransactionResponse']
 /** A single transaction from the ledger */
 export type JsTransaction = components['schemas']['JsTransaction']
-
-/**
- * Extract a {@link JsTransaction} from a `/v2/updates/update-by-id` response body.
- */
-export function extractJsTransactionFromUpdate(response: unknown): JsTransaction {
-  if (!response || typeof response !== 'object') {
-    throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'Canton update response is empty')
-  }
-  const root = response as Record<string, unknown>
-  const update = (root.update ?? root) as Record<string, unknown>
-  const transactionWrapper = update.Transaction as Record<string, unknown> | undefined
-  const transaction = transactionWrapper?.value
-  if (!transaction || typeof transaction !== 'object') {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      'Canton update response did not include a transaction',
-    )
-  }
-  return transaction as JsTransaction
-}
-
 export type GetLedgerEndResponse = components['schemas']['GetLedgerEndResponse']
 export type GetUpdateByIdRequest = components['schemas']['GetUpdateByIdRequest']
 export type UpdateFormat = components['schemas']['UpdateFormat']
@@ -94,58 +70,6 @@ export type Signature = components['schemas']['Signature']
 /** Hashing scheme version for interactive submissions */
 export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashingSchemeVersion']>
 
-export type CantonClient = ReturnType<typeof createCantonClientFromProvider>
-
-export function createCantonClientFromProvider(provider: CantonRpcProvider) {
-  return {
-    async getLedgerEnd(): Promise<GetLedgerEndResponse> {
-      const response = await provider.request({
-        method: 'ledgerApi',
-        params: {
-          requestMethod: 'get',
-          resource: '/v2/state/ledger-end',
-        },
-      })
-
-      return response as GetLedgerEndResponse
-    },
-
-    async getUpdateById(
-      updateId: string,
-      updateFormat?: UpdateFormat,
-    ): Promise<JsGetUpdateResponse> {
-      const response = await provider.request({
-        method: 'ledgerApi',
-        params: {
-          requestMethod: 'post',
-          resource: '/v2/updates/update-by-id',
-          body: {
-            updateId,
-            updateFormat,
-          } as GetUpdateByIdRequest,
-        },
-      })
-
-      return response as JsGetUpdateResponse
-    },
-
-    async getActiveContracts(
-      request: GetActiveContractsRequest,
-    ): Promise<JsGetActiveContractsResponse[]> {
-      const response = await provider.request({
-        method: 'ledgerApi',
-        params: {
-          requestMethod: 'post',
-          resource: '/v2/state/active-contracts',
-          body: request,
-        },
-      })
-
-      return response as JsGetActiveContractsResponse[]
-    },
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Error class
 // ---------------------------------------------------------------------------
@@ -191,12 +115,6 @@ class CantonApiError extends CCIPError {
       retryAfterMs: isTransient ? DEFAULT_RETRY_DELAY_MS : undefined,
     })
   }
-}
-
-function buildHeaders(jwt?: string): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (jwt) headers['Authorization'] = `Bearer ${jwt}`
-  return headers
 }
 
 const DEFAULT_RETRY_COUNT = 10

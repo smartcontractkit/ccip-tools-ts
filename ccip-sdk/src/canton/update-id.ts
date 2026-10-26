@@ -16,9 +16,6 @@ export const CANTON_UPDATE_ID_PREFIX = '1220'
 /** Full canonical update ID length: prefix (4) + digest (64) = 68 hex chars. */
 export const CANTON_UPDATE_ID_HEX_LENGTH = 68
 
-const CANTON_UPDATE_ID_DIGEST_HEX_LENGTH =
-  CANTON_UPDATE_ID_HEX_LENGTH - CANTON_UPDATE_ID_PREFIX.length
-
 /**
  * Returns true when `id` looks like a Canton ledger update ID (not a CCIP message ID).
  *
@@ -31,23 +28,4 @@ export function isCantonUpdateId(id: string): boolean {
     hex.startsWith(CANTON_UPDATE_ID_PREFIX) &&
     isHexString(`0x${hex}`, CANTON_UPDATE_ID_HEX_LENGTH / 2)
   )
-}
-
-/**
- * Normalize a Canton update ID for ledger API lookups.
- *
- * - Strips optional `0x`
- * - Prepends `1220` when only the 32-byte digest is provided
- * - Lowercases hex
- */
-export function normalizeCantonUpdateId(updateId: string): string {
-  const hex = normalizeHex(updateId)
-  if (
-    hex.length === CANTON_UPDATE_ID_DIGEST_HEX_LENGTH &&
-    isHexString(`0x${hex}`, CANTON_UPDATE_ID_DIGEST_HEX_LENGTH / 2)
-  ) {
-    return `${CANTON_UPDATE_ID_PREFIX}${hex}`
-  }
-  if (isCantonUpdateId(hex)) return hex
-  return updateId.trim()
 }
