@@ -29,6 +29,8 @@ import type { CantonTransactionResult } from './types.ts'
 export type CantonGenerateParams<P extends object> = P & {
   /** Acting party ID (`hint::1220…`), used for `actAs`. */
   sender: string
+  /** Explicit command ID (idempotency key); defaults to a content-derived deterministic ID. */
+  commandId?: string
 }
 
 /**
@@ -106,6 +108,16 @@ export abstract class CantonOperation<
     } catch (error) {
       // Not CCTTxNotConfirmedError: Canton submit-and-wait isn't safely retriable.
       if (CCIPError.isCCIPError(error)) {
+        // Command IDs are deterministic per operation, so a duplicate means the
+        // original committed — terminal, non-retryable.
+        if (error.context['cantonCode'] === 'DUPLICATE_COMMAND') {
+          throw new CCTTxFailedError(
+            this.name,
+            `commandId '${commands.commandId}' was already submitted (DUPLICATE_COMMAND) — ` +
+              'the original command likely committed; inspect ledger state instead of retrying',
+            { cause: error, context: { commandId: commands.commandId } },
+          )
+        }
         throw new CCTTxFailedError(this.name, error.message, {
           cause: error,
           isTransient: error.isTransient,

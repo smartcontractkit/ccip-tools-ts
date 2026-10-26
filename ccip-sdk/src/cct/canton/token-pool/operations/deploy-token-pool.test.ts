@@ -18,7 +18,8 @@ import { type CantonActiveContract, CantonChain } from '../../../../canton/index
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { ChainFamily } from '../../../../networks.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   TOKEN_CONFIG_TEMPLATE_ID,
   deriveTokenConfigInstanceAddress,
@@ -137,6 +138,30 @@ describe('deployTokenPool validation', () => {
         return true
       },
     )
+  })
+
+  it('rejects negative, fractional, and out-of-Daml-Int RelativeHours timeouts', async () => {
+    for (const hours of [-1, -1n, 1.5, 9223372036854775808n]) {
+      await assert.rejects(
+        () =>
+          op.generate(
+            mockChain('canton:TestNet'),
+            baseParams({ transferTimeout: { type: 'RelativeHours', hours } }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof CCTParamsInvalidError)
+          assert.match(err.message, /transferTimeout/)
+          return true
+        },
+      )
+    }
+    // boundary values are accepted
+    for (const hours of [0, 24, 9223372036854775807n]) {
+      await op.generate(
+        mockChain('canton:TestNet'),
+        baseParams({ transferTimeout: { type: 'RelativeHours', hours } }),
+      )
+    }
   })
 
   it('rejects a lane missing a rate-limiter spec', async () => {
@@ -429,13 +454,51 @@ describe('deployTokenPool execute result parsing', () => {
     assert.equal(result.poolInstanceAddress, hashedRawInstanceAddress(`pool-1@${POOL_OWNER}`))
   })
 
-  it('throws when the response has no created pool contract', async () => {
+  it('parses results from a param snapshot when the caller mutates params mid-flight', async () => {
+    const params = { ...baseParams(), wallet }
+    const chain = mockChain('canton:TestNet', {
+      provider: {
+        submitAndWaitForTransaction: async () => {
+          // Simulate the caller reusing and mutating the params object while
+          // the submission is in flight.
+          params.poolType = 'lockRelease'
+          params.instanceId = 'pool-2'
+          params.instrumentId = { admin: CCIP_OWNER, id: 'TESTTOKEN' }
+          return {
+            transaction: {
+              updateId: 'update-1',
+              events: [
+                {
+                  CreatedEvent: {
+                    templateId: concreteTemplateId(BURN_MINT_POOL_TEMPLATE_ID, 'deadbeef'),
+                    contractId: 'pool-cid-1',
+                  },
+                },
+              ],
+            },
+          }
+        },
+      },
+    })
+
+    const result = await op.execute(chain, params)
+
+    // Result identifiers describe the submitted deployment, not the mutated params.
+    assert.equal(result.poolCid, 'pool-cid-1')
+    assert.equal(result.poolInstanceAddress, hashedRawInstanceAddress(`pool-1@${POOL_OWNER}`))
+  })
+
+  it('throws a committed-but-unavailable error when the response has no created pool contract', async () => {
     const chain = mockChainWithSubmit([])
 
     await assert.rejects(
       () => op.execute(chain, { ...baseParams(), wallet }),
       (err: unknown) => {
-        assert.ok(err instanceof CCTTxFailedError)
+        // The transaction committed; only the result details are missing —
+        // must not surface as a (retryable-looking) submission failure.
+        assert.ok(err instanceof CCIPTxOutcomeUnavailableError)
+        assert.equal(err.isTransient, false)
+        assert.equal(err.context['updateId'], 'update-1')
         return true
       },
     )

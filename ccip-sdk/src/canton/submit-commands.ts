@@ -4,6 +4,7 @@ import type {
   JsCommands,
   JsPrepareSubmissionRequest,
   JsSubmitAndWaitForTransactionResponse,
+  TransactionFormat,
 } from './client/index.ts'
 import type { TransactionSigner } from './types.ts'
 import type { CantonChain } from './index.ts'
@@ -106,6 +107,27 @@ async function buildPrepareRequest(
   }
 }
 
+/**
+ * Ledger-effects format with wildcard filters for the acting/reading parties, so
+ * the response carries created + exercised events for result parsing. The API
+ * default (ACS-delta) omits exercise events and can return none at all.
+ */
+export function ledgerEffectsTransactionFormat(commands: JsCommands): TransactionFormat {
+  const parties = [...new Set([...commands.actAs, ...(commands.readAs ?? [])])]
+  const wildcard = {
+    cumulative: [
+      { identifierFilter: { WildcardFilter: { value: { includeCreatedEventBlob: false } } } },
+    ],
+  }
+  return {
+    eventFormat: {
+      filtersByParty: Object.fromEntries(parties.map((party) => [party, wildcard])),
+      verbose: true,
+    },
+    transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+  }
+}
+
 /** Direct submit with no signer; otherwise prepare → sign → execute via interactive submission. */
 export async function submitCantonCommands(
   chain: CantonChain,
@@ -113,7 +135,10 @@ export async function submitCantonCommands(
   signer?: TransactionSigner,
 ): Promise<JsSubmitAndWaitForTransactionResponse> {
   if (!signer) {
-    return chain.provider.submitAndWaitForTransaction(commands)
+    return chain.provider.submitAndWaitForTransaction(
+      commands,
+      ledgerEffectsTransactionFormat(commands),
+    )
   }
 
   const prepareRequest = await buildPrepareRequest(chain, commands)
@@ -140,6 +165,8 @@ export async function submitCantonCommands(
     partySignatures: { signatures: [partySignatures] },
     deduplicationPeriod: { Empty: {} },
     hashingSchemeVersion,
-    submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    transactionFormat: ledgerEffectsTransactionFormat(commands),
+    // Derived from the (deterministic) command ID so retries dedupe.
+    submissionId: `ext-${commands.commandId}`,
   })
 }
