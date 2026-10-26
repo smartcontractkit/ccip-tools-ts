@@ -17,8 +17,8 @@ import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import { type CantonActiveContract, CantonChain } from '../../../../canton/index.ts'
 import { CANTON_NETWORKS } from '../../../../canton/networks.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import { ChainFamily } from '../../../../networks.ts'
 import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   TOKEN_CONFIG_TEMPLATE_ID,
@@ -45,7 +45,7 @@ const TOKEN_CONFIG_ADDRESS = deriveTokenConfigInstanceAddress(
 const LANE_RATE_LIMITER = { instanceId: 'rl-in', isEnabled: true, capacity: 100n, rate: 1n }
 
 /**
- * `CantonChain` mock: no EDS disclosure provider (forces the ACS-fallback
+ * `CantonChain` mock: EDS disclosure always fails (forces the ACS-fallback
  * branch of `resolveTar`), `findActiveContractByInstanceAddress` returns
  * `tokenConfig` at {@link TOKEN_CONFIG_ADDRESS}, else a fake TAR signed by the
  * requested raw address's owner.
@@ -61,7 +61,12 @@ function mockChain(
     network: { family: ChainFamily.Canton, chainId },
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    edsDisclosureProvider: undefined,
+    // stubbed failure (not undefined) forces the ACS-fallback branch of resolveTar
+    edsDisclosureProvider: {
+      fetchContractDisclosure: async () => {
+        throw new Error('no EDS in test')
+      },
+    },
     findActiveContractByInstanceAddress: async (templateId: string, address: string) =>
       templateId === TOKEN_CONFIG_TEMPLATE_ID
         ? address === TOKEN_CONFIG_ADDRESS
