@@ -107,11 +107,15 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
   // Public fullnodes serve gRPC-Web, not JSON-RPC; SuiChain.fromUrl detects
   // the transport, so JSON-RPC gateways also work through RPC_SUI_TESTNET.
   RPC_SUI_TESTNET: 'https://fullnode.testnet.sui.io:443',
-  RPC_HEDERA_TESTNET:
+  RPC_HEDERA_TESTNET: [
     // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official
     // CCIP Router 1.2.0 from the CCIP Directory
     // (https://docs.chain.link/ccip/directory/testnet).
+    // HashIO answers Cloudflare 502 bursts for minute-scale windows, so
+    // thirdweb's public Hedera testnet RPC trails as a fallback.
     'https://testnet.hashio.io/api',
+    'https://296.rpc.thirdweb.com',
+  ].join(','),
   RPC_ETHEREUM_MAINNET: [
     'https://eth-mainnet.public.blastapi.io',
     'https://gateway.tenderly.co/public/mainnet',
@@ -176,7 +180,8 @@ export function rpcEndpoint(envName: RpcEnvName): string {
   return rpcEndpoints(envName)[0]!
 }
 
-function rpcCandidates(envName: RpcEnvName): string[] {
+/** Configured endpoints followed by public defaults, with duplicates removed. */
+export function rpcCandidates(envName: RpcEnvName): string[] {
   return [...new Set([...rpcEndpoints(envName), ...parseList(DEFAULT_RPC_ENDPOINTS[envName])])]
 }
 

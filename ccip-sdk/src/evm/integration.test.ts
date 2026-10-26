@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Contract, Wallet, ZeroAddress } from 'ethers'
+import { Contract, Wallet, ZeroAddress, isError } from 'ethers'
 
-import { reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { reachableRpcEndpoint, rpcCandidates } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { type MessageSearchResult, CCIPAPIClient } from '../api/index.ts'
 // Register non-EVM chain families for cross-family message building — the v1.6
@@ -12,6 +12,7 @@ import { type MessageSearchResult, CCIPAPIClient } from '../api/index.ts'
 // and extraArgs are family-specific (same pattern as fork.test.ts).
 import '../aptos/index.ts'
 import { LaneFeature } from '../chain.ts'
+import { CCIPAbortError, CCIPError, isTransientHttpStatus } from '../errors/index.ts'
 import { discoverOffRamp } from '../execution.ts'
 import { NetworkType } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
@@ -47,7 +48,6 @@ const BASE_SEP_SELECTOR = 10344971235874465080n
 const OP_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_OPTIMISM_SEPOLIA')
 const OP_SEP_SELECTOR = 5224473277236331295n
 
-const HEDERA_TESTNET_RPC = skip ? '' : await reachableRpcEndpoint('RPC_HEDERA_TESTNET')
 const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 // ── Routers ──
@@ -450,82 +450,69 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('generateUnsignedSendMessage (Hedera testnet)', () => {
-    // Hedera's EVM quotes native (WHBAR) fees in tinybars (8 decimals); the SDK returns
-    // the tx `value` in 18-decimal weibar by scaling the fee by 10^(18-8) = 10^10.
-    // The hedera router also requires destination receivers left-padded to 32 bytes
-    // (raw 20-byte EVM addresses revert with InvalidEVMAddress);
-    // `encodeAddressToEvm` -> `encodeAddressToAny` provides that padding.
-    it('should scale the native fee by 10^10 (tinybar -> weibar) in the ccipSend value', async () => {
-      await using disposer = new AsyncDisposableStack()
-      const hederaChain = disposer.adopt(
-        await EVMChain.fromUrl(HEDERA_TESTNET_RPC, { apiClient: null, logger: testLogger }),
-        (chain) => chain.provider.destroy(),
-      )
-      const sender = wallet.address
-      const message = { receiver: sender, data: '0x', feeToken: ZeroAddress }
-      const fee = await hederaChain.getFee({
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.ok(fee > 0n, `expected a positive fee on the live hedera->sepolia lane, got ${fee}`)
+    // An anvil fork misquotes Hedera's native fee. Keep one live router simulation;
+    // send-fee-scaling.test.ts checks the exact tinybar-to-weibar conversion offline.
+    it(
+      'should build a native-fee ccipSend the live router accepts (dry-run)',
+      { timeout: 120_000 },
+      async (t) => {
+        let last: unknown
+        for (const url of rpcCandidates('RPC_HEDERA_TESTNET')) {
+          t.signal.throwIfAborted()
+          const abort = AbortSignal.any([t.signal, AbortSignal.timeout(30_000)])
+          let hederaChain: EVMChain | undefined
+          try {
+            hederaChain = await EVMChain.fromUrl(url, {
+              apiClient: null,
+              logger: testLogger,
+              abort,
+            })
+            const sender = wallet.address
+            const unsigned = await hederaChain.generateUnsignedSendMessage({
+              sender,
+              router: HEDERA_ROUTER,
+              destChainSelector: SEPOLIA_SELECTOR,
+              message: { receiver: sender, data: '0x', feeToken: ZeroAddress },
+            })
+            assert.equal(
+              unsigned.transactions.length,
+              1,
+              'data-only send should not need approvals',
+            )
+            const [sendTx] = unsigned.transactions
+            assert.equal(sendTx?.to, HEDERA_ROUTER)
+            assert.equal(sendTx.from, sender)
+            assert.ok(BigInt(sendTx.value ?? 0) > 0n, 'native fee should be positive')
 
-      const unsigned = await hederaChain.generateUnsignedSendMessage({
-        sender,
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.equal(unsigned.transactions.length, 1, 'data-only send should not need approvals')
-      const [sendTx] = unsigned.transactions
-      assert.equal(sendTx?.to, HEDERA_ROUTER)
-      assert.equal(sendTx.from, sender)
-      assert.equal(
-        sendTx.value,
-        fee * 10n ** 10n,
-        'native msg.value should be the fee in tinybars scaled to weibar',
-      )
-    })
-
-    // An anvil fork of hedera can't replay this path (the FeeQuoter's native-price
-    // reads inside anvil's fork env quote a garbage fee), so validate the actual send
-    // by dry-running the exact SDK-built tx against the live router via eth_call.
-    it('should build a native-fee ccipSend the live router accepts (dry-run)', async () => {
-      await using disposer = new AsyncDisposableStack()
-      const hederaChain = disposer.adopt(
-        await EVMChain.fromUrl(HEDERA_TESTNET_RPC, { apiClient: null, logger: testLogger }),
-        (chain) => chain.provider.destroy(),
-      )
-      const sender = wallet.address
-      const message = { receiver: sender, data: '0x', feeToken: ZeroAddress }
-
-      const fee = await hederaChain.getFee({
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.ok(fee > 0n, `expected a positive fee on the live hedera->sepolia lane, got ${fee}`)
-
-      const unsigned = await hederaChain.generateUnsignedSendMessage({
-        sender,
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      const [sendTx] = unsigned.transactions
-      assert.equal(sendTx?.to, HEDERA_ROUTER)
-      assert.equal(sendTx.value, fee * 10n ** 10n)
-
-      // eth_call executes the router's ccipSend without broadcasting: a revert here
-      // means the lane rejects the SDK-built send (fee too high / receiver format /
-      // value mismatch).
-      await hederaChain.provider.call({
-        to: sendTx.to,
-        from: sender,
-        data: sendTx.data,
-        value: sendTx.value,
-      })
-    })
+            // Simulate the SDK-built transaction without broadcasting it.
+            await hederaChain.provider.call(sendTx)
+            abort.throwIfAborted()
+            return
+          } catch (err) {
+            t.signal.throwIfAborted()
+            const transient =
+              (err instanceof CCIPError && err.isTransient) ||
+              (isError(err, 'SERVER_ERROR') &&
+                isTransientHttpStatus(Number.parseInt(String(err.info?.responseStatus), 10))) ||
+              isError(err, 'TIMEOUT') ||
+              isError(err, 'NETWORK_ERROR') ||
+              (err instanceof TypeError && err.message === 'fetch failed')
+            const timedOut =
+              abort.aborted &&
+              (err === abort.reason ||
+                err instanceof CCIPAbortError ||
+                (isError(err, 'UNSUPPORTED_OPERATION') &&
+                  err.message.includes('provider destroyed')))
+            if (!transient && !timedOut) throw err
+            last = err
+            testLogger.warn('Hedera RPC attempt failed:', String(err).slice(0, 200))
+          } finally {
+            hederaChain?.provider.destroy()
+          }
+        }
+        throw last
+      },
+    )
   })
 
   describe('getFee', () => {
