@@ -108,6 +108,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
   TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
+  TOKEN_DECIMALS_UNAVAILABLE:
+    'The token does not implement the optional ERC-20 `decimals()` view. Preflights resolve its decimals from its pool (`TokenPoolConfig.decimals`) or the chain family default; when neither can declare them, fix the declaration on-chain: a `decimals()` view on the token, or a pool v1.5.1+ declaring them via `getTokenDecimals()`. A transport failure surfaces as itself, never as this error.',
   RATE_LIMIT_EXCEEDED:
     'Rate limit amount not enough for token transfer. Check capacity and retry when refilled.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
@@ -242,6 +244,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
   CCT_TX_NOT_CONFIRMED:
     'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
+  TX_OUTCOME_UNAVAILABLE:
+    'The transaction committed on-ledger, but result details were unavailable in the response. Use the update ID in error.context to inspect the transaction (e.g. getUpdateById) instead of resubmitting.',
   CCT_CONTRACT_VERSION_UNSUPPORTED:
     'This contract version is not supported by the CCT SDK. Check the contract address and its typeAndVersion.',
   CCT_OPERATION_UNSUPPORTED:

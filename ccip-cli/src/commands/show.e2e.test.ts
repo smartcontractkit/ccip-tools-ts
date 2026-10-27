@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { CCIPAPIClient, MessageStatus } from '@chainlink/ccip-sdk/src/index.ts'
+
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
+  APTOS_SKIP,
   APTOS_TESTNET_RPCS,
   BASE_MAINNET_RPCS,
   BASE_SEPOLIA_RPCS,
@@ -22,9 +25,12 @@ import {
 // (dest of the Solana->EVM and Aptos->EVM fixtures) and fuji (source of the
 // Solana v2 one), which have no live alternative counterpart, but only while
 // those blocks actually run. `show` also resolves 32-byte ids through the
-// default CCIP API; it makes one or two calls per invocation, far below any
-// rate limit, so it does not take the `api` lock that the API-heavy SDK
-// suites contend on. The TON block is describe.skip'd, so it locks nothing.
+// default CCIP API, and the format variants pick their fixture through it at
+// runtime (selectFreshQuietLaneFixture) — one or two calls per invocation plus
+// a handful more, once per file, all far below any rate limit, so it does not
+// take the `api` lock that the API-heavy SDK suites contend on. The TON block
+// picks its fixture the same way (selectFreshTonFixture) and locks ton-testnet
+// and sepolia while either direction runs.
 //
 // Per-test spawn timeouts are kept 30s under the test timeout: spawnCLI's
 // rejection carries the child's captured output, so a hung endpoint surfaces
@@ -32,6 +38,49 @@ import {
 
 function buildShowArgs(txHash: string, rpcs: string[], ...additionalArgs: string[]): string[] {
   return ['show', txHash, '--rpc', ...rpcs, '--rpcs-file', '', ...additionalArgs]
+}
+
+// bsc-testnet (chainId 97) and base-sepolia (chainId 84532) CCIP chain selectors.
+const BSC_TESTNET_SELECTOR = 13264668187771770619n
+const BASE_SEPOLIA_SELECTOR = 10344971235874465080n
+
+// The fixture must stay younger than this: the dest-side receipt scan derives its
+// start block from the send timestamp, and for older sends that probe goes past the
+// base-sepolia endpoints' earliest retained block (error 4444, "pruned history
+// unavailable").
+const QUIET_FIXTURE_MAX_AGE_MS = 48 * 3600_000
+
+/**
+ * Picks a recent executed send on the bsc-testnet -> base-sepolia lane through the
+ * same default CCIP API the CLI resolves ids with. Only SUCCESS messages qualify (the
+ * variants need an on-chain receipt), and only single-message transactions (a
+ * multi-message tx takes `show`'s "display all" early return, which never prints the
+ * commit/receipt sections these tests assert on).
+ */
+async function selectFreshQuietLaneFixture() {
+  const api = CCIPAPIClient.fromUrl(undefined, {
+    // keep the test output clean; real problems still surface
+    logger: { debug: () => {}, info: () => {}, warn: console.warn, error: console.error },
+  })
+  const page = await api.searchMessages(
+    { sourceChainSelector: BSC_TESTNET_SELECTOR, destChainSelector: BASE_SEPOLIA_SELECTOR },
+    { limit: 50 },
+  )
+  for (const msg of page.data) {
+    if (msg.status !== MessageStatus.Success) continue
+    if (Date.now() - Date.parse(msg.sendTimestamp) > QUIET_FIXTURE_MAX_AGE_MS) continue
+    const inTx = await api.searchMessages(
+      { sourceTransactionHash: msg.sendTransactionHash },
+      { limit: 2 },
+    )
+    if (inTx.data.length !== 1) continue
+    const { sendTransactionHash: txHash, messageId, sender, receiver } = msg
+    return { txHash, messageId, sender, receiver }
+  }
+  throw new Error(
+    `no single-message SUCCESS send younger than 48h among the CCIP API's ${page.data.length} ` +
+      'newest bsc-testnet -> base-sepolia sends',
+  )
 }
 
 describe('e2e command show EVM', () => {
@@ -47,18 +96,14 @@ describe('e2e command show EVM', () => {
   const ORIGIN = '0xcF57BFBC6e4aCDa88147634148aB17Cbbe875ee4'
 
   // Quiet lane for the format variants below: they re-run the SAME scan-heavy
-  // `show` flow as the pretty-format test above and only assert on output
-  // shape. bsc-testnet -> base-sepolia has since moved to v2.0 (v1.5 stays
-  // covered by the pretty-format fixture above, and older v1.5 sends here fall
-  // outside the bsc-testnet RPC's pruned history), sees a steady ~17 messages/day (a
-  // fixture refreshed within days keeps the dest scan tiny), and both sides
-  // ride CI-reachable keyless endpoints. The previous soneium -> astar lane
-  // answered fine from a residential IP but hung outright from CI's egress,
-  // wedging every test that had to hear from it.
-  const QUIET_TX_HASH = '0x79b050383bf849e01c7a028b6555c66ada640803556a4874fb216024db467620'
-  const QUIET_MESSAGE_ID = '0x7f5e5f87b70408b745f19794c505da484d70b46cfcd5703f4aa90a2a4e8fe5cc'
-  const QUIET_SENDER = '0x22D2E5b0324C6360f8934b891FF811Da32EAAcEB'
-  const QUIET_RECEIVER = '0xda7975Ff570fAc84Af328aa34Aa8AB6F049bcC77'
+  // `show` flow as the pretty-format test above and only assert on output shape.
+  // The fixture is selected at RUNTIME (see selectFreshQuietLaneFixture): a pinned
+  // send ages out of base-sepolia's pruned history within days. bsc-testnet ->
+  // base-sepolia is v2.0 with steady traffic, and both sides ride CI-reachable
+  // keyless endpoints. (The previous soneium -> astar lane answered fine from a
+  // residential IP but hung outright from CI's egress.)
+  let quietFixture$: ReturnType<typeof selectFreshQuietLaneFixture> | undefined
+  const quietFixture = () => (quietFixture$ ??= selectFreshQuietLaneFixture())
 
   describe('pretty format (default)', () => {
     useResourceForDescribe(['base-mainnet', 'polygon-mainnet'])
@@ -155,7 +200,8 @@ describe('e2e command show EVM', () => {
       'should output a single valid JSON envelope with all expected fields',
       { timeout: 120000 },
       async () => {
-        const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'json')
+        const fixture = await quietFixture()
+        const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--format', 'json')
         const result = await spawnCLI(args, 90000)
 
         assert.equal(result.exitCode, 0, result.stderr)
@@ -166,9 +212,9 @@ describe('e2e command show EVM', () => {
         // Request
         assert.ok(envelope.request, 'envelope should contain request')
         assert.ok(envelope.request.message, 'request should have message')
-        assert.match(envelope.request.message.messageId, new RegExp(QUIET_MESSAGE_ID, 'i'))
-        assert.match(envelope.request.message.sender, new RegExp(QUIET_SENDER, 'i'))
-        assert.match(envelope.request.message.receiver, new RegExp(QUIET_RECEIVER, 'i'))
+        assert.match(envelope.request.message.messageId, new RegExp(fixture.messageId, 'i'))
+        assert.match(envelope.request.message.sender, new RegExp(fixture.sender, 'i'))
+        assert.match(envelope.request.message.receiver, new RegExp(fixture.receiver, 'i'))
         assert.ok(
           'sequenceNumber' in envelope.request.message,
           'message should have sequenceNumber',
@@ -191,7 +237,8 @@ describe('e2e command show EVM', () => {
     useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
     it('should output in log format with object assignments', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--format', 'log')
+      const fixture = await quietFixture()
+      const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--format', 'log')
       const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
@@ -202,9 +249,9 @@ describe('e2e command show EVM', () => {
       assert.match(result.stdout, /receipt.*=/)
 
       // Should contain expected data
-      assert.match(result.stdout, new RegExp(QUIET_MESSAGE_ID, 'i'))
-      assert.match(result.stdout, new RegExp(QUIET_SENDER, 'i'))
-      assert.match(result.stdout, new RegExp(QUIET_RECEIVER, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.messageId, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.sender, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.receiver, 'i'))
     })
   })
 
@@ -212,7 +259,8 @@ describe('e2e command show EVM', () => {
     useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
     it('should work with verbose flag enabled', { timeout: 120000 }, async () => {
-      const args = buildShowArgs(QUIET_TX_HASH, QUIET_LANE_RPCS, '--verbose')
+      const fixture = await quietFixture()
+      const args = buildShowArgs(fixture.txHash, QUIET_LANE_RPCS, '--verbose')
       const result = await spawnCLI(args, 90000)
 
       assert.equal(result.exitCode, 0, result.stderr)
@@ -221,7 +269,7 @@ describe('e2e command show EVM', () => {
       // Should still contain main output
       assert.match(result.stdout, /Lane/)
       assert.match(result.stdout, /Request/)
-      assert.match(result.stdout, new RegExp(QUIET_MESSAGE_ID, 'i'))
+      assert.match(result.stdout, new RegExp(fixture.messageId, 'i'))
     })
   })
 
@@ -229,14 +277,17 @@ describe('e2e command show EVM', () => {
     describe('invalid transaction hash', () => {
       useResourceForDescribe(['bsc-testnet', 'base-sepolia'])
 
-      it('should handle invalid transaction hash gracefully', { timeout: 90000 }, async () => {
+      it('should handle invalid transaction hash gracefully', { timeout: 150000 }, async () => {
         const invalidTxHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
         // Two endpoints are plenty for this path: the CLI must hear "not found"
         // back from EVERY raced endpoint before it can conclude the tx is
         // nowhere, so each extra endpoint is another chance to hang on a
         // dead one (which is exactly how this test used to time out in CI).
         const args = buildShowArgs(invalidTxHash, [BSC_TESTNET_RPCS[0]!, BASE_SEPOLIA_RPCS[1]!])
-        const result = await spawnCLI(args, 60000)
+        // "Not found" needs a final answer from every raced request, and the SDK bounds
+        // one EVM request (all retries included) at 90s: under a 429 burst, a spawn
+        // timeout below that bound kills a CLI that would still exit cleanly.
+        const result = await spawnCLI(args, 120000)
 
         // Should exit with error code
         assert.notEqual(result.exitCode, 0)
@@ -259,10 +310,10 @@ describe('e2e command show EVM', () => {
     })
   })
 
-  // TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
-  // testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
-  // has onramp/offramp modules, so every live Aptos fixture below 404s.
-  describe.skip('EVM to Aptos', () => {
+  // TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
+  // and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
+  // list no aptos-testnet ramp created, or message sent, after the restart.
+  describe('EVM to Aptos', { skip: APTOS_SKIP }, () => {
     useResourceForDescribe(['bsc-testnet', 'aptos-testnet'])
 
     it(
@@ -511,10 +562,10 @@ describe('e2e command show Solana', () => {
   )
 })
 
-// TODO: restore once aptos-testnet CCIP is redeployed and fixtures are refreshed. The
-// testnet was reset (ledger version back to ~1.9M) and package 0xc748…ee45 no longer
-// has onramp/offramp modules, so every live Aptos fixture below 404s.
-describe.skip('e2e command show Aptos', () => {
+// TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
+// and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
+// list no aptos-testnet ramp created, or message sent, after the restart.
+describe('e2e command show Aptos', { skip: APTOS_SKIP }, () => {
   useResourceForDescribe(['aptos-testnet', 'sepolia'])
 
   // Fixture seeded periodically from CCIP API v2 messages
@@ -581,134 +632,141 @@ describe.skip('e2e command show Aptos', () => {
   )
 })
 
-describe.skip('e2e command show TON', () => {
-  it('should show complete CCIP transaction details TON to EVM', { timeout: 120000 }, async () => {
-    // Test transaction hash (raw 64-char hex, resolved via TonCenter)
-    const TX_HASH = '160f4da4b46fa0370ac7f4fcdac03f3a85919bce900be0bacf539df61fca2525'
-    const MESSAGE_ID = '0x48f80b0f66b929ef4196d3b3947051a7d9c6b892db38f98b8df07294808c3e7e'
-    const SENDER = 'EQAFbU7ATpBTe2vPiTpThvehgNiynnD4llSA8IaJThJFpvP7'
-    const RECEIVER = '0x40d7c009d073e0d740ed2c50ca0a48c84a3f8b47'
-    const ONRAMP = 'EQDTIBzONmN64tMmLymf0-jtc_AAWfDlXiZcr7ja5ri7ak53'
-    const OFFRAMP = '0x93Bb167Ebd91987f9Dff6B954b9Eead469d2b849'
+// TON testnet lane selectors: TON testnet and ethereum-sepolia, the two chains
+// every TON lane in this repo touches.
+const TON_TESTNET_SELECTOR = 1399300952838017768n
+const SEPOLIA_SELECTOR = 16015286601757825753n
 
-    const args = buildShowArgs(TX_HASH, [...TON_TESTNET_RPCS, ...SEPOLIA_RPCS])
-    const result = await spawnCLI(args, 90000)
+// Every TON fixture below is selected at RUNTIME through the same default CCIP API
+// the CLI resolves ids with: the pinned Jan-2026 sends are gone, and `show` needs a
+// recent send on each direction to print the commit and receipt sections.
+const TON_FIXTURE_MAX_AGE_MS = 48 * 3600_000
 
-    assert.equal(result.exitCode, 0)
-    const output = result.stdout
-
-    // Lane information
-    assert.match(output, /name.*ton-testnet.*ethereum-testnet-sepolia/i)
-    assert.match(output, /chainId.*-3.*11155111/)
-    assert.match(output, /chainSelector.*1399300952838017768n?.*16015286601757825753n?/)
-    assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
-
-    // Request information
-    assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-    assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-    assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-    assert.match(output, /sequenceNumber.*985/)
-    assert.match(output, /nonce.*0.*allow out-of-order/)
-    assert.match(output, /gasLimit.*1000000n?/)
-    assert.match(output, /data.*ccip-staging-20302718339/)
-    assert.match(output, /allowOutOfOrderExecution.*true/)
-
-    // Commit information
-    assert.match(output, /Commit.*dest/i)
-    assert.match(
-      output,
-      /merkleRoot.*0x03fac3a156309096f9415ea40f4a93e8674771eb6bc4511b31807510b6777207/i,
-    )
-    assert.match(output, /min.*985/)
-    assert.match(output, /max.*985/)
-
-    // Execution receipt
-    assert.match(output, /Receipts.*dest/i)
-    assert.match(output, /state.*success/i)
-    assert.match(output, /gasUsed.*41293/)
-    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+/**
+ * Picks a recent executed send on a TON testnet lane. Only SUCCESS messages qualify
+ * (the tests need an on-chain receipt), and only single-message transactions (a
+ * multi-message tx takes `show`'s "display all" early return, which never prints the
+ * commit/receipt sections these tests assert on).
+ */
+async function selectFreshTonFixture(sourceChainSelector: bigint, destChainSelector: bigint) {
+  const api = CCIPAPIClient.fromUrl(undefined, {
+    // keep the test output clean; real problems still surface
+    logger: { debug: () => {}, info: () => {}, warn: console.warn, error: console.error },
   })
+  const page = await api.searchMessages({ sourceChainSelector, destChainSelector }, { limit: 50 })
+  for (const msg of page.data) {
+    if (msg.status !== MessageStatus.Success) continue
+    if (Date.now() - Date.parse(msg.sendTimestamp) > TON_FIXTURE_MAX_AGE_MS) continue
+    const inTx = await api.searchMessages(
+      { sourceTransactionHash: msg.sendTransactionHash },
+      { limit: 2 },
+    )
+    if (inTx.data.length !== 1) continue
+    const { sendTransactionHash: txHash, messageId, origin, sender, receiver } = msg
+    return { txHash, messageId, origin, sender, receiver }
+  }
+  throw new Error(
+    `no single-message SUCCESS send younger than 48h among the CCIP API's ${page.data.length} ` +
+      `newest ${sourceChainSelector} -> ${destChainSelector} messages`,
+  )
+}
 
-  it('should show complete CCIP transaction details EVM to TON', { timeout: 120000 }, async () => {
-    const TX_HASH = '0x6b550ac7150cb00c791cd9201c451cc29ad4c19c92753729885bbb1145caa151'
-    const MESSAGE_ID = '0xe43ee2db7e074e8b9606428f241f2db7b917897ddfdbe7a73d2c7a8d5ffdb0d5'
-    const SENDER = '0xb9b390cabcc2aa9a22cac4f39550e0fe0ecf25b7'
-    const RECEIVER = 'EQAu0B-M1cibJaRPTJmUHBWuXu4Ng0mwDjKbthryf6D6JJ3c'
-    const ONRAMP = '0xa36871bde0f98b84066405462e4a9709fb71c905'
-    const OFFRAMP = 'EQBoGLxL52YDV1OwcaDLcNHyGVOxtcHQDxFb0WqVUQeyRHBd'
+describe('e2e command show TON', () => {
+  useResourceForDescribe(['ton-testnet', 'sepolia'])
 
-    const args = buildShowArgs(TX_HASH, [...SEPOLIA_RPCS, ...TON_TESTNET_RPCS])
-    const result = await spawnCLI(args, 90000)
+  let tonToEvm$: ReturnType<typeof selectFreshTonFixture> | undefined
+  let evmToTon$: ReturnType<typeof selectFreshTonFixture> | undefined
+  const tonToEvmFixture = () =>
+    (tonToEvm$ ??= selectFreshTonFixture(TON_TESTNET_SELECTOR, SEPOLIA_SELECTOR))
+  const evmToTonFixture = () =>
+    (evmToTon$ ??= selectFreshTonFixture(SEPOLIA_SELECTOR, TON_TESTNET_SELECTOR))
+
+  it('should show complete CCIP transaction details TON to EVM', { timeout: 210000 }, async () => {
+    const fixture = await tonToEvmFixture()
+
+    const args = buildShowArgs(fixture.txHash, [...TON_TESTNET_RPCS, ...SEPOLIA_RPCS])
+    const result = await spawnCLI(args, 180000)
 
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
     const output = result.stdout
 
-    // Lane information
+    // Lane information: the source onRamp is a TON friendly address, dest is EVM
+    assert.match(output, /name.*ton-testnet.*ethereum-testnet-sepolia/i)
+    assert.match(output, /chainId.*-3.*11155111/)
+    assert.match(output, /chainSelector.*1399300952838017768n?.*16015286601757825753n?/)
+    assert.match(output, /onRamp\/version.*(EQ|UQ)[A-Za-z0-9_-]{46}.*\d+\.\d+\.\d+/i)
+
+    // Request information
+    assert.match(output, new RegExp(`messageId.*${fixture.messageId}`, 'i'))
+    // The API renders TON addresses in raw form; `show` always prints the friendly one
+    assert.match(output, /sender.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    assert.match(output, new RegExp(`receiver.*${fixture.receiver}`, 'i'))
+    assert.match(output, /sequenceNumber.*\d+/)
+    assert.match(output, /nonce.*0.*allow out-of-order/)
+    assert.match(output, /gasLimit.*\d+n?/)
+    assert.match(output, new RegExp(`transactionHash.*${fixture.txHash}`, 'i'))
+    assert.match(output, /allowOutOfOrderExecution.*true/)
+
+    // Commit information (dest is EVM)
+    assert.match(output, /Commit.*dest/i)
+    assert.match(output, /merkleRoot.*0x[a-f0-9]{64}/i)
+    assert.match(output, /min.*\d+/)
+    assert.match(output, /max.*\d+/)
+    assert.match(output, /contract.*0x[a-fA-F0-9]{40}/)
+
+    // Execution receipt: the fixture is a SUCCESS message, so it has one
+    assert.match(output, /Receipts.*dest/i)
+    assert.match(output, /state.*success/i)
+    assert.match(output, /gasUsed.*\d+/)
+  })
+
+  it('should show complete CCIP transaction details EVM to TON', { timeout: 210000 }, async () => {
+    const fixture = await evmToTonFixture()
+
+    const args = buildShowArgs(fixture.txHash, [...SEPOLIA_RPCS, ...TON_TESTNET_RPCS])
+    const result = await spawnCLI(args, 180000)
+
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+    const output = result.stdout
+
+    // Lane information: source onRamp is EVM, receiver and dest are TON
     assert.match(output, /name.*ethereum-testnet-sepolia.*ton-testnet/i)
     assert.match(output, /chainId.*11155111.*-3/)
     assert.match(output, /chainSelector.*16015286601757825753n?.*1399300952838017768n?/)
-    assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+    assert.match(output, /onRamp\/version.*0x[a-fA-F0-9]{40}.*\d+\.\d+\.\d+/i)
 
     // Request information
-    assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
-    assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
-    assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-    assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-    assert.match(output, /sequenceNumber.*2388/)
+    assert.match(output, new RegExp(`messageId.*${fixture.messageId}`, 'i'))
+    assert.match(output, new RegExp(`origin.*${fixture.origin}`, 'i'))
+    // The API renders TON addresses in raw form; `show` always prints the friendly one
+    assert.match(output, /receiver.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    assert.match(output, /sequenceNumber.*\d+/)
     assert.match(output, /nonce.*0.*allow out-of-order/)
-    assert.match(output, /gasLimit.*100000000n?/)
-    assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-    assert.match(output, /data.*ccip-staging-/)
+    assert.match(output, /gasLimit.*\d+n?/)
+    assert.match(output, new RegExp(`transactionHash.*${fixture.txHash}`, 'i'))
     assert.match(output, /allowOutOfOrderExecution.*true/)
 
     // Commit information (dest is TON - friendly format)
     assert.match(output, /Commit.*dest/i)
-    assert.match(
-      output,
-      /merkleRoot.*0xbada41892c6b8c182692dbdb3611acfd9e4096d6db43c4b1ead1f3010fb03197/i,
-    )
-    assert.match(output, /min.*2386/)
-    assert.match(output, /max.*2388/)
-    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-    // Transaction hash should be in friendly format (64-char hex, not composite)
-    assert.match(
-      output,
-      /transactionHash.*6dc1abd410c256f9559dddcddf49b32b69e0df3c4abb16011c8135af6b64f166/i,
-    )
+    assert.match(output, /merkleRoot.*0x[a-f0-9]{64}/i)
+    assert.match(output, /min.*\d+/)
+    assert.match(output, /max.*\d+/)
+    assert.match(output, /origin.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    assert.match(output, /contract.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    // Transaction hashes stay plain 64-char hex (not the composite lt form)
+    assert.match(output, /transactionHash.*[a-f0-9]{64}/i)
 
-    // Execution receipt
+    // Execution receipt. TON keeps the whole execution history, and an automated
+    // attempt that failed before a manual exec still renders — require a success,
+    // not a particular first state.
     assert.match(output, /Receipts.*dest/i)
     assert.match(output, /state.*success/i)
-    assert.match(output, new RegExp(`origin.*${OFFRAMP}`, 'i'))
-    assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-    assert.match(
-      output,
-      /transactionHash.*86866ebd8beb4afc5bedb3fbb1bfec0c1f2c86ca843ddf47b22bfb14666245b1/i,
-    )
-    assert.match(output, /logIndex.*43860281000027/) // lt is now logIndex
-    // TODO: update blockNumber to actual masterchain seqno once test is re-enabled
+    assert.match(output, /origin.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    assert.match(output, /contract.*(EQ|UQ)[A-Za-z0-9_-]{46}/i)
+    assert.match(output, /logIndex.*\d+/)
 
-    // TON shows execution history including failed attempts and final success after manualExec
-    // First receipt final state: failed
-    // assert.match(output, /state.*failed/i)
-    // assert.match(
-    //   output,
-    //   /transactionHash.*531c2fbc8db214d194aef894bfbb7163b3ad9f8c36f89d18b459c9f52d4faa14/i,
-    // )
-
-    // Second receipt final state: successful
-    assert.match(output, /state.*success/i)
-    assert.match(
-      output,
-      /transactionHash.*86866ebd8beb4afc5bedb3fbb1bfec0c1f2c86ca843ddf47b22bfb14666245b1/i,
-    )
-
-    // Verify we have both failed and successful executions
     const receiptsSection = output.split(/Receipts.*dest/i)[1] || ''
-    // const failedMatches = receiptsSection.match(/failed/gi) || []
     const successMatches = receiptsSection.match(/success/gi) || []
-    // assert.ok(failedMatches.length >= 1, 'Should have at least one failed execution')
     assert.ok(successMatches.length >= 1, 'Should have at least one successful execution')
   })
 })
