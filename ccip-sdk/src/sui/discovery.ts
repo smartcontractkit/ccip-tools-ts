@@ -600,6 +600,8 @@ export const getOnRampsForCcip = memoize(
       client,
       { MoveFunction: { package: latestPkg, module: 'onramp_state_helper' } },
       'onramp',
+      // A large filtered page can reach the pruning boundary before returning recent sends.
+      { limit: 1 },
     ).catch(() => [])
     if (byHelper.length) return byHelper
 

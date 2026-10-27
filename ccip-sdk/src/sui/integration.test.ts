@@ -125,10 +125,8 @@ type SendFixture = {
  * deployment's current lanes — the exact condition). Retention-safe: the
  * capture runs against whichever endpoint the binding race picked, so the
  * fixture is by construction served by it — no hardcoded digest to age out.
- * Bounded: at most 10 descending pages of 50; the type-filtered query pages
- * only CCIPMessageSent events, so even a days-old newest send is a couple of
- * pages away. undefined when no send matches the condition within the budget
- * — the caller fails loudly with the fixture scanner's path.
+ * Scan at most 10 recent events, one per page, to avoid crossing the node's pruning boundary.
+ * Return undefined when no matching event remains within that budget.
  */
 const captureRecentTokenlessSend = async (
   client: SuiClientLike,
@@ -136,12 +134,23 @@ const captureRecentTokenlessSend = async (
   const filter = { MoveEventType: `${ONRAMP}::CCIPMessageSent` }
   let cursor: EventId | null | undefined
   for (let pages = 0; pages < 10; pages++) {
-    const res = await client.queryEvents({
-      query: filter,
-      order: 'descending',
-      limit: 50,
-      ...(cursor ? { cursor } : {}),
-    })
+    let res
+    try {
+      res = await client.queryEvents({
+        query: filter,
+        order: 'descending',
+        // Larger pages can cross the pruning boundary before the server returns any matches.
+        limit: 1,
+        ...(cursor ? { cursor } : {}),
+      })
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        /could not find the referenced transaction events/i.test(err.message)
+      )
+        return undefined
+      throw err
+    }
     for (const event of res.data) {
       const json = event.parsedJson as
         | {
