@@ -42,15 +42,21 @@ import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-t
 import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-to-address-mint-token-pool.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
+import USDC_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/usdc-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI from '../artifacts/abi/V1_6_0/siloed-lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
 import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-to-address-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/siloed-lock-release-token-pool.ts'
+import USDC_TOKEN_POOL_V1_6_2_ABI from '../artifacts/abi/V1_6_2/usdc-token-pool.ts'
+import USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI from '../artifacts/abi/V1_6_5/usdc-token-pool-cctp-v2.ts'
+import USDC_TOKEN_POOL_V1_6_5_ABI from '../artifacts/abi/V1_6_5/usdc-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
 import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-to-address-mint-token-pool.ts'
+import CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cctp-through-ccv-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
+import SILOED_USDC_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-usdc-token-pool.ts'
 import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
 import BURN_MINT_WITH_LOCK_RELEASE_FLAG_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-with-lock-release-flag-token-pool.ts'
@@ -109,6 +115,26 @@ export function isTokenPoolType(v: string): v is TokenPoolType {
 }
 
 /**
+ * The USDC/CCTP pool types: recognized so `getTokenPoolState` reads them (through
+ * {@link resolveAnyTokenPool}), but no other op supports them, so they are not
+ * {@link TokenPoolType}s. A `HybridLockReleaseUSDCTokenPool` reports `USDCTokenPool 1.6.2`.
+ */
+export const USDC_TOKEN_POOL_TYPES = [
+  'USDCTokenPool',
+  'USDCTokenPoolCCTPV2',
+  'SiloedUSDCTokenPool',
+  'CCTPThroughCCVTokenPool',
+] as const
+
+/** A USDC/CCTP pool contract type. */
+export type USDCTokenPoolType = (typeof USDC_TOKEN_POOL_TYPES)[number]
+
+/** Type guard for {@link USDC_TOKEN_POOL_TYPES}. */
+function isUSDCTokenPoolType(v: string): v is USDCTokenPoolType {
+  return (USDC_TOKEN_POOL_TYPES as readonly string[]).includes(v)
+}
+
+/**
  * Classifies a supported pool type into its {@link TokenPoolFamily} by name: every burn-* pool is
  * `BurnMint` (hence the anchored `^Burn`, which also covers
  * `BurnMintWithLockReleaseFlagTokenPool`), `SiloedLockReleaseTokenPool` is `SiloedLockRelease`,
@@ -157,9 +183,33 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
 }
 
 /**
+ * Versions only the legacy USDC pools shipped at. Kept out of {@link TokenPoolVersion} so no
+ * generic op resolves to them.
+ */
+export const LegacyUSDCTokenPoolVersion = {
+  V1_6_2: '1.6.2',
+  V1_6_5: '1.6.5',
+} as const
+
+/** A version only the legacy USDC pools shipped at. */
+export type LegacyUSDCTokenPoolVersion =
+  (typeof LegacyUSDCTokenPoolVersion)[keyof typeof LegacyUSDCTokenPoolVersion]
+
+/** Every version a {@link USDCTokenPoolType} reports: the shared ones plus the legacy USDC-only ones. */
+export type USDCTokenPoolVersion = TokenPoolVersion | LegacyUSDCTokenPoolVersion
+
+/** Type guard for {@link USDCTokenPoolVersion}. */
+function isUSDCTokenPoolVersion(v: string): v is USDCTokenPoolVersion {
+  return (
+    isTokenPoolVersion(v) || Object.values(LegacyUSDCTokenPoolVersion).some((known) => known === v)
+  )
+}
+
+/**
  * Narrows raw `typeAndVersion` strings to a known {@link TokenPoolType} and
  * {@link TokenPoolVersion}. A v1.5.0 `*AndProxy` type normalizes to its base pool type.
- * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
+ * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type,
+ * including a recognized USDC/CCTP pool ({@link USDCTokenPoolType}) or a `USDCTokenPoolProxy`
  * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version, or
  * not one the type shipped at (see {@link TOKEN_POOL_INTERFACES})
  */
@@ -172,6 +222,22 @@ export function parseTokenPoolVersion({
   contractType: string
   version: string
 }): { type: TokenPoolType; version: TokenPoolVersion } {
+  // before the version gates, so a USDC pool at any version fails as the type it is
+  if (isUSDCTokenPoolType(contractType))
+    throw new CCTContractTypeInvalidError(
+      address,
+      TOKEN_POOL_TYPES.join(', '),
+      contractType,
+      `recognized USDC pool type ${contractType}; this op does not support it, use getTokenPoolState`,
+    )
+  // the TokenAdminRegistry can return a USDCTokenPoolProxy as USDC's pool, so name the way out
+  if (contractType === 'USDCTokenPoolProxy')
+    throw new CCTContractTypeInvalidError(
+      address,
+      TOKEN_POOL_TYPES.join(', '),
+      contractType,
+      'a USDCTokenPoolProxy is not a TokenPool: it routes each lane to a USDC pool; pass one of the pools its getPools() returns',
+    )
   // v1.5.0's `*AndProxy` shims override only lockOrBurn/releaseOrMint, so every function a CCT op
   // encodes is the base pool's — and the vendored v1.5.0 ABIs are the `*_and_proxy` ones already.
   const type =
@@ -192,6 +258,23 @@ export function parseTokenPoolVersion({
   return { type, version }
 }
 
+/** {@link parseTokenPoolVersion} with the USDC/CCTP pools accepted, for `getTokenPoolState`. */
+function parseAnyTokenPoolVersion(raw: {
+  address: string
+  contractType: string
+  version: string
+}):
+  | { type: TokenPoolType; version: TokenPoolVersion }
+  | { type: USDCTokenPoolType; version: USDCTokenPoolVersion } {
+  const { address, contractType, version } = raw
+  if (!isUSDCTokenPoolType(contractType)) return parseTokenPoolVersion(raw)
+  if (!isUSDCTokenPoolVersion(version) || !USDC_TOKEN_POOL_ABIS[contractType][version])
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
+  return { type: contractType, version }
+}
+
 /**
  * Resolves an on-chain pool's type + version from its `typeAndVersion`, narrowed to a known
  * {@link TokenPoolType} and {@link TokenPoolVersion}.
@@ -205,6 +288,23 @@ export async function resolveTokenPool(
 ): Promise<{ type: TokenPoolType; version: TokenPoolVersion }> {
   const [contractType, version] = await chain.typeAndVersion(address)
   return parseTokenPoolVersion({ address, contractType, version })
+}
+
+/**
+ * {@link resolveTokenPool} with the USDC/CCTP pools accepted. Only for reads that hold for every
+ * recognized pool (`getTokenPoolState`); every other op uses {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if the reported type is not a recognized pool type
+ * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known pool version
+ */
+export async function resolveAnyTokenPool(
+  chain: EVMChain,
+  address: string,
+): Promise<
+  | { type: TokenPoolType; version: TokenPoolVersion }
+  | { type: USDCTokenPoolType; version: USDCTokenPoolVersion }
+> {
+  const [contractType, version] = await chain.typeAndVersion(address)
+  return parseAnyTokenPoolVersion({ address, contractType, version })
 }
 
 /** `Ownable2Step.owner()`, identical across all supported pool types and versions. */
@@ -457,6 +557,26 @@ const TOKEN_POOL_INTERFACE_LOOKUP: Record<
   TokenPoolType,
   Partial<Record<TokenPoolVersion, Interface>>
 > = TOKEN_POOL_INTERFACES
+
+/**
+ * Vendored ABI per {@link USDCTokenPoolType}, at exactly the versions it shipped at: only gates
+ * which USDC pools `getTokenPoolState` reads. Kept out of `TOKEN_POOL_ABIS` so no generic op or
+ * {@link TOKEN_POOL_INTERFACES} entry sees them. No 1.4.0 row: that `USDCTokenPool` has
+ * `getArmProxy`, not the `getRmnProxy` the legacy state reader calls.
+ */
+const USDC_TOKEN_POOL_ABIS: Record<
+  USDCTokenPoolType,
+  Partial<Record<USDCTokenPoolVersion, Abi>>
+> = {
+  USDCTokenPool: {
+    [TokenPoolVersion.V1_5_1]: USDC_TOKEN_POOL_V1_5_1_ABI,
+    [LegacyUSDCTokenPoolVersion.V1_6_2]: USDC_TOKEN_POOL_V1_6_2_ABI,
+    [LegacyUSDCTokenPoolVersion.V1_6_5]: USDC_TOKEN_POOL_V1_6_5_ABI,
+  },
+  USDCTokenPoolCCTPV2: { [LegacyUSDCTokenPoolVersion.V1_6_5]: USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI },
+  SiloedUSDCTokenPool: { [TokenPoolVersion.V2_0_0]: SILOED_USDC_TOKEN_POOL_V2_0_0_ABI },
+  CCTPThroughCCVTokenPool: { [TokenPoolVersion.V2_0_0]: CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI },
+}
 
 /**
  * Returns the cached pool {@link Interface} for `type` and `version`. Never throws when both came
