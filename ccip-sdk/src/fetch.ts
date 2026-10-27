@@ -668,14 +668,10 @@ function rebuildResponse(
 const MAX_INSPECTED_BODY_BYTES = 16_384
 
 /**
- * Some keyless RPCs (e.g. sepolia.base.org, rpc.monad.xyz) answer over-budget
- * calls with HTTP 200 and a JSON-RPC `-32007` error instead of a 429. Reads a
- * small JSON-RPC response once and reports whether every envelope (single or
- * batch) carries that code; the returned response replays the read body. A
- * batch with any other member answered is not retried: resending it would
- * replay that member, which may be a write (e.g. `eth_sendRawTransaction`).
- * Bodies without a small `content-length` are not read, so large results
- * keep streaming.
+ * Some RPCs return HTTP 200 with JSON-RPC `-32007` or `429` when they limit requests.
+ * Inspect only small responses and retry only when every member reports a rate limit.
+ * Do not retry a batch with a completed member: it can contain a successful write.
+ * Preserve the response body for callers. Leave unknown or large content lengths streaming.
  */
 async function readJsonRpcRateLimit(
   response: Response,
@@ -685,15 +681,16 @@ async function readJsonRpcRateLimit(
     return { response, limited: false }
   const text = await response.text()
   let limited = false
-  if (text.includes('-32007')) {
+  if (/(?:^|[^\w.-])(?:-32007|429)(?![\w.])/.test(text)) {
     try {
       const parsed: unknown = JSON.parse(text)
       const members = Array.isArray(parsed) ? parsed : [parsed]
       limited =
         members.length > 0 &&
-        members.every(
-          (member) => (member as { error?: { code?: unknown } } | null)?.error?.code === -32007,
-        )
+        members.every((member) => {
+          const code = (member as { error?: { code?: unknown } } | null)?.error?.code
+          return code === -32007 || code === 429
+        })
     } catch {
       // not JSON: not a rate-limit envelope
     }

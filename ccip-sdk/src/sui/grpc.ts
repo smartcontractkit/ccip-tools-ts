@@ -284,10 +284,12 @@ export class SuiGrpcChainClient implements SuiClientLike {
     if (low > high) return { data: [], hasNextPage: false, nextCursor: null }
 
     const data: Checkpoint[] = []
+    let endReason: number | undefined
     const call = this.#client.ledgerService.listCheckpoints({
       startCheckpoint: low,
       endCheckpoint: high + 1n, // exclusive upper bound
       readMask: CHECKPOINT_WITH_DIGESTS_MASK,
+      options: { limit },
     })
     for await (const frame of call.responses) {
       if (frame.checkpoint)
@@ -296,6 +298,7 @@ export class SuiGrpcChainClient implements SuiClientLike {
             frame.checkpoint as unknown as Parameters<typeof grpcCheckpointToJsonRpc>[0],
           ) as unknown as Checkpoint,
         )
+      if (frame.end) endReason = frame.end.reason
     }
     // the stream walks ascending regardless of the requested page order
     data.sort((left, right) =>
@@ -310,9 +313,13 @@ export class SuiGrpcChainClient implements SuiClientLike {
     const last = data[data.length - 1]
     const reachedBoundary =
       last != null && BigInt(last.sequenceNumber) === (descending ? 0n : latest)
+    // ITEM_LIMIT (1) and SCAN_LIMIT (2) can end a page before the requested limit.
     return {
       data,
-      hasNextPage: !reachedBoundary && data.length === limit,
+      hasNextPage:
+        !reachedBoundary &&
+        data.length > 0 &&
+        (data.length === limit || endReason === 1 || endReason === 2),
       nextCursor: last ? encodeCursor(String(last.sequenceNumber)) : null,
     }
   }
@@ -698,12 +705,9 @@ export class SuiGrpcChainClient implements SuiClientLike {
         ? decodeEventAnchor(input.cursor.txDigest)
         : undefined
 
-    // The normalized client does its own limit+1 lookahead and positions
-    // `endCursor` after the events it returns — ask for exactly `limit` so
-    // resuming from our encoded cursor never skips an event. A NOT_FOUND
-    // position (pruned / lagging backend) is rephrased with JSON-RPC's
-    // retention-boundary wording — the SDK switches to the checkpoint walk on
-    // it, which serves whatever the node still retains.
+    // The normalized client owns limit+1 lookahead and positions its end cursor after returned events.
+    // Request exactly `limit` to avoid skipping events.
+    // Normalize pruned positions and scans to trigger the checkpoint walk.
     const res = await (async () => {
       try {
         return await this.#client.listEvents({
@@ -714,7 +718,12 @@ export class SuiGrpcChainClient implements SuiClientLike {
           signal: input.signal,
         })
       } catch (error) {
-        if (isGrpcNotFound(error))
+        const rpcError = error as { code?: unknown; message?: unknown } | null
+        if (
+          isGrpcNotFound(error) ||
+          (rpcError?.code === 'OUT_OF_RANGE' &&
+            /below earliest available|lowest available checkpoint/i.test(String(rpcError.message)))
+        )
           throw new CCIPError(
             CCIPErrorCode.TRANSACTION_NOT_FOUND,
             'Could not find the referenced transaction events',
@@ -945,9 +954,12 @@ export class SuiGrpcChainClient implements SuiClientLike {
   }
 
   /** Renders every event's parsedJson of a transaction (raw proto or normalized shapes). */
-  async #fixupTxJson(tx: { events?: unknown }): Promise<void> {
-    for (const event of grpcTransactionEvents(tx as never))
+  async #fixupTxJson(tx: { digest?: string; events?: unknown }): Promise<void> {
+    for (const event of grpcTransactionEvents(tx as never)) {
       event.json = await this.#renderEventJson(event)
+      // Embedded events omit the transaction digest; logs still need it.
+      event.transactionDigest ||= tx.digest
+    }
   }
 
   async #getTransactionTx(

@@ -11,9 +11,11 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
 import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { normalizeSuiAddress } from '@mysten/sui/utils'
 
 import { type ChainFamily, type NetworkInfo, networkInfo } from '../networks.ts'
 import type { SuiClientLike } from './client.ts'
+import { getOnRampsForCcip } from './discovery.ts'
 import {
   getDynamicFieldIds,
   getLatestPackageId,
@@ -54,6 +56,21 @@ describe('Sui object cache isolation', () => {
     assert.deepEqual(await getDynamicFieldIds('0x04', b), { state: '0x02' })
     assert.deepEqual(await getPackageDisassembly('0x05', a), { module: '0x01' })
     assert.deepEqual(await getPackageDisassembly('0x05', b), { module: '0x02' })
+  })
+
+  it('discovers the onramp without scanning past sparse retained activity', async () => {
+    const client = Object.assign(fakeClient('0xa', '0x01'), {
+      queryTransactionBlocks: async ({ limit }: { limit?: number | null }) => {
+        assert.equal(limit, 1, 'larger pages cross the pruning boundary')
+        return {
+          data: [{ events: [{ type: '0x04::onramp::CCIPMessageSent' }] }],
+          hasNextPage: false,
+        }
+      },
+    })
+    assert.deepEqual(await getOnRampsForCcip('0x03', client), [
+      normalizeSuiAddress('0x04') + '::onramp',
+    ])
   })
 })
 
