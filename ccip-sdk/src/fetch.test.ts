@@ -827,6 +827,100 @@ describe('transient retry', () => {
     const result = await rateLimitedFetch(url)
     assert.equal(result.ok, true)
   })
+
+  for (const code of [-32007, 429]) {
+    for (const batch of [false, true]) {
+      it(`retries HTTP-200 JSON-RPC ${code}, batch: ${batch}, and preserves the final body`, async () => {
+        const url = `https://jsonrpc-${code}-${batch}.example.com/rpc`
+        const errors = [1, 2].map((id) => ({
+          jsonrpc: '2.0',
+          id,
+          error: { code, message: 'rate limited' },
+        }))
+        const successes = [1, 2].map((id) => ({ jsonrpc: '2.0', id, result: `0x${id}` }))
+        const bodies = [errors, successes].map((members) =>
+          JSON.stringify(batch ? members : members[0], null, 2),
+        )
+        let calls = 0
+        globalThis.fetch = mock.fn(() => {
+          const body = bodies[calls++]!
+          return Promise.resolve(
+            new Response(body, { headers: { 'content-length': String(body.length) } }),
+          )
+        })
+        const requests = [
+          { jsonrpc: '2.0', id: 1, method: 'eth_chainId' },
+          { jsonrpc: '2.0', id: 2, method: 'eth_blockNumber' },
+        ]
+        const result = await createRateLimitedFetch({ maxRetries: 3 })(url, {
+          method: 'POST',
+          body: JSON.stringify(batch ? requests : requests[0]),
+        })
+        assert.equal(calls, 2)
+        assert.equal(await result.text(), bodies[1])
+      })
+    }
+
+    it(`does not resend an answered write beside JSON-RPC ${code}`, async () => {
+      const url = `https://jsonrpc-${code}-mixed.example.com/rpc`
+      const body = JSON.stringify([
+        { jsonrpc: '2.0', id: 1, result: '0xabc' },
+        { jsonrpc: '2.0', id: 2, error: { code, message: 'rate limited' } },
+      ])
+      let calls = 0
+      globalThis.fetch = mock.fn(() => {
+        calls++
+        return Promise.resolve(
+          new Response(body, { headers: { 'content-length': String(body.length) } }),
+        )
+      })
+      const result = await createRateLimitedFetch({ maxRetries: 3 })(url, {
+        method: 'POST',
+        body: JSON.stringify([
+          { jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: ['0x00'] },
+          { jsonrpc: '2.0', id: 2, method: 'eth_blockNumber' },
+        ]),
+      })
+      assert.equal(calls, 1)
+      assert.equal(await result.text(), body)
+    })
+  }
+
+  it('does not retry matching digits outside an exact numeric error code', async () => {
+    for (const body of [
+      '{"jsonrpc":"2.0","id":1,"result":"0x429-32007"}',
+      '{"jsonrpc":"2.0","id":1,"error":{"code":1429}}',
+      '{"jsonrpc":"2.0","id":1,"error":{"code":-320070}}',
+      '{"jsonrpc":"2.0","id":1,"error":{"code":"429"}}',
+    ]) {
+      let calls = 0
+      globalThis.fetch = mock.fn(async () => {
+        calls++
+        return new Response(body, { headers: { 'content-length': String(body.length) } })
+      })
+      const result = await createRateLimitedFetch({ maxRetries: 3 })(
+        'https://jsonrpc-exact-code.example.com/rpc',
+        { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}' },
+      )
+      assert.equal(calls, 1)
+      assert.equal(await result.text(), body)
+    }
+  })
+
+  it('returns a -32007 body untouched for non-JSON-RPC requests', async () => {
+    const url = 'https://jsonrpc-32007-plain.example.com/api'
+    const body = '{"error":{"code":-32007}}'
+    let calls = 0
+    globalThis.fetch = mock.fn(() => {
+      calls++
+      return Promise.resolve(
+        new Response(body, { headers: { 'content-length': String(body.length) } }),
+      )
+    })
+    const result = await createRateLimitedFetch({ maxRetries: 3 })(url)
+    assert.equal(calls, 1)
+    assert.equal(await result.text(), body)
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -54,6 +54,7 @@
     "check": "npm run lint && npm run typecheck",
     "build": "npm run clean && tsc -p ./tsconfig.build.json",
     "clean": "rm -rfv ./dist",
+    "prepack": "node ../scripts/generate.cjs src/api/index.ts",
     "prepare": "npm run build"
   },
   "files": [
@@ -74,23 +75,23 @@
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.5",
     "esbuild": "^0.28.2",
     "ethers-abitype": "1.0.3",
     "prool": "^0.2.16",
     "protobufjs": "^8.8.0",
     "typescript": "7.0.2",
-    "viem": "^2.56.8"
+    "viem": "2.57.5"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^7.3.0",
+    "@aptos-labs/ts-sdk": "7.5.0",
     "@coral-xyz/anchor": "^0.29.0",
     "@metaplex-foundation/mpl-token-metadata": "3.4.0",
     "@metaplex-foundation/umi": "1.6.0",
     "@metaplex-foundation/umi-bundle-defaults": "1.6.0",
     "@metaplex-foundation/umi-web3js-adapters": "1.6.0",
-    "@mysten/bcs": "^2.1.1",
-    "@mysten/sui": "^2.31.3",
+    "@mysten/bcs": "2.1.2",
+    "@mysten/sui": "2.36.0",
     "@noble/hashes": "^2.4.0",
     "@solana/spl-token": "0.4.15",
     "@solana/web3.js": "^1.99.0",
@@ -107,8 +108,5 @@
     "oauth4webapi": "^3.8.8",
     "type-fest": "^5.10.0",
     "yaml": "2.9.1"
-  },
-  "overrides": {
-    "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10"
   }
 }

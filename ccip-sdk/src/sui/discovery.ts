@@ -1,4 +1,4 @@
-import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import type { TransactionFilter } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { hexlify } from 'ethers'
@@ -7,6 +7,7 @@ import { memoize } from 'micro-memoize'
 import { CCIPError } from '../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../errors/codes.ts'
 import { getAddressBytes } from '../utils.ts'
+import type { SuiClientLike } from './client.ts'
 import { withLookupRetry } from './events.ts'
 import {
   deriveObjectID,
@@ -24,7 +25,7 @@ import {
  * @returns ccip package id
  */
 export const getCcipStateAddress = memoize(
-  async (ramp: string, client: SuiJsonRpcClient): Promise<string> => {
+  async (ramp: string, client: SuiClientLike): Promise<string> => {
     // View calls must target the latest package (old versions are
     // version-gated and revert); state pointers are resolved by the callee
     ramp = await getLatestPackageId(ramp, client)
@@ -59,7 +60,7 @@ export const getCcipStateAddress = memoize(
  * by the `CCIPObjectRef` type the object carries, which names the ccip package).
  */
 export const resolveCcipStateAddress = memoize(
-  async (address: string, client: SuiJsonRpcClient): Promise<string> => {
+  async (address: string, client: SuiClientLike): Promise<string> => {
     const packageId = normalizeSuiAddress(address.split('::')[0]!)
     const module = address.split('::')[1] ?? (await moduleOfPackage(packageId, client))
     if (module === 'state_object') return `${packageId}::state_object`
@@ -90,7 +91,7 @@ export const resolveCcipStateAddress = memoize(
  * candidate set — an ABI fetch would pull a whole module's bytecode metadata.
  */
 export const moduleOfPackage = memoize(
-  async (packageId: string, client: SuiJsonRpcClient): Promise<string | undefined> => {
+  async (packageId: string, client: SuiClientLike): Promise<string | undefined> => {
     // The package-owned `*Pointer` object's type names the module (on-chain
     // state, one small request); the module is then validated - where the
     // package is interpretable - against its disassembly module list.
@@ -136,7 +137,7 @@ export const moduleOfPackage = memoize(
  * @throws {@link CCIPError} if no RouterState onramp matches the selector
  */
 export const getOnRampForSelectorFromRouterState = memoize(
-  async (ccip: string, destChainSelector: bigint, client: SuiJsonRpcClient): Promise<string> => {
+  async (ccip: string, destChainSelector: bigint, client: SuiClientLike): Promise<string> => {
     const ccipRefId = await getObjectRef(ccip, client)
     const refFields = await getObjectFields(ccipRefId, client)
     const owner = (refFields['ownable_state'] as { fields?: { owner?: string } } | undefined)
@@ -227,7 +228,7 @@ export const getOnRampForSelectorFromRouterState = memoize(
  */
 async function findOffRampPackageByUpgrades(
   ccip: string,
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
 ): Promise<string | undefined> {
   const ccipRefId = await getObjectRef(ccip, client)
   const ccipRef = await withLookupRetry(() =>
@@ -294,7 +295,7 @@ async function findOffRampPackageByUpgrades(
  */
 export async function findOffRampPackagesByCcipActivity(
   ccip: string,
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   { maxPages = 20, limit = 50 }: { maxPages?: number; limit?: number } = {},
 ): Promise<string[]> {
   const ccipRefId = await getObjectRef(ccip, client)
@@ -356,7 +357,7 @@ export async function findOffRampPackagesByCcipActivity(
  * activity (commit/execute/config) exists within event retention.
  */
 export async function findOffRampPackageByEvents(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   {
     maxPages = 100,
     limit = 50,
@@ -391,7 +392,7 @@ export async function findOffRampPackageByEvents(
  * Reads the Ownable owner from a ramp's state object. The owner is either a
  * deployer EOA (before ownership is transferred to MCMS) or the MCMS package.
  */
-async function getRampOwner(ramp: string, client: SuiJsonRpcClient): Promise<string | undefined> {
+async function getRampOwner(ramp: string, client: SuiClientLike): Promise<string | undefined> {
   const stateObjectId = await getObjectRef(ramp, client)
   const obj = await withLookupRetry(() =>
     client.getObject({ id: stateObjectId, options: { showContent: true } }),
@@ -423,7 +424,7 @@ async function getRampOwner(ramp: string, client: SuiJsonRpcClient): Promise<str
  */
 export async function getOffRampsFromRampOwner(
   ramp: string,
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
 ): Promise<string[]> {
   const owner = await getRampOwner(ramp, client).catch(() => undefined)
   if (!owner) return []
@@ -486,7 +487,7 @@ export async function getOffRampsFromRampOwner(
  * @returns Sui offramp package ids (`<pkg>::offramp`)
  */
 export const getOffRampsForCcip = memoize(
-  async (ccip: string, client: SuiJsonRpcClient): Promise<string[]> => {
+  async (ccip: string, client: SuiClientLike): Promise<string[]> => {
     const byActivity = await findOffRampPackagesByCcipActivity(ccip, client).catch(() => [])
     if (byActivity.length) return byActivity
 
@@ -516,8 +517,8 @@ export type RampModule = 'onramp' | 'offramp'
  * returns the ramp packages named by their events or PTB calls.
  */
 async function findRampPackagesByTxFilter(
-  client: SuiJsonRpcClient,
-  filter: Parameters<SuiJsonRpcClient['queryTransactionBlocks']>[0]['filter'],
+  client: SuiClientLike,
+  filter: TransactionFilter,
   module: RampModule,
   { maxPages = 20, limit = 50 }: { maxPages?: number; limit?: number } = {},
 ): Promise<string[]> {
@@ -593,12 +594,14 @@ async function findRampPackagesByTxFilter(
  * @returns Sui onramp package ids (`<pkg>::onramp`)
  */
 export const getOnRampsForCcip = memoize(
-  async (ccip: string, client: SuiJsonRpcClient): Promise<string[]> => {
+  async (ccip: string, client: SuiClientLike): Promise<string[]> => {
     const latestPkg = normalizeSuiAddress((await getLatestPackageId(ccip, client)).split('::')[0]!)
     const byHelper = await findRampPackagesByTxFilter(
       client,
       { MoveFunction: { package: latestPkg, module: 'onramp_state_helper' } },
       'onramp',
+      // A large filtered page can reach the pruning boundary before returning recent sends.
+      { limit: 1 },
     ).catch(() => [])
     if (byHelper.length) return byHelper
 
@@ -623,14 +626,14 @@ export const getOnRampsForCcip = memoize(
  * @returns Sui offramp package id
  * @see {@link getOffRampsForCcip} when more than one candidate is acceptable
  */
-export async function getOffRampForCcip(ccip: string, client: SuiJsonRpcClient): Promise<string> {
+export async function getOffRampForCcip(ccip: string, client: SuiClientLike): Promise<string> {
   const [offramp] = await getOffRampsForCcip(ccip, client)
   if (!offramp)
     throw new CCIPError(CCIPErrorCode.UNKNOWN, `Could not find offramp package for ccip ${ccip}`)
   return offramp
 }
 
-const getOffRampForCcip_ = async (ccip: string, client: SuiJsonRpcClient) => {
+const getOffRampForCcip_ = async (ccip: string, client: SuiClientLike) => {
   // Get CCIP publish tx info
   // Get the owner cap created in that tx.
   // Get owner of the ownercap object.
@@ -782,7 +785,7 @@ const getOffRampForCcip_ = async (ccip: string, client: SuiJsonRpcClient) => {
 }
 
 const findModulePackageId = async (
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   moduleName: string,
   packageIds: string[],
 ) => {
