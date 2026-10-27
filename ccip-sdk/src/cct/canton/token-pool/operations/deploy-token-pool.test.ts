@@ -60,7 +60,12 @@ function mockChain(
     network: { family: ChainFamily.Canton, chainId },
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    edsDisclosureProvider: undefined,
+    // stubbed failure (not undefined) forces the ACS-fallback branch of resolveTar
+    edsDisclosureProvider: {
+      fetchContractDisclosure: async () => {
+        throw new Error('no EDS in test')
+      },
+    },
     findActiveContractByInstanceAddress: async (templateId: string, address: string) =>
       templateId === TOKEN_CONFIG_TEMPLATE_ID
         ? address === TOKEN_CONFIG_ADDRESS
