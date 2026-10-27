@@ -262,7 +262,6 @@ describe('SetChainRateLimiterConfigs (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, v2Data([true, false]))
     })
 
-    // TMEM sends both buckets of every lane on v2.0.0, so a selector-only dedupe rejected them all
     it('sets both the finalized and fast-finality buckets of one lane on a 2.0.0 pool', async () => {
       const unsigned = await generate(stubChain({ version: TokenPoolVersion.V2_0_0 }), {
         updates: [
