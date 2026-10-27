@@ -266,7 +266,7 @@ async function sendMessage(
   }
 
   const tokenAmounts: { token: string; amount: bigint }[] = argv.transferTokens?.length
-    ? await parseTokenAmounts(source, argv.transferTokens)
+    ? await parseTokenAmounts(source, argv.transferTokens, router)
     : []
 
   let receiver = argv.receiver

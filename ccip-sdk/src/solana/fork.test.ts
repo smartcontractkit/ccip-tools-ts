@@ -17,6 +17,7 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  SYSVAR_RENT_PUBKEY,
   SendTransactionError,
 } from '@solana/web3.js'
 import { hexlify } from 'ethers'
@@ -465,6 +466,32 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       commitment: 'confirmed',
       wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
     })
+    // Surfpool synthesizes rent from its local SVM defaults instead of cloning devnet's sysvar.
+    // Devnet-created accounts can then fail Anchor's rent-exemption check before execution.
+    const upstream = new Connection(rpcEndpoint('RPC_SOLANA_DEVNET'), 'confirmed')
+    const rent = await upstream.getAccountInfo(SYSVAR_RENT_PUBKEY)
+    assert.ok(rent, 'devnet rent sysvar must exist')
+    await fetch(connection.rpcEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'surfnet_setAccount',
+        params: [
+          SYSVAR_RENT_PUBKEY.toBase58(),
+          {
+            data: rent.data.toString('hex'),
+            lamports: rent.lamports,
+            owner: rent.owner.toBase58(),
+            executable: rent.executable,
+          },
+        ],
+      }),
+    }).then((res) => res.text())
+    const forkRent = await connection.getAccountInfo(SYSVAR_RENT_PUBKEY)
+    assert.deepEqual(forkRent?.data, rent.data, 'the fork must use devnet rent settings')
+
     solanaChain = new SolanaChain(connection, networkInfo('solana-devnet'), {
       apiClient: null,
       logger: testLogger,
@@ -703,10 +730,11 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         isSigner: msg.isAccountSigner(i),
         isWritable: msg.isAccountWritable(i),
       }))
-      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 }>(
+      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 | null }>(
         'ExecuteParams',
         Buffer.from(landed.data).subarray(8),
       )
+      assert.ok(execInputs, 'the landed fixture must contain inline execute_v2 inputs')
 
       const { instruction, lookupTables, metadata } = await resolveExecuteV2(ctx(), {
         offramp: offRamp,
@@ -743,10 +771,11 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       const landed = msg.compiledInstructions.find((ix) =>
         keys.get(ix.programIdIndex)?.equals(offRamp),
       )!
-      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 }>(
+      const { execInputs } = offrampV2Coder.types.decode<{ execInputs: ExecutionInputsV2 | null }>(
         'ExecuteParams',
         Buffer.from(landed.data).subarray(8),
       )
+      assert.ok(execInputs, 'the landed fixture must contain inline execute_v2 inputs')
       return {
         encodedMessage: hexlify(execInputs.encodedMessage),
         verifications: execInputs.ccvs.map((ccv, i) => ({
@@ -762,7 +791,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       const input = await landedInput()
       const request = {
         lane: {
-          sourceChainSelector: STAGING.sepoliaSelector,
+          sourceChainSelector: STAGING.executeSourceSelector,
           destChainSelector: networkInfo('solana-devnet').chainSelector,
           onRamp: '',
           version: CCIPVersion.V2_0,

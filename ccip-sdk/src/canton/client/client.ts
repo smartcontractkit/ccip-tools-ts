@@ -132,6 +132,8 @@ export type JsCantonError = components['schemas']['JsCantonError']
 export type TransactionFilter = components['schemas']['TransactionFilter']
 /** Format for events in responses */
 export type EventFormat = components['schemas']['EventFormat']
+/** Format for transactions in submit/query responses (event format + shape) */
+export type TransactionFormat = components['schemas']['TransactionFormat']
 /** Filter for templates */
 export type TemplateFilter = components['schemas']['TemplateFilter']
 /** Wildcard filter for matching patterns */
@@ -284,11 +286,11 @@ export function createCantonClient(config: CantonClientConfig) {
 
     /**
      * Submit a command and wait for the full transaction response
-     * @returns The transaction with all created/archived events
+     * @returns The transaction with the events admitted by `transactionFormat`
      */
     async submitAndWaitForTransaction(
       commands: JsCommands,
-      eventFormat?: EventFormat,
+      transactionFormat?: TransactionFormat,
     ): Promise<JsSubmitAndWaitForTransactionResponse> {
       // Use a long timeout and no HTTP-level retry: submit-and-wait is not idempotent
       // across retries when the contract data (e.g. fee holding CID) may be consumed
@@ -297,7 +299,7 @@ export function createCantonClient(config: CantonClientConfig) {
       const SUBMIT_TIMEOUT_MS = 120_000
       return post2<JsSubmitAndWaitForTransactionResponse>(
         '/v2/commands/submit-and-wait-for-transaction',
-        { commands, eventFormat },
+        { commands, transactionFormat },
         undefined,
         1, // no HTTP-level retry
         SUBMIT_TIMEOUT_MS,

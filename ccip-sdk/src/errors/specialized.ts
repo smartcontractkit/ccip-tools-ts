@@ -142,6 +142,29 @@ export class CCIPTransactionNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a transaction committed on-ledger but the submission response
+ * lacked the events needed to extract result identifiers (e.g. an ACS-delta
+ * response without the expected created/exercised event). This is NOT a
+ * submission failure — the update ID is in `context.updateId`; inspect the
+ * transaction instead of resubmitting. Permanent, non-retryable.
+ */
+export class CCIPTxOutcomeUnavailableError extends CCIPError {
+  override readonly name = 'CCIPTxOutcomeUnavailableError'
+  /** Creates a committed-but-unavailable outcome error. */
+  constructor(operation: string, updateId: string, detail: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TX_OUTCOME_UNAVAILABLE,
+      `${operation} committed (updateId ${updateId}) but ${detail} was unavailable in the response; inspect the transaction instead of retrying`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, operation, updateId, detail },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when a transaction exceeds the wire size limits of its version
  * (1232 bytes for legacy/v0, 4096 bytes for v1) or the account/instruction
  * capacity of its message format.
@@ -959,6 +982,39 @@ export class CCIPTokenDecimalsInsufficientError extends CCIPError {
         ...options,
         isTransient: false,
         context: { ...options?.context, token, destDecimals, destChain, amount },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when a token does not implement the optional ERC-20 `decimals()` view, so its decimals
+ * cannot be read on-chain. Preflights resolve them from the token's pool or the chain family
+ * default instead (see `resolveTokenDecimals`); this surfaces only when neither can declare
+ * them, and there is no input override — the declaration must be fixed on-chain.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const { decimals } = await chain.getTokenInfo(token)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenDecimalsUnavailableError) {
+ *     console.log(`Token ${error.context.token} has no decimals(); fix the declaration on-chain: a decimals() view, or a pool v1.5.1+ declaring them`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenDecimalsUnavailableError extends CCIPError {
+  override readonly name = 'CCIPTokenDecimalsUnavailableError'
+  /** Creates a token decimals unavailable error. */
+  constructor(token: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_DECIMALS_UNAVAILABLE,
+      `token=${token} does not implement the optional ERC-20 decimals() view; its decimals must be resolved from its pool or fixed on-chain`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token },
       },
     )
   }
@@ -3383,7 +3439,7 @@ export class CCIPTokenNotFoundError extends CCIPError {
 export class CCIPInsufficientBalanceError extends CCIPError {
   override readonly name = 'CCIPInsufficientBalanceError'
   /** Creates an insufficient balance error. */
-  constructor(have: string, need: string, symbol: string, options?: CCIPErrorOptions) {
+  constructor(have: string, need: string, symbol = 'UNKNOWN', options?: CCIPErrorOptions) {
     super(
       CCIPErrorCode.INSUFFICIENT_BALANCE,
       `Insufficient balance: have ${have} ${symbol}, need ${need} ${symbol}`,

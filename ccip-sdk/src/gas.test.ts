@@ -4,7 +4,10 @@ import { after, beforeEach, describe, it, mock } from 'node:test'
 
 import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
-import { CCIPApiClientNotAvailableError } from './errors/index.ts'
+import {
+  CCIPApiClientNotAvailableError,
+  CCIPTokenDecimalsUnavailableError,
+} from './errors/index.ts'
 import { estimateExecGas } from './evm/gas.ts'
 import { EVMChain } from './evm/index.ts'
 import { estimateReceiveExecution } from './gas.ts'
@@ -433,6 +436,181 @@ describe('estimateExecGasForRequest', () => {
     const sendCall = mockDestChain.provider.send.mock.calls[0]
     assert.equal(sendCall.arguments[1].length, 2) // Only transaction and block, no stateOverrides
   })
+
+  it('should resolve dest decimals from the dest pool when the dest token has no decimals()', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const router = getAddress(hexlify(randomBytes(20)))
+    const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+    const destPoolAddress = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRamp)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+
+    // the dest token implements no decimals() — the typed error must fall back to the dest
+    // pool's declared decimals (18), never reach the user
+    mockDestChain.getTokenInfo = mock.fn(async () => {
+      throw new CCIPTokenDecimalsUnavailableError(destTokenAddress)
+    })
+    mockDestChain.getTokenPoolConfig = mock.fn(async () => ({ decimals: 18 }))
+    mockDestChain.getTokenAdminRegistryFor = mock.fn(async () =>
+      getAddress(hexlify(randomBytes(20))),
+    )
+    mockDestChain.getRegistryTokenConfig = mock.fn(async () => ({ tokenPool: destPoolAddress }))
+    mockDestChain.getRouterForOffRamp = mock.fn(async () => router)
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(50_000))
+    mockSourceChain.getTokenPoolRemotes = mock.fn(async () => ({
+      'base-sepolia': { remoteToken: destTokenAddress, remotePools: [destPoolAddress] },
+    }))
+
+    const message = {
+      sender: getAddress(hexlify(randomBytes(20))),
+      receiver: getAddress(hexlify(randomBytes(20))),
+      data: '0x',
+      tokenAmounts: [
+        {
+          sourcePoolAddress,
+          destTokenAddress,
+          amount: 10n ** 15n, // 0.001 at the 18-decimals source
+          extraData: Buffer.concat([Buffer.alloc(31), Buffer.from([18])]).toString('base64'),
+        },
+      ],
+    }
+
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message,
+    })
+
+    assert.equal(result, 29700)
+    assert.equal(mockDestChain.getTokenPoolConfig.mock.calls.length, 1)
+    assert.equal(mockDestChain.getTokenPoolConfig.mock.calls[0]!.arguments[0], destPoolAddress)
+  })
+
+  it('should use the registry-registered dest pool, not the source-configured remote pool', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const router = getAddress(hexlify(randomBytes(20)))
+    const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+    const registeredPoolAddress = getAddress(hexlify(randomBytes(20)))
+    const staleRemotePoolAddress = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRamp)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+
+    // the dest token implements no decimals(); the source-configured remote pool (e.g. a stale
+    // one) declares 6, but the pool actually registered on the dest registry declares 18 —
+    // the registered pool is the one that will convert, so it must win
+    mockDestChain.getTokenInfo = mock.fn(async () => {
+      throw new CCIPTokenDecimalsUnavailableError(destTokenAddress)
+    })
+    mockDestChain.getTokenPoolConfig = mock.fn(async (pool: string) => ({
+      decimals: pool === registeredPoolAddress ? 18 : 6,
+    }))
+    mockDestChain.getTokenAdminRegistryFor = mock.fn(async () =>
+      getAddress(hexlify(randomBytes(20))),
+    )
+    mockDestChain.getRegistryTokenConfig = mock.fn(async () => ({
+      tokenPool: registeredPoolAddress,
+    }))
+    mockDestChain.getRouterForOffRamp = mock.fn(async () => router)
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(50_000))
+    mockSourceChain.getTokenPoolRemotes = mock.fn(async () => ({
+      'base-sepolia': {
+        remoteToken: destTokenAddress,
+        remotePools: [staleRemotePoolAddress],
+      },
+    }))
+
+    const message = {
+      sender: getAddress(hexlify(randomBytes(20))),
+      receiver: getAddress(hexlify(randomBytes(20))),
+      data: '0x',
+      tokenAmounts: [
+        {
+          sourcePoolAddress,
+          destTokenAddress,
+          amount: 10n ** 15n, // 0.001 at the 18-decimals source
+          extraData: Buffer.concat([Buffer.alloc(31), Buffer.from([18])]).toString('base64'),
+        },
+      ],
+    }
+
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message,
+    })
+
+    assert.equal(result, 29700)
+    // the registered pool's 18 decimals converted the amount, not the stale remote's 6
+    assert.equal(mockDestChain.getTokenPoolConfig.mock.calls.length, 1)
+    assert.equal(
+      mockDestChain.getTokenPoolConfig.mock.calls[0]!.arguments[0],
+      registeredPoolAddress,
+    )
+  })
+
+  it('should fall back to the family default when neither token nor pool can declare', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const router = getAddress(hexlify(randomBytes(20)))
+    const sourcePoolAddress = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+    const destPoolAddress = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRamp)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+
+    // neither the dest token nor its pool can declare decimals (v1.5.0 pool) — the chain
+    // family's static default (18 on EVM) is the last resort
+    mockDestChain.getTokenInfo = mock.fn(async () => {
+      throw new CCIPTokenDecimalsUnavailableError(destTokenAddress)
+    })
+    mockDestChain.getTokenPoolConfig = mock.fn(async () => ({ decimals: undefined }))
+    mockDestChain.getTokenAdminRegistryFor = mock.fn(async () =>
+      getAddress(hexlify(randomBytes(20))),
+    )
+    mockDestChain.getRegistryTokenConfig = mock.fn(async () => ({ tokenPool: destPoolAddress }))
+    mockDestChain.getRouterForOffRamp = mock.fn(async () => router)
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(50_000))
+    mockSourceChain.getTokenPoolRemotes = mock.fn(async () => ({
+      'base-sepolia': { remoteToken: destTokenAddress, remotePools: [destPoolAddress] },
+    }))
+
+    const message = {
+      sender: getAddress(hexlify(randomBytes(20))),
+      receiver: getAddress(hexlify(randomBytes(20))),
+      data: '0x',
+      tokenAmounts: [
+        {
+          sourcePoolAddress,
+          destTokenAddress,
+          amount: 10n ** 15n, // 0.001 at the 18-decimals source
+          extraData: Buffer.concat([Buffer.alloc(31), Buffer.from([18])]).toString('base64'),
+        },
+      ],
+    }
+
+    const result = await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message,
+    })
+
+    // 0.001 at 18 source decimals = 0.001 at the family-default 18 dest decimals
+    assert.equal(result, 29700)
+    assert.equal(mockDestChain.getTokenPoolConfig.mock.calls.length, 1)
+  })
 })
 
 describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
@@ -587,5 +765,64 @@ describe('EVMChain.estimateReceiveExecution({ messageId })', () => {
     const sendCall = provider.send.mock.calls.at(-1)!
     const stateOverrides = (sendCall.arguments as any)[1][2]
     assert.ok(destTokenAddress in stateOverrides)
+  })
+
+  it('should convert via the registry-registered pool decimals in direct estimation', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const messageId = hexlify(randomBytes(32))
+    const sender = getAddress(hexlify(randomBytes(20)))
+    const receiver = getAddress(hexlify(randomBytes(20)))
+    const destTokenAddress = getAddress(hexlify(randomBytes(20)))
+    const registeredPoolAddress = getAddress(hexlify(randomBytes(20)))
+    const { chain, offRamp, provider } = createMockEVMChain()
+
+    provider.send = mock.fn(async () => toBeHex(55_000))
+
+    // the dest token implements no decimals(); the pool registered on the dest registry
+    // declares 6 — the estimate must convert through it (10^15 at 18 source decimals =
+    // 10^9 at 6 dest decimals), not fall to the family default (18) and override 10^15
+    chain.getMessageById = mock.fn(async () => ({
+      lane: {
+        sourceChainSelector: 16015286601757825753n,
+        destChainSelector: 10344971235874465080n,
+        onRamp,
+        version: CCIPVersion.V2_0,
+      },
+      message: {
+        messageId,
+        sender,
+        receiver,
+        sourceChainSelector: 16015286601757825753n,
+        data: '0xdeadbeef',
+        tokenAmounts: [
+          {
+            destTokenAddress,
+            sourcePoolAddress: getAddress(hexlify(randomBytes(20))),
+            amount: 10n ** 15n, // 0.001 at the 18-decimals source
+            extraData: Buffer.concat([Buffer.alloc(31), Buffer.from([18])]).toString('base64'),
+          },
+        ],
+        offRampAddress: offRamp,
+      },
+    }))
+    chain.getTokenInfo = mock.fn(async () => {
+      throw new CCIPTokenDecimalsUnavailableError(destTokenAddress)
+    })
+    chain.getTokenPoolConfig = mock.fn(async () => ({ decimals: 6 }))
+    chain.getTokenAdminRegistryFor = mock.fn(async () => getAddress(hexlify(randomBytes(20))))
+    chain.getRegistryTokenConfig = mock.fn(async () => ({ tokenPool: registeredPoolAddress }))
+
+    const result = await chain.estimateReceiveExecution({ messageId })
+
+    assert.equal(result, 34700) // 55000 - (21000 - 700)
+    // the registered pool was queried through the dest registry (the offRamp was passed)
+    assert.equal(chain.getTokenPoolConfig.mock.calls.length, 1)
+    assert.equal(chain.getTokenPoolConfig.mock.calls[0]!.arguments[0], registeredPoolAddress)
+    // the balance override carries the converted amount: 0.001 at the registered pool's 6
+    // decimals = 1000 units, not 10^15 at a guessed family default
+    const sendCall = provider.send.mock.calls.at(-1)!
+    const stateOverrides = (sendCall.arguments as any)[1][2]
+    const balanceSlot = Object.values(stateOverrides[destTokenAddress].stateDiff)[0] as string
+    assert.equal(BigInt(balanceSlot), 1000n)
   })
 })

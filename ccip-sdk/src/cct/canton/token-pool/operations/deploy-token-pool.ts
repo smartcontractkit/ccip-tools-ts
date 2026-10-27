@@ -38,7 +38,8 @@ import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import { type CantonChain, decodeDamlRecord } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransferTimeout } from '../../encoding.ts'
 import {
   type CantonExecuteParams,
@@ -66,6 +67,7 @@ import {
   buildPoolCreateArguments,
   parseLaneRemoteAddresses,
   resolvePoolFactoryDeps,
+  stableCommandId,
 } from '../shared.ts'
 
 export type {
@@ -172,6 +174,20 @@ export class DeployTokenPool extends CantonOperation<
         'decimals',
         `expected a non-negative integer, got ${p.decimals}`,
       )
+    }
+    // A negative RelativeHours yields an already-expired transfer window on-ledger,
+    // bricking inbound transfers after the source chain has locked/burned.
+    if (p.transferTimeout?.type === 'RelativeHours') {
+      const { hours } = p.transferTimeout
+      const DAML_INT_MAX = 9223372036854775807n // Daml Int is signed 64-bit
+      const isInteger = typeof hours === 'bigint' || Number.isInteger(hours)
+      if (!isInteger || BigInt(hours) < 0n || BigInt(hours) > DAML_INT_MAX) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'transferTimeout',
+          `RelativeHours must be an integer in 0..2^63-1, got ${hours}`,
+        )
+      }
     }
     // oxlint-disable-next-line typescript/no-unnecessary-condition
     if (!p.observers || p.observers.length === 0) {
@@ -303,18 +319,21 @@ export class DeployTokenPool extends CantonOperation<
       lanes: p.lanes,
     })
 
-    return {
-      commands: [
-        {
-          CreateAndExerciseCommand: {
-            templateId: POOL_TEMPLATE_IDS[p.poolType],
-            createArguments,
-            choice: 'Initialize',
-            choiceArgument,
-          },
+    const commands: JsCommands['commands'] = [
+      {
+        CreateAndExerciseCommand: {
+          templateId: POOL_TEMPLATE_IDS[p.poolType],
+          createArguments,
+          choice: 'Initialize',
+          choiceArgument,
         },
-      ],
-      commandId: `cct-deploy-${p.poolType}-pool-${crypto.randomUUID()}`,
+      },
+    ]
+    return {
+      commands,
+      // Deterministic per deployment: a retry after an ambiguous submission
+      // failure dedupes on the ledger instead of deploying a second pool.
+      commandId: p.commandId ?? stableCommandId(`cct-deploy-${p.poolType}-pool`, commands, actAs),
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
       actAs,
@@ -326,26 +345,30 @@ export class DeployTokenPool extends CantonOperation<
     chain: CantonChain,
     params: ExecuteDeployTokenPoolParams,
   ): Promise<ExecuteDeployTokenPoolResult> {
+    // Snapshot the fields re-read after submission — the caller may mutate
+    // `params` while the command is in flight.
+    const { poolType, instanceId } = params
+    const { admin: poolOwner } = parseInstrumentId(this.name, 'instrumentId', params.instrumentId)
+
     const base = await super.execute(chain, params)
 
-    const templateId = POOL_TEMPLATE_IDS[params.poolType]
+    const templateId = POOL_TEMPLATE_IDS[poolType]
     const poolCids = extractCreatedContractIds(base.response, templateId)
     const [poolCid] = poolCids
     if (poolCids.length !== 1 || !poolCid) {
-      throw new CCTTxFailedError(
+      // Committed on-ledger; the response just lacks the creation event.
+      throw new CCIPTxOutcomeUnavailableError(
         this.name,
-        `expected exactly one created ${templateId}, found ${poolCids.length}`,
-        { context: { updateId: base.hash } },
+        base.hash,
+        `the created ${templateId} contract ID (found ${poolCids.length})`,
       )
     }
-
-    const { admin: poolOwner } = parseInstrumentId(this.name, 'instrumentId', params.instrumentId)
     return {
       ...base,
       poolCid,
       rateLimiterCids: extractCreatedContractIds(base.response, RATE_LIMITER_TEMPLATE_ID),
       tokenConfigCid: extractCreatedContractIds(base.response, TOKEN_CONFIG_TEMPLATE_ID)[0],
-      poolInstanceAddress: hashedRawInstanceAddress(`${params.instanceId}@${poolOwner}`),
+      poolInstanceAddress: hashedRawInstanceAddress(`${instanceId}@${poolOwner}`),
     }
   }
 }

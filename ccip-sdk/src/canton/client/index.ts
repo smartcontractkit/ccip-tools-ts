@@ -29,6 +29,7 @@ export {
   type SubmitAndWaitResponse,
   type TemplateFilter,
   type TransactionFilter,
+  type TransactionFormat,
   type WildcardFilter,
   createCantonClient,
 } from './client.ts'
