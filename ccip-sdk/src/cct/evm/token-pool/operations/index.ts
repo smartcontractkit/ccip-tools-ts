@@ -15,6 +15,7 @@ export {
   ConfigureSiloedLockboxes,
 } from './configure-siloed-lockboxes.ts'
 export {
+  type DeployBurnToAddressTokenPoolParams,
   type DeployTokenPoolParams,
   type DeployableTokenPoolType,
   DeployTokenPool,
@@ -45,6 +46,11 @@ export {
   type GetAvailableTokensResult,
   GetAvailableTokens,
 } from './get-available-tokens.ts'
+export {
+  type GetBurnAddressParams,
+  type GetBurnAddressResult,
+  GetBurnAddress,
+} from './get-burn-address.ts'
 export {
   type GetChainRebalancerParams,
   type GetChainRebalancerResult,

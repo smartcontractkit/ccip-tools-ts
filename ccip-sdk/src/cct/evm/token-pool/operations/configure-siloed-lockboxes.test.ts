@@ -75,7 +75,7 @@ function stubChain({
   lockboxes?: Record<string, { typeAndVersion: string; token: string }>
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease['2.0.0']
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool['2.0.0']
   const pool: Record<string, unknown[]> = {
     owner: [OWNER],
     getToken: [TOKEN],
