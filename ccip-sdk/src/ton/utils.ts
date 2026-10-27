@@ -3,9 +3,24 @@ import { hexlify, toBeHex } from 'ethers'
 
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
+import { type RateLimitOpts, fetchProfileForUrl } from '../fetch.ts'
 import { NetworkType } from '../networks.ts'
 import type { WithLogger } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
+
+/**
+ * Rate-limit options for every TON fetch: the limiter is keyed by ORIGIN, so all
+ * paths on one origin (v2 JSON-RPC, v3 index, any other path of that host) share
+ * ONE limiter. The public toncenter serves v2 and v3 behind one per-IP budget;
+ * per-path limiters burned it at ~2× rate, and the v2 walk starved the v3 probes
+ * into fallback walks. All TON fetch creation sites use this helper.
+ */
+export function tonRateLimitProfile(
+  url: string,
+  over: Partial<RateLimitOpts> = {},
+): Partial<RateLimitOpts> {
+  return { ...fetchProfileForUrl(url), keyBy: 'origin', ...over }
+}
 
 /**
  * Attempts to parse hex string as TON BOC (Bag of Cells) format

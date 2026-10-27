@@ -5,6 +5,8 @@
  * @packageDocumentation
  */
 
+import { sha256, toUtf8Bytes } from 'ethers'
+
 import type { JsCommands } from '../../../canton/client/index.ts'
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
@@ -148,6 +150,19 @@ export function resolvePoolFactoryDeps(
   return deps as PoolFactoryDeps
 }
 
+/**
+ * Deterministic command ID from the command content, so retries of the same
+ * operation dedupe on the ledger (DUPLICATE_COMMAND) instead of double-executing.
+ * Builders use fixed key order, so plain JSON.stringify is stable; the replacer
+ * only guards against bigints.
+ */
+export function stableCommandId(prefix: string, commands: unknown, actAs: string[]): string {
+  const json = JSON.stringify({ prefix, commands, actAs }, (_k, v: unknown) =>
+    typeof v === 'bigint' ? v.toString() : v,
+  )
+  return `${prefix}-${sha256(toUtf8Bytes(json)).slice(2, 34)}`
+}
+
 /** Inputs to {@link buildFactoryExercise}. */
 export interface BuildFactoryExerciseInput {
   /** CCIPFactory choice name (e.g. `DeployBurnMintTokenPool`, `DeployLockReleaseTokenPool`). */
@@ -160,6 +175,8 @@ export interface BuildFactoryExerciseInput {
   actAs: string[]
   /** Command-ID prefix. */
   commandIdPrefix: string
+  /** Explicit command ID (idempotency key); defaults to a content-derived deterministic ID. */
+  commandId?: string
 }
 
 /**
@@ -169,19 +186,20 @@ export interface BuildFactoryExerciseInput {
  * caller).
  */
 export function buildFactoryExercise(input: BuildFactoryExerciseInput): JsCommands {
-  const { choice, factoryContract, choiceArgument, actAs, commandIdPrefix } = input
-  return {
-    commands: [
-      {
-        ExerciseCommand: {
-          templateId: FACTORY_TEMPLATE_ID,
-          contractId: factoryContract.contractId,
-          choice,
-          choiceArgument,
-        },
+  const { choice, factoryContract, choiceArgument, actAs, commandIdPrefix, commandId } = input
+  const commands: JsCommands['commands'] = [
+    {
+      ExerciseCommand: {
+        templateId: FACTORY_TEMPLATE_ID,
+        contractId: factoryContract.contractId,
+        choice,
+        choiceArgument,
       },
-    ],
-    commandId: `${commandIdPrefix}-${crypto.randomUUID()}`,
+    },
+  ]
+  return {
+    commands,
+    commandId: commandId ?? stableCommandId(commandIdPrefix, commands, actAs),
     actAs,
     disclosedContracts: [
       {
@@ -213,6 +231,8 @@ export interface BuildPoolExerciseInput {
   actAs: string[]
   /** Command-ID prefix. */
   commandIdPrefix: string
+  /** Explicit command ID (idempotency key); defaults to a content-derived deterministic ID. */
+  commandId?: string
 }
 
 /**
@@ -228,6 +248,7 @@ export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
     choiceArgument,
     actAs,
     commandIdPrefix,
+    commandId,
   } = input
   // Prefer the concrete package-ID template from the resolved contract over
   // the symbolic `#<pkg-name>:…` form — the interactive-submission `prepare`
@@ -235,18 +256,19 @@ export function buildPoolExercise(input: BuildPoolExerciseInput): JsCommands {
   // Daml-LF Package ID`). The ACS / EDS return the concrete form; fall back to
   // the symbolic form only if the contract was supplied without one.
   const concreteTemplateId = poolContract.templateId ?? templateId
-  return {
-    commands: [
-      {
-        ExerciseCommand: {
-          templateId: concreteTemplateId,
-          contractId: poolContract.contractId,
-          choice,
-          choiceArgument,
-        },
+  const commands: JsCommands['commands'] = [
+    {
+      ExerciseCommand: {
+        templateId: concreteTemplateId,
+        contractId: poolContract.contractId,
+        choice,
+        choiceArgument,
       },
-    ],
-    commandId: `${commandIdPrefix}-${crypto.randomUUID()}`,
+    },
+  ]
+  return {
+    commands,
+    commandId: commandId ?? stableCommandId(commandIdPrefix, commands, actAs),
     actAs,
     disclosedContracts: [
       {

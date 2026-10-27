@@ -11,11 +11,13 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
+  CCIPTokenDecimalsUnavailableError,
   ChainFamily,
   ExecutionState,
   getCCIPExplorerUrl,
   getDataBytes,
   networkInfo,
+  resolveTokenDecimals,
   supportedChains,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { select } from '@inquirer/prompts'
@@ -242,8 +244,16 @@ async function formatToken(
   if ('token' in ta) token = ta.token
   else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
   else token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
-  const { symbol, decimals } = await source.getTokenInfo(token)
-  return `${formatUnits(ta.amount, decimals)} ${symbol}`
+  try {
+    const { symbol, decimals } = await source.getTokenInfo(token)
+    return `${formatUnits(ta.amount, decimals)} ${symbol}`
+  } catch (err) {
+    // tokens without the optional ERC-20 decimals() view (or unreachable metadata) still
+    // display: raw units with the address, so a successful send is never unprintable
+    if (err instanceof CCIPTokenDecimalsUnavailableError)
+      return `${ta.amount} (raw units) ${formatDisplayAddress(token, family ?? ChainFamily.EVM)}`
+    throw err
+  }
 }
 
 /**
@@ -724,15 +734,36 @@ export function logParsedError(this: Ctx, err: unknown): boolean {
 }
 
 /**
- * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`
+ * Parse `--transfer-tokens token1=amount1 token2=amount2 ...` into `{ token, amount }[]`.
+ *
+ * Decimals resolve internally, with the standard fallback chain (see `resolveTokenDecimals`):
+ * the token's own on-chain `decimals()` view, else its pool's declared decimals
+ * (`TokenPoolConfig.decimals`, pool v1.5.1+ — the authoritative source, since the pool uses
+ * exactly these decimals for its own conversion). The family default does NOT apply here:
+ * these decimals determine the actual transfer amount, so a lookup failure must surface
+ * rather than silently parse the amount at a guessed precision.
  **/
-export async function parseTokenAmounts(source: Chain, transferTokens: readonly string[]) {
+export async function parseTokenAmounts(
+  source: Chain,
+  transferTokens: readonly string[],
+  router?: string,
+): Promise<{ token: string; amount: bigint }[]> {
   return Promise.all(
     transferTokens.map(async (tokenAmount) => {
       const [token, amount_] = tokenAmount.split('=') as [string, string]
-      const { decimals } = await source.getTokenInfo(token)
-      const amount = parseUnits(amount_, decimals)
-      return { token, amount }
+      // the pool is resolved from the TokenAdminRegistry behind the `router` (an OnRamp also
+      // works); a lookup failure propagates — it must not fall through to a guessed default
+      const decimals = await resolveTokenDecimals(
+        source,
+        token,
+        async () => {
+          if (!router) return undefined
+          const registry = await source.getTokenAdminRegistryFor(router)
+          return (await source.getRegistryTokenConfig(registry, token)).tokenPool
+        },
+        { familyDefault: false },
+      )
+      return { token, amount: parseUnits(amount_, decimals) }
     }),
   )
 }

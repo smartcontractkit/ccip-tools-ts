@@ -15,3 +15,5 @@ The latest SDK documentation is available at **[docs.chain.link/ccip/tools/sdk](
 The TypeScript SDK for integrating CCIP into your applications.
 
 For full documentation including installation, API reference, and examples, see the [CCIP Tools SDK Reference](https://docs.chain.link/ccip/tools/sdk/).
+
+See [Sui providers](sui.md) for transport selection and client injection.

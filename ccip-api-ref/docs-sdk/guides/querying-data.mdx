@@ -72,6 +72,10 @@ console.log('Decimals:', tokenInfo.decimals)  // e.g. 18
 console.log('Name:', tokenInfo.name)          // e.g. 'ChainLink Token' (optional)
 ```
 
+:::note Tokens without `decimals()`
+`decimals()` is an **optional** view in ERC-20 — some tokens don't implement it. For those, `getTokenInfo` throws `CCIPTokenDecimalsUnavailableError` (code `TOKEN_DECIMALS_UNAVAILABLE`), and preflights resolve the decimals via `resolveTokenDecimals` — from the token pool's `getTokenDecimals()` (pool v1.5.1+, exposed as `TokenPoolConfig.decimals`), else the chain family's static default (preflight conversions only; pass `familyDefault: false` where the decimals determine the actual transfer amount). When neither can declare them (e.g. a v1.5.0 pool) there is no input override — the declaration must be fixed on-chain: a `decimals()` view on the token, or a pool v1.5.1+ declaring them via `getTokenDecimals()`.
+:::
+
 Use `getTokenInfo` whenever you need to parse or format token amounts:
 
 ```typescript
