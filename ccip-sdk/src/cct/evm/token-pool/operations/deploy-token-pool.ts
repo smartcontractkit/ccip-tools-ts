@@ -45,7 +45,16 @@ type DeployTokenPoolBaseParams = {
   sender?: string
 }
 
-/** Params for a burn-* mint pool: the `TokenPool` base constructor, unchanged. */
+/**
+ * Params for a burn-* mint pool: the `TokenPool` base constructor, unchanged.
+ *
+ * @remarks `BurnMintWithLockReleaseFlagTokenPool` is a `BurnMintTokenPool` whose `lockOrBurn`
+ * sends `LOCK_RELEASE_FLAG` as `destPoolData` instead of the local decimals, so a remote USDC pool
+ * (`USDCTokenPoolProxy` at v2.0.0) routes the message to its lock/release pool rather than minting.
+ * Use it only for lanes whose remote pool reads that flag. Its `releaseOrMint` also skips decimal
+ * conversion (`destinationAmount` is the source amount as is), so local and remote decimals must
+ * match.
+ */
 export type DeployBurnMintTokenPoolParams = DeployTokenPoolBaseParams & {
   type: Exclude<Extract<DeployableTokenPoolType, BurnMintTokenPoolType>, 'BurnToAddressTokenPool'>
 }
@@ -168,6 +177,7 @@ export class DeployTokenPool extends EVMDeployOperation<DeployTokenPoolParams> {
     BurnFromMintTokenPool: encodeBaseTokenPool,
     BurnWithFromMintTokenPool: encodeBaseTokenPool,
     BurnToAddressTokenPool: encodeBurnToAddressTokenPool,
+    BurnMintWithLockReleaseFlagTokenPool: encodeBaseTokenPool,
     LockReleaseTokenPool: encodeLockReleaseTokenPool,
     SiloedLockReleaseTokenPool: encodeBaseTokenPool,
   } satisfies Record<DeployableTokenPoolType, TokenPoolConstructorEncoder>

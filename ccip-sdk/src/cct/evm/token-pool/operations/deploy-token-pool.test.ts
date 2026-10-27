@@ -10,6 +10,7 @@ import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import SILOED_LOCK_RELEASE_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
 import BURN_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_MINT_WITH_LOCK_RELEASE_FLAG_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-with-lock-release-flag-token-pool.ts'
 import BURN_TO_ADDRESS_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-to-address-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
@@ -84,6 +85,12 @@ const CASES: {
     bytecode: BURN_TO_ADDRESS_MINT_V2_0_0,
     ctorArgs: BURN_TO_ADDRESS_ARGS,
     compiledName: 'BurnToAddressMintTokenPool',
+  },
+  {
+    label: 'BurnMintWithLockReleaseFlagTokenPool',
+    params: { ...COMMON, type: 'BurnMintWithLockReleaseFlagTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: BURN_MINT_WITH_LOCK_RELEASE_FLAG_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
   },
   {
     label: 'LockReleaseTokenPool',
