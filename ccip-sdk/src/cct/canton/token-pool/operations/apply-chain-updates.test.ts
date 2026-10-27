@@ -15,6 +15,7 @@ import '../../../../solana/index.ts'
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
 import { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
+import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { ChainUpdateArg } from '../../daml-types.ts'
 import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
@@ -168,4 +169,62 @@ describe('applyChainUpdates lane params', () => {
       assert.deepEqual(lane!.inboundCustomBlockConfirmationsRateLimiter, { unpack: limiter ?? '' })
     })
   }
+})
+
+describe('applyChainUpdates commandId', () => {
+  it('is deterministic across generate calls with identical params', async () => {
+    const [first, second] = await Promise.all([generate(), generate()])
+    assert.equal(first.commands.commandId, second.commands.commandId)
+    assert.match(first.commands.commandId, /^cct-apply-chain-updates-[0-9a-f]{32}$/)
+  })
+
+  it('changes with the params', async () => {
+    const [add, remove] = await Promise.all([
+      generate(),
+      new ApplyChainUpdates().generate(chainWith().chain, {
+        sender: POOL_OWNER,
+        poolInstanceAddress: POOL_ADDRESS,
+        remoteChainSelectorsToRemove: [EVM_SELECTOR],
+      }),
+    ])
+    assert.notEqual(add.commands.commandId, remove.commands.commandId)
+  })
+
+  it('honours an explicit commandId override', async () => {
+    const tx = await new ApplyChainUpdates().generate(chainWith().chain, {
+      sender: POOL_OWNER,
+      poolInstanceAddress: POOL_ADDRESS,
+      remoteChainSelectorsToRemove: [EVM_SELECTOR],
+      commandId: 'ops-runbook-2026-10-26',
+    })
+    assert.equal(tx.commands.commandId, 'ops-runbook-2026-10-26')
+  })
+})
+
+describe('applyChainUpdates committed-but-unavailable outcome', () => {
+  it('throws CCIPTxOutcomeUnavailableError when the committed response lacks the exercise event', async () => {
+    const { chain } = chainWith()
+    Object.assign(chain.provider, {
+      submitAndWaitForTransaction: async () => ({
+        transaction: { updateId: 'update-1', events: [] },
+      }),
+    })
+
+    await assert.rejects(
+      () =>
+        new ApplyChainUpdates().execute(chain, {
+          poolInstanceAddress: POOL_ADDRESS,
+          remoteChainSelectorsToRemove: [EVM_SELECTOR],
+          wallet: { party: POOL_OWNER },
+        }),
+      (err: unknown) => {
+        // The update committed; only the result details are missing — must
+        // not surface as a (retryable-looking) submission failure.
+        assert.ok(err instanceof CCIPTxOutcomeUnavailableError)
+        assert.equal(err.isTransient, false)
+        assert.equal(err.context['updateId'], 'update-1')
+        return true
+      },
+    )
+  })
 })

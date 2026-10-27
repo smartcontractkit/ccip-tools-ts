@@ -117,9 +117,8 @@ export async function resolveTar(
   sender: string,
   tarInstanceAddress: string,
 ): Promise<ResolvedTar> {
-  // oxlint-disable-next-line typescript/no-unnecessary-condition -- test mocks omit this provider
   const disclosed = await chain.edsDisclosureProvider
-    ?.fetchContractDisclosure(TAR_TEMPLATE_ID, tarInstanceAddress)
+    .fetchContractDisclosure(TAR_TEMPLATE_ID, tarInstanceAddress)
     .catch(() => null)
   if (disclosed) {
     const ownerFromRaw = tarInstanceAddress.includes('@')

@@ -11,7 +11,12 @@ import { describe, it } from 'node:test'
 import '../../../evm/index.ts'
 import '../../../solana/index.ts'
 import '../../../ton/index.ts'
-import { normalizeRemoteAddress } from './shared.ts'
+import {
+  BURN_MINT_POOL_TEMPLATE_ID,
+  buildPoolExercise,
+  normalizeRemoteAddress,
+  stableCommandId,
+} from './shared.ts'
 
 const EVM_SELECTOR = 16015286601757825753n // ethereum-testnet-sepolia
 const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
@@ -49,4 +54,79 @@ describe('normalizeRemoteAddress', () => {
       assert.throws(() => normalizeRemoteAddress(value, selector), reason)
     })
   }
+})
+
+const POOL_CONTRACT = {
+  contractId: '00abc123',
+  createdEventBlob: 'blob',
+  synchronizerId: 'sync-1',
+}
+
+const EXERCISE_COMMAND = {
+  ExerciseCommand: {
+    templateId: BURN_MINT_POOL_TEMPLATE_ID,
+    contractId: '00abc123',
+    choice: 'ApplyChainUpdates',
+    choiceArgument: { remoteChainSelectorsToRemove: ['1'], chainsToAdd: [] },
+  },
+}
+
+describe('stableCommandId', () => {
+  it('is deterministic for the same logical operation', () => {
+    const a = stableCommandId('cct-op', [EXERCISE_COMMAND], ['party::1220ab'])
+    const b = stableCommandId('cct-op', [EXERCISE_COMMAND], ['party::1220ab'])
+    assert.equal(a, b)
+    assert.match(a, /^cct-op-[0-9a-f]{32}$/)
+  })
+
+  it('is independent of disclosure blobs (payload content only)', () => {
+    const a = stableCommandId('cct-op', [EXERCISE_COMMAND], ['party::1220ab'])
+    // builders hash only the commands array, never disclosedContracts
+    const withDisclosure = buildPoolExercise({
+      choice: 'ApplyChainUpdates',
+      templateId: BURN_MINT_POOL_TEMPLATE_ID,
+      poolContract: { ...POOL_CONTRACT, createdEventBlob: 'other-blob' },
+      choiceArgument: { remoteChainSelectorsToRemove: ['1'], chainsToAdd: [] },
+      actAs: ['party::1220ab'],
+      commandIdPrefix: 'cct-op',
+    })
+    assert.equal(withDisclosure.commandId, a)
+  })
+
+  it('differs across prefixes, commands, and actAs', () => {
+    const base = stableCommandId('cct-op', [EXERCISE_COMMAND], ['party::1220ab'])
+    assert.notEqual(stableCommandId('cct-other', [EXERCISE_COMMAND], ['party::1220ab']), base)
+    assert.notEqual(stableCommandId('cct-op', [], ['party::1220ab']), base)
+    assert.notEqual(stableCommandId('cct-op', [EXERCISE_COMMAND], ['party::1220ef']), base)
+  })
+
+  it('tolerates bigint values in the payload', () => {
+    const withBigint = {
+      ExerciseCommand: { ...EXERCISE_COMMAND.ExerciseCommand, choiceArgument: { amount: 1n } },
+    }
+    assert.doesNotThrow(() => stableCommandId('cct-op', [withBigint], ['party::1220ab']))
+  })
+})
+
+describe('buildPoolExercise commandId', () => {
+  const input = {
+    choice: 'ApplyChainUpdates',
+    templateId: BURN_MINT_POOL_TEMPLATE_ID,
+    poolContract: POOL_CONTRACT,
+    choiceArgument: { remoteChainSelectorsToRemove: ['1'], chainsToAdd: [] },
+    actAs: ['party::1220ab'],
+    commandIdPrefix: 'cct-apply-chain-updates',
+  }
+
+  it('derives a deterministic commandId from the command content', () => {
+    const first = buildPoolExercise(input)
+    const second = buildPoolExercise(input)
+    assert.equal(first.commandId, second.commandId)
+    assert.match(first.commandId, /^cct-apply-chain-updates-[0-9a-f]{32}$/)
+  })
+
+  it('prefers an explicit commandId override', () => {
+    const result = buildPoolExercise({ ...input, commandId: 'my-idempotency-key' })
+    assert.equal(result.commandId, 'my-idempotency-key')
+  })
 })

@@ -142,6 +142,29 @@ export class CCIPTransactionNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a transaction committed on-ledger but the submission response
+ * lacked the events needed to extract result identifiers (e.g. an ACS-delta
+ * response without the expected created/exercised event). This is NOT a
+ * submission failure — the update ID is in `context.updateId`; inspect the
+ * transaction instead of resubmitting. Permanent, non-retryable.
+ */
+export class CCIPTxOutcomeUnavailableError extends CCIPError {
+  override readonly name = 'CCIPTxOutcomeUnavailableError'
+  /** Creates a committed-but-unavailable outcome error. */
+  constructor(operation: string, updateId: string, detail: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TX_OUTCOME_UNAVAILABLE,
+      `${operation} committed (updateId ${updateId}) but ${detail} was unavailable in the response; inspect the transaction instead of retrying`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, operation, updateId, detail },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when a transaction exceeds the wire size limits of its version
  * (1232 bytes for legacy/v0, 4096 bytes for v1) or the account/instruction
  * capacity of its message format.

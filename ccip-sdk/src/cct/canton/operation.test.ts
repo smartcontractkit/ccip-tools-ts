@@ -60,4 +60,26 @@ describe('CantonOperation.execute error propagation', () => {
       },
     )
   })
+
+  it('maps DUPLICATE_COMMAND to a non-transient CCTTxFailedError naming the commandId', async () => {
+    const chain = mockChain(async () => {
+      // CantonApiError shape: HTTP 409 with the Canton error code in context.
+      throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'submission failed', {
+        context: { statusCode: 409, cantonCode: 'DUPLICATE_COMMAND' },
+      })
+    })
+
+    await assert.rejects(
+      () => op.execute(chain, { wallet } as unknown as CantonExecuteParams<Record<string, never>>),
+      (err: unknown) => {
+        assert.ok(err instanceof CCTTxFailedError)
+        assert.equal(err.isTransient, false)
+        assert.equal(err.retryAfterMs, undefined)
+        assert.match(err.message, /DUPLICATE_COMMAND/)
+        assert.match(err.message, /noop-1/)
+        assert.equal(err.context['commandId'], 'noop-1')
+        return true
+      },
+    )
+  })
 })
