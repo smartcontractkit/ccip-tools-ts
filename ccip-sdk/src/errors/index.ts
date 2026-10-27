@@ -19,6 +19,7 @@ export {
   CCIPPartialTransactionSubmissionError,
   CCIPTransactionNotFoundError,
   CCIPTransactionTooLargeError,
+  CCIPTxOutcomeUnavailableError,
 } from './specialized.ts'
 
 // Specialized errors - Logs
@@ -87,6 +88,7 @@ export {
   CCIPLegacyTokenPoolsUnsupportedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,

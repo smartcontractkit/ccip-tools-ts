@@ -2,16 +2,17 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Contract, JsonRpcProvider, Wallet, ZeroAddress } from 'ethers'
+import { Contract, Wallet, ZeroAddress, isError } from 'ethers'
 
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { reachableRpcEndpoint, rpcCandidates } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
-import { CCIPAPIClient } from '../api/index.ts'
+import { type MessageSearchResult, CCIPAPIClient } from '../api/index.ts'
 // Register non-EVM chain families for cross-family message building — the v1.6
 // lane cases below send/quote towards Aptos and Solana devnet, whose receivers
 // and extraArgs are family-specific (same pattern as fork.test.ts).
 import '../aptos/index.ts'
 import { LaneFeature } from '../chain.ts'
+import { CCIPAbortError, CCIPError, isTransientHttpStatus } from '../errors/index.ts'
 import { discoverOffRamp } from '../execution.ts'
 import { NetworkType } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
@@ -29,6 +30,10 @@ import { EVMChain } from './index.ts'
 // shared egress gets rate-limited on. Base Sepolia and OP Sepolia still carry all
 // three OnRamp generations between them (see the lane table below), are locked by
 // no other suite, and therefore run fully in parallel with the rest of the matrix.
+// computed before the endpoint probes below: a SKIP_INTEGRATION_TESTS run must
+// not issue a single network call at module load
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
+
 await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 
 // ── Chain constants ──
@@ -37,13 +42,12 @@ await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
 // defaults point at endpoints verified to (a) be reachable from CI's egress, (b) serve
 // ~10k-block `eth_getLogs` ranges, and (c) retain logs deep enough for the historical
 // messages asserted below. Override via RPC_* env vars.
-const BASE_SEP_RPC = rpcEndpoint('RPC_BASE_SEPOLIA')
+const BASE_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_BASE_SEPOLIA')
 const BASE_SEP_SELECTOR = 10344971235874465080n
 
-const OP_SEP_RPC = rpcEndpoint('RPC_OPTIMISM_SEPOLIA')
+const OP_SEP_RPC = skip ? '' : await reachableRpcEndpoint('RPC_OPTIMISM_SEPOLIA')
 const OP_SEP_SELECTOR = 5224473277236331295n
 
-const HEDERA_TESTNET_RPC = rpcEndpoint('RPC_HEDERA_TESTNET')
 const HEDERA_ROUTER = '0x802C5F84eAD128Ff36fD6a3f8a418e339f467Ce4'
 
 // ── Routers ──
@@ -107,8 +111,6 @@ const USDC_TOKEN_OP_SEP = '0x5fd84259d66Cd46123540766Be93DFE6D43130D7'
 
 // ── Tests ──
 
-const skip = !!process.env.SKIP_INTEGRATION_TESTS
-
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
 
@@ -167,19 +169,12 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   let wallet: Wallet
 
   before(async () => {
-    const baseSepProvider = new JsonRpcProvider(BASE_SEP_RPC)
-    const opSepProvider = new JsonRpcProvider(OP_SEP_RPC)
-    baseSepChain = await EVMChain.fromProvider(baseSepProvider, {
-      apiClient: null,
-      logger: testLogger,
-    })
-    opSepChain = await EVMChain.fromProvider(opSepProvider, {
-      apiClient: null,
-      logger: testLogger,
-    })
+    // fromUrl wraps the SDK's rate-limited fetch (paces keyless public endpoints)
+    baseSepChain = await EVMChain.fromUrl(BASE_SEP_RPC, { apiClient: null, logger: testLogger })
+    opSepChain = await EVMChain.fromUrl(OP_SEP_RPC, { apiClient: null, logger: testLogger })
     wallet = new Wallet(
       '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-      baseSepProvider,
+      baseSepChain.provider,
     )
   })
 
@@ -455,82 +450,69 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('generateUnsignedSendMessage (Hedera testnet)', () => {
-    // Hedera's EVM quotes native (WHBAR) fees in tinybars (8 decimals); the SDK returns
-    // the tx `value` in 18-decimal weibar by scaling the fee by 10^(18-8) = 10^10.
-    // The hedera router also requires destination receivers left-padded to 32 bytes
-    // (raw 20-byte EVM addresses revert with InvalidEVMAddress);
-    // `encodeAddressToEvm` -> `encodeAddressToAny` provides that padding.
-    it('should scale the native fee by 10^10 (tinybar -> weibar) in the ccipSend value', async () => {
-      await using disposer = new AsyncDisposableStack()
-      const hederaChain = disposer.adopt(
-        await EVMChain.fromUrl(HEDERA_TESTNET_RPC, { apiClient: null, logger: testLogger }),
-        (chain) => chain.provider.destroy(),
-      )
-      const sender = wallet.address
-      const message = { receiver: sender, data: '0x', feeToken: ZeroAddress }
-      const fee = await hederaChain.getFee({
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.ok(fee > 0n, `expected a positive fee on the live hedera->sepolia lane, got ${fee}`)
+    // An anvil fork misquotes Hedera's native fee. Keep one live router simulation;
+    // send-fee-scaling.test.ts checks the exact tinybar-to-weibar conversion offline.
+    it(
+      'should build a native-fee ccipSend the live router accepts (dry-run)',
+      { timeout: 120_000 },
+      async (t) => {
+        let last: unknown
+        for (const url of rpcCandidates('RPC_HEDERA_TESTNET')) {
+          t.signal.throwIfAborted()
+          const abort = AbortSignal.any([t.signal, AbortSignal.timeout(30_000)])
+          let hederaChain: EVMChain | undefined
+          try {
+            hederaChain = await EVMChain.fromUrl(url, {
+              apiClient: null,
+              logger: testLogger,
+              abort,
+            })
+            const sender = wallet.address
+            const unsigned = await hederaChain.generateUnsignedSendMessage({
+              sender,
+              router: HEDERA_ROUTER,
+              destChainSelector: SEPOLIA_SELECTOR,
+              message: { receiver: sender, data: '0x', feeToken: ZeroAddress },
+            })
+            assert.equal(
+              unsigned.transactions.length,
+              1,
+              'data-only send should not need approvals',
+            )
+            const [sendTx] = unsigned.transactions
+            assert.equal(sendTx?.to, HEDERA_ROUTER)
+            assert.equal(sendTx.from, sender)
+            assert.ok(BigInt(sendTx.value ?? 0) > 0n, 'native fee should be positive')
 
-      const unsigned = await hederaChain.generateUnsignedSendMessage({
-        sender,
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.equal(unsigned.transactions.length, 1, 'data-only send should not need approvals')
-      const [sendTx] = unsigned.transactions
-      assert.equal(sendTx?.to, HEDERA_ROUTER)
-      assert.equal(sendTx.from, sender)
-      assert.equal(
-        sendTx.value,
-        fee * 10n ** 10n,
-        'native msg.value should be the fee in tinybars scaled to weibar',
-      )
-    })
-
-    // An anvil fork of hedera can't replay this path (the FeeQuoter's native-price
-    // reads inside anvil's fork env quote a garbage fee), so validate the actual send
-    // by dry-running the exact SDK-built tx against the live router via eth_call.
-    it('should build a native-fee ccipSend the live router accepts (dry-run)', async () => {
-      await using disposer = new AsyncDisposableStack()
-      const hederaChain = disposer.adopt(
-        await EVMChain.fromUrl(HEDERA_TESTNET_RPC, { apiClient: null, logger: testLogger }),
-        (chain) => chain.provider.destroy(),
-      )
-      const sender = wallet.address
-      const message = { receiver: sender, data: '0x', feeToken: ZeroAddress }
-
-      const fee = await hederaChain.getFee({
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      assert.ok(fee > 0n, `expected a positive fee on the live hedera->sepolia lane, got ${fee}`)
-
-      const unsigned = await hederaChain.generateUnsignedSendMessage({
-        sender,
-        router: HEDERA_ROUTER,
-        destChainSelector: SEPOLIA_SELECTOR,
-        message,
-      })
-      const [sendTx] = unsigned.transactions
-      assert.equal(sendTx?.to, HEDERA_ROUTER)
-      assert.equal(sendTx.value, fee * 10n ** 10n)
-
-      // eth_call executes the router's ccipSend without broadcasting: a revert here
-      // means the lane rejects the SDK-built send (fee too high / receiver format /
-      // value mismatch).
-      await hederaChain.provider.call({
-        to: sendTx.to,
-        from: sender,
-        data: sendTx.data,
-        value: sendTx.value,
-      })
-    })
+            // Simulate the SDK-built transaction without broadcasting it.
+            await hederaChain.provider.call(sendTx)
+            abort.throwIfAborted()
+            return
+          } catch (err) {
+            t.signal.throwIfAborted()
+            const transient =
+              (err instanceof CCIPError && err.isTransient) ||
+              (isError(err, 'SERVER_ERROR') &&
+                isTransientHttpStatus(Number.parseInt(String(err.info?.responseStatus), 10))) ||
+              isError(err, 'TIMEOUT') ||
+              isError(err, 'NETWORK_ERROR') ||
+              (err instanceof TypeError && err.message === 'fetch failed')
+            const timedOut =
+              abort.aborted &&
+              (err === abort.reason ||
+                err instanceof CCIPAbortError ||
+                (isError(err, 'UNSUPPORTED_OPERATION') &&
+                  err.message.includes('provider destroyed')))
+            if (!transient && !timedOut) throw err
+            last = err
+            testLogger.warn('Hedera RPC attempt failed:', String(err).slice(0, 200))
+          } finally {
+            hederaChain?.provider.destroy()
+          }
+        }
+        throw last
+      },
+    )
   })
 
   describe('getFee', () => {
@@ -598,101 +580,90 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('getExecutionReceipts', () => {
-    // Both fixtures are on the OP Sepolia → Base Sepolia lane: the source tx is read by
-    // hash (no scan), and only the destination (Base Sepolia) is scanned — that endpoint
-    // is the one verified to serve 10k-block eth_getLogs ranges at this depth.
-    const SUCCESS_MSG = {
-      messageId: '0xaac233a5ece55e930fdc6e0d3c7d503e8675a1cf0fcf7c67b4c840bc1fdbb9b6',
-      txHash: '0xdbb494cfcc39d1403158df7931d68e7146ced980b57066f57512a6a516ea111c',
+    // Fixtures come from the CCIP API at runtime (bounded single-page searches, newest
+    // first), on the Base Sepolia → OP Sepolia lane. The OP Sepolia destination
+    // (sepolia.optimism.io) retains ~113 days of history, so receipts stay scannable
+    // for months — unlike base-sepolia destinations, whose keyless nodes prune to ~5.5
+    // days now that blocks are 0.2s (retention wall at block 46.5M, head ~48.9M,
+    // observed 2026-10), which is what hard-coded OP→Base fixtures kept falling
+    // behind. The scan inputs come from the API's decoded request, so no source-tx
+    // scan is needed — keyless base-sepolia nodes also prune those source transactions.
+    const apiClient = new CCIPAPIClient(undefined, { logger: testLogger })
+
+    /** The lane's newest messages with `status`: at most 2 pages of 100, 5 matches. */
+    async function searchNewest(status: 'success' | 'failed'): Promise<MessageSearchResult[]> {
+      const matches: MessageSearchResult[] = []
+      let cursor: string | undefined
+      for (let page = 0; page < 2 && matches.length === 0; page++) {
+        const result = await apiClient.searchMessages(
+          { sourceChainSelector: BASE_SEP_SELECTOR, destChainSelector: OP_SEP_SELECTOR },
+          { limit: 100, cursor },
+        )
+        matches.push(
+          ...result.data.filter((msg) => String(msg.status).toLowerCase() === status).slice(0, 5),
+        )
+        cursor = result.cursor
+        if (!result.hasNextPage) break
+      }
+      return matches
+    }
+
+    /**
+     * Scans the destination receipts of the newest `status` messages, newest first, up
+     * to the first receipt in `state`. A candidate the scan cannot reach (error, or no
+     * receipt at all: pruned or out of range) moves on to the next one; the test fails
+     * with every candidate's reason when none is reachable. A reachable candidate whose
+     * receipts never reach `state` fails at once: that is an SDK result, not retention.
+     * @returns the matched receipt and the receipt states seen before it
+     */
+    async function findReceipt(status: 'success' | 'failed', state: ExecutionState) {
+      assert.ok(baseSepChain, 'source chain should be initialized')
+      assert.ok(opSepChain, 'dest chain should be initialized')
+      const candidates = await searchNewest(status)
+      assert.ok(candidates.length, `CCIP API has no recent ${status} Base→OP messages`)
+      const errors: string[] = []
+      for (const { messageId } of candidates) {
+        const seen: ExecutionState[] = []
+        try {
+          const request = await apiClient.getMessageById(messageId)
+          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane.onRamp, {
+            logger: testLogger,
+          })
+          for await (const exec of opSepChain.getExecutionReceipts({
+            offRamp,
+            messageId,
+            sourceChainSelector: request.message.sourceChainSelector,
+            startTime: request.log.blockTimestamp,
+          })) {
+            if (exec.receipt.state === state) return { messageId, exec, seen }
+            seen.push(exec.receipt.state)
+          }
+          assert.equal(seen.length, 0, `${messageId}: receipts ${seen.join(',')} but no ${state}`)
+          errors.push(`${messageId}: no receipts found`)
+        } catch (err) {
+          if (err instanceof assert.AssertionError) throw err
+          errors.push(`${messageId}: ${(err as Error).message}`)
+        }
+      }
+      assert.fail(`no ${status} Base→OP candidate has a reachable receipt:\n${errors.join('\n')}`)
     }
 
     it('should find a success receipt for a known successful message', async () => {
-      assert.ok(opSepChain, 'source chain should be initialized')
-      assert.ok(baseSepChain, 'dest chain should be initialized')
-
-      // Discover offRamp from the source transaction
-      const tx = await opSepChain.getTransaction(SUCCESS_MSG.txHash)
-      const requests = await opSepChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === SUCCESS_MSG.messageId)
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(
-        opSepChain,
-        baseSepChain,
-        request.lane.onRamp,
-        opSepChain,
-      )
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundSuccess = false
-      for await (const exec of baseSepChain.getExecutionReceipts({
-        offRamp,
-        messageId: SUCCESS_MSG.messageId,
-        sourceChainSelector: request.message.sourceChainSelector,
-        startTime: request.log.blockTimestamp,
-      })) {
-        if (exec.receipt.state === ExecutionState.Success) {
-          foundSuccess = true
-          console.log(`  receipt: state=Success messageId=${SUCCESS_MSG.messageId.slice(0, 10)}…`)
-          assert.equal(
-            exec.receipt.messageId,
-            SUCCESS_MSG.messageId,
-            'receipt messageId should match',
-          )
-          assert.ok(exec.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-          break
-        }
-      }
-      assert.ok(foundSuccess, 'should find a success receipt for a known successful message')
+      const { messageId, exec } = await findReceipt('success', ExecutionState.Success)
+      console.log(`  receipt: state=Success messageId=${messageId.slice(0, 10)}…`)
+      assert.equal(exec.receipt.messageId, messageId, 'receipt messageId should match')
+      assert.ok(exec.log.blockTimestamp > 0, 'execution should have a positive timestamp')
     })
 
-    const FAILED_MSG = {
-      messageId: '0x5cec46c7ae98f1a474e7af7f6a1241d3b14f5ee39a08e69ab79610d749acd54a',
-      txHash: '0x9d9ac80f5c97b7a23cbc514a5701d2b01b3e2822ca6f11f47c96ae69ec4f454a',
-    }
-
-    // messageId-filtered scan from the message's block forward; breaks on the first
+    // messageId-filtered scan from the message's block forward; stops on the first
     // Failed receipt (emitted shortly after the message), so it returns early.
     it('should find a failed receipt with no preceding success for a known failed message', async () => {
-      assert.ok(opSepChain, 'source chain should be initialized')
-      assert.ok(baseSepChain, 'dest chain should be initialized')
-
-      const tx = await opSepChain.getTransaction(FAILED_MSG.txHash)
-      const requests = await opSepChain.getMessagesInTx(tx)
-      const request = requests.find((r) => r.message.messageId === FAILED_MSG.messageId)
-      assert.ok(request, 'should find the request in the transaction')
-
-      const offRamp = await discoverOffRamp(
-        opSepChain,
-        baseSepChain,
-        request.lane.onRamp,
-        opSepChain,
+      const { messageId, exec, seen } = await findReceipt('failed', ExecutionState.Failed)
+      assert.ok(
+        !seen.includes(ExecutionState.Success),
+        'should not find a success receipt before the failed one',
       )
-      assert.ok(offRamp, 'offRamp should be discovered')
-
-      let foundFailed = false
-      for await (const exec of baseSepChain.getExecutionReceipts({
-        offRamp,
-        messageId: FAILED_MSG.messageId,
-        sourceChainSelector: request.message.sourceChainSelector,
-        startTime: request.log.blockTimestamp,
-      })) {
-        assert.notEqual(
-          exec.receipt.state,
-          ExecutionState.Success,
-          'should not find a success receipt before the failed one',
-        )
-        if (exec.receipt.state === ExecutionState.Failed) {
-          foundFailed = true
-          assert.equal(
-            exec.receipt.messageId,
-            FAILED_MSG.messageId,
-            'receipt messageId should match',
-          )
-          break
-        }
-      }
-      assert.ok(foundFailed, 'should find a failed receipt for a known failed message')
+      assert.equal(exec.receipt.messageId, messageId, 'receipt messageId should match')
     })
   })
 

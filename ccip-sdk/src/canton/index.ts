@@ -18,6 +18,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPNotImplementedError,
+  CCIPTxOutcomeUnavailableError,
   CCIPWalletInvalidError,
 } from '../errors/index.ts'
 import type { ExtraArgs } from '../extra-args.ts'
@@ -111,7 +112,7 @@ import {
   isCantonWallet,
   parseCantonInstrumentId,
 } from './types.ts'
-import { isCantonUpdateId } from './update-id.ts'
+import { extractCantonUpdateId, isCantonUpdateId } from './update-id.ts'
 
 export type {
   CantonClient,
@@ -1578,9 +1579,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const response = await submitCantonCommands(this, updateCmd, signer)
     const newCid = extractCreatedContractId(response.transaction, 'CCIPReceiver')
     if (!newCid) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        'CantonChain.updateReceiverRequiredCCVs: CCIPReceiver created event not found in transaction',
+      // Committed on-ledger; the response just lacks the creation event.
+      throw new CCIPTxOutcomeUnavailableError(
+        'CantonChain.updateReceiverRequiredCCVs',
+        extractCantonUpdateId(response.transaction),
+        'the CCIPReceiver created event',
       )
     }
     return newCid
@@ -1641,9 +1644,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           const created = ev['CreatedEvent'] as Record<string, unknown> | undefined
           if (typeof created?.contractId === 'string') return created.contractId
         }
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain.createReceiverForFinality: CCIPReceiver creation produced no contract ID`,
+        // Committed on-ledger; the response just lacks the creation event.
+        // Non-transient: the retry loop must not re-create a duplicate receiver.
+        throw new CCIPTxOutcomeUnavailableError(
+          'CantonChain.createReceiverForFinality',
+          extractCantonUpdateId(response.transaction),
+          'the CCIPReceiver created contract ID',
         )
       } catch (err) {
         lastError = err
